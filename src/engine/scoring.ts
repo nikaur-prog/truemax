@@ -164,8 +164,23 @@ function normalizeAgg(
   raw: Record<string, number>,
 ): number {
   raw[key] = z;
-  const n = AGG_NORM[sex]?.[key];
-  return n ? (z - n.mean) / (n.sd || 1) : z;
+  const q = AGG_NORM[sex]?.[key];
+  if (!q || q.length < 3) return z;
+  // Where does this face sit in the reference population? Interpolate its
+  // position in the quantile table, then convert that percentile back to a
+  // z. Deliberately NOT a mean/SD rescale: the aggregate has heavy tails, and
+  // treating it as normal is what pushed top scores to 9+.
+  const last = q.length - 1;
+  let pct: number;
+  if (z <= q[0]) pct = 0.5 / (last + 1);
+  else if (z >= q[last]) pct = 1 - 0.5 / (last + 1);
+  else {
+    let i = 0;
+    while (i < last && z > q[i + 1]) i++;
+    const span = q[i + 1] - q[i] || 1e-9;
+    pct = (i + (z - q[i]) / span) / last;
+  }
+  return probit(clamp(pct, 0.001, 0.999));
 }
 
 // A metric only influences the score in proportion to how reproducibly it

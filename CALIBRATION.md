@@ -81,9 +81,12 @@ its own spread makes the median celebrity score 5.0 (they are not average),
 and widening it artificially lifts *everyone* — literal score inflation.
 
 Finally, `tools/normalize.mjs` measures each aggregate z across the population
-proxy and writes `src/engine/aggNorm.ts`. Scores are standardized against
-those real numbers (median for centering, SD for scale), so "5.0 = 50th
-percentile" holds by construction instead of by distributional assumption.
+proxy and writes **empirical quantile tables** to `src/engine/aggNorm.ts`.
+Scoring interpolates a face's position in those tables to get a real
+percentile, then converts that to a score. This replaced a mean/SD rescale:
+the aggregate has heavy tails, so treating it as normal pushed top scores past
+9 and put the population's 90th percentile at 7.4. Anchoring to the sample's
+actual distribution keeps the median at 5.0 without inflating the top.
 
 Verified: gated population median **5.0** (p10 3.8, p90 6.3); top celebrity
 faces 7.2–7.3; 6.5+ stays rare.
