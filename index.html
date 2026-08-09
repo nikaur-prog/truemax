@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TrueMax — Facial Analysis</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%231b1b19%22/><text x=%2250%22 y=%2268%22 font-size=%2252%22 font-family=%22sans-serif%22 font-weight=%22700%22 fill=%22white%22 text-anchor=%22middle%22>T</text></svg>" />
+    <link rel="preload" href="/models/face_landmarker.task" as="fetch" crossorigin="anonymous" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@400;500;600;650&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="wordmark">TRUE<b>MAX</b></span>
+      <div class="topbar-right">
+        <span class="tag">FRONT · V1</span>
+        <button class="mute hidden" id="mute" title="Sound">🔊</button>
+      </div>
+    </header>
+
+    <!-- Capture / upload -->
+    <section id="v-upload">
+      <h1>Know where you <em>actually</em> stand.</h1>
+      <p class="sub">
+        We measure 478 points on your face, compare them against real
+        population data, and show you every number behind the score.
+        Nothing is uploaded — it all runs on your device.
+      </p>
+
+      <div class="sex-picker" role="radiogroup" aria-label="Reference population">
+        <button class="sex-option selected" data-sex="auto" role="radio" aria-checked="true">Auto</button>
+        <button class="sex-option" data-sex="male" role="radio" aria-checked="false">Male</button>
+        <button class="sex-option" data-sex="female" role="radio" aria-checked="false">Female</button>
+      </div>
+
+      <!-- Capture stage: live preview when the camera is on, oval prompt when not -->
+      <div class="stage" id="capture-stage">
+        <div class="oval-frame" id="oval-frame">
+          <video id="cam-video" playsinline muted></video>
+          <canvas id="cam-guide"></canvas>
+          <div class="oval-mask"></div>
+          <div class="oval-idle" id="oval-idle">
+            <canvas id="reel-canvas"></canvas>
+            <canvas id="outline-canvas"></canvas>
+            <div class="reel-caption">
+              <b id="reel-score"></b>
+              <span id="reel-name"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="cam-hint" id="cam-hint">
+          <b id="cam-hint-title">Take a photo, or upload one</b>
+          <span id="cam-hint-detail">The camera preview will guide your framing</span>
+        </div>
+
+        <div class="cam-gates hidden" id="cam-gates"></div>
+
+        <div class="cam-actions">
+          <button class="btn pri shutter" id="btn-camera">Use camera</button>
+          <button class="btn gho" id="btn-upload">Upload a photo</button>
+        </div>
+      </div>
+      <input type="file" id="file-input" accept="image/*" hidden />
+
+      <div class="hints">
+        <div><i></i>Look straight at the lens</div>
+        <div><i></i>Neutral expression</div>
+        <div><i></i>Photos never leave your device</div>
+      </div>
+      <p class="engine-status" id="engine-status">Loading analysis engine…</p>
+    </section>
+
+    <!-- Two-pane results -->
+    <main id="v-main" class="hidden">
+      <div class="pane-photo">
+        <div class="face-frame" id="frame">
+          <div class="zoomable" id="zoomable">
+            <canvas id="photo-canvas"></canvas>
+            <canvas id="overlay-canvas"></canvas>
+          </div>
+          <div class="sweep"></div>
+        </div>
+        <div class="photo-caption">
+          <span>FRONT</span><b id="capRight">SCANNING</b>
+        </div>
+        <p class="scan-status" id="status"></p>
+        <div class="bar"><div id="barFill"></div></div>
+        <div class="quality-chips" id="quality-chips"></div>
+      </div>
+      <div class="pane-analysis" id="analysis"></div>
+    </main>
+
+    <!-- Side profile: upload + drag-to-verify landmarks -->
+    <section id="v-side" class="hidden">
+      <div class="side-inner">
+        <div class="side-photo">
+          <div class="face-frame" id="side-frame">
+            <canvas id="side-canvas"></canvas>
+            <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+            <div id="side-verify"></div>
+          </div>
+          <div class="photo-caption"><span>SIDE</span><b id="side-cap">VERIFY LANDMARKS</b></div>
+        </div>
+        <div class="side-panel" id="side-panel">
+          <h2 class="side-title">Verify your landmarks</h2>
+          <p class="side-sub">
+            Auto-placement gets close, but a true profile can't be landmarked
+            automatically with confidence. Drag each point onto its anatomical
+            spot — accuracy here is what makes the side measurements real.
+          </p>
+          <label class="drop drop-side" id="side-drop" for="side-input">
+            <b>Add a side-profile photo</b>
+            <span>Full profile · looking straight ahead · hair off the face</span>
+          </label>
+          <input type="file" id="side-input" accept="image/*" hidden />
+          <div class="navrow" id="side-actions"></div>
+        </div>
+      </div>
+    </section>
+
+    <p class="foot">TRUEMAX · ON-DEVICE MEASUREMENT ENGINE · TRUEMAX.APP</p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
