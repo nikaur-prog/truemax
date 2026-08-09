@@ -65,6 +65,10 @@ let selectedSex: Sex = "male";
     yaw: quality.yawDeg,
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
+    // Group shots are the main contaminant in scraped photo sets: the
+    // detector locks onto whichever face it finds, which may not be the
+    // subject. A face filling little of the frame is the tell.
+    faceWidthFrac: quality.faceWidthFrac,
     entry: JSON.parse(toCelebEntry(report, "x")),
     zScores: report.zScores,
   };

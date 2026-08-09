@@ -3,14 +3,14 @@ import { LM, MIRROR_PAIRS, dist, mid, angleAt, lineTiltDeg } from "./geometry.ts
 import type { MetricDef } from "./types.ts";
 
 // ---------------------------------------------------------------------------
-// Metric computers. Every distance is normalized by IPD (interpupillary
-// distance) or expressed as a ratio/angle, so absolute image scale never
-// matters. All coordinates are roll-corrected pixel space (see geometry.ts).
+// Metric computers. Every distance is normalized by the inter-eye distance
+// (gaze-independent, see geometry.ts) or expressed as a ratio/angle, so
+// absolute image scale never matters. Coordinates are pose-normalized.
 // ---------------------------------------------------------------------------
 
 interface Derived {
   g: Geom;
-  ipd: number;
+  interEye: number;
   eyeMid: Pt; // midpoint between iris centers
   bizygo: number; // face width at the cheekbones
   bigonial: number; // jaw width at the gonial area
@@ -29,8 +29,8 @@ function derive(g: Geom): Derived {
   const alarXs = [...LM.ALAR_R, ...LM.ALAR_L].map((i) => p(i).x);
   return {
     g,
-    ipd: g.ipd,
-    eyeMid: mid(p(LM.IRIS_R), p(LM.IRIS_L)),
+    interEye: g.interEye,
+    eyeMid: mid(g.eyeR, g.eyeL),
     bizygo: dist(p(LM.ZYGO_R), p(LM.ZYGO_L)),
     bigonial: dist(p(LM.GONION_R), p(LM.GONION_L)),
     mouthW: dist(p(LM.MOUTH_R), p(LM.MOUTH_L)),
@@ -65,15 +65,15 @@ export const COMPUTERS: Record<string, Computer> = {
     return (hR / d.eyeWR + hL / d.eyeWL) / 2;
   },
 
-  eyeSeparationRatio: (d) => d.ipd / d.bizygo,
+  eyeSeparationRatio: (d) => d.interEye / d.bizygo,
 
   intercanthalEyeWidth: (d) => d.intercanthal / ((d.eyeWR + d.eyeWL) / 2),
 
   browPosition: (d) => {
     const p = d.g.pt.bind(d.g);
-    const hR = dist(p(LM.BROW_R_MID), p(LM.IRIS_R));
-    const hL = dist(p(LM.BROW_L_MID), p(LM.IRIS_L));
-    return (hR + hL) / 2 / d.ipd;
+    const hR = dist(p(LM.BROW_R_MID), d.g.eyeR);
+    const hL = dist(p(LM.BROW_L_MID), d.g.eyeL);
+    return (hR + hL) / 2 / d.interEye;
   },
 
   browTilt: (d) => {
@@ -91,7 +91,7 @@ export const COMPUTERS: Record<string, Computer> = {
     return d.bizygo / upperFaceH;
   },
 
-  midfaceRatio: (d) => d.ipd / dist(d.eyeMid, d.g.pt(LM.LIP_TOP)),
+  midfaceRatio: (d) => d.interEye / dist(d.eyeMid, d.g.pt(LM.LIP_TOP)),
 
   cheekboneHeight: (d) => {
     const p = d.g.pt.bind(d.g);
@@ -102,10 +102,21 @@ export const COMPUTERS: Record<string, Computer> = {
   // ---- Jaw ----
   jawCheekRatio: (d) => d.bigonial / d.bizygo,
 
+  // Jawline bend measured at the mid-ramus point: how sharply the outline
+  // turns between the jaw corner and the chin. A square jaw bends more (lower
+  // angle), a rounded one runs straighter (closer to 180°).
+  //
+  // The earlier version took the angle at the gonion between the CHEEKBONE
+  // and the chin. Those three points are nearly collinear in a frontal
+  // projection, so the angle was near-degenerate head-on (~40°, anatomically
+  // impossible for a jaw) and swung to ~120° as soon as the head turned —
+  // MediaPipe's silhouette landmarks slide around the jaw with viewing angle,
+  // which no projection can undo. This form uses three well-separated points
+  // along the jaw outline itself.
   gonialProxy: (d) => {
     const p = d.g.pt.bind(d.g);
-    const aR = angleAt(p(LM.GONION_R), p(LM.ZYGO_R), p(LM.MENTON));
-    const aL = angleAt(p(LM.GONION_L), p(LM.ZYGO_L), p(LM.MENTON));
+    const aR = angleAt(p(LM.JAW_MID_R), p(LM.GONION_R), p(LM.MENTON));
+    const aL = angleAt(p(LM.JAW_MID_L), p(LM.GONION_L), p(LM.MENTON));
     return (aR + aL) / 2;
   },
 
@@ -151,7 +162,7 @@ export const COMPUTERS: Record<string, Computer> = {
     return lower / Math.max(upper, 1e-6);
   },
 
-  mouthIPD: (d) => d.mouthW / d.ipd,
+  mouthIPD: (d) => d.mouthW / d.interEye,
 
   lipHeightLowerThird: (d) => {
     const p = d.g.pt.bind(d.g);
@@ -193,7 +204,7 @@ export const COMPUTERS: Record<string, Computer> = {
       const dy = pa.y - pb.y;
       sum += dx * dx + dy * dy;
     }
-    return (Math.sqrt(sum / MIRROR_PAIRS.length) / d.ipd) * 100;
+    return (Math.sqrt(sum / MIRROR_PAIRS.length) / d.interEye) * 100;
   },
 
   canthalAsymmetry: (d) =>
@@ -215,7 +226,7 @@ export const COMPUTERS: Record<string, Computer> = {
     const offsets = [LM.NOSE_TIP, LM.SUBNASALE, LM.MENTON, LM.LIP_TOP].map(
       (i) => Math.abs(p(i).x - axisX),
     );
-    return (offsets.reduce((a, b) => a + b, 0) / offsets.length / d.ipd) * 100;
+    return (offsets.reduce((a, b) => a + b, 0) / offsets.length / d.interEye) * 100;
   },
 };
 
@@ -260,8 +271,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Features", weight: 1.1,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.4377, sd: 0.02609, ideal: 0.4161 },
-      female: { mean: 0.4536, sd: 0.00578, ideal: 0.44782 },
+      male: { mean: 0.4352, sd: 0.01601, ideal: 0.4482 },
+      female: { mean: 0.4498, sd: 0.00415, ideal: 0.45395 },
     },
   }),
   M({
@@ -274,12 +285,12 @@ export const METRICS: MetricDef[] = [
     },
   }),
   M({
-    id: "browPosition", name: "Brow height", unit: "×IPD", decimals: 3,
+    id: "browPosition", name: "Brow height", unit: "×eye-span", decimals: 3,
     view: "front", region: "eyes", pillar: "Dimorphism", weight: 1.0,
     direction: "band", fixability: 0.25,
     dist: {
-      male: { mean: 0.6227, sd: 0.27087, ideal: 0.6841 },
-      female: { mean: 0.2117, sd: 0.10867, ideal: 0.32037 },
+      male: { mean: 0.7984, sd: 0.37673, ideal: 0.524 },
+      female: { mean: 0.2541, sd: 0.11772, ideal: 0.37182 },
     },
   }),
   M({
@@ -307,8 +318,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "midface", pillar: "Harmony", weight: 1.2,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 1.649, sd: 1.2513, ideal: 1.5 },
-      female: { mean: 0.896, sd: 0.3662, ideal: 1.2622 },
+      male: { mean: 1.532, sd: 0.977, ideal: 1.48 },
+      female: { mean: 0.824, sd: 0.4033, ideal: 1.2273 },
     },
   }),
   M({
@@ -316,8 +327,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "midface", pillar: "Angularity", weight: 1.0,
     direction: "band", fixability: 0.5,
     dist: {
-      male: { mean: 1.427, sd: 0.7947, ideal: 0.744 },
-      female: { mean: -0.12, sd: 0.679, ideal: 0.559 },
+      male: { mean: 1.458, sd: 0.9607, ideal: 0.736 },
+      female: { mean: -0.115, sd: 0.6375, ideal: 0.5225 },
     },
   }),
 
@@ -336,8 +347,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "jaw", pillar: "Angularity", weight: 1.3,
     direction: "band", fixability: 0.7,
     dist: {
-      male: { mean: 68.94, sd: 39.23, ideal: 91.68 },
-      female: { mean: 164.11, sd: 8.362, ideal: 155.748 },
+      male: { mean: 166.71, sd: 5.426, ideal: 165 },
+      female: { mean: 167.16, sd: 3.38, ideal: 165.325 },
     },
   }),
   M({
@@ -428,12 +439,12 @@ export const METRICS: MetricDef[] = [
     },
   }),
   M({
-    id: "mouthIPD", name: "Mouth width : IPD", unit: "×", decimals: 2,
+    id: "mouthIPD", name: "Mouth width : eye span", unit: "×", decimals: 2,
     view: "front", region: "lips", pillar: "Harmony", weight: 0.9,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.894, sd: 0.0697, ideal: 0.9637 },
-      female: { mean: 0.852, sd: 0.0445, ideal: 0.8965 },
+      male: { mean: 0.901, sd: 0.0474, ideal: 0.888 },
+      female: { mean: 0.883, sd: 0.0682, ideal: 0.899 },
     },
   }),
   M({
@@ -495,12 +506,12 @@ export const METRICS: MetricDef[] = [
 
   // ---- Symmetry ----
   M({
-    id: "mirrorDeviation", name: "Mirror-axis deviation", unit: "% IPD", decimals: 1,
+    id: "mirrorDeviation", name: "Mirror-axis deviation", unit: "% eye-span", decimals: 1,
     view: "front", region: "symmetry", pillar: "Harmony", weight: 1.2,
     direction: "lower", fixability: 0.35,
     dist: {
-      male: { mean: 128.41, sd: 75.687 },
-      female: { mean: 105.78, sd: 20.653 },
+      male: { mean: 116.13, sd: 57.05 },
+      female: { mean: 105.97, sd: 27.295 },
     },
   }),
   M({
@@ -522,12 +533,12 @@ export const METRICS: MetricDef[] = [
     },
   }),
   M({
-    id: "midlineDeviation", name: "Midline deviation", unit: "% IPD", decimals: 1,
+    id: "midlineDeviation", name: "Midline deviation", unit: "% eye-span", decimals: 1,
     view: "front", region: "symmetry", pillar: "Harmony", weight: 0.9,
     direction: "lower", fixability: 0.2,
     dist: {
-      male: { mean: 60.61, sd: 32.706 },
-      female: { mean: 62.18, sd: 49.371 },
+      male: { mean: 67.03, sd: 34.574 },
+      female: { mean: 81.08, sd: 34.945 },
     },
   }),
 ];

@@ -50,6 +50,9 @@ export const LM = {
   ZYGO_L: 454,
   GONION_R: 58,
   GONION_L: 288,
+  // Mid-ramus points on the jaw outline, between the corner and the chin
+  JAW_MID_R: 172,
+  JAW_MID_L: 397,
   CHIN_SIDE_R: 149,
   CHIN_SIDE_L: 378,
 } as const;
@@ -75,7 +78,17 @@ export const MIRROR_PAIRS: ReadonlyArray<readonly [number, number]> = [
 
 export interface Geom {
   pt(i: number): Pt;
-  ipd: number;
+  // Distance between the two eye centers, used as the global scale reference.
+  //
+  // NOT interpupillary distance: iris centers track GAZE, so they shift
+  // between photos of the same person and inject noise into every metric
+  // normalized by them. Measured reliability of IPD-normalized metrics was
+  // ~0 (photo-to-photo variation exceeded between-person variation). Each eye
+  // center is the midpoint of that eye's inner and outer canthus, which is
+  // fixed to the skull and gaze-independent.
+  interEye: number;
+  eyeR: Pt;
+  eyeL: Pt;
   // Head pose that was removed, measured from the landmark cloud itself
   rollDeg: number;
   yawDeg: number;
@@ -178,16 +191,26 @@ export function buildGeometry(
   // Orient it downward in face terms (forehead → menton)
   if (dot3(sub3(p3[LM.MENTON], p3[LM.FOREHEAD_TOP]), vertical) < 0) vertical = scale3(vertical, -1);
 
+  const eyeC = (a: number, b: number): V3 => ({
+    x: (p3[a].x + p3[b].x) / 2,
+    y: (p3[a].y + p3[b].y) / 2,
+    z: (p3[a].z + p3[b].z) / 2,
+  });
+  const eyeR3 = eyeC(LM.EYE_R_OUTER, LM.EYE_R_INNER);
+  const eyeL3 = eyeC(LM.EYE_L_OUTER, LM.EYE_L_INNER);
   const origin = {
-    x: (p3[LM.IRIS_R].x + p3[LM.IRIS_L].x) / 2,
-    y: (p3[LM.IRIS_R].y + p3[LM.IRIS_L].y) / 2,
-    z: (p3[LM.IRIS_R].z + p3[LM.IRIS_L].z) / 2,
+    x: (eyeR3.x + eyeL3.x) / 2,
+    y: (eyeR3.y + eyeL3.y) / 2,
+    z: (eyeR3.z + eyeL3.z) / 2,
   };
 
-  const flat: Pt[] = p3.map((p) => {
+  const project = (p: V3): Pt => {
     const d = sub3(p, origin);
     return { x: dot3(d, lateral), y: dot3(d, vertical) };
-  });
+  };
+  const flat: Pt[] = p3.map(project);
+  const eyeR = project(eyeR3);
+  const eyeL = project(eyeL3);
 
   // Pose actually removed, for the capture-quality report.
   const yawDeg = (Math.asin(Math.max(-1, Math.min(1, lateral.z))) * 180) / Math.PI;
@@ -196,7 +219,9 @@ export function buildGeometry(
 
   return {
     pt: (i: number) => flat[i],
-    ipd: dist(flat[LM.IRIS_R], flat[LM.IRIS_L]),
+    interEye: dist(eyeR, eyeL),
+    eyeR,
+    eyeL,
     rollDeg,
     yawDeg,
     pitchDeg,

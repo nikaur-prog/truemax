@@ -88,24 +88,67 @@ percentile" holds by construction instead of by distributional assumption.
 Verified: gated population median **5.0** (p10 3.8, p90 6.3); top celebrity
 faces 7.2–7.3; 6.5+ stays rare.
 
+## Stability work: what was found and fixed
+
+Three real defects surfaced while chasing cross-photo agreement:
+
+1. **The scale reference tracked gaze.** Every metric was normalized by
+   interpupillary distance, but iris centers move when the eyes move, so the
+   normalizer itself changed between photos. Metrics built on it measured ~0
+   reliability. Eye centers are now the midpoint of each eye's inner and outer
+   canthus — fixed to the skull, gaze-independent.
+
+2. **The frontal gonial metric was degenerate.** It took the angle at the jaw
+   corner between the cheekbone and the chin; those three points are nearly
+   collinear head-on, so it read ~40° frontally (anatomically impossible for a
+   jaw) and jumped to ~120° as soon as the head turned. Replaced with the
+   jawline bend measured at the mid-ramus point.
+
+3. **The test set was measuring different people.** Photos scraped by name
+   include group shots, where the detector locks onto whoever it finds — one
+   "Sean O'Pry" photo was five people on a stage. Every multi-photo set is now
+   filtered to portrait-scale faces (>=22% of frame width). Any stability
+   number produced before this filter was partly comparing strangers.
+
+`reliability.ts` now records, per metric, the share of variance that is real
+between-person signal rather than photo-to-photo noise, measured within the
+capture envelope the app asks for. Scoring multiplies each metric's weight by
+it, so metrics that do not reproduce cannot move the score.
+
 ## Known gap: cross-photo stability
 
-Different photos of the same person still disagree by ~2.5 score points
-(`tools/convergence.mjs`), against a target of ≤0.4. Pose normalization
-removed the pose component — at fixed calibration it halved disagreement
-(0.80 → 0.40) — but residual per-photo variation (expression, lighting,
-resolution, the subject's age and weight in that photo) still moves ~31
-correlated metrics together, and the aggregation amplifies it.
+**Still failing.** After the three fixes above, different photos of the same
+person disagree with an SD of ~1.2 score points (`tools/convergence.mjs`),
+against a target of ≤0.4. Mean per-metric reliability is 0.37: the average
+metric's photo-to-photo noise is roughly 0.8× its whole-population spread.
+Averaging ~31 correlated metrics cannot remove that.
 
-**Do not treat a single scan as precise to a tenth until this closes.**
-Likely directions, in order of expected payoff:
+Same photo twice is still bit-identical — determinism holds. What does not
+hold is agreement between two *different* photos.
 
-1. Reduce per-metric noise — measure at several input scales and take the
-   median per metric, rather than trusting one detection.
-2. Re-check `RHO_METRICS` / `RHO_PILLARS` empirically from the population
-   set instead of assuming 0.3 / 0.55.
-3. Down-weight the metrics with the worst cross-photo variance (measurable
-   directly from `alt-scans.json`).
+**Important caveat about the test set.** These are Wikipedia/Commons photos
+taken years apart, on different cameras, at different ages and body weights.
+Some of the disagreement is real facial change, not measurement error. The
+product's actual case — one person, same phone, weekly — should be more
+stable, but that is **unverified** and must not be assumed.
+
+Next steps, in order:
+
+1. **Get controlled data.** Several photos of one person in a single sitting,
+   varying only framing and expression slightly. That separates engine noise
+   from genuine change and tells you which target is even achievable.
+2. **Shape descriptors instead of hand-picked ratios.** Procrustes-align the
+   full landmark cloud and score on its principal components. Averaging
+   hundreds of points is far less noisy than a ratio of two distances — this
+   is the structural fix if (1) shows the noise is ours.
+3. **Multi-scale measurement.** Measure each photo at several input
+   resolutions and take the per-metric median to damp detector jitter.
+4. **Re-derive `RHO_METRICS` / `RHO_PILLARS`** from the population set rather
+   than assuming 0.3 / 0.55.
+
+Until (1) is done, treat the overall score as meaningful to roughly ±1 point
+across separate photos, and do not ship week-over-week deltas as precise —
+a real +0.3 improvement is currently inside the noise.
 
 ## Current calibration status
 

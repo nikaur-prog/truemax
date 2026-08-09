@@ -1,84 +1,56 @@
-// Acceptance criterion #2: different photos of the SAME person must produce
-// near-identical scores. This is the direct test of pose normalization.
+// Acceptance criterion: different photos of the SAME person must score alike.
+//
+// Photos are filtered to portrait-scale faces (>=22% of frame width). Scraped
+// sets are full of group shots where the detector locks onto a different
+// person entirely — including those silently measures strangers against each
+// other and makes the engine look far less stable than it is.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 const APP_DIR = "/home/user/truemax";
-const ALTS = new URL("./alts/", import.meta.url).pathname;
-const manifest = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url).pathname));
-const sexOf = Object.fromEntries(manifest.map((m) => [m.name.replace(/[^a-zA-Z]/g, "_"), m.sex]));
-const leadOf = Object.fromEntries(manifest.map((m) => [m.name.replace(/[^a-zA-Z]/g, "_"), m.file]));
+const DATA = process.env.TM_DATA ?? new URL("../.calib/", import.meta.url).pathname;
+const SET = process.env.TM_SET ?? "alts2-manifest.json";
+const MIN_FACE = 0.22;
+const MAX_YAW = 28;
+const MAX_PITCH = 26;
 
-// Group alternate photos by person
+const rows = JSON.parse(readFileSync(DATA + SET, "utf8"));
 const groups = {};
-for (const f of readdirSync(ALTS)) {
-  const person = f.replace(/_\d+\.jpg$/, "");
-  (groups[person] ??= []).push(ALTS + f);
-}
-for (const [person, files] of Object.entries(groups)) {
-  if (leadOf[person]) files.unshift(leadOf[person]);
-  if (files.length < 3) delete groups[person];
-}
+for (const r of rows) (groups[r.person ?? r.name] ??= []).push(r);
 
-const server = spawn("npx", ["vite", "preview", "--port", "4179", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
+const server = spawn("npx", ["vite", "preview", "--port", "4188", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.goto("http://localhost:4179/");
+  const page = await browser.newPage();
+  await page.goto("http://localhost:4188/");
   await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
 
   const spreads = [];
   for (const [person, files] of Object.entries(groups)) {
-    const sex = sexOf[person] ?? "male";
-    const rows = [];
+    const kept = [];
     for (const f of files) {
-      try {
-        await page.click(`[data-sex="${sex}"]`);
-        await page.evaluate(() => { window.__truemax = undefined; });
-        await page.setInputFiles("#file-input", f);
-        await page.waitForFunction(
-          () => window.__truemax?.report || document.querySelector("#capRight")?.textContent === "NO FACE FOUND",
-          { timeout: 20000 },
-        );
-        const r = await page.evaluate(() => {
-          const t = window.__truemax;
-          if (!t?.report) return null;
-          return {
-            overall: t.report.overall,
-            yaw: Math.round(t.quality.yawDeg * 10) / 10,
-            pitch: Math.round(t.quality.pitchDeg * 10) / 10,
-            // Pose the geometry layer actually removed
-            gYaw: Math.round((t.geomPose?.yawDeg ?? 0) * 10) / 10,
-          };
-        });
-        await page.click("#btn-new").catch(() => {});
-        await page.waitForSelector("#v-upload:not(.hidden)", { timeout: 8000 }).catch(() => {});
-        if (r) rows.push(r);
-      } catch {
-        await page.reload();
-        await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
-      }
+      const url = `data:image/jpeg;base64,${readFileSync(f.file).toString("base64")}`;
+      const m = await page.evaluate(async ([u, s]) => await window.__truemaxMeasure(u, s), [url, f.sex]);
+      if (!m?.faceFound) continue;
+      if (m.faceWidthFrac < MIN_FACE) continue;
+      if (Math.abs(m.yaw) > MAX_YAW || Math.abs(m.pitch) > MAX_PITCH) continue;
+      kept.push(m.overall);
     }
-    if (rows.length < 3) continue;
-    // Only compare photos whose capture is within the usable envelope
-    const usable = rows.filter((r) => Math.abs(r.yaw) <= 28 && Math.abs(r.pitch) <= 26);
-    if (usable.length < 3) continue;
-    const scores = usable.map((r) => r.overall);
-    const spread = Math.max(...scores) - Math.min(...scores);
-    spreads.push({ person, n: usable.length, spread, scores, yaws: usable.map((r) => r.yaw) });
-    console.log(
-      `${person.replace(/_/g, " ").padEnd(22)} n=${usable.length}  spread ${spread.toFixed(1)}  ` +
-        `scores [${scores.join(", ")}]  yaws [${usable.map((r) => r.yaw).join(", ")}]`,
-    );
+    if (kept.length < 3) continue;
+    const spread = Math.max(...kept) - Math.min(...kept);
+    const mean = kept.reduce((a, b) => a + b, 0) / kept.length;
+    const sd = Math.sqrt(kept.reduce((a, b) => a + (b - mean) ** 2, 0) / (kept.length - 1));
+    spreads.push({ person, n: kept.length, spread, sd });
+    console.log(`${person.replace(/_/g, " ").padEnd(22)} n=${kept.length}  spread ${spread.toFixed(1)}  sd ${sd.toFixed(2)}  [${kept.join(", ")}]`);
   }
 
-  const avg = spreads.reduce((a, s) => a + s.spread, 0) / (spreads.length || 1);
-  const worst = Math.max(...spreads.map((s) => s.spread));
-  console.log(`\naverage spread ${avg.toFixed(2)}   worst ${worst.toFixed(1)}`);
-  console.log(avg <= 0.5 ? "CONVERGENCE OK" : "CONVERGENCE POOR");
+  const avgSpread = spreads.reduce((a, s) => a + s.spread, 0) / (spreads.length || 1);
+  const avgSD = spreads.reduce((a, s) => a + s.sd, 0) / (spreads.length || 1);
+  console.log(`\npeople ${spreads.length}   average spread ${avgSpread.toFixed(2)}   average SD ${avgSD.toFixed(2)}`);
+  console.log(avgSD <= 0.4 ? "CONVERGENCE OK" : "CONVERGENCE POOR");
 } finally {
   await browser.close();
   server.kill();

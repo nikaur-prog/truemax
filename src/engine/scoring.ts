@@ -2,6 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "./geometry.ts";
 import { METRICS, computeRawMetrics } from "./metrics.ts";
 import { AGG_NORM } from "./aggNorm.ts";
+import { reliabilityOf } from "./reliability.ts";
 import { SIDE_METRICS, computeSideMetrics } from "./sideMetrics.ts";
 import type { SidePoints } from "./sideMetrics.ts";
 import type {
@@ -166,6 +167,12 @@ function normalizeAgg(
   return n ? (z - n.mean) / (n.sd || 1) : z;
 }
 
+// A metric only influences the score in proportion to how reproducibly it
+// measures the same face across different photos (see reliability.ts).
+function effWeight(m: ScoredMetric): number {
+  return m.def.weight * reliabilityOf(m.def.id);
+}
+
 function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>): Report {
   const rawZ: Record<string, number> = {};
   const eff = (m: ScoredMetric) =>
@@ -175,7 +182,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   const pillarZ = {} as Record<PillarId, number>;
   for (const p of Object.keys(PILLAR_WEIGHTS) as PillarId[]) {
     const ms = scored.filter((m) => m.def.pillar === p);
-    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map((m) => m.def.weight), RHO_METRICS), sex, `pillar:${p}`, rawZ);
+    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight), RHO_METRICS), sex, `pillar:${p}`, rawZ);
     pillars[p] = zToScore(pillarZ[p]);
   }
 
@@ -184,7 +191,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {
     const ms = scored.filter((m) => m.def.region === r);
-    const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map((m) => m.def.weight), RHO_METRICS + 0.05), sex, `region:${r}`, rawZ);
+    const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight), RHO_METRICS + 0.05), sex, `region:${r}`, rawZ);
     return {
       region: r,
       score: zToScore(rz),
