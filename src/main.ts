@@ -3,7 +3,7 @@ import { assessQuality } from "./engine/quality.ts";
 import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
 import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.ts";
-import { extractShape } from "./engine/shape.ts";
+import { extractShape, shapeSubset } from "./engine/shape.ts";
 import { compareAndStore } from "./engine/history.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
 import { readOrientation } from "./engine/exif.ts";
@@ -13,6 +13,8 @@ import { renderResults, renderSideResults } from "./ui/results.ts";
 import { toggleMute } from "./ui/audio.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
+import { mountDemoReel } from "./ui/demoReel.ts";
+import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
 import { detectSex } from "./engine/shape.ts";
@@ -33,6 +35,10 @@ const el = {
   camGates: document.getElementById("cam-gates")!,
   btnCamera: document.getElementById("btn-camera") as HTMLButtonElement,
   btnUpload: document.getElementById("btn-upload") as HTMLButtonElement,
+  reelCanvas: document.getElementById("reel-canvas") as HTMLCanvasElement,
+  outlineCanvas: document.getElementById("outline-canvas") as HTMLCanvasElement,
+  reelScore: document.getElementById("reel-score")!,
+  reelName: document.getElementById("reel-name")!,
   frame: document.getElementById("frame")!,
   zoomable: document.getElementById("zoomable")!,
   photoCanvas: document.getElementById("photo-canvas") as HTMLCanvasElement,
@@ -87,15 +93,44 @@ let selectedSex: Sex = "male";
     entry: JSON.parse(toCelebEntry(report, "x")),
     zScores: report.zScores,
     shape: extractShape(buildGeometry(res.faceLandmarks[0], w, h)),
+    pillars: report.pillars,
+    // Outline points + face box for the landing-page reel builder
+    reelLandmarks: shapeSubset().map((i) => [
+      +res.faceLandmarks[0][i].x.toFixed(4),
+      +res.faceLandmarks[0][i].y.toFixed(4),
+    ]),
+    reelBox: (() => {
+      const lm = res.faceLandmarks[0];
+      let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+      for (const p of lm) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    })(),
   };
 };
 (window as unknown as Record<string, unknown>).__truemaxMeasureFull = (
   window as unknown as Record<string, unknown>
 ).__truemaxMeasure;
 
+// The idle frame runs the demo reel — real scans of public-domain portraits —
+// then settles onto the reference population's mean face for the chosen sex.
+const reel = mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
+el.ovalFrame.classList.add("showing-reel");
+let outline: ReturnType<typeof mountFaceOutline> | null = null;
+
+function showOutline(sex: Sex): void {
+  if (!outline) {
+    reel.stop();
+    el.ovalFrame.classList.remove("showing-reel");
+    outline = mountFaceOutline(el.outlineCanvas, sex);
+  }
+  outline.morphTo(sex);
+}
+
 for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
   btn.addEventListener("click", () => {
     sexChoice = btn.dataset.sex as Sex | "auto";
+    // Choosing a sex swaps the idle face to that population's mean shape
+    if (sexChoice !== "auto") showOutline(sexChoice);
     for (const b of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
       b.classList.toggle("selected", b === btn);
       b.setAttribute("aria-checked", String(b === btn));
