@@ -8,6 +8,9 @@ import type { Sex } from "../engine/types.ts";
 // the toggle morphs between the two average faces we measured, so the control
 // shows you what it is about to compare you against.
 
+// How far along the attractiveness axis the guide silhouette sits.
+const IDEAL_SIGMA = 0.035;
+
 const EDGE_SETS = () => [
   FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
   FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
@@ -16,24 +19,6 @@ const EDGE_SETS = () => [
   FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
   FaceLandmarker.FACE_LANDMARKS_LIPS,
 ];
-
-// Connections between subset points, resolved once
-let edges: Array<[number, number]> | null = null;
-function subsetEdges(): Array<[number, number]> {
-  if (edges) return edges;
-  const subset = shapeSubset();
-  const index = new Map(subset.map((id, i) => [id, i]));
-  const out: Array<[number, number]> = [];
-  for (const set of EDGE_SETS()) {
-    for (const c of set) {
-      const a = index.get(c.start);
-      const b = index.get(c.end);
-      if (a !== undefined && b !== undefined) out.push([a, b]);
-    }
-  }
-  edges = out;
-  return out;
-}
 
 // A Procrustes mean carries whatever orientation its alignment reference
 // happened to have, which came out tilted. Rotate it upright using its own
@@ -116,14 +101,59 @@ function symmetrize(shape: number[]): number[] {
   return out;
 }
 
+// Order each contour's connections into a continuous chain so it can be
+// stroked as one path rather than a pile of disconnected segments.
+type Loop = number[] & { closed?: boolean };
+let LOOPS: Loop[] | null = null;
+function contourLoops(): Loop[] {
+  if (LOOPS) return LOOPS;
+  const subset = shapeSubset();
+  const index = new Map(subset.map((id, i) => [id, i]));
+  const loops: Loop[] = [];
+  for (const set of EDGE_SETS()) {
+    const next = new Map<number, number>();
+    for (const c of set) next.set(c.start, c.end);
+    const seen = new Set<number>();
+    for (const startId of next.keys()) {
+      if (seen.has(startId)) continue;
+      const chain: number[] = [];
+      let cur: number | undefined = startId;
+      while (cur !== undefined && !seen.has(cur)) {
+        seen.add(cur);
+        const i = index.get(cur);
+        if (i !== undefined) chain.push(i);
+        cur = next.get(cur);
+      }
+      // Rings (oval, eyes, lips) come back to their start; brows do not
+      if (chain.length > 2) loops.push(Object.assign(chain, { closed: next.get(cur ?? -1) === startId || chain.length > 8 }));
+    }
+  }
+  // The nose has no contour set of its own, and a guide face without one
+  // looks unfinished
+  const nose = [168, 6, 197, 195, 5, 4, 1].map((id) => index.get(id)).filter((i): i is number => i !== undefined);
+  if (nose.length > 3) loops.push(Object.assign(nose, { closed: false }));
+  const alar = [98, 2, 327].map((id) => index.get(id)).filter((i): i is number => i !== undefined);
+  if (alar.length === 3) loops.push(Object.assign(alar, { closed: false }));
+
+  LOOPS = loops;
+  return loops;
+}
+
 export interface OutlineHandle {
   morphTo(sex: Sex): void;
   stop(): void;
 }
 
 export function mountFaceOutline(canvas: HTMLCanvasElement, initial: Sex): OutlineHandle {
-  const male = SHAPE_MODEL.male ? symmetrize(canonicalize(SHAPE_MODEL.male.meanShape)) : null;
-  const female = SHAPE_MODEL.female ? symmetrize(canonicalize(SHAPE_MODEL.female.meanShape)) : null;
+  // The alignment guide should look like a face worth aiming at, not the
+  // population average — an average plotted as raw points reads as a diagram.
+  // Pushing the mean along the model's attractiveness axis gives an idealized
+  // archetype from the same data: slimmer and more tapered for the female
+  // reference, broader and squarer through the jaw for the male.
+  const idealize = (m: { meanShape: number[]; axis: number[] } | null) =>
+    m ? symmetrize(canonicalize(m.meanShape.map((v, i) => v + m.axis[i] * IDEAL_SIGMA))) : null;
+  const male = idealize(SHAPE_MODEL.male);
+  const female = idealize(SHAPE_MODEL.female);
   if (!male || !female) return { morphTo: () => {}, stop: () => {} };
 
   let from = initial === "female" ? female : male;
@@ -193,22 +223,29 @@ function draw(
     y: cy + shape[2 * i + 1] * scale * pulse,
   });
 
-  ctx.strokeStyle = "rgba(14,122,104,0.30)";
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  for (const [a, b] of subsetEdges()) {
-    const pa = P(a);
-    const pb = P(b);
-    ctx.moveTo(pa.x, pa.y);
-    ctx.lineTo(pb.x, pb.y);
-  }
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(14,122,104,0.55)";
-  for (let i = 0; i < n; i++) {
-    const p = P(i);
+  // Draw each contour as one smooth stroked path. Segment-by-segment lines
+  // with a dot at every vertex look like a wireframe; a continuous curve
+  // reads as a drawn silhouette.
+  ctx.strokeStyle = "rgba(14,122,104,0.55)";
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const loop of contourLoops()) {
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    for (let k = 0; k < loop.length; k++) {
+      const p = P(loop[k]);
+      if (k === 0) ctx.moveTo(p.x, p.y);
+      else {
+        const prev = P(loop[k - 1]);
+        ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + p.x) / 2, (prev.y + p.y) / 2);
+      }
+    }
+    if (loop.closed) {
+      const first = P(loop[0]);
+      const last = P(loop[loop.length - 1]);
+      ctx.quadraticCurveTo(last.x, last.y, first.x, first.y);
+      ctx.closePath();
+    }
+    ctx.stroke();
   }
 }

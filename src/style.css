@@ -287,3 +287,9 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 #capture-stage.live-cam { width: min(560px, 100%); }
 .cam-hint.red b { color: #c4694f; }
 .cam-hint.amber b { color: #b0762a; }
+
+/* Silhouette guide sits over the camera preview, not over the reel */
+#outline-canvas { opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
+.oval-frame.live #outline-canvas { opacity: 0.5; }
+.oval-frame.live .oval-idle { display: block; }
+.oval-frame.live #reel-canvas, .oval-frame.live .reel-caption { display: none; }

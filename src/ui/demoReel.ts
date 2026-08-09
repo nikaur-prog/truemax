@@ -9,6 +9,9 @@ const SWEEP_MS = 850;
 
 export interface ReelHandle {
   stop(): void;
+  // Auto shows everyone; picking a sex narrows the reel to those faces, so
+  // the toggle previews the population you will actually be scored against.
+  setFilter(sex: "auto" | "male" | "female"): void;
 }
 
 export function mountDemoReel(
@@ -16,7 +19,7 @@ export function mountDemoReel(
   scoreEl: HTMLElement,
   nameEl: HTMLElement,
 ): ReelHandle {
-  if (!REEL.length) return { stop: () => {} };
+  if (!REEL.length) return { stop: () => {}, setFilter: () => {} };
 
   const images = REEL.map((f) => {
     const img = new Image();
@@ -24,7 +27,9 @@ export function mountDemoReel(
     return img;
   });
 
-  let idx = 0;
+  let playlist = REEL.map((_, i) => i);
+  let pos = 0;
+  let idx = playlist[0];
   let start = 0;
   let raf = 0;
   let stopped = false;
@@ -35,6 +40,7 @@ export function mountDemoReel(
     const t = now - start;
     const face = REEL[idx];
     const img = images[idx];
+    if (!face) return;
 
     const w = canvas.clientWidth || canvas.width;
     const h = canvas.clientHeight || canvas.height;
@@ -95,7 +101,8 @@ export function mountDemoReel(
     nameEl.style.opacity = String(alpha * 0.85);
 
     if (t >= HOLD_MS) {
-      idx = (idx + 1) % REEL.length;
+      pos = (pos + 1) % playlist.length;
+      idx = playlist[pos];
       start = now;
     }
     raf = requestAnimationFrame(frame);
@@ -103,6 +110,14 @@ export function mountDemoReel(
   raf = requestAnimationFrame(frame);
 
   return {
+    setFilter(sex) {
+      const next = REEL.map((f, i) => (sex === "auto" || f.sex === sex ? i : -1)).filter((i) => i >= 0);
+      if (!next.length) return;
+      playlist = next;
+      pos = 0;
+      idx = playlist[0];
+      start = 0;
+    },
     stop() {
       stopped = true;
       cancelAnimationFrame(raf);

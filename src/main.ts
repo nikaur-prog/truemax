@@ -115,26 +115,24 @@ let selectedSex: Sex = "male";
   window as unknown as Record<string, unknown>
 ).__truemaxMeasure;
 
-// The idle frame runs the demo reel — real scans of public-domain portraits —
-// then settles onto the reference population's mean face for the chosen sex.
+// The idle frame runs the demo reel — real scans of public-domain portraits.
+// The sex toggle filters WHICH faces play rather than replacing the reel: the
+// reel is the pitch, so it should keep running.
 const reel = mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 el.ovalFrame.classList.add("showing-reel");
-let outline: ReturnType<typeof mountFaceOutline> | null = null;
 
-function showOutline(sex: Sex): void {
-  if (!outline) {
-    reel.stop();
-    el.ovalFrame.classList.remove("showing-reel");
-    outline = mountFaceOutline(el.outlineCanvas, sex);
-  }
+// The idealized silhouette is a framing guide for the camera, not landing art
+let outline: ReturnType<typeof mountFaceOutline> | null = null;
+function showGuide(sex: Sex): void {
+  outline = outline ?? mountFaceOutline(el.outlineCanvas, sex);
   outline.morphTo(sex);
 }
 
 for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
   btn.addEventListener("click", () => {
     sexChoice = btn.dataset.sex as Sex | "auto";
-    // Choosing a sex swaps the idle face to that population's mean shape
-    if (sexChoice !== "auto") showOutline(sexChoice);
+    reel.setFilter(sexChoice);
+    if (sexChoice !== "auto") showGuide(sexChoice);
     for (const b of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
       b.classList.toggle("selected", b === btn);
       b.setAttribute("aria-checked", String(b === btn));
@@ -209,6 +207,7 @@ async function openCamera(): Promise<void> {
     });
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
+    showGuide(sexChoice === "female" ? "female" : "male");
     el.camLight.classList.remove("hidden");
     el.camGates.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
