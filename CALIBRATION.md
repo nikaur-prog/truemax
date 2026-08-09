@@ -1,5 +1,26 @@
 # Engine calibration notes
 
+## Pose normalization (measurement space)
+
+Metrics are **not** measured in image space. `geometry.ts` reconstructs the
+head's own 3D coordinate frame from the landmark cloud and projects into it:
+
+- **lateral axis** — perpendicular to the facial symmetry plane, averaged over
+  15 mirrored landmark pairs
+- **vertical axis** — principal direction of 22 midline points, fitted inside
+  the symmetry plane
+
+Projecting onto those two axes yields a canonical frontal orthographic view,
+so yaw, pitch and roll are removed before a single metric runs. A face turned
+30° no longer measures as a narrower face.
+
+**`POSE_CALIBRATION.zScale`** compensates for MediaPipe's landmark `z` being
+compressed relative to `x`/`y`. Without it, the estimated axes under-tilt and
+a face rotated by θ recovers as `u·√(cos²θ + k²sin²θ)` instead of `u`. The
+value is tuned by sweeping for minimum score disagreement across different
+photos of the same person (`tools/sweep-z.mjs`, verified by
+`tools/convergence.mjs`). Re-derive distributions after changing it.
+
 ## How scoring works
 
 1. `src/engine/metrics.ts` computes ~31 raw front-face measurements from the
@@ -44,6 +65,47 @@ the mesh actually measures.
 4. Re-run the harness (scratchpad `test-engine.mjs`) after edits: it dumps
    full tables for the test photos and enforces determinism, per-sex
    divergence, and sanity bounds.
+
+## Reference sets (two, and they do different jobs)
+
+1. **Population proxy** (`tools/population-list.mjs`) — 62 people notable for
+   their work, not their looks (scientists, politicians, economists, authors,
+   engineers). Effectively random draws with respect to appearance. **Defines
+   mean and SD.**
+2. **Celebrity set** — models, actors, musicians, athletes, streamers. A
+   hand-labeled top tier **defines the ideals**; the whole set becomes the
+   comparison DB.
+
+Using the celebrity set for spread was tried and is wrong in both directions:
+its own spread makes the median celebrity score 5.0 (they are not average),
+and widening it artificially lifts *everyone* — literal score inflation.
+
+Finally, `tools/normalize.mjs` measures each aggregate z across the population
+proxy and writes `src/engine/aggNorm.ts`. Scores are standardized against
+those real numbers (median for centering, SD for scale), so "5.0 = 50th
+percentile" holds by construction instead of by distributional assumption.
+
+Verified: gated population median **5.0** (p10 3.8, p90 6.3); top celebrity
+faces 7.2–7.3; 6.5+ stays rare.
+
+## Known gap: cross-photo stability
+
+Different photos of the same person still disagree by ~2.5 score points
+(`tools/convergence.mjs`), against a target of ≤0.4. Pose normalization
+removed the pose component — at fixed calibration it halved disagreement
+(0.80 → 0.40) — but residual per-photo variation (expression, lighting,
+resolution, the subject's age and weight in that photo) still moves ~31
+correlated metrics together, and the aggregation amplifies it.
+
+**Do not treat a single scan as precise to a tenth until this closes.**
+Likely directions, in order of expected payoff:
+
+1. Reduce per-metric noise — measure at several input scales and take the
+   median per metric, rather than trusting one detection.
+2. Re-check `RHO_METRICS` / `RHO_PILLARS` empirically from the population
+   set instead of assuming 0.3 / 0.55.
+3. Down-weight the metrics with the worst cross-photo variance (measurable
+   directly from `alt-scans.json`).
 
 ## Current calibration status
 

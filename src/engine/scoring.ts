@@ -1,6 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "./geometry.ts";
 import { METRICS, computeRawMetrics } from "./metrics.ts";
+import { AGG_NORM } from "./aggNorm.ts";
 import { SIDE_METRICS, computeSideMetrics } from "./sideMetrics.ts";
 import type { SidePoints } from "./sideMetrics.ts";
 import type {
@@ -148,7 +149,25 @@ function aggregateZ(zs: number[], weights: number[], rho: number): number {
   return mean / Math.sqrt(varOfMean);
 }
 
+// Empirical standardization of the aggregate. Per-metric effective z's are
+// only approximately N(0,1) — real measurements are skewed and heavy-tailed,
+// and 31 of them compound that error, which would push the population median
+// off 5.0 and exaggerate the spread. AGG_NORM is measured directly from the
+// population reference set (tools/normalize.mjs), so "5.0 = 50th percentile"
+// holds by construction rather than by assumption.
+function normalizeAgg(
+  z: number,
+  sex: Sex,
+  key: string,
+  raw: Record<string, number>,
+): number {
+  raw[key] = z;
+  const n = AGG_NORM[sex]?.[key];
+  return n ? (z - n.mean) / (n.sd || 1) : z;
+}
+
 function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>): Report {
+  const rawZ: Record<string, number> = {};
   const eff = (m: ScoredMetric) =>
     clamp(m.zEff + (zShift?.get(m.def.id) ?? 0), -Z_CLAMP, Z_CLAMP);
 
@@ -156,28 +175,16 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   const pillarZ = {} as Record<PillarId, number>;
   for (const p of Object.keys(PILLAR_WEIGHTS) as PillarId[]) {
     const ms = scored.filter((m) => m.def.pillar === p);
-    pillarZ[p] = aggregateZ(
-      ms.map(eff),
-      ms.map((m) => m.def.weight),
-      RHO_METRICS,
-    );
+    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map((m) => m.def.weight), RHO_METRICS), sex, `pillar:${p}`, rawZ);
     pillars[p] = zToScore(pillarZ[p]);
   }
 
   const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
-  const overallZ = aggregateZ(
-    pillarIds.map((p) => pillarZ[p]),
-    pillarIds.map((p) => PILLAR_WEIGHTS[p]),
-    RHO_PILLARS,
-  );
+  const overallZ = normalizeAgg(aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]), RHO_PILLARS), sex, "overall", rawZ);
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {
     const ms = scored.filter((m) => m.def.region === r);
-    const rz = aggregateZ(
-      ms.map(eff),
-      ms.map((m) => m.def.weight),
-      RHO_METRICS + 0.05,
-    );
+    const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map((m) => m.def.weight), RHO_METRICS + 0.05), sex, `region:${r}`, rawZ);
     return {
       region: r,
       score: zToScore(rz),
@@ -194,6 +201,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
     pillars,
     regions,
     metrics: scored,
+    zScores: rawZ,
   };
 }
 

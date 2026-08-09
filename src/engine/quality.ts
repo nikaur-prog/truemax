@@ -16,8 +16,11 @@ export interface QualityCheck {
 
 // Tolerances for "roughly frontal". Celebrity photos won't always pass —
 // the UI warns but allows proceeding.
-const YAW_TOLERANCE_DEG = 12;
-const PITCH_TOLERANCE_DEG = 12;
+// Measurements are pose-corrected (see geometry.ts), so moderate yaw/pitch no
+// longer distorts ratios. These thresholds mark where landmark accuracy itself
+// degrades from self-occlusion, not where the geometry breaks.
+const YAW_TOLERANCE_DEG = 28;
+const PITCH_TOLERANCE_DEG = 26;
 const MIN_FACE_WIDTH_FRAC = 0.2;
 const SMILE_TOLERANCE = 0.35;
 
@@ -62,8 +65,10 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
   const neutralExpression = smileScore <= SMILE_TOLERANCE;
 
   const issues: string[] = [];
-  if (Math.abs(yawDeg) > YAW_TOLERANCE_DEG) issues.push("Head is turned — face the camera directly");
-  if (Math.abs(pitchDeg) > PITCH_TOLERANCE_DEG) issues.push("Head is tilted up/down — keep it level");
+  if (Math.abs(yawDeg) > YAW_TOLERANCE_DEG)
+    issues.push("Head is turned far enough that some landmarks are hidden — face the camera more directly");
+  if (Math.abs(pitchDeg) > PITCH_TOLERANCE_DEG)
+    issues.push("Head is tilted steeply up/down — keep it level for the cleanest read");
   if (!largeEnough) issues.push("Face is small in frame — move closer or crop tighter");
   if (!neutralExpression) issues.push("Smiling detected — expression shifts mouth and jaw measurements");
 

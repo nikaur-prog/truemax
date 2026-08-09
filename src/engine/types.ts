@@ -68,4 +68,7 @@ export interface Report {
   pillars: Record<PillarId, number>;
   regions: RegionScore[];
   metrics: ScoredMetric[]; // flat, every scored metric
+  // Unrounded aggregate z per key ("overall", "pillar:X", "region:Y").
+  // The calibration pipeline reads these to derive AGG_NORM.
+  zScores: Record<string, number>;
 }

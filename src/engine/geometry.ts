@@ -76,40 +76,130 @@ export const MIRROR_PAIRS: ReadonlyArray<readonly [number, number]> = [
 export interface Geom {
   pt(i: number): Pt;
   ipd: number;
-  rollDeg: number; // roll that was removed (for reporting)
+  // Head pose that was removed, measured from the landmark cloud itself
+  rollDeg: number;
+  yawDeg: number;
+  pitchDeg: number;
 }
 
-// Convert normalized landmarks to pixel space (undoing the aspect-ratio
-// distortion of normalized coords), then rotate so the eye line is horizontal.
-// All metrics measure in this roll-corrected space, so a tilted head doesn't
-// skew vertical/horizontal measurements.
+interface V3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+const sub3 = (a: V3, b: V3): V3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+const dot3 = (a: V3, b: V3): number => a.x * b.x + a.y * b.y + a.z * b.z;
+const cross3 = (a: V3, b: V3): V3 => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x,
+});
+const scale3 = (a: V3, k: number): V3 => ({ x: a.x * k, y: a.y * k, z: a.z * k });
+function norm3(a: V3): V3 {
+  const m = Math.hypot(a.x, a.y, a.z) || 1e-9;
+  return scale3(a, 1 / m);
+}
+
+// Midline landmarks (forehead → menton) used to fit the head's vertical axis.
+const MIDLINE = [10, 151, 9, 8, 168, 6, 197, 195, 5, 4, 1, 2, 164, 0, 13, 14, 17, 18, 200, 199, 175, 152];
+
+// MediaPipe's landmark z is compressed relative to x/y, which makes the
+// estimated head axes under-tilt and leaves residual foreshortening. A face
+// rotated by θ recovers as `u·sqrt(cos²θ + k²sin²θ)` for compression k, so a
+// single scale restores full correction. Tuned by sweeping for minimum score
+// disagreement across different photos of the same person
+// (tools/convergence.mjs).
+// 4.5 measured as the optimum: it halves cross-photo score disagreement for
+// the same person (0.80 → 0.40 average, 1.1 → 0.5 worst).
+export const POSE_CALIBRATION = { zScale: 4.5 };
+
+// ---------------------------------------------------------------------------
+// Pose normalization. MediaPipe returns 3D landmarks, so instead of measuring
+// in image space (where a turned or tilted head distorts every ratio) we
+// reconstruct the head's OWN coordinate frame and measure in that:
+//
+//   lateral  — perpendicular to the facial symmetry plane, averaged over
+//              mirrored landmark pairs
+//   vertical — principal axis of the midline points, within the symmetry plane
+//
+// Projecting the cloud onto (lateral, vertical) yields a canonical frontal
+// orthographic view, so yaw/pitch/roll are removed before any metric runs.
+// Output keeps the screen convention: x grows right, y grows downward.
+// ---------------------------------------------------------------------------
 export function buildGeometry(
   landmarks: NormalizedLandmark[],
   width: number,
   height: number,
 ): Geom {
-  const px: Pt[] = landmarks.map((l) => ({ x: l.x * width, y: l.y * height }));
-
-  const irisR = px[LM.IRIS_R];
-  const irisL = px[LM.IRIS_L];
-  let rollNorm = Math.atan2(irisL.y - irisR.y, irisL.x - irisR.x);
-  // The iris pair may be in either image order; fold roll into (-90°, 90°]
-  if (rollNorm > Math.PI / 2) rollNorm -= Math.PI;
-  if (rollNorm < -Math.PI / 2) rollNorm += Math.PI;
-  const cx = (irisR.x + irisL.x) / 2;
-  const cy = (irisR.y + irisL.y) / 2;
-  const cos = Math.cos(-rollNorm);
-  const sin = Math.sin(-rollNorm);
-
-  const rot: Pt[] = px.map((p) => ({
-    x: cx + (p.x - cx) * cos - (p.y - cy) * sin,
-    y: cy + (p.x - cx) * sin + (p.y - cy) * cos,
+  // MediaPipe's z is scaled roughly like x, so both use image width.
+  const p3: V3[] = landmarks.map((l) => ({
+    x: l.x * width,
+    y: l.y * height,
+    z: (l.z ?? 0) * width * POSE_CALIBRATION.zScale,
   }));
 
+  // Lateral axis: mean of subject-right → subject-left pair vectors.
+  let acc: V3 = { x: 0, y: 0, z: 0 };
+  for (const [r, l] of MIRROR_PAIRS) {
+    const v = sub3(p3[l], p3[r]);
+    acc = { x: acc.x + v.x, y: acc.y + v.y, z: acc.z + v.z };
+  }
+  const lateral = norm3(acc);
+
+  // Vertical axis: fit the principal direction of the midline points inside
+  // the plane perpendicular to `lateral` (a 2x2 eigenproblem in that basis).
+  const seed: V3 = Math.abs(lateral.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 };
+  const e1 = norm3(sub3(seed, scale3(lateral, dot3(seed, lateral))));
+  const e2 = cross3(lateral, e1);
+
+  const mlPts = MIDLINE.filter((i) => p3[i]).map((i) => p3[i]);
+  const centroid = mlPts.reduce(
+    (a, p) => ({ x: a.x + p.x / mlPts.length, y: a.y + p.y / mlPts.length, z: a.z + p.z / mlPts.length }),
+    { x: 0, y: 0, z: 0 },
+  );
+  let saa = 0;
+  let sbb = 0;
+  let sab = 0;
+  for (const p of mlPts) {
+    const d = sub3(p, centroid);
+    const a = dot3(d, e1);
+    const b = dot3(d, e2);
+    saa += a * a;
+    sbb += b * b;
+    sab += a * b;
+  }
+  const theta = 0.5 * Math.atan2(2 * sab, saa - sbb);
+  let vertical = norm3({
+    x: e1.x * Math.cos(theta) + e2.x * Math.sin(theta),
+    y: e1.y * Math.cos(theta) + e2.y * Math.sin(theta),
+    z: e1.z * Math.cos(theta) + e2.z * Math.sin(theta),
+  });
+  // Orient it downward in face terms (forehead → menton)
+  if (dot3(sub3(p3[LM.MENTON], p3[LM.FOREHEAD_TOP]), vertical) < 0) vertical = scale3(vertical, -1);
+
+  const origin = {
+    x: (p3[LM.IRIS_R].x + p3[LM.IRIS_L].x) / 2,
+    y: (p3[LM.IRIS_R].y + p3[LM.IRIS_L].y) / 2,
+    z: (p3[LM.IRIS_R].z + p3[LM.IRIS_L].z) / 2,
+  };
+
+  const flat: Pt[] = p3.map((p) => {
+    const d = sub3(p, origin);
+    return { x: dot3(d, lateral), y: dot3(d, vertical) };
+  });
+
+  // Pose actually removed, for the capture-quality report.
+  const yawDeg = (Math.asin(Math.max(-1, Math.min(1, lateral.z))) * 180) / Math.PI;
+  const pitchDeg = (Math.asin(Math.max(-1, Math.min(1, -vertical.z))) * 180) / Math.PI;
+  const rollDeg = (Math.atan2(lateral.y, lateral.x) * 180) / Math.PI;
+
   return {
-    pt: (i: number) => rot[i],
-    ipd: dist(rot[LM.IRIS_R], rot[LM.IRIS_L]),
-    rollDeg: (rollNorm * 180) / Math.PI,
+    pt: (i: number) => flat[i],
+    ipd: dist(flat[LM.IRIS_R], flat[LM.IRIS_L]),
+    rollDeg,
+    yawDeg,
+    pitchDeg,
   };
 }
 

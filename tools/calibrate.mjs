@@ -13,11 +13,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const scans = JSON.parse(readFileSync(new URL("./scans.json", import.meta.url).pathname));
+// People notable for their work, not their looks — the population reference.
+const popScans = JSON.parse(readFileSync(new URL("./pop-scans.json", import.meta.url).pathname));
 
 // Strict gate defines the calibration sample (measurement fidelity matters
 // most when deriving distributions). The looser gate defines DB inclusion,
 // with each entry tagged so matching can prefer high-fidelity references.
-const GATE = { yaw: 16, pitch: 17, smile: 0.6 };
+// Pose normalization removes yaw/pitch from the measurements, so the
+// calibration gate only needs to exclude photos where landmark accuracy
+// itself degrades (self-occlusion) or expression distorts the mouth/jaw.
+const GATE = { yaw: 25, pitch: 22, smile: 0.7 };
 const GATE_LOOSE = { yaw: 26, pitch: 23, smile: 0.99 };
 
 const passes = (q, g) =>
@@ -61,7 +66,8 @@ const round = (v, d) => Number(v.toFixed(d + 2));
 const out = {};
 const counts = {};
 for (const sex of ["male", "female"]) {
-  const pool = scans.filter((s) => s.entry.sex === sex && passes(s.quality, GATE));
+  // mean/SD come from the population proxy; ideals from the celebrity top tier
+  const pool = popScans.filter((s) => s.entry.sex === sex && passes(s.quality, GATE));
   const top = scans.filter(
     (s) => s.entry.sex === sex && TOP_TIER.has(s.entry.name) && passes(s.quality, GATE_LOOSE),
   );
@@ -71,7 +77,8 @@ for (const sex of ["male", "female"]) {
     const vals = pool.map((s) => s.entry.metrics[id]).filter(Number.isFinite);
     if (vals.length < 6) continue;
     const mean = median(vals);
-    const sd = Math.max(1e-6, robustSD(vals) * 1.25);
+    // Robust SD from a real population sample — no artificial inflation.
+    const sd = Math.max(1e-6, robustSD(vals));
 
     let ideal;
     if (!LOWER.has(id)) {

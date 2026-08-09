@@ -1,6 +1,8 @@
 import { initLandmarker, detect, isReady } from "./engine/landmarker.ts";
 import { assessQuality } from "./engine/quality.ts";
+import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
+import { POSE_CALIBRATION } from "./engine/geometry.ts";
 import { compareAndStore } from "./engine/history.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
 import type { Report, Sex } from "./engine/types.ts";
@@ -30,6 +32,46 @@ const el = {
 };
 
 let selectedSex: Sex = "male";
+
+// Calibration harness API (tools/): lets the offline pipeline measure photos
+// directly, skipping the UI and its scan animation. Same engine path as a
+// real scan — detect, assess, analyze — so results are identical.
+(window as unknown as Record<string, unknown>).__truemaxPose = POSE_CALIBRATION;
+(window as unknown as Record<string, unknown>).__truemaxMeasure = async (
+  dataUrl: string,
+  sex: Sex,
+) => {
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error("bad image"));
+    i.src = dataUrl;
+  });
+  const s = Math.min(1, MAX_IMAGE_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.round(img.naturalWidth * s);
+  const h = Math.round(img.naturalHeight * s);
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  c.getContext("2d")!.drawImage(img, 0, 0, w, h);
+
+  const res = detect(c);
+  const quality = assessQuality(res);
+  if (!quality.faceFound) return { faceFound: false };
+  const report = analyze(res.faceLandmarks[0], w, h, sex);
+  return {
+    faceFound: true,
+    overall: report.overall,
+    yaw: quality.yawDeg,
+    pitch: quality.pitchDeg,
+    smile: quality.smileScore,
+    entry: JSON.parse(toCelebEntry(report, "x")),
+    zScores: report.zScores,
+  };
+};
+(window as unknown as Record<string, unknown>).__truemaxMeasureFull = (
+  window as unknown as Record<string, unknown>
+).__truemaxMeasure;
 
 for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
   btn.addEventListener("click", () => {
@@ -152,7 +194,7 @@ async function handleFile(file: File): Promise<void> {
   el.status.textContent = "";
   el.barFill.style.width = "0";
   drawCalm(el.overlayCanvas, landmarks, width, height);
-  renderQualityChips(quality.issues);
+  renderQualityChips(quality);
 
   renderResults({
     report,
@@ -184,10 +226,14 @@ function startSide(frontReport: Report): void {
   });
 }
 
-function renderQualityChips(issues: string[]): void {
-  el.qualityChips.innerHTML = issues.length
-    ? issues.map((i) => `<span class="qchip warn">${i}</span>`).join("")
-    : `<span class="qchip">Capture quality: good</span>`;
+function renderQualityChips(q: QualityCheck): void {
+  const chips = q.issues.map((i) => `<span class="qchip warn">${i}</span>`);
+  // Surfacing the correction is part of showing the math: the user can see
+  // that an off-axis photo was accounted for rather than silently mismeasured.
+  const off = Math.max(Math.abs(q.yawDeg), Math.abs(q.pitchDeg));
+  if (off >= 6) chips.push(`<span class="qchip">Pose-corrected · ${off.toFixed(0)}° off-axis</span>`);
+  if (!chips.length) chips.push(`<span class="qchip">Capture quality: good</span>`);
+  el.qualityChips.innerHTML = chips.join("");
 }
 
 function exposeDev(report: Report, landmarks: unknown, quality: unknown): void {
@@ -198,6 +244,7 @@ function exposeDev(report: Report, landmarks: unknown, quality: unknown): void {
     // Console helper for building the celebrity DB from real scans:
     // copy(window.__truemax.celebEntry("Name")) → paste into src/engine/celebs.ts
     celebEntry: (name: string) => toCelebEntry(report, name),
+    poseCalibration: POSE_CALIBRATION,
   };
 }
 
