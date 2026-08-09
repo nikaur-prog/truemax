@@ -39,6 +39,10 @@ const el = {
   outlineCanvas: document.getElementById("outline-canvas") as HTMLCanvasElement,
   reelScore: document.getElementById("reel-score")!,
   reelName: document.getElementById("reel-name")!,
+  stage: document.getElementById("capture-stage")!,
+  camLight: document.getElementById("cam-light")!,
+  camLamp: document.getElementById("cam-lamp")!,
+  camLampFill: document.getElementById("cam-lamp-fill")!,
   frame: document.getElementById("frame")!,
   zoomable: document.getElementById("zoomable")!,
   photoCanvas: document.getElementById("photo-canvas") as HTMLCanvasElement,
@@ -179,6 +183,11 @@ async function openCamera(): Promise<void> {
     el.camHintDetail.textContent = "This browser can't open a camera — upload a photo instead.";
     return;
   }
+  const desktop = !matchMedia("(pointer: coarse)").matches;
+  el.camHintTitle.textContent = "Allow camera access";
+  el.camHintDetail.textContent = desktop
+    ? "Your browser will ask at the top of the window — choose Allow"
+    : "Tap Allow when your browser asks";
   try {
     cam = await startCamera({
       video: el.camVideo,
@@ -188,12 +197,19 @@ async function openCamera(): Promise<void> {
         el.camHintTitle.textContent = c.hint;
         el.camHintDetail.textContent = c.detail;
         el.camHint.classList.toggle("ready", c.ready);
+        el.camHint.classList.toggle("red", c.status === "red");
+        el.camHint.classList.toggle("amber", c.status === "amber");
+        el.camLamp.className = `lamp ${c.status === "green" ? "green" : c.status}`;
+        el.camLampFill.className = c.status === "green" ? "green" : c.status;
+        el.camLampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
         el.ovalFrame.classList.toggle("ready", c.ready);
         el.btnCamera.disabled = !c.ready;
         renderGates(c);
       },
     });
     el.ovalFrame.classList.add("live");
+    el.stage.classList.add("live-cam");
+    el.camLight.classList.remove("hidden");
     el.camGates.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
     el.btnCamera.disabled = true;
@@ -224,6 +240,8 @@ el.btnCamera.addEventListener("click", async () => {
   cam.stop();
   cam = null;
   el.ovalFrame.classList.remove("live", "ready");
+  el.stage.classList.remove("live-cam");
+  el.camLight.classList.add("hidden");
   el.camGates.classList.add("hidden");
   el.btnCamera.textContent = "Use camera";
   el.btnCamera.disabled = false;

@@ -271,3 +271,19 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .reel-caption b { display: block; font-family: var(--serif); font-weight: 300; font-size: 40px; line-height: 1; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.55); }
 .reel-caption span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,.9); text-shadow: 0 1px 8px rgba(0,0,0,.6); }
 .oval-frame.showing-reel { background: #101113; }
+
+/* Traffic light: red while far off, amber while closing the gap, green when ready */
+.cam-light { display: flex; align-items: center; gap: 12px; width: 100%; }
+.lamp { width: 13px; height: 13px; border-radius: 99px; flex: none; background: #d6907c; transition: background 0.28s var(--ease, ease), box-shadow 0.28s ease; box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+.lamp.amber { background: #e8b164; box-shadow: 0 0 12px rgba(232,177,100,0.55); }
+.lamp.green { background: #34c79a; box-shadow: 0 0 14px rgba(52,199,154,0.65); }
+.lamp-track { flex: 1; height: 3px; border-radius: 99px; background: var(--soft); overflow: hidden; }
+.lamp-track i { display: block; height: 100%; width: 0; background: #d6907c; transition: width 0.24s ease, background 0.28s ease; }
+.lamp-track i.amber { background: #e8b164; }
+.lamp-track i.green { background: #34c79a; }
+
+/* The frame grows once the camera is live — the preview becomes the subject */
+.oval-frame { transition: max-width 0.45s var(--ease, cubic-bezier(.22,1,.36,1)), aspect-ratio 0.45s ease; }
+#capture-stage.live-cam { width: min(560px, 100%); }
+.cam-hint.red b { color: #c4694f; }
+.cam-hint.amber b { color: #b0762a; }

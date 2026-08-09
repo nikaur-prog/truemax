@@ -71,14 +71,59 @@ function canonicalize(shape: number[]): number[] {
   return out;
 }
 
+// An average face should be bilaterally symmetric: individual asymmetries
+// ought to cancel. With only ~10 female reference faces they do not, so the
+// mean came out visibly crooked — uneven brows, a tilted mouth.
+//
+// Mirroring the shape and averaging each point with its mirror partner fixes
+// that. The partner map is derived from the shape itself: after negating x,
+// each point's counterpart is simply the nearest point, because the face is
+// already close to symmetric.
+function symmetrize(shape: number[]): number[] {
+  const n = shape.length / 2;
+  const partner = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const mx = -shape[2 * i];
+    const my = shape[2 * i + 1];
+    let best = -1;
+    let bestD = Infinity;
+    for (let j = 0; j < n; j++) {
+      const d = (shape[2 * j] - mx) ** 2 + (shape[2 * j + 1] - my) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = j;
+      }
+    }
+    // Reject a match too far away to be a genuine mirror counterpart
+    partner[i] = bestD < 0.0025 ? best : -1;
+  }
+
+  // Only trust mutual matches: if i thinks j is its mirror but j disagrees,
+  // one of them is being dragged out of place — which is what put a notch in
+  // the jaw outline.
+  for (let i = 0; i < n; i++) {
+    const j = partner[i];
+    if (j >= 0 && partner[j] !== i) partner[i] = -1;
+  }
+
+  const out = shape.slice();
+  for (let i = 0; i < n; i++) {
+    const j = partner[i];
+    if (j < 0) continue;
+    out[2 * i] = (shape[2 * i] - shape[2 * j]) / 2;
+    out[2 * i + 1] = (shape[2 * i + 1] + shape[2 * j + 1]) / 2;
+  }
+  return out;
+}
+
 export interface OutlineHandle {
   morphTo(sex: Sex): void;
   stop(): void;
 }
 
 export function mountFaceOutline(canvas: HTMLCanvasElement, initial: Sex): OutlineHandle {
-  const male = SHAPE_MODEL.male ? canonicalize(SHAPE_MODEL.male.meanShape) : null;
-  const female = SHAPE_MODEL.female ? canonicalize(SHAPE_MODEL.female.meanShape) : null;
+  const male = SHAPE_MODEL.male ? symmetrize(canonicalize(SHAPE_MODEL.male.meanShape)) : null;
+  const female = SHAPE_MODEL.female ? symmetrize(canonicalize(SHAPE_MODEL.female.meanShape)) : null;
   if (!male || !female) return { morphTo: () => {}, stop: () => {} };
 
   let from = initial === "female" ? female : male;

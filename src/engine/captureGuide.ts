@@ -10,10 +10,18 @@ import { assessQuality } from "./quality.ts";
 // noise; "move closer" is an instruction.
 // ---------------------------------------------------------------------------
 
+export type CaptureStatus = "red" | "amber" | "green";
+
 export interface FrameCheck {
   ready: boolean;
   hint: string;
   detail: string;
+  // Traffic light: red when the frame is far off, amber while the user is
+  // actively closing the gap, green when every check passes. Graded rather
+  // than binary so movement in the right direction is visible immediately —
+  // being told 'move higher' with no feedback until it snaps is frustrating.
+  status: CaptureStatus;
+  progress: number; // 0..1 toward fixing the current limiting problem
   // Individual gates, for the checklist UI
   gates: {
     face: boolean;
@@ -35,7 +43,10 @@ const ROLL_OK = 7;
 const SMILE_OK = 0.35;
 const DARK = 42; // mean luma, 0-255
 const BRIGHT = 232;
-const SHARP_MIN = 26; // mean |Laplacian| over the face crop
+// Sharpness is measured on the FACE CROP, not the whole scene. Sampling the
+// entire frame at 96px blurred everything before measuring it, so real webcam
+// footage read as soft and the gate never lit. Threshold retuned for a crop.
+const SHARP_MIN = 9;
 
 export interface FrameStats {
   luma: number;
@@ -50,8 +61,8 @@ export function frameStats(
   scratch: HTMLCanvasElement,
   box?: { x: number; y: number; w: number; h: number },
 ): FrameStats {
-  const W = 96;
-  const H = 96;
+  const W = 160;
+  const H = 160;
   scratch.width = W;
   scratch.height = H;
   const ctx = scratch.getContext("2d", { willReadFrequently: true })!;
@@ -101,8 +112,10 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
   if (!result?.faceLandmarks.length) {
     return {
       ready: false,
-      hint: "Center your face in the oval",
+      hint: "Center your face in the frame",
       detail: "Looking for a face…",
+      status: "red",
+      progress: 0,
       gates,
     };
   }
@@ -132,21 +145,43 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
   gates.sharp = stats.sharpness >= SHARP_MIN;
   gates.neutral = q.smileScore <= SMILE_OK;
 
-  // Priority order: fix framing before fine detail, or the advice thrashes.
-  const say = (hint: string, detail: string): FrameCheck => ({ ready: false, hint, detail, gates });
+  // Each problem reports how far off it is, expressed as a multiple of its
+  // tolerance. 0 = solved, 1 = one whole tolerance out, 2+ = badly off. That
+  // is what lets the light run red → amber → green as the user moves, instead
+  // of snapping at the threshold.
+  interface Problem { over: number; hint: string; detail: string }
+  const problems: Problem[] = [];
+  const add = (over: number, hint: string, detail: string) => {
+    if (over > 0) problems.push({ over, hint, detail });
+  };
 
-  if (w < TARGET_MIN) return say("Move closer", "Your face should fill most of the oval");
-  if (w > TARGET_MAX) return say("Move back a little", "You're too close to the lens");
-  if (Math.abs(cxOff) >= 0.1) return say(cxOff > 0 ? "Move left" : "Move right", "Center your face in the oval");
-  if (Math.abs(cyOff) >= 0.12) return say(cyOff > 0 ? "Move up" : "Move down", "Center your face in the oval");
-  if (stats.luma < DARK) return say("Too dark", "Face a window or turn a light on");
-  if (stats.luma > BRIGHT) return say("Too bright", "Move out of direct light — detail is blown out");
-  if (q.pitchDeg < -PITCH_OK) return say("Lower the camera", "It's above your eye line, looking down");
-  if (q.pitchDeg > PITCH_OK) return say("Raise the camera", "It's below your eye line, looking up");
-  if (Math.abs(q.yawDeg) > YAW_OK) return say("Face the camera directly", "Your head is turned");
-  if (Math.abs(q.rollDeg) > ROLL_OK) return say("Straighten your head", "It's tilted to one side");
-  if (stats.sharpness < SHARP_MIN) return say("Image looks soft", "Hold still, or wipe the lens");
-  if (q.smileScore > SMILE_OK) return say("Relax your expression", "A smile changes mouth and jaw measurements");
+  add((TARGET_MIN - w) / TARGET_MIN, "Move closer", "Your face should fill most of the frame");
+  add((w - TARGET_MAX) / TARGET_MAX, "Move back a little", "You're too close to the lens");
+  add((Math.abs(cxOff) - 0.1) / 0.1, cxOff > 0 ? "Move left" : "Move right", "Center your face");
+  add((Math.abs(cyOff) - 0.12) / 0.12, cyOff > 0 ? "Move up" : "Move down", "Center your face");
+  add((DARK - stats.luma) / DARK, "Too dark", "Face a window or turn a light on");
+  add((stats.luma - BRIGHT) / BRIGHT, "Too bright", "Move out of direct light");
+  add((-q.pitchDeg - PITCH_OK) / PITCH_OK, "Lower the camera", "It's above your eye line, looking down");
+  add((q.pitchDeg - PITCH_OK) / PITCH_OK, "Raise the camera", "It's below your eye line, looking up");
+  add((Math.abs(q.yawDeg) - YAW_OK) / YAW_OK, "Face the camera directly", "Your head is turned");
+  add((Math.abs(q.rollDeg) - ROLL_OK) / ROLL_OK, "Straighten your head", "It's tilted to one side");
+  add((SHARP_MIN - stats.sharpness) / SHARP_MIN, "Hold still", "The image is too soft — or wipe the lens");
+  add((q.smileScore - SMILE_OK) / SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
 
-  return { ready: true, hint: "Hold still", detail: "Ready to capture", gates };
+  if (!problems.length) {
+    return { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gates };
+  }
+
+  // Coach the worst problem; grade the light by how close it is to solved.
+  problems.sort((a, b) => b.over - a.over);
+  const worst = problems[0];
+  const progress = Math.max(0, Math.min(1, 1 - worst.over));
+  return {
+    ready: false,
+    hint: worst.hint,
+    detail: worst.detail,
+    status: progress >= 0.5 ? "amber" : "red",
+    progress,
+    gates,
+  };
 }

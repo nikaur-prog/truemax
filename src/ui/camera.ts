@@ -1,5 +1,6 @@
 import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
 import { checkFrame, frameStats } from "../engine/captureGuide.ts";
+import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { FrameCheck } from "../engine/captureGuide.ts";
 
 // Live camera capture. The preview starts on the landing screen so the first
@@ -65,7 +66,10 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       } catch {
         /* mode switch in flight — skip this frame */
       }
-      const stats = frameStats(v, scratch!);
+      // Measure exposure and focus on the face itself — a bright wall or a
+      // busy background otherwise decides whether the shot is "sharp".
+      const box = faceBox(result);
+      const stats = frameStats(v, scratch!, box);
       const check = checkFrame(result, stats);
       opts.onCheck(check);
       drawGuide(opts.guideCanvas, result, check);
@@ -101,8 +105,37 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   };
 }
 
-// Light-touch live overlay: landmark dots so the tracking is visibly working,
-// tinted by whether the frame is currently acceptable.
+function faceBox(result: ReturnType<typeof detectVideo>) {
+  const lm = result?.faceLandmarks?.[0];
+  if (!lm) return undefined;
+  let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+  for (const p of lm) {
+    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+    y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+  }
+  return { x: x0, y: y0, w: Math.max(0.05, x1 - x0), h: Math.max(0.05, y1 - y0) };
+}
+
+// Live overlay: trace the face's OUTLINE — oval, brows, eyes, nose, lips —
+// rather than sprinkling interior mesh points. The dense mesh reads as a blob
+// stuck to the middle of the face and gives no sense that tracking is
+// following you; the contours visibly move with your features.
+let CONTOURS: Array<{ start: number; end: number }> | null = null;
+function contours() {
+  return (CONTOURS ??= [
+    ...FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
+    ...FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
+    ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
+    ...FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
+    ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
+    ...FaceLandmarker.FACE_LANDMARKS_LIPS,
+  ]);
+}
+const NOSE_LINES: Array<[number, number]> = [
+  [168, 6], [6, 197], [197, 195], [195, 5], [5, 4], [4, 1],
+  [1, 98], [1, 327], [98, 2], [327, 2], [48, 98], [278, 327],
+];
+
 function drawGuide(
   canvas: HTMLCanvasElement,
   result: ReturnType<typeof detectVideo>,
@@ -110,22 +143,49 @@ function drawGuide(
 ): void {
   const w = canvas.clientWidth || canvas.width;
   const h = canvas.clientHeight || canvas.height;
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
   }
   const ctx = canvas.getContext("2d")!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  if (!result?.faceLandmarks.length) return;
+  const lm = result?.faceLandmarks?.[0];
+  if (!lm) return;
 
-  const lm = result.faceLandmarks[0];
-  ctx.fillStyle = check.ready ? "rgba(143,243,224,0.95)" : "rgba(255,255,255,0.5)";
-  const r = Math.max(0.9, w / 260);
-  // Every 3rd point: dense enough to read as a mesh, cheap enough for 30fps
-  for (let i = 0; i < lm.length; i += 3) {
-    const p = lm[i];
+  const colour =
+    check.status === "green" ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
+
+  ctx.strokeStyle = `rgba(${colour},0.9)`;
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  ctx.shadowColor = `rgba(${colour},0.55)`;
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  for (const c of contours()) {
+    const a = lm[c.start];
+    const b = lm[c.end];
+    ctx.moveTo(a.x * w, a.y * h);
+    ctx.lineTo(b.x * w, b.y * h);
+  }
+  for (const [a, b] of NOSE_LINES) {
+    if (!lm[a] || !lm[b]) continue;
+    ctx.moveTo(lm[a].x * w, lm[a].y * h);
+    ctx.lineTo(lm[b].x * w, lm[b].y * h);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Vertices on the contour only, so the tracking reads as points on features
+  ctx.fillStyle = `rgba(${colour},0.95)`;
+  const seen = new Set<number>();
+  for (const c of contours()) {
+    if (seen.has(c.start)) continue;
+    seen.add(c.start);
+    const p = lm[c.start];
     ctx.beginPath();
-    ctx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2);
+    ctx.arc(p.x * w, p.y * h, 1.7, 0, Math.PI * 2);
     ctx.fill();
   }
 }
