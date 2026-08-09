@@ -40,6 +40,13 @@ npm run build   # type-checks then bundles to dist/
 - [x] Metric engine — 31 front-face metrics across 8 regions
 - [x] Per-sex reference distributions → percentile → 0–10 scores
       (percentile-anchored, no inflation — see CALIBRATION.md)
-- [ ] Results UI (overall + pillars + bell curve, region drill-down)
-- [ ] Deterministic explanation templates (typewriter)
-- [ ] Improvements page (non-surgical, current → potential)
+- [x] Results UI: two-pane FaceIQ-style layout, scan theatre, overall +
+      4 pillars + bell curve, 8-region drill-down with zoom/highlight,
+      gradient range bars with ideal windows
+- [x] Deterministic explanation templates (typewriter + key ticks, muteable)
+- [x] Improvements page (non-surgical, current → potential, real numbers)
+- [x] Week-over-week deltas (device-local via localStorage — no accounts)
+- [x] Celebrity per-metric comparison (seeded DB + console export helper:
+      `window.__truemax.celebEntry("Name")`)
+- [ ] Side profile (drag-to-verify landmarks + ~8 side metrics)
+- [ ] 10-celebrity acceptance tuning (see CALIBRATION.md)

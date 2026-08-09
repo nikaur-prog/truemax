@@ -1,30 +1,35 @@
 import { initLandmarker, detect, isReady } from "./engine/landmarker.ts";
 import { assessQuality } from "./engine/quality.ts";
-import type { QualityCheck } from "./engine/quality.ts";
-import { analyze, REGION_NAMES } from "./engine/scoring.ts";
-import type { Report } from "./engine/types.ts";
-import { drawLandmarksAnimated } from "./ui/overlay.ts";
-
-type Sex = "male" | "female";
+import { analyze } from "./engine/scoring.ts";
+import { compareAndStore } from "./engine/history.ts";
+import { toCelebEntry } from "./engine/celebs.ts";
+import type { Report, Sex } from "./engine/types.ts";
+import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
+import { renderResults } from "./ui/results.ts";
+import { toggleMute } from "./ui/audio.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
 const el = {
   engineStatus: document.getElementById("engine-status")!,
-  screenCapture: document.getElementById("screen-capture")!,
-  screenDetect: document.getElementById("screen-detect")!,
+  upload: document.getElementById("v-upload")!,
+  main: document.getElementById("v-main")!,
   fileInput: document.getElementById("file-input") as HTMLInputElement,
-  uploadZone: document.getElementById("upload-zone")!,
+  drop: document.getElementById("drop")!,
+  frame: document.getElementById("frame")!,
+  zoomable: document.getElementById("zoomable")!,
   photoCanvas: document.getElementById("photo-canvas") as HTMLCanvasElement,
   overlayCanvas: document.getElementById("overlay-canvas") as HTMLCanvasElement,
-  detectStatus: document.getElementById("detect-status")!,
-  qualityReport: document.getElementById("quality-report")!,
-  btnReset: document.getElementById("btn-reset")!,
+  capRight: document.getElementById("capRight")!,
+  status: document.getElementById("status")!,
+  barFill: document.getElementById("barFill")!,
+  qualityChips: document.getElementById("quality-chips")!,
+  analysis: document.getElementById("analysis")!,
+  mute: document.getElementById("mute")!,
 };
 
 let selectedSex: Sex = "male";
 
-// ---- Sex picker ----
 for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
   btn.addEventListener("click", () => {
     selectedSex = btn.dataset.sex as Sex;
@@ -35,148 +40,149 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
   });
 }
 
-// ---- Engine init ----
+el.mute.addEventListener("click", () => {
+  el.mute.textContent = toggleMute() ? "🔇" : "🔊";
+});
+
 initLandmarker()
   .then(() => {
-    el.engineStatus.textContent = "Engine ready — 478-point landmark model loaded";
+    el.engineStatus.textContent = "ENGINE READY — 478-POINT MODEL LOADED";
     el.engineStatus.classList.add("ready");
   })
   .catch((err) => {
     console.error(err);
-    el.engineStatus.textContent = "Failed to load the analysis engine — refresh to retry";
+    el.engineStatus.textContent = "ENGINE FAILED TO LOAD — REFRESH TO RETRY";
     el.engineStatus.classList.add("error");
   });
 
-// ---- Upload handling ----
 el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
   if (file) handleFile(file);
 });
-
-el.uploadZone.addEventListener("dragover", (e) => {
+el.drop.addEventListener("dragover", (e) => {
   e.preventDefault();
-  el.uploadZone.classList.add("dragover");
+  el.drop.classList.add("dragover");
 });
-el.uploadZone.addEventListener("dragleave", () => el.uploadZone.classList.remove("dragover"));
-el.uploadZone.addEventListener("drop", (e) => {
+el.drop.addEventListener("dragleave", () => el.drop.classList.remove("dragover"));
+el.drop.addEventListener("drop", (e) => {
   e.preventDefault();
-  el.uploadZone.classList.remove("dragover");
-  const file = e.dataTransfer?.files?.[0];
+  el.drop.classList.remove("dragover");
+  const file = (e as DragEvent).dataTransfer?.files?.[0];
   if (file && file.type.startsWith("image/")) handleFile(file);
 });
 
-el.btnReset.addEventListener("click", () => {
-  el.screenDetect.classList.add("hidden");
-  el.screenCapture.classList.remove("hidden");
-  el.qualityReport.classList.add("hidden");
-  el.btnReset.classList.add("hidden");
-  document.getElementById("engine-readout")?.remove();
+function resetToUpload(): void {
+  el.main.classList.add("hidden");
+  el.upload.classList.remove("hidden");
+  el.mute.classList.add("hidden");
+  el.zoomable.style.transform = "none";
+  el.analysis.innerHTML = "";
+  el.qualityChips.innerHTML = "";
   el.fileInput.value = "";
-});
+}
+
+const SCAN_STAGES = [
+  "Detecting facial landmarks",
+  "Normalizing to interpupillary scale",
+  "Measuring 31 proportions",
+  "Checking bilateral symmetry",
+  "Comparing against population",
+  "Composing report",
+];
 
 async function handleFile(file: File): Promise<void> {
   if (!isReady()) {
-    el.engineStatus.textContent = "Engine still loading — one moment…";
+    el.engineStatus.textContent = "ENGINE STILL LOADING — ONE MOMENT";
     return;
   }
-
   const image = await loadImage(file);
-
-  // Downscale to a fixed working size: keeps detection fast AND deterministic
-  // for a given photo regardless of the display device.
   const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.round(image.naturalWidth * scale);
   const height = Math.round(image.naturalHeight * scale);
-
   el.photoCanvas.width = width;
   el.photoCanvas.height = height;
   el.photoCanvas.getContext("2d")!.drawImage(image, 0, 0, width, height);
 
-  el.screenCapture.classList.add("hidden");
-  el.screenDetect.classList.remove("hidden");
-  el.detectStatus.textContent = "Detecting landmarks…";
-  el.qualityReport.classList.add("hidden");
-  el.btnReset.classList.add("hidden");
-
-  // Let the browser paint the photo before running detection
+  el.upload.classList.add("hidden");
+  el.main.classList.remove("hidden");
+  el.mute.classList.remove("hidden");
+  el.frame.classList.add("scanning");
+  el.capRight.textContent = "SCANNING";
+  el.analysis.innerHTML = "";
+  el.qualityChips.innerHTML = "";
   await nextFrame();
 
+  // Real math (milliseconds) happens inside the theatre beat (~2.2s)
   const result = detect(el.photoCanvas);
   const quality = assessQuality(result);
 
   if (!quality.faceFound) {
+    el.frame.classList.remove("scanning");
+    el.capRight.textContent = "NO FACE FOUND";
+    el.status.innerHTML = "<b>No face detected.</b> Try a clearer, front-facing photo.";
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
-    el.detectStatus.innerHTML = `<span class="fail">No face detected.</span> Try a clearer, front-facing photo.`;
-    el.btnReset.classList.remove("hidden");
+    setTimeout(() => resetToUpload(), 2600);
     return;
   }
 
   const landmarks = result.faceLandmarks[0];
-  el.detectStatus.textContent = "Mapping 478 landmarks…";
+  const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
 
-  const overlay = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
-  await overlay.done;
-
-  el.detectStatus.innerHTML = quality.pass
-    ? `<span class="ok">478 landmarks locked.</span> Photo is frontal and analysis-ready.`
-    : `<span class="fail">Landmarks placed, but this photo won't produce accurate measurements.</span>`;
-
-  renderQualityReport(quality);
+  // Staged status lines, ~360ms each
+  await new Promise<void>((done) => {
+    let s = 0;
+    const step = () => {
+      if (s < SCAN_STAGES.length) {
+        el.status.innerHTML = `<b>${SCAN_STAGES[s]}</b> …`;
+        el.barFill.style.width = `${((s + 1) / SCAN_STAGES.length) * 100}%`;
+        s++;
+        setTimeout(step, 360);
+      } else done();
+    };
+    setTimeout(step, 200);
+  });
+  await reveal.done;
 
   const report = analyze(landmarks, width, height, selectedSex);
-  renderEngineReadout(report);
-  el.btnReset.classList.remove("hidden");
+  const delta = compareAndStore(report);
 
-  // Results UI consumes this; also exposed for dev inspection.
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "ANALYZED";
+  el.status.textContent = "";
+  el.barFill.style.width = "0";
+  drawCalm(el.overlayCanvas, landmarks, width, height);
+  renderQualityChips(quality.issues);
+
+  renderResults({
+    report,
+    delta,
+    landmarks,
+    photoW: width,
+    photoH: height,
+    analysis: el.analysis,
+    zoomable: el.zoomable,
+    overlay: el.overlayCanvas,
+    onNewPhoto: resetToUpload,
+  });
+
+  exposeDev(report, landmarks, quality);
+}
+
+function renderQualityChips(issues: string[]): void {
+  el.qualityChips.innerHTML = issues.length
+    ? issues.map((i) => `<span class="qchip warn">${i}</span>`).join("")
+    : `<span class="qchip">Capture quality: good</span>`;
+}
+
+function exposeDev(report: Report, landmarks: unknown, quality: unknown): void {
   (window as unknown as Record<string, unknown>).__truemax = {
-    sex: selectedSex,
+    report,
     landmarks,
     quality,
-    report,
+    // Console helper for building the celebrity DB from real scans:
+    // copy(window.__truemax.celebEntry("Name")) → paste into src/engine/celebs.ts
+    celebEntry: (name: string) => toCelebEntry(report, name),
   };
-}
-
-// Temporary dev readout — replaced by the real results UI in the next step.
-function renderEngineReadout(r: Report): void {
-  const existing = document.getElementById("engine-readout");
-  existing?.remove();
-  const details = document.createElement("details");
-  details.id = "engine-readout";
-  details.className = "quality-report";
-  details.innerHTML =
-    `<summary style="cursor:pointer;font-weight:600;font-size:14px">` +
-    `Engine: overall ${r.overall.toFixed(1)} · top ${(100 - r.overallPercentile).toFixed(1)}% · potential ${r.potential.toFixed(1)}</summary>` +
-    `<div class="quality-row"><span class="label">Pillars</span><span class="value">` +
-    Object.entries(r.pillars).map(([p, s]) => `${p} ${s.toFixed(1)}`).join(" · ") +
-    `</span></div>` +
-    r.regions
-      .map(
-        (reg) =>
-          `<div class="quality-row"><span class="label">${REGION_NAMES[reg.region]}</span>` +
-          `<span class="value">${reg.score.toFixed(1)}</span></div>`,
-      )
-      .join("");
-  el.qualityReport.after(details);
-}
-
-function renderQualityReport(q: QualityCheck): void {
-  const row = (label: string, value: string, pass: boolean) =>
-    `<div class="quality-row"><span class="label">${label}</span><span class="value ${pass ? "pass" : "warn"}">${value}</span></div>`;
-
-  const yawOk = Math.abs(q.yawDeg) <= 12;
-  const pitchOk = Math.abs(q.pitchDeg) <= 12;
-
-  el.qualityReport.innerHTML = [
-    row("Head yaw", `${q.yawDeg.toFixed(1)}°`, yawOk),
-    row("Head pitch", `${q.pitchDeg.toFixed(1)}°`, pitchOk),
-    row("Head roll", `${q.rollDeg.toFixed(1)}°`, true),
-    row("Face size in frame", `${Math.round(q.faceWidthFrac * 100)}% of width`, q.largeEnough),
-    row("Expression", q.neutralExpression ? "neutral" : `smiling (${Math.round(q.smileScore * 100)}%)`, q.neutralExpression),
-    q.issues.length
-      ? `<div class="quality-verdict warn">${q.issues.join(" · ")} — you can proceed, but measurements may be off.</div>`
-      : `<div class="quality-verdict">All checks passed — measurements will be reliable.</div>`,
-  ].join("");
-  el.qualityReport.classList.remove("hidden");
 }
 
 function loadImage(file: File): Promise<HTMLImageElement> {
