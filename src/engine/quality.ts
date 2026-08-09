@@ -1,0 +1,100 @@
+import type { FaceLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision";
+
+export interface QualityCheck {
+  faceFound: boolean;
+  yawDeg: number;
+  pitchDeg: number;
+  rollDeg: number;
+  faceWidthFrac: number; // bizygomatic width as a fraction of image width
+  frontal: boolean;
+  largeEnough: boolean;
+  pass: boolean;
+  issues: string[];
+}
+
+// Tolerances for "roughly frontal". Celebrity photos won't always pass —
+// the UI warns but allows proceeding.
+const YAW_TOLERANCE_DEG = 12;
+const PITCH_TOLERANCE_DEG = 12;
+const MIN_FACE_WIDTH_FRAC = 0.2;
+
+// Landmark indices (MediaPipe 478-point mesh)
+const LEFT_FACE_EDGE = 234;
+const RIGHT_FACE_EDGE = 454;
+
+export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
+  if (!result.faceLandmarks.length) {
+    return {
+      faceFound: false,
+      yawDeg: 0,
+      pitchDeg: 0,
+      rollDeg: 0,
+      faceWidthFrac: 0,
+      frontal: false,
+      largeEnough: false,
+      pass: false,
+      issues: ["No face detected"],
+    };
+  }
+
+  const landmarks = result.faceLandmarks[0];
+  const { yawDeg, pitchDeg, rollDeg } = headPose(result);
+
+  const left = landmarks[LEFT_FACE_EDGE];
+  const right = landmarks[RIGHT_FACE_EDGE];
+  const faceWidthFrac = Math.abs(right.x - left.x);
+
+  const frontal = Math.abs(yawDeg) <= YAW_TOLERANCE_DEG && Math.abs(pitchDeg) <= PITCH_TOLERANCE_DEG;
+  const largeEnough = faceWidthFrac >= MIN_FACE_WIDTH_FRAC;
+
+  const issues: string[] = [];
+  if (Math.abs(yawDeg) > YAW_TOLERANCE_DEG) issues.push("Head is turned — face the camera directly");
+  if (Math.abs(pitchDeg) > PITCH_TOLERANCE_DEG) issues.push("Head is tilted up/down — keep it level");
+  if (!largeEnough) issues.push("Face is small in frame — move closer or crop tighter");
+
+  return {
+    faceFound: true,
+    yawDeg,
+    pitchDeg,
+    rollDeg,
+    faceWidthFrac,
+    frontal,
+    largeEnough,
+    pass: frontal && largeEnough,
+    issues,
+  };
+}
+
+// Extract yaw/pitch/roll from the facial transformation matrix (column-major
+// 4x4). Falls back to landmark symmetry if the matrix is unavailable.
+function headPose(result: FaceLandmarkerResult): { yawDeg: number; pitchDeg: number; rollDeg: number } {
+  const m = result.facialTransformationMatrixes?.[0]?.data;
+  if (m && m.length === 16) {
+    // Column-major: rotation columns are [m0 m1 m2], [m4 m5 m6], [m8 m9 m10]
+    const yaw = Math.atan2(-m[8], Math.hypot(m[9], m[10]));
+    const pitch = Math.atan2(m[9], m[10]);
+    const roll = Math.atan2(m[4], m[0]);
+    return {
+      yawDeg: toDeg(yaw),
+      pitchDeg: toDeg(pitch),
+      rollDeg: toDeg(roll),
+    };
+  }
+  return symmetryPose(result.faceLandmarks[0]);
+}
+
+// Fallback: estimate yaw from the nose tip's offset between the two face
+// edges. Crude but only used if the transform matrix is missing.
+function symmetryPose(landmarks: NormalizedLandmark[]): { yawDeg: number; pitchDeg: number; rollDeg: number } {
+  const noseTip = landmarks[1];
+  const left = landmarks[LEFT_FACE_EDGE];
+  const right = landmarks[RIGHT_FACE_EDGE];
+  const leftDist = Math.abs(noseTip.x - left.x);
+  const rightDist = Math.abs(right.x - noseTip.x);
+  const asym = (leftDist - rightDist) / (leftDist + rightDist);
+  return { yawDeg: asym * 45, pitchDeg: 0, rollDeg: 0 };
+}
+
+function toDeg(rad: number): number {
+  return (rad * 180) / Math.PI;
+}
