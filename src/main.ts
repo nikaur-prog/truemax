@@ -5,8 +5,9 @@ import { compareAndStore } from "./engine/history.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
-import { renderResults } from "./ui/results.ts";
+import { renderResults, renderSideResults } from "./ui/results.ts";
 import { toggleMute } from "./ui/audio.ts";
+import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -163,9 +164,24 @@ async function handleFile(file: File): Promise<void> {
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
+    onSideProfile: () => startSide(report),
   });
 
   exposeDev(report, landmarks, quality);
+}
+
+function startSide(frontReport: Report): void {
+  el.main.classList.add("hidden");
+  openSideCapture({
+    sex: frontReport.sex,
+    onBack: () => el.main.classList.remove("hidden"),
+    onDone: (sideReport) => {
+      closeSide();
+      el.main.classList.remove("hidden");
+      renderSideResults(sideReport, () => startSide(frontReport));
+      (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
+    },
+  });
 }
 
 function renderQualityChips(issues: string[]): void {

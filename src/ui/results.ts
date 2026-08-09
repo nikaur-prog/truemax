@@ -19,6 +19,7 @@ interface Ctx {
   zoomable: HTMLElement;
   overlay: HTMLCanvasElement;
   onNewPhoto: () => void;
+  onSideProfile?: () => void;
 }
 
 let ctx: Ctx | null = null;
@@ -113,6 +114,7 @@ function showOverall(): void {
         <p class="rarity">Roughly <b>1 in ${rarityN(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
       <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
         <button class="btn pri" id="btn-plan">See your plan</button></div>
+      ${ctx.onSideProfile ? `<div class="navrow"><button class="btn gho" id="btn-side">Add side profile →</button></div>` : ""}
     </div>`;
 
   countUp(document.getElementById("cnt")!, r.overall);
@@ -125,6 +127,53 @@ function showOverall(): void {
   );
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-plan")!.onclick = () => select("improve");
+  const sideBtn = document.getElementById("btn-side");
+  if (sideBtn) sideBtn.onclick = () => ctx?.onSideProfile?.();
+}
+
+// Side-profile results: same measurement language, its own report, no photo
+// zoom (the side view has no landmark mesh to re-light).
+export function renderSideResults(report: Report, onRedo: () => void): void {
+  if (!ctx) return;
+  setZoom(null);
+  const regions = report.regions.filter((r) => r.metrics.length);
+  const topPct = Math.max(0.1, Math.round((100 - report.overallPercentile) * 10) / 10);
+
+  ctx.analysis.innerHTML = `
+    <div class="reveal">
+      <div class="score-head">
+        <div><div class="klabel">SIDE PROFILE</div>
+          <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
+        <div class="chipcol"><span class="chip">Top ${topPct}%</span></div>
+      </div>
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile)}
+        <p class="rarity">Roughly <b>1 in ${rarityN(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
+      ${regions
+        .map(
+          (r) => `<div class="dcard" style="margin-bottom:12px">
+        <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+        ${r.metrics
+          .map(
+            (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
+          <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+          <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+          )
+          .join("")}
+      </div>`,
+        )
+        .join("")}
+      <div class="navrow">
+        <button class="btn gho" id="side-redo">Re-verify landmarks</button>
+        <button class="btn pri" id="side-front">Back to front results</button>
+      </div>
+    </div>`;
+
+  setTimeout(
+    () => document.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
+    120,
+  );
+  document.getElementById("side-redo")!.onclick = onRedo;
+  document.getElementById("side-front")!.onclick = () => renderResults(ctx!);
 }
 
 function countUp(el: HTMLElement, target: number): void {

@@ -68,6 +68,34 @@
       <div class="pane-analysis" id="analysis"></div>
     </main>
 
+    <!-- Side profile: upload + drag-to-verify landmarks -->
+    <section id="v-side" class="hidden">
+      <div class="side-inner">
+        <div class="side-photo">
+          <div class="face-frame" id="side-frame">
+            <canvas id="side-canvas"></canvas>
+            <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+            <div id="side-verify"></div>
+          </div>
+          <div class="photo-caption"><span>SIDE</span><b id="side-cap">VERIFY LANDMARKS</b></div>
+        </div>
+        <div class="side-panel" id="side-panel">
+          <h2 class="side-title">Verify your landmarks</h2>
+          <p class="side-sub">
+            Auto-placement gets close, but a true profile can't be landmarked
+            automatically with confidence. Drag each point onto its anatomical
+            spot — accuracy here is what makes the side measurements real.
+          </p>
+          <label class="drop drop-side" id="side-drop" for="side-input">
+            <b>Add a side-profile photo</b>
+            <span>Full profile · looking straight ahead · hair off the face</span>
+          </label>
+          <input type="file" id="side-input" accept="image/*" hidden />
+          <div class="navrow" id="side-actions"></div>
+        </div>
+      </div>
+    </section>
+
     <p class="foot">TRUEMAX · ON-DEVICE MEASUREMENT ENGINE · TRUEMAX.APP</p>
     <script type="module" src="/src/main.ts"></script>
   </body>

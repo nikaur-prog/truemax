@@ -180,6 +180,35 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .btn.pri { background: var(--ink); color: #fff; }
 .btn.gho { background: var(--card); border: 1px solid var(--line); }
 
+/* ---------- side profile: verify step ---------- */
+#v-side { max-width: 1080px; margin: 26px auto 90px; padding: 0 26px; }
+.side-inner { display: grid; grid-template-columns: 44% 1fr; gap: 34px; align-items: start; }
+.side-photo .face-frame { background: #101113; }
+#side-canvas { width: 100%; height: auto; display: block; }
+#side-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#side-verify { position: absolute; inset: 0; }
+.verify-layer { touch-action: none; }
+
+.vpoint { position: absolute; transform: translate(-50%, -50%); background: none; border: 0; padding: 0; cursor: grab; display: flex; align-items: center; gap: 6px; }
+.vpoint i { width: 13px; height: 13px; border-radius: 99px; background: #8ff3e0; border: 2px solid #0b1f1b; box-shadow: 0 0 8px rgba(120, 235, 210, 0.8); display: block; flex: none; }
+.vpoint span { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.82); white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); opacity: 0; transition: opacity 0.18s; }
+.vpoint:hover span, .vpoint.grabbing span { opacity: 1; }
+.vpoint.grabbing { cursor: grabbing; }
+.vpoint.grabbing i { background: #fff; transform: scale(1.15); }
+
+.verify-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #fff; background: rgba(16, 17, 19, 0.82); border-radius: 10px; padding: 9px 12px; opacity: 0; transition: opacity 0.18s; pointer-events: none; }
+.verify-hint.show { opacity: 1; }
+
+.side-panel { min-width: 0; }
+.side-title { font-family: var(--serif); font-weight: 300; font-size: 32px; letter-spacing: -0.01em; margin-bottom: 12px; }
+.side-sub { color: var(--mut); font-size: 14px; line-height: 1.6; margin-bottom: 22px; }
+.drop-side { width: 100%; padding: 28px 22px; text-align: center; }
+
+@media (max-width: 760px) {
+  .side-inner { grid-template-columns: 1fr; gap: 20px; }
+  #v-side { padding-left: 18px; padding-right: 18px; }
+}
+
 .foot { max-width: 1080px; margin: 0 auto; padding: 26px; text-align: center; font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: #c2c3be; }
 
 /* ---------- mobile stack (9:16 recording view) ---------- */

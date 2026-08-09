@@ -47,13 +47,41 @@ the mesh actually measures.
 
 ## Current calibration status
 
-- Seeded against 2 public-domain official portraits (male, female). Both
-  smiling — which is why lip/mouth metrics read low; the quality check now
-  flags non-neutral expression (blendshape smile score > 0.35).
-- **The 10-celebrity acceptance test has NOT been run yet.** Before filming
-  content: scan ~10 consensus-attractive + average faces per sex, confirm
-  attractive faces land 6+, average ~4.5–5.5, and tune means/ideals/weights
-  until they do.
+Distributions are **derived from measured data**, not hand-guessed. 67 public
+figures were fetched and scanned with this engine; per metric and sex:
+
+- `mean` = median of the strict-gated pool (|yaw| ≤ 16°, |pitch| ≤ 17°, smile ≤ 0.6)
+- `sd`   = 1.25 × robust SD (1.4826 × MAD) of that pool — the general
+  population is more varied than a celebrity sample
+- `ideal` = median of a hand-labeled top tier, clamped to within 1σ of the mean
+
+Because `ideal` comes from consensus-attractive faces while `sd` reflects the
+wider pool, top-tier faces cluster near the ideal and score high while the
+pool median scores ~5.0. No inflation is introduced — scoring still converts
+closeness-to-ideal into a population percentile.
+
+Regenerate with the scratchpad pipeline: `fetch-photos.mjs` → `scan-celebs.mjs`
+→ `calibrate.mjs` → `apply.mjs`.
+
+### Acceptance-test state (well-captured photos)
+
+Attractive, cleanly-shot faces reach 6+ (Bale 6.7, Chalamet 6.5, Gandy 6.2,
+Clooney 6.2, Portman 6.2, Pattinson 6.1, Dua Lipa 6.0, Jolie 5.9); average
+and mid-tier faces land 3.5–5 (IShowSpeed 3.6, Marlon Wayans 3.9, Ed Sheeran
+4.2, Pete Davidson 4.5). That is the intended spread.
+
+**Capture quality dominates residual error.** Off-axis or head-tilted photos
+score badly regardless of the face: Hailey Bieber 2.6 (pitch −27°), Billie
+Eilish 2.1 (pitch +17.9°), Rihanna 2.8 (yaw −30.7°), Jordan Barrett 5.2
+(yaw −25.6°). The quality panel warns on these, but the real fix is pose
+normalization (below) — that is the highest-value next change to the engine.
+
+### Next accuracy step: pose normalization
+
+MediaPipe returns 3D landmarks plus a head transformation matrix. Rotating
+the landmark cloud into a canonical frontal pose before measuring would
+neutralize yaw/pitch and make off-axis photos measurable. This requires
+re-deriving distributions afterwards (same pipeline).
 
 ## Known measurement caveats
 

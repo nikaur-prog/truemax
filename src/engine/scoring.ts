@@ -1,6 +1,8 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "./geometry.ts";
 import { METRICS, computeRawMetrics } from "./metrics.ts";
+import { SIDE_METRICS, computeSideMetrics } from "./sideMetrics.ts";
+import type { SidePoints } from "./sideMetrics.ts";
 import type {
   MetricDef,
   PillarId,
@@ -221,6 +223,20 @@ export function analyze(
   }
   report.potential = Math.max(report.overall, buildReport(scored, sex, lift).overall);
 
+  return report;
+}
+
+// Side profile: same scoring pipeline, driven by the user-verified points.
+export function analyzeSide(points: SidePoints, faceDir: number, sex: Sex): Report {
+  const raw = computeSideMetrics(points, faceDir);
+  const scored = SIDE_METRICS.map((def) => scoreMetric(def, raw[def.id], sex));
+  const report = buildReport(scored, sex);
+
+  const lift = new Map<string, number>();
+  for (const m of scored) {
+    if (m.def.fixability > 0 && m.zEff < Z_CLAMP) lift.set(m.def.id, m.def.fixability * 0.9);
+  }
+  report.potential = Math.max(report.overall, buildReport(scored, sex, lift).overall);
   return report;
 }
 
