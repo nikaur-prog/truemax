@@ -293,3 +293,23 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .oval-frame.live #outline-canvas { opacity: 0.5; }
 .oval-frame.live .oval-idle { display: block; }
 .oval-frame.live #reel-canvas, .oval-frame.live .reel-caption { display: none; }
+
+.sub-note { display: block; margin-top: 10px; font-size: 12.5px; color: var(--mut); opacity: 0.85; }
+
+/* Camera expansion: the frame grows into the space and the page furniture
+   recedes, so the preview becomes the subject rather than a thumbnail. */
+#capture-stage { transition: width 0.5s cubic-bezier(.22,1,.36,1); }
+#capture-stage.live-cam { width: min(680px, 100%); }
+#capture-stage.live-cam .oval-frame { aspect-ratio: 3 / 4; }
+#v-upload { transition: padding-top 0.5s cubic-bezier(.22,1,.36,1); }
+#v-upload.camera-live { padding-top: 3vh; }
+#v-upload.camera-live h1,
+#v-upload.camera-live .sub,
+#v-upload.camera-live .hints { max-height: 0; opacity: 0; margin: 0; overflow: hidden;
+  transition: opacity 0.3s ease, max-height 0.5s cubic-bezier(.22,1,.36,1), margin 0.4s ease; }
+#v-upload h1, #v-upload .sub, #v-upload .hints { max-height: 400px; opacity: 1;
+  transition: opacity 0.4s ease 0.1s, max-height 0.5s cubic-bezier(.22,1,.36,1); }
+@media (max-width: 760px) {
+  #capture-stage.live-cam { width: 100%; }
+  #capture-stage.live-cam .oval-frame { aspect-ratio: 3 / 4.4; border-radius: 18px; }
+}

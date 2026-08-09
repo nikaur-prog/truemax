@@ -207,6 +207,9 @@ async function openCamera(): Promise<void> {
     });
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
+    // Headline and hints collapse so the preview can take the space — the
+    // camera becomes the subject the moment it is granted.
+    el.upload.classList.add("camera-live");
     showGuide(sexChoice === "female" ? "female" : "male");
     el.camLight.classList.remove("hidden");
     el.camGates.classList.remove("hidden");
@@ -240,6 +243,7 @@ el.btnCamera.addEventListener("click", async () => {
   cam = null;
   el.ovalFrame.classList.remove("live", "ready");
   el.stage.classList.remove("live-cam");
+  el.upload.classList.remove("camera-live");
   el.camLight.classList.add("hidden");
   el.camGates.classList.add("hidden");
   el.btnCamera.textContent = "Use camera";
