@@ -21,27 +21,46 @@
 
     <!-- Capture / upload -->
     <section id="v-upload">
-      <h1>Your face, <em>measured</em> — not guessed.</h1>
+      <h1>Know where you <em>actually</em> stand.</h1>
       <p class="sub">
-        478 landmarks, 31 real ratios, compared against population data — all
-        in your browser. The same photo always returns the same result.
-        No vibes, no inflation.
+        We measure 478 points on your face, compare them against real
+        population data, and show you every number behind the score.
+        Nothing is uploaded — it all runs on your device.
       </p>
 
-      <div class="sex-picker" role="radiogroup" aria-label="Reference distribution">
-        <button class="sex-option selected" data-sex="male" role="radio" aria-checked="true">Male norms</button>
-        <button class="sex-option" data-sex="female" role="radio" aria-checked="false">Female norms</button>
+      <div class="sex-picker" role="radiogroup" aria-label="Reference population">
+        <button class="sex-option selected" data-sex="auto" role="radio" aria-checked="true">Auto</button>
+        <button class="sex-option" data-sex="male" role="radio" aria-checked="false">Male</button>
+        <button class="sex-option" data-sex="female" role="radio" aria-checked="false">Female</button>
       </div>
 
-      <label class="drop" id="drop" for="file-input">
-        <div class="oval"></div>
-        <b>Add a front-facing photo</b>
-        <span>Tap or drop · JPG / PNG</span>
-      </label>
+      <!-- Capture stage: live preview when the camera is on, oval prompt when not -->
+      <div class="stage" id="capture-stage">
+        <div class="oval-frame" id="oval-frame">
+          <video id="cam-video" playsinline muted></video>
+          <canvas id="cam-guide"></canvas>
+          <div class="oval-mask"></div>
+          <div class="oval-idle" id="oval-idle">
+            <div class="oval"></div>
+          </div>
+        </div>
+
+        <div class="cam-hint" id="cam-hint">
+          <b id="cam-hint-title">Take a photo, or upload one</b>
+          <span id="cam-hint-detail">The camera preview will guide your framing</span>
+        </div>
+
+        <div class="cam-gates hidden" id="cam-gates"></div>
+
+        <div class="cam-actions">
+          <button class="btn pri shutter" id="btn-camera">Use camera</button>
+          <button class="btn gho" id="btn-upload">Upload a photo</button>
+        </div>
+      </div>
       <input type="file" id="file-input" accept="image/*" hidden />
 
       <div class="hints">
-        <div><i></i>Straight at the camera</div>
+        <div><i></i>Look straight at the lens</div>
         <div><i></i>Neutral expression</div>
         <div><i></i>Photos never leave your device</div>
       </div>

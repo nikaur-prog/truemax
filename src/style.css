@@ -227,3 +227,38 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .metric.tappable .mrow b::after { content: "◱"; font-size: 9px; color: var(--mut); margin-left: 7px; opacity: 0.55; }
 .metric.tappable.active { background: var(--acc-soft); }
 .metric.tappable.active .mrow b { color: var(--acc); }
+
+/* ---------- capture stage: live camera + guidance ---------- */
+#capture-stage { width: min(420px, 100%); display: flex; flex-direction: column; align-items: center; gap: 18px; }
+
+.oval-frame {
+  position: relative; width: 100%; aspect-ratio: 4 / 5; border-radius: 24px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-soft, 0 18px 60px rgba(20,21,24,.10));
+  display: flex; align-items: center; justify-content: center;
+}
+#cam-video, #cam-guide { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: none; }
+.oval-frame.live #cam-video, .oval-frame.live #cam-guide { display: block; }
+.oval-frame.live .oval-idle { display: none; }
+
+/* Vignette that reads as an alignment oval without hiding the preview */
+.oval-mask { position: absolute; inset: 0; pointer-events: none; display: none;
+  background: radial-gradient(ellipse 38% 46% at 50% 46%, transparent 60%, rgba(20,21,24,0.42) 100%);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.08); }
+.oval-frame.live .oval-mask { display: block; }
+.oval-frame.ready .oval-mask { box-shadow: inset 0 0 0 2px rgba(143,243,224,0.75); }
+
+.oval-idle { display: flex; align-items: center; justify-content: center; }
+
+.cam-hint { text-align: center; min-height: 44px; }
+.cam-hint b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.cam-hint span { font-size: 12.5px; color: var(--mut); }
+.cam-hint.ready b { color: var(--acc); }
+
+.cam-gates { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.gate { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 4px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--mut); background: var(--card); }
+.gate.ok { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 30%, var(--line)); background: var(--acc-soft); }
+
+.cam-actions { display: flex; gap: 10px; width: 100%; }
+.cam-actions .btn { flex: 1; }
+.btn.shutter:disabled { opacity: 0.42; cursor: not-allowed; }

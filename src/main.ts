@@ -1,4 +1,4 @@
-import { initLandmarker, detect, isReady } from "./engine/landmarker.ts";
+import { initLandmarker, detect, isReady, setRunningMode } from "./engine/landmarker.ts";
 import { assessQuality } from "./engine/quality.ts";
 import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
@@ -6,11 +6,16 @@ import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.ts";
 import { extractShape } from "./engine/shape.ts";
 import { compareAndStore } from "./engine/history.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
+import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
 import { renderResults, renderSideResults } from "./ui/results.ts";
 import { toggleMute } from "./ui/audio.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
+import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
+import type { CameraHandle } from "./ui/camera.ts";
+import type { FrameCheck } from "./engine/captureGuide.ts";
+import { detectSex } from "./engine/shape.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -19,7 +24,15 @@ const el = {
   upload: document.getElementById("v-upload")!,
   main: document.getElementById("v-main")!,
   fileInput: document.getElementById("file-input") as HTMLInputElement,
-  drop: document.getElementById("drop")!,
+  ovalFrame: document.getElementById("oval-frame")!,
+  camVideo: document.getElementById("cam-video") as HTMLVideoElement,
+  camGuide: document.getElementById("cam-guide") as HTMLCanvasElement,
+  camHint: document.getElementById("cam-hint")!,
+  camHintTitle: document.getElementById("cam-hint-title")!,
+  camHintDetail: document.getElementById("cam-hint-detail")!,
+  camGates: document.getElementById("cam-gates")!,
+  btnCamera: document.getElementById("btn-camera") as HTMLButtonElement,
+  btnUpload: document.getElementById("btn-upload") as HTMLButtonElement,
   frame: document.getElementById("frame")!,
   zoomable: document.getElementById("zoomable")!,
   photoCanvas: document.getElementById("photo-canvas") as HTMLCanvasElement,
@@ -32,6 +45,7 @@ const el = {
   mute: document.getElementById("mute")!,
 };
 
+let sexChoice: Sex | "auto" = "auto";
 let selectedSex: Sex = "male";
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
@@ -81,7 +95,7 @@ let selectedSex: Sex = "male";
 
 for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
   btn.addEventListener("click", () => {
-    selectedSex = btn.dataset.sex as Sex;
+    sexChoice = btn.dataset.sex as Sex | "auto";
     for (const b of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
       b.classList.toggle("selected", b === btn);
       b.setAttribute("aria-checked", String(b === btn));
@@ -108,16 +122,84 @@ el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
   if (file) handleFile(file);
 });
-el.drop.addEventListener("dragover", (e) => {
+el.btnUpload.addEventListener("click", () => el.fileInput.click());
+el.ovalFrame.addEventListener("dragover", (e) => {
   e.preventDefault();
-  el.drop.classList.add("dragover");
+  el.ovalFrame.classList.add("dragover");
 });
-el.drop.addEventListener("dragleave", () => el.drop.classList.remove("dragover"));
-el.drop.addEventListener("drop", (e) => {
+el.ovalFrame.addEventListener("dragleave", () => el.ovalFrame.classList.remove("dragover"));
+el.ovalFrame.addEventListener("drop", (e) => {
   e.preventDefault();
-  el.drop.classList.remove("dragover");
+  el.ovalFrame.classList.remove("dragover");
   const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file && file.type.startsWith("image/")) handleFile(file);
+  if (file) handleFile(file);
+});
+
+// ---- camera ----
+let cam: CameraHandle | null = null;
+let lastCheck: FrameCheck | null = null;
+
+async function openCamera(): Promise<void> {
+  if (!isSupported()) {
+    el.camHintDetail.textContent = "This browser can't open a camera — upload a photo instead.";
+    return;
+  }
+  try {
+    cam = await startCamera({
+      video: el.camVideo,
+      guideCanvas: el.camGuide,
+      onCheck: (c) => {
+        lastCheck = c;
+        el.camHintTitle.textContent = c.hint;
+        el.camHintDetail.textContent = c.detail;
+        el.camHint.classList.toggle("ready", c.ready);
+        el.ovalFrame.classList.toggle("ready", c.ready);
+        el.btnCamera.disabled = !c.ready;
+        renderGates(c);
+      },
+    });
+    el.ovalFrame.classList.add("live");
+    el.camGates.classList.remove("hidden");
+    el.btnCamera.textContent = "Capture";
+    el.btnCamera.disabled = true;
+  } catch {
+    el.camHintTitle.textContent = "Camera unavailable";
+    el.camHintDetail.textContent = "Permission was denied — you can still upload a photo.";
+  }
+}
+
+const GATE_LABELS: Record<string, string> = {
+  face: "face", distance: "distance", centered: "centered", level: "level",
+  straight: "straight", light: "light", sharp: "sharp", neutral: "neutral",
+};
+
+function renderGates(c: FrameCheck): void {
+  el.camGates.innerHTML = Object.entries(c.gates)
+    .map(([k, ok]) => `<span class="gate ${ok ? "ok" : ""}">${GATE_LABELS[k]}</span>`)
+    .join("");
+}
+
+el.btnCamera.addEventListener("click", async () => {
+  if (!cam) {
+    await openCamera();
+    return;
+  }
+  if (!lastCheck?.ready) return;
+  const shot = cam.capture();
+  cam.stop();
+  cam = null;
+  el.ovalFrame.classList.remove("live", "ready");
+  el.camGates.classList.add("hidden");
+  el.btnCamera.textContent = "Use camera";
+  el.btnCamera.disabled = false;
+  await setRunningMode("IMAGE");
+  if (shot) await handleCanvas(shot);
+});
+
+// Returning visitors who already granted access get a live preview with no
+// second prompt — the guidance starts working before they ask for it.
+permissionGranted().then((granted) => {
+  if (granted) openCamera();
 });
 
 function resetToUpload(): void {
@@ -144,13 +226,38 @@ async function handleFile(file: File): Promise<void> {
     el.engineStatus.textContent = "ENGINE STILL LOADING — ONE MOMENT";
     return;
   }
-  const image = await loadImage(file);
-  const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(image.naturalWidth, image.naturalHeight));
-  const width = Math.round(image.naturalWidth * scale);
-  const height = Math.round(image.naturalHeight * scale);
+  let image;
+  try {
+    image = await loadImage(file);
+  } catch (err) {
+    el.engineStatus.textContent = (err as Error).message.toUpperCase();
+    el.engineStatus.classList.add("error");
+    return;
+  }
+  // Browsers apply EXIF orientation during decode — verified against rotated
+  // iPhone-style files (orientation 3 and 6 both land upright). We read the
+  // flag only for diagnostics; applying it again would rotate twice, which is
+  // exactly the bug this check caught.
+  const exifOrientation = await readOrientation(file);
+  const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(image.width, image.height));
+  const dw = Math.round(image.width * scale);
+  const dh = Math.round(image.height * scale);
+  const width = dw;
+  const height = dh;
+  const src = document.createElement("canvas");
+  src.width = width;
+  src.height = height;
+  src.getContext("2d")!.drawImage(image, 0, 0, dw, dh);
+  await handleCanvas(src, exifOrientation);
+}
+
+async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promise<void> {
+  void exifOrientation;
+  const width = src.width;
+  const height = src.height;
   el.photoCanvas.width = width;
   el.photoCanvas.height = height;
-  el.photoCanvas.getContext("2d")!.drawImage(image, 0, 0, width, height);
+  el.photoCanvas.getContext("2d")!.drawImage(src, 0, 0);
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
@@ -192,6 +299,16 @@ async function handleFile(file: File): Promise<void> {
   });
   await reveal.done;
 
+  // Auto mode picks the reference population by shape, then says so — an
+  // unexplained switch would look like a guess.
+  let autoNote = "";
+  if (sexChoice === "auto") {
+    const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
+    selectedSex = guess?.sex ?? "male";
+    autoNote = guess ? `Scored against ${guess.sex} norms (auto-detected)` : "";
+  } else {
+    selectedSex = sexChoice;
+  }
   const report = analyze(landmarks, width, height, selectedSex);
   const delta = compareAndStore(report);
 
@@ -200,7 +317,7 @@ async function handleFile(file: File): Promise<void> {
   el.status.textContent = "";
   el.barFill.style.width = "0";
   drawCalm(el.overlayCanvas, landmarks, width, height);
-  renderQualityChips(quality);
+  renderQualityChips(quality, autoNote);
 
   renderResults({
     report,
@@ -232,8 +349,9 @@ function startSide(frontReport: Report): void {
   });
 }
 
-function renderQualityChips(q: QualityCheck): void {
+function renderQualityChips(q: QualityCheck, autoNote = ""): void {
   const chips = q.issues.map((i) => `<span class="qchip warn">${i}</span>`);
+  if (autoNote) chips.push(`<span class="qchip">${autoNote}</span>`);
   // Surfacing the correction is part of showing the math: the user can see
   // that an off-axis photo was accounted for rather than silently mismeasured.
   const off = Math.max(Math.abs(q.yawDeg), Math.abs(q.pitchDeg));
@@ -254,20 +372,34 @@ function exposeDev(report: Report, landmarks: unknown, quality: unknown): void {
   };
 }
 
-function loadImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
+// Phone photos are the hard case: they carry EXIF rotation (a portrait shot
+// decodes sideways unless honoured) and iPhones default to HEIC, which only
+// Safari can decode. createImageBitmap applies EXIF for us where supported;
+// the <img> path is the fallback, and browsers apply EXIF there too.
+async function loadImage(file: File): Promise<CanvasImageSource & { width: number; height: number }> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);
+    } catch {
+      /* fall through to the <img> decoder */
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
     const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Could not load image"));
-    };
     img.src = url;
-  });
+    await img.decode();
+    return Object.assign(img, { width: img.naturalWidth, height: img.naturalHeight });
+  } catch {
+    const heic = /.hei[cf]$/i.test(file.name) || /hei[cf]/i.test(file.type);
+    throw new Error(
+      heic
+        ? "HEIC photos can't be read by this browser. On iPhone: Settings › Camera › Formats › Most Compatible, or share the photo as JPEG."
+        : "That image couldn't be read. Try a JPG or PNG.",
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function nextFrame(): Promise<void> {

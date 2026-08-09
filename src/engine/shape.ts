@@ -125,3 +125,28 @@ export function shapeZScore(shape: number[], sex: Sex): number | null {
   }
   return (proj - model.axisMean) / (model.axisSD || 1);
 }
+
+// Which sex's reference population does this face's shape sit closer to?
+//
+// Uses the same mean shapes the scoring model is built on: align the face to
+// each, and compare residuals. This is a shape comparison against our own
+// measured reference sets — not a classifier trained on demographics — and it
+// is only ever a default the user can override.
+export function detectSex(shape: number[]): { sex: Sex; confidence: number } | null {
+  const m = SHAPE_MODEL.male;
+  const f = SHAPE_MODEL.female;
+  if (!m || !f || shape.length !== m.meanShape.length) return null;
+
+  const residual = (mean: number[]): number => {
+    const a = procrustes(shape, mean);
+    let s = 0;
+    for (let i = 0; i < a.length; i++) s += (a[i] - mean[i]) ** 2;
+    return Math.sqrt(s);
+  };
+  const dm = residual(m.meanShape);
+  const df = residual(f.meanShape);
+  const total = dm + df || 1e-9;
+  // Margin between the two fits, 0 = a coin flip, 1 = decisively one side
+  const confidence = Math.abs(df - dm) / total;
+  return { sex: dm <= df ? "male" : "female", confidence: Math.round(confidence * 1000) / 1000 };
+}
