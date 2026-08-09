@@ -211,7 +211,7 @@ function showRegion(id: RegionId): void {
         <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
         )
         .join("")
-    : `<p class="footnote" style="margin-top:2px">Reference set is still being measured — celebrity scans land here as they're analyzed. Comparisons are per-metric, never overall resemblance.</p>`;
+    : `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on metrics where you measure at or above average, and this region has none. That restraint is the point — a flattering comparison you did not earn would make every other number worth less.</p>`;
 
   body().innerHTML = `
     <div class="reveal">
