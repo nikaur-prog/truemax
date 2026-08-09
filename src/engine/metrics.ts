@@ -253,8 +253,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Features", weight: 1.3,
     direction: "band", fixability: 0.1,
     dist: {
-      male: { mean: -21.72, sd: 15.938, ideal: -6.5 },
-      female: { mean: 5.54, sd: 7.932, ideal: -2.392 },
+      male: { mean: -19.9, sd: 16.976, ideal: -6.5 },
+      female: { mean: 6.3, sd: 24.967, ideal: -18.667 },
     },
   }),
   M({
@@ -262,8 +262,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Dimorphism", weight: 0.9,
     direction: "band", fixability: 0.2,
     dist: {
-      male: { mean: 0.36, sd: 0.089, ideal: 0.297 },
-      female: { mean: 0.255, sd: 0.0697, ideal: 0.3247 },
+      male: { mean: 0.354, sd: 0.0786, ideal: 0.297 },
+      female: { mean: 0.278, sd: 0.1127, ideal: 0.341 },
     },
   }),
   M({
@@ -271,8 +271,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Features", weight: 1.1,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.4352, sd: 0.01601, ideal: 0.4482 },
-      female: { mean: 0.4498, sd: 0.00415, ideal: 0.45395 },
+      male: { mean: 0.4352, sd: 0.01334, ideal: 0.4482 },
+      female: { mean: 0.446, sd: 0.01038, ideal: 0.45638 },
     },
   }),
   M({
@@ -280,8 +280,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Harmony", weight: 1.0,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 1.345, sd: 0.2016, ideal: 1.442 },
-      female: { mean: 1.401, sd: 0.2179, ideal: 1.288 },
+      male: { mean: 1.327, sd: 0.1868, ideal: 1.442 },
+      female: { mean: 1.276, sd: 0.1557, ideal: 1.288 },
     },
   }),
   M({
@@ -289,8 +289,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Dimorphism", weight: 1.0,
     direction: "band", fixability: 0.25,
     dist: {
-      male: { mean: 0.7984, sd: 0.37673, ideal: 0.524 },
-      female: { mean: 0.2541, sd: 0.11772, ideal: 0.37182 },
+      male: { mean: 0.7646, sd: 0.3407, ideal: 0.524 },
+      female: { mean: 0.3431, sd: 0.20134, ideal: 0.54444 },
     },
   }),
   M({
@@ -298,8 +298,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Features", weight: 0.7,
     direction: "band", fixability: 0.3,
     dist: {
-      male: { mean: -46.62, sd: 12.098, ideal: -34.522 },
-      female: { mean: 10.14, sd: 24.73, ideal: -14.59 },
+      male: { mean: -44.92, sd: 13.521, ideal: -31.399 },
+      female: { mean: 10.14, sd: 45.338, ideal: -35.198 },
     },
   }),
 
@@ -310,7 +310,7 @@ export const METRICS: MetricDef[] = [
     direction: "band", fixability: 0.3,
     dist: {
       male: { mean: 6.943, sd: 5.5271, ideal: 6.565 },
-      female: { mean: 3.529, sd: 2.5427, ideal: 6.0717 },
+      female: { mean: 3.48, sd: 3.0972, ideal: 6.5772 },
     },
   }),
   M({
@@ -318,8 +318,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "midface", pillar: "Harmony", weight: 1.2,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 1.532, sd: 0.977, ideal: 1.48 },
-      female: { mean: 0.824, sd: 0.4033, ideal: 1.2273 },
+      male: { mean: 1.452, sd: 0.8999, ideal: 1.48 },
+      female: { mean: 0.824, sd: 0.5308, ideal: 1.3548 },
     },
   }),
   M({
@@ -327,8 +327,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "midface", pillar: "Angularity", weight: 1.0,
     direction: "band", fixability: 0.5,
     dist: {
-      male: { mean: 1.458, sd: 0.9607, ideal: 0.736 },
-      female: { mean: -0.115, sd: 0.6375, ideal: 0.5225 },
+      male: { mean: 1.458, sd: 1.063, ideal: 0.736 },
+      female: { mean: -0.115, sd: 0.7457, ideal: 0.6307 },
     },
   }),
 
@@ -338,8 +338,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "jaw", pillar: "Angularity", weight: 1.2,
     direction: "band", fixability: 0.5,
     dist: {
-      male: { mean: 0.8938, sd: 0.01838, ideal: 0.8943 },
-      female: { mean: 0.8732, sd: 0.00741, ideal: 0.88061 },
+      male: { mean: 0.8936, sd: 0.01809, ideal: 0.8943 },
+      female: { mean: 0.8891, sd: 0.02402, ideal: 0.88565 },
     },
   }),
   M({
@@ -356,8 +356,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "jaw", pillar: "Angularity", weight: 1.0,
     direction: "band", fixability: 0.4,
     dist: {
-      male: { mean: 42.4, sd: 12.839, ideal: 33.11 },
-      female: { mean: 38.34, sd: 5.604, ideal: 43.03 },
+      male: { mean: 42.4, sd: 16.635, ideal: 33.11 },
+      female: { mean: 38.34, sd: 8.673, ideal: 43.03 },
     },
   }),
 
@@ -368,7 +368,7 @@ export const METRICS: MetricDef[] = [
     direction: "band", fixability: 0.1,
     dist: {
       male: { mean: 0.671, sd: 0.0119, ideal: 0.67 },
-      female: { mean: 0.689, sd: 0.0341, ideal: 0.7 },
+      female: { mean: 0.689, sd: 0.0311, ideal: 0.7 },
     },
   }),
   M({
@@ -376,7 +376,7 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "chin", pillar: "Features", weight: 0.8,
     direction: "band", fixability: 0.1,
     dist: {
-      male: { mean: 4.331, sd: 1.3477, ideal: 5.035 },
+      male: { mean: 4.437, sd: 1.4011, ideal: 5.035 },
       female: { mean: 2.857, sd: 1.9452, ideal: 4.8022 },
     },
   }),
@@ -385,8 +385,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "chin", pillar: "Angularity", weight: 0.8,
     direction: "band", fixability: 0.3,
     dist: {
-      male: { mean: 0.501, sd: 0.0104, ideal: 0.5 },
-      female: { mean: 0.492, sd: 0.0089, ideal: 0.496 },
+      male: { mean: 0.501, sd: 0.0119, ideal: 0.5 },
+      female: { mean: 0.494, sd: 0.0119, ideal: 0.496 },
     },
   }),
   M({
@@ -394,7 +394,7 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "chin", pillar: "Harmony", weight: 1.0,
     direction: "band", fixability: 0.2,
     dist: {
-      male: { mean: 69.58, sd: 3.662, ideal: 70.94 },
+      male: { mean: 69.58, sd: 3.87, ideal: 70.94 },
       female: { mean: 47.88, sd: 28.851, ideal: 72.13 },
     },
   }),
@@ -405,8 +405,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "nose", pillar: "Features", weight: 1.0,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.825, sd: 0.0979, ideal: 0.854 },
-      female: { mean: 0.756, sd: 0.0741, ideal: 0.822 },
+      male: { mean: 0.851, sd: 0.0949, ideal: 0.854 },
+      female: { mean: 0.821, sd: 0.0415, ideal: 0.822 },
     },
   }),
   M({
@@ -415,7 +415,7 @@ export const METRICS: MetricDef[] = [
     direction: "band", fixability: 0,
     dist: {
       male: { mean: 1.298, sd: 0.0875, ideal: 1.32 },
-      female: { mean: 1.138, sd: 0.0979, ideal: 1.2359 },
+      female: { mean: 1.228, sd: 0.1334, ideal: 1.3215 },
     },
   }),
   M({
@@ -423,8 +423,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "nose", pillar: "Features", weight: 0.9,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 1.372, sd: 0.2684, ideal: 1.6404 },
-      female: { mean: 0.955, sd: 0.3588, ideal: 1.3138 },
+      male: { mean: 1.499, sd: 0.3247, ideal: 1.8237 },
+      female: { mean: 0.955, sd: 0.4092, ideal: 1.3642 },
     },
   }),
 
@@ -434,8 +434,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "lips", pillar: "Features", weight: 0.9,
     direction: "band", fixability: 0.1,
     dist: {
-      male: { mean: 0.244, sd: 0.2283, ideal: 0.329 },
-      female: { mean: 1.068, sd: 0.891, ideal: 0.3795 },
+      male: { mean: 0.25, sd: 0.2224, ideal: 0.329 },
+      female: { mean: 1.068, sd: 0.9681, ideal: 0.3795 },
     },
   }),
   M({
@@ -443,8 +443,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "lips", pillar: "Harmony", weight: 0.9,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.901, sd: 0.0474, ideal: 0.888 },
-      female: { mean: 0.883, sd: 0.0682, ideal: 0.899 },
+      male: { mean: 0.909, sd: 0.0549, ideal: 0.888 },
+      female: { mean: 0.902, sd: 0.0489, ideal: 0.899 },
     },
   }),
   M({
@@ -452,8 +452,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "lips", pillar: "Features", weight: 0.9,
     direction: "band", fixability: 0.25,
     dist: {
-      male: { mean: 20.19, sd: 3.025, ideal: 23.215 },
-      female: { mean: 31.39, sd: 5.308, ideal: 28.375 },
+      male: { mean: 20.42, sd: 3.232, ideal: 23.652 },
+      female: { mean: 29.06, sd: 5.026, ideal: 28.375 },
     },
   }),
   M({
@@ -461,8 +461,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "lips", pillar: "Features", weight: 0.7,
     direction: "band", fixability: 0.4,
     dist: {
-      male: { mean: -43.35, sd: 26.82, ideal: -16.53 },
-      female: { mean: 11.28, sd: 24.241, ideal: -12.961 },
+      male: { mean: -43.35, sd: 25.352, ideal: -17.998 },
+      female: { mean: 11.28, sd: 49.193, ideal: -37.913 },
     },
   }),
 
@@ -472,7 +472,7 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "proportions", pillar: "Harmony", weight: 0.7,
     direction: "band", fixability: 0.15,
     dist: {
-      male: { mean: 9.92, sd: 4.552, ideal: 13.25 },
+      male: { mean: 11.42, sd: 7.472, ideal: 13.25 },
       female: { mean: 29.34, sd: 4.715, ideal: 24.625 },
     },
   }),
@@ -481,8 +481,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "proportions", pillar: "Harmony", weight: 1.0,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.454, sd: 0.0741, ideal: 0.458 },
-      female: { mean: 1.545, sd: 1.2009, ideal: 0.4125 },
+      male: { mean: 0.452, sd: 0.0949, ideal: 0.458 },
+      female: { mean: 1.545, sd: 1.5197, ideal: 0.4125 },
     },
   }),
   M({
@@ -490,7 +490,7 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "proportions", pillar: "Harmony", weight: 0.9,
     direction: "band", fixability: 0,
     dist: {
-      male: { mean: 0.1923, sd: 0.01927, ideal: 0.1801 },
+      male: { mean: 0.1923, sd: 0.01987, ideal: 0.1801 },
       female: { mean: 0.1884, sd: 0.01512, ideal: 0.20352 },
     },
   }),
@@ -499,8 +499,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "proportions", pillar: "Harmony", weight: 1.0,
     direction: "band", fixability: 0.2,
     dist: {
-      male: { mean: 1.135, sd: 0.3543, ideal: 0.869 },
-      female: { mean: 0.933, sd: 0.3543, ideal: 1.109 },
+      male: { mean: 1.118, sd: 0.3277, ideal: 0.869 },
+      female: { mean: 1.073, sd: 0.4225, ideal: 1.109 },
     },
   }),
 
@@ -510,8 +510,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "symmetry", pillar: "Harmony", weight: 1.2,
     direction: "lower", fixability: 0.35,
     dist: {
-      male: { mean: 116.13, sd: 57.05 },
-      female: { mean: 105.97, sd: 27.295 },
+      male: { mean: 122.23, sd: 61.839 },
+      female: { mean: 111.54, sd: 14.515 },
     },
   }),
   M({
@@ -519,8 +519,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "symmetry", pillar: "Harmony", weight: 0.9,
     direction: "lower", fixability: 0.15,
     dist: {
-      male: { mean: 6.17, sd: 4.818 },
-      female: { mean: 6.43, sd: 3.988 },
+      male: { mean: 7.01, sd: 5.738 },
+      female: { mean: 10.01, sd: 5.308 },
     },
   }),
   M({
@@ -528,8 +528,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "symmetry", pillar: "Harmony", weight: 0.8,
     direction: "lower", fixability: 0.3,
     dist: {
-      male: { mean: 0.97, sd: 1.067 },
-      female: { mean: 0.98, sd: 0.326 },
+      male: { mean: 0.97, sd: 1.023 },
+      female: { mean: 0.98, sd: 0.593 },
     },
   }),
   M({
@@ -537,7 +537,7 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "symmetry", pillar: "Harmony", weight: 0.9,
     direction: "lower", fixability: 0.2,
     dist: {
-      male: { mean: 67.03, sd: 34.574 },
+      male: { mean: 67.03, sd: 32.054 },
       female: { mean: 81.08, sd: 34.945 },
     },
   }),

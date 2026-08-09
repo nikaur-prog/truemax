@@ -2,7 +2,8 @@ import { initLandmarker, detect, isReady } from "./engine/landmarker.ts";
 import { assessQuality } from "./engine/quality.ts";
 import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
-import { POSE_CALIBRATION } from "./engine/geometry.ts";
+import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.ts";
+import { extractShape } from "./engine/shape.ts";
 import { compareAndStore } from "./engine/history.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
 import type { Report, Sex } from "./engine/types.ts";
@@ -71,6 +72,7 @@ let selectedSex: Sex = "male";
     faceWidthFrac: quality.faceWidthFrac,
     entry: JSON.parse(toCelebEntry(report, "x")),
     zScores: report.zScores,
+    shape: extractShape(buildGeometry(res.faceLandmarks[0], w, h)),
   };
 };
 (window as unknown as Record<string, unknown>).__truemaxMeasureFull = (

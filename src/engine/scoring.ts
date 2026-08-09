@@ -3,6 +3,7 @@ import { buildGeometry } from "./geometry.ts";
 import { METRICS, computeRawMetrics } from "./metrics.ts";
 import { AGG_NORM } from "./aggNorm.ts";
 import { reliabilityOf } from "./reliability.ts";
+import { extractShape, shapeZScore } from "./shape.ts";
 import { SIDE_METRICS, computeSideMetrics } from "./sideMetrics.ts";
 import type { SidePoints } from "./sideMetrics.ts";
 import type {
@@ -173,7 +174,12 @@ function effWeight(m: ScoredMetric): number {
   return m.def.weight * reliabilityOf(m.def.id);
 }
 
-function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>): Report {
+// How much of the overall score comes from the shape descriptor vs the
+// individual ratios. Ratios are legible but noisy; the descriptor averages
+// ~130 landmarks and reproduces far better, so it carries the majority.
+const W_SHAPE = 0.6;
+
+function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>, shapeZ?: number | null): Report {
   const rawZ: Record<string, number> = {};
   const eff = (m: ScoredMetric) =>
     clamp(m.zEff + (zShift?.get(m.def.id) ?? 0), -Z_CLAMP, Z_CLAMP);
@@ -187,7 +193,9 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   }
 
   const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
-  const overallZ = normalizeAgg(aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]), RHO_PILLARS), sex, "overall", rawZ);
+  const ratioZ = aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]), RHO_PILLARS);
+  const blended = shapeZ == null ? ratioZ : W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;
+  const overallZ = normalizeAgg(blended, sex, "overall", rawZ);
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {
     const ms = scored.filter((m) => m.def.region === r);
@@ -220,12 +228,13 @@ export function analyze(
 ): Report {
   const g = buildGeometry(landmarks, width, height);
   const raw = computeRawMetrics(g);
+  const shapeZ = shapeZScore(extractShape(g), sex);
 
   const scored = METRICS.filter((m) => m.view === "front").map((def) =>
     scoreMetric(def, raw[def.id], sex),
   );
 
-  const report = buildReport(scored, sex);
+  const report = buildReport(scored, sex, undefined, shapeZ);
 
   // Potential: re-run aggregation with each fixable metric's effective z
   // lifted in proportion to its fixability — capped, so potential stays
@@ -236,7 +245,7 @@ export function analyze(
       lift.set(m.def.id, m.def.fixability * 0.9);
     }
   }
-  report.potential = Math.max(report.overall, buildReport(scored, sex, lift).overall);
+  report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
 
   return report;
 }
