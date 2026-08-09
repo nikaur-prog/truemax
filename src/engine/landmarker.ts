@@ -15,7 +15,7 @@ export async function initLandmarker(): Promise<void> {
     runningMode: "IMAGE",
     numFaces: 1,
     outputFacialTransformationMatrixes: true,
-    outputFaceBlendshapes: false,
+    outputFaceBlendshapes: true,
   });
 }
 

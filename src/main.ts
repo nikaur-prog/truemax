@@ -1,6 +1,8 @@
 import { initLandmarker, detect, isReady } from "./engine/landmarker.ts";
 import { assessQuality } from "./engine/quality.ts";
 import type { QualityCheck } from "./engine/quality.ts";
+import { analyze, REGION_NAMES } from "./engine/scoring.ts";
+import type { Report } from "./engine/types.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 
 type Sex = "male" | "female";
@@ -68,6 +70,7 @@ el.btnReset.addEventListener("click", () => {
   el.screenCapture.classList.remove("hidden");
   el.qualityReport.classList.add("hidden");
   el.btnReset.classList.add("hidden");
+  document.getElementById("engine-readout")?.remove();
   el.fileInput.value = "";
 });
 
@@ -119,14 +122,41 @@ async function handleFile(file: File): Promise<void> {
     : `<span class="fail">Landmarks placed, but this photo won't produce accurate measurements.</span>`;
 
   renderQualityReport(quality);
+
+  const report = analyze(landmarks, width, height, selectedSex);
+  renderEngineReadout(report);
   el.btnReset.classList.remove("hidden");
 
-  // Downstream scoring will consume these; expose for dev inspection.
+  // Results UI consumes this; also exposed for dev inspection.
   (window as unknown as Record<string, unknown>).__truemax = {
     sex: selectedSex,
     landmarks,
     quality,
+    report,
   };
+}
+
+// Temporary dev readout — replaced by the real results UI in the next step.
+function renderEngineReadout(r: Report): void {
+  const existing = document.getElementById("engine-readout");
+  existing?.remove();
+  const details = document.createElement("details");
+  details.id = "engine-readout";
+  details.className = "quality-report";
+  details.innerHTML =
+    `<summary style="cursor:pointer;font-weight:600;font-size:14px">` +
+    `Engine: overall ${r.overall.toFixed(1)} · top ${(100 - r.overallPercentile).toFixed(1)}% · potential ${r.potential.toFixed(1)}</summary>` +
+    `<div class="quality-row"><span class="label">Pillars</span><span class="value">` +
+    Object.entries(r.pillars).map(([p, s]) => `${p} ${s.toFixed(1)}`).join(" · ") +
+    `</span></div>` +
+    r.regions
+      .map(
+        (reg) =>
+          `<div class="quality-row"><span class="label">${REGION_NAMES[reg.region]}</span>` +
+          `<span class="value">${reg.score.toFixed(1)}</span></div>`,
+      )
+      .join("");
+  el.qualityReport.after(details);
 }
 
 function renderQualityReport(q: QualityCheck): void {
@@ -141,6 +171,7 @@ function renderQualityReport(q: QualityCheck): void {
     row("Head pitch", `${q.pitchDeg.toFixed(1)}°`, pitchOk),
     row("Head roll", `${q.rollDeg.toFixed(1)}°`, true),
     row("Face size in frame", `${Math.round(q.faceWidthFrac * 100)}% of width`, q.largeEnough),
+    row("Expression", q.neutralExpression ? "neutral" : `smiling (${Math.round(q.smileScore * 100)}%)`, q.neutralExpression),
     q.issues.length
       ? `<div class="quality-verdict warn">${q.issues.join(" · ")} — you can proceed, but measurements may be off.</div>`
       : `<div class="quality-verdict">All checks passed — measurements will be reliable.</div>`,

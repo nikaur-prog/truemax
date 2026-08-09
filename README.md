@@ -37,8 +37,9 @@ npm run build   # type-checks then bundles to dist/
 
 - [x] Scaffold + MediaPipe landmark detection on uploaded photos
       (progressive mesh/dot reveal, scan-line, frontal/quality check)
-- [ ] Metric engine (~11 front-face metrics from landmark geometry)
-- [ ] Per-sex reference distributions → percentile → 0–10 scores
+- [x] Metric engine — 31 front-face metrics across 8 regions
+- [x] Per-sex reference distributions → percentile → 0–10 scores
+      (percentile-anchored, no inflation — see CALIBRATION.md)
 - [ ] Results UI (overall + pillars + bell curve, region drill-down)
 - [ ] Deterministic explanation templates (typewriter)
 - [ ] Improvements page (non-surgical, current → potential)

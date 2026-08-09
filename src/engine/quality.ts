@@ -6,8 +6,10 @@ export interface QualityCheck {
   pitchDeg: number;
   rollDeg: number;
   faceWidthFrac: number; // bizygomatic width as a fraction of image width
+  smileScore: number; // 0..1 from blendshapes — smiling skews mouth/jaw metrics
   frontal: boolean;
   largeEnough: boolean;
+  neutralExpression: boolean;
   pass: boolean;
   issues: string[];
 }
@@ -17,6 +19,7 @@ export interface QualityCheck {
 const YAW_TOLERANCE_DEG = 12;
 const PITCH_TOLERANCE_DEG = 12;
 const MIN_FACE_WIDTH_FRAC = 0.2;
+const SMILE_TOLERANCE = 0.35;
 
 // Landmark indices (MediaPipe 478-point mesh)
 const LEFT_FACE_EDGE = 234;
@@ -30,8 +33,10 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
       pitchDeg: 0,
       rollDeg: 0,
       faceWidthFrac: 0,
+      smileScore: 0,
       frontal: false,
       largeEnough: false,
+      neutralExpression: false,
       pass: false,
       issues: ["No face detected"],
     };
@@ -44,13 +49,23 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
   const right = landmarks[RIGHT_FACE_EDGE];
   const faceWidthFrac = Math.abs(right.x - left.x);
 
+  const blend = result.faceBlendshapes?.[0]?.categories ?? [];
+  const smileScore = Math.max(
+    0,
+    ...blend
+      .filter((c) => c.categoryName === "mouthSmileLeft" || c.categoryName === "mouthSmileRight")
+      .map((c) => c.score),
+  );
+
   const frontal = Math.abs(yawDeg) <= YAW_TOLERANCE_DEG && Math.abs(pitchDeg) <= PITCH_TOLERANCE_DEG;
   const largeEnough = faceWidthFrac >= MIN_FACE_WIDTH_FRAC;
+  const neutralExpression = smileScore <= SMILE_TOLERANCE;
 
   const issues: string[] = [];
   if (Math.abs(yawDeg) > YAW_TOLERANCE_DEG) issues.push("Head is turned — face the camera directly");
   if (Math.abs(pitchDeg) > PITCH_TOLERANCE_DEG) issues.push("Head is tilted up/down — keep it level");
   if (!largeEnough) issues.push("Face is small in frame — move closer or crop tighter");
+  if (!neutralExpression) issues.push("Smiling detected — expression shifts mouth and jaw measurements");
 
   return {
     faceFound: true,
@@ -58,9 +73,11 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
     pitchDeg,
     rollDeg,
     faceWidthFrac,
+    smileScore,
     frontal,
     largeEnough,
-    pass: frontal && largeEnough,
+    neutralExpression,
+    pass: frontal && largeEnough && neutralExpression,
     issues,
   };
 }
