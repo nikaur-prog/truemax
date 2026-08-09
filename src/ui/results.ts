@@ -6,6 +6,8 @@ import { regionMatches } from "../engine/celebs.ts";
 import { curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm } from "./overlay.ts";
+import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
+import { renderShareCard, shareCard } from "./shareCard.ts";
 import { fmt, leverFor, rarityN, regionSummary } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 
@@ -114,7 +116,10 @@ function showOverall(): void {
         <p class="rarity">Roughly <b>1 in ${rarityN(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
       <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
         <button class="btn pri" id="btn-plan">See your plan</button></div>
-      ${ctx.onSideProfile ? `<div class="navrow"><button class="btn gho" id="btn-side">Add side profile →</button></div>` : ""}
+      <div class="navrow">
+        <button class="btn gho" id="btn-share">Share card</button>
+        ${ctx.onSideProfile ? `<button class="btn gho" id="btn-side">Add side profile →</button>` : ""}
+      </div>
     </div>`;
 
   countUp(document.getElementById("cnt")!, r.overall);
@@ -129,6 +134,12 @@ function showOverall(): void {
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const sideBtn = document.getElementById("btn-side");
   if (sideBtn) sideBtn.onclick = () => ctx?.onSideProfile?.();
+  document.getElementById("btn-share")!.onclick = async () => {
+    if (!ctx) return;
+    const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
+    const card = await renderShareCard(ctx.report, photo);
+    await shareCard(card, ctx.report.overall);
+  };
 }
 
 // Side-profile results: same measurement language, its own report, no photo
@@ -210,7 +221,7 @@ function showRegion(id: RegionId): void {
           <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
-              (m, i) => `<div class="metric" style="animation-delay:${80 + i * 70}ms">
+              (m, i) => `<div class="metric${hasOverlay(m.def.id) ? " tappable" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
             <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
             )
@@ -235,6 +246,7 @@ function showRegion(id: RegionId): void {
     120,
   );
   typewrite(document.getElementById("tw")!, regionSummary(r, ctx.report.sex));
+  wireMeasurementTaps(r, id);
 
   const deck = document.getElementById("deck")!;
   const dots = document.getElementById("dots")!;
@@ -257,6 +269,32 @@ function rarityLine(r: RegionScore): string {
   return r.percentile >= 50
     ? `Roughly <b>1 in ${rarityN(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
     : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here — the drill-down above shows exactly why.`;
+}
+
+// Tapping a measurement row draws that exact measurement on the face. A
+// number in a table is a claim; the same number drawn across the cheekbones
+// is evidence — this is the credibility wedge made visible.
+let activeMetric: string | null = null;
+
+function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
+  for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
+    const id = row.dataset.metric!;
+    const metric = r.metrics.find((m) => m.def.id === id);
+    if (!metric || !hasOverlay(id)) continue;
+    row.onclick = () => {
+      if (!ctx) return;
+      if (activeMetric === id) {
+        activeMetric = null;
+        row.classList.remove("active");
+        drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+        return;
+      }
+      activeMetric = id;
+      for (const other of document.querySelectorAll(".metric")) other.classList.remove("active");
+      row.classList.add("active");
+      drawMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+    };
+  }
 }
 
 // ---------------- improvements ----------------

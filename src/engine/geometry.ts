@@ -191,10 +191,25 @@ export function buildGeometry(
   // Orient it downward in face terms (forehead → menton)
   if (dot3(sub3(p3[LM.MENTON], p3[LM.FOREHEAD_TOP]), vertical) < 0) vertical = scale3(vertical, -1);
 
+  // zScale exaggerates depth to get a better axis ESTIMATE, but projecting
+  // onto exaggerated axes would stretch distances along whichever axis carries
+  // more depth — fWHR came out 5.09 on a face whose width is visibly ~2.2x its
+  // upper-face height. Convert the axes back into true (unscaled) space and
+  // project the unscaled cloud, so the projection stays rigid and every
+  // measurement means what its name says.
+  const unscale = (v: V3): V3 => norm3({ x: v.x, y: v.y, z: v.z / POSE_CALIBRATION.zScale });
+  const lateralT = unscale(lateral);
+  const verticalT = unscale(vertical);
+  const pTrue: V3[] = landmarks.map((l) => ({
+    x: l.x * width,
+    y: l.y * height,
+    z: (l.z ?? 0) * width,
+  }));
+
   const eyeC = (a: number, b: number): V3 => ({
-    x: (p3[a].x + p3[b].x) / 2,
-    y: (p3[a].y + p3[b].y) / 2,
-    z: (p3[a].z + p3[b].z) / 2,
+    x: (pTrue[a].x + pTrue[b].x) / 2,
+    y: (pTrue[a].y + pTrue[b].y) / 2,
+    z: (pTrue[a].z + pTrue[b].z) / 2,
   });
   const eyeR3 = eyeC(LM.EYE_R_OUTER, LM.EYE_R_INNER);
   const eyeL3 = eyeC(LM.EYE_L_OUTER, LM.EYE_L_INNER);
@@ -206,9 +221,9 @@ export function buildGeometry(
 
   const project = (p: V3): Pt => {
     const d = sub3(p, origin);
-    return { x: dot3(d, lateral), y: dot3(d, vertical) };
+    return { x: dot3(d, lateralT), y: dot3(d, verticalT) };
   };
-  const flat: Pt[] = p3.map(project);
+  const flat: Pt[] = pTrue.map(project);
   const eyeR = project(eyeR3);
   const eyeL = project(eyeL3);
 
