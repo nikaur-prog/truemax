@@ -227,6 +227,13 @@ body {
 
 .navrow { display: flex; gap: 10px; margin-top: 20px; }
 .btn { flex: 1; border: none; border-radius: 14px; padding: 15px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.12s, opacity 0.2s; }
+/* Backing out of the camera. Deliberately quieter than Capture and Upload —
+   it is an escape hatch, not a third thing to choose between. */
+.btn.cancel {
+  display: block; width: min(420px, 100%); margin: 10px auto 0;
+  background: none; border: 1px solid #e3c6bd; color: var(--warm);
+}
+.btn.cancel:hover { background: #f8ece8; }
 .btn:active { transform: scale(0.985); }
 .btn.pri { background: var(--ink); color: #fff; }
 .btn.gho { background: var(--card); border: 1px solid var(--line); }
@@ -534,3 +541,7 @@ body {
 .rec-group h5 { font-family: var(--mono); font-size: 9px; letter-spacing: 0.18em; color: var(--ink);
   font-weight: 500; margin-bottom: 4px; }
 .rec-group-note { font-size: 11px; line-height: 1.5; color: var(--mut); margin-bottom: 10px; }
+
+/* The percentile beside the score, and the line that lands it. */
+.chip.big-chip { font-size: 13px; font-weight: 600; padding: 9px 15px; letter-spacing: 0; }
+.ego { font-size: 13.5px; line-height: 1.6; color: var(--mut); margin: 14px 2px 0; max-width: 52ch; }

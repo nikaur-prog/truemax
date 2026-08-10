@@ -83,6 +83,10 @@
           <button class="btn pri shutter" id="btn-camera">Use camera</button>
           <button class="btn gho" id="btn-upload">Upload a photo</button>
         </div>
+        <!-- Only while the camera is live. Backing out of an open camera had no
+             exit before this: the only ways out were to take a photo you did
+             not want or to reload the page. -->
+        <button class="btn cancel hidden" id="btn-cancel">Cancel</button>
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
 

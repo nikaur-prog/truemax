@@ -39,6 +39,7 @@ const el = {
   camHintDetail: document.getElementById("cam-hint-detail")!,
   btnCamera: document.getElementById("btn-camera") as HTMLButtonElement,
   btnUpload: document.getElementById("btn-upload") as HTMLButtonElement,
+  btnCancel: document.getElementById("btn-cancel") as HTMLButtonElement,
   reelCanvas: document.getElementById("reel-canvas") as HTMLCanvasElement,
   outlineCanvas: document.getElementById("outline-canvas") as HTMLCanvasElement,
   reelScore: document.getElementById("reel-score")!,
@@ -228,12 +229,33 @@ async function openCamera(): Promise<void> {
     // someone needs help positioning.
     showGuide("male");
     el.camLight.classList.remove("hidden");
+    el.btnCancel.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
     el.btnCamera.disabled = true;
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied — you can still upload a photo.";
   }
+}
+
+// Tear the live preview down and put the landing screen back exactly as it
+// was, celebrity reel and all. Shared by capture and cancel so the two can
+// never drift apart and leave the page half in camera mode.
+async function closeCamera(): Promise<void> {
+  cam?.stop();
+  cam = null;
+  lastCheck = null;
+  el.ovalFrame.classList.remove("live", "ready", "tracking");
+  el.stage.classList.remove("live-cam");
+  el.upload.classList.remove("camera-live");
+  el.camLight.classList.add("hidden");
+  el.btnCancel.classList.add("hidden");
+  el.btnCamera.textContent = "Use camera";
+  el.btnCamera.disabled = false;
+  el.camHintTitle.textContent = "Take a photo, or upload one";
+  el.camHintDetail.textContent = "The camera preview will guide your framing";
+  el.camHint.classList.remove("ready", "red", "amber");
+  await setRunningMode("IMAGE");
 }
 
 el.btnCamera.addEventListener("click", async () => {
@@ -243,16 +265,12 @@ el.btnCamera.addEventListener("click", async () => {
   }
   if (!lastCheck?.ready) return;
   const shot = cam.capture();
-  cam.stop();
-  cam = null;
-  el.ovalFrame.classList.remove("live", "ready");
-  el.stage.classList.remove("live-cam");
-  el.upload.classList.remove("camera-live");
-  el.camLight.classList.add("hidden");
-  el.btnCamera.textContent = "Use camera";
-  el.btnCamera.disabled = false;
-  await setRunningMode("IMAGE");
+  await closeCamera();
   if (shot) await handleCanvas(shot);
+});
+
+el.btnCancel.addEventListener("click", async () => {
+  await closeCamera();
 });
 
 // Returning visitors who already granted access get a live preview with no

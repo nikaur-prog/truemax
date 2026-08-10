@@ -1,6 +1,6 @@
 import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
+import { CLOUD_POINTS } from "./cloudPoints.ts";
 import { checkFrame, frameStats } from "../engine/captureGuide.ts";
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "../engine/geometry.ts";
 import { detectSex, extractShape } from "../engine/shape.ts";
 import type { FrameCheck } from "../engine/captureGuide.ts";
@@ -241,16 +241,16 @@ function drawGuide(
 // makes the whole cloud rotate. Same trick Face ID's setup animation uses.
 // ---------------------------------------------------------------------------
 
-// Every Nth landmark. Was 4, which put ~120 dots on a face — enough that the
-// cloud stopped reading as "tracking" and started reading as "static". At 8 it
-// is ~60, sparse enough that you can see individual points hold onto features.
-const CLOUD_STEP = 8;
-
-// The face-oval ring, as a lookup. Built once from the same connection list the
-// outline used to be drawn from.
-const BOUNDARY: Set<number> = new Set(
-  FaceLandmarker.FACE_LANDMARKS_FACE_OVAL.flatMap((c) => [c.start, c.end]),
-);
+// Which landmarks to draw is NOT a stride any more. Taking every Nth index
+// looks like it should give an even scatter and does the opposite: MediaPipe's
+// indices are ordered by mesh topology, not by position, and the mesh is far
+// denser around the eyes and lips than across the cheeks and forehead. A stride
+// therefore inherits that density — clumps around the features, bare patches
+// everywhere else — and because indices are not mirror-paired, the left and
+// right of the face get visibly different patterns. It reads as random scatter.
+//
+// CLOUD_POINTS is chosen offline by farthest-point sampling over an averaged
+// face and mirrored into exact pairs. See tools/cloud-points.mjs.
 
 function drawCloud(
   ctx: CanvasRenderingContext2D,
@@ -268,13 +268,9 @@ function drawCloud(
   const span = zMax - zMin || 1e-6;
   const tint = check.ready ? "143,243,224" : "100,210,255";
 
-  for (let i = 0; i < lm.length; i += CLOUD_STEP) {
-    // Skip the boundary ring. Those landmarks sit on the anatomical edge of the
-    // face, which from the front lands on the neck and in front of the ears —
-    // they are the dots that read as "it has lost my face" even when tracking
-    // is perfect. Everything inside the boundary sits on a feature.
-    if (BOUNDARY.has(i)) continue;
+  for (const i of CLOUD_POINTS) {
     const p = lm[i];
+    if (!p) continue;
     // 1 = nearest the lens, 0 = furthest. MediaPipe's z grows away from camera.
     const near = 1 - ((p.z ?? 0) - zMin) / span;
     const s = P(p.x, p.y);
@@ -388,6 +384,9 @@ function drawCross(
   // Shorter arms and a wider gap than the first version. The old cross ran
   // almost the full width of the face with a tick on each end, which read as a
   // rifle scope; this is closer to the hairline reticle a camera app draws.
+  // Inner radius of the crosshair gap. Named `ring` from when a circle was
+  // drawn here; it now only sets where the arms start and where the heading
+  // arrow emerges.
   const ring = 13;
   const armX = Math.max(ring + 14, faceW * 0.5);
   const armY = Math.max(ring + 14, faceH * 0.34);
@@ -415,19 +414,53 @@ function drawCross(
   }
   ctx.restore();
 
-  // Gaze, reduced to the ring alone. It used to also draw a radial line and a
-  // filled pip that tracked the eyes — three moving elements stacked on the
-  // bridge of the nose. The ring changing colour carries the same one bit of
-  // information ("your eyes are off the lens") without the machinery, and the
-  // hint line says it in words at the same moment.
-  ctx.save();
-  ctx.strokeStyle = check.gates.gaze ? `rgba(${colour},0.5)` : "rgba(255,201,139,0.95)";
-  ctx.lineWidth = check.gates.gaze ? 1 : 1.4;
-  ctx.beginPath();
-  ctx.arc(c.x, c.y, ring, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
+  // Heading arrow, in place of the ring that used to sit here.
+  //
+  // A circle on the bridge of the nose was decoration: it never moved and it
+  // carried one bit (gaze ok / not ok) that the hint line already says in
+  // words. What is actually useful at this moment is WHICH WAY you are turned,
+  // and that is a direction, so it should be drawn as one. The arrow grows out
+  // of the centre along the head's heading and lengthens with how far off-axis
+  // you are; face the lens squarely and it vanishes entirely, which makes its
+  // absence the target.
+  const { yaw, pitch } = check.pose;
+  const off = Math.hypot(yaw, pitch);
+  if (off > TURN_DEADZONE) {
+    // Scaled so the arrow is short at the edge of the deadzone and reaches full
+    // length at roughly twice the pose gate — past that the length stops
+    // growing, because the message is the direction, not the magnitude.
+    const t = Math.min(1, (off - TURN_DEADZONE) / 16);
+    const len = ring + 6 + t * 26;
+    const ux = yaw / off;
+    const uy = pitch / off;
+    const tipX = c.x + ux * len;
+    const tipY = c.y + uy * len;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,201,139,${(0.55 + t * 0.4).toFixed(2)})`;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(c.x + ux * (ring - 4), c.y + uy * (ring - 4));
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    // Chevron head, built from the perpendicular so it always points outward
+    const hx = -uy;
+    const hy = ux;
+    const back = 7;
+    const wide = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(tipX - ux * back + hx * wide, tipY - uy * back + hy * wide);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(tipX - ux * back - hx * wide, tipY - uy * back - hy * wide);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
+
+// Below this the arrow does not draw at all. Set just inside the pose gate so
+// "no arrow" and "straight enough to shoot" mean the same thing.
+const TURN_DEADZONE = 4;
 
 interface V3 { x: number; y: number; z: number }
 const mid3 = (a: V3, b: V3): V3 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });

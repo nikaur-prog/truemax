@@ -27,6 +27,9 @@ export interface FrameCheck {
   // Where the eyes are pointed, for the on-face crosshair. Null when the
   // irises aren't tracked (blinks, heavy occlusion).
   gaze: Gaze | null;
+  // Head angles in degrees, so the overlay can point in the direction someone
+  // is actually facing rather than only naming it in the hint text.
+  pose: { yaw: number; pitch: number; roll: number };
   // Individual gates, for the checklist UI
   gates: {
     face: boolean;
@@ -198,12 +201,14 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
       status: "red",
       progress: 0,
       gaze: null,
+      pose: { yaw: 0, pitch: 0, roll: 0 },
       gates,
     };
   }
   gates.face = true;
 
   const q = assessQuality(result);
+  const pose = { yaw: q.yawDeg, pitch: q.pitchDeg, roll: q.rollDeg };
   const lm = result.faceLandmarks[0];
   const gaze = estimateGaze(lm);
   let minX = 1;
@@ -270,8 +275,8 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
         ? { hint: "Look at the lens", detail: "Framing is good — your eyes are off to one side" }
         : null;
     return advisory
-      ? { ready: true, ...advisory, status: "amber", progress: 1, gaze, gates }
-      : { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, gates };
+      ? { ready: true, ...advisory, status: "amber", progress: 1, gaze, pose, gates }
+      : { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, pose, gates };
   }
 
   // Coach the worst problem; grade the light by how close it is to solved.
@@ -285,6 +290,7 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
     status: progress >= 0.5 ? "amber" : "red",
     progress,
     gaze,
+    pose,
     gates,
   };
 }

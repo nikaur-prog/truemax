@@ -8,7 +8,7 @@ import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm } from "./overlay.ts";
 import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
-import { fmt, leverFor, rarityText, regionSummary, topPctText } from "./templates.ts";
+import { egoLine, fmt, leverFor, percentileLine, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
@@ -93,7 +93,6 @@ function showOverall(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
-  const topPct = topPctText(r.overallPercentile);
   const deltaHTML = delta
     ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`)
     : "";
@@ -104,10 +103,11 @@ function showOverall(): void {
         <div><div class="klabel">OVERALL</div>
           <div class="big"><span id="cnt">0.0</span><small> /10</small></div></div>
         <div class="chipcol">
-          <span class="chip">${topPct}</span>
+          <span class="chip big-chip">${percentileLine(r.overallPercentile, r.sex)}</span>
           ${deltaHTML}
         </div>
       </div>
+      <p class="ego">${egoLine(r.overallPercentile)}</p>
       <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
         .map(
           ([p, s]) => `

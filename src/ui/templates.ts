@@ -233,3 +233,40 @@ const DEFAULT_LEVER: Lever = {
 export function leverFor(m: ScoredMetric): Lever {
   return LEVERS[m.def.id] ?? DEFAULT_LEVER;
 }
+
+// ---------------------------------------------------------------------------
+// Landing the number.
+//
+// A bare "5.2" with nothing around it reads as a verdict, and for most people
+// it lands worse than the measurement deserves — half of everyone is below the
+// median by construction, and the median face is not a problem to be solved.
+//
+// Two jobs here, and neither is flattery. The first is to name the reaction
+// out loud, because a scanner that pretends a middling number feels fine is
+// obviously lying and loses the credibility everything else here is built on.
+// The second is to put the percentile next to the score, since "5.2" and
+// "ahead of 43.7% of men" are the same fact and only one of them is legible.
+// Nothing in this file rounds, softens or inflates the number itself.
+// ---------------------------------------------------------------------------
+
+export function percentileLine(pct: number, sex: Sex): string {
+  const rest = Math.round((100 - pct) * 10) / 10;
+  const group = sex === "male" ? "men" : "women";
+  // Below the median, "top X%" is a strained way to say it, so say the true
+  // thing instead — it is the same number and it does not sound like spin.
+  return rest > 50
+    ? `Ahead of ${Math.round(pct * 10) / 10}% of ${group}`
+    : `Top ${rest}% of ${group}`;
+}
+
+export function egoLine(pct: number): string {
+  if (pct >= 90)
+    return `That is a genuinely high measurement — top decile against the reference set. The plan below is mostly about not losing it.`;
+  if (pct >= 70)
+    return `A strong number. Comfortably above the middle of the distribution, with specific things still worth moving.`;
+  if (pct >= 45)
+    return `Mid-table, and worth being unromantic about: the middle is where most faces land, because that is what a middle is.`;
+  if (pct >= 25)
+    return `Damn — that one stings the ego a bit. Two honest things about it: this measures the geometry in one photograph, not you, and the levers below are the ones that actually move it.`;
+  return `Damn. That is a hard number to read, and softening it would make every other number here worth less. What it is not is a verdict — it is one photograph, scored on bone and soft tissue, and the plan below is the part you can change.`;
+}

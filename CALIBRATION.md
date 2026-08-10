@@ -649,3 +649,40 @@ What is left: a depth-shaded dot cloud on interior features only, and a thin
 crosshair carrying the head's own 3D axes. The nine-chip gate checklist was
 also removed from the HUD — it restated what the readiness bar and the one-line
 hint already said.
+
+## Why the point cloud looked like random scatter
+
+The overlay drew every Nth landmark. That looks like it should give an even
+spread and does the opposite, for two reasons:
+
+- **MediaPipe's indices are ordered by mesh topology, not by position**, and the
+  mesh is far denser around the eyes and lips than across the cheeks and
+  forehead. A stride inherits that density, so the dots clump on the features
+  and leave bare patches everywhere else.
+- **Indices are not mirror-paired.** Taking every 8th index picks a different
+  pattern on the left of the face than on the right, so the cloud is visibly
+  asymmetric on a symmetric face.
+
+`tools/cloud-points.mjs` now picks the subset once, offline: detect 16 faces,
+normalise each to a common centre and scale, average into a canonical mesh,
+mirror-pair every landmark and symmetrise, then greedy farthest-point sample
+with each pick's mirror partner taken alongside it. Resulting nearest-neighbour
+spacing across the 64 chosen points, in face widths: **min 0.057, median 0.101,
+max 0.146** — a 2.5x spread, against the order-of-magnitude clumping a stride
+produces.
+
+The list is fixed, which matters as much as the spacing: every frame draws the
+same anatomical points, so the cloud deforms with the face. A per-frame sampler
+would reselect different points each frame and shimmer.
+
+Boundary landmarks stay excluded, for the reason in the section above.
+
+### A bug worth remembering
+
+The first run of the generator emitted one point. Cause: the image was released
+with `img.src = ""` *before* its intrinsic size was read, so the aspect ratio
+became `0/0`, every y-coordinate became NaN, and every `d < bestD` comparison
+was false — so the argmin returned -1, every landmark was classified as
+unpaired, and the greedy loop terminated after its seed. NaN does not propagate
+as an error through comparison-based selection; it propagates as "nothing is
+ever better than the current best".
