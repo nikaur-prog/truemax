@@ -306,6 +306,10 @@ export function checkFrame(
   result: FaceLandmarkerResult | null,
   stats: FrameStats,
   view: Viewport = FULL_VIEW,
+  // Last verdict from the glasses measure, which runs on its own slower clock
+  // because it costs a canvas readback. Advisory only — see occlusion.ts for
+  // why it must never hold the shutter.
+  glasses = false,
 ): FrameCheck {
   const gates = {
     face: false,
@@ -398,11 +402,16 @@ export function checkFrame(
     // Framing is correct, so the shutter opens either way. Two things can still
     // be worth saying while there is a chance to fix them — neither blocks,
     // because neither is bad enough to justify refusing to take the photo.
-    const advisory = !gates.sharp
-      ? { hint: "A bit soft", detail: "More light on your face will sharpen it — you can still shoot" }
-      : !gates.gaze
-        ? { hint: "Look at the lens", detail: "Framing is good — your eyes are off to one side" }
-        : null;
+    const advisory = glasses
+      ? {
+          hint: "Glasses off, if you have them on",
+          detail: "Frames sit right across the eye and brow measurements",
+        }
+      : !gates.sharp
+        ? { hint: "A bit soft", detail: "More light on your face will sharpen it — you can still shoot" }
+        : !gates.gaze
+          ? { hint: "Look at the lens", detail: "Framing is good — your eyes are off to one side" }
+          : null;
     return advisory
       ? { ready: true, ...advisory, status: "amber", progress: 1, gaze, pose, gates }
       : { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, pose, gates };

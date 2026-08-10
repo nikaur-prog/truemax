@@ -3,6 +3,7 @@ import { TARGET_MAX, TARGET_MIN, checkFrame, checkSideFrame, frameStats } from "
 import { idealShape, shapeExtent, strokeOutline } from "./faceOutline.ts";
 import { buildGeometry } from "../engine/geometry.ts";
 import { detectSex, extractShape } from "../engine/shape.ts";
+import { detectOcclusion } from "../engine/occlusion.ts";
 import type { FrameCheck, Viewport } from "../engine/captureGuide.ts";
 import type { Sex } from "../engine/types.ts";
 
@@ -69,6 +70,11 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   const sexVotes: Sex[] = [];
   let sexShown: Sex | null = null;
   let frameNo = 0;
+  // The glasses measure resamples a face crop and reads it back, which is far
+  // too expensive per frame and does not need to be: nobody puts glasses on
+  // and takes them off between frames. Sampled every 20th frame, roughly three
+  // times a second, and the last verdict is held in between.
+  let glasses = false;
 
   const loop = () => {
     const v = opts.video;
@@ -85,12 +91,20 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       // busy background otherwise decides whether the shot is "sharp".
       const box = faceBox(result);
       const stats = frameStats(v, scratch!, box);
+      const lm = result?.faceLandmarks?.[0];
+      if (!side && lm && ++frameNo % 20 === 0) {
+        try {
+          glasses = detectOcclusion(v, lm, v.videoWidth, v.videoHeight)?.glasses ?? glasses;
+        } catch {
+          /* a frame mid-resize can fail the readback; keep the last verdict */
+        }
+      }
       const check = side
         ? checkSideFrame(result, stats)
-        : checkFrame(result, stats, viewport(v, opts.guideCanvas));
+        : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
       opts.onCheck(check);
       drawGuide(opts.guideCanvas, v, check, side);
-      if (!side && opts.onSex && ++frameNo % 12 === 0) voteSex(result, v, check);
+      if (!side && opts.onSex && frameNo % 12 === 0) voteSex(result, v, check);
     }
     raf = requestAnimationFrame(loop);
   };

@@ -23,6 +23,7 @@ import { detectSex } from "./engine/shape.ts";
 import { estimateGaze } from "./engine/gaze.ts";
 import { openQuiz } from "./ui/goalsQuiz.ts";
 import { analyzeSkin } from "./engine/skin.ts";
+import { detectOcclusion } from "./engine/occlusion.ts";
 import { REGION_LANDMARKS } from "./ui/regions.ts";
 
 const MAX_IMAGE_DIM = 1280;
@@ -101,6 +102,7 @@ let selectedSex: Sex = "male";
     smile: quality.smileScore,
     gaze: estimateGaze(res.faceLandmarks[0]),
     skin: analyzeSkin(c, res.faceLandmarks[0], w, h),
+    occlusion: detectOcclusion(c, res.faceLandmarks[0], w, h),
     // Group shots are the main contaminant in scraped photo sets: the
     // detector locks onto whichever face it finds, which may not be the
     // subject. A face filling little of the frame is the tell.
@@ -184,6 +186,9 @@ el.ovalFrame.addEventListener("drop", (e) => {
 // ---- camera ----
 let cam: CameraHandle | null = null;
 let lastCheck: FrameCheck | null = null;
+// Wall clock until which the opening capture instruction stays put.
+let holdHintUntil = 0;
+const HINT_HOLD_MS = 3200;
 
 async function openCamera(): Promise<void> {
   if (!isSupported()) {
@@ -191,6 +196,7 @@ async function openCamera(): Promise<void> {
     return;
   }
   const desktop = !matchMedia("(pointer: coarse)").matches;
+  holdHintUntil = 0;
   el.camHintTitle.textContent = "Allow camera access";
   el.camHintDetail.textContent = desktop
     ? "Your browser will ask at the top of the window — choose Allow"
@@ -201,8 +207,16 @@ async function openCamera(): Promise<void> {
       guideCanvas: el.camGuide,
       onCheck: (c) => {
         lastCheck = c;
-        el.camHintTitle.textContent = c.hint;
-        el.camHintDetail.textContent = c.detail;
+        // Hold the opening instruction for a beat before the live coaching
+        // takes over. Glasses can be detected once the camera is running; a
+        // cap or a hood cannot, so this moment — preview up, nothing shot yet
+        // — is the only chance to ask about them, and a hint that is replaced
+        // on the very next frame is a hint nobody reads. The lamp underneath
+        // is already live, so nothing is being hidden.
+        if (performance.now() >= holdHintUntil) {
+          el.camHintTitle.textContent = c.hint;
+          el.camHintDetail.textContent = c.detail;
+        }
         el.camHint.classList.toggle("ready", c.ready);
         el.camHint.classList.toggle("red", c.status === "red");
         el.camHint.classList.toggle("amber", c.status === "amber");
@@ -224,6 +238,9 @@ async function openCamera(): Promise<void> {
     // waiting for the vote would leave the frame empty at the exact moment
     // someone needs help positioning.
     showGuide("male");
+    el.camHintTitle.textContent = "Glasses, hats and hoods off";
+    el.camHintDetail.textContent = "They sit across the eye, brow and jaw measurements";
+    holdHintUntil = performance.now() + HINT_HOLD_MS;
     el.camLight.classList.remove("hidden");
     el.btnCancel.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
