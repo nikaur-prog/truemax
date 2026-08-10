@@ -155,6 +155,15 @@ body {
    comparison — sizing the overall card larger would make the eye read it as the
    only real number, when the whole reason for the row is to show what it is
    made of. It gets a tinted ground instead. */
+/* Reading of a rescan. The noise case is deliberately the calm grey one: it is
+   the message that says stop worrying, and colouring it red or green would
+   contradict the sentence it contains. */
+.delta-read { font-size: 13px; line-height: 1.65; color: var(--mut); background: var(--soft);
+  border-radius: 12px; padding: 12px 14px; margin: 14px 2px 0; max-width: 62ch; }
+.delta-read b { color: var(--ink); font-weight: 600; }
+.delta-read.worthNoting { background: var(--acc-soft); color: #4a6b63; }
+.delta-read.worthNoting b { color: var(--acc); }
+
 .viewcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 4px; }
 .viewcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 10px 11px; text-align: center; }
 .viewcard.lead { background: var(--acc-soft); border-color: transparent; }

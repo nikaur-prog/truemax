@@ -1,6 +1,7 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.ts";
 import { REGION_NAMES } from "../engine/scoring.ts";
 import type { AdviceChannel } from "../engine/goals.ts";
+import type { ScanDelta } from "../engine/history.ts";
 
 // Deterministic explanation engine. No LLM, no randomness: banded templates
 // with the actual computed numbers interpolated in. Every sentence must
@@ -122,6 +123,48 @@ export function topPctText(pct: number): string {
   const rest = 100 - pct;
   return rest < 1 ? "Top 1%" : `Top ${Math.round(rest * 10) / 10}%`;
 }
+
+// ---------------------------------------------------------------------------
+// Reading a rescan.
+//
+// The measured spread between two photographs of one person is 1.32 points, and
+// between two different people it is 1.20. That is a problem for weekly
+// tracking and it is the one place the problem turns into the product: an app
+// that says "that is noise, ignore it" while its competitors say "you dropped
+// 0.4, here is what to buy" is the entire positioning.
+//
+// Which only works if it is said plainly. Hedging a fluctuation into "you may
+// have seen a slight decline" is the same sale in a quieter voice.
+// ---------------------------------------------------------------------------
+export function deltaReadingCopy(d: ScanDelta): string {
+  const size = Math.abs(d.overall).toFixed(1);
+  const when =
+    d.daysAgo === 0 ? "today" : d.daysAgo === 1 ? "yesterday" : `${d.daysAgo} days ago`;
+  const dir = d.overall > 0 ? "up" : "down";
+
+  if (d.reading === "noise") {
+    return `<b>That is not a change.</b> Two photos of the same face land ${DELTA_SD} points apart
+      on average — more than two different people do — so ${size} ${dir} against ${when} is the
+      same face measured twice. Lighting, angle, how much water you are carrying, the camera.
+      Nothing to read into it.`;
+  }
+  if (d.reading === "tooSoon") {
+    // "in yesterday" and "in today" are the obvious way to get this wrong.
+    const span = d.daysAgo <= 1 ? "a day" : `${d.daysAgo} days`;
+    return `<b>${size} ${dir} is a big gap, and it is still capture.</b> A face does not
+      restructure in ${span}, so a swing this size means the two photographs differ, not that
+      you do. Shoot both in the same light, at the same distance, at the same time of day, and
+      compare those.`;
+  }
+  // This branch needs at least STRUCTURAL_DAYS, so "the last N days" always
+  // reads correctly here — "since 7 days ago" does not.
+  return `<b>${size} ${dir} over the last ${d.daysAgo} days, and that is outside normal capture spread.</b>
+    Worth paying attention to. It is still not proof: ${DELTA_SD} points is what two photos of
+    one unchanged face can differ by, and this only clears it. If something changed — sleep,
+    training, weight, alcohol, how you are grooming — this is the scan where it would show.`;
+}
+
+const DELTA_SD = "1.3";
 
 // ---------------------------------------------------------------------------
 // Improvement plan copy — non-surgical levers only, each tied to the actual
