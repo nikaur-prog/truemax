@@ -14,15 +14,17 @@ import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
 import { renderResults } from "./ui/results.ts";
 import { mergeReports } from "./engine/scoring.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
-import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
+import { analyzeSide } from "./engine/scoring.ts";
+import type { SidePoints } from "./engine/sideMetrics.ts";
+import { isSupported, permissionGranted, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
-import { detectSex } from "./engine/shape.ts";
 import { estimateGaze } from "./engine/gaze.ts";
 import { openQuiz } from "./ui/goalsQuiz.ts";
 import { analyzeSkin } from "./engine/skin.ts";
+import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { detectOcclusion } from "./engine/occlusion.ts";
 import { REGION_LANDMARKS } from "./ui/regions.ts";
 
@@ -61,11 +63,14 @@ const el = {
   analysis: document.getElementById("analysis")!,
 };
 
-// The reference population is always inferred from face shape. Asking people
-// to classify themselves before a scan added a decision in front of the only
-// thing that matters (taking the photo), and the shape model is the thing
-// actually doing the work either way.
-let selectedSex: Sex = "male";
+// The reference population, chosen by the user and remembered on the device.
+//
+// It used to be inferred from face shape. That was the right instinct — a
+// decision in front of the only thing that matters is a cost — but the
+// inference turned out to be 58.8% accurate on held-out faces against a 54.1%
+// base rate, while the choice itself moves the score by a median of 0.70 points
+// and up to 4.50. sexPref.ts has the measurements. One tap beats that.
+let selectedSex: Sex = storedSex() ?? "male";
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
 // directly, skipping the UI and its scan animation. Same engine path as a
@@ -153,6 +158,28 @@ function showGuide(sex: Sex): void {
   outline.morphTo(sex);
 }
 
+// Reference-population control. Reflects the stored choice, writes it back, and
+// re-shapes the capture silhouette to match — the guide should be the average
+// face someone is about to be compared against, not a fixed one.
+const refpop = document.getElementById("refpop")!;
+function paintRefPop(): void {
+  for (const b of refpop.querySelectorAll<HTMLButtonElement>(".seg-btn")) {
+    b.classList.toggle("on", b.dataset.sex === selectedSex);
+    b.setAttribute("aria-pressed", String(b.dataset.sex === selectedSex));
+  }
+}
+refpop.addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>(".seg-btn");
+  if (!b?.dataset.sex) return;
+  selectedSex = b.dataset.sex as Sex;
+  storeSex(selectedSex);
+  paintRefPop();
+  setGuideSex(selectedSex);
+  showGuide(selectedSex);
+});
+paintRefPop();
+setGuideSex(selectedSex);
+
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
 initLandmarker()
@@ -227,7 +254,6 @@ async function openCamera(): Promise<void> {
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
       },
-      onSex: (sex) => showGuide(sex),
     });
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
@@ -237,7 +263,7 @@ async function openCamera(): Promise<void> {
     // Starts on the male silhouette and morphs once the shape vote settles —
     // waiting for the vote would leave the frame empty at the exact moment
     // someone needs help positioning.
-    showGuide("male");
+    showGuide(selectedSex);
     el.camHintTitle.textContent = "Glasses, hats and hoods off";
     el.camHintDetail.textContent = "They sit across the eye, brow and jaw measurements";
     holdHintUntil = performance.now() + HINT_HOLD_MS;
@@ -376,17 +402,12 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
 
   const landmarks = result.faceLandmarks[0];
 
-  // The reference population is picked by shape, then stated — an unexplained
-  // switch would look like a guess. Resolved before the side step, because the
-  // side metrics are scored against the same norms.
-  const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
-  selectedSex = guess?.sex ?? "male";
   pending = {
     landmarks,
     width,
     height,
     quality,
-    autoNote: guess ? `Scored against ${guess.sex} norms (auto-detected)` : "",
+    autoNote: `Scored against ${selectedSex} norms`,
   };
 
   // Straight to the profile. A scan is two photographs, and showing a score
@@ -408,6 +429,9 @@ interface PendingFront {
   autoNote: string;
 }
 let pending: PendingFront | null = null;
+// The verified side points, kept so a change of reference population can
+// re-score the profile too rather than only the front.
+let lastSide: { points: SidePoints; faceDir: number } | null = null;
 
 // Both photographs are in. One analysis, one reveal, one score.
 async function runFullAnalysis(sideReport: Report): Promise<void> {
@@ -457,6 +481,22 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
     onSideProfile: () => startSide(),
+    // Changing the reference population re-runs BOTH views and the merge. It
+    // cannot just relabel: every percentile, every region and the side metrics
+    // are all scored against the chosen population, so a relabel would leave
+    // the numbers describing a group the header no longer names.
+    onSexChange: (sex: Sex) => {
+      selectedSex = sex;
+      storeSex(sex);
+      paintRefPop();
+      setGuideSex(sex);
+      if (!lastSide) return;
+      const f = analyze(landmarks, width, height, sex);
+      const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
+      const merged = mergeReports(f, sd);
+      renderQualityChips(quality, `Scored against ${sex} norms`);
+      renderResults({ ...ctxArgs, report: merged, delta: null });
+    },
   };
   renderResults(ctxArgs);
 
@@ -470,9 +510,14 @@ function startSide(): void {
     // There is no "back to results" any more, because there are no results yet.
     // The only way out of this step is forward, or starting over.
     onBack: () => resetToUpload(),
-    onDone: async (sideReport) => {
+    onDone: async (sideReport, points, faceDir) => {
       closeSide();
+      lastSide = { points, faceDir };
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
+      // The verified points, for the calibration harnesses — re-scoring the
+      // profile under a different reference population needs the input, not
+      // the finished report.
+      (window as unknown as Record<string, unknown>).__truemaxSidePoints = { points, faceDir };
       await runFullAnalysis(sideReport);
     },
   });

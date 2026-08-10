@@ -3,13 +3,12 @@ import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts"
 import { detectStable } from "./engine/consensus.ts";
 import { assessQuality } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
-import { buildGeometry } from "./engine/geometry.ts";
-import { detectSex, extractShape } from "./engine/shape.ts";
 import { REGION_NAMES } from "./engine/scoring.ts";
 import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import { curveSVG } from "./ui/curve.ts";
 import { rankShort, rarityText } from "./ui/templates.ts";
+import { storeSex, storedSex } from "./engine/sexPref.ts";
 import type { Report, Sex } from "./engine/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -143,19 +142,17 @@ async function run(src: HTMLCanvasElement): Promise<void> {
     el.hintDetail.textContent = "Try again with the whole face in frame";
     return;
   }
-  // Same shape-model vote the main app uses, rather than asking up front: on a
-  // page built for filming, a demographic question standing between someone and
-  // their score is the one interaction guaranteed to end up in the clip.
+  // No demographic question in front of the score — on a page built for
+  // filming, that is the one interaction guaranteed to end up in the clip. The
+  // stored choice is used if there is one, and the label on the card is a
+  // button either way, so correcting it costs one tap and re-scores instantly.
   //
-  // But the vote is wrong sometimes, and here it is wrong in public. Testing
-  // this page on a bearded man in glasses, the model returned female and the
-  // card printed WOMEN next to his face — while scoring him against the female
-  // reference, which is not a cosmetic error: every percentile on the page
-  // comes from that population. So the label is shown, and it is a button.
+  // What is NOT used here is the shape model's guess. It classified a bearded
+  // man as female while testing this page, and at 58.8% on held-out faces
+  // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
   const lm = det.faceLandmarks[0];
   last = { lm, w: src.width, h: src.height, photo: src };
-  const guess = detectSex(extractShape(buildGeometry(lm, src.width, src.height)));
-  show(guess?.sex ?? "male");
+  show(storedSex() ?? "male");
 }
 
 // The last analysed photo, kept so switching reference population re-scores it
@@ -164,6 +161,7 @@ let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasEle
 
 function show(sex: Sex): void {
   if (!last) return;
+  storeSex(sex);
   render(analyze(last.lm, last.w, last.h, sex), last.photo);
 }
 

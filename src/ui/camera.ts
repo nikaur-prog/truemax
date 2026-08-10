@@ -1,8 +1,6 @@
 import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
 import { TARGET_MAX, TARGET_MIN, checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
 import { idealShape, shapeExtent, strokeOutline } from "./faceOutline.ts";
-import { buildGeometry } from "../engine/geometry.ts";
-import { detectSex, extractShape } from "../engine/shape.ts";
 import { detectOcclusion } from "../engine/occlusion.ts";
 import type { FrameCheck, Viewport } from "../engine/captureGuide.ts";
 import type { Sex } from "../engine/types.ts";
@@ -24,10 +22,6 @@ interface Opts {
   // detector NOT seeing a front-on face.
   mode?: "front" | "side";
   onCheck: (c: FrameCheck) => void;
-  // Fires when the running vote on which reference population fits the face
-  // settles, or flips. Lets the framing silhouette match the person in front
-  // of the camera without asking them to classify themselves first.
-  onSex?: (sex: Sex) => void;
 }
 
 let stream: MediaStream | null = null;
@@ -67,8 +61,6 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   const side = opts.mode === "side";
   scratch = scratch ?? document.createElement("canvas");
   let last = -1;
-  const sexVotes: Sex[] = [];
-  let sexShown: Sex | null = null;
   let frameNo = 0;
   // The glasses measure resamples a face crop and reads it back, which is far
   // too expensive per frame and does not need to be: nobody puts glasses on
@@ -104,40 +96,8 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
       opts.onCheck(check);
       drawGuide(opts.guideCanvas, v, check, side);
-      if (!side && opts.onSex && frameNo % 12 === 0) voteSex(result, v, check);
     }
     raf = requestAnimationFrame(loop);
-  };
-
-  // Shape-based sex detection on a badly framed face is a coin flip, so only
-  // vote on frames that already pass distance and pose, and only act on a
-  // clear margin. A silhouette that flickers between male and female while
-  // someone is still getting into position would read as the app guessing.
-  const voteSex = (
-    result: ReturnType<typeof detectVideo>,
-    v: HTMLVideoElement,
-    check: FrameCheck,
-  ) => {
-    const lm = result?.faceLandmarks?.[0];
-    if (!lm || !check.gates.distance || !check.gates.straight) return;
-    let guess: ReturnType<typeof detectSex> = null;
-    try {
-      guess = detectSex(extractShape(buildGeometry(lm, v.videoWidth, v.videoHeight)));
-    } catch {
-      return;
-    }
-    if (!guess || guess.confidence < 0.03) return;
-    sexVotes.push(guess.sex);
-    if (sexVotes.length > 9) sexVotes.shift();
-    if (sexVotes.length < 5) return;
-    const male = sexVotes.filter((s) => s === "male").length;
-    const winner: Sex = male * 2 > sexVotes.length ? "male" : "female";
-    if (male !== 0 && male !== sexVotes.length) return; // not unanimous — wait
-    if (winner !== sexShown) {
-      sexShown = winner;
-      guideSex = winner;
-      opts.onSex?.(winner);
-    }
   };
 
   raf = requestAnimationFrame(loop);
@@ -248,9 +208,16 @@ function drawGuide(
 }
 
 // Which reference population's average face the front silhouette is drawn from.
-// Set by the running sex vote, so the guide is the shape the person in front of
-// the camera is actually going to be compared against.
+//
+// Set by the user's own choice, not by a vote. The camera used to classify the
+// face from its shape and morph the guide to match; that classifier scores
+// 58.8% on held-out faces against a 54.1% base rate (see sexPref.ts), so what
+// it produced in practice was a silhouette that changed its mind about you
+// while you were still lining up.
 let guideSex: Sex = "male";
+export function setGuideSex(sex: Sex): void {
+  guideSex = sex;
+}
 
 // ONE element now: the silhouette you fit your face into.
 //

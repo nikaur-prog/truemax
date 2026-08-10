@@ -1260,3 +1260,50 @@ in the clip.
 
 This wants fixing properly at some point — the vote should carry a confidence and
 say so when it is close.
+
+# The sex vote does not work, and has been removed
+
+Reported after the quick page printed WOMEN beside a bearded man's face.
+
+Measured against the manifests' own labels, which give 229 faces with a known
+sex. In the app the classifier scored **70.7%** — but that model was trained on
+these very faces. Rebuilding the mean shapes with each face removed and then
+classifying it:
+
+```
+leave-one-out accuracy    58.8%   (male 61.9%, female 55.1%)
+always say "male"         54.1%   <- base rate of the same sample
+```
+
+Four points above a constant answer.
+
+A second decision rule was tried — project onto the between-means axis and
+threshold at the midpoint — and it agreed with the first on **194 of 194** faces.
+That is not a coincidence: nearest-centroid under Euclidean distance IS that
+threshold. The two were one classifier wearing two names, so there is no better
+rule waiting to be found over this descriptor. The descriptor does not carry
+the information.
+
+**Why it mattered enough to remove rather than tolerate.** Every percentile in a
+report comes from the chosen reference population. Switching it moves the
+overall score by:
+
+```
+median 0.70    p90 2.10    max 4.50
+```
+
+Kim Kardashian scores 7.7 against women and 4.0 against men. Michael B. Jordan
+scores 7.6 against men and 4.4 against women — and the vote had him as female.
+A coin flip was deciding a number larger than the entire within-person noise
+band of 1.32.
+
+`detectSex` is deleted. The reference population is asked for on the capture
+screen, remembered on the device, and changeable from the results screen — where
+changing it re-runs both views and the merge, not just the label. That reverses
+the earlier decision to infer rather than ask, and the only reason for the
+reversal is that the inference was finally measured.
+
+One note for whoever tests this: a profile far off the bottom of the scale
+displays the same floored score under either population, so checking the side
+CARD is not a check that the profile was re-scored. The aggregate underneath it
+moves (-5.08 male vs -3.64 female on the test profile); the card is floored.

@@ -26,6 +26,7 @@ interface Ctx {
   overlay: HTMLCanvasElement;
   onNewPhoto: () => void;
   onSideProfile?: () => void;
+  onSexChange?: (sex: Sex) => void;
 }
 
 let ctx: Ctx | null = null;
@@ -154,7 +155,9 @@ function showOverall(): void {
   body().innerHTML = `
     <div class="reveal">
       <div class="score-head">
-        <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}</div>
+        <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
+            · <button type="button" class="refswitch" id="ref-switch"
+              title="Score against the other reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button></div>
           <div class="big"><span id="cnt">0.0</span><small> /10</small></div></div>
         <div class="chipcol">
           <span class="chip big-chip">${percentileLine(r.overallPercentile, r.sex)}</span>
@@ -205,6 +208,12 @@ function showOverall(): void {
         .forEach((i) => (i.style.width = `${i.dataset.w}%`)),
     150,
   );
+  // Correcting the reference population where its effect is visible. Every
+  // percentile on this screen comes from it, and it moves the overall score by
+  // a median of 0.7 points, so it cannot be a choice you can only revisit by
+  // starting over.
+  const refBtn = document.getElementById("ref-switch");
+  if (refBtn) refBtn.onclick = () => ctx?.onSexChange?.(r.sex === "male" ? "female" : "male");
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const sideBtn = document.getElementById("btn-side");

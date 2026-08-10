@@ -592,3 +592,23 @@ body {
 }
 .side-live .cam-hud::before { top: 0; background: linear-gradient(rgba(10,11,13,0.5), transparent); }
 .side-live .cam-hud::after { bottom: 0; background: linear-gradient(transparent, rgba(10,11,13,0.55)); }
+
+/* Reference-population control on the capture screen.
+   Deliberately not a modal and not a required step before the shutter: it has
+   a sensible remembered default, and it sits where someone will see it while
+   they are getting into position rather than blocking them from starting. */
+.refpop { border: 0; margin: 16px 0 2px; padding: 0; text-align: center; }
+.refpop legend { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  color: var(--mut); text-transform: uppercase; padding: 0; margin-bottom: 8px; float: none; }
+.seg { display: inline-flex; background: var(--soft); border-radius: 99px; padding: 3px; gap: 2px; }
+.seg-btn { border: 0; background: none; cursor: pointer; font: inherit; font-size: 13.5px;
+  color: var(--mut); padding: 7px 20px; border-radius: 99px; transition: background .18s, color .18s; }
+.seg-btn.on { background: var(--card); color: var(--ink); font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .07); }
+.refpop-why { font-size: 11.5px; color: var(--mut); margin: 8px 0 0; }
+
+/* Same control on the results screen, so a wrong choice is correctable where
+   its effect is visible rather than only where it was made. */
+.refswitch { background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--mut); }
+.refswitch:hover { color: var(--acc); }

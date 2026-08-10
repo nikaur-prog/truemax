@@ -94,6 +94,21 @@
         <span>one quick question · optional</span>
       </button>
 
+      <!-- Which reference population to score against. This was inferred from
+           face shape until the inference was measured: 58.8% correct on
+           held-out faces against a 54.1% base rate, while the choice moves the
+           score by a median of 0.70 points and up to 4.50. A guess that weak
+           cannot be allowed to decide a number that large, so it is asked. See
+           src/engine/sexPref.ts. -->
+      <fieldset class="refpop" id="refpop">
+        <legend>Score against</legend>
+        <div class="seg">
+          <button type="button" class="seg-btn" data-sex="male">Men</button>
+          <button type="button" class="seg-btn" data-sex="female">Women</button>
+        </div>
+        <p class="refpop-why">Every percentile is measured against this group. You can change it on your results.</p>
+      </fieldset>
+
       <div class="hints">
         <div><i></i>Look straight at the lens</div>
         <div><i></i>Neutral expression</div>
