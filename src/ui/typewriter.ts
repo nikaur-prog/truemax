@@ -1,6 +1,9 @@
-import { tick } from "./audio.ts";
-
-// Fast typewriter (~30 chars/sec) with key ticks; tap to complete instantly.
+// Fast typewriter (~60 chars/sec); tap to complete instantly.
+//
+// It used to click on every other character through a WebAudio oscillator.
+// Removed: the effect earns its place because it paces reading, and the sound
+// was doing something different and worse — it made a measurement page feel
+// like a toy, and it fired unprompted on a screen people open in public.
 let active: number | null = null;
 
 export function typewrite(box: HTMLElement, text: string): void {
@@ -11,7 +14,6 @@ export function typewrite(box: HTMLElement, text: string): void {
   active = window.setInterval(() => {
     if (i < text.length) {
       caret.insertAdjacentText("beforebegin", text[i]);
-      if (i % 2) tick();
       i++;
     } else {
       stopTypewriter();

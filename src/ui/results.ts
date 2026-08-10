@@ -5,7 +5,7 @@ import type { ScanDelta } from "../engine/history.ts";
 import { regionMatches } from "../engine/celebs.ts";
 import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
-import { drawCalm } from "./overlay.ts";
+import { drawCalm, transitionRegion } from "./overlay.ts";
 import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { egoLine, fmt, leverFor, percentileLine, rarityText, regionSummary, topPctText } from "./templates.ts";
@@ -32,6 +32,12 @@ let ctx: Ctx | null = null;
 
 export function renderResults(c: Ctx): void {
   ctx = c;
+  // A new scan starts from the calm whole-face state. Without this the first
+  // tab change after re-scanning would animate out of the PREVIOUS photo's
+  // region, which is a transition from somewhere the user never was.
+  transition?.cancel();
+  transition = null;
+  shownRegion = null;
   const tabs = document.createElement("div");
   tabs.className = "rtabs";
   const mk = (label: string, id: string) => {
@@ -65,17 +71,36 @@ function select(id: string): void {
   else showRegion(id as RegionId);
 }
 
+// Which region the overlay is currently lit for, so a transition knows what it
+// is coming FROM. Null means the calm whole-face state.
+let shownRegion: RegionId | null = null;
+let transition: { cancel(): void } | null = null;
+
 function setZoom(region: RegionId | null): void {
   if (!ctx) return;
-  if (!region) {
+  // A fast tab-to-tab click must not leave two animations fighting over the
+  // same canvas; the newer one wins outright.
+  transition?.cancel();
+  transition = null;
+
+  if (region) {
+    const z = zoomFor(region, ctx.landmarks);
+    ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
+    ctx.zoomable.style.transform = `scale(${z.scale})`;
+  } else {
     ctx.zoomable.style.transform = "none";
+  }
+
+  const from = shownRegion ? REGION_LANDMARKS[shownRegion] : undefined;
+  const to = region ? REGION_LANDMARKS[region] : undefined;
+  shownRegion = region;
+
+  // Nothing to animate between on the very first paint of the calm state.
+  if (!from && !to) {
     drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
     return;
   }
-  const z = zoomFor(region, ctx.landmarks);
-  ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
-  ctx.zoomable.style.transform = `scale(${z.scale})`;
-  drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+  transition = transitionRegion(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, from, to);
 }
 
 function body(): HTMLElement {
@@ -329,6 +354,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
           hint.innerHTML = HINT_IDLE;
         }
         drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+        shownRegion = region;
         return;
       }
       activeMetric = id;

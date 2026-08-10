@@ -12,7 +12,6 @@ import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
 import { renderResults, renderSideResults } from "./ui/results.ts";
 import { mergeReports } from "./engine/scoring.ts";
-import { toggleMute } from "./ui/audio.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
@@ -58,7 +57,6 @@ const el = {
   barFill: document.getElementById("barFill")!,
   qualityChips: document.getElementById("quality-chips")!,
   analysis: document.getElementById("analysis")!,
-  mute: document.getElementById("mute")!,
 };
 
 // The reference population is always inferred from face shape. Asking people
@@ -153,10 +151,6 @@ function showGuide(sex: Sex): void {
 }
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
-
-el.mute.addEventListener("click", () => {
-  el.mute.textContent = toggleMute() ? "🔇" : "🔊";
-});
 
 initLandmarker()
   .then(() => {
@@ -283,7 +277,6 @@ permissionGranted().then((granted) => {
 function resetToUpload(): void {
   el.main.classList.add("hidden");
   el.upload.classList.remove("hidden");
-  el.mute.classList.add("hidden");
   el.zoomable.style.transform = "none";
   el.analysis.innerHTML = "";
   el.qualityChips.innerHTML = "";
@@ -339,7 +332,6 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
-  el.mute.classList.remove("hidden");
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
