@@ -134,7 +134,7 @@ function showGuide(sex: Sex): void {
   outline.morphTo(sex);
 }
 
-document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}));
+document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
 el.mute.addEventListener("click", () => {
   el.mute.textContent = toggleMute() ? "🔇" : "🔊";
