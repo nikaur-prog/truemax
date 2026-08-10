@@ -89,6 +89,36 @@ function zToScore(z: number): number {
   return Math.round(clamp(5 + SCORE_SCALE * z, 0.5, 9.9) * 10) / 10;
 }
 
+// ---------------------------------------------------------------------------
+// Soft floor on the DISPLAYED aggregate scores.
+//
+// Run across 110 population portraits the raw scale bottomed out at 1.8, with
+// five people under 3.0 — and those are ordinary, accomplished adults. Handing
+// a real person a 1.8 out of 10 for their face is the numerical version of the
+// thing this product refuses to say in words, and the scale is not precise
+// down there anyway: below about the 10th percentile the reference sample is
+// thin and a tenth of a point means nothing.
+//
+// So the bottom is compressed toward an asymptote rather than truncated. The
+// mapping is smooth, strictly increasing and identity at or above the knee, so
+// nothing about the ORDERING changes — a worse face still scores worse. Only
+// the distance between bad and very bad shrinks, which is honest, because that
+// distance was never measured well.
+//
+// Percentiles are untouched: someone in the bottom 8% is still told they are in
+// the bottom 8%. And this applies only to the aggregate headline numbers —
+// individual metric rows keep their raw score, because those are the evidence
+// the plan ranks from and evidence should stay sharp.
+const FLOOR = 3.2;
+const KNEE = 5.0;
+
+function aggScore(z: number): number {
+  const raw = clamp(5 + SCORE_SCALE * z, 0.5, 9.9);
+  if (raw >= KNEE) return Math.round(raw * 10) / 10;
+  const span = KNEE - FLOOR;
+  return Math.round((KNEE - span * (1 - Math.exp(-(KNEE - raw) / span))) * 10) / 10;
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
@@ -204,7 +234,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   for (const p of Object.keys(PILLAR_WEIGHTS) as PillarId[]) {
     const ms = scored.filter((m) => m.def.pillar === p);
     pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight), RHO_METRICS), sex, `pillar:${p}`, rawZ);
-    pillars[p] = zToScore(pillarZ[p]);
+    pillars[p] = aggScore(pillarZ[p]);
   }
 
   const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
@@ -217,7 +247,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
     const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight), RHO_METRICS + 0.05), sex, `region:${r}`, rawZ);
     return {
       region: r,
-      score: zToScore(rz),
+      score: aggScore(rz),
       percentile: Math.round(phi(rz) * 1000) / 10,
       metrics: ms,
     };
@@ -225,7 +255,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
 
   return {
     sex,
-    overall: zToScore(overallZ),
+    overall: aggScore(overallZ),
     overallPercentile: Math.round(phi(overallZ) * 1000) / 10,
     potential: 0, // filled by analyze()
     pillars,

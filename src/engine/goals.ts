@@ -138,6 +138,9 @@ export interface Profile {
   goals: string[];
   quiet: RegionId[];
   advice: Record<AdviceChannel, boolean>;
+  // Dietary exclusions, so food suggestions never name something someone
+  // does not eat. Not a health field and never used as one.
+  diet: string[];
   endGoal: string;
 }
 
@@ -151,6 +154,7 @@ export const EMPTY_PROFILE: Profile = {
   goals: [],
   quiet: [],
   advice: { diet: true, lifestyle: true, grooming: true, capture: true },
+  diet: [],
   endGoal: "",
 };
 
