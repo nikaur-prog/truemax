@@ -33,7 +33,7 @@ export function openSideCapture(ctx: SideCtx): void {
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
-  e.actions.innerHTML = `<button class="btn gho" id="side-back">Back to front results</button>`;
+  e.actions.innerHTML = `<button class="btn gho" id="side-back">Skip — keep my front-only score</button>`;
   document.getElementById("side-back")!.onclick = () => {
     close();
     ctx.onBack();
@@ -81,8 +81,8 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
   drawGuides(e.lines, seed.points, w, h);
 
   e.actions.innerHTML = `
-    <button class="btn gho" id="side-back">Back</button>
-    <button class="btn pri" id="side-go">Analyze side profile</button>`;
+    <button class="btn gho" id="side-back">Skip</button>
+    <button class="btn pri" id="side-go">Merge into my score</button>`;
   document.getElementById("side-back")!.onclick = () => {
     close();
     ctx.onBack();

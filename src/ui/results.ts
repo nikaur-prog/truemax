@@ -156,12 +156,19 @@ function showOverall(): void {
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex)}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
-      <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
-        <button class="btn pri" id="btn-plan">See your plan</button></div>
-      <div class="navrow">
-        <button class="btn gho" id="btn-share">Share card</button>
-        ${ctx.onSideProfile ? `<button class="btn gho" id="btn-side">Add side profile →</button>` : ""}
-      </div>
+      ${
+        // Until the profile is in, adding it IS the next step — so it is the
+        // primary button. A scan is not finished at one view, and burying that
+        // behind a ghost button next to "Share card" said the opposite.
+        !merged && ctx.onSideProfile
+          ? `<div class="navrow"><button class="btn gho" id="btn-plan">See your plan</button>
+               <button class="btn pri" id="btn-side">Add side profile →</button></div>
+             <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
+               <button class="btn gho" id="btn-share">Share card</button></div>`
+          : `<div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
+               <button class="btn pri" id="btn-plan">See your plan</button></div>
+             <div class="navrow"><button class="btn gho" id="btn-share">Share card</button></div>`
+      }
     </div>`;
 
   countUp(document.getElementById("cnt")!, r.overall);
