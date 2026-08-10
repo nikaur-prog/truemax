@@ -187,6 +187,23 @@ function aggregateZ(zs: number[], weights: number[], rho: number): number {
 // off 5.0 and exaggerate the spread. AGG_NORM is measured directly from the
 // population reference set (tools/normalize.mjs), so "5.0 = 50th percentile"
 // holds by construction rather than by assumption.
+// Continue the quantile mapping past either end at the slope of the outer
+// quartile, so faces beyond the reference population keep separating from
+// each other instead of piling onto one score.
+function tailZ(z: number, q: number[], last: number): number {
+  const hiP = 1 - 0.5 / (last + 1);
+  const loP = 0.5 / (last + 1);
+  const qi = Math.max(1, Math.round(last * 0.25)); // quartile anchor
+  if (z >= q[last]) {
+    const span = q[last] - q[last - qi] || 1e-9;
+    const slope = (probit(hiP) - probit(1 - qi / last)) / span;
+    return probit(hiP) + (z - q[last]) * Math.max(0.2, slope);
+  }
+  const span = q[qi] - q[0] || 1e-9;
+  const slope = (probit(qi / last) - probit(loP)) / span;
+  return probit(loP) - (q[0] - z) * Math.max(0.2, slope);
+}
+
 function normalizeAgg(
   z: number,
   sex: Sex,
@@ -201,10 +218,22 @@ function normalizeAgg(
   // z. Deliberately NOT a mean/SD rescale: the aggregate has heavy tails, and
   // treating it as normal is what pushed top scores to 9+.
   const last = q.length - 1;
+  // Outside the reference range, EXTRAPOLATE rather than clamp.
+  //
+  // Clamping here was a real defect: every face above the population maximum
+  // collapsed onto one percentile, which mapped to exactly 7.6. Nine of the
+  // twenty-seven faces in the consensus-attractive set scored 7.6 — not a
+  // coincidence, the ceiling. It destroyed discrimination in precisely the
+  // range this product's audience cares about, and no amount of genuine
+  // structural advantage could ever show up as a higher number.
+  //
+  // The slope is taken from the quartile-to-max span rather than the final
+  // bin. The top two quantiles of a 117-person reference sit very close
+  // together, so using that bin as the scale made the extrapolation explode:
+  // a face slightly past the maximum would have shot to 9.9.
+  if (z >= q[last] || z <= q[0]) return tailZ(z, q, last);
   let pct: number;
-  if (z <= q[0]) pct = 0.5 / (last + 1);
-  else if (z >= q[last]) pct = 1 - 0.5 / (last + 1);
-  else {
+  {
     let i = 0;
     while (i < last && z > q[i + 1]) i++;
     const span = q[i + 1] - q[i] || 1e-9;
@@ -240,6 +269,10 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
   const ratioZ = aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]), RHO_PILLARS);
   const blended = shapeZ == null ? ratioZ : W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;
+  // Recorded so the calibration harness can decompose where score variance
+  // between two photos of the same face actually comes from.
+  rawZ["blend:shape"] = shapeZ ?? NaN;
+  rawZ["blend:ratio"] = ratioZ;
   const overallZ = normalizeAgg(blended, sex, "overall", rawZ);
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {
