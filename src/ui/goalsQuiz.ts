@@ -57,10 +57,10 @@ const GOALS_STEP: Step = {
   id: "goals",
   kicker: "GOALS",
   question: "What are you actually trying to change?",
-  note: "Pick as many as apply. This reorders your plan so the levers you care about come first — it never changes a single measurement.",
+  note: "Pick as many as apply. This reorders your plan so the levers you care about come first. It never changes a single measurement.",
   render: () =>
     `<div class="q-grid">${GOALS.map((g) => chip(g.label, g.id, g.blurb)).join("")}</div>
-     <p class="q-foot">Skin, teeth and muscle aren't things a face mesh can measure. Pick them anyway — they'll appear in your plan labelled honestly as unmeasured.</p>`,
+     <p class="q-foot">Skin, teeth and muscle aren't things a face mesh can measure. Pick them anyway, and they'll appear in your plan labelled honestly as unmeasured.</p>`,
   pick: (k, p) => {
     p.goals = toggleIn(p.goals, k);
   },
@@ -71,7 +71,7 @@ const BOUNDARIES_STEP: Step = {
   id: "quiet",
   kicker: "BOUNDARIES",
   question: "Anything you'd rather I didn't write about?",
-  note: "Optional, and it changes nothing about the analysis. Every number is still measured and still shown — a scanner that quietly skipped things would be worthless. This only stops the written plan from making a topic into a project.",
+  note: "Optional, and it changes nothing about the analysis. Every number is still measured and still shown, because a scanner that quietly skipped things would be worthless. This only stops the written plan from making a topic into a project.",
   render: () =>
     `<div class="q-grid two">${QUIET_TOPICS.map((t) => chip(t.label, t.region)).join("")}</div>
      <p class="q-foot">You can change this any time from your plan.</p>`,
@@ -91,7 +91,7 @@ const ADVICE_STEP: Step = {
        ${chip("Food and drink", "adv:diet", "Body fat, sodium, alcohol")}
        ${chip("Sleep and habits", "adv:lifestyle", "Rest, posture, routine")}
      </div>
-     <p class="q-foot">Nothing here is medical advice, and there is nothing to buy — no supplements, no procedures, ever.</p>`,
+     <p class="q-foot">Nothing here is medical advice, and there is nothing to buy: no supplements, no procedures, ever.</p>`,
   pick: (k, p) => {
     const c = k.slice(4) as AdviceChannel;
     p.advice[c] = !p.advice[c];
@@ -114,7 +114,7 @@ const DIET_STEP: Step = {
        ${chip("Dairy-free", "dairy-free")}
        ${chip("No shellfish", "no-shellfish")}
      </div>
-     <p class="q-foot">Nothing on your plan is a supplement, a pill or a calorie target — food appears as facts about food, and that is all.</p>`,
+     <p class="q-foot">Nothing on your plan is a supplement, a pill or a calorie target. Food appears as facts about food, and that is all.</p>`,
   pick: (k, p) => {
     p.diet = toggleIn(p.diet, k);
   },
@@ -129,7 +129,7 @@ const SKIN_STEP: Step = {
   id: "skin",
   kicker: "SKIN",
   question: "What would you call the problem?",
-  note: "You tell us — the scan can't. It measures how evenly your face reflects light, and that cannot tell breakouts from eczema from rosacea. Your answer only decides which over-the-counter options are worth showing you.",
+  note: "You tell us, because the scan can't. It measures how evenly your face reflects light, and that cannot tell breakouts from eczema from rosacea. Your answer only decides which over-the-counter options are worth showing you.",
   when: (p) => p.goals.includes("skin"),
   render: () =>
     `<div class="q-grid two">${SKIN_CONCERNS.map((c) => chip(c.label, c.id, c.blurb)).join("")}</div>

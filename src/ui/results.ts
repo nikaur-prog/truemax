@@ -365,7 +365,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
 // cannot drift apart in either wording or restraint.
 function celebCard(matches: ReturnType<typeof regionMatches>): string {
   if (!matches.length) {
-    return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point — a flattering comparison you did not earn would make every other number worth less.</p>`;
+    return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point: a flattering comparison you did not earn would make every other number worth less.</p>`;
   }
   return matches
     .map(

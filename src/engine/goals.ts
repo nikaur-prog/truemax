@@ -37,7 +37,7 @@ export const GOALS: GoalDef[] = [
   {
     id: "bodyfat",
     label: "Lean out",
-    blurb: "Lower body fat — the single largest non-surgical lever on the face",
+    blurb: "Lower body fat, the single largest non-surgical lever on the face",
     metrics: ["gonialProxy", "jawCheekRatio", "cheekboneHeight", "fwhr", "chinWidthRatio"],
     regions: ["jaw", "midface", "chin"],
     measurable: true,
@@ -77,7 +77,7 @@ export const GOALS: GoalDef[] = [
   {
     id: "grooming",
     label: "Grooming",
-    blurb: "Brow shape, beard line, hair — the fastest-moving numbers here",
+    blurb: "Brow shape, beard line, hair: the fastest-moving numbers here",
     metrics: ["browPosition", "browTilt", "lipHeightLowerThird"],
     regions: ["eyes", "lips"],
     measurable: true,

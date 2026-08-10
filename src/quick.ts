@@ -74,7 +74,7 @@ initLandmarker()
     });
   })
   .catch(() => {
-    el.engine.textContent = "ENGINE FAILED TO LOAD — REFRESH";
+    el.engine.textContent = "ENGINE FAILED TO LOAD · REFRESH";
     el.engine.classList.add("error");
   });
 
@@ -248,7 +248,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     })}</div>
 
     <p class="q-foot">
-      Front view only — chin projection, jaw angle and facial convexity are not in this number.
+      Front view only. Chin projection, jaw angle and facial convexity are not in this number.
       Two photos of one face differ by about 1.3 points, so treat one scan as one reading.
     </p>
 

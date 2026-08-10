@@ -290,7 +290,7 @@ export function checkSideFrame(
     add(
       (PROFILE_YAW - Math.abs(pose.yaw)) / PROFILE_YAW,
       "Keep turning",
-      "All the way to a full profile — one ear to the lens, nose in silhouette",
+      "All the way to a full profile: one ear to the lens, nose in silhouette",
     );
   }
   if (!lm && !turned) {
@@ -303,14 +303,14 @@ export function checkSideFrame(
   add(
     (SHARP_BLOCK - stats.sharpness) / SHARP_BLOCK,
     "Can't focus",
-    "Give the lens a wipe — the image is too smeared to measure",
+    "Give the lens a wipe. The image is too smeared to measure",
   );
 
   if (!problems.length) {
     return {
       ready: true,
       hint: "Hold still",
-      detail: "Full profile — chin, nose and brow all in silhouette",
+      detail: "Full profile: chin, nose and brow all in silhouette",
       status: "green",
       progress: 1,
       gaze: null,
@@ -425,7 +425,7 @@ export function checkFrame(
   add(
     (SHARP_BLOCK - stats.sharpness) / SHARP_BLOCK,
     "Can't focus on your face",
-    "Give the lens a wipe — the image is too smeared to measure",
+    "Give the lens a wipe. The image is too smeared to measure",
   );
   add((q.smileScore - SMILE_OK) / SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
   // A blocking problem like any other, so it sorts against the rest by how far
@@ -446,9 +446,9 @@ export function checkFrame(
           detail: "Frames sit right across the eye and brow measurements",
         }
       : !gates.sharp
-        ? { hint: "A bit soft", detail: "More light on your face will sharpen it — you can still shoot" }
+        ? { hint: "A bit soft", detail: "More light on your face will sharpen it, but you can still shoot" }
         : !gates.gaze
-          ? { hint: "Look at the lens", detail: "Framing is good — your eyes are off to one side" }
+          ? { hint: "Look at the lens", detail: "Framing is good, but your eyes are off to one side" }
           : null;
     return advisory
       ? { ready: true, ...advisory, status: "amber", progress: 1, gaze, pose, gates }

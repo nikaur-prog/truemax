@@ -66,11 +66,11 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
 
   const issues: string[] = [];
   if (Math.abs(yawDeg) > YAW_TOLERANCE_DEG)
-    issues.push("Head is turned far enough that some landmarks are hidden — face the camera more directly");
+    issues.push("Head is turned far enough that some landmarks are hidden. Face the camera more directly");
   if (Math.abs(pitchDeg) > PITCH_TOLERANCE_DEG)
-    issues.push("Head is tilted steeply up/down — keep it level for the cleanest read");
-  if (!largeEnough) issues.push("Face is small in frame — move closer or crop tighter");
-  if (!neutralExpression) issues.push("Smiling detected — expression shifts mouth and jaw measurements");
+    issues.push("Head is tilted steeply up/down. Keep it level for the cleanest read");
+  if (!largeEnough) issues.push("Face is small in frame. Move closer or crop tighter");
+  if (!neutralExpression) issues.push("Smiling detected. Expression shifts mouth and jaw measurements");
 
   return {
     faceFound: true,

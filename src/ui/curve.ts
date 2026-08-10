@@ -193,7 +193,7 @@ export function curveLegend(): string {
     <span><i class="k-tick"></i>each tick = 5% of the reference set</span>
     <span><i class="k-you"></i>you</span>
   </p>
-  <p class="curve-note">Drawn from the measured reference distribution, not a textbook bell — where the ticks crowd together is where real faces crowd together, and where they spread out is where the sample thins.</p>`;
+  <p class="curve-note">Drawn from the measured reference distribution, not a textbook bell. Where the ticks crowd together is where real faces crowd together, and where they spread out is where the sample thins.</p>`;
 }
 
 // Fallback for aggregates with no quantile table (side-profile metrics, and

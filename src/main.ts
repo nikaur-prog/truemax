@@ -185,12 +185,12 @@ document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() =
 
 initLandmarker()
   .then(() => {
-    el.engineStatus.textContent = "ENGINE READY — 478-POINT MODEL LOADED";
+    el.engineStatus.textContent = "ENGINE READY · 478-POINT MODEL LOADED";
     el.engineStatus.classList.add("ready");
   })
   .catch((err) => {
     console.error(err);
-    el.engineStatus.textContent = "ENGINE FAILED TO LOAD — REFRESH TO RETRY";
+    el.engineStatus.textContent = "ENGINE FAILED TO LOAD · REFRESH TO RETRY";
     el.engineStatus.classList.add("error");
   });
 
@@ -220,7 +220,7 @@ const HINT_HOLD_MS = 3200;
 
 async function openCamera(): Promise<void> {
   if (!isSupported()) {
-    el.camHintDetail.textContent = "This browser can't open a camera — upload a photo instead.";
+    el.camHintDetail.textContent = "This browser can't open a camera, so upload a photo instead.";
     return;
   }
   const desktop = !matchMedia("(pointer: coarse)").matches;
@@ -228,7 +228,7 @@ async function openCamera(): Promise<void> {
   resetGlassesOverride();
   el.camHintTitle.textContent = "Allow camera access";
   el.camHintDetail.textContent = desktop
-    ? "Your browser will ask at the top of the window — choose Allow"
+    ? "Your browser will ask at the top of the window. Choose Allow"
     : "Tap Allow when your browser asks";
   try {
     cam = await startCamera({
@@ -278,7 +278,7 @@ async function openCamera(): Promise<void> {
     el.btnCamera.disabled = true;
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
-    el.camHintDetail.textContent = "Permission was denied — you can still upload a photo.";
+    el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";
   }
 }
 
@@ -354,7 +354,7 @@ const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
 
 async function handleFile(file: File): Promise<void> {
   if (!isReady()) {
-    el.engineStatus.textContent = "ENGINE STILL LOADING — ONE MOMENT";
+    el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
     return;
   }
   let image;
