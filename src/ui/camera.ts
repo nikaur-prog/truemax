@@ -158,21 +158,6 @@ function faceBox(result: ReturnType<typeof detectVideo>) {
   return { x: x0, y: y0, w: Math.max(0.05, x1 - x0), h: Math.max(0.05, y1 - y0) };
 }
 
-// Feature contours, drawn a weight below the face oval.
-let FEATURES: Array<{ start: number; end: number }> | null = null;
-function features() {
-  return (FEATURES ??= [
-    ...FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
-    ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
-    ...FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
-    ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
-    ...FaceLandmarker.FACE_LANDMARKS_LIPS,
-  ]);
-}
-const NOSE_LINES: Array<[number, number]> = [
-  [168, 6], [6, 197], [197, 195], [195, 5], [5, 4], [4, 1],
-  [1, 98], [1, 327], [98, 2], [327, 2], [48, 98], [278, 327],
-];
 
 // The preview is `object-fit: cover`, so a 4:3 camera inside a 3:4 frame is
 // centre-cropped. Mapping normalized landmarks straight to canvas pixels
@@ -228,6 +213,13 @@ function drawGuide(
   drawCross(ctx, P, lm, check, colour);
 }
 
+// Three elements, and no more: the outline proves it found your face, the dots
+// prove it is still tracking, the cross tells you how to move. Feature contours
+// on the eyes, brows and lips were the fourth thing — they sat a little wide of
+// the real eye opening (MediaPipe's eye ring follows the orbit, not the lid),
+// so they read as broken tracking even while the measurements underneath were
+// correct. An overlay that looks wrong costs more than it adds.
+
 // ---------------------------------------------------------------------------
 // The mesh, rendered with depth.
 //
@@ -238,7 +230,7 @@ function drawGuide(
 // makes the whole cloud rotate. Same trick Face ID's setup animation uses.
 // ---------------------------------------------------------------------------
 
-const CLOUD_STEP = 2; // every Nth landmark — the full 478 is soup
+const CLOUD_STEP = 4; // every Nth landmark — denser than this is soup, not tracking
 
 function drawCloud(
   ctx: CanvasRenderingContext2D,
@@ -261,9 +253,9 @@ function drawCloud(
     // 1 = nearest the lens, 0 = furthest. MediaPipe's z grows away from camera.
     const near = 1 - ((p.z ?? 0) - zMin) / span;
     const s = P(p.x, p.y);
-    ctx.fillStyle = `rgba(${tint},${(0.3 + near * 0.6).toFixed(3)})`;
+    ctx.fillStyle = `rgba(${tint},${(0.28 + near * 0.5).toFixed(3)})`;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, 0.9 + near * 1.5, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, 0.85 + near * 1.15, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -304,8 +296,8 @@ function drawOutline(
   // Pulse ring: the outline traced again, wider and fading, while moving
   if (pulseAmt > 0.02) {
     ctx.save();
-    ctx.strokeStyle = `rgba(100,210,255,${(pulseAmt * 0.4).toFixed(3)})`;
-    ctx.lineWidth = 2 + pulseAmt * 7;
+    ctx.strokeStyle = `rgba(100,210,255,${(pulseAmt * 0.22).toFixed(3)})`;
+    ctx.lineWidth = 2 + pulseAmt * 5;
     ctx.lineJoin = "round";
     ctx.beginPath();
     for (const c of oval) {
@@ -319,11 +311,11 @@ function drawOutline(
   }
 
   ctx.save();
-  ctx.strokeStyle = `rgba(${tint},0.92)`;
-  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = `rgba(${tint},0.8)`;
+  ctx.lineWidth = 1.6;
   ctx.lineJoin = "round";
-  ctx.shadowColor = "rgba(100,210,255,0.65)";
-  ctx.shadowBlur = 8;
+  ctx.shadowColor = "rgba(100,210,255,0.5)";
+  ctx.shadowBlur = 6;
   ctx.beginPath();
   for (const c of oval) {
     const a = P(lm[c.start].x, lm[c.start].y);
@@ -333,26 +325,6 @@ function drawOutline(
   }
   ctx.stroke();
 
-  // Features, one weight down: enough to show the mesh is tracking eyes, brows
-  // and mouth specifically, without competing with the face outline.
-  ctx.strokeStyle = `rgba(${tint},0.6)`;
-  ctx.lineWidth = 1.1;
-  ctx.shadowBlur = 4;
-  ctx.beginPath();
-  for (const c of features()) {
-    const a = P(lm[c.start].x, lm[c.start].y);
-    const b = P(lm[c.end].x, lm[c.end].y);
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-  }
-  for (const [a, b] of NOSE_LINES) {
-    if (!lm[a] || !lm[b]) continue;
-    const pa = P(lm[a].x, lm[a].y);
-    const pb = P(lm[b].x, lm[b].y);
-    ctx.moveTo(pa.x, pa.y);
-    ctx.lineTo(pb.x, pb.y);
-  }
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -370,27 +342,18 @@ function drawOutline(
 // measurements, and no amount of head-position coaching catches it.
 // ---------------------------------------------------------------------------
 
-const TOL_X = 0.1; // matches the `centered` gate in captureGuide
-const TOL_Y = 0.12;
-
 function drawTarget(ctx: CanvasRenderingContext2D, P: Mapper, check: FrameCheck): void {
+  // Just four ticks at dead centre. The dashed tolerance box that used to be
+  // here was accurate and still wrong: a rectangle floating over someone's
+  // chest is one more thing to decode when the traffic light already answers
+  // "am I there yet" in a glance.
   const c = P(0.5, 0.5);
-  const rx = TOL_X * P.dw;
-  const ry = TOL_Y * P.dh;
-  const lit = check.gates.centered;
   ctx.save();
-  ctx.strokeStyle = lit ? "rgba(143,243,224,0.5)" : "rgba(255,255,255,0.26)";
+  ctx.strokeStyle = check.gates.centered ? "rgba(143,243,224,0.5)" : "rgba(255,255,255,0.26)";
   ctx.lineWidth = 1;
-  ctx.setLineDash([5, 6]);
-  ctx.beginPath();
-  ctx.roundRect(c.x - rx, c.y - ry, rx * 2, ry * 2, 14);
-  ctx.stroke();
-  // Centre ticks — a full cross here would compete with the live one
-  ctx.setLineDash([]);
-  ctx.strokeStyle = lit ? "rgba(143,243,224,0.75)" : "rgba(255,255,255,0.45)";
   ctx.beginPath();
   for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-    ctx.moveTo(c.x + dx * 7, c.y + dy * 7);
+    ctx.moveTo(c.x + dx * 8, c.y + dy * 8);
     ctx.lineTo(c.x + dx * 15, c.y + dy * 15);
   }
   ctx.stroke();

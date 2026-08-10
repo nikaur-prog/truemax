@@ -45,18 +45,24 @@
               <span id="reel-name"></span>
             </div>
           </div>
-        </div>
 
-        <div class="cam-hint" id="cam-hint">
-          <b id="cam-hint-title">Take a photo, or upload one</b>
-          <span id="cam-hint-detail">The camera preview will guide your framing</span>
+          <!-- Guidance rides on top of the feed rather than under it, so the
+               instruction and the thing it is about are in one glance and the
+               frame keeps its height. -->
+          <div class="cam-hud">
+            <div class="cam-hint" id="cam-hint">
+              <b id="cam-hint-title">Take a photo, or upload one</b>
+              <span id="cam-hint-detail">The camera preview will guide your framing</span>
+            </div>
+            <div class="hud-bottom">
+              <div class="cam-light hidden" id="cam-light">
+                <span class="lamp" id="cam-lamp"></span>
+                <span class="lamp-track"><i id="cam-lamp-fill"></i></span>
+              </div>
+              <div class="cam-gates hidden" id="cam-gates"></div>
+            </div>
+          </div>
         </div>
-
-        <div class="cam-light hidden" id="cam-light">
-          <span class="lamp" id="cam-lamp"></span>
-          <span class="lamp-track"><i id="cam-lamp-fill"></i></span>
-        </div>
-        <div class="cam-gates hidden" id="cam-gates"></div>
 
         <div class="cam-actions">
           <button class="btn pri shutter" id="btn-camera">Use camera</button>
