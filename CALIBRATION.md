@@ -931,3 +931,52 @@ face — it is 60% noise. Do not ship this to paying users.
 
 Harness: `scratchpad/score-audit.mjs` (scores both sets) and
 `scratchpad/separation.mjs` (computes the table above).
+
+## Next: time-aware deltas, and what the numbers already say about them
+
+Requested: when someone rescans, read the gap between scans and interpret the
+change accordingly — two days apart is probably lighting or water retention, two
+weeks apart might be real.
+
+The thresholds for this do not need inventing. They are already measured, and
+they are the same numbers that make weekly tracking hard:
+
+```
+within-person SD across photos    1.32   (repeat photos of the same person)
+between-person SD                 1.20   (different people)
+```
+
+So the honest bands, before any structural change is claimed:
+
+- **A delta under ~1.3 is inside single-photo noise.** At two days apart it
+  should be stated as capture variance outright — lighting, expression, water
+  retention, camera. Not hedged: said.
+- **Above that, and weeks apart**, it is worth calling a change — but the copy
+  still has to name capture as the leading alternative, because 1.32 is an
+  upper bound measured on photos spanning years of real ageing, not a floor.
+- **Direction matters less than magnitude.** A -0.4 at three days is not a
+  decline; it is the same measurement twice.
+
+This is the one place the stability problem becomes a feature rather than a
+liability: an app that says "that is noise, ignore it" when its competitors say
+"you dropped 0.4, buy our fix" is exactly the positioning. But it only works if
+the bands come from the measurement. Hard-coding "2 days = lighting, 2 weeks =
+real" without reference to the SD would be the same invention we removed from
+the blur gate and the population curve.
+
+`history.ts` already stores scans and computes `daysAgo`, so the data is there.
+
+### The Coach Max profile idea changes the privacy posture
+
+Also raised: Max remembering what someone said they did, building a picture week
+over week, asking "you changed this much — what did you do differently?".
+
+That is a good product idea and a completely different security position. Today
+the app has no backend, no accounts and no uploads, so there is nothing to
+breach. A coach that recalls someone's daily habits across weeks means stored
+personal data about minors and adults describing their bodies and routines.
+
+If it gets built: keep it on-device for as long as possible (the profile already
+lives in localStorage), and if it must sync, store the CONVERSATION SUMMARY and
+the scan numbers — never the photographs. A breach of a face-photo database
+ends the company; a breach of a numbers table is an incident.
