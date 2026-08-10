@@ -31,12 +31,6 @@
         <span class="sub-note">Nothing is uploaded. It all runs on your device.</span>
       </p>
 
-      <div class="sex-picker" role="radiogroup" aria-label="Reference population">
-        <button class="sex-option selected" data-sex="auto" role="radio" aria-checked="true">Auto</button>
-        <button class="sex-option" data-sex="male" role="radio" aria-checked="false">Male</button>
-        <button class="sex-option" data-sex="female" role="radio" aria-checked="false">Female</button>
-      </div>
-
       <!-- Capture stage: live preview when the camera is on, oval prompt when not -->
       <div class="stage" id="capture-stage">
         <div class="oval-frame" id="oval-frame">
@@ -70,6 +64,11 @@
         </div>
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
+
+      <button class="q-strip" id="q-open">
+        <i></i><b>Personalise your plan</b>
+        <span>4 quick questions · optional</span>
+      </button>
 
       <div class="hints">
         <div><i></i>Look straight at the lens</div>

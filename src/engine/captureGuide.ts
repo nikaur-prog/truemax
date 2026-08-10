@@ -1,5 +1,7 @@
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { assessQuality } from "./quality.ts";
+import { estimateGaze } from "./gaze.ts";
+import type { Gaze } from "./gaze.ts";
 
 // ---------------------------------------------------------------------------
 // Live capture guidance. The scan is only as good as the photo, so instead of
@@ -22,6 +24,9 @@ export interface FrameCheck {
   // being told 'move higher' with no feedback until it snaps is frustrating.
   status: CaptureStatus;
   progress: number; // 0..1 toward fixing the current limiting problem
+  // Where the eyes are pointed, for the on-face crosshair. Null when the
+  // irises aren't tracked (blinks, heavy occlusion).
+  gaze: Gaze | null;
   // Individual gates, for the checklist UI
   gates: {
     face: boolean;
@@ -32,6 +37,7 @@ export interface FrameCheck {
     light: boolean;
     sharp: boolean;
     neutral: boolean;
+    gaze: boolean;
   };
 }
 
@@ -47,6 +53,19 @@ const BRIGHT = 232;
 // entire frame at 96px blurred everything before measuring it, so real webcam
 // footage read as soft and the gate never lit. Threshold retuned for a crop.
 const SHARP_MIN = 9;
+// Iris offset inside its own eye opening: 0 = down the lens, 1 = at the corner.
+//
+// Calibrated against 216 real portraits (tools/gaze-calibrate.mjs): median
+// 0.088, p90 0.235. The tail is people genuinely looking off-lens, so 0.22
+// flags a real look-away without failing ordinary press-photo eye contact.
+//
+// Deliberately NOT a shutter block. The eyeball turns ~0.14 of this scale per
+// 10° of head yaw, which is inside the yaw the pose gate already permits, so a
+// tighter threshold would fire on people who are looking straight at the lens
+// with their head very slightly turned. The measure catches a genuine
+// look-away; it cannot resolve "screen instead of lens" at arm's length, and
+// gating the shutter on a number that imprecise would just strand people.
+const GAZE_OK = 0.22;
 
 export interface FrameStats {
   luma: number;
@@ -107,6 +126,7 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
     light: false,
     sharp: false,
     neutral: false,
+    gaze: false,
   };
 
   if (!result?.faceLandmarks.length) {
@@ -116,6 +136,7 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
       detail: "Looking for a face…",
       status: "red",
       progress: 0,
+      gaze: null,
       gates,
     };
   }
@@ -123,6 +144,7 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
 
   const q = assessQuality(result);
   const lm = result.faceLandmarks[0];
+  const gaze = estimateGaze(lm);
   let minX = 1;
   let maxX = 0;
   let minY = 1;
@@ -144,6 +166,9 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
   gates.light = stats.luma >= DARK && stats.luma <= BRIGHT;
   gates.sharp = stats.sharpness >= SHARP_MIN;
   gates.neutral = q.smileScore <= SMILE_OK;
+  // A blink loses the irises for a frame or two. Holding the last verdict
+  // instead of failing keeps the light from flickering on every blink.
+  gates.gaze = gaze ? gaze.offset <= GAZE_OK : true;
 
   // Each problem reports how far off it is, expressed as a multiple of its
   // tolerance. 0 = solved, 1 = one whole tolerance out, 2+ = badly off. That
@@ -169,7 +194,19 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
   add((q.smileScore - SMILE_OK) / SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
 
   if (!problems.length) {
-    return { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gates };
+    // Framing is correct, so the shutter opens either way — but if the eyes are
+    // off the lens, say so while there is still a chance to fix it.
+    return gates.gaze
+      ? { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, gates }
+      : {
+          ready: true,
+          hint: "Look at the lens",
+          detail: "Framing is good — your eyes are off to one side",
+          status: "amber",
+          progress: 1,
+          gaze,
+          gates,
+        };
   }
 
   // Coach the worst problem; grade the light by how close it is to solved.
@@ -182,6 +219,7 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
     detail: worst.detail,
     status: progress >= 0.5 ? "amber" : "red",
     progress,
+    gaze,
     gates,
   };
 }

@@ -18,6 +18,8 @@ import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
 import { detectSex } from "./engine/shape.ts";
+import { estimateGaze } from "./engine/gaze.ts";
+import { openQuiz } from "./ui/goalsQuiz.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -55,7 +57,10 @@ const el = {
   mute: document.getElementById("mute")!,
 };
 
-let sexChoice: Sex | "auto" = "auto";
+// The reference population is always inferred from face shape. Asking people
+// to classify themselves before a scan added a decision in front of the only
+// thing that matters (taking the photo), and the shape model is the thing
+// actually doing the work either way.
 let selectedSex: Sex = "male";
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
@@ -90,6 +95,7 @@ let selectedSex: Sex = "male";
     yaw: quality.yawDeg,
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
+    gaze: estimateGaze(res.faceLandmarks[0]),
     // Group shots are the main contaminant in scraped photo sets: the
     // detector locks onto whichever face it finds, which may not be the
     // subject. A face filling little of the frame is the tell.
@@ -116,9 +122,7 @@ let selectedSex: Sex = "male";
 ).__truemaxMeasure;
 
 // The idle frame runs the demo reel — real scans of public-domain portraits.
-// The sex toggle filters WHICH faces play rather than replacing the reel: the
-// reel is the pitch, so it should keep running.
-const reel = mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
+mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 el.ovalFrame.classList.add("showing-reel");
 
 // The idealized silhouette is a framing guide for the camera, not landing art
@@ -128,17 +132,7 @@ function showGuide(sex: Sex): void {
   outline.morphTo(sex);
 }
 
-for (const btn of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
-  btn.addEventListener("click", () => {
-    sexChoice = btn.dataset.sex as Sex | "auto";
-    reel.setFilter(sexChoice);
-    if (sexChoice !== "auto") showGuide(sexChoice);
-    for (const b of document.querySelectorAll<HTMLButtonElement>(".sex-option")) {
-      b.classList.toggle("selected", b === btn);
-      b.setAttribute("aria-checked", String(b === btn));
-    }
-  });
-}
+document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}));
 
 el.mute.addEventListener("click", () => {
   el.mute.textContent = toggleMute() ? "🔇" : "🔊";
@@ -201,16 +195,21 @@ async function openCamera(): Promise<void> {
         el.camLampFill.className = c.status === "green" ? "green" : c.status;
         el.camLampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
         el.ovalFrame.classList.toggle("ready", c.ready);
+        el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
         renderGates(c);
       },
+      onSex: (sex) => showGuide(sex),
     });
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
     // Headline and hints collapse so the preview can take the space — the
     // camera becomes the subject the moment it is granted.
     el.upload.classList.add("camera-live");
-    showGuide(sexChoice === "female" ? "female" : "male");
+    // Starts on the male silhouette and morphs once the shape vote settles —
+    // waiting for the vote would leave the frame empty at the exact moment
+    // someone needs help positioning.
+    showGuide("male");
     el.camLight.classList.remove("hidden");
     el.camGates.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
@@ -224,6 +223,7 @@ async function openCamera(): Promise<void> {
 const GATE_LABELS: Record<string, string> = {
   face: "face", distance: "distance", centered: "centered", level: "level",
   straight: "straight", light: "light", sharp: "sharp", neutral: "neutral",
+  gaze: "eyes on lens",
 };
 
 function renderGates(c: FrameCheck): void {
@@ -355,16 +355,11 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   });
   await reveal.done;
 
-  // Auto mode picks the reference population by shape, then says so — an
-  // unexplained switch would look like a guess.
-  let autoNote = "";
-  if (sexChoice === "auto") {
-    const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
-    selectedSex = guess?.sex ?? "male";
-    autoNote = guess ? `Scored against ${guess.sex} norms (auto-detected)` : "";
-  } else {
-    selectedSex = sexChoice;
-  }
+  // The reference population is picked by shape, then stated — an unexplained
+  // switch would look like a guess.
+  const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
+  selectedSex = guess?.sex ?? "male";
+  const autoNote = guess ? `Scored against ${guess.sex} norms (auto-detected)` : "";
   const report = analyze(landmarks, width, height, selectedSex);
   const delta = compareAndStore(report);
 

@@ -1,5 +1,6 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.ts";
 import { REGION_NAMES } from "../engine/scoring.ts";
+import type { AdviceChannel } from "../engine/goals.ts";
 
 // Deterministic explanation engine. No LLM, no randomness: banded templates
 // with the actual computed numbers interpolated in. Every sentence must
@@ -98,62 +99,92 @@ export function rarityN(pct: number): number {
 // measured number it moves.
 // ---------------------------------------------------------------------------
 
+// Every lever declares which kind of advice it is. Someone who told us to keep
+// food out of it still gets the measurement and still gets told it is fixable —
+// they just don't get the diet paragraph. Suppressing the advice, never the
+// number, is the line this whole product is built on.
 interface Lever {
   title: string;
   tag: string;
+  channel: AdviceChannel;
   body: (m: ScoredMetric, sex: Sex) => string;
+  // Used when that advice channel is switched off
+  neutral: (m: ScoredMetric, sex: Sex) => string;
 }
+
+const neutralCopy = (kind: string) => (m: ScoredMetric, sex: Sex) =>
+  `${m.def.name} measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)} — the ${Math.round(
+    m.def.fixability * 100,
+  )}% of that gap that moves without surgery moves with ${kind}. You asked me to keep those recommendations out, so the number is here and the advice isn't.`;
 
 const LEVERS: Record<string, Lever> = {
   gonialProxy: {
+    channel: "diet",
+    neutral: neutralCopy("composition work"),
     title: "Cut body fat",
     tag: "CORE",
     body: (m, sex) =>
       `Submental and jawline fat blunt the gonial turn. Yours measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)} — composition is the single biggest lever on this number.`,
   },
   jawCheekRatio: {
+    channel: "diet",
+    neutral: neutralCopy("composition work"),
     title: "Debloat protocol",
     tag: "DAILY",
     body: (m, sex) =>
       `Sodium, alcohol and short sleep puff the lower face and drag the measured jaw : cheek ratio (${fmt(m)} vs the ${fmtMean(m, sex)} norm). Two weeks of discipline shows up in this exact number.`,
   },
   cheekboneHeight: {
+    channel: "diet",
+    neutral: neutralCopy("composition work"),
     title: "Body-fat reduction",
     tag: "CORE",
     body: (m) =>
       `Cheek fat pads bury the zygomatic line. Your widest point sits at ${fmt(m)} of eye-to-chin height; leaning out raises where the face visually breaks.`,
   },
   fwhr: {
+    channel: "lifestyle",
+    neutral: neutralCopy("habit and posture work"),
     title: "Composition + posture",
     tag: "CORE",
     body: (m, sex) =>
       `Your fWHR of ${fmt(m)} (${sexNoun(sex)} mean ${fmtMean(m, sex)}) shifts with facial fat and head carriage — both trainable, neither surgical.`,
   },
   browPosition: {
+    channel: "grooming",
+    neutral: neutralCopy("grooming"),
     title: "Brow grooming",
     tag: "LOW-EFFORT",
     body: (m, sex) =>
       `The brow-to-eye gap measures ${fmt(m)} against a ${fmtMean(m, sex)} ${sexNoun(sex)} norm. Shaping the underside of the brow tightens this without touching anything else.`,
   },
   mouthCornerTilt: {
+    channel: "capture",
+    neutral: neutralCopy("capture discipline"),
     title: "Neutral capture discipline",
     tag: "CAPTURE",
     body: (m) =>
       `Corner tilt reads ${fmt(m)} — expression moves this number more than anatomy does. Recapture with a fully neutral mouth before chasing it.`,
   },
   mirrorDeviation: {
+    channel: "lifestyle",
+    neutral: neutralCopy("posture and habit work"),
     title: "Posture + chewing balance",
     tag: "HABIT",
     body: (m) =>
       `Unilateral chewing and forward head posture measurably worsen mirror deviation over time. Yours is ${fmt(m)} of IPD; balancing both sides protects the number.`,
   },
   eyeAspectRatio: {
+    channel: "lifestyle",
+    neutral: neutralCopy("sleep and routine work"),
     title: "Sleep + sodium discipline",
     tag: "DAILY",
     body: (m) =>
       `Periorbital puffiness changes the measured aperture (currently ${fmt(m)}). Consistent sleep and lower sodium restore the true measurement within weeks.`,
   },
   lipHeightLowerThird: {
+    channel: "grooming",
+    neutral: neutralCopy("grooming"),
     title: "Lip-line grooming",
     tag: "LOW-EFFORT",
     body: (m) =>
@@ -164,6 +195,8 @@ const LEVERS: Record<string, Lever> = {
 const DEFAULT_LEVER: Lever = {
   title: "Targeted habit work",
   tag: "HABIT",
+  channel: "lifestyle",
+  neutral: neutralCopy("habit work"),
   body: (m, sex) =>
     `${m.def.name} sits at ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)} — debloating, leaner composition and capture discipline close part of this gap.`,
 };

@@ -10,6 +10,8 @@ import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { fmt, leverFor, rarityN, regionSummary } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
+import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile } from "../engine/goals.ts";
+import { openQuiz } from "./goalsQuiz.ts";
 
 interface Ctx {
   report: Report;
@@ -302,11 +304,24 @@ function showImprove(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
+  const profile = loadProfile();
 
+  // The plan is where someone's answers have to actually bite. Regions they
+  // asked us to leave alone are dropped from the WRITTEN plan — their scores
+  // are still on every other tab, untouched — and the goals they picked pull
+  // their own levers to the front.
   const fixables = r.metrics
     .filter((m) => m.def.fixability >= 0.2 && m.zEff < 0.4)
-    .sort((a, b) => a.zEff - b.zEff)
+    .filter((m) => !isQuiet(m.def.region, profile))
+    .sort((a, b) => a.zEff - goalBoost(a.def.id, profile) - (b.zEff - goalBoost(b.def.id, profile)))
     .slice(0, 4);
+
+  const unmeasured = chosenGoals(profile).filter((g) => !g.measurable);
+  const quietNote = profile.quiet.length
+    ? `<p class="q-foot" style="margin:0 2px 14px">Your plan skips ${profile.quiet
+        .map((q) => REGION_NAMES[q].toLowerCase())
+        .join(", ")} because you asked it to. Every one of those measurements is still on its own tab — nothing was hidden or softened.</p>`
+    : "";
 
   const progress = delta
     ? `<div class="panel"><h4>SINCE YOUR LAST SCAN${delta.daysAgo ? ` · ${delta.daysAgo}D AGO` : ""}</h4>
@@ -326,14 +341,26 @@ function showImprove(): void {
       <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming — no surgery, anywhere.</p></div>
+      ${goalHead(profile)}
+      ${quietNote}
       ${progress}
       ${fixables
         .map((m) => {
           const lever = leverFor(m);
+          const why = goalsTouching(m.def.id, profile);
+          const muted = !profile.advice[lever.channel];
           return `<div class="imp"><b>${lever.title}<em>${REGION_NAMES[m.def.region].toUpperCase()} · ${m.score.toFixed(1)} · ${lever.tag}</em></b>
-          <p>${lever.body(m, r.sex)}</p>
+          <p>${muted ? lever.neutral(m, r.sex) : lever.body(m, r.sex)}</p>
+          ${why.length ? `<span class="because">Because you chose ${why.map((g) => g.label.toLowerCase()).join(" + ")}</span>` : ""}
           <span class="why">MOVES ${m.def.pillar.toUpperCase()} →</span></div>`;
         })
+        .join("")}
+      ${unmeasured
+        .map(
+          (g) => `<div class="imp"><b>${g.label}<em>NOT MEASURED · YOUR GOAL</em></b>
+        <p>${g.blurb}. Nothing in a 478-point face mesh reads this, so TrueMax will never hand you a number for it or claim your score moved because of it. It's on your list because you put it there.</p>
+        <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
+        )
         .join("")}
       <div class="navrow"><button class="btn gho" id="btn-back">Back to results</button>
         <button class="btn pri" id="btn-again">Scan another face</button></div>
@@ -341,6 +368,29 @@ function showImprove(): void {
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
+  const edit = document.getElementById("goal-edit");
+  if (edit) edit.onclick = () => openQuiz(() => showImprove());
+
+  // First time through, ask before writing any coaching copy — that is the
+  // whole point of asking what to leave alone.
+  if (!profile.done) openQuiz(() => showImprove());
+}
+
+function goalHead(p: ReturnType<typeof loadProfile>): string {
+  const goals = chosenGoals(p);
+  if (!p.done) return "";
+  return `<div class="goal-head">
+    <h4>YOUR PLAN</h4>
+    ${p.endGoal ? `<div class="endgoal">“${p.endGoal}”</div>` : ""}
+    <div class="goal-tags">
+      ${goals.length
+        ? goals.map((g) => `<span class="goal-tag">${g.label}</span>`).join("")
+        : `<span class="goal-tag mut">No goals set — showing your weakest fixable numbers</span>`}
+      ${p.sleepHours ? `<span class="goal-tag mut">${p.sleepHours}h sleep</span>` : ""}
+      ${p.quiet.length ? `<span class="goal-tag mut">${p.quiet.length} topic${p.quiet.length > 1 ? "s" : ""} off-limits</span>` : ""}
+    </div>
+    <button class="goal-edit" id="goal-edit">Edit your goals</button>
+  </div>`;
 }
 
 function progressCopy(d: ScanDelta): string {

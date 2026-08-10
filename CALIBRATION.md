@@ -199,3 +199,31 @@ re-deriving distributions afterwards (same pipeline).
   cannot see hair) — it is labeled "est." and weighted low.
 - **Gonial angularity** is a 2D frontal projection, not the true side-view
   gonial angle (that arrives with the side-profile step).
+
+## Gaze tolerance
+
+`tools/gaze-calibrate.mjs` measures iris offset within the eye opening across
+the 216 reference portraits that pass the portrait filter. Those are people
+looking at a photographer's lens, so their distribution defines what "looking
+at the camera" measures as:
+
+```
+offset  p50 0.088  p75 0.143  p90 0.235  p95 0.297  max 0.534
+```
+
+`GAZE_OK = 0.22` sits at roughly p88. The tail above it is genuine look-away
+(Michael B. Jordan at 0.53 is turned toward something off-camera), not
+measurement noise.
+
+**This gate is advisory and does not block the shutter**, for a reason worth
+recording: the eyeball rotates about 0.14 on this scale per 10° of head yaw,
+and the pose gate already permits ±10°. So someone looking straight down the
+lens with a slightly turned head can read 0.14, while someone at arm's length
+looking at their own image on screen instead of the lens is only about 10° off
+— also ≈0.14. The measure cannot separate those two cases. It reliably catches
+a real look-away and it drives the crosshair's gaze pip, which is honest
+feedback; making it a hard gate would strand people on a number that imprecise.
+
+Closing this properly means subtracting the head-yaw contribution from the iris
+offset, which needs a sign convention validated against live footage rather
+than stills.
