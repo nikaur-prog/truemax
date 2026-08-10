@@ -1362,3 +1362,24 @@ hint costs a glance, but a wrong block costs someone the use of the app with no
 way to comply, because there is nothing on their face to remove. The capture
 screen shows "I'm not wearing glasses" only while that block is what is stopping
 them. Requiring removal and stranding people are different things.
+
+## The reel generator's scan sequence
+
+The quick page now plays three stages instead of showing a card: a scan line
+down the full-bleed photo, then the landmark reveal, then the photo shrinks to
+the top of the screen while the score cards drop out of the space it vacates,
+staggered into reading order.
+
+It is sequenced in script rather than as one CSS animation because the middle
+stage is a canvas reveal that has to be started and awaited — and because it has
+to be skippable. Switching reference population re-scores and re-renders, and
+replaying the theatre on every toggle would be unwatchable, so only the first
+render after a scan animates.
+
+The photo collapses by `max-height`, not by `transform`. A scaled element keeps
+its layout box, so the cards would have slid underneath it rather than following
+it up the screen.
+
+Verified by sampling the sequence at four points and asserting the ORDER, not
+just the end state: scan line running and no dots at 0.7s, dots painted by 3.1s,
+photo shrunk from 597px to 317px and cards at full opacity by 5.4s.

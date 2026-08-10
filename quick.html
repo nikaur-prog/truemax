@@ -42,8 +42,22 @@
         <p class="engine-status" id="q-engine">Loading analysis engine…</p>
       </section>
 
-      <!-- Result -->
-      <section id="q-result" class="hidden"></section>
+      <!-- Result.
+           Three stages play here rather than the card simply appearing: a scan
+           line down the photo, then the landmark dots, then the photo shrinks to
+           the top while the score cards drop out of it. It is built to be
+           filmed — the point of this page is the fifteen seconds someone
+           records, and a result that pops into existence has nothing to record. -->
+      <section id="q-result" class="hidden">
+        <div class="q-stage" id="q-stage">
+          <div class="q-photo" id="q-photo">
+            <canvas id="q-shot"></canvas>
+            <canvas id="q-dots"></canvas>
+            <div class="q-scanline" id="q-scanline"></div>
+          </div>
+          <div class="q-cards" id="q-cards"></div>
+        </div>
+      </section>
     </main>
     <script type="module" src="/src/quick.ts"></script>
   </body>

@@ -9,6 +9,7 @@ import type { CameraHandle } from "./ui/camera.ts";
 import { curveSVG } from "./ui/curve.ts";
 import { rankShort, rarityText } from "./ui/templates.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
+import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +49,16 @@ const el = {
   pick: document.getElementById("q-pick") as HTMLButtonElement,
   file: document.getElementById("q-file") as HTMLInputElement,
   engine: document.getElementById("q-engine")!,
+  stage: document.getElementById("q-stage")!,
+  shot: document.getElementById("q-shot") as HTMLCanvasElement,
+  dots: document.getElementById("q-dots") as HTMLCanvasElement,
+  cards: document.getElementById("q-cards")!,
 };
+
+// Stage timings. Long enough to read on camera, short enough that nobody
+// reaches for the skip they do not have.
+const SWEEP_MS = 2500; // two passes of the scan line
+const DOTS_HOLD_MS = 550; // beat after the dots land, before the photo moves
 
 let cam: CameraHandle | null = null;
 let ready = false;
@@ -152,30 +162,60 @@ async function run(src: HTMLCanvasElement): Promise<void> {
   // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
   const lm = det.faceLandmarks[0];
   last = { lm, w: src.width, h: src.height, photo: src };
-  show(storedSex() ?? "male");
+  show(storedSex() ?? "male", true);
 }
 
 // The last analysed photo, kept so switching reference population re-scores it
 // rather than making someone shoot again.
 let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
 
-function show(sex: Sex): void {
+function show(sex: Sex, animate = false): void {
   if (!last) return;
   storeSex(sex);
-  render(analyze(last.lm, last.w, last.h, sex), last.photo);
+  render(analyze(last.lm, last.w, last.h, sex), last.photo, animate);
 }
 
-function render(r: Report, photo: HTMLCanvasElement): void {
+// Scan line, then landmarks, then the photo gives up its space to the cards.
+//
+// Sequenced in script rather than as one long CSS animation because the middle
+// stage is a canvas reveal that has to be started and awaited, and because the
+// whole thing has to be skippable when someone switches reference population —
+// re-running the theatre on every toggle would be unwatchable.
+async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> {
+  void r;
+  el.stage.classList.remove("open");
+  el.stage.classList.add("scanning");
+  await wait(SWEEP_MS);
+  el.stage.classList.remove("scanning");
+
+  if (last) {
+    const reveal = drawLandmarksAnimated(el.dots, last.lm, photo.width, photo.height);
+    await reveal.done;
+  }
+  await wait(DOTS_HOLD_MS);
+
+  // The photo shrinks and the cards drop out of the space it vacates.
+  el.stage.classList.add("open");
+}
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   el.capture.classList.add("hidden");
   el.result.classList.remove("hidden");
+
+  // The photo lives in its own element now, painted once, so the sequence can
+  // move it without the card markup being rebuilt underneath it.
+  el.shot.width = photo.width;
+  el.shot.height = photo.height;
+  el.shot.getContext("2d")!.drawImage(photo, 0, 0);
 
   const regions = [...r.regions].sort((a, b) => b.score - a.score);
   const best = regions[0];
   const worst = regions[regions.length - 1];
 
-  el.result.innerHTML = `
+  el.cards.innerHTML = `
     <div class="q-hero">
-      <img class="q-shot" alt="" src="${photo.toDataURL("image/jpeg", 0.86)}" />
       <div class="q-headline">
         <button class="q-klabel q-switch" id="q-sex" type="button"
           title="Switch the reference population">FRONT ONLY · VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button>
@@ -214,8 +254,19 @@ function render(r: Report, photo: HTMLCanvasElement): void {
 
     <div class="q-actions"><button class="btn pri" id="q-again">Scan again</button></div>`;
 
+  // Stagger index for the drop, so the cards arrive in reading order rather
+  // than all at once.
+  [...el.cards.children].forEach((c, i) => (c as HTMLElement).style.setProperty("--i", String(i)));
+
+  if (animate) void playSequence(r, photo);
+  else el.stage.classList.add("open");
+
   document.getElementById("q-sex")!.onclick = () => show(r.sex === "male" ? "female" : "male");
   document.getElementById("q-again")!.onclick = () => {
+    // Reset the stage, or the next scan starts already open with last scan's
+    // landmarks still painted over the new photo.
+    el.stage.classList.remove("open", "scanning");
+    el.dots.getContext("2d")?.clearRect(0, 0, el.dots.width, el.dots.height);
     el.result.classList.add("hidden");
     el.capture.classList.remove("hidden");
     el.shoot.textContent = "Use camera";
