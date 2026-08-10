@@ -44,8 +44,31 @@ export interface FrameCheck {
   };
 }
 
-const TARGET_MIN = 0.3; // face width as a fraction of frame width
-const TARGET_MAX = 0.62;
+// Face width as a fraction of the VISIBLE frame width. Exported because the
+// capture guide draws its silhouette at the midpoint of this band — the target
+// someone lines up against and the gate that judges them have to be the same
+// number, or fitting the outline and being told "move closer" happen at once.
+export const TARGET_MIN = 0.3;
+export const TARGET_MAX = 0.62;
+
+// How much of the camera frame the preview actually shows.
+//
+// The preview is `object-fit: cover`, so a camera whose aspect ratio differs
+// from the frame's gets centre-cropped — and on a 16:9 webcam in a square frame
+// that throws away nearly half the width. Landmarks arrive normalized to the
+// FULL video, so measuring face width against that was measuring against pixels
+// the user cannot see: a face filling 90% of the visible frame reads as 0.25 of
+// the video and gets told "move closer", forever.
+//
+// Everything positional below is therefore divided through by these, which
+// converts video-normalized coordinates into visible-frame ones. Cover crops
+// symmetrically about the centre, so the centre maps to the centre and only the
+// scale changes.
+export interface Viewport {
+  visW: number; // 0..1 — fraction of video width on screen
+  visH: number;
+}
+const FULL_VIEW: Viewport = { visW: 1, visH: 1 };
 const YAW_OK = 10;
 const PITCH_OK = 10;
 const ROLL_OK = 7;
@@ -279,7 +302,11 @@ export function checkSideFrame(
   };
 }
 
-export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStats): FrameCheck {
+export function checkFrame(
+  result: FaceLandmarkerResult | null,
+  stats: FrameStats,
+  view: Viewport = FULL_VIEW,
+): FrameCheck {
   const gates = {
     face: false,
     distance: false,
@@ -320,9 +347,12 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
     minY = Math.min(minY, p.y);
     maxY = Math.max(maxY, p.y);
   }
-  const w = maxX - minX;
-  const cxOff = (minX + maxX) / 2 - 0.5;
-  const cyOff = (minY + maxY) / 2 - 0.5;
+  // Converted out of video-normalized space and into visible-frame space, so
+  // every number below means what someone looking at the preview would say it
+  // means.
+  const w = (maxX - minX) / view.visW;
+  const cxOff = ((minX + maxX) / 2 - 0.5) / view.visW;
+  const cyOff = ((minY + maxY) / 2 - 0.5) / view.visH;
 
   gates.distance = w >= TARGET_MIN && w <= TARGET_MAX;
   gates.centered = Math.abs(cxOff) < 0.1 && Math.abs(cyOff) < 0.12;

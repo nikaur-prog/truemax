@@ -1,9 +1,9 @@
 import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
-import { CLOUD_POINTS } from "./cloudPoints.ts";
-import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
+import { TARGET_MAX, TARGET_MIN, checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
+import { idealShape, shapeExtent, strokeOutline } from "./faceOutline.ts";
 import { buildGeometry } from "../engine/geometry.ts";
 import { detectSex, extractShape } from "../engine/shape.ts";
-import type { FrameCheck } from "../engine/captureGuide.ts";
+import type { FrameCheck, Viewport } from "../engine/captureGuide.ts";
 import type { Sex } from "../engine/types.ts";
 
 // Live camera capture. The preview starts on the landing screen so the first
@@ -85,9 +85,11 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       // busy background otherwise decides whether the shot is "sharp".
       const box = faceBox(result);
       const stats = frameStats(v, scratch!, box);
-      const check = side ? checkSideFrame(result, stats) : checkFrame(result, stats);
+      const check = side
+        ? checkSideFrame(result, stats)
+        : checkFrame(result, stats, viewport(v, opts.guideCanvas));
       opts.onCheck(check);
-      drawGuide(opts.guideCanvas, v, result, check, side);
+      drawGuide(opts.guideCanvas, v, check, side);
       if (!side && opts.onSex && ++frameNo % 12 === 0) voteSex(result, v, check);
     }
     raf = requestAnimationFrame(loop);
@@ -119,6 +121,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     if (male !== 0 && male !== sexVotes.length) return; // not unanimous — wait
     if (winner !== sexShown) {
       sexShown = winner;
+      guideSex = winner;
       opts.onSex?.(winner);
     }
   };
@@ -174,6 +177,18 @@ interface Mapper {
   dh: number;
 }
 
+// How much of the video survives the cover crop. The gates are written against
+// what the user can see, so they need this rather than the raw frame.
+function viewport(video: HTMLVideoElement, canvas: HTMLCanvasElement): Viewport {
+  const w = canvas.clientWidth || canvas.width;
+  const h = canvas.clientHeight || canvas.height;
+  const P = coverMap(video, w, h);
+  return {
+    visW: Math.min(1, w / (P.dw || 1)),
+    visH: Math.min(1, h / (P.dh || 1)),
+  };
+}
+
 function coverMap(video: HTMLVideoElement, w: number, h: number): Mapper {
   const vw = video.videoWidth || w;
   const vh = video.videoHeight || h;
@@ -188,10 +203,12 @@ function coverMap(video: HTMLVideoElement, w: number, h: number): Mapper {
   return f;
 }
 
+// Neither guide reads the landmark result any more. The front one draws a fixed
+// target and the side one has no landmarks to draw; everything derived from the
+// detection now arrives inside `check`.
 function drawGuide(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
-  result: ReturnType<typeof detectVideo>,
   check: FrameCheck,
   side = false,
 ): void {
@@ -213,99 +230,147 @@ function drawGuide(
     return;
   }
 
-  const lm = result?.faceLandmarks?.[0];
-  if (!lm) return;
-
-  const colour =
-    check.status === "green" ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
-
-  drawCloud(ctx, P, lm, check);
-  drawCross(ctx, P, lm, check, colour);
+  drawFrontGuide(ctx, w, h, check);
 }
 
-// TWO elements now: the dots prove it is tracking, the cross tells you how to
-// move. Two things have been removed for the same reason, and it is worth
-// writing down because the temptation to add them back is constant.
+// Which reference population's average face the front silhouette is drawn from.
+// Set by the running sex vote, so the guide is the shape the person in front of
+// the camera is actually going to be compared against.
+let guideSex: Sex = "male";
+
+// ONE element now: the silhouette you fit your face into.
 //
-// Feature contours on the eyes, brows and lips went first: MediaPipe's eye ring
-// follows the orbital rim, not the lid, so it sat visibly wide of the eye and
-// read as broken tracking even while the measurements underneath were correct.
+// What was here before was a dot cloud plus an adaptive crosshair, and both are
+// gone. The crosshair anchored to the eye midpoint, which sits around a third of
+// the way down a face, so its horizontal arm read as a level that was set far
+// too high — people lined their face up to it and ended up framed high in the
+// shot. The dots proved the tracker was alive but told you nothing about where
+// to move.
 //
-// The face outline went second, for a subtler version of the same problem. The
-// FACE_OVAL ring is an anatomical boundary, not the silhouette you see — its
-// lower arc follows the jaw's underside, so on anyone photographed from
-// slightly above it projects well below the visible chin. Verified on a
-// pixel-perfect render where the mesh was provably aligned: the oval still
-// finished about 15% of face height below the chin, onto the neck. Nothing was
-// wrong, and it looked wrong, which for the one screen that has to establish
-// "this thing can actually see me" is the same as being wrong.
+// The side view already worked this way and was the easier of the two to shoot,
+// which is backwards: the front view is the one that carries most of the score.
+// A silhouette states the target directly — get inside the outline — and the
+// hint line handles the rest in words. Two views, one idea.
 //
-// An overlay that looks broken costs more than it adds. If a third element is
-// ever proposed, it has to survive that test first.
+// Two things were removed earlier for a reason that still holds, and the
+// temptation to add them back is constant. Feature contours on the eyes, brows
+// and lips went first: MediaPipe's eye ring follows the orbital rim, not the
+// lid, so locked to a live face it sat visibly wide of the eye and read as
+// broken tracking even while the measurements underneath were correct. The face
+// outline went second: FACE_OVAL is an anatomical boundary, not the silhouette
+// you see, and its lower arc follows the jaw's underside, so on anyone shot from
+// slightly above it projected onto the neck.
+//
+// Neither objection applies to what is drawn now, and the difference is the
+// point: this outline is not locked to the face. It is a fixed target sitting in
+// the frame, so it cannot look like tracking that has come loose. It is also the
+// same shape the gate is written against — the landmark bounding box — so fitting
+// it and passing the distance check are the same act.
 
 // ---------------------------------------------------------------------------
-// The mesh, rendered with depth.
+// Front guide: the average face of the reference population you will be scored
+// against, drawn at the size and position the capture gates actually want.
 //
-// Every landmark carries a z, and ignoring it is what made the old overlay read
-// as a flat blob stuck to the middle of the face. Sizing and fading each point
-// by its depth turns the same data into something that visibly wraps around a
-// head — the nose comes forward, the jaw sides fall away, and turning your head
-// makes the whole cloud rotate. Same trick Face ID's setup animation uses.
+// Sized against the canvas, because the distance gate is now written in visible
+// terms too. Both were previously in video units, which under `object-fit:
+// cover` means units the user cannot see: on a 16:9 webcam in a square frame
+// roughly half the width is cropped away, so a face satisfying "0.46 of the
+// video" is wider than the whole preview.
 // ---------------------------------------------------------------------------
 
-// Which landmarks to draw is NOT a stride any more. Taking every Nth index
-// looks like it should give an even scatter and does the opposite: MediaPipe's
-// indices are ordered by mesh topology, not by position, and the mesh is far
-// denser around the eyes and lips than across the cheeks and forehead. A stride
-// therefore inherits that density — clumps around the features, bare patches
-// everywhere else — and because indices are not mirror-paired, the left and
-// right of the face get visibly different patterns. It reads as random scatter.
-//
-// CLOUD_POINTS is chosen offline by farthest-point sampling over an averaged
-// face and mirrored into exact pairs. See tools/cloud-points.mjs.
+// Midpoint of the distance gate's accepted band, so there is room on both sides.
+const GUIDE_FACE_FRAC = (TARGET_MIN + TARGET_MAX) / 2;
 
-function drawCloud(
+function drawFrontGuide(
   ctx: CanvasRenderingContext2D,
-  P: Mapper,
-  lm: Array<{ x: number; y: number; z?: number }>,
+  w: number,
+  h: number,
   check: FrameCheck,
 ): void {
-  let zMin = Infinity;
-  let zMax = -Infinity;
-  for (const p of lm) {
-    const z = p.z ?? 0;
-    if (z < zMin) zMin = z;
-    if (z > zMax) zMax = z;
-  }
-  const span = zMax - zMin || 1e-6;
-  const tint = check.ready ? "143,243,224" : "100,210,255";
+  const shape = idealShape(guideSex);
+  if (!shape) return;
+  const ext = shapeExtent(shape);
+  // Width sets the scale, but a tall narrow frame can still cut the chin off,
+  // so take whichever of the two constraints binds first.
+  const scale = Math.min(
+    (GUIDE_FACE_FRAC * w) / (ext.w || 1),
+    (0.78 * h) / (ext.h || 1),
+  );
+  // Cover crops symmetrically, so the visible centre and the video centre are
+  // the same point — verified in the render harness rather than assumed.
+  const c = { x: w / 2, y: h / 2 };
 
-  for (const i of CLOUD_POINTS) {
-    const p = lm[i];
-    if (!p) continue;
-    // 1 = nearest the lens, 0 = furthest. MediaPipe's z grows away from camera.
-    const near = 1 - ((p.z ?? 0) - zMin) / span;
-    const s = P(p.x, p.y);
-    ctx.fillStyle = `rgba(${tint},${(0.28 + near * 0.5).toFixed(3)})`;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, 0.85 + near * 1.15, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  const tint =
+    check.status === "green" ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
+  strokeOutline(ctx, shape, {
+    cx: c.x,
+    cy: c.y,
+    scale,
+    stroke: `rgba(${tint},${check.ready ? 0.9 : 0.62})`,
+    lineWidth: check.ready ? 2 : 1.5,
+    dash: check.ready ? undefined : [9, 7],
+    // The interior features are there to make the outline legible as a face to
+    // line up with rather than an arbitrary blob. Kept faint so they never
+    // compete with the person's own face behind them.
+    features: 0.32,
+  });
+
+  drawHeadingArrow(ctx, c.x, c.y - scale * ext.h * 0.08, check);
 }
 
 // ---------------------------------------------------------------------------
-// Adaptive crosshair.
+// Heading arrow.
 //
-// Two crosses: a fixed target at the centre of the frame with the centring
-// tolerance drawn around it, and a live cross locked to the face that carries
-// the head's own tilt. Lining one up with the other IS the framing instruction,
-// which beats reading "move left" and guessing how far.
-//
-// The ring at the middle of the live cross is the gaze readout: the pip inside
-// it drifts toward whatever the eyes are actually pointed at. Nearly everyone
-// looks at their own image rather than the lens, which quietly tilts the eye
-// measurements, and no amount of head-position coaching catches it.
+// The one part of the old crosshair worth keeping. Which way you are turned is a
+// direction, so it is drawn as one: the arrow grows out of the centre along the
+// head's heading and lengthens with how far off-axis you are. Face the lens
+// squarely and it vanishes, which makes its absence the target.
 // ---------------------------------------------------------------------------
+
+function drawHeadingArrow(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  check: FrameCheck,
+): void {
+  const { yaw, pitch } = check.pose;
+  const off = Math.hypot(yaw, pitch);
+  if (off <= TURN_DEADZONE) return;
+  // Short at the edge of the deadzone, full length at roughly twice the pose
+  // gate. Past that it stops growing: the message is the direction, not the
+  // magnitude.
+  const t = Math.min(1, (off - TURN_DEADZONE) / 16);
+  const base = 13;
+  const len = base + 6 + t * 26;
+  const ux = yaw / off;
+  const uy = pitch / off;
+  const tipX = cx + ux * len;
+  const tipY = cy + uy * len;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,201,139,${(0.55 + t * 0.4).toFixed(2)})`;
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx + ux * (base - 4), cy + uy * (base - 4));
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
+  // Chevron head, built from the perpendicular so it always points outward
+  const hx = -uy;
+  const hy = ux;
+  const back = 7;
+  const wide = 4.5;
+  ctx.beginPath();
+  ctx.moveTo(tipX - ux * back + hx * wide, tipY - uy * back + hy * wide);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineTo(tipX - ux * back - hx * wide, tipY - uy * back - hy * wide);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Below this the arrow does not draw at all. Set just inside the pose gate so
+// "no arrow" and "straight enough to shoot" mean the same thing.
+const TURN_DEADZONE = 4;
 
 // ---------------------------------------------------------------------------
 // Profile guide.
@@ -437,127 +502,4 @@ function drawDebug(
   lines.forEach((t, i) => ctx.fillText(t, 10, h - 80 + i * 14));
   ctx.restore();
   ctx.restore();
-}
-
-function drawCross(
-  ctx: CanvasRenderingContext2D,
-  P: Mapper,
-  lm: Array<{ x: number; y: number; z?: number }>,
-  check: FrameCheck,
-  colour: string,
-): void {
-  let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
-  for (const p of lm) {
-    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
-    y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
-  }
-  const faceW = (x1 - x0) * P.dw;
-  const faceH = (y1 - y0) * P.dh;
-
-  // The cross is built from the head's own axes IN 3D and then flattened, so
-  // it foreshortens on its own: turn away and the horizontal arm shortens and
-  // swings, exactly as a band drawn around a real head would. Deriving it from
-  // the eye axis in 2D instead would give a cross that only ever rotates, and
-  // would read as a sticker rather than something wrapped around you.
-  // Everything below works in screen pixels, including z. Normalized landmark
-  // coordinates are anisotropic — x and y span different pixel counts — so a
-  // unit vector computed in that space would skew the axes.
-  const px3 = (i: number): V3 => {
-    const s = P(lm[i].x, lm[i].y);
-    return { x: s.x, y: s.y, z: (lm[i].z ?? 0) * P.dw };
-  };
-  const eyeR = mid3(px3(33), px3(133));
-  const eyeL = mid3(px3(362), px3(263));
-  const centre = mid3(eyeR, eyeL);
-  const lateral = unit3(sub3(eyeL, eyeR));
-  const vertical = unit3(sub3(px3(152), px3(9)));
-
-  const c = { x: centre.x, y: centre.y };
-  // Shorter arms and a wider gap than the first version. The old cross ran
-  // almost the full width of the face with a tick on each end, which read as a
-  // rifle scope; this is closer to the hairline reticle a camera app draws.
-  // Inner radius of the crosshair gap. Named `ring` from when a circle was
-  // drawn here; it now only sets where the arms start and where the heading
-  // arrow emerges.
-  const ring = 13;
-  const armX = Math.max(ring + 14, faceW * 0.5);
-  const armY = Math.max(ring + 14, faceH * 0.34);
-
-  // Step along the axis in 3D, then drop z. That orthographic flatten is what
-  // makes the arm shorten as the head turns away from the lens.
-  const along = (axis: V3, dist: number) => ({
-    x: centre.x + axis.x * dist,
-    y: centre.y + axis.y * dist,
-  });
-
-  ctx.save();
-  ctx.strokeStyle = `rgba(${colour},0.72)`;
-  ctx.lineWidth = 1;
-  ctx.lineCap = "round";
-  for (const [axis, arm] of [[lateral, armX], [vertical, armY]] as const) {
-    for (const sign of [-1, 1] as const) {
-      const inner = along(axis, sign * (ring + 9));
-      const outer = along(axis, sign * arm);
-      ctx.beginPath();
-      ctx.moveTo(inner.x, inner.y);
-      ctx.lineTo(outer.x, outer.y);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-
-  // Heading arrow, in place of the ring that used to sit here.
-  //
-  // A circle on the bridge of the nose was decoration: it never moved and it
-  // carried one bit (gaze ok / not ok) that the hint line already says in
-  // words. What is actually useful at this moment is WHICH WAY you are turned,
-  // and that is a direction, so it should be drawn as one. The arrow grows out
-  // of the centre along the head's heading and lengthens with how far off-axis
-  // you are; face the lens squarely and it vanishes entirely, which makes its
-  // absence the target.
-  const { yaw, pitch } = check.pose;
-  const off = Math.hypot(yaw, pitch);
-  if (off > TURN_DEADZONE) {
-    // Scaled so the arrow is short at the edge of the deadzone and reaches full
-    // length at roughly twice the pose gate — past that the length stops
-    // growing, because the message is the direction, not the magnitude.
-    const t = Math.min(1, (off - TURN_DEADZONE) / 16);
-    const len = ring + 6 + t * 26;
-    const ux = yaw / off;
-    const uy = pitch / off;
-    const tipX = c.x + ux * len;
-    const tipY = c.y + uy * len;
-    ctx.save();
-    ctx.strokeStyle = `rgba(255,201,139,${(0.55 + t * 0.4).toFixed(2)})`;
-    ctx.lineWidth = 1.4;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(c.x + ux * (ring - 4), c.y + uy * (ring - 4));
-    ctx.lineTo(tipX, tipY);
-    ctx.stroke();
-    // Chevron head, built from the perpendicular so it always points outward
-    const hx = -uy;
-    const hy = ux;
-    const back = 7;
-    const wide = 4.5;
-    ctx.beginPath();
-    ctx.moveTo(tipX - ux * back + hx * wide, tipY - uy * back + hy * wide);
-    ctx.lineTo(tipX, tipY);
-    ctx.lineTo(tipX - ux * back - hx * wide, tipY - uy * back - hy * wide);
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-
-// Below this the arrow does not draw at all. Set just inside the pose gate so
-// "no arrow" and "straight enough to shoot" mean the same thing.
-const TURN_DEADZONE = 4;
-
-interface V3 { x: number; y: number; z: number }
-const mid3 = (a: V3, b: V3): V3 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
-const sub3 = (a: V3, b: V3): V3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
-function unit3(v: V3): V3 {
-  const n = Math.hypot(v.x, v.y, v.z) || 1e-6;
-  return { x: v.x / n, y: v.y / n, z: v.z / n };
 }
