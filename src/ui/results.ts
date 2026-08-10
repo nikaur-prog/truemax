@@ -229,7 +229,7 @@ function showOverall(): void {
       ${viewCards(r)}
       ${
         merged
-          ? `<p class="viewnote done">Projection, chin and jaw angle can only be seen in profile. The front view carries 75% of the overall number and the side 25% — the side is capped, because thirteen points placed by hand is the one input you can get wrong by mis-dragging.</p>`
+          ? `<p class="viewnote done">Projection, chin and jaw angle can only be seen in profile. The front view carries 75% of the overall number and the side 25%. The side is capped because thirteen points placed by hand is the one input you can get wrong by mis-dragging.</p>`
           : ctx.onSideProfile
             ? `<p class="viewnote">Measured from the front only. <button class="linkish" id="side-nudge">Add a side profile</button> to include chin projection, jaw angle and facial convexity.</p>`
             : ""
@@ -308,7 +308,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       </div>
       <p class="viewnote">Measured from the thirteen points you verified. Chin projection, jaw
         angle and facial convexity have no front-view equivalent, which is why the profile is
-        taken at all — and the placement of those points is why it is capped at a quarter of
+        taken at all, and the placement of those points is why it is capped at a quarter of
         the total.
         ${ctx?.onRedoSide ? `<button class="linkish" id="side-redo">Re-verify the landmarks</button>` : ""}</p>
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
@@ -459,7 +459,7 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
 function rarityLine(r: RegionScore): string {
   return r.percentile >= 50
     ? `Roughly <b>${rarityText(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
-    : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here — the drill-down above shows exactly why.`;
+    : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here, and the drill-down above shows exactly why.`;
 }
 
 // Hovering a measurement row draws that exact measurement on the face. A number
@@ -496,7 +496,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     if (!hint) return;
     hint.classList.toggle("on", !!metric);
     hint.innerHTML = metric
-      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>${pinned ? " — click again to release" : ""}`
+      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>${pinned ? " (click again to release)" : ""}`
       : HINT_IDLE;
   };
 
@@ -578,7 +578,7 @@ function showImprove(): void {
   const quietNote = profile.quiet.length
     ? `<p class="q-foot" style="margin:0 2px 14px">Your plan skips ${profile.quiet
         .map((q) => REGION_NAMES[q].toLowerCase())
-        .join(", ")} because you asked it to. Every one of those measurements is still on its own tab — nothing was hidden or softened.</p>`
+        .join(", ")} because you asked it to. Every one of those measurements is still on its own tab. Nothing was hidden or softened.</p>`
     : "";
 
   const progress = delta
@@ -598,7 +598,7 @@ function showImprove(): void {
     <div class="reveal">
       <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div>
-        <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming — no surgery, anywhere.</p></div>
+        <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
       ${quietNote}
       ${progress}
@@ -655,7 +655,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
   // the best-evidenced thing comes first, so the cheapest and most certain
   // options are what someone reads before anything they could spend money on.
   const GROUPS: Array<[string, string, string]> = [
-    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country — a pharmacist will know what's on the shelf where you are."],
+    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country, and a pharmacist will know what's on the shelf where you are."],
     ["food", "EAT", "Facts about food, not a diet. No targets, no counting, nothing to buy."],
     ["habit", "DO", "Free, and mostly the things that compound."],
     ["professional", "ASK SOMEONE", "The things worth paying a person for rather than guessing at."],
@@ -682,7 +682,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
 
   return `<div class="recs">
     <h4>WORTH TRYING</h4>
-    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure — over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't. Where the evidence for something popular is weak, it says so.</p>
+    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure. Over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't. Where the evidence for something popular is weak, it says so.</p>
     ${sections}
   </div>`;
 }
@@ -696,7 +696,7 @@ function goalHead(p: ReturnType<typeof loadProfile>): string {
     <div class="goal-tags">
       ${goals.length
         ? goals.map((g) => `<span class="goal-tag">${g.label}</span>`).join("")
-        : `<span class="goal-tag mut">No goals set — showing your weakest fixable numbers</span>`}
+        : `<span class="goal-tag mut">No goals set, showing your weakest fixable numbers</span>`}
       ${skinConcernLabels(p)
         .map((l) => `<span class="goal-tag alt">${l}</span>`)
         .join("")}
@@ -704,7 +704,7 @@ function goalHead(p: ReturnType<typeof loadProfile>): string {
     </div>
     ${
       skinConcernLabels(p).length
-        ? `<p class="goal-declared">You told us this — the scan didn't. It measures how evenly your face reflects light, which cannot tell one skin condition from another.</p>`
+        ? `<p class="goal-declared">You told us this, the scan didn't. It measures how evenly your face reflects light, which cannot tell one skin condition from another.</p>`
         : ""
     }
     <button class="goal-edit" id="goal-edit">Edit your goals</button>
@@ -713,8 +713,8 @@ function goalHead(p: ReturnType<typeof loadProfile>): string {
 
 function progressCopy(d: ScanDelta): string {
   if (d.overall > 0.15)
-    return `<p class="rarity">Up <b>+${d.overall.toFixed(1)}</b> overall. The numbers moved — whatever you're doing, keep doing it.</p>`;
+    return `<p class="rarity">Up <b>+${d.overall.toFixed(1)}</b> overall. The numbers moved, so whatever you're doing, keep doing it.</p>`;
   if (d.overall < -0.15)
-    return `<p class="rarity">Down <b>${d.overall.toFixed(1)}</b> overall. Before reading into it: lighting, expression and angle explain most small drops — recapture in the same conditions first.</p>`;
-  return `<p class="rarity">Overall is <b>flat</b> (${d.overall >= 0 ? "+" : ""}${d.overall.toFixed(1)}) — within capture variance. Structural change shows up over weeks, not days.</p>`;
+    return `<p class="rarity">Down <b>${d.overall.toFixed(1)}</b> overall. Before reading into it: lighting, expression and angle explain most small drops, so recapture in the same conditions first.</p>`;
+  return `<p class="rarity">Overall is <b>flat</b> (${d.overall >= 0 ? "+" : ""}${d.overall.toFixed(1)}), which is within capture variance. Structural change shows up over weeks, not days.</p>`;
 }

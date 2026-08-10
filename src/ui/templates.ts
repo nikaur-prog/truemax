@@ -7,13 +7,17 @@ import type { ScanDelta } from "../engine/history.ts";
 // with the actual computed numbers interpolated in. Every sentence must
 // reference a real measurement — zero generic filler.
 
-// What each metric *means*, phrased to slot after an em-dash.
+// What each metric *means*. Every entry is a noun phrase that completes the
+// sentence "It measures ___", so the summary can introduce it with ordinary
+// punctuation. They used to be written to slot after an em-dash, which is why
+// a few were clauses rather than phrases and why the summaries were stitched
+// together with dashes end to end.
 const TRAITS: Record<string, string> = {
-  canthalTilt: "a positive tilt reads alert and structurally dimorphic",
-  eyeAspectRatio: "narrower apertures read intense, rounder read softer",
+  canthalTilt: "eye-corner tilt, where a positive angle reads alert and structurally dimorphic",
+  eyeAspectRatio: "aperture shape, where narrower reads intense and rounder reads softer",
   eyeSeparationRatio: "how the eyes sit across the face's width",
-  intercanthalEyeWidth: "eye spacing measured in eye-widths",
-  browPosition: "low-set brows harden the whole upper third",
+  intercanthalEyeWidth: "eye spacing, counted in eye-widths",
+  browPosition: "brow height, where low-set brows harden the whole upper third",
   browTilt: "the rise of the brow from inner to outer end",
   fwhr: "upper-face width against height, a core dominance signal",
   midfaceRatio: "the compactness of the midface",
@@ -99,20 +103,20 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
 
   let s1: string;
   if (best.percentile >= 55) {
-    s1 = `${best.def.name} is the anchor here: ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which lands in the top ${Math.max(1, Math.round(100 - best.percentile))}% — ${traitOf(best.def.id)}.`;
+    s1 = `${best.def.name} is the anchor here, at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which lands in the top ${Math.max(1, Math.round(100 - best.percentile))}%. It measures ${traitOf(best.def.id)}.`;
   } else {
     s1 = `Nothing in this region carries hard: even ${best.def.name.toLowerCase()} only reaches the ${ordinal(best.percentile)} percentile at ${fmt(best)} (${sexNoun(sex)} average ${fmtMean(best, sex)}).`;
   }
 
   const s2 =
     worst.percentile < 45
-      ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)} — ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm; ${traitOf(worst.def.id)}.`
+      ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)}, the ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm. That one is ${traitOf(worst.def.id)}.`
       : `Even the weakest number here, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, holds the ${ordinal(worst.percentile)} percentile.`;
 
   const s3 =
     r.percentile >= 50
-      ? `Net position: ${r.score.toFixed(1)}/10 — roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
-      : `Net position: ${r.score.toFixed(1)}/10 — about ${Math.round(100 - r.percentile)}% of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
+      ? `Net position: ${r.score.toFixed(1)}/10, meaning roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
+      : `Net position: ${r.score.toFixed(1)}/10. About ${Math.round(100 - r.percentile)}% of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
 
   return `${s1} ${s2} ${s3}`;
 }
@@ -170,7 +174,7 @@ export function deltaReadingCopy(d: ScanDelta): string {
 
   if (d.reading === "noise") {
     return `<b>That is not a change.</b> Two photos of the same face land ${DELTA_SD} points apart
-      on average — more than two different people do — so ${size} ${dir} against ${when} is the
+      on average, which is more than two different people do, so ${size} ${dir} against ${when} is the
       same face measured twice. Lighting, angle, water retention in your face, the camera.
       Nothing to read into it.`;
   }
@@ -186,8 +190,8 @@ export function deltaReadingCopy(d: ScanDelta): string {
   // reads correctly here — "since 7 days ago" does not.
   return `<b>${size} ${dir} over the last ${d.daysAgo} days, and that is outside normal capture spread.</b>
     Worth paying attention to. It is still not proof: ${DELTA_SD} points is what two photos of
-    one unchanged face can differ by, and this only clears it. If something changed — sleep,
-    training, weight, alcohol, how you are grooming — this is the scan where it would show.`;
+    one unchanged face can differ by, and this only clears it. If something changed (sleep,
+    training, weight, alcohol, how you are grooming), this is the scan where it would show.`;
 }
 
 const DELTA_SD = "1.3";
@@ -211,7 +215,7 @@ interface Lever {
 }
 
 const neutralCopy = (kind: string) => (m: ScoredMetric, sex: Sex) =>
-  `${m.def.name} measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)} — the ${Math.round(
+  `${m.def.name} measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)}. The ${Math.round(
     m.def.fixability * 100,
   )}% of that gap that moves without surgery moves with ${kind}. You asked me to keep those recommendations out, so the number is here and the advice isn't.`;
 
@@ -222,7 +226,7 @@ const LEVERS: Record<string, Lever> = {
     title: "Cut body fat",
     tag: "CORE",
     body: (m, sex) =>
-      `Submental and jawline fat blunt the gonial turn. Yours measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)} — composition is the single biggest lever on this number.`,
+      `Submental and jawline fat blunt the gonial turn. Yours measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)}. Composition is the single biggest lever on this number.`,
   },
   jawCheekRatio: {
     channel: "diet",
@@ -246,7 +250,7 @@ const LEVERS: Record<string, Lever> = {
     title: "Composition + posture",
     tag: "CORE",
     body: (m, sex) =>
-      `Your fWHR of ${fmt(m)} (${sexNoun(sex)} mean ${fmtMean(m, sex)}) shifts with facial fat and head carriage — both trainable, neither surgical.`,
+      `Your fWHR of ${fmt(m)} (${sexNoun(sex)} mean ${fmtMean(m, sex)}) shifts with facial fat and head carriage. Both are trainable and neither is surgical.`,
   },
   browPosition: {
     channel: "grooming",
@@ -262,7 +266,7 @@ const LEVERS: Record<string, Lever> = {
     title: "Neutral capture discipline",
     tag: "CAPTURE",
     body: (m) =>
-      `Corner tilt reads ${fmt(m)} — expression moves this number more than anatomy does. Recapture with a fully neutral mouth before chasing it.`,
+      `Corner tilt reads ${fmt(m)}. Expression moves this number more than anatomy does. Recapture with a fully neutral mouth before chasing it.`,
   },
   mirrorDeviation: {
     channel: "lifestyle",
@@ -296,7 +300,7 @@ const DEFAULT_LEVER: Lever = {
   channel: "lifestyle",
   neutral: neutralCopy("habit work"),
   body: (m, sex) =>
-    `${m.def.name} sits at ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)} — debloating, leaner composition and capture discipline close part of this gap.`,
+    `${m.def.name} sits at ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)}. Debloating, leaner composition and capture discipline close part of this gap.`,
 };
 
 export function leverFor(m: ScoredMetric): Lever {
@@ -353,7 +357,7 @@ export function percentileLine(pct: number, sex: Sex): string {
 // The substance of the old line was worth keeping and is not banded, because it
 // is equally true at every score.
 export function overviewCaveat(): string {
-  return `One photograph, scored on geometry — bone proportion and soft tissue — against a
-    reference population. Two photos of the same face differ by about 1.3 points, so a single
+  return `One photograph, scored on bone proportion and soft tissue against a reference
+    population. Two photos of the same face differ by about 1.3 points, so a single
     scan is one reading rather than a verdict.`;
 }

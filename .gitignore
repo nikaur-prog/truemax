@@ -7,3 +7,4 @@ public/wasm/
 # Calibration photographs — the README, never the faces. See calib/README.md.
 calib/*
 !calib/README.md
+.reel-cache/
