@@ -271,7 +271,7 @@ function label(
   fs: number,
   color: string,
 ): void {
-  ctx.font = `600 ${fs}px "IBM Plex Mono", monospace`;
+  ctx.font = `600 ${fs}px Inter Variable, Inter, system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const w = ctx.measureText(text).width + fs * 0.7;

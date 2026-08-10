@@ -200,25 +200,36 @@ function drawGuide(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const P = coverMap(video, w, h);
-  drawTarget(ctx, P, check);
+  if (DEBUG) drawDebug(ctx, P, video, w, h, dpr);
   const lm = result?.faceLandmarks?.[0];
   if (!lm) return;
 
   const colour =
     check.status === "green" ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
-  const pulse = trackMotion(lm);
 
   drawCloud(ctx, P, lm, check);
-  drawOutline(ctx, P, lm, check, pulse);
   drawCross(ctx, P, lm, check, colour);
 }
 
-// Three elements, and no more: the outline proves it found your face, the dots
-// prove it is still tracking, the cross tells you how to move. Feature contours
-// on the eyes, brows and lips were the fourth thing — they sat a little wide of
-// the real eye opening (MediaPipe's eye ring follows the orbit, not the lid),
-// so they read as broken tracking even while the measurements underneath were
-// correct. An overlay that looks wrong costs more than it adds.
+// TWO elements now: the dots prove it is tracking, the cross tells you how to
+// move. Two things have been removed for the same reason, and it is worth
+// writing down because the temptation to add them back is constant.
+//
+// Feature contours on the eyes, brows and lips went first: MediaPipe's eye ring
+// follows the orbital rim, not the lid, so it sat visibly wide of the eye and
+// read as broken tracking even while the measurements underneath were correct.
+//
+// The face outline went second, for a subtler version of the same problem. The
+// FACE_OVAL ring is an anatomical boundary, not the silhouette you see — its
+// lower arc follows the jaw's underside, so on anyone photographed from
+// slightly above it projects well below the visible chin. Verified on a
+// pixel-perfect render where the mesh was provably aligned: the oval still
+// finished about 15% of face height below the chin, onto the neck. Nothing was
+// wrong, and it looked wrong, which for the one screen that has to establish
+// "this thing can actually see me" is the same as being wrong.
+//
+// An overlay that looks broken costs more than it adds. If a third element is
+// ever proposed, it has to survive that test first.
 
 // ---------------------------------------------------------------------------
 // The mesh, rendered with depth.
@@ -230,7 +241,16 @@ function drawGuide(
 // makes the whole cloud rotate. Same trick Face ID's setup animation uses.
 // ---------------------------------------------------------------------------
 
-const CLOUD_STEP = 4; // every Nth landmark — denser than this is soup, not tracking
+// Every Nth landmark. Was 4, which put ~120 dots on a face — enough that the
+// cloud stopped reading as "tracking" and started reading as "static". At 8 it
+// is ~60, sparse enough that you can see individual points hold onto features.
+const CLOUD_STEP = 8;
+
+// The face-oval ring, as a lookup. Built once from the same connection list the
+// outline used to be drawn from.
+const BOUNDARY: Set<number> = new Set(
+  FaceLandmarker.FACE_LANDMARKS_FACE_OVAL.flatMap((c) => [c.start, c.end]),
+);
 
 function drawCloud(
   ctx: CanvasRenderingContext2D,
@@ -249,6 +269,11 @@ function drawCloud(
   const tint = check.ready ? "143,243,224" : "100,210,255";
 
   for (let i = 0; i < lm.length; i += CLOUD_STEP) {
+    // Skip the boundary ring. Those landmarks sit on the anatomical edge of the
+    // face, which from the front lands on the neck and in front of the ears —
+    // they are the dots that read as "it has lost my face" even when tracking
+    // is perfect. Everything inside the boundary sits on a feature.
+    if (BOUNDARY.has(i)) continue;
     const p = lm[i];
     // 1 = nearest the lens, 0 = furthest. MediaPipe's z grows away from camera.
     const near = 1 - ((p.z ?? 0) - zMin) / span;
@@ -258,74 +283,6 @@ function drawCloud(
     ctx.arc(s.x, s.y, 0.85 + near * 1.15, 0, Math.PI * 2);
     ctx.fill();
   }
-}
-
-// Motion detector for the pulse. Compares the face's position and size against
-// the previous frame; any real movement re-triggers the ring, which then decays.
-// It exists so the overlay feels alive while someone is adjusting, and settles
-// once they hold still — the same signal the shutter is waiting for.
-let lastCentre: { x: number; y: number; s: number } | null = null;
-let pulse = 0;
-
-function trackMotion(lm: Array<{ x: number; y: number }>): number {
-  let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
-  for (const p of lm) {
-    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
-    y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
-  }
-  const now = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s: x1 - x0 };
-  if (lastCentre) {
-    const moved =
-      Math.hypot(now.x - lastCentre.x, now.y - lastCentre.y) + Math.abs(now.s - lastCentre.s);
-    pulse = Math.max(pulse * 0.9, Math.min(1, moved * 45));
-  }
-  lastCentre = now;
-  return pulse;
-}
-
-function drawOutline(
-  ctx: CanvasRenderingContext2D,
-  P: Mapper,
-  lm: Array<{ x: number; y: number }>,
-  check: FrameCheck,
-  pulseAmt: number,
-): void {
-  const oval = FaceLandmarker.FACE_LANDMARKS_FACE_OVAL;
-  const tint = check.ready ? "143,243,224" : "255,255,255";
-
-  // Pulse ring: the outline traced again, wider and fading, while moving
-  if (pulseAmt > 0.02) {
-    ctx.save();
-    ctx.strokeStyle = `rgba(100,210,255,${(pulseAmt * 0.22).toFixed(3)})`;
-    ctx.lineWidth = 2 + pulseAmt * 5;
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    for (const c of oval) {
-      const a = P(lm[c.start].x, lm[c.start].y);
-      const b = P(lm[c.end].x, lm[c.end].y);
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  ctx.save();
-  ctx.strokeStyle = `rgba(${tint},0.8)`;
-  ctx.lineWidth = 1.6;
-  ctx.lineJoin = "round";
-  ctx.shadowColor = "rgba(100,210,255,0.5)";
-  ctx.shadowBlur = 6;
-  ctx.beginPath();
-  for (const c of oval) {
-    const a = P(lm[c.start].x, lm[c.start].y);
-    const b = P(lm[c.end].x, lm[c.end].y);
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-  }
-  ctx.stroke();
-
-  ctx.restore();
 }
 
 // ---------------------------------------------------------------------------
@@ -342,21 +299,55 @@ function drawOutline(
 // measurements, and no amount of head-position coaching catches it.
 // ---------------------------------------------------------------------------
 
-function drawTarget(ctx: CanvasRenderingContext2D, P: Mapper, check: FrameCheck): void {
-  // Just four ticks at dead centre. The dashed tolerance box that used to be
-  // here was accurate and still wrong: a rectangle floating over someone's
-  // chest is one more thing to decode when the traffic light already answers
-  // "am I there yet" in a glance.
-  const c = P(0.5, 0.5);
+// Alignment diagnostic, off unless the page is loaded with ?debug=1.
+//
+// The overlay is drawn by reproducing the browser's own `object-fit: cover`
+// crop in script. If the two ever disagree — a camera reporting a pixel aspect
+// ratio other than 1:1 would do it, and so would a stylesheet setting
+// object-position — the mesh lands off the face with no way to tell from the
+// outside which half is wrong. This draws the rectangle the script BELIEVES the
+// video occupies. If that box does not sit exactly on the visible video, the
+// mapping is at fault; if it does, the landmarks are.
+const DEBUG =
+  typeof location !== "undefined" && new URLSearchParams(location.search).get("debug") === "1";
+
+function drawDebug(
+  ctx: CanvasRenderingContext2D,
+  P: Mapper,
+  video: HTMLVideoElement,
+  w: number,
+  h: number,
+  dpr: number,
+): void {
+  const a = P(0, 0);
+  const b = P(1, 1);
   ctx.save();
-  ctx.strokeStyle = check.gates.centered ? "rgba(143,243,224,0.5)" : "rgba(255,255,255,0.26)";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(255,64,129,0.95)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  ctx.setLineDash([]);
+  // Crosshair at the exact centre of where the script thinks the frame is
+  const c = P(0.5, 0.5);
   ctx.beginPath();
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-    ctx.moveTo(c.x + dx * 8, c.y + dy * 8);
-    ctx.lineTo(c.x + dx * 15, c.y + dy * 15);
-  }
+  ctx.moveTo(c.x - 20, c.y); ctx.lineTo(c.x + 20, c.y);
+  ctx.moveTo(c.x, c.y - 20); ctx.lineTo(c.x, c.y + 20);
   ctx.stroke();
+  // Text is mirrored by the CSS flip on the canvas, so un-flip it locally
+  ctx.save();
+  ctx.translate(w, 0);
+  ctx.scale(-1, 1);
+  ctx.fillStyle = "rgba(255,64,129,0.95)";
+  ctx.font = "600 11px ui-monospace, monospace";
+  ctx.textAlign = "left";
+  const lines = [
+    `video ${video.videoWidth}x${video.videoHeight}`,
+    `box   ${Math.round(w)}x${Math.round(h)}  dpr ${dpr}`,
+    `draw  ${P.dw.toFixed(1)}x${P.dh.toFixed(1)}`,
+    `off   ${(P(0, 0).x).toFixed(1)}, ${(P(0, 0).y).toFixed(1)}`,
+  ];
+  lines.forEach((t, i) => ctx.fillText(t, 10, 18 + i * 14));
+  ctx.restore();
   ctx.restore();
 }
 
@@ -394,9 +385,12 @@ function drawCross(
   const vertical = unit3(sub3(px3(152), px3(9)));
 
   const c = { x: centre.x, y: centre.y };
-  const ring = 15;
-  const armX = Math.max(ring + 12, faceW * 0.72);
-  const armY = Math.max(ring + 12, faceH * 0.5);
+  // Shorter arms and a wider gap than the first version. The old cross ran
+  // almost the full width of the face with a tick on each end, which read as a
+  // rifle scope; this is closer to the hairline reticle a camera app draws.
+  const ring = 13;
+  const armX = Math.max(ring + 14, faceW * 0.5);
+  const armY = Math.max(ring + 14, faceH * 0.34);
 
   // Step along the axis in 3D, then drop z. That orthographic flatten is what
   // makes the arm shorten as the head turns away from the lens.
@@ -406,60 +400,32 @@ function drawCross(
   });
 
   ctx.save();
-  ctx.strokeStyle = `rgba(${colour},0.9)`;
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = `rgba(${colour},0.72)`;
+  ctx.lineWidth = 1;
   ctx.lineCap = "round";
-  ctx.shadowColor = `rgba(${colour},0.5)`;
-  ctx.shadowBlur = 5;
   for (const [axis, arm] of [[lateral, armX], [vertical, armY]] as const) {
     for (const sign of [-1, 1] as const) {
-      const inner = along(axis, sign * (ring + 6));
+      const inner = along(axis, sign * (ring + 9));
       const outer = along(axis, sign * arm);
       ctx.beginPath();
       ctx.moveTo(inner.x, inner.y);
       ctx.lineTo(outer.x, outer.y);
       ctx.stroke();
-      // End cap, perpendicular in screen space — a tick, not an arrowhead,
-      // so it never reads as a direction to move in
-      const dx = outer.x - inner.x;
-      const dy = outer.y - inner.y;
-      const len = Math.hypot(dx, dy) || 1;
-      ctx.beginPath();
-      ctx.moveTo(outer.x - (dy / len) * 5, outer.y + (dx / len) * 5);
-      ctx.lineTo(outer.x + (dy / len) * 5, outer.y - (dx / len) * 5);
-      ctx.stroke();
     }
   }
   ctx.restore();
 
-  // Gaze ring, drawn unrotated: it reports where the eyes point in the frame,
-  // which has nothing to do with how the head is tilted.
-  const gazeOk = check.gates.gaze;
+  // Gaze, reduced to the ring alone. It used to also draw a radial line and a
+  // filled pip that tracked the eyes — three moving elements stacked on the
+  // bridge of the nose. The ring changing colour carries the same one bit of
+  // information ("your eyes are off the lens") without the machinery, and the
+  // hint line says it in words at the same moment.
   ctx.save();
-  ctx.strokeStyle = gazeOk ? "rgba(100,210,255,0.9)" : "rgba(255,201,139,0.95)";
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = check.gates.gaze ? `rgba(${colour},0.5)` : "rgba(255,201,139,0.95)";
+  ctx.lineWidth = check.gates.gaze ? 1 : 1.4;
   ctx.beginPath();
   ctx.arc(c.x, c.y, ring, 0, Math.PI * 2);
   ctx.stroke();
-
-  const g = check.gaze;
-  if (g) {
-    // Clamped just outside the ring: past a point the direction is the message,
-    // not the magnitude, and a pip flying off the face reads as a glitch.
-    const m = Math.hypot(g.x, g.y) || 1e-6;
-    const k = Math.min(1.9, m * 2.4) * ring;
-    const px = c.x + (g.x / m) * k;
-    const py = c.y + (g.y / m) * k;
-    ctx.strokeStyle = gazeOk ? "rgba(100,210,255,0.45)" : "rgba(255,201,139,0.55)";
-    ctx.beginPath();
-    ctx.moveTo(c.x, c.y);
-    ctx.lineTo(px, py);
-    ctx.stroke();
-    ctx.fillStyle = gazeOk ? "rgba(100,210,255,0.95)" : "rgba(255,201,139,0.95)";
-    ctx.beginPath();
-    ctx.arc(px, py, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
   ctx.restore();
 }
 

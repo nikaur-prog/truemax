@@ -1,15 +1,21 @@
 /* TrueMax — warm whitish-grey, generous whitespace, soft shadows.
-   Serif numerals (Fraunces), grotesk body (Inter), mono labels (IBM Plex).
+   Serif display numerals (Fraunces), everything else Inter.
 
    Self-hosted and version-pinned rather than pulled from the Google Fonts CDN.
    Only the latin subsets are ever fetched — the packages ship per-script files
    behind unicode-range, so the rest never leave the bundle. Upright faces only:
    every <em> in this stylesheet is reset to font-style: normal, so shipping
-   italics would be ~120KB nothing renders. */
+   italics would be ~120KB nothing renders.
+
+   TWO families, not three. IBM Plex Mono used to set every label, chip, caption
+   and measured value — roughly half the words in the app — and at 9-10px
+   uppercase a monospace reads as source code rather than as an instrument.
+   Monospace earns its keep when columns of figures must align; that job is now
+   done by tabular-nums, which Inter has, so the mono was paying 30KB and the
+   whole visual register for nothing. --mono is kept as a name because it still
+   means "the small technical label voice", but it resolves to Inter. */
 @import "@fontsource-variable/fraunces/opsz.css";
 @import "@fontsource-variable/inter/wght.css";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
 
 :root {
   --bg: #f4f3ef;
@@ -25,7 +31,7 @@
   --down: #c4694f;
   --serif: "Fraunces Variable", "Fraunces", Georgia, serif;
   --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --mono: "Inter Variable", "Inter", -apple-system, sans-serif;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }

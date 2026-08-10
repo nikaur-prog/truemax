@@ -93,7 +93,7 @@ export function curveSVG(pct: number, key: string, sex: Sex, soft = false): stri
   // half of "MEDIAN" plus half of "25%" at 7.5px mono, plus a little air.
   const sideLabel = (x: number, text: string) =>
     Math.abs(x - x50) > 26
-      ? `<text x="${x.toFixed(1)}" y="${LABEL}" text-anchor="middle" font-family="IBM Plex Mono" font-size="7.5" fill="#B4B6B1">${text}</text>`
+      ? `<text x="${x.toFixed(1)}" y="${LABEL}" text-anchor="middle" font-family="Inter Variable, Inter, sans-serif" font-size="8" font-weight="600" letter-spacing="0.06em" fill="#B4B6B1">${text}</text>`
       : "";
 
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
@@ -126,7 +126,7 @@ export function curveSVG(pct: number, key: string, sex: Sex, soft = false): stri
       <animate attributeName="r" to="5.5" dur=".5s" begin=".25s" fill="freeze"/>
     </circle>
 
-    <text x="${x50.toFixed(1)}" y="${LABEL}" text-anchor="middle" font-family="IBM Plex Mono" font-size="7.5" fill="#A9ABA6">MEDIAN</text>
+    <text x="${x50.toFixed(1)}" y="${LABEL}" text-anchor="middle" font-family="Inter Variable, Inter, sans-serif" font-size="8" font-weight="600" letter-spacing="0.06em" fill="#A9ABA6">MEDIAN</text>
     ${sideLabel(x25, "25%")}${sideLabel(x75, "75%")}
   </svg>`;
 }
@@ -174,6 +174,6 @@ function idealSVG(pct: number, soft: boolean): string {
     <line x1="150" y1="14" x2="150" y2="84" stroke="#DDDBD4" stroke-width="1" stroke-dasharray="2 4"/>
     <line x1="${px}" y1="${py}" x2="${px}" y2="84" stroke="#0E7A68" stroke-width="1.5" stroke-dasharray="3 3"/>
     <circle cx="${px}" cy="${py}" r="0" fill="#0E7A68"><animate attributeName="r" to="5.5" dur=".5s" begin=".25s" fill="freeze"/></circle>
-    <text x="150" y="10" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#A9ABA6">MEDIAN</text>
+    <text x="150" y="10" text-anchor="middle" font-family="Inter Variable, Inter, sans-serif" font-size="8" font-weight="600" letter-spacing="0.06em" fill="#A9ABA6">MEDIAN</text>
   </svg>`;
 }

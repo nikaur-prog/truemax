@@ -571,3 +571,81 @@ makes zero external requests.
 Fraunces' `opsz` axis is now set explicitly rather than left on `auto`. Left to
 the browser, a 78px score renders at opsz 78 on an axis that runs to 144 — half
 way up an axis whose entire purpose is its top end.
+
+## The blur gate was measuring the light, not the lens
+
+Reported symptom: "Hold still — the image is too soft" on every frame, in an
+ordinary lit room, with the shutter held shut.
+
+The gate was the mean absolute Laplacian of the face crop, thresholded at 9.
+That quantity is proportional to local CONTRAST as well as to focus, so it
+cannot separate a dim room from a dirty lens. Measured across 20 portraits
+degraded synthetically (`scratchpad/sharp-lab2.mjs`), medians:
+
+```
+condition                    old metric     new metric
+in focus, well lit               17.5          0.396
+in focus, dim  (x0.45)           12.1          0.503
+in focus, very dim (x0.28)        7.6          0.503
+1.5px blur                       18.5          0.373
+3px blur                          9.4          0.244
+3px blur + dim                    4.3          0.244
+6px blur                          4.9          0.126
+```
+
+The old column ranks a **perfectly focused face in a dim room (7.6) BELOW a
+genuinely 3px-blurred one in a bright room (9.4)**. With the gate at 9, the
+focused-but-dim user is blocked and the actually-blurred user sails through.
+Anyone scanning in indoor evening light was stranded.
+
+The replacement asks a question with no brightness term: blur the crop again
+and measure how much that changes it. Sharp images lose a lot of neighbour
+difference; already-soft ones have little left to lose. The ratio cancels
+exposure and contrast exactly — note `dim` and `very dim` both land on 0.503,
+and `3px blur` and `3px blur + dim` both on 0.244. That invariance is the whole
+point and it is visible in the table.
+
+### Why it now warns instead of blocking
+
+Two thresholds: warn below 0.28, hold the shutter only below 0.17.
+
+The justification is that a soft frame is not a wrong measurement. Running the
+detector over the same 20 portraits blurred and dimmed, the landmarks barely
+move:
+
+```
+condition     median centre shift   median scale change   p90 worst landmark
+1.5px blur           0.0012                0.0042               0.023
+3px blur             0.0021                0.0077               0.039
+6px blur             0.0007                0.0093               0.065
+dim                  0.0017                0.0027               0.018
+very dim             0.0011                0.0024               0.023
+```
+
+All as a fraction of face width; no detection was lost in any condition. A 6px
+blur — far past anything a webcam produces — moves the face centre by 0.07% of
+its width. Refusing to take the photo at all was never proportionate.
+
+This also rules out soft frames as the cause of a separate report of the mesh
+sitting low and left of the face. Blur does not move landmarks; something else
+does, and `?debug=1` now draws the rectangle the overlay believes the video
+occupies so the mapping and the landmarks can be told apart.
+
+## What the live overlay draws, and why it is only two things
+
+The face outline was removed. `FACE_LANDMARKS_FACE_OVAL` is an anatomical
+boundary, not the silhouette a person sees: its lower arc follows the underside
+of the jaw, so on anyone shot from slightly above it projects well below the
+visible chin. On a render verified pixel-perfect against a known 1280x720 feed,
+the oval still finished roughly 15% of face height below the chin, onto the
+neck. Nothing was wrong and it looked wrong — on the one screen whose job is to
+establish that the app can see you, that is the same thing.
+
+The same reasoning removed the boundary landmarks from the dot cloud (they land
+on the neck and in front of the ears) and, earlier, the eye and lip contours
+(MediaPipe's eye ring follows the orbital rim, not the lid).
+
+What is left: a depth-shaded dot cloud on interior features only, and a thin
+crosshair carrying the head's own 3D axes. The nine-chip gate checklist was
+also removed from the HUD — it restated what the readiness bar and the one-line
+hint already said.

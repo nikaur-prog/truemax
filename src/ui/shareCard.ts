@@ -28,7 +28,7 @@ export async function renderShareCard(
 
   // Wordmark
   ctx.fillStyle = "#8B8E94";
-  ctx.font = '500 26px "IBM Plex Mono", monospace';
+  ctx.font = '600 26px Inter Variable, Inter, system-ui, sans-serif';
   ctx.textAlign = "left";
   ctx.letterSpacing = "6px";
   ctx.fillText("TRUE", 80, 108);
@@ -38,7 +38,7 @@ export async function renderShareCard(
   ctx.letterSpacing = "0px";
 
   ctx.fillStyle = "#6B6E74";
-  ctx.font = '400 22px "IBM Plex Mono", monospace';
+  ctx.font = '500 22px Inter Variable, Inter, system-ui, sans-serif';
   ctx.textAlign = "right";
   ctx.fillText(new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }), W - 80, 108);
 
@@ -71,7 +71,7 @@ export async function renderShareCard(
   ctx.fillText("/10", cx + 150, 800);
 
   ctx.fillStyle = "#4FD1B0";
-  ctx.font = '500 26px "IBM Plex Mono", monospace';
+  ctx.font = '600 26px Inter Variable, Inter, system-ui, sans-serif';
   ctx.fillText(
     `TOP ${Math.max(0.1, Math.round((100 - report.overallPercentile) * 10) / 10)}%  ·  ${report.sex.toUpperCase()} NORMS`,
     cx,
@@ -89,14 +89,14 @@ export async function renderShareCard(
     ctx.font = '400 60px Fraunces Variable, Fraunces, Georgia, serif';
     ctx.fillText(score.toFixed(1), x, y);
     ctx.fillStyle = "#6B6E74";
-    ctx.font = '500 20px "IBM Plex Mono", monospace';
+    ctx.font = '600 20px Inter Variable, Inter, system-ui, sans-serif';
     ctx.letterSpacing = "3px";
     ctx.fillText(name.toUpperCase(), x, y + 34);
     ctx.letterSpacing = "0px";
   });
 
   ctx.fillStyle = "#4A4C51";
-  ctx.font = '400 22px "IBM Plex Mono", monospace';
+  ctx.font = '500 22px Inter Variable, Inter, system-ui, sans-serif';
   ctx.fillText("MEASURED ON-DEVICE  ·  TRUEMAX.APP", cx, H - 70);
 
   return c;

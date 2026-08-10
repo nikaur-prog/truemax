@@ -37,7 +37,6 @@ const el = {
   camHint: document.getElementById("cam-hint")!,
   camHintTitle: document.getElementById("cam-hint-title")!,
   camHintDetail: document.getElementById("cam-hint-detail")!,
-  camGates: document.getElementById("cam-gates")!,
   btnCamera: document.getElementById("btn-camera") as HTMLButtonElement,
   btnUpload: document.getElementById("btn-upload") as HTMLButtonElement,
   reelCanvas: document.getElementById("reel-canvas") as HTMLCanvasElement,
@@ -216,7 +215,6 @@ async function openCamera(): Promise<void> {
         el.ovalFrame.classList.toggle("ready", c.ready);
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
-        renderGates(c);
       },
       onSex: (sex) => showGuide(sex),
     });
@@ -230,25 +228,12 @@ async function openCamera(): Promise<void> {
     // someone needs help positioning.
     showGuide("male");
     el.camLight.classList.remove("hidden");
-    el.camGates.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
     el.btnCamera.disabled = true;
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied — you can still upload a photo.";
   }
-}
-
-const GATE_LABELS: Record<string, string> = {
-  face: "face", distance: "distance", centered: "centered", level: "level",
-  straight: "straight", light: "light", sharp: "sharp", neutral: "neutral",
-  gaze: "eyes on lens",
-};
-
-function renderGates(c: FrameCheck): void {
-  el.camGates.innerHTML = Object.entries(c.gates)
-    .map(([k, ok]) => `<span class="gate ${ok ? "ok" : ""}">${GATE_LABELS[k]}</span>`)
-    .join("");
 }
 
 el.btnCamera.addEventListener("click", async () => {
@@ -264,7 +249,6 @@ el.btnCamera.addEventListener("click", async () => {
   el.stage.classList.remove("live-cam");
   el.upload.classList.remove("camera-live");
   el.camLight.classList.add("hidden");
-  el.camGates.classList.add("hidden");
   el.btnCamera.textContent = "Use camera";
   el.btnCamera.disabled = false;
   await setRunningMode("IMAGE");

@@ -125,7 +125,7 @@ export function mountDemoReel(
     // ---- phase label ------------------------------------------------------
     const phase =
       t < T.scan[1] ? "SCANNING" : t < T.measure[1] ? "MEASURING" : "ANALYSIS";
-    ctx.font = "500 9.5px ui-monospace, 'IBM Plex Mono', monospace";
+    ctx.font = "600 9.5px Inter Variable, Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.72)";
     ctx.textAlign = "left";
     ctx.fillText(phase, 14, 22);
@@ -157,7 +157,7 @@ export function mountDemoReel(
         ctx.fillRect(x, y + 16, bw, 3);
         ctx.fillStyle = "#8FF3E0";
         ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * appear, 3);
-        ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
+        ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.66)";
         ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
         ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
@@ -207,7 +207,7 @@ export function mountDemoReel(
         ctx.beginPath();
         ctx.roundRect(lx, ly - 4, 74, 26, 7);
         ctx.fill();
-        ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
+        ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.62)";
         ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
         ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
@@ -219,7 +219,7 @@ export function mountDemoReel(
 
     // ---- attribution ------------------------------------------------------
     // Required by the image licence, not optional decoration.
-    ctx.font = "400 7.5px ui-monospace, 'IBM Plex Mono', monospace";
+    ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.42)";
     ctx.textAlign = "right";
     ctx.fillText(face.credit, w - 12, h - 8);

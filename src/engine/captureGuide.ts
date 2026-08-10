@@ -49,10 +49,41 @@ const ROLL_OK = 7;
 const SMILE_OK = 0.35;
 const DARK = 42; // mean luma, 0-255
 const BRIGHT = 232;
-// Sharpness is measured on the FACE CROP, not the whole scene. Sampling the
-// entire frame at 96px blurred everything before measuring it, so real webcam
-// footage read as soft and the gate never lit. Threshold retuned for a crop.
-const SHARP_MIN = 9;
+// Sharpness. Measured on the FACE CROP, not the whole scene.
+//
+// This used to be the mean absolute Laplacian of the crop, gated at 9. That
+// number is proportional to local CONTRAST as well as to focus, so it could not
+// tell a dim room from a dirty lens. Measured over 20 portraits, degraded
+// synthetically (tools sit in the scratchpad; the numbers are in CALIBRATION.md):
+//
+//   condition                     old metric (gate was 9)
+//   in focus, well lit                  17.5
+//   in focus, dim                       12.1
+//   in focus, very dim                   7.6   <- BLOCKED, and nothing is wrong
+//   genuinely 3px blurred                9.4   <- PASSED
+//
+// It ranked a perfectly focused face in a dim room BELOW a genuinely blurred
+// one in a bright room. Anyone scanning in normal indoor evening light was
+// told to wipe their lens and had the shutter held shut.
+//
+// The replacement asks a question that has no brightness term in it: blur the
+// crop AGAIN, and see how much that changes it. An already-soft image barely
+// changes; a sharp one changes a lot. Taking the ratio cancels contrast and
+// exposure exactly — measured, `dim` and `very dim` both score 0.503, and
+// `blurred` and `blurred+dim` both score 0.244.
+//
+//   in focus (any exposure)         0.40 – 0.54
+//   1.5px blur                      0.37
+//   3px blur                        0.24
+//   6px blur                        0.13
+//
+// Two thresholds, because the old one-threshold design is what stranded people.
+// Below WARN we say so; only below BLOCK do we hold the shutter. A slightly
+// soft frame costs a little measurement precision — landmark positions barely
+// move under blur (median shift 0.1% of face width even at 6px) — so refusing
+// to take the photo at all was never proportionate to the harm.
+const SHARP_WARN = 0.28;
+const SHARP_BLOCK = 0.17;
 // Iris offset inside its own eye opening: 0 = down the lens, 1 = at the corner.
 //
 // Calibrated against 216 real portraits (tools/gaze-calibrate.mjs): median
@@ -69,11 +100,13 @@ const GAZE_OK = 0.22;
 
 export interface FrameStats {
   luma: number;
+  // 0..1. Higher is sharper. Brightness- and contrast-invariant by
+  // construction: it is a ratio of the same quantity measured twice.
   sharpness: number;
 }
 
 // Sample the face region for exposure and focus. Deliberately cheap: a small
-// downscale, then a 4-neighbour Laplacian for sharpness — enough to catch a
+// downscale, then two passes of mean neighbour difference — enough to catch a
 // dim room or a smeared lens without costing frame rate.
 export function frameStats(
   video: HTMLVideoElement,
@@ -103,17 +136,45 @@ export function frameStats(
   }
   const luma = sum / (W * H);
 
-  let lap = 0;
+  // Mean absolute neighbour difference, before and after a 3x3 box blur. The
+  // fraction that blurring destroys IS the focus measure: a sharp image loses
+  // a lot of neighbour difference, an already-soft one has little left to lose.
+  const d0 = meanNeighbourDiff(lum, W, H);
+  const d1 = meanNeighbourDiff(boxBlur3(lum, W, H), W, H);
+  const sharpness = d0 <= 1e-6 ? 0 : Math.max(0, (d0 - d1) / d0);
+  return { luma, sharpness };
+}
+
+function meanNeighbourDiff(lum: Float32Array, W: number, H: number): number {
+  let s = 0;
   let n = 0;
-  for (let y = 1; y < H - 1; y++) {
-    for (let x = 1; x < W - 1; x++) {
+  for (let y = 1; y < H; y++) {
+    for (let x = 1; x < W; x++) {
       const p = y * W + x;
-      const v = Math.abs(4 * lum[p] - lum[p - 1] - lum[p + 1] - lum[p - W] - lum[p + W]);
-      lap += v;
-      n++;
+      s += Math.abs(lum[p] - lum[p - 1]) + Math.abs(lum[p] - lum[p - W]);
+      n += 2;
     }
   }
-  return { luma, sharpness: lap / Math.max(1, n) };
+  return s / Math.max(1, n);
+}
+
+// Separable 3-tap box blur, edges clamped.
+function boxBlur3(lum: Float32Array, W: number, H: number): Float32Array {
+  const t = new Float32Array(W * H);
+  const o = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const p = y * W + x;
+      t[p] = (lum[p - (x > 0 ? 1 : 0)] + lum[p] + lum[p + (x < W - 1 ? 1 : 0)]) / 3;
+    }
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const p = y * W + x;
+      o[p] = (t[p - (y > 0 ? W : 0)] + t[p] + t[p + (y < H - 1 ? W : 0)]) / 3;
+    }
+  }
+  return o;
 }
 
 export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStats): FrameCheck {
@@ -164,7 +225,7 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
   gates.level = Math.abs(q.pitchDeg) <= PITCH_OK;
   gates.straight = Math.abs(q.yawDeg) <= YAW_OK && Math.abs(q.rollDeg) <= ROLL_OK;
   gates.light = stats.luma >= DARK && stats.luma <= BRIGHT;
-  gates.sharp = stats.sharpness >= SHARP_MIN;
+  gates.sharp = stats.sharpness >= SHARP_WARN;
   gates.neutral = q.smileScore <= SMILE_OK;
   // A blink loses the irises for a frame or two. Holding the last verdict
   // instead of failing keeps the light from flickering on every blink.
@@ -190,23 +251,27 @@ export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStat
   add((q.pitchDeg - PITCH_OK) / PITCH_OK, "Raise the camera", "It's below your eye line, looking up");
   add((Math.abs(q.yawDeg) - YAW_OK) / YAW_OK, "Face the camera directly", "Your head is turned");
   add((Math.abs(q.rollDeg) - ROLL_OK) / ROLL_OK, "Straighten your head", "It's tilted to one side");
-  add((SHARP_MIN - stats.sharpness) / SHARP_MIN, "Hold still", "The image is too soft — or wipe the lens");
+  // Only genuine smear holds the shutter. Merely-soft is handled below, after
+  // the blocking problems, so a dim room never strands anyone.
+  add(
+    (SHARP_BLOCK - stats.sharpness) / SHARP_BLOCK,
+    "Can't focus on your face",
+    "Give the lens a wipe — the image is too smeared to measure",
+  );
   add((q.smileScore - SMILE_OK) / SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
 
   if (!problems.length) {
-    // Framing is correct, so the shutter opens either way — but if the eyes are
-    // off the lens, say so while there is still a chance to fix it.
-    return gates.gaze
-      ? { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, gates }
-      : {
-          ready: true,
-          hint: "Look at the lens",
-          detail: "Framing is good — your eyes are off to one side",
-          status: "amber",
-          progress: 1,
-          gaze,
-          gates,
-        };
+    // Framing is correct, so the shutter opens either way. Two things can still
+    // be worth saying while there is a chance to fix them — neither blocks,
+    // because neither is bad enough to justify refusing to take the photo.
+    const advisory = !gates.sharp
+      ? { hint: "A bit soft", detail: "More light on your face will sharpen it — you can still shoot" }
+      : !gates.gaze
+        ? { hint: "Look at the lens", detail: "Framing is good — your eyes are off to one side" }
+        : null;
+    return advisory
+      ? { ready: true, ...advisory, status: "amber", progress: 1, gaze, gates }
+      : { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, gates };
   }
 
   // Coach the worst problem; grade the light by how close it is to solved.
