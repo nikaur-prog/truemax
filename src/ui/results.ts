@@ -8,7 +8,7 @@ import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm } from "./overlay.ts";
 import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
-import { fmt, leverFor, rarityN, regionSummary } from "./templates.ts";
+import { fmt, leverFor, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
@@ -93,7 +93,7 @@ function showOverall(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
-  const topPct = Math.max(0.1, Math.round((100 - r.overallPercentile) * 10) / 10);
+  const topPct = topPctText(r.overallPercentile);
   const deltaHTML = delta
     ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`)
     : "";
@@ -104,7 +104,7 @@ function showOverall(): void {
         <div><div class="klabel">OVERALL</div>
           <div class="big"><span id="cnt">0.0</span><small> /10</small></div></div>
         <div class="chipcol">
-          <span class="chip">Top ${topPct}%</span>
+          <span class="chip">${topPct}</span>
           ${deltaHTML}
         </div>
       </div>
@@ -117,7 +117,7 @@ function showOverall(): void {
         .join("")}
       </div>
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile)}
-        <p class="rarity">Roughly <b>1 in ${rarityN(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
+        <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
       <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
         <button class="btn pri" id="btn-plan">See your plan</button></div>
       <div class="navrow">
@@ -152,17 +152,17 @@ export function renderSideResults(report: Report, onRedo: () => void): void {
   if (!ctx) return;
   setZoom(null);
   const regions = report.regions.filter((r) => r.metrics.length);
-  const topPct = Math.max(0.1, Math.round((100 - report.overallPercentile) * 10) / 10);
+  const topPct = topPctText(report.overallPercentile);
 
   ctx.analysis.innerHTML = `
     <div class="reveal">
       <div class="score-head">
         <div><div class="klabel">SIDE PROFILE</div>
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
-        <div class="chipcol"><span class="chip">Top ${topPct}%</span></div>
+        <div class="chipcol"><span class="chip">${topPct}</span></div>
       </div>
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile)}
-        <p class="rarity">Roughly <b>1 in ${rarityN(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
+        <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
       ${regions
         .map(
           (r) => `<div class="dcard" style="margin-bottom:12px">
@@ -271,7 +271,7 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
 
 function rarityLine(r: RegionScore): string {
   return r.percentile >= 50
-    ? `Roughly <b>1 in ${rarityN(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
+    ? `Roughly <b>${rarityText(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
     : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here — the drill-down above shows exactly why.`;
 }
 

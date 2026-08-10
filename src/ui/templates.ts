@@ -84,14 +84,43 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
 
   const s3 =
     r.percentile >= 50
-      ? `Net position: ${r.score.toFixed(1)}/10 — roughly 1 in ${rarityN(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
+      ? `Net position: ${r.score.toFixed(1)}/10 — roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
       : `Net position: ${r.score.toFixed(1)}/10 — about ${Math.round(100 - r.percentile)}% of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
 
   return `${s1} ${s2} ${s3}`;
 }
 
+// How rare is this, stated only as precisely as the sample allows.
+//
+// The reference population is ~110 faces per sex. A sample that size can
+// resolve down to roughly 1-in-110 and no further: beyond that the tail is
+// fitted, not observed, and a denominator like "1 in 1000" is a decimal place
+// invented out of nothing. The old version printed exactly that.
+//
+// This matters more here than it would elsewhere. A competitor in this category
+// shows users "Top 0.01% · 1 in 8.35k", which would need something like a
+// hundred thousand measured faces to mean anything. Being the product that
+// doesn't do that is the entire positioning, and it costs nothing to be right.
+const REFERENCE_N = 110;
+
 export function rarityN(pct: number): number {
-  return Math.max(2, Math.round(1 / Math.max(0.001, 1 - pct / 100)));
+  return Math.max(2, Math.min(REFERENCE_N, Math.round(1 / Math.max(0.001, 1 - pct / 100))));
+}
+
+// Past the resolution of the sample, drop the denominator entirely.
+//
+// 1-in-110 is about the top 0.9%, so "the top 1%" is the finest band this
+// reference can honestly express. Anything narrower — 0.1%, 0.01% — is a
+// decimal place invented from a sample that cannot see it.
+export function rarityText(pct: number): string {
+  const n = Math.round(1 / Math.max(0.001, 1 - pct / 100));
+  return n <= REFERENCE_N ? `1 in ${Math.max(2, n)}` : "the top 1%";
+}
+
+// The headline "Top X%" chip, floored at the same resolution.
+export function topPctText(pct: number): string {
+  const rest = 100 - pct;
+  return rest < 1 ? "Top 1%" : `Top ${Math.round(rest * 10) / 10}%`;
 }
 
 // ---------------------------------------------------------------------------
