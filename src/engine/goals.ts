@@ -131,23 +131,26 @@ export const QUIET_TOPICS: Array<{ region: RegionId; label: string }> = [
 
 export interface Profile {
   v: 1;
-  // Completed the quiz at least once. Distinct from "chose nothing", which is
+  // Answered each half at least once. Distinct from "chose nothing", which is
   // a valid answer we must not keep re-asking about.
-  done: boolean;
+  preDone: boolean;
+  postDone: boolean;
   goals: string[];
   quiet: RegionId[];
   advice: Record<AdviceChannel, boolean>;
-  sleepHours: number | null;
   endGoal: string;
 }
 
+// Sleep hours used to live here. It was collected and never read by anything,
+// and asking for data we do not use is the same trust problem as a score with
+// a hidden component. It comes back when something consumes it.
 export const EMPTY_PROFILE: Profile = {
   v: 1,
-  done: false,
+  preDone: false,
+  postDone: false,
   goals: [],
   quiet: [],
   advice: { diet: true, lifestyle: true, grooming: true, capture: true },
-  sleepHours: null,
   endGoal: "",
 };
 

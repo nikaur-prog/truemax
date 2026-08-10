@@ -369,16 +369,17 @@ function showImprove(): void {
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
   const edit = document.getElementById("goal-edit");
-  if (edit) edit.onclick = () => openQuiz(() => showImprove());
+  if (edit) edit.onclick = () => openQuiz(() => showImprove(), "all");
 
-  // First time through, ask before writing any coaching copy — that is the
-  // whole point of asking what to leave alone.
-  if (!profile.done) openQuiz(() => showImprove());
+  // First time someone reaches their plan, ask what to leave alone — the
+  // moment prose is about to be written, and the first moment they have the
+  // numbers in front of them to answer with.
+  if (!profile.postDone) openQuiz(() => showImprove(), "post");
 }
 
 function goalHead(p: ReturnType<typeof loadProfile>): string {
   const goals = chosenGoals(p);
-  if (!p.done) return "";
+  if (!p.preDone && !p.postDone) return "";
   return `<div class="goal-head">
     <h4>YOUR PLAN</h4>
     ${p.endGoal ? `<div class="endgoal">“${p.endGoal}”</div>` : ""}
@@ -386,7 +387,6 @@ function goalHead(p: ReturnType<typeof loadProfile>): string {
       ${goals.length
         ? goals.map((g) => `<span class="goal-tag">${g.label}</span>`).join("")
         : `<span class="goal-tag mut">No goals set — showing your weakest fixable numbers</span>`}
-      ${p.sleepHours ? `<span class="goal-tag mut">${p.sleepHours}h sleep</span>` : ""}
       ${p.quiet.length ? `<span class="goal-tag mut">${p.quiet.length} topic${p.quiet.length > 1 ? "s" : ""} off-limits</span>` : ""}
     </div>
     <button class="goal-edit" id="goal-edit">Edit your goals</button>
