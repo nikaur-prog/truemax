@@ -12,6 +12,8 @@ import { fmt, leverFor, rarityN, regionSummary } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
+import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
+import { GOALS } from "../engine/goals.ts";
 
 interface Ctx {
   report: Report;
@@ -362,6 +364,7 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
+      ${recsHTML(profile)}
       <div class="navrow"><button class="btn gho" id="btn-back">Back to results</button>
         <button class="btn pri" id="btn-again">Scan another face</button></div>
     </div>`;
@@ -375,6 +378,37 @@ function showImprove(): void {
   // moment prose is about to be written, and the first moment they have the
   // numbers in front of them to answer with.
   if (!profile.postDone) openQuiz(() => showImprove(), "post");
+}
+
+// Recommendations: what to actually do, drawn only from things sold over a
+// counter and things that are simply true about food. Ordered by how well the
+// evidence holds up, because "strong" and "no good evidence" both appear here
+// and the person deserves to see which is which before they spend anything.
+function recsHTML(p: ReturnType<typeof loadProfile>): string {
+  // A goal whose regions are all off-limits stays off-limits here too
+  const quietGoals = new Set(
+    GOALS.filter((g) => g.regions.length && g.regions.every((r) => isQuiet(r, p))).map((g) => g.id),
+  );
+  const recs = recsFor(p, quietGoals);
+  if (!recs.length) return "";
+
+  const order: Record<string, number> = { strong: 0, moderate: 1, limited: 2, none: 3 };
+  recs.sort((a, b) => order[a.evidence] - order[b.evidence]);
+
+  return `<div class="recs">
+    <h4>WORTH TRYING</h4>
+    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure — over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't.</p>
+    ${recs
+      .map(
+        (r) => `<div class="rec ev-${r.evidence}">
+      <b>${r.title}<em>${EVIDENCE_LABEL[r.evidence].toUpperCase()}</em></b>
+      <span class="rec-what">${r.what}</span>
+      <p>${r.detail}</p>
+      ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
+    </div>`,
+      )
+      .join("")}
+  </div>`;
 }
 
 function goalHead(p: ReturnType<typeof loadProfile>): string {

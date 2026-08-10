@@ -96,6 +96,25 @@ const ADVICE_STEP: Step = {
     ),
 };
 
+const DIET_STEP: Step = {
+  id: "diet",
+  kicker: "FOOD",
+  question: "Anything I should work around?",
+  note: "Only used so a food suggestion never names something you don't eat. It is not a health question and nothing here affects a single measurement.",
+  render: () =>
+    `<div class="q-grid two">
+       ${chip("Vegetarian", "vegetarian")}
+       ${chip("Vegan", "vegan")}
+       ${chip("Dairy-free", "dairy-free")}
+       ${chip("No shellfish", "no-shellfish")}
+     </div>
+     <p class="q-foot">Nothing on your plan is a supplement, a pill or a calorie target — food appears as facts about food, and that is all.</p>`,
+  pick: (k, p) => {
+    p.diet = toggleIn(p.diet, k);
+  },
+  selected: (p) => new Set(p.diet),
+};
+
 const ENDGOAL_STEP: Step = {
   id: "endGoal",
   kicker: "THE POINT",
@@ -118,8 +137,8 @@ const ENDGOAL_STEP: Step = {
 
 const PHASES: Record<Phase, Step[]> = {
   pre: [GOALS_STEP],
-  post: [BOUNDARIES_STEP, ADVICE_STEP, ENDGOAL_STEP],
-  all: [GOALS_STEP, BOUNDARIES_STEP, ADVICE_STEP, ENDGOAL_STEP],
+  post: [BOUNDARIES_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
+  all: [GOALS_STEP, BOUNDARIES_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
 };
 
 let host: HTMLElement | null = null;
