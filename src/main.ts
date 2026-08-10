@@ -338,13 +338,18 @@ function resetToUpload(): void {
   el.fileInput.value = "";
 }
 
-const SCAN_STAGES = [
-  "Detecting facial landmarks",
-  "Normalizing to interpupillary scale",
-  "Measuring 31 proportions",
-  "Checking bilateral symmetry",
-  "Comparing against population",
-  "Composing report",
+// Two views go into the score, so the scan shows two views being measured. It
+// only ever showed the front, which made the profile someone had just spent
+// time verifying look like it had been filed away and ignored.
+const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
+  { text: "Detecting facial landmarks", view: "front" },
+  { text: "Normalizing to interpupillary scale", view: "front" },
+  { text: "Measuring 31 front proportions", view: "front" },
+  { text: "Checking bilateral symmetry", view: "front" },
+  { text: "Reading the profile: chin, jaw, convexity", view: "side" },
+  { text: "Measuring 15 side proportions", view: "side" },
+  { text: "Comparing against population", view: "side" },
+  { text: "Merging both views", view: "front" },
 ];
 
 async function handleFile(file: File): Promise<void> {
@@ -392,6 +397,12 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  // The front photo, kept so the scan can switch back to it after showing the
+  // profile being measured.
+  const frontShot = document.createElement("canvas");
+  frontShot.width = el.photoCanvas.width;
+  frontShot.height = el.photoCanvas.height;
+  frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
@@ -449,19 +460,48 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
   if (!pending) return;
   const { landmarks, width, height, quality, autoNote } = pending;
   el.main.classList.remove("hidden");
+  // The front photo, kept so the scan can switch back to it after showing the
+  // profile being measured.
+  const frontShot = document.createElement("canvas");
+  frontShot.width = el.photoCanvas.width;
+  frontShot.height = el.photoCanvas.height;
+  frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
   await nextFrame();
   const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
 
-  // Staged status lines, ~360ms each
+  // Staged status lines, ~360ms each, with the photo pane following whichever
+  // view the current stage is about.
+  const sideShot = lastSide?.photo;
+  let showing: "front" | "side" = "front";
+  const swapTo = (view: "front" | "side") => {
+    if (view === showing) return;
+    if (view === "side" && !sideShot) return;
+    showing = view;
+    const target = view === "side" ? sideShot! : null;
+    const cap = document.querySelector(".photo-caption span");
+    if (cap) cap.textContent = view === "side" ? "SIDE" : "FRONT";
+    el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
+    if (target) {
+      el.photoCanvas.width = target.width;
+      el.photoCanvas.height = target.height;
+      el.photoCanvas.getContext("2d")!.drawImage(target, 0, 0);
+    } else {
+      el.photoCanvas.width = width;
+      el.photoCanvas.height = height;
+      el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
+      drawCalm(el.overlayCanvas, landmarks, width, height);
+    }
+  };
   await new Promise<void>((done) => {
     let s = 0;
     const step = () => {
       if (s < SCAN_STAGES.length) {
-        el.status.innerHTML = `<b>${SCAN_STAGES[s]}</b> …`;
+        el.status.innerHTML = `<b>${SCAN_STAGES[s].text}</b> …`;
         el.barFill.style.width = `${((s + 1) / SCAN_STAGES.length) * 100}%`;
+        swapTo(SCAN_STAGES[s].view);
         s++;
         setTimeout(step, 360);
       } else done();

@@ -240,12 +240,24 @@ export function transitionMeasurement(
   return { cancel: () => cancelAnimationFrame(raf) };
 }
 
+// `progress` draws the measurement partway: 0 is nothing, 1 is the finished
+// figure. Each segment extends ALONG ITS OWN PATH, and the segments start in
+// sequence rather than together.
+//
+// I argued against animating this at first, on the grounds that the lines are
+// the evidence and animating them would mean showing geometry that is briefly
+// wrong. That is true of growing or scaling a figure into place — and it is not
+// true of this. A line drawn from its start point toward its end is a SUBSET of
+// the true line at every frame: incomplete, never misplaced. Ticks and labels
+// only appear once their segment has finished arriving, so nothing is ever
+// annotated before it is real.
 export function drawMeasurement(
   canvas: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
   width: number,
   height: number,
   metric: ScoredMetric,
+  progress = 1,
 ): boolean {
   canvas.width = width;
   canvas.height = height;
@@ -276,7 +288,24 @@ export function drawMeasurement(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  for (const seg of recipe(metric)) {
+  const segs = recipe(metric);
+  // Each segment gets its own slice of the timeline, overlapping so the figure
+  // reads as one gesture rather than a queue.
+  const share = 1 / Math.max(1, segs.length);
+  const at = (i: number) => {
+    if (progress >= 1) return 1;
+    const start = i * share * STAGGER;
+    const span = 1 - start;
+    return Math.max(0, Math.min(1, (progress - start) / (span || 1)));
+  };
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+  const lerp = (a: Pt2, b: Pt2, t: number): Pt2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+  for (const [segIndex, seg] of segs.entries()) {
+    const u = ease(at(segIndex));
+    if (u <= 0) continue;
+    // Annotations wait until their own line has fully arrived.
+    const done = u >= 0.999;
     const color = ("color" in seg && seg.color) || ACCENT;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
@@ -286,31 +315,36 @@ export function drawMeasurement(
 
     if (seg.kind === "span") {
       const a = P(seg.a);
-      const b = P(seg.b);
+      const bFull = P(seg.b);
+      const b = lerp(a, bFull, u);
       line(ctx, a, b);
-      tick(ctx, a, b, lw);
-      if (seg.label) {
+      if (done) tick(ctx, a, bFull, lw);
+      if (seg.label && done) {
         // Sit the label just past the line's end so the face stays visible
-        const dx = b.x - a.x, dy = b.y - a.y;
+        const dx = bFull.x - a.x, dy = bFull.y - a.y;
         const len = Math.hypot(dx, dy) || 1;
-        label(ctx, seg.label, { x: b.x + (dx / len) * fs * 1.6, y: b.y + (dy / len) * fs * 1.6 }, fs, color);
+        label(ctx, seg.label, { x: bFull.x + (dx / len) * fs * 1.6, y: bFull.y + (dy / len) * fs * 1.6 }, fs, color);
       }
     } else if (seg.kind === "angle") {
       const v = P(seg.v);
       const a = P(seg.a);
       const b = P(seg.b);
-      line(ctx, v, a);
-      line(ctx, v, b);
-      arc(ctx, v, a, b, width);
-      if (seg.label) label(ctx, seg.label, v, fs, color);
+      // The two legs run out from the vertex, then the arc sweeps between them.
+      line(ctx, v, lerp(v, a, u));
+      line(ctx, v, lerp(v, b, u));
+      if (u > 0.55) arc(ctx, v, a, b, width, (u - 0.55) / 0.45);
+      if (seg.label && done) label(ctx, seg.label, v, fs, color);
     } else if (seg.kind === "rule") {
+      // A rule spans the frame, so it opens from the middle outward.
       const p = P(seg.y);
-      line(ctx, { x: 0, y: p.y }, { x: width, y: p.y });
-      if (seg.label) label(ctx, seg.label, { x: width * 0.5, y: p.y }, fs, color);
+      const half = (width / 2) * u;
+      line(ctx, { x: width / 2 - half, y: p.y }, { x: width / 2 + half, y: p.y });
+      if (seg.label && done) label(ctx, seg.label, { x: width * 0.5, y: p.y }, fs, color);
     } else {
       const p = P(seg.x);
+      const half = (height / 2) * u;
       ctx.setLineDash([lw * 3, lw * 3]);
-      line(ctx, { x: p.x, y: 0 }, { x: p.x, y: height });
+      line(ctx, { x: p.x, y: height / 2 - half }, { x: p.x, y: height / 2 + half });
       ctx.setLineDash([]);
     }
   }
@@ -336,13 +370,45 @@ function tick(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2, lw: number): void {
   line(ctx, { x: b.x - nx, y: b.y - ny }, { x: b.x + nx, y: b.y + ny });
 }
 
-function arc(ctx: CanvasRenderingContext2D, v: Pt2, a: Pt2, b: Pt2, width: number): void {
+// `u` sweeps the arc from its first leg toward its second.
+function arc(ctx: CanvasRenderingContext2D, v: Pt2, a: Pt2, b: Pt2, width: number, u = 1): void {
   const r = width * 0.045;
   const a1 = Math.atan2(a.y - v.y, a.x - v.x);
   const a2 = Math.atan2(b.y - v.y, b.x - v.x);
+  const lo = Math.min(a1, a2);
+  const hi = Math.max(a1, a2);
+  const t = Math.max(0, Math.min(1, u));
   ctx.beginPath();
-  ctx.arc(v.x, v.y, r, Math.min(a1, a2), Math.max(a1, a2), Math.abs(a1 - a2) > Math.PI);
+  ctx.arc(v.x, v.y, r, lo, lo + (hi - lo) * t, Math.abs(a1 - a2) > Math.PI);
   ctx.stroke();
+}
+
+// How much of the timeline is spent staggering segment starts, as opposed to
+// all of them running together. 0 = simultaneous, 1 = strictly sequential.
+const STAGGER = 0.45;
+
+// Draw a measurement on, over `DRAW_MS`. Returns a handle so a fast hover down
+// the list can cancel the previous one instead of leaving two rAF loops
+// fighting over the same canvas.
+const DRAW_MS = 420;
+
+export function animateMeasurement(
+  canvas: HTMLCanvasElement,
+  landmarks: NormalizedLandmark[],
+  width: number,
+  height: number,
+  metric: ScoredMetric,
+): OverlayFade {
+  let raf = 0;
+  let start = 0;
+  const frame = (now: number) => {
+    if (!start) start = now;
+    const t = Math.min(1, (now - start) / DRAW_MS);
+    drawMeasurement(canvas, landmarks, width, height, metric, t);
+    if (t < 1) raf = requestAnimationFrame(frame);
+  };
+  raf = requestAnimationFrame(frame);
+  return { cancel: () => cancelAnimationFrame(raf) };
 }
 
 function label(

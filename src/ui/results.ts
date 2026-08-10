@@ -6,7 +6,7 @@ import { regionMatches } from "../engine/celebs.ts";
 import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
-import { drawMeasurement, transitionMeasurement } from "./measureOverlay.ts";
+import { animateMeasurement, transitionMeasurement } from "./measureOverlay.ts";
 import type { OverlayFade } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
@@ -511,11 +511,17 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     }
     setHint(metric ?? null, pinnedMetric === id && !!id);
     fade?.cancel();
-    fade = transitionMeasurement(ctx.overlay, (target) => {
-      if (!ctx) return;
-      if (metric) drawMeasurement(target, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
-      else drawCalm(target, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
-    });
+    // Arriving at a measurement DRAWS IT ON — the lines extend along their own
+    // paths, which is the thing worth watching. Leaving it cross-fades back to
+    // the calm region instead, because a region outline has no natural
+    // direction to grow along and animating it would just be motion for its
+    // own sake.
+    fade = metric
+      ? animateMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric)
+      : transitionMeasurement(ctx.overlay, (target) => {
+          if (!ctx) return;
+          drawCalm(target, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+        });
     shownRegion = region;
   };
 

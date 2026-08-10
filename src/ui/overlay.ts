@@ -119,7 +119,11 @@ export function drawCalm(
 // interval, so the two never both look active.
 // ---------------------------------------------------------------------------
 
-const TRANSITION_MS = 620; // slightly longer than the CSS zoom, so it lands last
+// Region-to-region transition. Was 620ms, which is fine for something you
+// trigger once and far too slow for something you trigger by moving a mouse:
+// switching tabs meant watching two thirds of a second of animation before the
+// new region settled. Still slightly longer than the CSS zoom so it lands last.
+const TRANSITION_MS = 380;
 
 export function transitionRegion(
   canvas: HTMLCanvasElement,
