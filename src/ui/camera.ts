@@ -1,6 +1,6 @@
 import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
 import { CLOUD_POINTS } from "./cloudPoints.ts";
-import { checkFrame, frameStats } from "../engine/captureGuide.ts";
+import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
 import { buildGeometry } from "../engine/geometry.ts";
 import { detectSex, extractShape } from "../engine/shape.ts";
 import type { FrameCheck } from "../engine/captureGuide.ts";
@@ -18,6 +18,10 @@ export interface CameraHandle {
 interface Opts {
   video: HTMLVideoElement;
   guideCanvas: HTMLCanvasElement;
+  // "front" runs the full landmark-driven gating. "side" cannot: the face mesh
+  // does not track a true profile, so it gates on exposure, focus, and the
+  // detector NOT seeing a front-on face.
+  mode?: "front" | "side";
   onCheck: (c: FrameCheck) => void;
   // Fires when the running vote on which reference population fits the face
   // settles, or flips. Lets the framing silhouette match the person in front
@@ -59,6 +63,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   await opts.video.play();
   await setRunningMode("VIDEO");
 
+  const side = opts.mode === "side";
   scratch = scratch ?? document.createElement("canvas");
   let last = -1;
   const sexVotes: Sex[] = [];
@@ -80,10 +85,10 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       // busy background otherwise decides whether the shot is "sharp".
       const box = faceBox(result);
       const stats = frameStats(v, scratch!, box);
-      const check = checkFrame(result, stats);
+      const check = side ? checkSideFrame(result, stats) : checkFrame(result, stats);
       opts.onCheck(check);
-      drawGuide(opts.guideCanvas, v, result, check);
-      if (opts.onSex && ++frameNo % 12 === 0) voteSex(result, v, check);
+      drawGuide(opts.guideCanvas, v, result, check, side);
+      if (!side && opts.onSex && ++frameNo % 12 === 0) voteSex(result, v, check);
     }
     raf = requestAnimationFrame(loop);
   };
@@ -188,6 +193,7 @@ function drawGuide(
   video: HTMLVideoElement,
   result: ReturnType<typeof detectVideo>,
   check: FrameCheck,
+  side = false,
 ): void {
   const w = canvas.clientWidth || canvas.width;
   const h = canvas.clientHeight || canvas.height;
@@ -201,6 +207,12 @@ function drawGuide(
   ctx.clearRect(0, 0, w, h);
   const P = coverMap(video, w, h);
   if (DEBUG) drawDebug(ctx, P, video, w, h, dpr);
+
+  if (side) {
+    drawProfileGuide(ctx, w, h, check);
+    return;
+  }
+
   const lm = result?.faceLandmarks?.[0];
   if (!lm) return;
 
@@ -294,6 +306,70 @@ function drawCloud(
 // looks at their own image rather than the lens, which quietly tilts the eye
 // measurements, and no amount of head-position coaching catches it.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Profile guide.
+//
+// There is nothing to track here — the face mesh does not follow a true
+// profile, which is the whole reason the thirteen points are placed by hand
+// afterwards. So this draws a target rather than a measurement: a facing
+// silhouette to line up against, and three rules marking where the brow, the
+// nose base and the chin should sit.
+//
+// It is deliberately loose. A silhouette drawn tightly enough to be a real
+// template would be wrong for most faces, and the accuracy that matters is
+// enforced at the verification step regardless. This only has to get someone
+// close enough that the auto-placement has a chance.
+// ---------------------------------------------------------------------------
+
+function drawProfileGuide(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  check: FrameCheck,
+): void {
+  const tint = check.ready ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
+  // A head box sized to how a profile should fill the frame, shifted back from
+  // centre so there is room in front of the face for nose and chin projection —
+  // which is exactly what the side view exists to measure.
+  const bh = h * 0.62;
+  const bw = bh * 0.78;
+  const cx = w * 0.54;
+  const cy = h * 0.5;
+  const left = cx - bw * 0.5;
+  const top = cy - bh * 0.5;
+
+  ctx.save();
+  ctx.strokeStyle = `rgba(${tint},0.5)`;
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([7, 6]);
+
+  // Facing silhouette, drawn as a single open curve: crown, brow, nose, lips,
+  // chin, jaw. Bezier control points are proportions of the box, so it scales.
+  const X = (f: number) => left + bw * f;
+  const Y = (f: number) => top + bh * f;
+  ctx.beginPath();
+  ctx.moveTo(X(0.16), Y(0.30));
+  ctx.bezierCurveTo(X(0.22), Y(0.02), X(0.78), Y(0.0), X(0.82), Y(0.30)); // crown
+  ctx.bezierCurveTo(X(0.86), Y(0.40), X(0.80), Y(0.40), X(0.80), Y(0.44)); // brow
+  ctx.bezierCurveTo(X(0.94), Y(0.55), X(0.94), Y(0.57), X(0.78), Y(0.60)); // nose
+  ctx.bezierCurveTo(X(0.86), Y(0.68), X(0.84), Y(0.72), X(0.76), Y(0.74)); // lips
+  ctx.bezierCurveTo(X(0.82), Y(0.82), X(0.74), Y(0.92), X(0.58), Y(0.93)); // chin
+  ctx.bezierCurveTo(X(0.36), Y(0.94), X(0.18), Y(0.80), X(0.16), Y(0.58)); // jaw
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Height rules: brow, nose base, chin.
+  ctx.strokeStyle = `rgba(${tint},0.22)`;
+  ctx.lineWidth = 1;
+  for (const f of [0.34, 0.6, 0.93]) {
+    ctx.beginPath();
+    ctx.moveTo(left - bw * 0.18, Y(f));
+    ctx.lineTo(left + bw * 1.18, Y(f));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
 // Alignment diagnostic, off unless the page is loaded with ?debug=1.
 //

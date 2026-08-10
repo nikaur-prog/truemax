@@ -18,7 +18,7 @@
     <header class="topbar">
       <span class="wordmark">TRUE<b>MAX</b></span>
       <div class="topbar-right">
-        <span class="tag">FRONT · V1</span>
+        <span class="tag">FRONT + SIDE · V1</span>
       </div>
     </header>
 
@@ -130,16 +130,34 @@
             <canvas id="side-canvas"></canvas>
             <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
             <div id="side-verify"></div>
+            <!-- Live profile capture, layered over the same frame so the
+                 preview and the captured still occupy identical geometry. -->
+            <div class="side-live hidden" id="side-live">
+              <video id="side-video" playsinline muted></video>
+              <canvas id="side-guide"></canvas>
+              <div class="cam-hud">
+                <div class="cam-hint" id="side-hint">
+                  <b id="side-hint-title">Turn to the side</b>
+                  <span id="side-hint-detail">One ear toward the lens</span>
+                </div>
+                <div class="hud-bottom">
+                  <div class="cam-light" id="side-light">
+                    <span class="lamp" id="side-lamp"></span>
+                    <span class="lamp-track"><i id="side-lamp-fill"></i></span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="photo-caption"><span>SIDE</span><b id="side-cap">VERIFY LANDMARKS</b></div>
         </div>
         <div class="side-panel" id="side-panel">
           <h2 class="side-title">Now the side profile</h2>
           <p class="side-sub">
-            Chin projection, jaw angle and facial convexity do not exist in a
-            front photo — they can only be measured from the side, and they are
-            some of the strongest numbers on the report. Add one and your score
-            is recomputed from both views.
+            Second of two. Chin projection, jaw angle and facial convexity do
+            not exist in a front photo — they can only be measured from the
+            side, and they are among the strongest numbers on the report. The
+            analysis runs once both views are in.
           </p>
           <p class="side-sub">
             One catch: a true profile cannot be landmarked automatically with

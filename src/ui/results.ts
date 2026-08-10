@@ -121,10 +121,9 @@ function showOverall(): void {
   const deltaHTML = delta
     ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`)
     : "";
-  // A front scan is a complete measurement, but it is a measurement of one
-  // plane. Projection, chin and jaw angle only exist in profile, so a
-  // front-only number says so rather than quietly presenting itself as the
-  // whole picture.
+  // Every score is now measured from both views — the flow requires the profile
+  // before it will analyse anything. The flag stays because a report restored
+  // from history may predate that.
   const merged = Number.isFinite(r.zScores["view:side"]);
 
   body().innerHTML = `
@@ -142,7 +141,7 @@ function showOverall(): void {
         merged
           ? `<p class="viewnote done">Measured from both views. Projection, chin and jaw angle can only be seen in profile — they are in this number.</p>`
           : ctx.onSideProfile
-            ? `<p class="viewnote">This is your front measurement. Chin projection, jaw angle and facial convexity do not exist in a front photo — <button class="linkish" id="side-nudge">add a side profile</button> and the score is recomputed from both.</p>`
+            ? `<p class="viewnote">Measured from the front only. <button class="linkish" id="side-nudge">Add a side profile</button> to include chin projection, jaw angle and facial convexity.</p>`
             : ""
       }
       <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
@@ -163,7 +162,7 @@ function showOverall(): void {
         !merged && ctx.onSideProfile
           ? `<div class="navrow"><button class="btn gho" id="btn-plan">See your plan</button>
                <button class="btn pri" id="btn-side">Add side profile →</button></div>
-             <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
+             <div class="navrow"><button class="btn gho" id="btn-new">Start over</button>
                <button class="btn gho" id="btn-share">Share card</button></div>`
           : `<div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
                <button class="btn pri" id="btn-plan">See your plan</button></div>

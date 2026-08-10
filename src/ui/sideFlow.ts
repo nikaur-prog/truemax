@@ -3,9 +3,15 @@ import type { Report, Sex } from "../engine/types.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
 import { mountVerifier, seedFromSilhouette } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
+import { isSupported, permissionGranted, startCamera } from "./camera.ts";
+import { setRunningMode } from "../engine/landmarker.ts";
+import type { CameraHandle } from "./camera.ts";
 
-// Side-profile capture flow: upload → auto-seeded landmarks → user verifies
-// by dragging → live-recomputed side report.
+// Side-profile capture flow: camera or upload → auto-seeded landmarks → user
+// verifies by dragging → side report.
+//
+// The camera here runs in "side" mode, which gates on exposure, focus, and the
+// frontal detector NOT finding a square-on face. See checkSideFrame.
 
 const MAX_DIM = 1000;
 
@@ -16,6 +22,7 @@ interface SideCtx {
 }
 
 let verifier: VerifyHandle | null = null;
+let sideCam: CameraHandle | null = null;
 
 const el = () => ({
   section: document.getElementById("v-side")!,
@@ -26,6 +33,15 @@ const el = () => ({
   drop: document.getElementById("side-drop")!,
   input: document.getElementById("side-input") as HTMLInputElement,
   actions: document.getElementById("side-actions")!,
+  frame: document.getElementById("side-frame")!,
+  live: document.getElementById("side-live")!,
+  video: document.getElementById("side-video") as HTMLVideoElement,
+  guide: document.getElementById("side-guide") as HTMLCanvasElement,
+  hintTitle: document.getElementById("side-hint-title")!,
+  hintDetail: document.getElementById("side-hint-detail")!,
+  hint: document.getElementById("side-hint")!,
+  lamp: document.getElementById("side-lamp")!,
+  lampFill: document.getElementById("side-lamp-fill")!,
 });
 
 export function openSideCapture(ctx: SideCtx): void {
@@ -33,11 +49,19 @@ export function openSideCapture(ctx: SideCtx): void {
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
-  e.actions.innerHTML = `<button class="btn gho" id="side-back">Skip — keep my front-only score</button>`;
-  document.getElementById("side-back")!.onclick = () => {
-    close();
-    ctx.onBack();
-  };
+  e.live.classList.add("hidden");
+  e.actions.innerHTML = `
+    <button class="btn pri" id="side-cam">Use camera</button>
+    <button class="btn gho" id="side-pick">Upload a photo</button>`;
+  document.getElementById("side-cam")!.onclick = () => openSideCamera(ctx);
+  document.getElementById("side-pick")!.onclick = () => e.input.click();
+  // Already granted from the front capture, so open the profile preview
+  // straight away rather than making them ask for the camera twice.
+  if (isSupported()) {
+    permissionGranted().then((ok) => {
+      if (ok) void openSideCamera(ctx);
+    });
+  }
 
   e.input.onchange = async () => {
     const file = e.input.files?.[0];
@@ -62,21 +86,95 @@ export function openSideCapture(ctx: SideCtx): void {
   };
 }
 
+async function openSideCamera(ctx: SideCtx): Promise<void> {
+  const e = el();
+  if (sideCam) return;
+  e.drop.classList.add("hidden");
+  e.live.classList.remove("hidden");
+  e.frame.classList.add("live");
+  e.cap.textContent = "LINE UP YOUR PROFILE";
+  let ready = false;
+  try {
+    sideCam = await startCamera({
+      video: e.video,
+      guideCanvas: e.guide,
+      mode: "side",
+      onCheck: (c) => {
+        ready = c.ready;
+        e.hintTitle.textContent = c.hint;
+        e.hintDetail.textContent = c.detail;
+        e.hint.classList.toggle("ready", c.ready);
+        e.hint.classList.toggle("red", c.status === "red");
+        e.hint.classList.toggle("amber", c.status === "amber");
+        e.lamp.className = `lamp ${c.status === "green" ? "green" : c.status}`;
+        e.lampFill.className = c.status === "green" ? "green" : c.status;
+        e.lampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
+        const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
+        if (shoot) shoot.disabled = !c.ready;
+      },
+    });
+  } catch {
+    e.live.classList.add("hidden");
+    e.frame.classList.remove("live");
+    e.drop.classList.remove("hidden");
+    e.hintTitle.textContent = "Camera unavailable";
+    return;
+  }
+  e.actions.innerHTML = `
+    <button class="btn gho" id="side-stop">Upload instead</button>
+    <button class="btn pri" id="side-shoot" disabled>Capture profile</button>`;
+  document.getElementById("side-stop")!.onclick = () => {
+    stopSideCamera();
+    openSideCapture(ctx);
+  };
+  document.getElementById("side-shoot")!.onclick = async () => {
+    if (!sideCam || !ready) return;
+    const shot = sideCam.capture();
+    stopSideCamera();
+    if (shot) await loadCanvas(shot, ctx);
+  };
+}
+
+function stopSideCamera(): void {
+  if (!sideCam) return;
+  sideCam.stop();
+  sideCam = null;
+  // Hand the detector back to still-image mode. Anything downstream of here
+  // works on stills, and leaving it in VIDEO mode makes them throw.
+  void setRunningMode("IMAGE");
+  const e = el();
+  e.live.classList.add("hidden");
+  e.frame.classList.remove("live");
+}
+
 export function close(): void {
+  stopSideCamera();
   verifier?.destroy();
   verifier = null;
   el().section.classList.add("hidden");
 }
 
 async function load(file: File, ctx: SideCtx): Promise<void> {
-  const e = el();
   const img = await loadImage(file);
-  const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
-  const w = Math.round(img.naturalWidth * scale);
-  const h = Math.round(img.naturalHeight * scale);
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  c.getContext("2d")!.drawImage(img, 0, 0);
+  await loadCanvas(c, ctx);
+}
+
+// Both entry points — a chosen file and a captured frame — converge here, so
+// the verify step cannot behave differently depending on where the pixels came
+// from.
+async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
+  const e = el();
+  stopSideCamera();
+  const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
+  const w = Math.round(src.width * scale);
+  const h = Math.round(src.height * scale);
   e.canvas.width = w;
   e.canvas.height = h;
-  e.canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+  e.canvas.getContext("2d")!.drawImage(src, 0, 0, w, h);
 
   e.drop.classList.add("hidden");
   e.cap.textContent = "VERIFY LANDMARKS";
@@ -87,12 +185,9 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
   drawGuides(e.lines, seed.points, w, h);
 
   e.actions.innerHTML = `
-    <button class="btn gho" id="side-back">Skip</button>
-    <button class="btn pri" id="side-go">Merge into my score</button>`;
-  document.getElementById("side-back")!.onclick = () => {
-    close();
-    ctx.onBack();
-  };
+    <button class="btn gho" id="side-back">Retake profile</button>
+    <button class="btn pri" id="side-go">Run the analysis</button>`;
+  document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
   document.getElementById("side-go")!.onclick = () => {
     if (!verifier) return;
     const report = analyzeSide(verifier.points, verifier.faceDir, ctx.sex);

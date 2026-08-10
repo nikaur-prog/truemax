@@ -180,6 +180,105 @@ function boxBlur3(lum: Float32Array, W: number, H: number): Float32Array {
   return o;
 }
 
+// ---------------------------------------------------------------------------
+// Side-profile capture.
+//
+// The front gates cannot be reused, because the thing they all depend on is
+// absent: MediaPipe's face mesh needs a roughly frontal face and simply does
+// not track a true profile. That absence is not a failure to work around — it
+// is the most reliable signal available here, so it is used directly.
+//
+// If the frontal detector CAN see a face and it is anywhere near square on,
+// the person is not in profile yet. If it loses the face, or holds it at a
+// steep yaw, they have turned far enough. So "no detection" is the pass
+// condition, which is the inverse of every other gate in this file.
+//
+// What cannot be checked without landmarks is framing — distance, centring,
+// tilt. Rather than guess at those from pixels, the copy states them and the
+// verification step afterwards is where accuracy is actually enforced: every
+// point gets dragged onto its spot by hand regardless.
+// ---------------------------------------------------------------------------
+
+// Below this yaw the detector is still seeing a broadly front-on face.
+const PROFILE_YAW = 42;
+
+export function checkSideFrame(
+  result: FaceLandmarkerResult | null,
+  stats: FrameStats,
+): FrameCheck {
+  const gates = {
+    face: false,
+    distance: true,
+    centered: true,
+    level: true,
+    straight: true,
+    light: stats.luma >= DARK && stats.luma <= BRIGHT,
+    sharp: stats.sharpness >= SHARP_WARN,
+    neutral: true,
+    gaze: true,
+  };
+  const pose = { yaw: 0, pitch: 0, roll: 0 };
+
+  const lm = result?.faceLandmarks?.[0];
+  let turned = true;
+  if (lm) {
+    const q = assessQuality(result);
+    pose.yaw = q.yawDeg;
+    pose.pitch = q.pitchDeg;
+    pose.roll = q.rollDeg;
+    turned = Math.abs(q.yawDeg) >= PROFILE_YAW;
+  }
+  // "face" here means "a head is in frame at all" — either the detector has it,
+  // or it has lost it because the head is side-on, which is what we want.
+  gates.face = true;
+  gates.straight = turned;
+
+  const problems: Array<{ over: number; hint: string; detail: string }> = [];
+  const add = (over: number, hint: string, detail: string) => {
+    if (over > 0) problems.push({ over, hint, detail });
+  };
+  if (lm && !turned) {
+    add(
+      (PROFILE_YAW - Math.abs(pose.yaw)) / PROFILE_YAW,
+      "Turn to the side",
+      "A full profile — one ear toward the lens, nose in silhouette",
+    );
+  }
+  add((DARK - stats.luma) / DARK, "Too dark", "Face a window or turn a light on");
+  add((stats.luma - BRIGHT) / BRIGHT, "Too bright", "Move out of direct light");
+  add(
+    (SHARP_BLOCK - stats.sharpness) / SHARP_BLOCK,
+    "Can't focus",
+    "Give the lens a wipe — the image is too smeared to measure",
+  );
+
+  if (!problems.length) {
+    return {
+      ready: true,
+      hint: "Hold still",
+      detail: "Full profile — chin, nose and brow all in silhouette",
+      status: "green",
+      progress: 1,
+      gaze: null,
+      pose,
+      gates,
+    };
+  }
+  problems.sort((a, b) => b.over - a.over);
+  const worst = problems[0];
+  const progress = Math.max(0, Math.min(1, 1 - worst.over));
+  return {
+    ready: false,
+    hint: worst.hint,
+    detail: worst.detail,
+    status: progress >= 0.5 ? "amber" : "red",
+    progress,
+    gaze: null,
+    pose,
+    gates,
+  };
+}
+
 export function checkFrame(result: FaceLandmarkerResult | null, stats: FrameStats): FrameCheck {
   const gates = {
     face: false,

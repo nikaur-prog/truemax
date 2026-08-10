@@ -1,3 +1,4 @@
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts";
 import { detectStable } from "./engine/consensus.ts";
 import { assessQuality } from "./engine/quality.ts";
@@ -10,7 +11,7 @@ import { toCelebEntry } from "./engine/celebs.ts";
 import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
-import { renderResults, renderSideResults } from "./ui/results.ts";
+import { renderResults } from "./ui/results.ts";
 import { mergeReports } from "./engine/scoring.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
@@ -324,6 +325,11 @@ async function handleFile(file: File): Promise<void> {
 
 async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promise<void> {
   void exifOrientation;
+  // Uploading while the live preview is running left the landmarker in VIDEO
+  // mode, and the still-image detector then threw "Landmarker is in VIDEO
+  // mode". Capturing had always torn the camera down first; choosing a file
+  // never did.
+  if (cam) await closeCamera();
   const width = src.width;
   const height = src.height;
   el.photoCanvas.width = width;
@@ -352,6 +358,49 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   }
 
   const landmarks = result.faceLandmarks[0];
+
+  // The reference population is picked by shape, then stated — an unexplained
+  // switch would look like a guess. Resolved before the side step, because the
+  // side metrics are scored against the same norms.
+  const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
+  selectedSex = guess?.sex ?? "male";
+  pending = {
+    landmarks,
+    width,
+    height,
+    quality,
+    autoNote: guess ? `Scored against ${guess.sex} norms (auto-detected)` : "",
+  };
+
+  // Straight to the profile. A scan is two photographs, and showing a score
+  // after the first one taught people the second was optional garnish — the
+  // opposite of true, since chin projection, jaw angle and facial convexity
+  // have no front-view equivalent at all.
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "FRONT CAPTURED";
+  el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
+  drawCalm(el.overlayCanvas, landmarks, width, height);
+  startSide();
+}
+
+interface PendingFront {
+  landmarks: NormalizedLandmark[];
+  width: number;
+  height: number;
+  quality: QualityCheck;
+  autoNote: string;
+}
+let pending: PendingFront | null = null;
+
+// Both photographs are in. One analysis, one reveal, one score.
+async function runFullAnalysis(sideReport: Report): Promise<void> {
+  if (!pending) return;
+  const { landmarks, width, height, quality, autoNote } = pending;
+  el.main.classList.remove("hidden");
+  el.frame.classList.add("scanning");
+  el.capRight.textContent = "SCANNING";
+  el.analysis.innerHTML = "";
+  await nextFrame();
   const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
 
   // Staged status lines, ~360ms each
@@ -369,12 +418,8 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   });
   await reveal.done;
 
-  // The reference population is picked by shape, then stated — an unexplained
-  // switch would look like a guess.
-  const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
-  selectedSex = guess?.sex ?? "male";
-  const autoNote = guess ? `Scored against ${guess.sex} norms (auto-detected)` : "";
-  const report = analyze(landmarks, width, height, selectedSex);
+  const front = analyze(landmarks, width, height, selectedSex);
+  const report = mergeReports(front, sideReport);
   const delta = compareAndStore(report);
 
   el.frame.classList.remove("scanning");
@@ -394,38 +439,24 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
-    onSideProfile: () => startSide(report),
+    onSideProfile: () => startSide(),
   };
-  lastRender = ctxArgs;
   renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
 }
 
-// Held so a completed side scan can re-render the SAME results view with the
-// merged report, rather than dropping the person onto a separate side-only
-// page that scores the profile in isolation.
-let lastRender: Parameters<typeof renderResults>[0] | null = null;
-
-function startSide(frontReport: Report): void {
+function startSide(): void {
   el.main.classList.add("hidden");
   openSideCapture({
-    sex: frontReport.sex,
-    onBack: () => el.main.classList.remove("hidden"),
-    onDone: (sideReport) => {
+    sex: selectedSex,
+    // There is no "back to results" any more, because there are no results yet.
+    // The only way out of this step is forward, or starting over.
+    onBack: () => resetToUpload(),
+    onDone: async (sideReport) => {
       closeSide();
-      el.main.classList.remove("hidden");
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
-      if (lastRender) {
-        // One number, measured from both views. See mergeReports for why this
-        // combines already-normalised aggregates instead of pooling metrics.
-        const merged = mergeReports(frontReport, sideReport);
-        lastRender = { ...lastRender, report: merged, onSideProfile: () => startSide(frontReport) };
-        renderResults(lastRender);
-        exposeDev(merged, null, null);
-      } else {
-        renderSideResults(sideReport, () => startSide(frontReport));
-      }
+      await runFullAnalysis(sideReport);
     },
   });
 }

@@ -550,3 +550,21 @@ body {
 .viewnote { font-size: 12.5px; line-height: 1.6; color: var(--mut); margin: 10px 2px 0; max-width: 54ch; }
 .viewnote.done { color: var(--acc); }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--acc); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Live side-profile capture, layered over the same frame the still will use.
+   The frame is given an explicit portrait ratio while live, because with no
+   photo loaded yet the canvas inside it has no intrinsic size and the box
+   collapses to a wide letterbox. */
+.side-live { position: absolute; inset: 0;
+  /* .face-frame sets line-height: 0 so its canvases sit flush. Inherited into
+     the HUD that collapses the hint's block children onto one line and the
+     title and detail draw on top of each other. */
+  line-height: 1.5; }
+#side-frame.live { aspect-ratio: 3 / 4; max-height: 66vh; }
+#side-frame.live #side-canvas, #side-frame.live #side-lines { display: none; }
+#side-video, #side-guide { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.side-live .cam-hud::before, .side-live .cam-hud::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 92px; pointer-events: none;
+}
+.side-live .cam-hud::before { top: 0; background: linear-gradient(rgba(10,11,13,0.5), transparent); }
+.side-live .cam-hud::after { bottom: 0; background: linear-gradient(transparent, rgba(10,11,13,0.55)); }

@@ -818,3 +818,41 @@ The headline now always states which views it came from: "OVERALL · FRONT ONLY"
 or "OVERALL · FRONT + SIDE". A front scan is a complete measurement of one
 plane, and chin projection, jaw angle and facial convexity do not exist in that
 plane at all.
+
+## Both views are now required, and the side has its own capture
+
+The flow was front photo -> score -> optionally add a profile. That taught
+people the second photo was garnish. It is not: chin projection, jaw angle and
+facial convexity have no front-view equivalent at all, so a front-only report
+is missing measurements rather than merely having fewer of them.
+
+Now: front photo -> side photo -> one analysis -> one score. No number is shown
+between the two.
+
+### The side camera gates on the detector FAILING
+
+The front gates cannot be reused, because the thing they all depend on is
+absent: MediaPipe's face mesh needs a roughly frontal face and does not track a
+true profile. That absence is the most reliable signal available, so it is used
+directly — if the frontal detector can see a face at under 42 degrees of yaw,
+the person has not turned far enough, and the shutter stays shut. "No detection"
+is the pass condition, which inverts every other gate in the file.
+
+Exposure and focus still gate normally, since `frameStats` needs no landmarks.
+Framing cannot be checked at all without them, so the copy states it and the
+verification step enforces what actually matters: all thirteen points get
+dragged into place by hand regardless.
+
+Verified against a fake camera device fed a front-facing clip: the capture
+button stays disabled and the hint reads "Turn to the side".
+
+### Two bugs this surfaced
+
+- **Uploading a photo while the live preview was running crashed**, with
+  "Landmarker is in VIDEO mode". Capturing had always torn the camera down
+  first; choosing a file never did. Pre-existing, and invisible until a test ran
+  with a camera attached — every earlier upload test ran with no device, so the
+  preview never started and the mode was never switched.
+- **The side HUD's hint drew its title and detail on top of each other.**
+  `.face-frame` sets `line-height: 0` so its canvases sit flush, and that
+  inherited into the overlaid HUD and collapsed its block children.
