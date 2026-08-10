@@ -15,7 +15,18 @@ const APP_DIR = "/home/user/truemax";
 const DATA = process.env.TM_DATA ?? new URL("../.calib/", import.meta.url).pathname;
 const pop = JSON.parse(readFileSync(DATA + "pop-manifest.json", "utf8"));
 
-const GATE = { yaw: 25, pitch: 22, smile: 0.7, face: 0.2 };
+// The smile gate used to sit at 0.7 and it introduced a sex-correlated
+// selection bias severe enough to break the scale: it rejected 45 of 59 female
+// reference faces against 22 of 58 male, because women in press photography
+// smile far more often. The 13 women who survived were not a sample of women,
+// they were a sample of women who were not smiling — and the female quantile
+// table built from them sat 0.4 sigma high, inflating every female score.
+//
+// A larger sample with a small shared bias beats a tiny clean one: at n=13 the
+// sampling error on a 21-point quantile table dwarfs anything a smile does to
+// the mouth metrics. Pose and framing gates stay, since those distort geometry
+// in ways that do not cancel.
+const GATE = { yaw: 25, pitch: 22, smile: 1.01, face: 0.2 };
 
 const server = spawn("npx", ["vite", "preview", "--port", "4186", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));

@@ -420,3 +420,63 @@ Nothing available here can separate engine noise from a person actually looking
 different. That is precisely what the controlled sitting settles, and it is why
 no further stability work is worth doing before it exists: 6-8 front shots, one
 sitting, independent attempts, no real change possible in between.
+
+## Fixing the sex scale
+
+Female faces were scoring systematically high — population median 5.80 against
+5.50 for men, and Sydney Sweeney reading 9.2. Diagnosis, per sex, on the
+population reference:
+
+```
+            median score   median shapeZ   median overallZ
+male   55        5.50          -0.107          -0.030
+female 56        5.80          +0.580          +0.399
+```
+
+Male sat at zero, as the quantile tables guarantee by construction. Female was
+0.4 sigma high, and the shape descriptor carried nearly all of it.
+
+### The cause was a sex-correlated selection bias
+
+Both reference generators gated on smile. Counting what that rejected:
+
+```
+male   : 58 detected, 22 fail smile>0.7  ->  33 usable
+female : 59 detected, 45 fail smile>0.7  ->  13 usable
+```
+
+Women in press photography smile far more often than men. The thirteen women
+who survived were not a sample of women, they were a sample of women who were
+not smiling — and the female mean shape built from them sat well below where
+real women actually land, putting every female face 0.58 sigma above it.
+
+Both gates now admit smiling faces. The female shape reference goes from 13 to
+52 and the quantile reference from 13 to 57. Smiling moves the mouth and jaw
+metrics, but barely touches the outline landmarks the shape model uses, and at
+n=13 sampling error dwarfs anything a smile does.
+
+### Result, and the cost
+
+```
+                     before   after
+male median score      5.50     5.10
+female median score    5.80     4.95
+sex gap                0.30     0.15
+median female shapeZ  +0.580   -0.203
+separation (Cohen's d) 1.02     0.69
+```
+
+The scale is fixed: both sexes now sit near 5.0 and the gap is inside the
+noise. **Separation fell from 1.02 to 0.69, and that is a real cost, not a
+rounding artifact.**
+
+The reason is visible in the shape model's own output: the attractive top tier
+now sits only 0.50 SD (male) and 0.76 SD (female) along the discriminating
+axis. That axis is defined by 11 male and 13 female top-tier faces. Having
+fixed the small-sample problem at the population end, the same problem is now
+the binding constraint at the ideal end.
+
+This is a data problem, not a code problem. The top tier needs to be three or
+four times larger before the shape axis can discriminate as sharply as the
+biased version appeared to — and "appeared to" is the right phrase, because
+some of that d=1.02 was the female inflation itself widening the gap.
