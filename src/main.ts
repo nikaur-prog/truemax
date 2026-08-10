@@ -13,7 +13,7 @@ import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
 import { renderResults } from "./ui/results.ts";
 import { mergeReports } from "./engine/scoring.ts";
-import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
+import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
 import { isSupported, overrideGlasses, permissionGranted, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
@@ -480,14 +480,18 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
     if (view === showing) return;
     if (view === "side" && !sideShot) return;
     showing = view;
-    const target = view === "side" ? sideShot! : null;
     const cap = document.querySelector(".photo-caption span");
     if (cap) cap.textContent = view === "side" ? "SIDE" : "FRONT";
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
-    if (target) {
-      el.photoCanvas.width = target.width;
-      el.photoCanvas.height = target.height;
-      el.photoCanvas.getContext("2d")!.drawImage(target, 0, 0);
+    if (view === "side") {
+      const t = sideShot!;
+      el.photoCanvas.width = t.width;
+      el.photoCanvas.height = t.height;
+      el.photoCanvas.getContext("2d")!.drawImage(t, 0, 0);
+      // The profile gets its own reveal: the thirteen verified points, dropped
+      // in one at a time. Without this the side half of the scan was a photo
+      // sitting still while the text claimed it was being measured.
+      if (lastSide) revealSidePoints(el.overlayCanvas, lastSide.points, t.width, t.height);
     } else {
       el.photoCanvas.width = width;
       el.photoCanvas.height = height;
@@ -503,7 +507,7 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
         el.barFill.style.width = `${((s + 1) / SCAN_STAGES.length) * 100}%`;
         swapTo(SCAN_STAGES[s].view);
         s++;
-        setTimeout(step, 360);
+        setTimeout(step, SCAN_STAGES[s - 1].view === "side" ? 520 : 360);
       } else done();
     };
     setTimeout(step, 200);
@@ -534,7 +538,27 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
     onSideProfile: () => startSide(),
     sideReport,
     sidePhoto: lastSide?.photo,
-    onRedoSide: () => startSide(),
+    // Correct the points on the profile already taken, rather than shooting it
+    // again. The photograph is usually fine; it is the seed that missed.
+    onRedoSide: () => {
+      if (!lastSide?.photo) {
+        startSide();
+        return;
+      }
+      el.main.classList.add("hidden");
+      openSideAdjust(lastSide.photo, { points: lastSide.points, faceDir: lastSide.faceDir }, {
+        sex: selectedSex,
+        onBack: () => {
+          closeSide();
+          el.main.classList.remove("hidden");
+        },
+        onDone: async (sideReport, points, faceDir) => {
+          closeSide();
+          lastSide = { points, faceDir, photo: lastSide?.photo };
+          await runFullAnalysis(sideReport);
+        },
+      });
+    },
     // Changing the reference population re-runs BOTH views and the merge. It
     // cannot just relabel: every percentile, every region and the side metrics
     // are all scored against the chosen population, so a relabel would leave
@@ -555,6 +579,43 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
   renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
+}
+
+// Drop the verified profile points in one by one, in reading order down the
+// face, so the side view visibly gets measured rather than just displayed.
+function revealSidePoints(
+  canvas: HTMLCanvasElement,
+  points: SidePoints,
+  w: number,
+  h: number,
+): void {
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const pts = Object.values(points).sort((a, b) => a.y - b.y);
+  const r = Math.max(3, w / 130);
+  const total = 900;
+  const start = performance.now();
+  const frame = (now: number) => {
+    const t = Math.min(1, (now - start) / total);
+    ctx.clearRect(0, 0, w, h);
+    const shown = Math.ceil(t * pts.length);
+    for (let i = 0; i < shown; i++) {
+      const p = pts[i];
+      // The newest point lands slightly large and settles, so the eye catches
+      // which one just arrived.
+      const age = Math.min(1, (t * pts.length - i) * 2.2);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * (1 + (1 - age) * 0.9), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(143,243,224,${0.35 + age * 0.55})`;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(4,53,45,0.85)";
+      ctx.lineWidth = Math.max(1, r * 0.32);
+      ctx.stroke();
+    }
+    if (t < 1) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 function startSide(): void {

@@ -179,6 +179,26 @@ function stopSideCamera(): void {
   e.frame.classList.remove("live");
 }
 
+// Re-open the verifier on a profile that has already been captured, so the
+// thirteen points can be corrected without shooting the photo again.
+//
+// "Retake" was the only route back, which is the wrong tool for the actual
+// problem: the photograph is usually fine and the seed landed a point or two
+// off. Making someone re-shoot to fix a dot they can see is wrong throws away
+// the good capture and their time.
+export function openSideAdjust(
+  photo: HTMLCanvasElement,
+  seed: { points: SidePoints; faceDir: number },
+  ctx: SideCtx,
+): void {
+  const e = el();
+  e.section.classList.remove("hidden");
+  e.drop.classList.add("hidden");
+  e.live.classList.add("hidden");
+  e.frame.classList.remove("live");
+  mountVerify(photo, seed, ctx, "ADJUST LANDMARKS");
+}
+
 export function close(): void {
   stopSideCamera();
   verifier?.destroy();
@@ -213,7 +233,28 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   e.drop.classList.add("hidden");
   e.cap.textContent = "VERIFY LANDMARKS";
 
-  const seed = seedSidePoints(e.canvas);
+  mountVerify(e.canvas, seedSidePoints(e.canvas), ctx, "VERIFY LANDMARKS");
+}
+
+// Shared by the first pass and by a later correction, so the two cannot drift
+// apart in what dragging a point does.
+function mountVerify(
+  photo: HTMLCanvasElement,
+  seed: { points: SidePoints; faceDir: number },
+  ctx: SideCtx,
+  caption: string,
+): void {
+  const e = el();
+  if (photo !== e.canvas) {
+    e.canvas.width = photo.width;
+    e.canvas.height = photo.height;
+    e.canvas.getContext("2d")!.drawImage(photo, 0, 0);
+  }
+  const w = e.canvas.width;
+  const h = e.canvas.height;
+  e.drop.classList.add("hidden");
+  e.cap.textContent = caption;
+
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
   drawGuides(e.lines, seed.points, w, h);
