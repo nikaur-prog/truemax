@@ -30,8 +30,11 @@ import type { AdviceChannel, Profile } from "./goals.ts";
 
 export type Evidence = "strong" | "moderate" | "limited" | "none";
 
+export type RecGroup = "topical" | "food" | "habit" | "professional";
+
 export interface Rec {
   id: string;
+  group: RecGroup;
   goals: string[]; // goal ids from goals.ts this serves
   channel: AdviceChannel;
   title: string;
@@ -59,6 +62,7 @@ export const RECS: Rec[] = [
   // ---- skin ---------------------------------------------------------------
   {
     id: "spf",
+    group: "topical",
     goals: ["skin"],
     channel: "grooming",
     title: "Daily sunscreen",
@@ -70,6 +74,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "adapalene",
+    group: "topical",
     goals: ["skin"],
     channel: "grooming",
     title: "Adapalene 0.1%",
@@ -83,6 +88,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "azelaic",
+    group: "topical",
     goals: ["skin"],
     channel: "grooming",
     title: "Azelaic acid 10%",
@@ -95,6 +101,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "salicylic",
+    group: "topical",
     goals: ["skin"],
     channel: "grooming",
     title: "Salicylic acid 2%",
@@ -105,6 +112,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "niacinamide",
+    group: "topical",
     goals: ["skin"],
     channel: "grooming",
     title: "Niacinamide 4–5%",
@@ -116,6 +124,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "derm",
+    group: "professional",
     goals: ["skin"],
     channel: "grooming",
     title: "See a pharmacist or dermatologist",
@@ -128,6 +137,7 @@ export const RECS: Rec[] = [
   // ---- food ---------------------------------------------------------------
   {
     id: "zinc-food",
+    group: "food",
     goals: ["skin"],
     channel: "diet",
     title: "Zinc in food",
@@ -139,6 +149,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "zinc-veg",
+    group: "food",
     goals: ["skin"],
     channel: "diet",
     title: "Zinc without seafood",
@@ -149,6 +160,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "vitc",
+    group: "food",
     goals: ["skin"],
     channel: "diet",
     title: "Vitamin C in food",
@@ -159,6 +171,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "omega3",
+    group: "food",
     goals: ["skin", "debloat"],
     channel: "diet",
     title: "Omega-3 in food",
@@ -169,6 +182,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "sodium",
+    group: "food",
     goals: ["debloat", "bodyfat"],
     channel: "diet",
     title: "Sodium and alcohol",
@@ -179,6 +193,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "protein",
+    group: "food",
     goals: ["muscle", "bodyfat"],
     channel: "diet",
     title: "Protein at every meal",
@@ -191,6 +206,7 @@ export const RECS: Rec[] = [
   // ---- teeth --------------------------------------------------------------
   {
     id: "fluoride",
+    group: "topical",
     goals: ["teeth"],
     channel: "grooming",
     title: "Fluoride toothpaste",
@@ -201,6 +217,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "cheese",
+    group: "food",
     goals: ["teeth"],
     channel: "diet",
     title: "Cheese after a meal",
@@ -212,6 +229,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "whitening",
+    group: "topical",
     goals: ["teeth"],
     channel: "grooming",
     title: "Peroxide whitening strips",
@@ -224,6 +242,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "dentist",
+    group: "professional",
     goals: ["teeth"],
     channel: "grooming",
     title: "See a dentist about alignment",
@@ -235,6 +254,7 @@ export const RECS: Rec[] = [
   // ---- brows, lashes, grooming -------------------------------------------
   {
     id: "brow-shape",
+    group: "habit",
     goals: ["grooming", "eyes"],
     channel: "grooming",
     title: "Brow shaping",
@@ -245,6 +265,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "brow-tint",
+    group: "topical",
     goals: ["grooming", "eyes"],
     channel: "grooming",
     title: "Brow tinting",
@@ -255,6 +276,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "brow-oils",
+    group: "topical",
     goals: ["grooming", "eyes"],
     channel: "grooming",
     title: "Brow and lash growth oils",
@@ -269,6 +291,7 @@ export const RECS: Rec[] = [
   // ---- habits -------------------------------------------------------------
   {
     id: "sleep",
+    group: "habit",
     goals: ["debloat", "eyes", "skin"],
     channel: "lifestyle",
     title: "Consistent sleep timing",
@@ -279,6 +302,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "resistance",
+    group: "habit",
     goals: ["muscle", "bodyfat"],
     channel: "lifestyle",
     title: "Resistance training",
@@ -289,6 +313,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "posture",
+    group: "habit",
     goals: ["symmetry"],
     channel: "lifestyle",
     title: "Posture and chewing balance",
@@ -296,6 +321,162 @@ export const RECS: Rec[] = [
     evidence: "limited",
     detail:
       "Habitual one-sided chewing and forward head posture are associated with asymmetry over long periods. Slow, and worth doing anyway for reasons that have nothing to do with your face.",
+  },
+
+  // ---- eating pattern -----------------------------------------------------
+  {
+    id: "wholefood",
+    group: "food",
+    goals: ["bodyfat", "skin", "debloat"],
+    channel: "diet",
+    title: "Whole foods over ultra-processed",
+    what: "The best-evidenced dietary change there is for eating less without trying",
+    evidence: "strong",
+    detail:
+      "In a controlled trial where both diets were matched for calories, sugar, fat, fibre and protein and people ate as much as they liked, the ultra-processed version led to roughly 500 more calories a day — without anyone noticing. This is not about any single ingredient. It is that processed food is easier to overeat.",
+  },
+  {
+    id: "complex-carbs",
+    group: "food",
+    goals: ["bodyfat"],
+    channel: "diet",
+    title: "Slower carbohydrates",
+    what: "Oats, legumes, potatoes, intact grains and fruit over refined flour and sugar",
+    evidence: "moderate",
+    detail:
+      "Slower-digesting carbohydrates are more filling per calorie and flatten the blood-sugar swing that makes you hungry again an hour later. Maltodextrin and refined flour sit at the opposite end — they are near the top of the glycaemic scale and are in almost everything processed.",
+  },
+  {
+    id: "water",
+    group: "food",
+    goals: ["bodyfat", "debloat"],
+    channel: "diet",
+    title: "Water, particularly before meals",
+    what: "Modestly reduces how much is eaten at that meal",
+    evidence: "moderate",
+    detail:
+      "Small but real in trials, and free. It also helps the other direction: mild dehydration drives sodium retention, which is the puffiness the scan actually measures.",
+  },
+  {
+    id: "fat-quality",
+    group: "food",
+    goals: ["bodyfat", "skin"],
+    channel: "diet",
+    title: "Where your fat comes from",
+    what: "Olive oil, nuts, oily fish, avocado, dairy",
+    evidence: "moderate",
+    detail:
+      "Whole-food fat sources come with fibre, protein and micronutrients attached. That is the defensible version of the advice — the case for whole foods is strong and does not depend on any particular oil being harmful.",
+  },
+  {
+    id: "seed-oils",
+    group: "food",
+    goals: ["bodyfat", "skin"],
+    channel: "diet",
+    title: "On seed oils specifically",
+    what: "The popular claim is that they are the problem. The evidence does not support it",
+    evidence: "none",
+    detail:
+      "Controlled trials and meta-analyses do not show seed oils causing harm; replacing saturated fat with them is generally associated with lower cardiovascular risk. What IS well evidenced is the ultra-processed food they usually arrive in. Cutting those gets you the outcome people credit to cutting seed oils, and it is the version that survives scrutiny.",
+  },
+  {
+    id: "glycaemic-skin",
+    group: "food",
+    goals: ["skin"],
+    channel: "diet",
+    title: "Sugar load and skin congestion",
+    what: "High-glycaemic diets are associated with more congestion",
+    evidence: "limited",
+    detail:
+      "Observational, with a modest effect size, so treat it as a nudge rather than a rule. It points the same direction as everything else here: less refined flour and sugar, more whole food.",
+  },
+
+  // ---- hair ---------------------------------------------------------------
+  {
+    id: "minoxidil",
+    group: "topical",
+    goals: ["hair"],
+    channel: "grooming",
+    title: "Minoxidil 5%",
+    what: "Topical, over the counter in most countries, and it works",
+    evidence: "strong",
+    detail:
+      "The best-evidenced non-prescription option for pattern hair thinning, for both men and women. It takes four to six months before anything is visible, and there is often a shedding phase early on that makes people quit right before it starts working.",
+    otc: true,
+    caution:
+      "Gains reverse if you stop, so it is an ongoing commitment rather than a course. Formulations and recommended strength differ for women. Not for use in pregnancy. Ask a pharmacist.",
+  },
+  {
+    id: "keto-shampoo",
+    group: "topical",
+    goals: ["hair"],
+    channel: "grooming",
+    title: "Ketoconazole 1% shampoo",
+    what: "An over-the-counter antifungal shampoo",
+    evidence: "limited",
+    detail:
+      "Some evidence as an adjunct for scalp health and shedding. Cheap and low-risk, but a supporting act rather than a treatment.",
+    otc: true,
+  },
+  {
+    id: "hair-damage",
+    group: "habit",
+    goals: ["hair"],
+    channel: "grooming",
+    title: "Heat and tension",
+    what: "Tight styles and high heat cause avoidable loss",
+    evidence: "strong",
+    detail:
+      "Traction alopecia from persistently tight styles is one of the few kinds of hair loss that is genuinely preventable, and heat damage causes breakage that reads as thinning. Costs nothing to stop.",
+  },
+  {
+    id: "hair-colour",
+    group: "topical",
+    goals: ["hair", "grooming"],
+    channel: "grooming",
+    title: "Colour",
+    what: "Cosmetic, immediate, no medical claim attached",
+    evidence: "moderate",
+    detail:
+      "Darker colour reads as more density at the same hair count, the same way brow tinting does. Bleaching does the reverse and damages the shaft.",
+    otc: true,
+    caution: "Patch test 48 hours ahead — dye reactions are the common problem, and they can be severe.",
+  },
+  {
+    id: "hair-doctor",
+    group: "professional",
+    goals: ["hair"],
+    channel: "grooming",
+    title: "Get shedding investigated",
+    what: "For sudden or patchy loss rather than gradual thinning",
+    evidence: "strong",
+    detail:
+      "Causes range from thyroid to iron to autoimmune to genetics, and they are treated completely differently. A blood test settles in a week what guessing will not settle at all. Low ferritin in particular is common, easily missed, and fixable.",
+  },
+
+  // ---- texture and marks --------------------------------------------------
+  {
+    id: "silicone",
+    group: "topical",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Silicone gel or sheets",
+    what: "For raised or thickened scars",
+    evidence: "moderate",
+    detail:
+      "The best-evidenced over-the-counter option for raised scarring, and the one dermatologists reach for first. It needs months of daily use, and it does nothing for indented scars.",
+    otc: true,
+  },
+  {
+    id: "scar-sun",
+    group: "habit",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Keep marks out of the sun",
+    what: "Sun exposure darkens healing skin semi-permanently",
+    evidence: "strong",
+    detail:
+      "New scars and post-spot marks pigment far more readily than surrounding skin. Covering them for the first several months is the difference between a mark that fades and one that stays.",
   },
 ];
 

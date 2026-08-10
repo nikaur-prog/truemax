@@ -395,19 +395,39 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
   const order: Record<string, number> = { strong: 0, moderate: 1, limited: 2, none: 3 };
   recs.sort((a, b) => order[a.evidence] - order[b.evidence]);
 
+  // Grouped, because a flat list of thirty cards is a wall. Within each group
+  // the best-evidenced thing comes first, so the cheapest and most certain
+  // options are what someone reads before anything they could spend money on.
+  const GROUPS: Array<[string, string, string]> = [
+    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country — a pharmacist will know what's on the shelf where you are."],
+    ["food", "EAT", "Facts about food, not a diet. No targets, no counting, nothing to buy."],
+    ["habit", "DO", "Free, and mostly the things that compound."],
+    ["professional", "ASK SOMEONE", "The things worth paying a person for rather than guessing at."],
+  ];
+
+  const sections = GROUPS.map(([g, label, blurb]) => {
+    const items = recs.filter((r) => r.group === g);
+    if (!items.length) return "";
+    return `<div class="rec-group">
+      <h5>${label}</h5>
+      <p class="rec-group-note">${blurb}</p>
+      ${items
+        .map(
+          (r) => `<div class="rec ev-${r.evidence}">
+        <b>${r.title}<em>${EVIDENCE_LABEL[r.evidence].toUpperCase()}</em></b>
+        <span class="rec-what">${r.what}</span>
+        <p>${r.detail}</p>
+        ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
+      </div>`,
+        )
+        .join("")}
+    </div>`;
+  }).join("");
+
   return `<div class="recs">
     <h4>WORTH TRYING</h4>
-    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure — over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't.</p>
-    ${recs
-      .map(
-        (r) => `<div class="rec ev-${r.evidence}">
-      <b>${r.title}<em>${EVIDENCE_LABEL[r.evidence].toUpperCase()}</em></b>
-      <span class="rec-what">${r.what}</span>
-      <p>${r.detail}</p>
-      ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
-    </div>`,
-      )
-      .join("")}
+    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure — over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't. Where the evidence for something popular is weak, it says so.</p>
+    ${sections}
   </div>`;
 }
 

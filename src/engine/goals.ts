@@ -91,6 +91,14 @@ export const GOALS: GoalDef[] = [
     measurable: true,
   },
   {
+    id: "hair",
+    label: "Hair",
+    blurb: "Density, thickness, colour and keeping what you have",
+    metrics: [],
+    regions: [],
+    measurable: false,
+  },
+  {
     id: "skin",
     label: "Skin quality",
     blurb: "Texture and tone",
