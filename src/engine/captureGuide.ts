@@ -224,6 +224,26 @@ function boxBlur3(lum: Float32Array, W: number, H: number): Float32Array {
 
 // Below this yaw the detector is still seeing a broadly front-on face.
 const PROFILE_YAW = 42;
+// Consecutive frames with no detection before that counts as "turned away".
+//
+// Losing the face used to pass the gate on its own and on the first frame, and
+// that is what made the side view easier to shoot than the front — which is
+// backwards, because the front carries most of the score. It also passed for
+// every reason a detector loses a face: a hand over the lens, someone leaving
+// frame, walking out of the light. Requiring the loss to persist, and to have
+// been preceded by a face that was already turning, means the only way to pass
+// is the one we actually want.
+const LOST_FRAMES = 6;
+
+// Recent detection history, so "the face went away" can be told apart from
+// "there was never a face". Reset whenever a side capture starts.
+let lostRun = 0;
+let sawTurning = false;
+
+export function resetSideTracking(): void {
+  lostRun = 0;
+  sawTurning = false;
+}
 
 export function checkSideFrame(
   result: FaceLandmarkerResult | null,
@@ -243,17 +263,23 @@ export function checkSideFrame(
   const pose = { yaw: 0, pitch: 0, roll: 0 };
 
   const lm = result?.faceLandmarks?.[0];
-  let turned = true;
+  let turned = false;
   if (lm) {
+    lostRun = 0;
     const q = assessQuality(result);
     pose.yaw = q.yawDeg;
     pose.pitch = q.pitchDeg;
     pose.roll = q.rollDeg;
     turned = Math.abs(q.yawDeg) >= PROFILE_YAW;
+    // Half of the profile yaw is already a decisive turn, and it is the last
+    // thing the detector reliably reports before it drops the face. Seeing it
+    // is what licenses treating a later loss as "they kept turning".
+    if (Math.abs(q.yawDeg) >= PROFILE_YAW * 0.5) sawTurning = true;
+  } else {
+    lostRun++;
+    turned = sawTurning && lostRun >= LOST_FRAMES;
   }
-  // "face" here means "a head is in frame at all" — either the detector has it,
-  // or it has lost it because the head is side-on, which is what we want.
-  gates.face = true;
+  gates.face = !!lm || sawTurning;
   gates.straight = turned;
 
   const problems: Array<{ over: number; hint: string; detail: string }> = [];
@@ -263,9 +289,14 @@ export function checkSideFrame(
   if (lm && !turned) {
     add(
       (PROFILE_YAW - Math.abs(pose.yaw)) / PROFILE_YAW,
-      "Turn to the side",
-      "A full profile — one ear toward the lens, nose in silhouette",
+      "Keep turning",
+      "All the way to a full profile — one ear to the lens, nose in silhouette",
     );
+  }
+  if (!lm && !turned) {
+    // No face, and no turn on record to explain it. Almost always someone who
+    // has not started yet, or has stepped out of frame.
+    add(1, "Face the camera first", "Start front-on, then turn until you are fully side-on");
   }
   add((DARK - stats.luma) / DARK, "Too dark", "Face a window or turn a light on");
   add((stats.luma - BRIGHT) / BRIGHT, "Too bright", "Move out of direct light");

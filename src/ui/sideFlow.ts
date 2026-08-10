@@ -5,6 +5,7 @@ import { mountVerifier, seedFromSilhouette } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
 import { isSupported, permissionGranted, startCamera } from "./camera.ts";
 import { setRunningMode } from "../engine/landmarker.ts";
+import { resetSideTracking } from "../engine/captureGuide.ts";
 import type { CameraHandle } from "./camera.ts";
 
 // Side-profile capture flow: camera or upload → auto-seeded landmarks → user
@@ -105,6 +106,10 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   e.live.classList.remove("hidden");
   e.frame.classList.add("live");
   e.cap.textContent = "LINE UP YOUR PROFILE";
+  // The gate remembers having seen the head turn, so that losing the face can
+  // be read as "they turned away" rather than "there was never anyone there".
+  // That memory has to start empty on every new attempt.
+  resetSideTracking();
   let ready = false;
   try {
     sideCam = await startCamera({
