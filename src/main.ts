@@ -442,7 +442,7 @@ interface PendingFront {
 let pending: PendingFront | null = null;
 // The verified side points, kept so a change of reference population can
 // re-score the profile too rather than only the front.
-let lastSide: { points: SidePoints; faceDir: number } | null = null;
+let lastSide: { points: SidePoints; faceDir: number; photo?: HTMLCanvasElement } | null = null;
 
 // Both photographs are in. One analysis, one reveal, one score.
 async function runFullAnalysis(sideReport: Report): Promise<void> {
@@ -492,6 +492,9 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
     onSideProfile: () => startSide(),
+    sideReport,
+    sidePhoto: lastSide?.photo,
+    onRedoSide: () => startSide(),
     // Changing the reference population re-runs BOTH views and the merge. It
     // cannot just relabel: every percentile, every region and the side metrics
     // are all scored against the chosen population, so a relabel would leave
@@ -522,8 +525,19 @@ function startSide(): void {
     // The only way out of this step is forward, or starting over.
     onBack: () => resetToUpload(),
     onDone: async (sideReport, points, faceDir) => {
+      // Copy the profile out before the side screen is torn down — the results
+      // panel shows it under the Side tab, and after closeSide() the canvas it
+      // lives on is fair game.
+      const shot = document.getElementById("side-canvas") as HTMLCanvasElement | null;
+      let photo: HTMLCanvasElement | undefined;
+      if (shot?.width) {
+        photo = document.createElement("canvas");
+        photo.width = shot.width;
+        photo.height = shot.height;
+        photo.getContext("2d")!.drawImage(shot, 0, 0);
+      }
       closeSide();
-      lastSide = { points, faceDir };
+      lastSide = { points, faceDir, photo };
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
       // The verified points, for the calibration harnesses — re-scoring the
       // profile under a different reference population needs the input, not

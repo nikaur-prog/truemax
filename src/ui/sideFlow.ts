@@ -1,7 +1,7 @@
 import { analyzeSide } from "../engine/scoring.ts";
 import type { Report, Sex } from "../engine/types.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
-import { mountVerifier, seedFromSilhouette } from "./sideVerify.ts";
+import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
 import { isSupported, permissionGranted, startCamera } from "./camera.ts";
 import { setRunningMode } from "../engine/landmarker.ts";
@@ -166,6 +166,13 @@ function stopSideCamera(): void {
   sideCam = null;
   // Hand the detector back to still-image mode. Anything downstream of here
   // works on stills, and leaving it in VIDEO mode makes them throw.
+  //
+  // Fire-and-forget is fine HERE because loadCanvas awaits the same switch
+  // before it seeds. It did not used to, and that was a silent bug: seeding
+  // runs the detector, the detector throws in VIDEO mode, the throw is caught
+  // as "no face", and every camera-captured profile quietly fell back to the
+  // silhouette trace — the worse path, on the most common route into this
+  // screen.
   void setRunningMode("IMAGE");
   const e = el();
   e.live.classList.add("hidden");
@@ -194,6 +201,8 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
 async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   const e = el();
   stopSideCamera();
+  // Awaited, not assumed: seeding runs the still-image detector below.
+  await setRunningMode("IMAGE");
   const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
   const w = Math.round(src.width * scale);
   const h = Math.round(src.height * scale);
@@ -204,7 +213,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   e.drop.classList.add("hidden");
   e.cap.textContent = "VERIFY LANDMARKS";
 
-  const seed = seedFromSilhouette(e.canvas);
+  const seed = seedSidePoints(e.canvas);
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
   drawGuides(e.lines, seed.points, w, h);

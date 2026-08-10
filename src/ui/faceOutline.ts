@@ -274,6 +274,13 @@ export interface StrokeOpts {
 // Each contour is one continuous stroked path. Drawing it segment-by-segment
 // with a vertex at every landmark looks like a wireframe; a smooth curve
 // through the same points reads as a drawn silhouette.
+//
+// The curve passes THROUGH the landmarks (Catmull-Rom) rather than being pulled
+// toward their midpoints. The previous version used quadratics aimed at each
+// midpoint, which systematically cuts corners — and the corners of a face oval
+// are the chin and the two jaw angles, so the one thing it rounded off was the
+// jawline. It drew every face as a rounded square. Same data, same claim about
+// what the outline is; it just stops smoothing away the shape.
 export function strokeOutline(
   ctx: CanvasRenderingContext2D,
   shape: number[],
@@ -294,23 +301,36 @@ export function strokeOutline(
     ctx.strokeStyle = o.stroke;
     ctx.lineWidth = (o.lineWidth ?? 1.6) * (isOval ? 1 : 0.8);
     ctx.beginPath();
-    for (let k = 0; k < loop.length; k++) {
-      const p = P(loop[k]);
-      if (k === 0) ctx.moveTo(p.x, p.y);
-      else {
-        const prev = P(loop[k - 1]);
-        ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + p.x) / 2, (prev.y + p.y) / 2);
-      }
-    }
-    if (loop.closed) {
-      const first = P(loop[0]);
-      const last = P(loop[loop.length - 1]);
-      ctx.quadraticCurveTo(last.x, last.y, first.x, first.y);
-      ctx.closePath();
-    }
+    spline(ctx, loop.map(P), loop.closed === true);
     ctx.stroke();
   }
   ctx.restore();
+}
+
+// Catmull-Rom through the given points, emitted as cubic beziers. `tension` at
+// 6 is the standard uniform form; larger values pull the curve tighter to the
+// straight line between points.
+function spline(ctx: CanvasRenderingContext2D, pts: Array<{ x: number; y: number }>, closed: boolean): void {
+  const n = pts.length;
+  if (n < 2) return;
+  const at = (i: number) => pts[closed ? (i + n) % n : Math.max(0, Math.min(n - 1, i))];
+  ctx.moveTo(pts[0].x, pts[0].y);
+  const last = closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    const p0 = at(i - 1);
+    const p1 = at(i);
+    const p2 = at(i + 1);
+    const p3 = at(i + 2);
+    ctx.bezierCurveTo(
+      p1.x + (p2.x - p0.x) / 6,
+      p1.y + (p2.y - p0.y) / 6,
+      p2.x - (p3.x - p1.x) / 6,
+      p2.y - (p3.y - p1.y) / 6,
+      p2.x,
+      p2.y,
+    );
+  }
+  if (closed) ctx.closePath();
 }
 
 export interface OutlineHandle {

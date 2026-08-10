@@ -145,7 +145,7 @@ export function deltaReadingCopy(d: ScanDelta): string {
   if (d.reading === "noise") {
     return `<b>That is not a change.</b> Two photos of the same face land ${DELTA_SD} points apart
       on average — more than two different people do — so ${size} ${dir} against ${when} is the
-      same face measured twice. Lighting, angle, how much water you are carrying, the camera.
+      same face measured twice. Lighting, angle, water retention in your face, the camera.
       Nothing to read into it.`;
   }
   if (d.reading === "tooSoon") {
@@ -315,14 +315,19 @@ export function percentileLine(pct: number, sex: Sex): string {
     : `Top ${rest}% of ${group}`;
 }
 
-export function egoLine(pct: number): string {
-  if (pct >= 90)
-    return `That is a genuinely high measurement — top decile against the reference set. The plan below is mostly about not losing it.`;
-  if (pct >= 70)
-    return `A strong number. Comfortably above the middle of the distribution, with specific things still worth moving.`;
-  if (pct >= 45)
-    return `Mid-table, and worth being unromantic about: the middle is where most faces land, because that is what a middle is.`;
-  if (pct >= 25)
-    return `Damn — that one stings the ego a bit. Two honest things about it: this measures the geometry in one photograph, not you, and the levers below are the ones that actually move it.`;
-  return `Damn. That is a hard number to read, and softening it would make every other number here worth less. What it is not is a verdict — it is one photograph, scored on bone and soft tissue, and the plan below is the part you can change.`;
+// The overview's one caveat, stated the same way for everyone.
+//
+// This replaced `egoLine`, which banded the score and changed its tone with it
+// — "Damn, that one stings the ego a bit" under the median, congratulations
+// above it. That voice belongs to the coach, not to the instrument. A panel of
+// measurements that commiserates with you about the measurements is doing two
+// jobs and undermining the first: the reason to trust a number here is that it
+// reads the same whether it flatters you or not.
+//
+// The substance of the old line was worth keeping and is not banded, because it
+// is equally true at every score.
+export function overviewCaveat(): string {
+  return `One photograph, scored on geometry — bone proportion and soft tissue — against a
+    reference population. Two photos of the same face differ by about 1.3 points, so a single
+    scan is one reading rather than a verdict.`;
 }

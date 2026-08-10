@@ -176,6 +176,10 @@
             </div>
           </div>
           <div class="photo-caption"><span>SIDE</span><b id="side-cap">VERIFY LANDMARKS</b></div>
+          <!-- Under the photo, not off in the text column. The shutter belongs
+               next to the thing it acts on: with the buttons in the right-hand
+               panel you had to look away from your own framing to find them. -->
+          <div class="navrow" id="side-actions"></div>
         </div>
         <div class="side-panel" id="side-panel">
           <h2 class="side-title">Now the side profile</h2>
@@ -186,18 +190,18 @@
             analysis runs once both views are in.
           </p>
           <p class="side-sub">
-            The thirteen points are placed for you by tracing your silhouette
-            against the background. That gets the shape right and the exact
-            anatomy roughly right — so check them, and drag any that have missed.
-            Accuracy here is what makes the side measurements real, and it is
-            why the side view is capped at how far it can move your score.
+            The thirteen points are placed for you — from the face mesh where
+            the detector can still see you at this angle, and by tracing your
+            silhouette against the background where it cannot. Check them, and
+            drag any that have missed. Accuracy here is what makes the side
+            measurements real, and it is why the side view is capped at how far
+            it can move your score.
           </p>
           <label class="drop drop-side" id="side-drop" for="side-input">
             <b>Add a side-profile photo</b>
             <span>Full profile · looking straight ahead · hair off the face</span>
           </label>
           <input type="file" id="side-input" accept="image/*" hidden />
-          <div class="navrow" id="side-actions"></div>
         </div>
       </div>
     </section>

@@ -1,6 +1,7 @@
 import type { Pt } from "../engine/geometry.ts";
 import { SIDE_POINTS } from "../engine/sideMetrics.ts";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.ts";
+import { detect } from "../engine/landmarker.ts";
 
 // Drag-to-verify landmark editor for the side profile. MediaPipe can't place
 // true-profile landmarks reliably, so the app seeds a best guess from the
@@ -140,9 +141,89 @@ function centredSeed(w: number, h: number): { points: SidePoints; faceDir: numbe
   return { points, faceDir: 1 };
 }
 
-// Seed guesses from the face silhouette: trace the profile edge, then place
-// points at anatomically-proportional heights along it. Rough by design — the
-// user drags them into place.
+// ---------------------------------------------------------------------------
+// Preferred path: real landmarks.
+//
+// The side capture opens the shutter at 42 degrees of yaw, and MediaPipe holds
+// a face well past that — it tracked a 46-degree turn in the reference set. So
+// a good proportion of side photographs still carry a full mesh, and when they
+// do, tracing a silhouette against the background instead is throwing away the
+// better measurement for the worse one.
+//
+// Every point below is a named landmark rather than a fraction of head height,
+// so the seed lands on the anatomy instead of near it. The paired ones — ear,
+// jaw corner — are chosen by depth: MediaPipe's z is smaller toward the camera,
+// so the near side of the head is the one with the smaller z, which is the side
+// actually visible in a profile.
+// ---------------------------------------------------------------------------
+function seedFromLandmarks(
+  canvas: HTMLCanvasElement,
+): { points: SidePoints; faceDir: number } | null {
+  let lm;
+  try {
+    lm = detect(canvas)?.faceLandmarks?.[0];
+  } catch {
+    return null;
+  }
+  if (!lm || lm.length < 468) return null;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const P = (i: number): Pt => ({ x: lm[i].x * w, y: lm[i].y * h });
+
+  // Which way the face points, straight from the geometry: the nose tip sits
+  // ahead of the head's own centre, on the side the face is turned toward. No
+  // sign convention to get wrong and no silhouette to trace.
+  let cx = 0;
+  for (const p of lm) cx += p.x / lm.length;
+  const faceDir = lm[1].x >= cx ? 1 : -1;
+
+  // Near side of the head, by depth.
+  const near = (a: number, b: number) => ((lm[a].z ?? 0) <= (lm[b].z ?? 0) ? a : b);
+  const tragionId = near(234, 454);
+  const gonionId = near(172, 397);
+  const condylionId = near(127, 356);
+
+  const menton = P(152);
+  const pogonion = P(175);
+  // The neck point has no landmark: it is below the jaw where the underside
+  // meets the throat. Placed by stepping down and back from the chin, which is
+  // the one point here the user will usually still need to nudge.
+  const faceH = Math.hypot(menton.x - P(168).x, menton.y - P(168).y) || 1;
+  const cervicale = {
+    x: menton.x - faceDir * faceH * 0.30,
+    y: menton.y + faceH * 0.24,
+  };
+
+  const points: SidePoints = {
+    trichion: P(10),
+    glabella: P(9),
+    nasion: P(168),
+    pronasale: P(1),
+    subnasale: P(2),
+    labialeSuperius: P(0),
+    labialeInferius: P(17),
+    pogonion,
+    menton,
+    gonion: P(gonionId),
+    condylion: P(condylionId),
+    cervicale,
+    tragion: P(tragionId),
+  };
+  return { points, faceDir };
+}
+
+// Entry point. Real landmarks when the detector can still see the face, the
+// silhouette trace when it cannot.
+export function seedSidePoints(
+  canvas: HTMLCanvasElement,
+): { points: SidePoints; faceDir: number } {
+  return seedFromLandmarks(canvas) ?? seedFromSilhouette(canvas);
+}
+
+// Fallback: trace the profile edge against the background, then place points at
+// anatomically-proportional heights along it. Rough by design — the user drags
+// them into place.
 export function seedFromSilhouette(
   canvas: HTMLCanvasElement,
 ): { points: SidePoints; faceDir: number } {

@@ -201,8 +201,18 @@ body {
 .dots { display: flex; gap: 6px; justify-content: center; margin: 2px 0 14px; }
 .dots i { width: 5.5px; height: 5.5px; border-radius: 99px; background: #d4d2cb; transition: background 0.2s, transform 0.2s; }
 .dots i.on { background: var(--ink); transform: scale(1.15); }
-.deck { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; scrollbar-width: none; margin-bottom: 14px; }
+/* Measurements and the comparisons that go with them.
+   These were a swipe deck at every width, so on a desktop the second card —
+   the celebrity comparisons — sat off-screen behind a gesture nobody makes with
+   a mouse, and the two dots above it were the only clue it existed. Wide
+   viewports get both side by side; the swipe stays where it belongs, on a
+   phone. */
+.deck { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; scrollbar-width: none; margin-bottom: 14px; align-items: start; }
 .deck::-webkit-scrollbar { display: none; }
+@media (min-width: 900px) {
+  .deck { display: grid; grid-template-columns: 1.35fr 1fr; overflow: visible; }
+  .dots { display: none; }
+}
 .dcard { flex: 0 0 100%; scroll-snap-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 19px 20px 21px; min-width: 0; }
 .dcard h3 { font-size: 13.5px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 .dcard h3 em { font-family: var(--mono); font-style: normal; font-size: 9.5px; letter-spacing: 0.15em; color: var(--mut); font-weight: 400; }

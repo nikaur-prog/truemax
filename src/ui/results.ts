@@ -8,7 +8,7 @@ import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
 import { drawMeasurement } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
-import { deltaReadingCopy, egoLine, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
+import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
@@ -27,6 +27,12 @@ interface Ctx {
   onNewPhoto: () => void;
   onSideProfile?: () => void;
   onSexChange?: (sex: Sex) => void;
+  // The side half of a merged report, so it can be looked at. It was computed,
+  // merged into the total and then unreachable — renderSideResults existed and
+  // nothing called it, so a quarter of the score had no screen.
+  sideReport?: Report;
+  sidePhoto?: HTMLCanvasElement;
+  onRedoSide?: () => void;
 }
 
 let ctx: Ctx | null = null;
@@ -51,6 +57,7 @@ export function renderResults(c: Ctx): void {
   };
   mk("Overall", "overall");
   for (const r of c.report.regions) mk(REGION_NAMES[r.region], r.region);
+  if (c.sideReport) mk("Side", "side");
   mk("Plan →", "improve");
 
   c.analysis.innerHTML = "";
@@ -92,8 +99,12 @@ function select(id: string): void {
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
   }
+  // The photo pane follows the tab: the side numbers next to the front
+  // photograph would be describing a picture that is not on screen.
+  showPhoto(id === "side" ? "side" : "front");
   if (id === "overall") showOverall();
   else if (id === "improve") showImprove();
+  else if (id === "side") showSide();
   else showRegion(id as RegionId);
 }
 
@@ -133,6 +144,54 @@ function body(): HTMLElement {
   return document.getElementById("body")!;
 }
 
+// Swap the photo pane between the two captures. Both were taken; only one was
+// ever shown.
+let shownPhoto: "front" | "side" = "front";
+function showPhoto(which: "front" | "side"): void {
+  if (!ctx || which === shownPhoto) return;
+  const canvas = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
+  const cap = document.getElementById("capRight");
+  const label = document.querySelector(".photo-caption span");
+  if (!canvas) return;
+
+  if (which === "side" && ctx.sidePhoto) {
+    frontPhoto = frontPhoto ?? cloneCanvas(canvas);
+    paint(canvas, ctx.sidePhoto);
+    ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);
+    if (label) label.textContent = "SIDE";
+    if (cap) cap.textContent = "VERIFIED";
+    shownPhoto = "side";
+  } else if (which === "front" && frontPhoto) {
+    paint(canvas, frontPhoto);
+    drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
+    if (label) label.textContent = "FRONT";
+    if (cap) cap.textContent = "ANALYZED";
+    shownPhoto = "front";
+  }
+}
+let frontPhoto: HTMLCanvasElement | null = null;
+function cloneCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = src.width;
+  c.height = src.height;
+  c.getContext("2d")!.drawImage(src, 0, 0);
+  return c;
+}
+function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
+  dst.width = src.width;
+  dst.height = src.height;
+  const g = dst.getContext("2d")!;
+  g.clearRect(0, 0, dst.width, dst.height);
+  g.drawImage(src, 0, 0);
+}
+
+// The side view, inside the tabbed report rather than as a separate screen.
+function showSide(): void {
+  if (!ctx?.sideReport) return;
+  setZoom(null);
+  renderSideInto(body(), ctx.sideReport);
+}
+
 function deltaChip(delta: number, label: string): string {
   const cls = delta > 0.05 ? "up" : delta < -0.05 ? "down" : "flat";
   const sign = delta > 0 ? "+" : "";
@@ -164,7 +223,7 @@ function showOverall(): void {
           ${deltaHTML}
         </div>
       </div>
-      <p class="ego">${egoLine(r.overallPercentile)}</p>
+      <p class="ego">${overviewCaveat()}</p>
       ${delta ? `<div class="delta-read ${delta.reading}">${deltaReadingCopy(delta)}</div>` : ""}
       ${viewCards(r)}
       ${
@@ -230,48 +289,82 @@ function showOverall(): void {
 
 // Side-profile results: same measurement language, its own report, no photo
 // zoom (the side view has no landmark mesh to re-light).
-export function renderSideResults(report: Report, onRedo: () => void): void {
-  if (!ctx) return;
-  setZoom(null);
+// The side profile, rendered into the tab body.
+//
+// Was `renderSideResults`, a full-screen takeover that nothing ever called: the
+// profile was captured, verified, scored, merged into the total, and then had
+// no screen. Someone whose score was dragged down by the side view could not
+// see which measurement did it.
+function renderSideInto(host: HTMLElement, report: Report): void {
   const regions = report.regions.filter((r) => r.metrics.length);
-  const topPct = topPctText(report.overallPercentile);
 
-  ctx.analysis.innerHTML = `
+  host.innerHTML = `
     <div class="reveal">
       <div class="score-head">
-        <div><div class="klabel">SIDE PROFILE</div>
+        <div><div class="klabel">SIDE PROFILE · 25% OF THE TOTAL</div>
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
-        <div class="chipcol"><span class="chip">${topPct}</span></div>
+        <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex)}
+      <p class="viewnote">Measured from the thirteen points you verified. Chin projection, jaw
+        angle and facial convexity have no front-view equivalent, which is why the profile is
+        taken at all — and the placement of those points is why it is capped at a quarter of
+        the total.
+        ${ctx?.onRedoSide ? `<button class="linkish" id="side-redo">Re-verify the landmarks</button>` : ""}</p>
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
       ${regions
-        .map(
-          (r) => `<div class="dcard" style="margin-bottom:12px">
-        <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
-        ${r.metrics
-          .map(
-            (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
-          <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-          <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
-          )
-          .join("")}
-      </div>`,
-        )
+        .map((r) => {
+          // Same comparison card the front regions carry, and wrapped for the
+          // same reason: a reference lookup must never be able to blank the
+          // measurements it sits beside.
+          let matches: ReturnType<typeof regionMatches> = [];
+          try {
+            matches = regionMatches(r.region, r.metrics, report.sex);
+          } catch (err) {
+            console.error("celebrity match failed", err);
+          }
+          return `<div class="deck">
+        <div class="dcard">
+          <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+          ${r.metrics
+            .map(
+              (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
+            <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+            <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+            )
+            .join("")}
+        </div>
+        <div class="dcard">
+          <h3>Notable comparisons<em>REFERENCE</em></h3>
+          ${celebCard(matches)}
+        </div>
+      </div>`;
+        })
         .join("")}
-      <div class="navrow">
-        <button class="btn gho" id="side-redo">Re-verify landmarks</button>
-        <button class="btn pri" id="side-front">Back to front results</button>
-      </div>
     </div>`;
 
   setTimeout(
-    () => document.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
+    () => host.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
     120,
   );
-  document.getElementById("side-redo")!.onclick = onRedo;
-  document.getElementById("side-front")!.onclick = () => renderResults(ctx!);
+  const redo = document.getElementById("side-redo");
+  if (redo) redo.onclick = () => ctx?.onRedoSide?.();
+}
+
+// One renderer for the comparison card, so the front regions and the profile
+// cannot drift apart in either wording or restraint.
+function celebCard(matches: ReturnType<typeof regionMatches>): string {
+  if (!matches.length) {
+    return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point — a flattering comparison you did not earn would make every other number worth less.</p>`;
+  }
+  return matches
+    .map(
+      (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
+        <div class="nm">${m.name}<span>${m.metricName}</span></div>
+        <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
+    )
+    .join("");
 }
 
 function countUp(el: HTMLElement, target: number): void {
@@ -300,15 +393,7 @@ function showRegion(id: RegionId): void {
   } catch (err) {
     console.error("celebrity match failed", err);
   }
-  const matchCard = matches.length
-    ? matches
-        .map(
-          (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
-        <div class="nm">${m.name}<span>${m.metricName}</span></div>
-        <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
-        )
-        .join("")
-    : `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on metrics where you measure at or above average, and this region has none. That restraint is the point — a flattering comparison you did not earn would make every other number worth less.</p>`;
+  const matchCard = celebCard(matches);
 
   body().innerHTML = `
     <div class="reveal">
@@ -333,7 +418,7 @@ function showRegion(id: RegionId): void {
           <div class="typebox" id="tw"></div>
         </div>
         <div class="dcard">
-          <h3>Similar measurements<em>REFERENCE</em></h3>
+          <h3>Notable comparisons<em>REFERENCE</em></h3>
           ${matchCard}
           <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
