@@ -22,7 +22,12 @@ const TOP_TIER = new Set([
   "Scarlett Johansson", "Kendall Jenner", "Zendaya", "Natalie Portman",
 ]);
 
-const GATE = { yaw: 20, pitch: 20, smile: 0.75, face: 0.22 };
+// Same sex-correlated selection bias that broke the quantile tables applies
+// here, and worse: the mean SHAPE is what every face is scored against, so a
+// female mean built from 13 non-smiling women put every real woman 0.58 sigma
+// above it. Smiling barely moves the outline landmarks this model uses —
+// jaw, cheek and brow contour — so the gate can be loose without cost.
+const GATE = { yaw: 20, pitch: 20, smile: 1.01, face: 0.22 };
 
 const server = spawn("npx", ["vite", "preview", "--port", "4190", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
