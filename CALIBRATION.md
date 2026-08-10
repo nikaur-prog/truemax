@@ -980,3 +980,43 @@ If it gets built: keep it on-device for as long as possible (the profile already
 lives in localStorage), and if it must sync, store the CONVERSATION SUMMARY and
 the scan numbers — never the photographs. A breach of a face-photo database
 ends the company; a breach of a numbers table is an incident.
+
+## Potential can only move 40% of the score
+
+Reported: "I believe my potential is higher than a five" — shown 4.9 -> 5.0.
+
+That ceiling is structural, not a judgement about the face. `analyze()` builds
+potential by lifting each fixable metric's `zEff` and re-aggregating:
+
+```ts
+report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
+```
+
+`shapeZ` is passed through **unchanged**. And the blend is:
+
+```ts
+const blended = W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;   // W_SHAPE = 0.6
+```
+
+So the lift reaches `ratioZ` only. Sixty per cent of the aggregate is frozen at
+its measured value no matter how much every fixable metric improves. Potential
+is capped at roughly 40% of the range it should have.
+
+Measured across 111 faces, the potential gap is: mean 0.38, median 0.40, max
+1.20. So even the best case in the whole set gains 1.2 points — and a gap of
+0.1 sits near the bottom of our own distribution.
+
+Two things follow, and the second is the important one:
+
+1. Whatever weight the shape term ends up with, the potential run must lift it
+   too, or leave it out of both runs. Freezing a term in one and not the other
+   is not a conservative choice, it is an inconsistent one.
+2. **Potential inherits the validity failure above.** It is computed on top of a
+   term that separates attractive faces from ordinary ones at d = 0.177. Fixing
+   the ceiling before fixing the axis would just produce a confidently wrong
+   larger number.
+
+Whether any individual's true ceiling is higher than what is shown is not
+answerable from this engine yet, and saying otherwise would be inventing
+reassurance. It becomes answerable once the shape term is either fixed with
+enough top-tier faces or dropped.
