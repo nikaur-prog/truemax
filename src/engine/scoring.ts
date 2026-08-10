@@ -250,9 +250,26 @@ function effWeight(m: ScoredMetric): number {
 }
 
 // How much of the overall score comes from the shape descriptor vs the
-// individual ratios. Ratios are legible but noisy; the descriptor averages
-// ~130 landmarks and reproduces far better, so it carries the majority.
-const W_SHAPE = 0.6;
+// individual ratios.
+//
+// This was 0.6, on the reasoning that the descriptor averages ~130 landmarks
+// and so reproduces far better across photos of one person than any single
+// ratio does. That reasoning was about RELIABILITY and it is still true — but
+// reliability is not validity. A metric can be perfectly repeatable and still
+// measure nothing you care about, and that is what was happening: the majority
+// of every score came from a term that barely distinguished the consensus-
+// attractive top tier from the general reference population.
+//
+// Measured, leave-one-out (tools rebuild the axis with each face removed, then
+// score that face on an axis it had no hand in defining):
+//
+//   shapeZ  d = 0.326 male / 0.263 female   <- in-sample it looks like .48/.70
+//   ratioZ  d = 1.189 male / 0.916 female
+//
+// Sweeping the blend against held-out separation peaks at 0.15, and the peak
+// is shallow — the descriptor adds about 4% over dropping it entirely. It
+// earns a small weight, not a majority one.
+const W_SHAPE = 0.15;
 
 function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>, shapeZ?: number | null): Report {
   const rawZ: Record<string, number> = {};
@@ -326,6 +343,27 @@ export function analyze(
       lift.set(m.def.id, m.def.fixability * 0.9);
     }
   }
+  // shapeZ is passed through UNCHANGED, so potential can only move the ratio
+  // share of the score — W_SHAPE of it is pinned at today's value. That is
+  // deliberate, but it was not defensible while W_SHAPE was 0.6: it meant no
+  // amount of realistic change could shift 60% of someone's score, and
+  // potential topped out barely above actual for everyone. At 0.15 the pinned
+  // share is small enough to be honest.
+  //
+  // It stays pinned rather than getting lifted alongside the metrics because
+  // there is no measurement saying it should move. Across 229 scored faces the
+  // descriptor and the ratio composite are very nearly independent —
+  // r = 0.113 male, 0.019 female — so the fixable metrics carry almost no
+  // information about where the descriptor sits.
+  //
+  // That correlation is BETWEEN people, though, and what potential needs is the
+  // within-person slope: if one person's fixable metrics improve, how far does
+  // their own outline follow? Different skeletons dominate the between-person
+  // variance, so the two numbers are not the same and this one cannot stand in
+  // for the other. Settling it needs the same faces measured before and after a
+  // real change, which we do not have. Until then the conservative direction is
+  // to leave it pinned — overstating what someone can reach is the failure mode
+  // that makes a potential number worthless.
   report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
 
   return report;
