@@ -227,3 +227,58 @@ feedback; making it a hard gate would strand people on a number that imprecise.
 Closing this properly means subtracting the head-yaw contribution from the iris
 offset, which needs a sign convention validated against live footage rather
 than stills.
+
+## Skin: measured, and deliberately not scored yet
+
+`src/engine/skin.ts` measures five skin statistics; `tools/skin-reliability.mjs`
+puts them through the same test every other metric had to pass — how much does
+this move between photos of the same person, against how much it moves across
+the population?
+
+Across 106 population portraits and 14 people with repeat photos (65 images):
+
+```
+metric           between-SD  within-SD   reliability
+toneEvenness        0.0642     0.0554       0.254   weak
+rednessSpread       1.0948     1.3743       0.000   photography, not skin
+chromaSpread        1.0126     1.1361       0.000   photography, not skin
+texture             0.1237     0.1081       0.237   weak
+undereyeRatio       0.1317     0.0901       0.532   usable
+```
+
+Geometry metrics already in the score sit at 0.3–0.7. **Only `undereyeRatio`
+clears that bar.** Redness and chroma spread reproduce at zero: the within-person
+spread is *larger* than the population spread, which means those numbers are
+describing the camera and the room, not the face.
+
+Tone evenness started at 0.088 and reached 0.254 only after flat-fielding —
+subtracting a heavily blurred copy of the face before measuring spread. That
+single change is the whole story: raw lightness variation across a face is
+mostly the direction of the light. What survives after removing the smooth
+illumination field is small.
+
+### Why this test is harsher than the real case
+
+The repeat photos come from different shoots — different cameras, lighting,
+years, and makeup. Two confounds hit skin specifically and barely touch
+geometry:
+
+- **Retouching.** Press and publicity photos are routinely smoothed. That
+  destroys texture signal directly, and it is not evenly applied.
+- **White balance.** A jaw angle does not care what colour temperature the
+  room was. `rednessSpread` cares about nothing else.
+
+So these numbers are a floor, not a verdict. Someone photographing themselves
+weekly under their own bathroom light is a much easier problem than this set.
+
+### What would settle it
+
+The same controlled capture that is already blocking cross-photo stability:
+6–8 photos of one person in one sitting, then the same again a week later. That
+separates engine noise from genuine change for the geometry metrics AND gives
+skin a fair test under realistic conditions. One sitting unblocks both.
+
+Until then skin is measured, stored and shown as its own number — and does not
+touch the overall score. The reliability weighting would assign it near-zero
+weight anyway; wiring it in early would just make week-over-week deltas noisier,
+which is the one thing the product promises to get right.

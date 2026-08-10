@@ -20,6 +20,7 @@ import type { FrameCheck } from "./engine/captureGuide.ts";
 import { detectSex } from "./engine/shape.ts";
 import { estimateGaze } from "./engine/gaze.ts";
 import { openQuiz } from "./ui/goalsQuiz.ts";
+import { analyzeSkin } from "./engine/skin.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -96,6 +97,7 @@ let selectedSex: Sex = "male";
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
     gaze: estimateGaze(res.faceLandmarks[0]),
+    skin: analyzeSkin(c, res.faceLandmarks[0], w, h),
     // Group shots are the main contaminant in scraped photo sets: the
     // detector locks onto whichever face it finds, which may not be the
     // subject. A face filling little of the frame is the tell.
