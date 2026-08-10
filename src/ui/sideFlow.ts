@@ -41,6 +41,12 @@ export function openSideCapture(ctx: SideCtx): void {
 
   e.input.onchange = async () => {
     const file = e.input.files?.[0];
+    // Clear the selection before handling it. A file input fires `change` only
+    // when the chosen file DIFFERS from what is already there, so without this
+    // the sequence "pick a profile, skip, come back, pick the same profile"
+    // silently does nothing and the screen looks frozen. The front input has
+    // always cleared itself; this one did not. Found by testing the skip path.
+    e.input.value = "";
     if (file) await load(file, ctx);
   };
   e.drop.ondragover = (ev) => {
