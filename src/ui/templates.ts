@@ -40,7 +40,33 @@ const TRAITS: Record<string, string> = {
   canthalAsymmetry: "the tilt difference between your two eyes",
   eyeMouthParallel: "whether the mouth line runs parallel to the eye line",
   midlineDeviation: "how far the center features drift off the facial midline",
+  // Side-profile metrics. These were missing, and the merged report puts front
+  // and side measurements into the same regions — so the summary for Midface
+  // reached for a trait that did not exist and printed the word "undefined"
+  // into the sentence. See the lookup below, which now cannot do that again.
+  gonialAngle: "how sharply the jaw turns at the corner, seen from the side",
+  ramusMandible: "the vertical arm of the jaw against its horizontal one",
+  submentalCervical: "the angle under the chin where it meets the neck",
+  mandibularPlane: "the slope of the jawline from corner to chin",
+  chinProjection: "how far the chin sits forward of the facial plane",
+  facialConvexity: "the profile's bend from brow to nose base to chin",
+  totalFacialConvexity: "the same bend measured to the nose tip instead",
+  nasofrontalAngle: "the angle where the brow meets the bridge of the nose",
+  nasolabialAngle: "the angle between the nose base and the upper lip",
+  nasalProjection: "how far the nose stands off the face",
+  upperLipELine: "the upper lip against the nose-to-chin line",
+  lowerLipELine: "the lower lip against the same line",
+  lowerThirdDepth: "the depth of the lower face in profile",
+  foreheadSlope: "how far the forehead slopes back from vertical",
+  midfaceRatioSide: "the depth of the midface, which only the profile shows",
 };
+
+// A metric with no entry above must never reach the page. It used to: the
+// summary interpolated TRAITS[id] directly, so an unlisted metric printed
+// "undefined" mid-sentence in front of the user.
+function traitOf(id: string): string {
+  return TRAITS[id] ?? "a measured proportion of the face";
+}
 
 export function fmt(m: ScoredMetric): string {
   return `${m.value.toFixed(m.def.decimals)}${m.def.unit}`;
@@ -73,14 +99,14 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
 
   let s1: string;
   if (best.percentile >= 55) {
-    s1 = `${best.def.name} is the anchor here: ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which lands in the top ${Math.max(1, Math.round(100 - best.percentile))}% — ${TRAITS[best.def.id]}.`;
+    s1 = `${best.def.name} is the anchor here: ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which lands in the top ${Math.max(1, Math.round(100 - best.percentile))}% — ${traitOf(best.def.id)}.`;
   } else {
     s1 = `Nothing in this region carries hard: even ${best.def.name.toLowerCase()} only reaches the ${ordinal(best.percentile)} percentile at ${fmt(best)} (${sexNoun(sex)} average ${fmtMean(best, sex)}).`;
   }
 
   const s2 =
     worst.percentile < 45
-      ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)} — ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm; ${TRAITS[worst.def.id]}.`
+      ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)} — ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm; ${traitOf(worst.def.id)}.`
       : `Even the weakest number here, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, holds the ${ordinal(worst.percentile)} percentile.`;
 
   const s3 =

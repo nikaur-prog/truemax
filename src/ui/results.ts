@@ -6,7 +6,8 @@ import { regionMatches } from "../engine/celebs.ts";
 import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
-import { drawMeasurement } from "./measureOverlay.ts";
+import { drawMeasurement, transitionMeasurement } from "./measureOverlay.ts";
+import type { OverlayFade } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
@@ -412,7 +413,7 @@ function showRegion(id: RegionId): void {
             // The overlay is the credibility feature and it was invisible: a
             // 9px glyph at 55% opacity is not an affordance. Say it in words.
             r.metrics.length
-              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Tap any measurement to draw it on your face</button>`
+              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Hover a measurement to draw it on your face</button>`
               : ""
           }
           <div class="typebox" id="tw"></div>
@@ -461,54 +462,92 @@ function rarityLine(r: RegionScore): string {
     : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here — the drill-down above shows exactly why.`;
 }
 
-// Tapping a measurement row draws that exact measurement on the face. A
-// number in a table is a claim; the same number drawn across the cheekbones
-// is evidence — this is the credibility wedge made visible.
-let activeMetric: string | null = null;
+// Hovering a measurement row draws that exact measurement on the face. A number
+// in a table is a claim; the same number drawn across the cheekbones is
+// evidence — this is the credibility wedge made visible.
+//
+// It was a click, and a click is the wrong gesture for it. Reading a column of
+// measurements is a scanning motion, and making someone commit a tap to each
+// one — then another tap to undo it — turns "show me" into a chore, so most
+// people pressed it once and never again. On hover the overlay simply follows
+// your eye down the list.
+//
+// Click still works and still pins, for two reasons that are not the same: a
+// touch screen has no hover at all, and on a mouse you sometimes want a
+// measurement to STAY drawn while you look away at the photo.
+let activeMetric: string | null = null; // hovered or pinned: what is drawn
+let pinnedMetric: string | null = null; // survives pointerleave
+let fade: OverlayFade | null = null;
 
-const HINT_IDLE = `<i>◱</i>Tap a measurement to draw it on your face`;
+const HINT_IDLE = `<i>◱</i>Hover a measurement to draw it on your face`;
 
 function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
   // Switching tabs re-renders the rows but used to leave this pointing at the
-  // previous region's metric, so the first tap after coming back toggled the
-  // overlay OFF instead of on.
+  // previous region's metric, so the first interaction after coming back
+  // toggled the overlay OFF instead of on.
   activeMetric = null;
+  pinnedMetric = null;
+  fade?.cancel();
+  fade = null;
   const hint = document.getElementById("tap-hint");
   const rows: HTMLElement[] = [];
 
+  const setHint = (metric: ScoredMetric | null, pinned: boolean) => {
+    if (!hint) return;
+    hint.classList.toggle("on", !!metric);
+    hint.innerHTML = metric
+      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>${pinned ? " — click again to release" : ""}`
+      : HINT_IDLE;
+  };
+
+  // Every change of what is drawn goes through here, so the cross-fade cannot
+  // be skipped by one path and applied by another.
+  const show = (id: string | null) => {
+    if (!ctx || id === activeMetric) return;
+    activeMetric = id;
+    const metric = id ? r.metrics.find((m) => m.def.id === id) : null;
+    for (const other of document.querySelectorAll(".metric")) {
+      other.classList.toggle("active", (other as HTMLElement).dataset.metric === id);
+    }
+    setHint(metric ?? null, pinnedMetric === id && !!id);
+    fade?.cancel();
+    fade = transitionMeasurement(ctx.overlay, (target) => {
+      if (!ctx) return;
+      if (metric) drawMeasurement(target, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+      else drawCalm(target, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+    });
+    shownRegion = region;
+  };
+
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
     const id = row.dataset.metric!;
-    const metric = r.metrics.find((m) => m.def.id === id);
-    if (!metric) continue;
+    if (!r.metrics.some((m) => m.def.id === id)) continue;
     rows.push(row);
+
+    // Mouse only. A touch "hover" fires on tap and would draw and then
+    // immediately pin on the same press.
+    row.onpointerenter = (e) => {
+      if (e.pointerType === "touch") return;
+      show(id);
+    };
+    row.onpointerleave = (e) => {
+      if (e.pointerType === "touch") return;
+      show(pinnedMetric);
+    };
     row.onclick = () => {
-      if (!ctx) return;
-      if (activeMetric === id) {
-        activeMetric = null;
-        row.classList.remove("active");
-        if (hint) {
-          hint.classList.remove("on");
-          hint.innerHTML = HINT_IDLE;
-        }
-        drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
-        shownRegion = region;
-        return;
-      }
-      activeMetric = id;
-      for (const other of document.querySelectorAll(".metric")) other.classList.remove("active");
-      row.classList.add("active");
-      if (hint) {
-        hint.classList.add("on");
-        hint.innerHTML = `<i>◱</i>Drawing <b>${metric.def.name}</b> — tap the row again to clear`;
-      }
-      drawMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+      pinnedMetric = pinnedMetric === id ? null : id;
+      show(pinnedMetric ?? id);
+      // `show` returns early when the drawing is already correct, which it
+      // usually is here — the row is under the cursor. The hint still has to
+      // change, because pinning is a state the drawing cannot express.
+      setHint(r.metrics.find((m) => m.def.id === id) ?? null, pinnedMetric === id);
     };
   }
 
   // The hint is the affordance, so it has to do the thing it describes:
-  // demonstrate on the first measurement, and clear whatever is drawn.
+  // demonstrate on the first measurement, and release whatever is pinned.
   if (hint && rows.length) {
-    hint.onclick = () => (rows.find((x) => x.dataset.metric === activeMetric) ?? rows[0]).click();
+    hint.onclick = () => (rows.find((x) => x.dataset.metric === (pinnedMetric ?? activeMetric)) ?? rows[0]).click();
   }
 }
 

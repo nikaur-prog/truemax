@@ -181,6 +181,65 @@ const REGION_FALLBACK: Record<string, number[]> = {
   symmetry: [10, 168, 1, 152, 33, 263],
 };
 
+// Cross-fade from whatever is currently drawn to a new measurement.
+//
+// Hovering down a list of measurements snapped from one set of lines to the
+// next, which reads as flicker rather than as the overlay following you. This
+// renders both states offscreen and dissolves between them.
+//
+// It is a cross-fade rather than a draw-on animation because the lines are the
+// evidence: growing or scaling them into place would mean showing geometry
+// that is briefly WRONG, on the one feature whose whole job is to prove the
+// number is real. Opacity is the only property that can change here without
+// lying.
+export interface OverlayFade {
+  cancel(): void;
+}
+
+const FADE_MS = 240;
+
+export function transitionMeasurement(
+  canvas: HTMLCanvasElement,
+  paintNext: (target: HTMLCanvasElement) => void,
+): OverlayFade {
+  const w = canvas.width || 1;
+  const h = canvas.height || 1;
+
+  const from = document.createElement("canvas");
+  from.width = w;
+  from.height = h;
+  if (canvas.width && canvas.height) from.getContext("2d")!.drawImage(canvas, 0, 0);
+
+  const to = document.createElement("canvas");
+  to.width = w;
+  to.height = h;
+  paintNext(to);
+
+  const ctx = canvas.getContext("2d")!;
+  let raf = 0;
+  let start = 0;
+  const frame = (now: number) => {
+    if (!start) start = now;
+    const t = Math.min(1, (now - start) / FADE_MS);
+    const e = 1 - Math.pow(1 - t, 3);
+    // The canvas may have been resized by whatever painted `to`; match it back
+    // so both layers land on the same grid.
+    if (canvas.width !== to.width || canvas.height !== to.height) {
+      canvas.width = to.width;
+      canvas.height = to.height;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1 - e;
+    ctx.drawImage(from, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = e;
+    ctx.drawImage(to, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+    if (t < 1) raf = requestAnimationFrame(frame);
+  };
+  raf = requestAnimationFrame(frame);
+  return { cancel: () => cancelAnimationFrame(raf) };
+}
+
 export function drawMeasurement(
   canvas: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
