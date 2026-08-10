@@ -283,6 +283,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
       region: r,
       score: aggScore(rz),
       percentile: Math.round(phi(rz) * 1000) / 10,
+      z: rz,
       metrics: ms,
     };
   });
@@ -291,6 +292,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
     sex,
     overall: aggScore(overallZ),
     overallPercentile: Math.round(phi(overallZ) * 1000) / 10,
+    overallZ,
     potential: 0, // filled by analyze()
     pillars,
     regions,
@@ -392,9 +394,27 @@ const W_SIDE = 0.25;
 const RHO_VIEWS = 0.5;
 
 export function mergeReports(front: Report, side: Report): Report {
-  const zf = front.zScores["overall"];
-  const zs = side.zScores["overall"];
-  if (!Number.isFinite(zf) || !Number.isFinite(zs)) return front;
+  // The NORMALISED aggregates, not zScores.overall. zScores holds the raw
+  // pre-normalisation values that AGG_NORM is derived from; those are not
+  // unit-normal and combining them would be combining two different scales.
+  // This distinction cost a debugging round: the raw front aggregate read
+  // 0.029 where the normalised one was 0.308, so the merge was quietly
+  // under-weighting the front view by an order of magnitude.
+  const zf = front.overallZ;
+  const zsRaw = side.overallZ;
+  if (!Number.isFinite(zf) || !Number.isFinite(zsRaw)) return front;
+
+  // Clamp the side aggregate the same way every per-metric z is clamped.
+  //
+  // Found by testing rather than by reasoning: feeding the flow a profile photo
+  // of a different person, with the auto-placed points accepted unverified,
+  // produced a side aggregate near -3.4σ and dragged the merged score from 5.4
+  // to 4.1. Thirteen points placed by hand is the least reliable input in the
+  // whole pipeline — it is the ONLY one a user can get wrong by mis-dragging —
+  // so it is exactly the input that should not be able to swing the result
+  // without limit. At ±2.2 a genuinely extreme profile still moves the score
+  // hard; a mis-placed one cannot bury it.
+  const zs = clamp(zsRaw, -Z_CLAMP, Z_CLAMP);
 
   const z = aggregateZ([zf, zs], [W_FRONT, W_SIDE], RHO_VIEWS);
 
@@ -405,17 +425,18 @@ export function mergeReports(front: Report, side: Report): Report {
   for (const r of side.regions) {
     if (!r.metrics.length) continue;
     const f = byRegion.get(r.region);
-    const zsr = side.zScores[`region:${r.region}`];
-    const zfr = f ? front.zScores[`region:${r.region}`] : NaN;
+    const zsr = r.z;
+    const zfr = f ? f.z : NaN;
     if (!f || !Number.isFinite(zfr) || !Number.isFinite(zsr)) {
       byRegion.set(r.region, r);
       continue;
     }
-    const rz = aggregateZ([zfr, zsr], [W_FRONT, W_SIDE], RHO_VIEWS);
+    const rz = aggregateZ([zfr, clamp(zsr, -Z_CLAMP, Z_CLAMP)], [W_FRONT, W_SIDE], RHO_VIEWS);
     byRegion.set(r.region, {
       region: r.region,
       score: aggScore(rz),
       percentile: Math.round(phi(rz) * 1000) / 10,
+      z: rz,
       metrics: [...f.metrics, ...r.metrics],
     });
   }
@@ -429,6 +450,7 @@ export function mergeReports(front: Report, side: Report): Report {
     sex: front.sex,
     overall: aggScore(z),
     overallPercentile: Math.round(phi(z) * 1000) / 10,
+    overallZ: z,
     potential: Math.round(Math.max(aggScore(z), aggScore(z) + gap) * 10) / 10,
     pillars: front.pillars,
     regions: [...byRegion.values()],
@@ -438,6 +460,7 @@ export function mergeReports(front: Report, side: Report): Report {
       overall: z,
       "view:front": zf,
       "view:side": zs,
+      "view:sideRaw": zsRaw,
     },
   };
 }

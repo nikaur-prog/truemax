@@ -430,6 +430,7 @@ function startSide(frontReport: Report): void {
         const merged = mergeReports(frontReport, sideReport);
         lastRender = { ...lastRender, report: merged, onSideProfile: () => startSide(frontReport) };
         renderResults(lastRender);
+        exposeDev(merged, null, null);
       } else {
         renderSideResults(sideReport, () => startSide(frontReport));
       }

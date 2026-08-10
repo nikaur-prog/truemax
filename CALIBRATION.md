@@ -711,16 +711,39 @@ automatically with confidence. That is 1,430 manual placements.
 
 ### What is done instead
 
-Combine one level up. `front.zScores.overall` and `side.zScores.overall` have
-each already been mapped through their own normalisation, so both are
-unit-normal by construction. Combining two unit-normal variates under a
-correlation assumption is exactly what `aggregateZ` already does for pillars,
-and the result is still unit-normal — which is the property the scale rests on.
+Combine one level up. The two views' overall aggregates have each already been
+mapped through their own normalisation, so both are unit-normal by
+construction. Combining two unit-normal variates under a correlation assumption
+is exactly what `aggregateZ` already does for pillars, and the result is still
+unit-normal — which is the property the scale rests on.
 
-Verified by Monte Carlo over 400k draws with `corr(front, side) = 0.5`:
+**The first implementation read the wrong field, and it is worth recording.**
+`Report.zScores` holds the aggregate BEFORE normalisation — that is its whole
+purpose, since `AGG_NORM` is derived from those values. So `zScores.overall`
+is not unit-normal, and merging it merged two quantities that were never on a
+common scale. It was invisible in the output: the merged score simply looked a
+bit low. It surfaced only when the end-to-end test printed the intermediate
+z's and the front aggregate read **0.029** where the score of 5.4 implied
+**0.308** — an order of magnitude of under-weighting on the view that carries
+31 of the 46 metrics. `Report.overallZ` and `RegionScore.z` now carry the
+normalised values explicitly, and the two fields are documented against each
+other in `types.ts` so the next person does not repeat it.
+
+Verified two ways. Monte Carlo over 400k draws with `corr(front, side) = 0.5`,
+confirming the combination preserves the scale:
 
 ```
 merged z   mean 0.0110   sd 1.0060      (target 0.0000 / 1.0000)
+```
+
+And end to end in the browser, against an independent recomputation of the
+merge from the exposed intermediates:
+
+```
+front normalised z   0.295274      -> front-only score 5.4  (matches display)
+side raw z          -7.729783      -> clamped to -2.2
+expected merged z   -0.364487
+actual   merged z   -0.364487
 ```
 
 So the merged score is percentile-anchored in exactly the same sense the
@@ -744,6 +767,19 @@ partially-independent pieces of evidence pointing the same way are stronger
 than one. Someone above on one view and below on the other moves toward the
 middle. That is what aggregating evidence is supposed to do, and it is the same
 arithmetic the pillar aggregation has always used.
+
+### The side aggregate is clamped
+
+Found by testing, not by reasoning. Feeding the flow a profile photo of a
+different person, with the auto-placed points accepted unverified, produced a
+side aggregate of **-7.7σ**. Unclamped that dragged the merged score from 5.4
+to 4.1.
+
+Thirteen points placed by hand is the least reliable input in the pipeline, and
+the only one a user can get wrong by mis-dragging. So it is clamped to the same
+±2.2 every per-metric z already uses. A genuinely extreme profile still moves
+the score hard — the deliberately-wrong one above still lands 4.6 — but a
+mis-placed one cannot bury someone.
 
 Potential cannot go through `aggregateZ` because it is a score, not a z. The
 merge combines the HEADROOM each view found — which is what potential actually
