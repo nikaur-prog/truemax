@@ -52,7 +52,20 @@ function smoothPath(p: Array<[number, number]>): string {
   return `${s} L${last[0].toFixed(1)},${last[1].toFixed(1)}`;
 }
 
-export function curveSVG(pct: number, key: string, sex: Sex, soft = false): string {
+// `mark` adds a callout on the marker line reading the score and the standing
+// together. Worth having on the overall curve and nowhere else: the point of it
+// is that the dot's position and the headline number are the same fact, and
+// repeating that on every region chart would be clutter.
+//
+// The rank string is passed in rather than derived here, so that it cannot
+// drift from the wording used elsewhere on the same screen.
+export function curveSVG(
+  pct: number,
+  key: string,
+  sex: Sex,
+  soft = false,
+  mark?: { score: number; rank: string },
+): string {
   const q = AGG_NORM[sex]?.[key];
   if (!q || q.length < 21) return idealSVG(pct, soft);
 
@@ -128,7 +141,34 @@ export function curveSVG(pct: number, key: string, sex: Sex, soft = false): stri
 
     <text x="${x50.toFixed(1)}" y="${LABEL}" text-anchor="middle" font-family="Inter Variable, Inter, sans-serif" font-size="8" font-weight="600" letter-spacing="0.06em" fill="#A9ABA6">MEDIAN</text>
     ${sideLabel(x25, "25%")}${sideLabel(x75, "75%")}
+    ${mark ? callout(px, py, mark) : ""}
   </svg>`;
+}
+
+// The "you are here" flag on the marker.
+//
+// Sits above the dot, and flips to whichever side has room — anchored blindly
+// to the right it runs off the edge for anyone in the top quarter, which is
+// exactly the person most likely to be looking closely at it.
+function callout(px: number, py: number, mark: { score: number; rank: string }): string {
+  const bw = 74;
+  const bh = 30;
+  const gap = 9;
+  const flip = px + gap + bw > W - 2;
+  const bx = flip ? px - gap - bw : px + gap;
+  // Keep it inside the plotting area vertically too, for a dot near the peak.
+  const by = Math.max(TOP - 2, Math.min(BASE - bh - 4, py - bh - 4));
+  const tx = bx + bw / 2;
+  return `<g>
+    <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw}" height="${bh}" rx="6"
+      fill="#0E7A68" opacity="0"><animate attributeName="opacity" to="1" dur=".35s" begin=".45s" fill="freeze"/></rect>
+    <text x="${tx.toFixed(1)}" y="${(by + 12.5).toFixed(1)}" text-anchor="middle" opacity="0"
+      font-family="Inter Variable, Inter, sans-serif" font-size="10" font-weight="700" fill="#fff"
+      font-variant-numeric="tabular-nums">You: ${mark.score.toFixed(1)}<animate attributeName="opacity" to="1" dur=".35s" begin=".45s" fill="freeze"/></text>
+    <text x="${tx.toFixed(1)}" y="${(by + 24).toFixed(1)}" text-anchor="middle" opacity="0"
+      font-family="Inter Variable, Inter, sans-serif" font-size="9" font-weight="600" fill="#BFE9DF"
+      font-variant-numeric="tabular-nums">${mark.rank}<animate attributeName="opacity" to="1" dur=".35s" begin=".45s" fill="freeze"/></text>
+  </g>`;
 }
 
 // Height of the drawn curve at a given x, by walking the same point list the

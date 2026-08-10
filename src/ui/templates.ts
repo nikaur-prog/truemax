@@ -249,6 +249,19 @@ export function leverFor(m: ScoredMetric): Lever {
 // Nothing in this file rounds, softens or inflates the number itself.
 // ---------------------------------------------------------------------------
 
+// The same rule as percentileLine, minus the group noun, for places with no
+// room for a sentence — the view cards and the curve callout.
+//
+// It has to be one function rather than two matching ones, because the first
+// version of the cards computed it separately and got a "Bottom 47%" sitting
+// directly beneath a "Top 53.4%" on the chart. Both were describing the same
+// face, one of them was arithmetically wrong, and a side view at the very
+// bottom of the reference set came out as "Bottom 0%".
+export function rankShort(pct: number): string {
+  const rest = Math.round((100 - pct) * 10) / 10;
+  return rest > 50 ? `Ahead of ${Math.round(pct * 10) / 10}%` : `Top ${rest}%`;
+}
+
 export function percentileLine(pct: number, sex: Sex): string {
   const rest = Math.round((100 - pct) * 10) / 10;
   const group = sex === "male" ? "men" : "women";

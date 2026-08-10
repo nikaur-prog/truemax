@@ -8,7 +8,7 @@ import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
 import { drawMeasurement } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
-import { egoLine, fmt, leverFor, percentileLine, rarityText, regionSummary, topPctText } from "./templates.ts";
+import { egoLine, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
@@ -58,6 +58,31 @@ export function renderResults(c: Ctx): void {
   body.id = "body";
   c.analysis.appendChild(body);
   select("overall");
+}
+
+// Overall, front and side side by side, so the merge is legible: two views went
+// in and one number came out, and you can see which one pulled which way.
+//
+// Only drawn once both views are in. On a front-only report the front card
+// would be a copy of the overall card and the side card would be empty, which
+// is three boxes to say what one already said.
+function viewCards(r: Report): string {
+  if (!r.views) return "";
+  const cards: Array<[string, number, number]> = [
+    ["OVERALL", r.overall, r.overallPercentile],
+    ["FRONT", r.views.front.score, r.views.front.percentile],
+    ["SIDE", r.views.side.score, r.views.side.percentile],
+  ];
+  return `<div class="viewcards">${cards
+    .map(([label, score, pct]) => {
+      const tone = score >= 6.5 ? "hi" : score >= 4.5 ? "mid" : "lo";
+      return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
+        <span class="vc-label">${label}</span>
+        <span class="vc-rank">${rankShort(pct)}</span>
+        <b class="vc-score ${tone}">${score.toFixed(2)}<small>/10</small></b>
+      </div>`;
+    })
+    .join("")}</div>`;
 }
 
 function select(id: string): void {
@@ -137,9 +162,10 @@ function showOverall(): void {
         </div>
       </div>
       <p class="ego">${egoLine(r.overallPercentile)}</p>
+      ${viewCards(r)}
       ${
         merged
-          ? `<p class="viewnote done">Measured from both views. Projection, chin and jaw angle can only be seen in profile — they are in this number.</p>`
+          ? `<p class="viewnote done">Projection, chin and jaw angle can only be seen in profile. The front view carries 75% of the overall number and the side 25% — the side is capped, because thirteen points placed by hand is the one input you can get wrong by mis-dragging.</p>`
           : ctx.onSideProfile
             ? `<p class="viewnote">Measured from the front only. <button class="linkish" id="side-nudge">Add a side profile</button> to include chin projection, jaw angle and facial convexity.</p>`
             : ""
@@ -152,7 +178,7 @@ function showOverall(): void {
         )
         .join("")}
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex)}
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex, false, { score: r.overall, rank: rankShort(r.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
       ${

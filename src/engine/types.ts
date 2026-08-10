@@ -62,6 +62,11 @@ export interface RegionScore {
   metrics: ScoredMetric[];
 }
 
+export interface ViewScore {
+  score: number;
+  percentile: number;
+}
+
 export interface Report {
   sex: Sex;
   overall: number;
@@ -73,6 +78,10 @@ export interface Report {
   // combines quantities that are not on a common scale.
   overallZ: number;
   potential: number;
+  // Each view's own standing, kept alongside the merged number so the report
+  // can show what combined into what. Absent on a single-view report — its
+  // score IS the front view, and restating it twice says nothing.
+  views?: { front: ViewScore; side: ViewScore };
   pillars: Record<PillarId, number>;
   regions: RegionScore[];
   metrics: ScoredMetric[]; // flat, every scored metric

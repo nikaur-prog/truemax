@@ -151,6 +151,21 @@ body {
 .delta-chip.down { color: var(--down); background: #f6e9e4; }
 .delta-chip.flat { color: var(--mut); background: var(--soft); }
 
+/* Overall / front / side, side by side. Equal columns because the point is the
+   comparison — sizing the overall card larger would make the eye read it as the
+   only real number, when the whole reason for the row is to show what it is
+   made of. It gets a tinted ground instead. */
+.viewcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 4px; }
+.viewcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 10px 11px; text-align: center; }
+.viewcard.lead { background: var(--acc-soft); border-color: transparent; }
+.vc-label { display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.14em; color: var(--mut); }
+.viewcard.lead .vc-label { color: var(--acc); }
+.vc-rank { display: block; font-size: 11px; color: var(--mut); margin: 5px 0 6px; }
+.vc-score { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
+.vc-score small { font-size: 12px; color: var(--mut); }
+.vc-score.hi { color: var(--acc); }
+.vc-score.lo { color: var(--down); }
+
 .pillars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
 .pillar { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 13px 12px 12px; }
 .pillar b { font-family: var(--serif); font-weight: 400; font-size: 21px; display: block; }

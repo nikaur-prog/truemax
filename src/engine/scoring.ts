@@ -489,6 +489,22 @@ export function mergeReports(front: Report, side: Report): Report {
     overall: aggScore(z),
     overallPercentile: Math.round(phi(z) * 1000) / 10,
     overallZ: z,
+    // The two views as they stand on their own, so the report can show what
+    // went into the merge.
+    //
+    // The side figure is the UNCLAMPED one, which is not the value the merge
+    // arithmetic used. That is deliberate. The clamp only bites on a genuinely
+    // extreme profile, and when it does, the clamped number differs from the
+    // one the side-profile results screen shows for the same scan — two screens
+    // disagreeing about a number with the same name is a worse problem than
+    // arithmetic that does not visibly add up. It does not visibly add up
+    // anyway: this is a correlated aggregation of z-scores, not an average of
+    // two scores, so no pair of displayed figures would sum to the total. The
+    // cap is explained in the copy beneath the cards instead.
+    views: {
+      front: { score: aggScore(zf), percentile: Math.round(phi(zf) * 1000) / 10 },
+      side: { score: aggScore(zsRaw), percentile: Math.round(phi(zsRaw) * 1000) / 10 },
+    },
     potential: Math.round(Math.max(aggScore(z), aggScore(z) + gap) * 10) / 10,
     pillars: front.pillars,
     regions: [...byRegion.values()],
