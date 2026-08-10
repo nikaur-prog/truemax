@@ -1,4 +1,5 @@
-import { initLandmarker, detect, isReady, setRunningMode } from "./engine/landmarker.ts";
+import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts";
+import { detectStable } from "./engine/consensus.ts";
 import { assessQuality } from "./engine/quality.ts";
 import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
@@ -87,7 +88,7 @@ let selectedSex: Sex = "male";
   c.height = h;
   c.getContext("2d")!.drawImage(img, 0, 0, w, h);
 
-  const res = detect(c);
+  const res = detectStable(c);
   const quality = assessQuality(res);
   if (!quality.faceFound) return { faceFound: false };
   const report = analyze(res.faceLandmarks[0], w, h, sex);
@@ -342,7 +343,7 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   await nextFrame();
 
   // Real math (milliseconds) happens inside the theatre beat (~2.2s)
-  const result = detect(el.photoCanvas);
+  const result = detectStable(el.photoCanvas);
   const quality = assessQuality(result);
 
   if (!quality.faceFound) {

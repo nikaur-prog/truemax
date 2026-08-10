@@ -269,6 +269,10 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
   const ratioZ = aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]), RHO_PILLARS);
   const blended = shapeZ == null ? ratioZ : W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;
+  // Recorded so the calibration harness can decompose where score variance
+  // between two photos of the same face actually comes from.
+  rawZ["blend:shape"] = shapeZ ?? NaN;
+  rawZ["blend:ratio"] = ratioZ;
   const overallZ = normalizeAgg(blended, sex, "overall", rawZ);
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {

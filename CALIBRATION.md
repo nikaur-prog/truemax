@@ -346,3 +346,77 @@ not fix it.
 
 The controlled capture — 6–8 front shots, one sitting, independent attempts —
 is what isolates how much of that 1.45 is the engine versus the photography.
+
+## Stability work: what moved the number, and what did not
+
+### Determinism holds absolutely
+
+Six consecutive scans of the same photo return bit-identical values across all
+31 metrics and an identical score. This is guaranteed by construction — there
+is no randomness anywhere in the measurement path — and it stays true with
+consensus detection added, because the transforms it applies are fixed rather
+than sampled.
+
+### Lighting is not the problem
+
+One photo, distorted in the ways a capture session actually varies, with zero
+change to the face:
+
+```
+brightness +20% / -20%      0.1
+low contrast                0.1
+cool white balance          0.2
+soft focus                  0.2
+scale 0.85x / 1.15x         0.1 - 0.3
+jpeg quality 50             0.6
+warm white balance          0.6
+image rotation +-3 degrees  0.8 - 0.9
+```
+
+Exposure, contrast, focus and framing scale are already near-irrelevant. The
+requirement that lighting must not move the score is, for practical purposes,
+already met.
+
+### Rotation was landmark jitter, not a pose failure
+
+Sweeping ±8° of pure in-plane rotation produced scatter, not drift — one
+subject read 4.0, 4.9, 4.1, 4.7 at successive angles with no monotone trend. A
+systematic pose error would trend. Scatter means the detector is placing
+landmarks a pixel or two differently on each resample, and the scoring pipeline
+amplifies that for some faces more than others.
+
+`src/engine/consensus.ts` measures each photo under five fixed geometric
+transforms, maps every result back to original coordinates and takes the
+per-landmark median. Effects:
+
+```
+                        before   after
+worst-case roll spread    0.9      0.6
+within-person SD          1.45     1.32
+separation (Cohen's d)    0.99     1.02
+```
+
+Modest, real, and it costs four extra detections inside a scan that already
+takes two seconds of theatre.
+
+### What did not work
+
+Shrinking the quantile tables toward a fitted normal. The male "overall" table
+has bins from 0.0037 to 0.4049 wide — a 109x ratio — so the reasoning was that
+a z-shift of four thousandths crossing a whole five-percentile step must be the
+amplifier. Regularising it made **both** measures worse: roll spread on one
+subject went 0.2 → 0.6 and separation fell from 0.99 to 0.84. The staircase was
+carrying real signal. Reverted.
+
+### The honest limit of this analysis
+
+The repeat-photo set is press photography spanning years — different ages,
+weights, hairstyles and cameras. Emma Watson's photos cover most of her adult
+life. So **1.32 is an upper bound that includes genuine facial change**, and the
+earlier claim that "the score is determined more by the photograph than by the
+face" was stated more strongly than this data supports.
+
+Nothing available here can separate engine noise from a person actually looking
+different. That is precisely what the controlled sitting settles, and it is why
+no further stability work is worth doing before it exists: 6-8 front shots, one
+sitting, independent attempts, no real change possible in between.
