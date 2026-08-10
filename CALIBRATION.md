@@ -282,3 +282,67 @@ Until then skin is measured, stored and shown as its own number — and does not
 touch the overall score. The reliability weighting would assign it near-zero
 weight anyway; wiring it in early would just make week-over-week deltas noisier,
 which is the one thing the product promises to get right.
+
+## Does the score actually measure the face? (validity check)
+
+Two experiments, both run through the real engine path.
+
+### 1. Does it separate attractive faces from ordinary ones?
+
+27 hand-labelled consensus-attractive faces (models, leading actors) against the
+110-person population reference:
+
+```
+consensus-attractive  mean 6.94  sd 1.49
+notable-for-work      mean 5.59  sd 1.23
+separation (Cohen's d) = 0.99
+```
+
+Yes — there is a real, large group-level signal. The engine is measuring
+something related to attractiveness, not noise.
+
+That number is after fixing a ceiling bug found during this check. `normalizeAgg`
+clamped anything above the reference maximum to a single percentile, which
+mapped to exactly 7.6 — nine of the twenty-seven attractive faces scored 7.6,
+which is the clamp, not a coincidence. It destroyed discrimination in precisely
+the range this product's audience cares about. The tails now extrapolate at the
+slope of the outer quartile. Separation improved from d=0.81 to d=0.99.
+
+### 2. Does it give the same face the same score twice?
+
+No. This is the finding that matters.
+
+Same person, multiple photographs, score spread:
+
+```
+Keanu Reeves      3.7 – 7.9    sd 2.04
+Timothée Chalamet 3.7 – 7.7    sd 2.00
+Margot Robbie     4.3 – 8.5    sd 1.79
+Chris Hemsworth   5.4 – 8.0    sd 1.33
+Justin Trudeau    4.0 – 8.2    sd 1.22
+
+pooled within-person SD              1.45
+restricted to gate-passing photos    1.37
+```
+
+**Within-person noise (1.45) exceeds between-person spread (~1.2.)** For an
+individual, the score is currently determined more by which photograph was taken
+than by whose face is in it.
+
+Restricting to photos the capture gates would actually accept — yaw ≤10°,
+smile ≤0.35 — barely helps (1.37, though on only 5 degrees of freedom). So this
+is **not** primarily a pose problem, and tightening the angle requirement will
+not fix it.
+
+### What follows from this
+
+- Group-level claims are supportable. Individual scores are not yet.
+- A single celebrity score is a statement about one photograph. Henry Cavill at
+  5.8 is one image; Hemsworth ranges 5.4–8.0 across three.
+- Week-over-week tracking cannot ship until within-person SD is under ~0.4. It is
+  currently 1.45, so a "+0.6 this week" readout would be pure photography.
+- The reference sets are press photos, most of which the app's own capture gates
+  would reject. Numbers derived from them are a floor on quality, not a ceiling.
+
+The controlled capture — 6–8 front shots, one sitting, independent attempts —
+is what isolates how much of that 1.45 is the engine versus the photography.
