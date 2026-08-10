@@ -162,6 +162,25 @@ export function hasOverlay(metricId: string): boolean {
   return metricId in RECIPES;
 }
 
+// Every measurement row is tappable, so every row has to draw something. Most
+// have a bespoke recipe above; the rest — chiefly the side-profile metrics,
+// whose points live in a different image entirely — fall back to lighting the
+// landmarks their region is measured from, with the value called out.
+//
+// This is deliberately honest about being less specific: it shows WHERE the
+// number comes from without pretending to draw a span it cannot locate in this
+// photograph. A row that did nothing when tapped would be worse.
+const REGION_FALLBACK: Record<string, number[]> = {
+  eyes: [33, 133, 159, 145, 362, 263, 386, 374],
+  midface: [234, 454, 116, 345, 50, 280],
+  jaw: [58, 288, 172, 397, 136, 365, 152],
+  chin: [152, 148, 377, 17, 18, 200],
+  nose: [1, 4, 6, 168, 98, 327],
+  lips: [61, 291, 0, 13, 14, 17],
+  proportions: [10, 9, 2, 152, 234, 454],
+  symmetry: [10, 168, 1, 152, 33, 263],
+};
+
 export function drawMeasurement(
   canvas: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
@@ -169,13 +188,16 @@ export function drawMeasurement(
   height: number,
   metric: ScoredMetric,
 ): boolean {
-  const recipe = RECIPES[metric.def.id];
-  if (!recipe) return false;
-
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, width, height);
+
+  const recipe = RECIPES[metric.def.id];
+  if (!recipe) {
+    drawRegionFallback(ctx, landmarks, width, height, metric);
+    return true;
+  }
 
   const P = (ref: number | Pt2): Pt2 => {
     if (typeof ref === "number") {
@@ -301,4 +323,50 @@ function roundRect(
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+
+// Light the region a metric is measured from, and call out its value. Used for
+// every metric with no bespoke span — notably the side-profile ones, whose
+// thirteen points were placed on a different photograph and have no position
+// in this one.
+function drawRegionFallback(
+  ctx: CanvasRenderingContext2D,
+  landmarks: NormalizedLandmark[],
+  width: number,
+  height: number,
+  metric: ScoredMetric,
+): void {
+  const ids = (REGION_FALLBACK[metric.def.region] ?? []).filter((i) => landmarks[i]);
+  if (!ids.length) return;
+
+  let cx = 0;
+  let cy = 0;
+  for (const i of ids) {
+    cx += landmarks[i].x * width;
+    cy += landmarks[i].y * height;
+  }
+  cx /= ids.length;
+  cy /= ids.length;
+
+  const r = Math.max(3, width / 150);
+  ctx.save();
+  ctx.shadowColor = ACCENT;
+  ctx.shadowBlur = width / 90;
+  ctx.fillStyle = ACCENT;
+  for (const i of ids) {
+    ctx.beginPath();
+    ctx.arc(landmarks[i].x * width, landmarks[i].y * height, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  const dec = metric.def.decimals ?? 2;
+  label(
+    ctx,
+    `${metric.value.toFixed(dec)}${metric.def.unit ?? ""}`,
+    { x: cx, y: cy },
+    Math.max(11, width / 34),
+    ACCENT,
+  );
 }

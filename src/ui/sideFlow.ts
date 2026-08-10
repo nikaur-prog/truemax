@@ -50,15 +50,16 @@ export function openSideCapture(ctx: SideCtx): void {
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
   e.live.classList.add("hidden");
-  // Both views are required, so there is no "skip". There is still an exit:
-  // requiring the profile must not mean the only way out of this screen is a
-  // page reload, which is what removing the skip button first left behind.
+  // Both views are required, so there is no "skip" — but backing out of the
+  // capture must still be possible, because capture is free. Nothing has been
+  // spent at this point: the analysis is the costly step and it has not run.
+  // So this is a plain Cancel, not an offer to abandon a half-finished scan.
   e.actions.innerHTML = `
     <button class="btn pri" id="side-cam">Use camera</button>
     <button class="btn gho" id="side-pick">Upload a photo</button>`;
   e.actions.insertAdjacentHTML(
     "beforeend",
-    `<button class="btn cancel" id="side-quit">Start over with a new front photo</button>`,
+    `<button class="btn cancel" id="side-quit">Cancel</button>`,
   );
   document.getElementById("side-cam")!.onclick = () => openSideCamera(ctx);
   document.getElementById("side-pick")!.onclick = () => e.input.click();
@@ -136,7 +137,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     <button class="btn pri" id="side-shoot" disabled>Capture profile</button>`;
   e.actions.insertAdjacentHTML(
     "beforeend",
-    `<button class="btn cancel" id="side-quit2">Start over with a new front photo</button>`,
+    `<button class="btn cancel" id="side-quit2">Cancel</button>`,
   );
   document.getElementById("side-quit2")!.onclick = () => {
     close();

@@ -6,7 +6,7 @@ import { regionMatches } from "../engine/celebs.ts";
 import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
-import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
+import { drawMeasurement } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { egoLine, fmt, leverFor, percentileLine, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
@@ -253,7 +253,17 @@ function showRegion(id: RegionId): void {
   const r = ctx.report.regions.find((x) => x.region === id)!;
   setZoom(id);
 
-  const matches = regionMatches(id, r.metrics, ctx.report.sex);
+  // Wrapped because this is the one call in the render path that reaches into
+  // a separate dataset, and it runs BEFORE the panel's innerHTML is assigned —
+  // so anything it throws leaves the whole analysis pane blank rather than
+  // just dropping the celebrity card. A comparison feature must never be able
+  // to take out the report it sits beside.
+  let matches: ReturnType<typeof regionMatches> = [];
+  try {
+    matches = regionMatches(id, r.metrics, ctx.report.sex);
+  } catch (err) {
+    console.error("celebrity match failed", err);
+  }
   const matchCard = matches.length
     ? matches
         .map(
@@ -272,7 +282,7 @@ function showRegion(id: RegionId): void {
           <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
-              (m, i) => `<div class="metric${hasOverlay(m.def.id) ? " tappable" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+              (m, i) => `<div class="metric tappable" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
             <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
             )
@@ -280,8 +290,8 @@ function showRegion(id: RegionId): void {
           ${
             // The overlay is the credibility feature and it was invisible: a
             // 9px glyph at 55% opacity is not an affordance. Say it in words.
-            r.metrics.some((m) => hasOverlay(m.def.id))
-              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Tap a measurement to draw it on your face</button>`
+            r.metrics.length
+              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Tap any measurement to draw it on your face</button>`
               : ""
           }
           <div class="typebox" id="tw"></div>
@@ -348,7 +358,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
     const id = row.dataset.metric!;
     const metric = r.metrics.find((m) => m.def.id === id);
-    if (!metric || !hasOverlay(id)) continue;
+    if (!metric) continue;
     rows.push(row);
     row.onclick = () => {
       if (!ctx) return;
