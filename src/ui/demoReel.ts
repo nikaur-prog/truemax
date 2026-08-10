@@ -1,14 +1,54 @@
 import { REEL } from "./demoReelData.ts";
+import type { ReelFace } from "./demoReelData.ts";
 
-// Landing-page demo reel: rattles through real scans — face in, points sweep
-// across it, score lands, next. These are the engine's actual outputs on
-// public-domain portraits, so the demo is the product rather than a mock-up.
+// ---------------------------------------------------------------------------
+// Landing demo reel.
+//
+// It runs the same beats a real scan does — points sweep the face, the engine
+// works, then the analysis arrives in parts: overall, then the four pillars,
+// then individual regions called out at the exact spot on the face they were
+// measured from. A number that flashes up in one second reads as a gimmick; a
+// number that arrives after visible work reads as a measurement.
+//
+// Every value on screen is this engine's real output on that photograph.
+// ---------------------------------------------------------------------------
 
-const HOLD_MS = 1650;
-const SWEEP_MS = 850;
+const T = {
+  scan: [260, 1500],
+  measure: [1500, 2400],
+  score: [2400, 3150],
+  pillars: [3150, 4400],
+  regions: [4400, 6400],
+  out: 6500,
+  hold: 6800,
+};
+
+const STAGES = ["Normalizing pose", "Measuring 31 proportions", "Comparing against population"];
+// Four characters each: at reel width a full pillar name ran into its own
+// number, and "ANGULARIT" truncated mid-word looks like a bug.
+const PILLAR_ABBR: Record<string, string> = {
+  Harmony: "HARM", Angularity: "ANGL", Dimorphism: "DIMO", Features: "FEAT",
+};
+
+const REGION_LABEL: Record<string, string> = {
+  eyes: "Eyes", midface: "Midface", jaw: "Jaw", chin: "Chin",
+  nose: "Nose", lips: "Lips", proportions: "Proportions", symmetry: "Symmetry",
+};
 
 export interface ReelHandle {
   stop(): void;
+}
+
+const seg = (t: number, a: number, b: number) => Math.max(0, Math.min(1, (t - a) / (b - a)));
+const ease = (x: number) => 1 - Math.pow(1 - x, 2);
+
+// Three regions, chosen to look like an actual read of the face rather than a
+// highlight reel: the best, the worst, and the median. Showing only strengths
+// is what the competition does.
+function calloutsFor(face: ReelFace) {
+  const rs = [...face.regions].sort((a, b) => b.score - a.score);
+  if (rs.length < 3) return rs;
+  return [rs[0], rs[rs.length >> 1], rs[rs.length - 1]];
 }
 
 export function mountDemoReel(
@@ -48,9 +88,8 @@ export function mountDemoReel(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Cross-fade in, hold, fade out
     const fadeIn = Math.min(1, t / 260);
-    const fadeOut = t > HOLD_MS - 220 ? Math.max(0, (HOLD_MS - t) / 220) : 1;
+    const fadeOut = t > T.out ? Math.max(0, (T.hold - t) / (T.hold - T.out)) : 1;
     const alpha = Math.min(fadeIn, fadeOut);
 
     if (img.complete && img.naturalWidth) {
@@ -61,41 +100,140 @@ export function mountDemoReel(
       ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
       ctx.globalAlpha = 1;
     }
-
-    // Points sweep top-to-bottom across the face
-    const sweep = Math.min(1, Math.max(0, (t - 160) / SWEEP_MS));
-    const eased = 1 - Math.pow(1 - sweep, 2);
     ctx.globalAlpha = alpha;
+
+    // ---- points sweep -----------------------------------------------------
+    const swept = ease(seg(t, T.scan[0], T.scan[1]));
+    const settled = t > T.scan[1];
     for (const [px, py] of face.points) {
-      if (py > eased) continue;
-      const x = px * w;
-      const y = py * h;
-      const fresh = eased - py < 0.09;
-      ctx.fillStyle = fresh ? "#8FF3E0" : "rgba(255,255,255,0.62)";
+      if (py > swept) continue;
+      const fresh = !settled && swept - py < 0.09;
+      ctx.fillStyle = fresh ? "#8FF3E0" : `rgba(255,255,255,${settled ? 0.3 : 0.62})`;
       ctx.beginPath();
-      ctx.arc(x, y, fresh ? 2.4 : 1.5, 0, Math.PI * 2);
+      ctx.arc(px * w, py * h, fresh ? 2.4 : 1.4, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    // Scan line riding the leading edge
-    if (sweep > 0 && sweep < 1) {
-      const y = eased * h;
+    if (swept > 0 && swept < 1) {
+      const y = swept * h;
       const g = ctx.createLinearGradient(0, y - 26, 0, y + 2);
       g.addColorStop(0, "rgba(143,243,224,0)");
       g.addColorStop(1, "rgba(143,243,224,0.85)");
       ctx.fillStyle = g;
       ctx.fillRect(0, y - 26, w, 27);
     }
+
+    // ---- phase label ------------------------------------------------------
+    const phase =
+      t < T.scan[1] ? "SCANNING" : t < T.measure[1] ? "MEASURING" : "ANALYSIS";
+    ctx.font = "500 9.5px ui-monospace, 'IBM Plex Mono', monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    ctx.textAlign = "left";
+    ctx.fillText(phase, 14, 22);
+
+    // ---- staged working lines --------------------------------------------
+    if (t >= T.measure[0] && t < T.measure[1]) {
+      const p = seg(t, T.measure[0], T.measure[1]);
+      const i = Math.min(STAGES.length - 1, Math.floor(p * STAGES.length));
+      ctx.font = "500 11.5px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillText(`${STAGES[i]}…`, 14, 42);
+      ctx.fillStyle = "rgba(255,255,255,0.22)";
+      ctx.fillRect(14, 50, w - 28, 2);
+      ctx.fillStyle = "#8FF3E0";
+      ctx.fillRect(14, 50, (w - 28) * p, 2);
+    }
+
+    // ---- pillars ----------------------------------------------------------
+    if (t >= T.pillars[0]) {
+      const names = Object.keys(face.pillars);
+      const bw = (w - 28 - (names.length - 1) * 8) / names.length;
+      names.forEach((n, i) => {
+        const appear = seg(t, T.pillars[0] + i * 170, T.pillars[0] + i * 170 + 380);
+        if (appear <= 0) return;
+        const x = 14 + i * (bw + 8);
+        const y = h - 74;
+        ctx.globalAlpha = alpha * appear;
+        ctx.fillStyle = "rgba(255,255,255,0.2)";
+        ctx.fillRect(x, y + 16, bw, 3);
+        ctx.fillStyle = "#8FF3E0";
+        ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * appear, 3);
+        ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(255,255,255,0.66)";
+        ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
+        ctx.font = "600 11px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "right";
+        ctx.fillText(face.pillars[n].toFixed(1), x + bw, y + 10);
+        ctx.textAlign = "left";
+        ctx.globalAlpha = alpha;
+      });
+    }
+
+    // ---- region callouts --------------------------------------------------
+    if (t >= T.regions[0]) {
+      const outs = calloutsFor(face);
+      const taken: Array<[number, number, boolean]> = [];
+      outs.forEach((r, i) => {
+        const appear = seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
+        if (appear <= 0) return;
+        ctx.globalAlpha = alpha * appear;
+        const ax = r.x * w;
+        const ay = r.y * h;
+        // Label sits on whichever side has room, so it never covers the face
+        const left = ax > w * 0.5;
+        const lx = left ? Math.max(10, ax - 74 - 26) : Math.min(w - 84, ax + 26);
+        let ly = Math.max(14, Math.min(h - 96, ay - 9));
+        // Slide down past anything already occupying this column
+        for (let guard = 0; guard < 8; guard++) {
+          const clash = taken.find(([ty, by, tl]) => tl === left && ly < by + 6 && ly + 26 > ty - 6);
+          if (!clash) break;
+          ly = clash[1] + 12;
+        }
+        ly = Math.max(14, Math.min(h - 96, ly));
+        taken.push([ly, ly + 26, left]);
+
+        ctx.strokeStyle = "rgba(143,243,224,0.85)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(left ? lx + 74 : lx, ly + 9);
+        ctx.stroke();
+        ctx.fillStyle = "#8FF3E0";
+        ctx.beginPath();
+        ctx.arc(ax, ay, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(16,17,19,0.72)";
+        ctx.beginPath();
+        ctx.roundRect(lx, ly - 4, 74, 26, 7);
+        ctx.fill();
+        ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(255,255,255,0.62)";
+        ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
+        ctx.font = "600 12px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "#fff";
+        ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
+        ctx.globalAlpha = alpha;
+      });
+    }
+
+    // ---- attribution ------------------------------------------------------
+    // Required by the image licence, not optional decoration.
+    ctx.font = "400 7.5px ui-monospace, 'IBM Plex Mono', monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.42)";
+    ctx.textAlign = "right";
+    ctx.fillText(face.credit, w - 12, h - 8);
+    ctx.textAlign = "left";
     ctx.globalAlpha = 1;
 
-    // Score counts up as the sweep completes
-    const shown = (face.overall * Math.min(1, sweep * 1.15)).toFixed(1);
-    scoreEl.textContent = shown;
+    // Overall counts up only once the measuring beat is over
+    const shown = face.overall * ease(seg(t, T.score[0], T.score[1]));
+    scoreEl.textContent = t >= T.score[0] ? shown.toFixed(1) : "";
     scoreEl.style.opacity = String(alpha);
     nameEl.textContent = face.name;
     nameEl.style.opacity = String(alpha * 0.85);
 
-    if (t >= HOLD_MS) {
+    if (t >= T.hold) {
       idx = (idx + 1) % REEL.length;
       start = now;
     }

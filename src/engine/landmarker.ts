@@ -19,6 +19,15 @@ export async function initLandmarker(): Promise<void> {
     numFaces: 1,
     outputFacialTransformationMatrixes: true,
     outputFaceBlendshapes: true,
+    // Below MediaPipe's 0.5 defaults. A face lit from behind — a window at
+    // someone's back is the single most common selfie setup — sits right on
+    // the default threshold and drops in and out, which reads as "the app
+    // can't see me". Detecting a marginal face costs nothing here: the
+    // capture gates still refuse to fire the shutter until the frame is
+    // actually good, so a weak detection produces guidance, not a bad scan.
+    minFaceDetectionConfidence: 0.3,
+    minFacePresenceConfidence: 0.3,
+    minTrackingConfidence: 0.3,
   });
   mode = "IMAGE";
 }

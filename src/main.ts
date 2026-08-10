@@ -21,6 +21,7 @@ import { detectSex } from "./engine/shape.ts";
 import { estimateGaze } from "./engine/gaze.ts";
 import { openQuiz } from "./ui/goalsQuiz.ts";
 import { analyzeSkin } from "./engine/skin.ts";
+import { REGION_LANDMARKS } from "./ui/regions.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -106,6 +107,20 @@ let selectedSex: Sex = "male";
     zScores: report.zScores,
     shape: extractShape(buildGeometry(res.faceLandmarks[0], w, h)),
     pillars: report.pillars,
+    // Per-region score plus the centroid of that region's landmarks, so the
+    // demo reel can point a callout at the actual spot on the face
+    regions: report.regions.map((r) => {
+      const ids = REGION_LANDMARKS[r.region];
+      const lm = res.faceLandmarks[0];
+      let sx = 0, sy = 0;
+      for (const i of ids) { sx += lm[i].x; sy += lm[i].y; }
+      return {
+        id: r.region,
+        score: r.score,
+        x: +(sx / ids.length).toFixed(4),
+        y: +(sy / ids.length).toFixed(4),
+      };
+    }),
     // Outline points + face box for the landing-page reel builder
     reelLandmarks: shapeSubset().map((i) => [
       +res.faceLandmarks[0][i].x.toFixed(4),
