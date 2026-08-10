@@ -137,9 +137,12 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     e.hintTitle.textContent = "Camera unavailable";
     return;
   }
+  // Same order as the front screen: the shutter first, upload second. They were
+  // reversed here, so the button under your thumb changed meaning between the
+  // two steps of the same flow.
   e.actions.innerHTML = `
-    <button class="btn gho" id="side-stop">Upload instead</button>
-    <button class="btn pri" id="side-shoot" disabled>Capture profile</button>`;
+    <button class="btn pri" id="side-shoot" disabled>Capture</button>
+    <button class="btn gho" id="side-stop">Upload a photo</button>`;
   e.actions.insertAdjacentHTML(
     "beforeend",
     `<button class="btn cancel" id="side-quit2">Cancel</button>`,

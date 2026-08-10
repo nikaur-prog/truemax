@@ -301,10 +301,12 @@ function drawFrontGuide(
     stroke: `rgba(${tint},${check.ready ? 0.9 : 0.62})`,
     lineWidth: check.ready ? 2 : 1.5,
     dash: check.ready ? undefined : [9, 7],
-    // The interior features are there to make the outline legible as a face to
-    // line up with rather than an arbitrary blob. Kept faint so they never
-    // compete with the person's own face behind them.
-    features: 0.32,
+    // Face shape only. The eyes, brows, nose and lips used to be drawn faintly
+    // to make the outline "read as a face", and they did the opposite: a second
+    // set of features floating over the real ones, never lining up, on a target
+    // whose entire job is "get your face inside this line". A framing guide is
+    // an outline.
+    features: 0,
   });
 
   drawHeadingArrow(ctx, c.x, c.y - scale * ext.h * 0.08, check);
