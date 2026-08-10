@@ -1,5 +1,15 @@
 /* TrueMax — warm whitish-grey, generous whitespace, soft shadows.
-   Serif numerals (Fraunces), grotesk body (Inter), mono labels (IBM Plex). */
+   Serif numerals (Fraunces), grotesk body (Inter), mono labels (IBM Plex).
+
+   Self-hosted and version-pinned rather than pulled from the Google Fonts CDN.
+   Only the latin subsets are ever fetched — the packages ship per-script files
+   behind unicode-range, so the rest never leave the bundle. Upright faces only:
+   every <em> in this stylesheet is reset to font-style: normal, so shipping
+   italics would be ~120KB nothing renders. */
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
 
 :root {
   --bg: #f4f3ef;
@@ -13,15 +23,43 @@
   --warm: #c4694f;
   --up: #2e7d4f;
   --down: #c4694f;
-  --serif: "Fraunces", serif;
-  --sans: "Inter", -apple-system, sans-serif;
-  --mono: "IBM Plex Mono", monospace;
+  --serif: "Fraunces Variable", "Fraunces", Georgia, serif;
+  --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { scroll-behavior: smooth; }
-body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-height: 100vh; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+body {
+  background: var(--bg); font-family: var(--sans); color: var(--ink);
+  min-height: 100vh; font-size: 16px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  /* Every number on this page is a measurement, and the overall score counts
+     up digit by digit. Proportional figures make the whole block twitch
+     sideways while it animates; tabular ones hold still. */
+  font-variant-numeric: tabular-nums;
+  /* Never let the browser fake a weight we did not ship. Synthesised bold is
+     the cheapest-looking thing a typeface can do. */
+  font-synthesis: none;
+}
 ::selection { background: var(--acc-soft); }
+
+/* Optical sizing. Fraunces carries a real opsz axis from 9 to 144, and left on
+   `auto` the browser just hands it the font size — so a 78px score renders at
+   opsz 78, roughly halfway up an axis whose whole point is the top of it. The
+   display end is where the serifs sharpen and the thin strokes actually thin
+   out; the small end is where they thicken so labels stay legible. Setting it
+   deliberately is most of the difference between this reading as typeset and
+   reading as a serif at a large size. Weight has to be restated because
+   font-variation-settings wins over font-weight. */
+#v-upload h1 { font-variation-settings: "opsz" 144, "wght" 300; }
+.big { font-variation-settings: "opsz" 144, "wght" 300; }
+.pot .n { font-variation-settings: "opsz" 120, "wght" 300; }
+.reel-caption b { font-variation-settings: "opsz" 120, "wght" 300; }
+.side-title, .q-body h2 { font-variation-settings: "opsz" 96, "wght" 300; }
+.goal-head .endgoal { font-variation-settings: "opsz" 72, "wght" 300; }
+.pillar b { font-variation-settings: "opsz" 36, "wght" 400; }
+.celeb .ava { font-variation-settings: "opsz" 20, "wght" 400; }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 .hidden { display: none !important; }
@@ -118,6 +156,16 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .panel h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; color: var(--mut); font-weight: 500; margin-bottom: 10px; }
 .rarity { font-size: 13px; margin-top: 8px; line-height: 1.5; }
 .rarity b { color: var(--acc); }
+
+/* Curve legend. Without it the shaded middle reads as "good", when all it is
+   is the interquartile range. */
+.curve-key { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 2px; }
+.curve-key span { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mut); }
+.curve-key i { width: 11px; height: 9px; border-radius: 2px; flex: none; }
+.curve-key .k-band { background: #dceBe5; border: 1px solid #c3d8d0; }
+.curve-key .k-tick { width: 7px; height: 10px; border-radius: 0; background: repeating-linear-gradient(90deg, #c9c7c0 0 1px, transparent 1px 3px); }
+.curve-key .k-you { width: 9px; height: 9px; border-radius: 99px; background: var(--acc); }
+.curve-note { font-size: 11px; color: var(--mut); line-height: 1.55; margin-top: 9px; }
 
 /* region cards */
 .dots { display: flex; gap: 6px; justify-content: center; margin: 2px 0 14px; }
@@ -224,6 +272,20 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .metric.tappable .mrow b::after { content: "◱"; font-size: 9px; color: var(--mut); margin-left: 7px; opacity: 0.55; }
 .metric.tappable.active { background: var(--acc-soft); }
 .metric.tappable.active .mrow b { color: var(--acc); }
+
+/* The instruction for the overlay. It was previously only implied by a 9px
+   glyph, which nobody found. */
+.tap-hint {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  margin: 2px 0 16px; padding: 9px 11px;
+  background: var(--soft); border: 1px dashed var(--line); border-radius: 10px;
+  font-family: var(--sans); font-size: 11.5px; color: var(--mut);
+  text-align: left; cursor: pointer; transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.tap-hint i { font-style: normal; font-size: 12px; opacity: 0.7; }
+.tap-hint:hover { background: #eae8e1; color: var(--ink); }
+.tap-hint.on { background: var(--acc-soft); border-color: transparent; border-style: solid; color: var(--acc); }
+.tap-hint.on b { font-weight: 600; }
 
 /* ---------- capture stage: live camera + guidance ---------- */
 #capture-stage { width: min(420px, 100%); display: flex; flex-direction: column; align-items: center; gap: 18px; }
@@ -415,6 +477,10 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .goal-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .goal-tag { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 10px; border-radius: 99px; background: var(--acc-soft); color: var(--acc); }
 .goal-tag.mut { background: var(--soft); color: var(--mut); }
+/* Declared, not measured — a different colour so the two can never be read as
+   the same kind of statement. */
+.goal-tag.alt { background: #f6ece6; color: var(--warm); }
+.goal-declared { font-size: 11.5px; line-height: 1.55; color: var(--mut); margin-top: 10px; }
 .goal-edit { margin-top: 12px; font-size: 12px; color: var(--acc); background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--sans); text-decoration: underline; text-underline-offset: 3px; }
 .imp .because { display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--acc); margin-top: 9px; }
 

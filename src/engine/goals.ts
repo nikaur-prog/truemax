@@ -124,6 +124,35 @@ export const GOALS: GoalDef[] = [
   },
 ];
 
+// Skin concerns, SELF-DECLARED. Read the name of this list literally.
+//
+// The obvious product move is the one every competitor makes: "our scanner has
+// identified that you may have rosacea — true or false?" We will not do it, for
+// two reasons that both stand on their own.
+//
+// 1. The engine cannot. It measures how evenly a face reflects light. Acne,
+//    eczema and rosacea are medical diagnoses that look similar in a photo and
+//    are treated completely differently; guessing between them from a webcam
+//    frame is a clinician's job and, in several places, a regulated one.
+// 2. Our own reliability numbers say so. Of the five skin statistics, only the
+//    under-eye ratio repeats well enough across photos of the same person to
+//    be worth reporting. Redness and chroma spread reproduce at ~0.00 — they
+//    measure the room's lighting, not the face.
+//
+// So we ask. A declared concern is worth more than a guessed one anyway: it
+// routes the over-the-counter recommendations, and the person knows their own
+// skin better than a 220-pixel crop of it does.
+export const SKIN_CONCERNS: Array<{ id: string; label: string; blurb: string }> = [
+  { id: "acne", label: "Breakouts", blurb: "Spots, congestion, blackheads" },
+  { id: "redness", label: "Redness or flushing", blurb: "Persistent colour across the cheeks or nose" },
+  { id: "dryness", label: "Dryness or irritation", blurb: "Tight, flaky or reactive skin" },
+  { id: "marks", label: "Marks left behind", blurb: "Brown or red patches after a spot heals" },
+  { id: "scarring", label: "Scarring", blurb: "Raised or indented texture" },
+  { id: "pigmentation", label: "Pigmentation", blurb: "Sun spots or uneven tone" },
+  { id: "undereye", label: "Dark circles", blurb: "Shadowing under the eyes" },
+  { id: "none", label: "None of these", blurb: "Nothing I'd call a problem" },
+];
+
 // Regions someone can ask us to stay quiet about. Kept to the areas people
 // actually name; the wording is neutral on purpose — this is a preference, not
 // a diagnosis, and nothing here implies anything is wrong.
@@ -149,6 +178,9 @@ export interface Profile {
   // Dietary exclusions, so food suggestions never name something someone
   // does not eat. Not a health field and never used as one.
   diet: string[];
+  // Self-declared skin concerns. Never inferred, never written to by the
+  // engine — only ever by the person, through the quiz.
+  skin: string[];
   endGoal: string;
 }
 
@@ -163,6 +195,7 @@ export const EMPTY_PROFILE: Profile = {
   quiet: [],
   advice: { diet: true, lifestyle: true, grooming: true, capture: true },
   diet: [],
+  skin: [],
   endGoal: "",
 };
 
@@ -216,4 +249,15 @@ export function chosenGoals(p: Profile): GoalDef[] {
 // everywhere — this only silences the prose.
 export function isQuiet(region: RegionId, p: Profile): boolean {
   return p.quiet.includes(region);
+}
+
+// Answering "none of these" is an answer, and a different one from not having
+// been asked. The first narrows the recommendations to the things everyone
+// benefits from; the second has to leave them all showing, because filtering
+// on a question nobody answered would silently hide the useful half.
+export const skinAnswered = (p: Profile): boolean => (p.skin?.length ?? 0) > 0;
+export const declaredSkin = (p: Profile): string[] => (p.skin ?? []).filter((s) => s !== "none");
+
+export function skinConcernLabels(p: Profile): string[] {
+  return declaredSkin(p).map((id) => SKIN_CONCERNS.find((c) => c.id === id)?.label ?? id);
 }

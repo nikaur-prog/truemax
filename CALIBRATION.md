@@ -480,3 +480,94 @@ This is a data problem, not a code problem. The top tier needs to be three or
 four times larger before the shape axis can discriminate as sharply as the
 biased version appeared to — and "appeared to" is the right phrase, because
 some of that d=1.02 was the female inflation itself widening the gap.
+
+## Showing the population curve instead of drawing a bell
+
+The "population position" chart used to be a textbook normal — the same
+perfect bell on every tab, for every region, for both sexes, with the subject's
+dot placed at `pct/100` along it. It was decoration, and worse, it quietly
+contradicted the numbers printed underneath it.
+
+The reference distributions are not normal. `AGG_NORM` already stores 21
+empirical quantiles per aggregate, which is a histogram in disguise: each
+consecutive pair brackets exactly 5% of the reference set, so that slice's
+height is `0.05 / (q[i+1] - q[i])`. The curve is now drawn from those.
+
+What this exposes, which the bell hid:
+
+- **`region:midface` (male) is bimodal.** Two clear modes, not one.
+- **`region:nose` (female) is severely left-shifted** — the entire table sits
+  below zero, from -2.67 to +1.07. A symmetric bell over that is a fiction.
+- **The upper tail is thin, visibly.** On most aggregates the top three or four
+  quantiles are spread across as much x-distance as the middle ten. The ticks
+  are drawn, so where the sample runs out is now something a user can see
+  rather than something buried in this file.
+
+The dot is placed by interpolating the *same* table that scoring interpolates,
+so the dot and the percentile printed under it cannot disagree — they are one
+lookup.
+
+Two honesty constraints on the chart:
+
+- The shaded middle band is the interquartile range and is labelled as such.
+  Shading "the middle" without saying what it is reads as a value judgement.
+- Slice heights are smoothed with two [1,2,1] passes. With ~110 faces behind 21
+  order statistics, two nearly-coincident quantiles produce a spike that is
+  sampling noise. This is smoothing a histogram, which is not the same thing as
+  the discarded experiment of shrinking the quantile table toward a fitted
+  normal — that changed the *scores* and made both stability and validity
+  worse (d 0.99 -> 0.84). This changes only the picture.
+
+Aggregates with no quantile table (side-profile metrics) still fall back to the
+idealized bell, since there is no data to draw.
+
+## Skin concerns are declared, never inferred
+
+The scan does not tell anyone what condition they have, and the recommendation
+layer no longer needs it to. A quiz card — shown only to people who picked skin
+as a goal — asks directly, and the answer routes the over-the-counter cards.
+
+This is not caution for its own sake. It is what the reliability numbers in
+"Skin: measured, and deliberately not scored yet" already established: of the
+five skin statistics, only `undereyeRatio` (0.532) repeats well enough across
+photos of the same person to be worth reporting. `rednessSpread` and
+`chromaSpread` reproduce at 0.000 — they measure the room, not the face. An
+app that read "you may have rosacea" off a number with zero test-retest
+reliability would be inventing a diagnosis, and it would be inventing it from
+the lighting.
+
+The competitor pattern — "our scanner has identified that you may have X, true
+or false?" — extracts the same answer while taking credit for knowing it. We
+ask, and say why we are asking. The declared concerns render in a different
+colour from the measured goals on the plan header, with a line stating the
+scan did not find them.
+
+Filtering only engages once the question has been answered: a card carrying no
+`concerns` is unconditional (sunscreen, "see a pharmacist"), and if someone
+skipped the question nothing is filtered at all. Filtering on an unanswered
+optional question would silently hide the useful half of the section.
+
+## Typefaces are self-hosted
+
+Fraunces, Inter and IBM Plex Mono came from the Google Fonts CDN via a
+render-blocking `<link>`. Three consequences, all bad:
+
+1. On a slow or filtered connection the entire app fell back to system
+   defaults, which is what made a carefully set page look like an unstyled
+   document.
+2. It was the only outbound request on a page whose headline promise is that
+   nothing leaves your device.
+3. Canvas text (the share card, the demo reel) does not trigger a webfont load
+   and does not wait for one, so the shareable artifact — the one thing that
+   leaves the device — could go out set in Georgia if the race went the wrong
+   way. `renderShareCard` now awaits `document.fonts.ready`.
+
+Now version-pinned via Fontsource and bundled. Only latin subsets are ever
+fetched (the packages ship per-script files behind `unicode-range`), and only
+upright faces are imported, since every `<em>` in the stylesheet is reset to
+`font-style: normal`. Verified: exactly one file loads per family, and the page
+makes zero external requests.
+
+Fraunces' `opsz` axis is now set explicitly rather than left on `auto`. Left to
+the browser, a 78px score renders at opsz 78 on an axis that runs to 144 — half
+way up an axis whose entire purpose is its top end.

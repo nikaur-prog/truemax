@@ -1,3 +1,4 @@
+import { declaredSkin, skinAnswered } from "./goals.ts";
 import type { AdviceChannel, Profile } from "./goals.ts";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,10 @@ export interface Rec {
   caution?: string;
   // Dietary flags a profile can exclude on
   contains?: Array<"meat" | "fish" | "shellfish" | "dairy">;
+  // Self-declared skin concerns this addresses (ids from SKIN_CONCERNS).
+  // Absent means it is worth showing to anyone who picked skin as a goal —
+  // sunscreen and "go see someone" are not contingent on a complaint.
+  concerns?: string[];
 }
 
 export const EVIDENCE_LABEL: Record<Evidence, string> = {
@@ -74,6 +79,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "adapalene",
+    concerns: ["acne"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -88,6 +94,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "azelaic",
+    concerns: ["redness", "marks", "acne", "pigmentation"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -101,6 +108,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "salicylic",
+    concerns: ["acne"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -112,6 +120,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "niacinamide",
+    concerns: ["redness", "dryness"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -132,6 +141,61 @@ export const RECS: Rec[] = [
     evidence: "strong",
     detail:
       "TrueMax measures how evenly your face reflects light. It cannot tell acne from eczema from rosacea, and those need different treatment — a person who can actually look at your skin is worth more than any product on this list.",
+  },
+  {
+    id: "emollient",
+    concerns: ["dryness"],
+    group: "topical",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "A plain fragrance-free moisturiser",
+    what: "Applied while the skin is still damp, twice a day",
+    evidence: "strong",
+    detail:
+      "Unglamorous and very well evidenced: regular emollient use is the first-line treatment for dry and eczema-prone skin in every clinical guideline that covers it. Fragrance is the usual culprit when a product stings, and the cheap tub often outperforms the expensive one.",
+    otc: true,
+    caution:
+      "If skin is cracked, weeping or painful, that is past what a moisturiser fixes — see a pharmacist or doctor.",
+  },
+  {
+    id: "gentle-cleanse",
+    concerns: ["dryness", "redness"],
+    group: "habit",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Stop stripping it",
+    what: "Lukewarm water, one mild cleanser, nothing abrasive",
+    evidence: "moderate",
+    detail:
+      "Reactive and persistently red skin is very often over-treated skin. Scrubs, hot water, astringent toners and stacking three actives at once all damage the barrier, and the damage looks like the problem people are treating. Cutting back is free and reverses in weeks.",
+  },
+  {
+    id: "redness-triggers",
+    concerns: ["redness"],
+    group: "habit",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Find your flushing triggers",
+    what: "Heat, alcohol, spice and sun are the common four",
+    evidence: "moderate",
+    detail:
+      "Persistent facial flushing is strongly trigger-driven, and the triggers are individual — a fortnight of noting what preceded a flare identifies them better than any product does. Sun is the one that shows up for nearly everyone, which is another reason sunscreen sits at the top of this list.",
+    caution:
+      "Persistent central-face redness with visible vessels or bumps is a diagnosis someone needs to make in person, and the effective treatments for it are prescription-only. Worth a doctor's appointment rather than a shopping list.",
+  },
+  {
+    id: "undereye-truth",
+    concerns: ["undereye"],
+    group: "habit",
+    goals: ["skin", "eyes", "debloat"],
+    channel: "grooming",
+    title: "What actually moves dark circles",
+    what: "Mostly nothing you can buy",
+    evidence: "none",
+    detail:
+      "Under-eye shadow is usually structural — thin skin over a tear-trough hollow, or vessels showing through — and no over-the-counter cream changes either. What does move is the puffiness component: sleep timing, sodium and alcohol, within days. This is also the one skin number the scan reports, because it is the only one that repeats reliably between photos.",
+    caution:
+      "Caffeine gels, vitamin K creams and cooling rollers reduce puffiness for an hour or two. That is a real effect and a different claim from fixing the shadow.",
   },
 
   // ---- food ---------------------------------------------------------------
@@ -381,6 +445,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "glycaemic-skin",
+    concerns: ["acne"],
     group: "food",
     goals: ["skin"],
     channel: "diet",
@@ -457,6 +522,7 @@ export const RECS: Rec[] = [
   // ---- texture and marks --------------------------------------------------
   {
     id: "silicone",
+    concerns: ["scarring"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -469,6 +535,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "scar-sun",
+    concerns: ["scarring", "marks", "pigmentation"],
     group: "habit",
     goals: ["skin"],
     channel: "grooming",
@@ -497,6 +564,13 @@ export function recsFor(profile: Profile, quietGoals: Set<string> = new Set()): 
   if (profile.diet?.includes("dairy-free")) exclude.add("dairy");
   if (profile.diet?.includes("no-shellfish")) exclude.add("shellfish");
 
+  // Concern filtering only engages once someone has actually answered the skin
+  // question. Filtering on an unanswered question would silently drop most of
+  // the skin section for anyone who skipped it, which is the opposite of what
+  // an optional question should do.
+  const concerns = new Set(declaredSkin(profile));
+  const filterConcerns = skinAnswered(profile);
+
   return RECS.filter((r) => {
     // Only what serves a goal they picked
     if (!r.goals.some((g) => profile.goals.includes(g))) return false;
@@ -505,6 +579,8 @@ export function recsFor(profile: Profile, quietGoals: Set<string> = new Set()): 
     if (!profile.advice[r.channel]) return false;
     // Dietary exclusions
     if (r.contains?.some((c) => exclude.has(c))) return false;
+    // Declared skin concerns. A card with no `concerns` is unconditional.
+    if (filterConcerns && r.concerns && !r.concerns.some((c) => concerns.has(c))) return false;
     return true;
   });
 }

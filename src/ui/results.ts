@@ -3,14 +3,14 @@ import { phi, REGION_NAMES } from "../engine/scoring.ts";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.ts";
 import type { ScanDelta } from "../engine/history.ts";
 import { regionMatches } from "../engine/celebs.ts";
-import { curveSVG } from "./curve.ts";
+import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm } from "./overlay.ts";
 import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { fmt, leverFor, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
-import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile } from "../engine/goals.ts";
+import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
 import { GOALS } from "../engine/goals.ts";
@@ -116,7 +116,8 @@ function showOverall(): void {
         )
         .join("")}
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile)}
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex)}
+        ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
       <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
         <button class="btn pri" id="btn-plan">See your plan</button></div>
@@ -161,7 +162,8 @@ export function renderSideResults(report: Report, onRedo: () => void): void {
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
         <div class="chipcol"><span class="chip">${topPct}</span></div>
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile)}
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex)}
+        ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
       ${regions
         .map(
@@ -230,6 +232,13 @@ function showRegion(id: RegionId): void {
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
             )
             .join("")}
+          ${
+            // The overlay is the credibility feature and it was invisible: a
+            // 9px glyph at 55% opacity is not an affordance. Say it in words.
+            r.metrics.some((m) => hasOverlay(m.def.id))
+              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Tap a measurement to draw it on your face</button>`
+              : ""
+          }
           <div class="typebox" id="tw"></div>
         </div>
         <div class="dcard">
@@ -238,7 +247,8 @@ function showRegion(id: RegionId): void {
           <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
       </div>
-      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, true)}
+      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, ctx!.report.sex, true)}
+        ${curveLegend()}
         <p class="rarity">${rarityLine(r)}</p></div>
     </div>`;
 
@@ -280,24 +290,48 @@ function rarityLine(r: RegionScore): string {
 // is evidence — this is the credibility wedge made visible.
 let activeMetric: string | null = null;
 
+const HINT_IDLE = `<i>◱</i>Tap a measurement to draw it on your face`;
+
 function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
+  // Switching tabs re-renders the rows but used to leave this pointing at the
+  // previous region's metric, so the first tap after coming back toggled the
+  // overlay OFF instead of on.
+  activeMetric = null;
+  const hint = document.getElementById("tap-hint");
+  const rows: HTMLElement[] = [];
+
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
     const id = row.dataset.metric!;
     const metric = r.metrics.find((m) => m.def.id === id);
     if (!metric || !hasOverlay(id)) continue;
+    rows.push(row);
     row.onclick = () => {
       if (!ctx) return;
       if (activeMetric === id) {
         activeMetric = null;
         row.classList.remove("active");
+        if (hint) {
+          hint.classList.remove("on");
+          hint.innerHTML = HINT_IDLE;
+        }
         drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
         return;
       }
       activeMetric = id;
       for (const other of document.querySelectorAll(".metric")) other.classList.remove("active");
       row.classList.add("active");
+      if (hint) {
+        hint.classList.add("on");
+        hint.innerHTML = `<i>◱</i>Drawing <b>${metric.def.name}</b> — tap the row again to clear`;
+      }
       drawMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
     };
+  }
+
+  // The hint is the affordance, so it has to do the thing it describes:
+  // demonstrate on the first measurement, and clear whatever is drawn.
+  if (hint && rows.length) {
+    hint.onclick = () => (rows.find((x) => x.dataset.metric === activeMetric) ?? rows[0]).click();
   }
 }
 
@@ -441,8 +475,16 @@ function goalHead(p: ReturnType<typeof loadProfile>): string {
       ${goals.length
         ? goals.map((g) => `<span class="goal-tag">${g.label}</span>`).join("")
         : `<span class="goal-tag mut">No goals set — showing your weakest fixable numbers</span>`}
+      ${skinConcernLabels(p)
+        .map((l) => `<span class="goal-tag alt">${l}</span>`)
+        .join("")}
       ${p.quiet.length ? `<span class="goal-tag mut">${p.quiet.length} topic${p.quiet.length > 1 ? "s" : ""} off-limits</span>` : ""}
     </div>
+    ${
+      skinConcernLabels(p).length
+        ? `<p class="goal-declared">You told us this — the scan didn't. It measures how evenly your face reflects light, which cannot tell one skin condition from another.</p>`
+        : ""
+    }
     <button class="goal-edit" id="goal-edit">Edit your goals</button>
   </div>`;
 }

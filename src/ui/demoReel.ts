@@ -134,7 +134,7 @@ export function mountDemoReel(
     if (t >= T.measure[0] && t < T.measure[1]) {
       const p = seg(t, T.measure[0], T.measure[1]);
       const i = Math.min(STAGES.length - 1, Math.floor(p * STAGES.length));
-      ctx.font = "500 11.5px Inter, system-ui, sans-serif";
+      ctx.font = "500 11.5px Inter Variable, Inter, system-ui, sans-serif";
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.fillText(`${STAGES[i]}…`, 14, 42);
       ctx.fillStyle = "rgba(255,255,255,0.22)";
@@ -160,7 +160,7 @@ export function mountDemoReel(
         ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
         ctx.fillStyle = "rgba(255,255,255,0.66)";
         ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
-        ctx.font = "600 11px Inter, system-ui, sans-serif";
+        ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "#fff";
         ctx.textAlign = "right";
         ctx.fillText(face.pillars[n].toFixed(1), x + bw, y + 10);
@@ -210,7 +210,7 @@ export function mountDemoReel(
         ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
         ctx.fillStyle = "rgba(255,255,255,0.62)";
         ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
-        ctx.font = "600 12px Inter, system-ui, sans-serif";
+        ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "#fff";
         ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
         ctx.globalAlpha = alpha;

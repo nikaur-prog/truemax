@@ -1,4 +1,4 @@
-import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.ts";
+import { GOALS, QUIET_TOPICS, SKIN_CONCERNS, loadProfile, saveProfile } from "../engine/goals.ts";
 import type { AdviceChannel, Profile } from "../engine/goals.ts";
 import type { RegionId } from "../engine/types.ts";
 
@@ -35,6 +35,9 @@ interface Step {
   wire?(root: HTMLElement, p: Profile): void;
   // Which chips should read as selected, given current state
   selected(p: Profile): Set<string>;
+  // Steps that are only relevant to some people. Evaluated when the quiz
+  // opens, so answers given on an earlier card can gate a later one.
+  when?(p: Profile): boolean;
 }
 
 const chip = (label: string, key: string, sub = "") =>
@@ -46,6 +49,9 @@ const chip = (label: string, key: string, sub = "") =>
 function toggleIn<T>(list: T[], v: T): T[] {
   return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
 }
+
+const railHTML = (n: number, at: number): string =>
+  Array.from({ length: n }, (_, i) => `<i class="${i < at ? "done" : i === at ? "now" : ""}"></i>`).join("");
 
 const GOALS_STEP: Step = {
   id: "goals",
@@ -115,6 +121,28 @@ const DIET_STEP: Step = {
   selected: (p) => new Set(p.diet),
 };
 
+// Only shown to people who said skin was a goal. Asking everyone to itemise
+// what is wrong with their skin, unprompted, is the single most intrusive
+// question in the app; asking the people who raised it themselves is just
+// listening.
+const SKIN_STEP: Step = {
+  id: "skin",
+  kicker: "SKIN",
+  question: "What would you call the problem?",
+  note: "You tell us — the scan can't. It measures how evenly your face reflects light, and that cannot tell breakouts from eczema from rosacea. Your answer only decides which over-the-counter options are worth showing you.",
+  when: (p) => p.goals.includes("skin"),
+  render: () =>
+    `<div class="q-grid two">${SKIN_CONCERNS.map((c) => chip(c.label, c.id, c.blurb)).join("")}</div>
+     <p class="q-foot">Not a diagnosis, not stored anywhere but this device, and it never touches a single measurement or your score. Anything persistent, painful or spreading is worth showing to a pharmacist or a doctor rather than an app.</p>`,
+  pick: (k, p) => {
+    // "None of these" is exclusive in both directions — it cannot coexist with
+    // a named concern without one of them being wrong.
+    if (k === "none") p.skin = p.skin.includes("none") ? [] : ["none"];
+    else p.skin = toggleIn(p.skin.filter((s) => s !== "none"), k);
+  },
+  selected: (p) => new Set(p.skin),
+};
+
 const ENDGOAL_STEP: Step = {
   id: "endGoal",
   kicker: "THE POINT",
@@ -137,16 +165,22 @@ const ENDGOAL_STEP: Step = {
 
 const PHASES: Record<Phase, Step[]> = {
   pre: [GOALS_STEP],
-  post: [BOUNDARIES_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
-  all: [GOALS_STEP, BOUNDARIES_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
+  post: [BOUNDARIES_STEP, SKIN_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
+  all: [GOALS_STEP, BOUNDARIES_STEP, SKIN_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
 };
 
 let host: HTMLElement | null = null;
 
 export function openQuiz(onDone: (p: Profile) => void, phase: Phase = "all"): void {
   const p = loadProfile();
-  const steps = PHASES[phase];
-  let step = 0;
+  // Visibility is recomputed on every navigation rather than fixed when the
+  // quiz opens, because a conditional card can be gated on an answer given two
+  // cards earlier in the same run — picking "Skin quality" must make the skin
+  // card appear now, not on the next visit. Position is therefore tracked by
+  // step id, since the index it sits at moves underneath it.
+  const visible = () => PHASES[phase].filter((s) => !s.when || s.when(p));
+  let curId = visible()[0].id;
+  const idx = () => Math.max(0, visible().findIndex((s) => s.id === curId));
 
   host?.remove();
   host = document.createElement("div");
@@ -169,13 +203,15 @@ export function openQuiz(onDone: (p: Profile) => void, phase: Phase = "all"): vo
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") close(false);
-    if (e.key === "Enter" && step < steps.length - 1) next();
+    if (e.key === "Enter" && idx() < visible().length - 1) next();
   };
   document.addEventListener("keydown", onKey);
 
   const next = () => {
-    if (step < steps.length - 1) {
-      step++;
+    const v = visible();
+    const i = idx();
+    if (i < v.length - 1) {
+      curId = v[i + 1].id;
       draw();
     } else close(true);
   };
@@ -185,34 +221,44 @@ export function openQuiz(onDone: (p: Profile) => void, phase: Phase = "all"): vo
   // actually sees: a tap that slides to green.
   const sync = () => {
     if (!host) return;
-    const on = steps[step].selected(p);
+    const v = visible();
+    const i = idx();
+    const on = v[i].selected(p);
     for (const b of host.querySelectorAll<HTMLButtonElement>(".q-chip")) {
       const isOn = on.has(b.dataset.key!);
       b.classList.toggle("on", isOn);
       b.setAttribute("aria-pressed", String(isOn));
     }
+    // A tap can add or remove a later card, so the counter and the rail have to
+    // move with it — without re-rendering, which is what the flicker fix bought.
+    const kicker = host.querySelector<HTMLElement>("#q-kicker");
+    if (kicker) kicker.textContent = v.length > 1 ? `${v[i].kicker} · ${i + 1} OF ${v.length}` : v[i].kicker;
+    const rail = host.querySelector<HTMLElement>("#q-rail");
+    if (rail) rail.innerHTML = railHTML(v.length, i);
+    const nextBtn = host.querySelector<HTMLButtonElement>("#q-next");
+    if (nextBtn) nextBtn.textContent = i === v.length - 1 ? "Save and continue" : "Continue";
   };
 
   const draw = () => {
     if (!host) return;
-    const s = steps[step];
+    const v = visible();
+    const i = idx();
+    const s = v[i];
     host.innerHTML = `
       <div class="q-card" role="dialog" aria-modal="true" aria-label="${s.question}">
         <div class="q-top">
-          <div class="q-rail">${steps
-            .map((_, i) => `<i class="${i < step ? "done" : i === step ? "now" : ""}"></i>`)
-            .join("")}</div>
+          <div class="q-rail" id="q-rail">${railHTML(v.length, i)}</div>
           <button class="q-x" id="q-x" aria-label="Close">✕</button>
         </div>
         <div class="q-body">
-          <div class="q-kicker">${s.kicker}${steps.length > 1 ? ` · ${step + 1} OF ${steps.length}` : ""}</div>
+          <div class="q-kicker" id="q-kicker">${s.kicker}${v.length > 1 ? ` · ${i + 1} OF ${v.length}` : ""}</div>
           <h2>${s.question}</h2>
           <p class="q-note">${s.note}</p>
           ${s.render(p)}
         </div>
         <div class="q-actions">
-          <button class="btn gho" id="q-back">${step === 0 ? "Skip for now" : "Back"}</button>
-          <button class="btn pri" id="q-next">${step === steps.length - 1 ? "Save and continue" : "Continue"}</button>
+          <button class="btn gho" id="q-back">${i === 0 ? "Skip for now" : "Back"}</button>
+          <button class="btn pri" id="q-next">${i === v.length - 1 ? "Save and continue" : "Continue"}</button>
         </div>
       </div>`;
 
@@ -229,9 +275,11 @@ export function openQuiz(onDone: (p: Profile) => void, phase: Phase = "all"): vo
 
     host.querySelector<HTMLButtonElement>("#q-x")!.onclick = () => close(false);
     host.querySelector<HTMLButtonElement>("#q-back")!.onclick = () => {
-      if (step === 0) close(true); // skipping is a valid answer; don't re-ask
+      const vv = visible();
+      const i2 = idx();
+      if (i2 === 0) close(true); // skipping is a valid answer; don't re-ask
       else {
-        step--;
+        curId = vv[i2 - 1].id;
         draw();
       }
     };
