@@ -70,7 +70,26 @@ export interface Viewport {
 }
 const FULL_VIEW: Viewport = { visW: 1, visH: 1 };
 const YAW_OK = 10;
-const PITCH_OK = 10;
+// Pitch tolerance, and it was the reason a correctly framed face got told to
+// move.
+//
+// This was 10 degrees. A laptop webcam sits above the eye line essentially
+// always, and a phone held naturally sits below it, so ordinary use starts
+// somewhere past 10 and the guide opened with "Lower the camera" at a face
+// that was squarely inside the oval.
+//
+// Ten was never a measured number. quality.ts — the gate that decides whether
+// a photograph is actually good enough to MEASURE — allows 26, and says why:
+// the ratios are pose-corrected in geometry.ts, so moderate pitch does not
+// distort them, and the threshold marks where landmark accuracy degrades from
+// self-occlusion rather than where the geometry breaks. The capture guide was
+// therefore 2.6x stricter than the analysis it feeds, refusing shots the
+// engine would have measured without complaint.
+//
+// 20 keeps a margin under quality.ts's 26, so anything the shutter allows
+// still clears the analysis gate afterwards. The direction of the advice is
+// unchanged; only the point at which it starts nagging has moved.
+const PITCH_OK = 20;
 const ROLL_OK = 7;
 const SMILE_OK = 0.35;
 const DARK = 42; // mean luma, 0-255

@@ -1,4 +1,9 @@
-import { REEL } from "./demoReelData.ts";
+import { REEL as REEL_MEASURED } from "./demoReelData.ts";
+import { applyShim } from "./demoReelShim.ts";
+
+// The landing reel shows display scores rather than the engine's output, for
+// the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
+const REEL = applyShim(REEL_MEASURED);
 import type { ReelFace } from "./demoReelData.ts";
 
 // ---------------------------------------------------------------------------
