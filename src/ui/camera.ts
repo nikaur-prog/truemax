@@ -66,7 +66,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   // too expensive per frame and does not need to be: nobody puts glasses on
   // and takes them off between frames. Sampled every 20th frame, roughly three
   // times a second, and the last verdict is held in between.
-  let glasses = false;
+  let glasses = { advise: false, block: false };
 
   const loop = () => {
     const v = opts.video;
@@ -86,7 +86,8 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       const lm = result?.faceLandmarks?.[0];
       if (!side && lm && ++frameNo % 20 === 0) {
         try {
-          glasses = detectOcclusion(v, lm, v.videoWidth, v.videoHeight)?.glasses ?? glasses;
+          const o = detectOcclusion(v, lm, v.videoWidth, v.videoHeight);
+          if (o) glasses = { advise: o.glasses, block: o.glassesStrong && !glassesOverride };
         } catch {
           /* a frame mid-resize can fail the readback; keep the last verdict */
         }
@@ -217,6 +218,16 @@ function drawGuide(
 let guideSex: Sex = "male";
 export function setGuideSex(sex: Sex): void {
   guideSex = sex;
+}
+
+// Someone the glasses measure is wrong about has no way to comply with "take
+// your glasses off", so they can say so and the block lifts for the session.
+let glassesOverride = false;
+export function overrideGlasses(): void {
+  glassesOverride = true;
+}
+export function resetGlassesOverride(): void {
+  glassesOverride = false;
 }
 
 // ONE element now: the silhouette you fit your face into.

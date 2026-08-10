@@ -1307,3 +1307,58 @@ One note for whoever tests this: a profile far off the bottom of the scale
 displays the same floored score under either population, so checking the side
 CARD is not a check that the profile was re-scored. The aggregate underneath it
 moves (-5.08 male vs -3.64 female on the test profile); the card is floored.
+
+## Hats and hoods, second attempt: texture. Also failed.
+
+The first attempt used edges and shadow and caught fringes. The second tested
+the obvious follow-up — hair has strand detail at a fine scale, fabric is a
+broad flat field — as high-frequency energy in the band above the hairline over
+the same quantity on the person's own cheek. Against 229 bare heads and 9
+portraits in caps, berets and military headwear:
+
+```
+crownTexture     Cohen's d 0.405
+best threshold   3% precision at 67% recall
+                 173 bare heads flagged to catch 6 hats
+```
+
+Colour spread looked much better at d = -0.630, and that number is a trap worth
+recording: the headwear portraits obtainable were largely historical monochrome,
+which has almost no chroma by construction. It was measuring the age of the
+photograph.
+
+**What would actually work is a segmentation model, not a hand-built feature.**
+MediaPipe ships an `ImageSegmenter` inside the bundle already loaded here, and
+Google publishes a multiclass selfie model whose classes include hair and
+clothes separately — a hood is clothes where hair should be, which states the
+question directly instead of proxying it. The cost is the download:
+
+```
+selfie_multiclass_256x256 (hair + clothes + skin)   16 MB
+hair_segmenter (hair vs not-hair)                  781 KB
+face_landmarker (already loaded)                   3.7 MB
+```
+
+The cheap one cannot tell a bald head from a covered one, and flagging bald
+users is a worse failure than the fringe problem it would replace. So the choice
+is 16 MB of extra download against detecting headwear at all, on a page whose
+audience arrives from a phone. That is a product decision rather than an
+engineering one and it has not been taken.
+
+## Glasses now hold the shutter, with a way past
+
+Full view of the face is a requirement, so the advisory became a block — but on
+a measure with roughly six-in-seven precision, a single threshold cannot do both
+jobs. Two thresholds, the same shape as the blur gate:
+
+```
+>= 3.4   advisory, conditional wording, never blocks     11 of 229 (4.8%)
+>= 4.3   holds the shutter                                7 of 229 (3.1%)
+```
+
+Of the seven above 4.3, six are plainly wearing glasses and one cannot be called
+from the photograph. That last one is why the block is always escapable: a wrong
+hint costs a glance, but a wrong block costs someone the use of the app with no
+way to comply, because there is nothing on their face to remove. The capture
+screen shows "I'm not wearing glasses" only while that block is what is stopping
+them. Requiring removal and stranding people are different things.

@@ -338,9 +338,9 @@ export function checkFrame(
   stats: FrameStats,
   view: Viewport = FULL_VIEW,
   // Last verdict from the glasses measure, which runs on its own slower clock
-  // because it costs a canvas readback. Advisory only — see occlusion.ts for
-  // why it must never hold the shutter.
-  glasses = false,
+  // because it costs a canvas readback. "advise" only says so; "block" holds
+  // the shutter, and the UI must offer a way past it — see occlusion.ts.
+  glasses: { advise: boolean; block: boolean } = { advise: false, block: false },
 ): FrameCheck {
   const gates = {
     face: false,
@@ -428,12 +428,19 @@ export function checkFrame(
     "Give the lens a wipe — the image is too smeared to measure",
   );
   add((q.smileScore - SMILE_OK) / SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
+  // A blocking problem like any other, so it sorts against the rest by how far
+  // off it is rather than jumping the queue: someone in glasses who is also
+  // badly framed should be told about the framing first, because they have to
+  // fix that anyway.
+  if (glasses.block) {
+    add(1.05, "Take your glasses off", "Frames sit across the eye and brow measurements");
+  }
 
   if (!problems.length) {
     // Framing is correct, so the shutter opens either way. Two things can still
     // be worth saying while there is a chance to fix them — neither blocks,
     // because neither is bad enough to justify refusing to take the photo.
-    const advisory = glasses
+    const advisory = glasses.advise
       ? {
           hint: "Glasses off, if you have them on",
           detail: "Frames sit right across the eye and brow measurements",

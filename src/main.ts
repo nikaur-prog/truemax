@@ -16,7 +16,7 @@ import { mergeReports } from "./engine/scoring.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
-import { isSupported, permissionGranted, setGuideSex, startCamera } from "./ui/camera.ts";
+import { isSupported, overrideGlasses, permissionGranted, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
@@ -44,6 +44,7 @@ const el = {
   btnCamera: document.getElementById("btn-camera") as HTMLButtonElement,
   btnUpload: document.getElementById("btn-upload") as HTMLButtonElement,
   btnCancel: document.getElementById("btn-cancel") as HTMLButtonElement,
+  btnNoGlasses: document.getElementById("btn-noglasses") as HTMLButtonElement,
   reelCanvas: document.getElementById("reel-canvas") as HTMLCanvasElement,
   outlineCanvas: document.getElementById("outline-canvas") as HTMLCanvasElement,
   reelScore: document.getElementById("reel-score")!,
@@ -224,6 +225,7 @@ async function openCamera(): Promise<void> {
   }
   const desktop = !matchMedia("(pointer: coarse)").matches;
   holdHintUntil = 0;
+  resetGlassesOverride();
   el.camHintTitle.textContent = "Allow camera access";
   el.camHintDetail.textContent = desktop
     ? "Your browser will ask at the top of the window — choose Allow"
@@ -251,6 +253,9 @@ async function openCamera(): Promise<void> {
         el.camLampFill.className = c.status === "green" ? "green" : c.status;
         el.camLampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
         el.ovalFrame.classList.toggle("ready", c.ready);
+        // Offer the way out only while the glasses block is what is stopping
+        // them, so it is not a standing invitation to skip a real check.
+        el.btnNoGlasses.classList.toggle("hidden", c.hint !== "Take your glasses off");
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
       },
@@ -289,6 +294,7 @@ async function closeCamera(): Promise<void> {
   el.upload.classList.remove("camera-live");
   el.camLight.classList.add("hidden");
   el.btnCancel.classList.add("hidden");
+  el.btnNoGlasses.classList.add("hidden");
   el.btnCamera.textContent = "Use camera";
   el.btnCamera.disabled = false;
   el.camHintTitle.textContent = "Take a photo, or upload one";
@@ -310,6 +316,11 @@ el.btnCamera.addEventListener("click", async () => {
 
 el.btnCancel.addEventListener("click", async () => {
   await closeCamera();
+});
+
+el.btnNoGlasses.addEventListener("click", () => {
+  overrideGlasses();
+  el.btnNoGlasses.classList.add("hidden");
 });
 
 // Returning visitors who already granted access get a live preview with no

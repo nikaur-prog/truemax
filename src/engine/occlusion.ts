@@ -42,15 +42,42 @@ import type { Pt } from "./geometry.ts";
 //
 // A fringe is far more common than a cap. Telling someone with hair to take
 // their hat off is worse than saying nothing, since the capture screen already
-// asks. Whatever eventually detects headwear will need to separate fabric from
-// hair by texture, not by edges or by shadow.
+// asks.
+//
+// SECOND ATTEMPT, also failed: texture. The reasoning was that hair has strand
+// detail at a fine scale while fabric is a broad flat field, so high-frequency
+// energy in the band above the hairline — over the same quantity on the
+// person's own cheek — should tell them apart. Measured against 229 bare heads
+// and 9 portraits in caps, berets and military headwear:
+//
+//   crownTexture   Cohen's d 0.405
+//   best threshold 3% precision at 67% recall — 173 bare heads flagged to
+//                  catch 6 hats
+//
+// Colour spread looked better at d = -0.630, and that number is a trap: the
+// headwear portraits available were largely historical monochrome, which has
+// almost no chroma by construction. It was measuring the age of the photograph,
+// not the presence of a hat.
+//
+// WHAT WOULD ACTUALLY WORK is not a hand-built feature at all. MediaPipe ships
+// an ImageSegmenter in the bundle already loaded here, and Google publishes a
+// multiclass selfie model whose classes include hair and clothes separately —
+// a hood is clothes where hair should be, which is the question asked directly.
+// The cost is the download: 16 MB for the multiclass model, against the 3.7 MB
+// face model already loaded. The hair-only segmenter is 781 KB but cannot tell
+// a bald head from a covered one, and flagging bald users is worse than the
+// fringe problem it would replace. That trade is a product decision, not an
+// engineering one, so it is written down here rather than taken.
 // ---------------------------------------------------------------------------
 
 export interface Occlusion {
   // Horizontal edge energy across the nose bridge, over the same quantity on
   // bare cheek. 1 = the bridge is as smooth as the cheek.
   bridge: number;
+  // Worth mentioning. Advisory only.
   glasses: boolean;
+  // Strong enough to hold the shutter. See the two thresholds below.
+  glassesStrong: boolean;
 }
 
 // Face resampled to a fixed width, so edge energy is measured per unit of FACE
@@ -74,6 +101,21 @@ const SAMPLE_W = 240;
 // asks everyone up front, and this only has to catch the people who did not
 // read it.
 const BRIDGE_GLASSES = 3.4;
+
+// Two thresholds, the same shape as the blur gate, and for the same reason: one
+// number cannot both catch enough and be safe enough to act on.
+//
+// A full view of the face is required — frames sit directly across the eye and
+// brow metrics — so above this the shutter is held rather than a hint shown. At
+// 4.3 it fires on 3.1% of the reference set, seven faces, of which six are
+// plainly in glasses and one I cannot call from the photograph.
+//
+// That last one is why the block is always escapable. A wrong hint costs a
+// glance; a wrong block costs someone the ability to use the app at all, with
+// no way to comply because there is nothing on their face to remove. So the UI
+// pairs this with an explicit override. Requiring removal and stranding people
+// are different things, and only the first one is wanted.
+const BRIDGE_BLOCK = 4.3;
 
 export function detectOcclusion(
   source: HTMLCanvasElement | HTMLVideoElement,
@@ -150,5 +192,9 @@ export function detectOcclusion(
   const bridge =
     hEdge(eyeRi.x + inter * 0.12, nasion.y - bh, eyeLi.x - inter * 0.12, nasion.y + bh) / denom;
 
-  return { bridge: +bridge.toFixed(3), glasses: bridge >= BRIDGE_GLASSES };
+  return {
+    bridge: +bridge.toFixed(3),
+    glasses: bridge >= BRIDGE_GLASSES,
+    glassesStrong: bridge >= BRIDGE_BLOCK,
+  };
 }
