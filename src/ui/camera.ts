@@ -315,21 +315,37 @@ function drawDebug(
   h: number,
   dpr: number,
 ): void {
-  const a = P(0, 0);
-  const b = P(1, 1);
   ctx.save();
-  ctx.strokeStyle = "rgba(255,64,129,0.95)";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([6, 4]);
-  ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  ctx.strokeStyle = "rgba(255,64,129,0.85)";
+  ctx.lineWidth = 1;
+
+  // Gridlines at quarter positions of the VIDEO's own coordinate space, not the
+  // canvas's. A rectangle at the video bounds was the first attempt and drew
+  // nothing useful: under `object-fit: cover` those bounds are off-screen by
+  // design — that is what cover means. These lines stay in frame, so they can
+  // be compared against what is actually visible behind them.
+  ctx.setLineDash([5, 4]);
+  for (const f of [0.25, 0.5, 0.75]) {
+    const v = P(f, 0.5);
+    const hh = P(0.5, f);
+    ctx.beginPath();
+    ctx.moveTo(v.x, 0); ctx.lineTo(v.x, h);
+    ctx.moveTo(0, hh.y); ctx.lineTo(w, hh.y);
+    ctx.stroke();
+  }
   ctx.setLineDash([]);
-  // Crosshair at the exact centre of where the script thinks the frame is
+
+  // The centre, drawn heavier. If this cross does not sit on the middle of the
+  // visible image, the mapping is at fault and the landmarks are not.
   const c = P(0.5, 0.5);
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(c.x - 20, c.y); ctx.lineTo(c.x + 20, c.y);
-  ctx.moveTo(c.x, c.y - 20); ctx.lineTo(c.x, c.y + 20);
+  ctx.moveTo(c.x - 26, c.y); ctx.lineTo(c.x + 26, c.y);
+  ctx.moveTo(c.x, c.y - 26); ctx.lineTo(c.x, c.y + 26);
   ctx.stroke();
-  // Text is mirrored by the CSS flip on the canvas, so un-flip it locally
+
+  // Text is mirrored by the CSS flip on the canvas, so un-flip it locally, and
+  // sit it low-left where the guidance card cannot cover it.
   ctx.save();
   ctx.translate(w, 0);
   ctx.scale(-1, 1);
@@ -338,11 +354,11 @@ function drawDebug(
   ctx.textAlign = "left";
   const lines = [
     `video ${video.videoWidth}x${video.videoHeight}`,
-    `box   ${Math.round(w)}x${Math.round(h)}  dpr ${dpr}`,
+    `box   ${Math.round(w)}x${Math.round(h)} dpr ${dpr}`,
     `draw  ${P.dw.toFixed(1)}x${P.dh.toFixed(1)}`,
-    `off   ${(P(0, 0).x).toFixed(1)}, ${(P(0, 0).y).toFixed(1)}`,
+    `off   ${P(0, 0).x.toFixed(1)}, ${P(0, 0).y.toFixed(1)}`,
   ];
-  lines.forEach((t, i) => ctx.fillText(t, 10, 18 + i * 14));
+  lines.forEach((t, i) => ctx.fillText(t, 10, h - 80 + i * 14));
   ctx.restore();
   ctx.restore();
 }
