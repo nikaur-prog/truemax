@@ -605,6 +605,35 @@ exposure and contrast exactly — note `dim` and `very dim` both land on 0.503,
 and `3px blur` and `3px blur + dim` both on 0.244. That invariance is the whole
 point and it is visible in the table.
 
+### Verified against the shipped function, not the lab reimplementation
+
+The thresholds above were chosen from a standalone script that reimplemented
+the metric. That validates the formula and says nothing about whether the code
+in `captureGuide.ts` computes it — the same gap that produced the front/side
+merge bug. Re-run by importing the real `frameStats`:
+
+```
+condition      p10    med    p90   med luma   verdict  (WARN 0.28, BLOCK 0.17)
+in focus      0.332  0.503  0.602      119    pass
+dim  x0.45    0.333  0.503  0.602       53    pass
+very dim x.28 0.335  0.503  0.602       33    pass
+1.5px blur    0.135  0.373  0.468      119    pass
+3px blur      0.057  0.244  0.330      119    warn, shutter open
+3px + dim     0.058  0.244  0.330       53    warn, shutter open
+6px blur      0.029  0.126  0.245      119    block
+```
+
+Brightness invariance holds in the shipped path: all three focused conditions
+land on **0.503** across a 3.6x range of exposure. The focused p10 is 0.332,
+comfortably clear of the warn threshold, so a well-lit or a dim in-focus face
+does not even draw the advisory.
+
+Note the shipped `sharp` (0.503) is higher than the lab's (0.396) while `dim`
+matches. The lab measured its `sharp` condition from the source image directly
+and every other condition through an intermediate canvas; that extra resample
+was softening the comparison. The shipped path puts every condition through the
+same route, which is why the focused conditions now agree exactly.
+
 ### Why it now warns instead of blocking
 
 Two thresholds: warn below 0.28, hold the shutter only below 0.17.
