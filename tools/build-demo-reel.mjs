@@ -78,13 +78,14 @@ writeFileSync(
 // engine's actual output, not a mock-up. Images live in public/demo/.
 export interface ReelFace {
   name: string;
+  sex: "male" | "female";
   slug: string;
   overall: number;
   points: Array<[number, number]>;
 }
 
 export const REEL: ReelFace[] = ${JSON.stringify(
-    entries.map((e) => ({ name: e.name, slug: e.slug, overall: e.overall, points: e.points })),
+    entries.map((e) => ({ name: e.name, sex: e.sex, slug: e.slug, overall: e.overall, points: e.points })),
   )};
 `,
 );

@@ -35,6 +35,7 @@ export function mountDemoReel(
     const t = now - start;
     const face = REEL[idx];
     const img = images[idx];
+    if (!face) return;
 
     const w = canvas.clientWidth || canvas.width;
     const h = canvas.clientHeight || canvas.height;

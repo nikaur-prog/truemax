@@ -52,9 +52,29 @@ npm run build   # type-checks then bundles to dist/
       per-metric matching, capture-quality tagged
 - [x] Data-derived calibration from the measured pool (see CALIBRATION.md)
 - [x] Side profile: 15 cephalometric metrics + drag-to-verify landmark editor
-- [ ] Pose normalization (neutralize yaw/pitch before measuring) — the
-      biggest remaining accuracy win, see CALIBRATION.md
+- [x] Pose normalization (neutralize yaw/pitch before measuring) — see
+      CALIBRATION.md
+- [x] Live camera capture with real-time framing coach and traffic light
+- [x] Depth-shaded tracking overlay + adaptive crosshair with gaze readout
+- [x] Pre-quiz: goals, off-limits topics and advice consent, driving the plan
+- [ ] Coach Max — the conversational layer on top of the deterministic plan
 - [ ] Celebrity profile pages (browse a celeb, see their own analysis)
+
+## Parked (deliberately not in the MVP)
+
+Ideas worth building once the MVP and Coach Max are real, recorded here so
+they stop competing for attention now:
+
+- Progress tracking for things the face mesh cannot see — training, athletic
+  activity, diet adherence. These need either self-report or an integration,
+  and a half-measured progress chart is worse than none.
+- Integrations with tracking apps (calorie/food logging and similar) so the
+  plan can reference real inputs instead of asking.
+- A social layer.
+
+The constraint that decides all three: TrueMax only ever claims a number it
+actually measured. Anything imported from elsewhere has to stay visibly
+separate from the measured score.
 
 ## Calibration pipeline (`tools/`)
 

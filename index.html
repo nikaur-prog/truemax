@@ -21,18 +21,15 @@
 
     <!-- Capture / upload -->
     <section id="v-upload">
-      <h1>Know where you <em>actually</em> stand.</h1>
+      <h1>Looks are no longer <em>subjective</em>.</h1>
       <p class="sub">
-        We measure 478 points on your face, compare them against real
-        population data, and show you every number behind the score.
-        Nothing is uploaded — it all runs on your device.
+        We analyse 478 points on your face and run a full breakdown, so your
+        glow-up can finally be measured. Jaw angularity, canthal tilt, facial
+        thirds, midface ratio, cheekbone height, lip fullness, nose harmony and
+        symmetry — 31 measurements, each compared against real population data,
+        showing what already works and what is worth changing.
+        <span class="sub-note">Nothing is uploaded. It all runs on your device.</span>
       </p>
-
-      <div class="sex-picker" role="radiogroup" aria-label="Reference population">
-        <button class="sex-option selected" data-sex="auto" role="radio" aria-checked="true">Auto</button>
-        <button class="sex-option" data-sex="male" role="radio" aria-checked="false">Male</button>
-        <button class="sex-option" data-sex="female" role="radio" aria-checked="false">Female</button>
-      </div>
 
       <!-- Capture stage: live preview when the camera is on, oval prompt when not -->
       <div class="stage" id="capture-stage">
@@ -55,6 +52,10 @@
           <span id="cam-hint-detail">The camera preview will guide your framing</span>
         </div>
 
+        <div class="cam-light hidden" id="cam-light">
+          <span class="lamp" id="cam-lamp"></span>
+          <span class="lamp-track"><i id="cam-lamp-fill"></i></span>
+        </div>
         <div class="cam-gates hidden" id="cam-gates"></div>
 
         <div class="cam-actions">
@@ -63,6 +64,11 @@
         </div>
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
+
+      <button class="q-strip" id="q-open">
+        <i></i><b>Personalise your plan</b>
+        <span>4 quick questions · optional</span>
+      </button>
 
       <div class="hints">
         <div><i></i>Look straight at the lens</div>
