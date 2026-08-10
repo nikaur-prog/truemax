@@ -246,15 +246,30 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 
 .oval-idle { display: flex; align-items: center; justify-content: center; }
 
-.cam-hint { text-align: center; min-height: 44px; }
-.cam-hint b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.cam-hint span { font-size: 12.5px; color: var(--mut); }
-.cam-hint.ready b { color: var(--acc); }
+/* HUD layer over the preview */
+.cam-hud { position: absolute; inset: 0; display: flex; flex-direction: column;
+  justify-content: space-between; padding: 16px; pointer-events: none; z-index: 3; }
+/* Scrims top and bottom so the guidance stays readable whatever is behind it —
+   a bright window or a white wall otherwise swallows the text. */
+.oval-frame.live .cam-hud::before, .oval-frame.live .cam-hud::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 116px; pointer-events: none; z-index: -1; }
+.oval-frame.live .cam-hud::before { top: 0; background: linear-gradient(rgba(10,11,13,0.5), transparent); }
+.oval-frame.live .cam-hud::after { bottom: 0; background: linear-gradient(transparent, rgba(10,11,13,0.55)); }
+.hud-bottom { display: flex; flex-direction: column; gap: 9px; }
 
-.cam-gates { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
-.gate { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
-  padding: 4px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--mut); background: var(--card); }
-.gate.ok { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 30%, var(--line)); background: var(--acc-soft); }
+.cam-hint { text-align: center; align-self: center; max-width: 92%;
+  padding: 9px 16px; border-radius: 14px;
+  background: rgba(16,17,19,0.55); backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.22); }
+.cam-hint b { display: block; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; color: #fff; }
+.cam-hint span { font-size: 12px; color: rgba(255,255,255,0.72); }
+.cam-hint.ready b { color: #8ff3e0; }
+
+.cam-gates { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+.gate { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3.5px 8px; border-radius: 99px; border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.6); background: rgba(16,17,19,0.45); backdrop-filter: blur(8px); }
+.gate.ok { color: #8ff3e0; border-color: rgba(143,243,224,0.42); background: rgba(143,243,224,0.14); }
 
 .cam-actions { display: flex; gap: 10px; width: 100%; }
 .cam-actions .btn { flex: 1; }
@@ -264,17 +279,17 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .oval-idle { position: absolute; inset: 0; }
 #reel-canvas, #outline-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 #reel-canvas { border-radius: 24px; }
-.reel-caption { position: absolute; left: 0; right: 0; bottom: 16px; text-align: center; pointer-events: none; }
+.reel-caption { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; pointer-events: none; }
 .reel-caption b { display: block; font-family: var(--serif); font-weight: 300; font-size: 40px; line-height: 1; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.55); }
 .reel-caption span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,.9); text-shadow: 0 1px 8px rgba(0,0,0,.6); }
 .oval-frame.showing-reel { background: #101113; }
 
 /* Traffic light: red while far off, amber while closing the gap, green when ready */
-.cam-light { display: flex; align-items: center; gap: 12px; width: 100%; }
+.cam-light { display: flex; align-items: center; gap: 11px; width: 100%; padding: 0 2px; }
 .lamp { width: 13px; height: 13px; border-radius: 99px; flex: none; background: #d6907c; transition: background 0.28s var(--ease, ease), box-shadow 0.28s ease; box-shadow: 0 0 0 0 rgba(0,0,0,0); }
 .lamp.amber { background: #e8b164; box-shadow: 0 0 12px rgba(232,177,100,0.55); }
 .lamp.green { background: #34c79a; box-shadow: 0 0 14px rgba(52,199,154,0.65); }
-.lamp-track { flex: 1; height: 3px; border-radius: 99px; background: var(--soft); overflow: hidden; }
+.lamp-track { flex: 1; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.18); overflow: hidden; }
 .lamp-track i { display: block; height: 100%; width: 0; background: #d6907c; transition: width 0.24s ease, background 0.28s ease; }
 .lamp-track i.amber { background: #e8b164; }
 .lamp-track i.green { background: #34c79a; }
@@ -282,8 +297,8 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 /* The frame grows once the camera is live — the preview becomes the subject */
 .oval-frame { transition: max-width 0.45s var(--ease, cubic-bezier(.22,1,.36,1)), aspect-ratio 0.45s ease; }
 #capture-stage.live-cam { width: min(560px, 100%); }
-.cam-hint.red b { color: #c4694f; }
-.cam-hint.amber b { color: #b0762a; }
+.cam-hint.red b { color: #ffb59c; }
+.cam-hint.amber b { color: #ffd7a1; }
 
 /* Silhouette guide sits over the camera preview, not over the reel */
 #outline-canvas { opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
@@ -300,8 +315,10 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 /* Camera expansion: the frame grows into the space and the page furniture
    recedes, so the preview becomes the subject rather than a thumbnail. */
 #capture-stage { transition: width 0.5s cubic-bezier(.22,1,.36,1); }
-#capture-stage.live-cam { width: min(680px, 100%); }
-#capture-stage.live-cam .oval-frame { aspect-ratio: 3 / 4; }
+#capture-stage.live-cam { width: min(820px, 100%); }
+/* Wider and shorter than the idle frame: a taller preview pushed the guidance
+   and the shutter below the fold, and the guidance is the whole point. */
+#capture-stage.live-cam .oval-frame { aspect-ratio: 1 / 1; }
 #v-upload { transition: padding-top 0.5s cubic-bezier(.22,1,.36,1); }
 #v-upload.camera-live { padding-top: 3vh; }
 #v-upload.camera-live h1,
@@ -312,7 +329,7 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
   transition: opacity 0.4s ease 0.1s, max-height 0.5s cubic-bezier(.22,1,.36,1); }
 @media (max-width: 760px) {
   #capture-stage.live-cam { width: 100%; }
-  #capture-stage.live-cam .oval-frame { aspect-ratio: 3 / 4.4; border-radius: 18px; }
+  #capture-stage.live-cam .oval-frame { aspect-ratio: 3 / 3.6; border-radius: 18px; }
 }
 
 /* ---------- pre-quiz ---------- */
