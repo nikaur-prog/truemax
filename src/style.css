@@ -545,3 +545,8 @@ body {
 /* The percentile beside the score, and the line that lands it. */
 .chip.big-chip { font-size: 13px; font-weight: 600; padding: 9px 15px; letter-spacing: 0; }
 .ego { font-size: 13.5px; line-height: 1.6; color: var(--mut); margin: 14px 2px 0; max-width: 52ch; }
+
+/* Which views the headline number was measured from. */
+.viewnote { font-size: 12.5px; line-height: 1.6; color: var(--mut); margin: 10px 2px 0; max-width: 54ch; }
+.viewnote.done { color: var(--acc); }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--acc); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }

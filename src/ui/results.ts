@@ -96,11 +96,16 @@ function showOverall(): void {
   const deltaHTML = delta
     ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`)
     : "";
+  // A front scan is a complete measurement, but it is a measurement of one
+  // plane. Projection, chin and jaw angle only exist in profile, so a
+  // front-only number says so rather than quietly presenting itself as the
+  // whole picture.
+  const merged = Number.isFinite(r.zScores["view:side"]);
 
   body().innerHTML = `
     <div class="reveal">
       <div class="score-head">
-        <div><div class="klabel">OVERALL</div>
+        <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}</div>
           <div class="big"><span id="cnt">0.0</span><small> /10</small></div></div>
         <div class="chipcol">
           <span class="chip big-chip">${percentileLine(r.overallPercentile, r.sex)}</span>
@@ -108,6 +113,13 @@ function showOverall(): void {
         </div>
       </div>
       <p class="ego">${egoLine(r.overallPercentile)}</p>
+      ${
+        merged
+          ? `<p class="viewnote done">Measured from both views. Projection, chin and jaw angle can only be seen in profile — they are in this number.</p>`
+          : ctx.onSideProfile
+            ? `<p class="viewnote">This is your front measurement. Chin projection, jaw angle and facial convexity do not exist in a front photo — <button class="linkish" id="side-nudge">add a side profile</button> and the score is recomputed from both.</p>`
+            : ""
+      }
       <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
         .map(
           ([p, s]) => `
@@ -139,6 +151,8 @@ function showOverall(): void {
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const sideBtn = document.getElementById("btn-side");
   if (sideBtn) sideBtn.onclick = () => ctx?.onSideProfile?.();
+  const nudge = document.getElementById("side-nudge");
+  if (nudge) nudge.onclick = () => ctx?.onSideProfile?.();
   document.getElementById("btn-share")!.onclick = async () => {
     if (!ctx) return;
     const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;

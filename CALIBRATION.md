@@ -686,3 +686,70 @@ was false — so the argmin returned -1, every landmark was classified as
 unpaired, and the greedy loop terminated after its seed. NaN does not propagate
 as an error through comparison-based selection; it propagates as "nothing is
 ever better than the current best".
+
+## Merging the front and side scans into one score
+
+Requested: the side profile should not be a separate page with its own number —
+both views should combine into one score.
+
+### The obvious implementation is wrong
+
+Pool the metric lists and let the normal aggregation run:
+`buildReport([...frontScored, ...sideScored])`. This produces a plausible
+number and a meaningless percentile.
+
+`AGG_NORM`'s quantile tables were measured from **front-only** scans of the
+reference population. Their entire purpose is that "5.0 = the 50th percentile"
+holds by construction rather than by assumption. A front+side aggregate has a
+different distribution, so mapping it through a front-only table gives a
+percentile with no referent — and the percentile is what the score is.
+
+Fixing that properly means regenerating the tables from front+side scans of all
+~110 reference faces. We cannot. Side landmarks are hand-placed by the user,
+thirteen points at a time, because a true profile cannot be landmarked
+automatically with confidence. That is 1,430 manual placements.
+
+### What is done instead
+
+Combine one level up. `front.zScores.overall` and `side.zScores.overall` have
+each already been mapped through their own normalisation, so both are
+unit-normal by construction. Combining two unit-normal variates under a
+correlation assumption is exactly what `aggregateZ` already does for pillars,
+and the result is still unit-normal — which is the property the scale rests on.
+
+Verified by Monte Carlo over 400k draws with `corr(front, side) = 0.5`:
+
+```
+merged z   mean 0.0110   sd 1.0060      (target 0.0000 / 1.0000)
+```
+
+So the merged score is percentile-anchored in exactly the same sense the
+front-only score is. The front-only path is untouched — Henry Cavill measures
+5.4 before and after.
+
+### The two assumptions, stated plainly
+
+- **W_FRONT 0.75 / W_SIDE 0.25.** Front carries 31 metrics plus a shape
+  descriptor averaging ~130 automatically placed landmarks. Side carries 15
+  metrics derived from 13 points a person dragged into place by hand. The split
+  reflects both how much is measured and how reliably it was located.
+- **RHO_VIEWS 0.5.** The two views describe the same skull from different
+  angles, so the correlation is clearly neither 0 nor 1. Measuring it needs
+  paired front+side scans of the reference set — the same data we do not have.
+  0.5 is a deliberate midpoint. Revisit the moment paired data exists.
+
+Note a consequence that is correct but surprising: someone above the median on
+*both* views scores higher than their front-only score, because two
+partially-independent pieces of evidence pointing the same way are stronger
+than one. Someone above on one view and below on the other moves toward the
+middle. That is what aggregating evidence is supposed to do, and it is the same
+arithmetic the pillar aggregation has always used.
+
+Potential cannot go through `aggregateZ` because it is a score, not a z. The
+merge combines the HEADROOM each view found — which is what potential actually
+reports — and adds it to the merged score.
+
+The headline now always states which views it came from: "OVERALL · FRONT ONLY"
+or "OVERALL · FRONT + SIDE". A front scan is a complete measurement of one
+plane, and chin projection, jaw angle and facial convexity do not exist in that
+plane at all.

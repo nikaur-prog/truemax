@@ -11,6 +11,7 @@ import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
 import { renderResults, renderSideResults } from "./ui/results.ts";
+import { mergeReports } from "./engine/scoring.ts";
 import { toggleMute } from "./ui/audio.ts";
 import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
@@ -391,7 +392,7 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   drawCalm(el.overlayCanvas, landmarks, width, height);
   renderQualityChips(quality, autoNote);
 
-  renderResults({
+  const ctxArgs = {
     report,
     delta,
     landmarks,
@@ -402,10 +403,17 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
     onSideProfile: () => startSide(report),
-  });
+  };
+  lastRender = ctxArgs;
+  renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
 }
+
+// Held so a completed side scan can re-render the SAME results view with the
+// merged report, rather than dropping the person onto a separate side-only
+// page that scores the profile in isolation.
+let lastRender: Parameters<typeof renderResults>[0] | null = null;
 
 function startSide(frontReport: Report): void {
   el.main.classList.add("hidden");
@@ -415,8 +423,16 @@ function startSide(frontReport: Report): void {
     onDone: (sideReport) => {
       closeSide();
       el.main.classList.remove("hidden");
-      renderSideResults(sideReport, () => startSide(frontReport));
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
+      if (lastRender) {
+        // One number, measured from both views. See mergeReports for why this
+        // combines already-normalised aggregates instead of pooling metrics.
+        const merged = mergeReports(frontReport, sideReport);
+        lastRender = { ...lastRender, report: merged, onSideProfile: () => startSide(frontReport) };
+        renderResults(lastRender);
+      } else {
+        renderSideResults(sideReport, () => startSide(frontReport));
+      }
     },
   });
 }

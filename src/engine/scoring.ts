@@ -10,6 +10,7 @@ import type {
   MetricDef,
   PillarId,
   RegionId,
+  RegionScore,
   Report,
   ScoredMetric,
   Sex,
@@ -340,6 +341,105 @@ export function analyzeSide(points: SidePoints, faceDir: number, sex: Sex): Repo
   }
   report.potential = Math.max(report.overall, buildReport(scored, sex, lift).overall);
   return report;
+}
+
+// ---------------------------------------------------------------------------
+// Combining the front and side scans into one number.
+//
+// The obvious implementation is wrong, and it is worth saying why in full,
+// because it is the kind of wrong that produces a plausible number.
+//
+// The obvious version pools the metric lists — buildReport([...front, ...side])
+// — and lets the normal aggregation run. That breaks the scale. AGG_NORM's
+// quantile tables were measured from FRONT-ONLY scans of the reference
+// population (tools/normalize.mjs), and the whole reason they exist is that
+// "5.0 = the 50th percentile" holds by construction rather than by assumption.
+// Feed a front+side aggregate into a front-only table and that guarantee is
+// gone: the combined aggregate has a different distribution, so every
+// percentile printed against it is a number with no referent.
+//
+// Fixing it properly would mean regenerating the tables from front+side scans
+// of all ~110 reference faces. We cannot: side landmarks are hand-placed by
+// the user, thirteen points at a time, because a true profile cannot be
+// landmarked automatically with any confidence. That is 1,430 manual
+// placements, and it is not happening.
+//
+// So combine one level up instead. front.zScores.overall and
+// side.zScores.overall have EACH already been mapped through their own
+// normalisation, so both are unit-normal by construction. Combining two
+// unit-normal variates with a correlation assumption is exactly what
+// aggregateZ already does for pillars, and the result is still unit-normal —
+// which is the property the whole scale rests on. No new reference data
+// required, and nothing about the front-only path changes.
+//
+// Two numbers here are assumptions, not measurements, and they are the honest
+// weak point of this function:
+// ---------------------------------------------------------------------------
+
+// Front carries 31 metrics plus a shape descriptor averaging ~130 landmarks,
+// all placed automatically. Side carries 15 metrics derived from 13 points a
+// person dragged into place by hand. The split reflects both how much is being
+// measured and how reliably it was located.
+const W_FRONT = 0.75;
+const W_SIDE = 0.25;
+
+// Correlation between the two views' aggregates. They describe the same skull
+// from different angles, so it is clearly neither 0 nor 1. Measuring it needs
+// paired front+side scans of the reference set — the same data we do not have.
+// 0.5 is a deliberate midpoint: it is the value that makes the combined score
+// move meaningfully when the side disagrees with the front, without letting a
+// hand-placed profile swing the result. Revisit the moment paired data exists.
+const RHO_VIEWS = 0.5;
+
+export function mergeReports(front: Report, side: Report): Report {
+  const zf = front.zScores["overall"];
+  const zs = side.zScores["overall"];
+  if (!Number.isFinite(zf) || !Number.isFinite(zs)) return front;
+
+  const z = aggregateZ([zf, zs], [W_FRONT, W_SIDE], RHO_VIEWS);
+
+  // Regions the two views share get combined the same way; regions only one
+  // view measures pass through untouched.
+  const byRegion = new Map<RegionId, RegionScore>();
+  for (const r of front.regions) byRegion.set(r.region, r);
+  for (const r of side.regions) {
+    if (!r.metrics.length) continue;
+    const f = byRegion.get(r.region);
+    const zsr = side.zScores[`region:${r.region}`];
+    const zfr = f ? front.zScores[`region:${r.region}`] : NaN;
+    if (!f || !Number.isFinite(zfr) || !Number.isFinite(zsr)) {
+      byRegion.set(r.region, r);
+      continue;
+    }
+    const rz = aggregateZ([zfr, zsr], [W_FRONT, W_SIDE], RHO_VIEWS);
+    byRegion.set(r.region, {
+      region: r.region,
+      score: aggScore(rz),
+      percentile: Math.round(phi(rz) * 1000) / 10,
+      metrics: [...f.metrics, ...r.metrics],
+    });
+  }
+
+  // Potential is a score, not a z, so it cannot go through aggregateZ. Combine
+  // the HEADROOM each view found instead — that is the quantity potential
+  // actually reports — and add it to the merged score.
+  const gap = W_FRONT * (front.potential - front.overall) + W_SIDE * (side.potential - side.overall);
+
+  return {
+    sex: front.sex,
+    overall: aggScore(z),
+    overallPercentile: Math.round(phi(z) * 1000) / 10,
+    potential: Math.round(Math.max(aggScore(z), aggScore(z) + gap) * 10) / 10,
+    pillars: front.pillars,
+    regions: [...byRegion.values()],
+    metrics: [...front.metrics, ...side.metrics],
+    zScores: {
+      ...front.zScores,
+      overall: z,
+      "view:front": zf,
+      "view:side": zs,
+    },
+  };
 }
 
 // Max change in overall per 1σ change of a single metric — the brief requires
