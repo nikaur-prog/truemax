@@ -95,6 +95,7 @@ let selectedSex: Sex = "male";
   return {
     faceFound: true,
     overall: report.overall,
+    potential: report.potential,
     yaw: quality.yawDeg,
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
