@@ -374,6 +374,41 @@ export function mountVerifier(
   };
   place();
 
+  // Ground truth, exportable.
+  //
+  // The automatic placement has now failed three times on real photographs and
+  // been "fixed" three times against synthetic tests that could not see the
+  // failure. What is missing is not another idea, it is a set of profiles with
+  // the thirteen points KNOWN to be in the right place, to test against.
+  //
+  // Nobody should have to hand over photographs to produce that, and reading
+  // coordinates off a screenshot is worth about two percent of the frame. So
+  // the verifier can emit what it currently holds: drag the points until they
+  // are right, press this, and what lands on the clipboard is numbers. The
+  // photograph stays where it is. Normalised 0..1 so the fixture survives a
+  // re-crop or a different capture size.
+  if (new URLSearchParams(location.search).has("dev")) {
+    const dump = document.createElement("button");
+    dump.type = "button";
+    dump.className = "vdump";
+    dump.textContent = "Copy points";
+    dump.onclick = () => {
+      const out: Record<string, [number, number]> = {};
+      for (const spec of SIDE_POINTS) {
+        out[spec.id] = [
+          +(points[spec.id].x / photo.width).toFixed(4),
+          +(points[spec.id].y / photo.height).toFixed(4),
+        ];
+      }
+      const json = JSON.stringify(out, null, 1);
+      void navigator.clipboard?.writeText(json).then(
+        () => { dump.textContent = "Copied"; setTimeout(() => (dump.textContent = "Copy points"), 1400); },
+        () => { dump.textContent = "See console"; console.log(json); },
+      );
+    };
+    host.appendChild(dump);
+  }
+
   let dragging: SidePointId | null = null;
   const toPhoto = (clientX: number, clientY: number): Pt => {
     const r = host.getBoundingClientRect();

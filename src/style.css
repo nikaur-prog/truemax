@@ -79,7 +79,12 @@ body {
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
-.wordmark { font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; font-weight: 500; }
+.wordmark { font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; font-weight: 500;
+  flex: none; white-space: nowrap; }
+/* The version chip yields first: it can shorten or, on a narrow screen, hide,
+   but it must never be the reason the wordmark leaves the screen. */
+.topbar-right { min-width: 0; }
+@media (max-width: 420px) { .topbar .tag { display: none; } }
 .wordmark b { color: var(--acc); font-weight: 500; }
 .tag { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: #b6b8b2; border: 1px solid var(--line); padding: 4px 9px; border-radius: 99px; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
@@ -130,7 +135,21 @@ body {
 
 /* ---------- right pane ---------- */
 .pane-analysis { min-width: 0; }
-.rtabs { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 18px; scrollbar-width: none; }
+.rtabs {
+  display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 18px;
+}
+/* Below the two-pane breakpoint the analysis column is narrow enough that
+   wrapping the tabs eats too much height, so they scroll instead — with a
+   right-edge fade so it reads as scrollable rather than cut off. That fade,
+   not a wider strip, is the fix for "the Proportions tab looks chopped": the
+   tabs were always scrollable, they just never looked it. */
+@media (max-width: 760px) {
+  .rtabs {
+    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
+  }
+}
 .rtabs::-webkit-scrollbar { display: none; }
 /* `transition: all` animates layout-affecting properties too, so every tab
    change paid for transitions on things that had not changed. Naming the two
@@ -290,11 +309,25 @@ body {
 .verify-layer { touch-action: none; }
 
 .vpoint { position: absolute; transform: translate(-50%, -50%); background: none; border: 0; padding: 0; cursor: grab; display: flex; align-items: center; gap: 6px; }
-.vpoint i { width: 13px; height: 13px; border-radius: 99px; background: #8ff3e0; border: 2px solid #0b1f1b; box-shadow: 0 0 8px rgba(120, 235, 210, 0.8); display: block; flex: none; }
+/* Small enough to aim with, still big enough to grab.
+   The dot was 13px of solid fill, which is wider than the features being
+   placed on: at the nose tip or the lip border the marker covered the very
+   detail it was meant to sit on, so there was no way to tell a good placement
+   from one that was three pixels out. It is now a 7px ring with a 1px hollow
+   centre, so the pixel under the point is visible through it.
+   The touch target does NOT shrink with it — .vpoint carries its own padded
+   hit area below, because a 7px tap target on a phone is unusable. */
+.vpoint i { width: 7px; height: 7px; border-radius: 99px; background: transparent;
+  border: 2px solid #8ff3e0; box-shadow: 0 0 6px rgba(120, 235, 210, 0.75), inset 0 0 0 1px rgba(6, 20, 17, 0.9);
+  display: block; flex: none; }
+.vpoint.grabbing i { background: #fff; border-color: #fff; }
+/* The invisible grab area, sized for a fingertip rather than for the eye. */
+.vpoint::before { content: ""; position: absolute; left: 50%; top: 50%;
+  width: 34px; height: 34px; transform: translate(-50%, -50%); border-radius: 99px; }
 .vpoint span { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.82); white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); opacity: 0; transition: opacity 0.18s; }
 .vpoint:hover span, .vpoint.grabbing span { opacity: 1; }
 .vpoint.grabbing { cursor: grabbing; }
-.vpoint.grabbing i { background: #fff; transform: scale(1.15); }
+.vpoint.grabbing i { transform: scale(1.25); }
 
 .verify-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #fff; background: rgba(16, 17, 19, 0.82); border-radius: 10px; padding: 9px 12px; opacity: 0; transition: opacity 0.18s; pointer-events: none; }
 .verify-hint.show { opacity: 1; }
@@ -732,3 +765,12 @@ body > .topbar { flex: none; }
   #v-upload h1 { display: none; }
   #v-upload .sub { display: none; }
 }
+
+/* Dev-only affordance on the side verifier (?dev=1). Deliberately plain and
+   deliberately out of the way: it exists to collect test fixtures, not to be
+   part of the product. */
+.vdump { position: absolute; right: 10px; bottom: 10px; z-index: 5;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  background: rgba(10, 12, 14, 0.82); color: #8ff3e0; border: 1px solid rgba(143, 243, 224, 0.4);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.vdump:hover { background: rgba(10, 12, 14, 0.95); }
