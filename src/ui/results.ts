@@ -10,7 +10,7 @@ import { animateMeasurement, transitionMeasurement } from "./measureOverlay.ts";
 import type { OverlayFade } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
-import { stopTypewriter, typewrite } from "./typewriter.ts";
+import { stopTypewriter, typewrite, typewriteBlock } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
@@ -224,6 +224,7 @@ function showOverall(): void {
           ${deltaHTML}
         </div>
       </div>
+      <div class="ovw">
       <p class="ego">${overviewCaveat()}</p>
       ${delta ? `<div class="delta-read ${delta.reading}">${deltaReadingCopy(delta)}</div>` : ""}
       ${viewCards(r)}
@@ -234,6 +235,7 @@ function showOverall(): void {
             ? `<p class="viewnote">Measured from the front only. <button class="linkish" id="side-nudge">Add a side profile</button> to include chin projection, jaw angle and facial convexity.</p>`
             : ""
       }
+      </div>
       <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
         .map(
           ([p, s]) => `
@@ -261,6 +263,12 @@ function showOverall(): void {
     </div>`;
 
   countUp(document.getElementById("cnt")!, r.overall);
+  // The caveat, the rescan reading, the three view cards and the merge note
+  // reveal together, in the order they are read. Everything below stays put:
+  // the pillars have their own bar animation and the curve draws itself, and
+  // three animations competing for the same eye is worse than one.
+  const ovw = document.querySelector<HTMLElement>(".ovw");
+  if (ovw) typewriteBlock(ovw);
   setTimeout(
     () =>
       document
