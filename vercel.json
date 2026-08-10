@@ -20,7 +20,6 @@
       ]
     },
     {
-      "comment": "The quick breakdown is unlisted, not private. Nothing links to it and this tells crawlers to stay out, but anyone with the URL can open it. Locking it down properly means turning on Vercel deployment protection for the project, or putting it behind a backend — a client-side gate on a static page is theatre, since the bundle ships to whoever asks.",
       "source": "/quick(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
