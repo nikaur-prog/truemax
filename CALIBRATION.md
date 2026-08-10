@@ -856,3 +856,78 @@ button stays disabled and the hint reads "Turn to the side".
 - **The side HUD's hint drew its title and detail on top of each other.**
   `.face-frame` sets `line-height: 0` so its canvases sit flush, and that
   inherited into the overlaid HUD and collapsed its block children.
+
+## THE SCORE IS NOT VALID YET — measured, and unfixed
+
+Reported: "Chris Hemsworth and Henry Cavill are still rated like 5.6s, whereas
+Rihanna was 8.6." Investigated, and the report is correct. This section is the
+evidence, written down because the fix is not in yet.
+
+### The 60% component has no discriminating power
+
+`buildReport` blends two things into the overall: the shape descriptor at
+`W_SHAPE = 0.6`, and the 31 measured ratios at 0.4. Scoring the whole reference
+population (117) and the whole celebrity set (112) through the shipped engine
+and measuring Cohen's d, top tier vs reference population:
+
+```
+sex      nPop nTop |  shapeZ   ratioZ  overall
+male       58   14 |   0.177    1.285    0.892
+female     59   14 |   0.656    0.881    1.039
+```
+
+**d = 0.177 is nothing**, and it is *in-sample* — those fourteen faces defined
+the axis, so this is the flattering case. Out of sample it can only be worse.
+The component carrying the majority of the score does not separate attractive
+faces from ordinary ones at all for men.
+
+Weighted by measured separation, shape deserves 0.12 (male) and 0.43 (female).
+It is shipping at 0.60 for both.
+
+### What that produces
+
+```
+top-tier males:   Evans 9.0, Chalamet 8.1, Pattinson 8.1, Pitt 7.8, Gandy 7.7,
+                  Jordan 7.3, Cavill 5.4, Bale 5.4, Hemsworth 5.4, Efron 5.3,
+                  Barrett 4.8, Lachowski 4.7, Gosling 4.7, O'Pry 3.8
+highest scorers:  Chris Evans 9.0, Cillian Murphy 8.4, Chalamet 8.1,
+                  Pattinson 8.1, PETE BUTTIGIEG 7.8, Brad Pitt 7.8,
+                  Tom Hardy 7.8, STEVE BUSCEMI 7.8
+                  Giorgia MELONI 8.8, Kendall Jenner 8.7, Ana de Armas 8.3,
+                  Zendaya 8.1, WHOOPI GOLDBERG 8.1
+```
+
+Sean O'Pry — one of the most booked male models alive — scores **3.8**. Members
+of the ordinary reference population outrank the top tier. The reference
+population and the celebrity set have nearly identical medians (5.10 vs 5.40
+male, 5.00 vs 5.30 female), which is the same failure stated another way.
+
+It is also why a headline can disagree with its own pillars: Rihanna's overall
+(8.4) is higher than all four of her pillars, Cavill's (5.7) lower than three of
+his. The pillars feed only the 40% ratio term; the 60% shape term is not shown
+anywhere and is what actually moves the number.
+
+### Why the axis is dead
+
+It is one linear direction in ~250-dimensional shape space, fitted from 14
+top-tier faces per sex against the population mean, and normalised by the
+population's own spread along it (`axisSD`: 0.098 male, 0.050 female — the 2x
+difference between sexes is its own problem, since it doubles female z for the
+same deviation). Fourteen points cannot locate a direction in that many
+dimensions; the axis is fitting noise, and each face's projection is dominated
+by whatever idiosyncratic directions the noise picked up.
+
+### The fix, not yet applied
+
+1. Drop `W_SHAPE` toward the measured value (~0.15), or to zero.
+2. Regenerate `AGG_NORM` — the quantile tables were built with `W_SHAPE = 0.6`,
+   so changing the blend invalidates them. `tools/normalize.mjs` with `TM_DATA`
+   pointed at the reference photo set.
+3. Re-audit and confirm the top tier separates and no reference-population face
+   outranks it.
+
+Until that lands, the number shown to a user is not a measurement of their
+face — it is 60% noise. Do not ship this to paying users.
+
+Harness: `scratchpad/score-audit.mjs` (scores both sets) and
+`scratchpad/separation.mjs` (computes the table above).
