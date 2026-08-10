@@ -1020,3 +1020,243 @@ Whether any individual's true ceiling is higher than what is shown is not
 answerable from this engine yet, and saying otherwise would be inventing
 reassurance. It becomes answerable once the shape term is either fixed with
 enough top-tier faces or dropped.
+
+---
+
+# Resolved: the shape weight, measured out of sample
+
+The validity failure above is fixed, and the fix was chosen by measurement
+rather than by argument.
+
+The problem with the original evidence was that it was **in-sample**. The top
+tier defines the shape axis — the axis IS the vector from the population mean to
+their mean — so of course they project high on it. Any separation measured that
+way is flattered by an unknown amount.
+
+The honest test is leave-one-out: rebuild the axis with one face removed, then
+score that face on an axis it had no hand in choosing. Across the reference set
+(50 male / 52 female population, 11 / 13 top tier after gating):
+
+```
+                    in-sample    leave-one-out
+shapeZ, male          0.477          0.326
+shapeZ, female        0.704          0.263
+```
+
+The female axis was almost entirely overfit — 0.704 collapsing to 0.263 on
+held-out faces. Against `ratioZ` at d = 1.189 / 0.916, the descriptor is the
+weaker term by a factor of three to four, not the stronger one.
+
+Sweeping the blend against **held-out** separation:
+
+```
+W_SHAPE |  male d  female d  |  pooled
+  0.00  |  1.189    0.916   |  1.052
+  0.10  |  1.217    0.959   |  1.088
+  0.15  |  1.221    0.967   |  1.094   <- best
+  0.25  |  1.199    0.947   |  1.073
+  0.60  |  0.801    0.586   |  0.693   <- was shipped
+```
+
+An earlier sweep using in-sample shape scores put the optimum at 0.25. That was
+the same flattery showing up again, one level down. The held-out optimum is
+0.15, which is where CALIBRATION.md's original estimate had it before the
+in-sample sweep talked it upward.
+
+`W_SHAPE = 0.15`, `AGG_NORM` regenerated. Only the two `overall` rows in that
+table change, which is the check that the blend was the only thing touched —
+pillar and region normalisation never saw the shape term.
+
+End-to-end, top tier vs reference population:
+
+```
+              before    after
+male          0.716     1.324
+female        1.034     1.052
+pooled        0.875     1.188
+```
+
+**What is still wrong.** Individual placements remain noisy — Hemsworth 4.7,
+O'Pry 4.0, Hadid 4.6 — because each person is one photograph and one photograph
+is worth ±1.3. And the reference set produces its own 9.0s at the top, which is
+structural: a 58-person reference always contains someone at its own 100th
+percentile. Group separation is the claim that holds; individual placement is
+not yet.
+
+## Potential: the cap was the weight, not the freeze
+
+`shapeZ` is still passed through unchanged into the potential run, so potential
+can only move `1 - W_SHAPE` of the score. That was 40% frozen and is now 15%.
+
+It stays frozen rather than getting lifted, and the reason is measured: across
+229 scored faces the descriptor and the ratio composite are very nearly
+independent — **r = 0.113 male, 0.019 female** — so the fixable metrics carry
+almost no information about where the descriptor sits.
+
+That correlation is BETWEEN people, though, and what potential needs is the
+WITHIN-person slope: if one person's fixable metrics improve, how far does their
+own outline follow? Different skeletons dominate the between-person variance, so
+the two are not the same number and this one cannot stand in for the other.
+Answering it needs the same faces measured before and after a real change, which
+does not exist yet. Until it does, frozen is the conservative direction, and
+overstating a ceiling is the failure mode that makes a potential number
+worthless.
+
+## Time-aware deltas: shipped, on the measured bands
+
+`readDelta` in `history.ts`, using 1.32 (within-person SD) as the floor and four
+days as the point past which a structural change is even possible:
+
+```
+under 1.32                  noise — stated as capture variance outright
+over 1.32, under 4 days     still capture; a face does not restructure that fast
+over 1.32, 4 days or more   worth attention, capture named as the alternative
+```
+
+The top band deliberately stops short of claiming proof, because 1.32 was
+measured on repeat photos spanning years of genuine ageing. It is a ceiling on
+noise, not a floor.
+
+# Capture: three fixes, each found by looking at the render
+
+## The distance gate was measuring pixels nobody can see
+
+`checkFrame` measured face width as a fraction of the **video** frame, but the
+preview is `object-fit: cover`, so a camera whose aspect ratio differs from the
+frame's is centre-cropped. On a 16:9 webcam in a square frame only 56% of the
+width survives — a face filling 90% of what the user can see reads as 0.25 of
+the video and is told "move closer", indefinitely.
+
+Both distance and centring now divide through by the visible fraction. Verified
+across four frame/camera combinations; before the fix, two of the four could not
+be satisfied at all.
+
+```
+case                        visW  silhouette  gate sees  passes
+square frame / 16:9 cam    0.563     0.46       0.46      yes
+square frame / 4:3 cam     0.750     0.46       0.46      yes
+3:4 frame / 16:9 cam       0.422     0.46       0.46      yes
+3:4 frame / square cam     0.750     0.46       0.46      yes
+```
+
+## The front overlay is a silhouette now
+
+The dot cloud and the adaptive crosshair are gone. The crosshair anchored to the
+eye midpoint, which sits about a third of the way down a face, so its horizontal
+arm read as a level set far too high. The heading arrow — the one element that
+answered a question — stays.
+
+In its place is the Procrustes mean of the reference population the person will
+actually be scored against, sized to the midpoint of the distance band, so
+fitting the outline and passing the gate are the same act.
+
+The earlier objection to drawing FACE_OVAL still stands and does not apply here:
+it looked broken as a **live overlay** because it is an anatomical boundary
+rather than the visible silhouette. A fixed target in the frame cannot look like
+tracking that has come loose.
+
+Fixing it exposed a bug in the mean face itself: a 60-degree notch in one jaw.
+The symmetrizer pairs each point with its nearest mirror and drops any pair that
+disagrees — which left exactly two oval landmarks raw, and dropping both halves
+of a disagreement is what put the notch there. The oval now takes its pairs from
+the ring's own topology: walk both ways from the crown, and step k of one arc
+mirrors step k of the other. Mirror residual across all 36 oval points is zero.
+
+## Glasses are detected; hats and hoods are not
+
+Horizontal edge energy across the nose bridge, over the same quantity on the
+person's own cheek. The ratio is what makes it portable — an absolute edge count
+tracks sharpness and contrast far more strongly than eyewear, and would encode
+skin tone besides.
+
+Calibrated on 229 reference faces: median 1.53, p90 2.46. At 3.4 it flags eleven,
+of which nine are plainly wearing glasses and one or two are not callable from
+the photograph. Against a base rate near 8% that is real signal and it is not
+clean, so it never blocks the shutter and its wording is conditional — "if
+you're wearing glasses". A false positive then costs nothing.
+
+**Headwear was attempted and failed. Do not repeat it this way.** The feature was
+the strongest horizontal edge across the forehead, gated on the forehead being
+darker than the cheeks. Over the same 229 faces the twenty highest scores were
+seventeen people with hair on their forehead and three in headwear, and the
+shadow gate did not rescue it: the two clearest hats in the set were lit brightly
+enough to make the forehead LIGHTER than the cheeks. It caught one cap and two
+fringes. A fringe is far more common than a cap. Whatever eventually works will
+have to separate fabric from hair by texture, not by edges or by shadow. The
+capture screen asks instead.
+
+# Side profile: the seed was landing on the wall
+
+Two independent bugs, both worth naming because both are easy to write again.
+
+**Facing direction** was decided by comparing pixel mass in the left half of the
+FRAME against the right half. That measures where the person is standing, not
+which way they are looking. Now decided inside the head's own box, from which
+edge wanders more: the back of a skull is a smooth convex curve, while brow,
+nose, lips and chin all stick out and cut back in.
+
+**The profile edge** was found by scanning inward from the frame border for the
+first "skin-coloured" pixel, on fixed thresholds of `r > 70, r > g, r - b > 12`.
+A beige wall passes that, so the scan stopped where it started and the edge came
+back as the frame border. The replacement never asks whether a pixel looks like
+skin — it asks whether a pixel looks like the BACKGROUND, modelled from the top
+corners, which are background in any portrait framing. It is also independent of
+skin tone, which `r - b > 12` was not.
+
+The anchor table was in frame fractions, so it was only correct when the head
+happened to span 16%–86% of the frame. It is in head fractions now.
+
+Verified on twelve synthetic profiles with known geometry — two backgrounds
+including the beige that defeated the old test, both facing directions, three
+horizontal offsets: **12/12 correct on facing direction, all 13 points on the
+head**. Where the head fills the frame and the corners are hair rather than
+background, the trace cannot work and says so, falling back to a centred head
+box.
+
+External profile photographs were sought for a real-world set and Wikimedia
+returned drawings, mummy portraits and stone heads. The synthetic set tests the
+geometry exactly; the background model's behaviour on real backgrounds is still
+under-tested, and that is the known gap.
+
+**The gate** passed the moment the detector lost the face, on the first frame —
+which is what made the side view easier to shoot than the front, and which also
+passed for a hand over the lens or someone stepping out of shot. Passing now
+requires having watched the head turn past half the profile angle, then holding
+the loss for six frames.
+
+# The quick breakdown page
+
+`quick.html` / `src/quick.ts` — a second entry point, front-only, laid out to be
+read at arm's length in a screen recording.
+
+It shares the engine rather than approximating it: same detect, same `analyze`,
+same percentile tables. Verified by computing `analyze()` independently on the
+main page's module graph and comparing — 4.30 and potential 5.2 on both, exactly.
+
+It does NOT show the same total as the main app, deliberately. The main flow
+requires a profile and merges two views; this is front-only, and the page says so
+rather than presenting it as the same number.
+
+**It is unlisted, not private.** Nothing links to it, `robots` and `X-Robots-Tag`
+ask crawlers away, and that is the whole of it — anyone with the URL can open it.
+A client-side gate on a static page is theatre, since the bundle ships to whoever
+asks. Real access control means turning on Vercel deployment protection for the
+project, or putting it behind a backend.
+
+## The sex vote is wrong often enough to be a product problem
+
+Testing this page on a bearded man in glasses, the shape model returned **female**
+and the card printed WOMEN beside his face. That is not a labelling error: every
+percentile on the page is computed against whichever reference population it
+picked, and switching it moved the same photograph from **4.30 to 6.00** — a
+1.7-point swing, larger than the whole within-person noise band.
+
+The main app has the same behaviour and the same exposure. On the quick page the
+reference population is therefore shown as a button: one tap re-scores against
+the other population. Hiding the label would have hidden a load-bearing fact;
+asking up front would have put a demographic question between someone and their
+score, which on a page built for filming is the interaction guaranteed to end up
+in the clip.
+
+This wants fixing properly at some point — the vote should carry a confidence and
+say so when it is close.
