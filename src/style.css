@@ -414,7 +414,7 @@ body {
 
 /* The frame grows once the camera is live — the preview becomes the subject */
 .oval-frame { transition: max-width 0.45s var(--ease, cubic-bezier(.22,1,.36,1)), aspect-ratio 0.45s ease; }
-#capture-stage.live-cam { width: min(560px, 100%); }
+#capture-stage.live-cam { width: auto; max-width: min(560px, 100%); }
 .cam-hint.red b { color: #ffb59c; }
 .cam-hint.amber b { color: #ffd7a1; }
 
@@ -630,3 +630,105 @@ body {
 .refswitch { background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--mut); }
 .refswitch:hover { color: var(--acc); }
+
+/* ---------------------------------------------------------------------------
+   The landing screen fits on one screen.
+
+   It did not. Measured at 1440x750, the section wanted 922px:
+
+     capture stage 437 · reference control 100 · subtitle 92 · topbar 53
+     quiz strip 52 · disclosure 44 · headline 43 · padding 36 · hints 33
+     engine status 32
+
+   Every one of those was a fixed px value or scaled off WIDTH, and width tells
+   you nothing about how much height you have. Reading the page meant zooming
+   to 75%.
+
+   Two changes. The furniture is trimmed and scales off viewport HEIGHT, and
+   the card — by far the largest block — is no longer given a size at all. It
+   is a flex item that takes whatever is left after everything else has had its
+   share, with its 4:5 ratio turning that height into a width. So there is no
+   magic number to re-tune when a line of copy changes: the card absorbs it.
+
+   svh rather than vh, and it matters on exactly the devices this was reported
+   for. On iOS and Android `vh` means the viewport with the browser chrome
+   RETRACTED, so a 100vh layout is taller than the screen the moment it loads.
+   `svh` is the smallest viewport, which is what you actually get. The plain-vh
+   line above each one is the fallback for anything older, and for a wrapped
+   webview it resolves the same way.
+   --------------------------------------------------------------------------- */
+/* The section fills what is left UNDER the topbar, which is why the body is a
+   flex column: `height: 100svh` on the section alone made the page exactly one
+   topbar too tall, and it overflowed by the same 38px on every device tested.
+   Subtracting a hard-coded bar height would work until someone changes the bar.
+   Letting flex do the subtraction cannot go stale. */
+body { display: flex; flex-direction: column; }
+body > .topbar { flex: none; }
+#v-upload { flex: 1 1 auto; }
+
+#v-upload {
+  min-height: 0;
+  justify-content: center;
+  padding-top: clamp(8px, 1.6svh, 32px);
+  padding-bottom: clamp(10px, 1.8svh, 36px);
+}
+
+#v-upload h1 { font-size: clamp(24px, 2.9svh + 1vw, 52px); }
+
+#v-upload .sub {
+  font-size: clamp(12.5px, 1.7svh, 15px);
+  line-height: 1.45;
+  margin: clamp(6px, 1.2svh, 16px) 0 clamp(4px, 0.8svh, 12px);
+}
+.sub-note { margin-top: clamp(3px, 0.7svh, 9px); }
+.sub-more { margin-bottom: clamp(6px, 1.4svh, 20px); }
+
+/* The card takes what is left. `flex: 1 1 auto` with `min-height: 0` is what
+   lets it actually shrink — without the zero minimum a flex item refuses to go
+   below its content size and the overflow reappears at the bottom of the page.
+   Width comes from the aspect ratio rather than the other way round. */
+#capture-stage {
+  width: auto;
+  max-width: min(420px, 100%);
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: clamp(6px, 1.3svh, 16px);
+}
+/* `flex: 0 1 auto` and not `1 1 auto`: the card should take everything it can
+   get up to its natural 4:5, and never stretch past it. Growing it would make
+   a wide short box and crop the face inside. `min-height: 0` is what actually
+   permits the shrink — a flex item refuses to go under its content size
+   without it, which is how the overflow survived the first attempt. */
+#capture-stage .oval-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+}
+#capture-stage.live-cam { width: min(560px, 100%); }
+
+.q-strip { margin-top: clamp(6px, 1.2svh, 16px); padding: clamp(8px, 1.3svh, 13px) 16px; }
+.refpop { margin: clamp(6px, 1.2svh, 14px) 0 2px; }
+.refpop-why { margin-top: clamp(3px, 0.7svh, 8px); }
+.hints { margin-top: clamp(6px, 1.4svh, 26px); gap: clamp(10px, 2.2vw, 22px); }
+.engine-status { margin-top: clamp(6px, 1.3svh, 22px); }
+
+/* Below this the page is furniture-bound rather than card-bound: no amount of
+   shrinking the card frees enough room, so the lines that are read once and
+   never again come out. Priority order is the capture button, the score, then
+   everything else. */
+@media (max-height: 780px) {
+  .refpop-why { display: none; }
+  .sub-note { display: none; }
+}
+@media (max-height: 700px), (max-width: 460px) {
+  .hints { display: none; }
+}
+@media (max-height: 640px) {
+  .sub-more { display: none; }
+}
+@media (max-height: 520px) {
+  #v-upload h1 { display: none; }
+  #v-upload .sub { display: none; }
+}
