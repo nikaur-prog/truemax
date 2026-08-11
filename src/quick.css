@@ -55,8 +55,16 @@
   color: var(--mut); display: block; text-transform: uppercase; }
 .q-cell b { font-family: var(--serif); font-weight: 400; font-size: 22px; display: block;
   margin: 3px 0 7px; font-variant-numeric: tabular-nums; }
+
+/* Every score is editable in place — this is a content tool, so a wrong demo
+   number should be nudged, not reshot. The affordance is quiet until you touch
+   it: a dotted underline on hover, a soft ring while editing. */
+.q-num { outline: none; cursor: text; border-radius: 5px; }
+.q-num:hover { text-decoration: underline dotted rgba(120,130,128,0.6); text-underline-offset: 3px; }
+.q-num:focus { background: var(--acc-soft, rgba(16,122,87,0.1)); box-shadow: 0 0 0 2px var(--acc, #107a57); padding: 0 4px; }
 .q-bar { height: 2.5px; border-radius: 99px; background: var(--soft); overflow: hidden; }
-.q-bar i { display: block; height: 100%; background: var(--acc); border-radius: 99px; }
+.q-bar i { display: block; height: 100%; background: var(--acc); border-radius: 99px;
+  transition: width .7s cubic-bezier(.22,1,.32,1); }
 
 .q-note { font-size: 13.5px; line-height: 1.6; color: var(--mut); margin: 14px 0 0; }
 .q-note b { color: var(--ink); font-weight: 600; }
@@ -135,3 +143,41 @@
   .q-stage.scanning .q-scanline { animation: none; }
   .q-stage.open .q-cards > * { animation: none; opacity: 1; transform: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   9:16 framing.
+
+   This page is filmed and its output is a vertical clip, so the whole thing
+   lives inside a phone-shaped column: a 9:16 box, as tall as the viewport
+   allows, centred, with the width falling out of the height. Recording that
+   region — or the PNG the Download button renders of it — is already the right
+   shape for TikTok, Reels and Shorts with nothing to crop.
+
+   The result view fits INSIDE that box: the photo caps at ~46% of the frame
+   height once it shrinks, leaving the score and the eight cards room to sit
+   below it without scrolling, which is what "make it all fit" means here.
+   --------------------------------------------------------------------------- */
+.q-wrap {
+  width: min(100%, calc(100svh * 9 / 16));
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 14px 16px;
+}
+
+/* In the 9:16 column the shrunk photo is measured against the frame, not the
+   window, so the cards below always clear the fold. */
+.q-stage.open .q-photo,
+.q-stage.open .q-photo canvas { max-height: 42svh; }
+
+/* The result grid tightens up so all eight cards plus the headline fit one
+   9:16 screen without scrolling. */
+#q-result .q-grid { gap: 6px; }
+#q-result .q-cell { padding: 8px 10px; }
+#q-result .q-cell b { font-size: 20px; margin: 2px 0 6px; }
+.q-score { font-size: 54px; }
+
+/* The download/new-photo row sits at the bottom of the frame, out of the shot
+   the creator is composing. */
+#q-result .q-actions { margin-top: 12px; }

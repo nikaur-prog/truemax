@@ -192,8 +192,11 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
   }
   await wait(DOTS_HOLD_MS);
 
-  // The photo shrinks and the cards drop out of the space it vacates.
+  // The photo shrinks and the cards drop out of the space it vacates, then the
+  // numbers count up and the bars fill as each card settles.
   el.stage.classList.add("open");
+  await wait(180);
+  settleNumbers(true);
 }
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -211,17 +214,20 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   const regions = [...r.regions].sort((a, b) => b.score - a.score);
 
   // Trimmed for TikTok on purpose: the score, the percentile under it, and the
-  // eight face-part grid, then nothing. The population curve, the potential
-  // line, the best/worst sentence and the fine-print caveat were all cut —
-  // this page is a fifteen-second reveal, not a report, and every extra block
-  // is one the eye has to skip on camera. The full versions of all of that
-  // live on the main product.
+  // eight face-part grid, then nothing. Every number here is a `.q-num`: it
+  // counts up on reveal, and it is editable, because this page is a content
+  // tool. A creator whose scan came out wrong needs to nudge a number to
+  // something believable rather than reshoot — see the edit wiring below.
+  const num = (target: number, cls = "") =>
+    `<b class="q-num ${cls}" data-target="${target.toFixed(1)}" contenteditable="true"
+        inputmode="decimal" spellcheck="false">0.0</b>`;
   el.cards.innerHTML = `
     <div class="q-hero">
       <div class="q-headline">
         <button class="q-klabel q-switch" id="q-sex" type="button"
           title="Switch the reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button>
-        <b class="q-score">${r.overall.toFixed(1)}<small>/10</small></b>
+        <div class="q-score"><span class="q-num q-score-num" data-target="${r.overall.toFixed(1)}"
+          contenteditable="true" inputmode="decimal" spellcheck="false">0.0</span><small>/10</small></div>
         <span class="q-rank">${rankShort(r.overallPercentile)}</span>
       </div>
     </div>
@@ -231,23 +237,32 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         .map(
           (g) => `<div class="q-cell">
             <span>${REGION_NAMES[g.region]}</span>
-            <b>${g.score.toFixed(1)}</b>
-            <div class="q-bar"><i style="width:${Math.max(2, Math.min(100, g.score * 10))}%"></i></div>
+            ${num(g.score)}
+            <div class="q-bar"><i data-w="${Math.max(2, Math.min(100, g.score * 10))}" style="width:0%"></i></div>
           </div>`,
         )
         .join("")}
     </div>
 
-    <div class="q-actions"><button class="btn pri" id="q-again">Scan again</button></div>`;
+    <div class="q-actions">
+      <button class="btn pri" id="q-download">Download</button>
+      <button class="btn gho" id="q-again">New photo</button>
+    </div>`;
 
   // Stagger index for the drop, so the cards arrive in reading order rather
   // than all at once.
   [...el.cards.children].forEach((c, i) => (c as HTMLElement).style.setProperty("--i", String(i)));
 
+  wireEditing();
+
   if (animate) void playSequence(r, photo);
-  else el.stage.classList.add("open");
+  else {
+    el.stage.classList.add("open");
+    settleNumbers(false);
+  }
 
   document.getElementById("q-sex")!.onclick = () => show(r.sex === "male" ? "female" : "male");
+  document.getElementById("q-download")!.onclick = () => void downloadCard();
   document.getElementById("q-again")!.onclick = () => {
     // Reset the stage, or the next scan starts already open with last scan's
     // landmarks still painted over the new photo.
@@ -257,8 +272,93 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     el.capture.classList.remove("hidden");
     el.shoot.textContent = "Use camera";
     el.shoot.disabled = false;
-    void openCamera();
   };
+}
+
+// Numbers count up, bars fill. Called once the cards have dropped, so the
+// motion reads as the card settling into its value rather than racing the drop.
+function settleNumbers(animate: boolean): void {
+  const nums = [...el.cards.querySelectorAll<HTMLElement>(".q-num")];
+  for (const n of nums) {
+    const target = parseFloat(n.dataset.target ?? "0");
+    if (animate) countTo(n, target);
+    else n.textContent = target.toFixed(1);
+  }
+  // Bars grow to their width via a CSS transition; setting it in a rAF ensures
+  // the 0% starting width has painted first, or the browser skips the tween.
+  requestAnimationFrame(() => {
+    for (const i of el.cards.querySelectorAll<HTMLElement>(".q-bar i")) {
+      i.style.width = `${i.dataset.w}%`;
+    }
+  });
+}
+
+function countTo(node: HTMLElement, target: number): void {
+  const dur = 620;
+  const start = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3);
+    node.textContent = (target * eased).toFixed(1);
+    if (t < 1) requestAnimationFrame(step);
+    else node.textContent = target.toFixed(1);
+  };
+  requestAnimationFrame(step);
+}
+
+// Every number is editable, because a demo scan that came out wrong should be
+// fixable in place rather than by reshooting. Keeps it to one decimal, clamps
+// to 0.0–9.9, and refills the bar under a region score so the edit stays
+// consistent with what it draws.
+function wireEditing(): void {
+  for (const n of el.cards.querySelectorAll<HTMLElement>(".q-num")) {
+    n.addEventListener("focus", () => {
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+    n.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        n.blur();
+      }
+    });
+    n.addEventListener("blur", () => {
+      const v = Math.max(0, Math.min(9.9, parseFloat(n.textContent ?? "") || 0));
+      n.textContent = v.toFixed(1);
+      const bar = n.parentElement?.querySelector<HTMLElement>(".q-bar i");
+      if (bar) bar.style.width = `${Math.max(2, Math.min(100, v * 10))}%`;
+    });
+  }
+}
+
+// Download the card as a PNG. The stage is the whole reveal (photo + cards), so
+// a screenshot of it is the shareable image. The motion is captured by screen
+// recording; this is the still, for a thumbnail or a static post.
+async function downloadCard(): Promise<void> {
+  const btn = document.getElementById("q-download") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Rendering…";
+  }
+  try {
+    const { toPng } = await import("html-to-image");
+    const bg = getComputedStyle(document.body).backgroundColor || "#f4f3ee";
+    const url = await toPng(el.stage, { pixelRatio: 2, backgroundColor: bg, cacheBust: true });
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `truemax-scan-${Date.now()}.png`;
+    a.click();
+  } catch {
+    if (btn) btn.textContent = "Couldn't render";
+  } finally {
+    if (btn && btn.textContent !== "Couldn't render") {
+      btn.disabled = false;
+      btn.textContent = "Download";
+    }
+  }
 }
 
 function loadImage(file: File): Promise<HTMLImageElement> {
