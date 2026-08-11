@@ -145,7 +145,8 @@ function centredSeed(w: number, h: number): { points: SidePoints; faceDir: numbe
   for (const [id, f, inset] of ANCHORS) {
     points[id] = { x: edge - inset * headH, y: top + f * headH };
   }
-  placeBackPoints(points, 1, headH * 0.7, headH);
+  const frame = headFrame(points);
+  if (frame) placeBackPoints(points, frame, headWidthFrom(headH * 0.7, frame.vlen));
   return { points, faceDir: 1 };
 }
 
@@ -234,23 +235,22 @@ function seedFromLandmarks(
   };
 
   // Head width from the oval point rather than the anatomy it is near. The mesh
-  // lands 234/454 at a consistent 0.66 of the way from the nose tip to the true
-  // ear canal — measured on a hand-corrected profile — and that fraction is a
-  // depth ratio, so it survives the yaw compression that scales both distances
-  // together. Everything behind the face is then placed from the template.
-  const headH = Math.abs(menton.y - points.trichion.y) || 1;
-  const headW = headWidthFrom(
-    Math.abs(points.tragion.x - points.pronasale.x) / OVAL_DEPTH_FRACTION,
-    headH,
-  );
-  placeBackPoints(points, faceDir, headW, headH);
+  // lands 234/454 at a consistent fraction of the way from the nose tip to the
+  // true ear canal — measured on a hand-corrected profile — and that fraction is
+  // a ratio of two depths, so it survives the yaw compression that scales both
+  // distances together. Everything behind the face is then placed from the
+  // template, in the head's own axes.
+  const f = headFrame(points);
+  if (f) {
+    const uOval = Math.abs(alongU(f, points.tragion.x, points.tragion.y) - f.uNose);
+    placeBackPoints(points, f, headWidthFrom(uOval / OVAL_DEPTH_FRACTION, f.vlen));
+  }
   return { points, faceDir };
 }
 
 // Where MediaPipe's widest face-oval landmark sits between the nose tip and the
-// ear canal, along the head's depth axis. From set F: the seeded ear was at
-// 0.664 of the corrected nose-to-ear distance.
-const OVAL_DEPTH_FRACTION = 0.664;
+// ear canal, along the head's facing axis. Measured on set F: 0.607.
+const OVAL_DEPTH_FRACTION = 0.607;
 
 // ---------------------------------------------------------------------------
 // The shape template, and the sanity pass that uses it.
@@ -281,21 +281,83 @@ const OVAL_DEPTH_FRACTION = 0.664;
 // because the thing being defended against is outliers: a least-squares fit
 // would be dragged by the very point it is meant to catch.
 // ---------------------------------------------------------------------------
+// The frame is the HEAD's own axes, not the image's. fu runs from the nose tip
+// (0) straight back to the ear canal (-1); fv runs from the hairline (0) down
+// the face axis, with the chin bottom just under 1. Both are perpendicular to
+// each other and both rotate with the head.
+//
+// That last part is the fix. The first version of this table was in image x and
+// y, which silently assumes the head is upright, and the moment someone shot a
+// profile lying back the ear and jaw corner rotated out from under it — the ear
+// came out a fifth of a head-width wrong on a photo where every front point was
+// right. In the head's own axes the same three fixtures agree three to four
+// times more closely: the ear's vertical spread across them falls from 0.164 to
+// 0.037.
 const TEMPLATE: Record<SidePointId, [number, number]> = {
-  trichion: [-0.216, 0.0],
-  glabella: [-0.139, 0.197],
-  nasion: [-0.152, 0.306],
-  pronasale: [0.0, 0.504],
-  subnasale: [-0.087, 0.577],
-  labialeSuperius: [-0.038, 0.649],
-  labialeInferius: [-0.044, 0.790],
-  pogonion: [-0.107, 0.945],
-  menton: [-0.230, 1.0],
-  gonion: [-0.897, 0.849],
-  condylion: [-0.981, 0.371],
-  cervicale: [-0.617, 1.0],
-  tragion: [-1.0, 0.506],
+  trichion: [-0.159, 0.0],
+  glabella: [-0.111, 0.194],
+  nasion: [-0.136, 0.292],
+  pronasale: [0.0, 0.508],
+  subnasale: [-0.101, 0.575],
+  labialeSuperius: [-0.062, 0.651],
+  labialeInferius: [-0.096, 0.789],
+  pogonion: [-0.159, 0.942],
+  menton: [-0.305, 0.988],
+  gonion: [-0.940, 0.810],
+  condylion: [-0.927, 0.297],
+  cervicale: [-0.678, 0.969],
+  tragion: [-1.0, 0.435],
 };
+
+// Where pogonion sits on the head axis. The axis is defined by it, so this is
+// what converts the measured trichion-to-pogonion length back into a full
+// hairline-to-chin head height.
+const POGONION_V = TEMPLATE.pogonion[1];
+
+interface HeadFrame {
+  ox: number; oy: number; // origin: the hairline
+  ux: number; uy: number; // unit vector, pointing the way the face looks
+  vx: number; vy: number; // unit vector, hairline down to chin
+  uNose: number; // the nose tip's u coordinate, which is where fu = 0
+  vlen: number; // hairline to chin bottom, in pixels, along the axis
+}
+
+// The head's own axes, built from three points the detector places well.
+//
+// The axis runs trichion → POGONION rather than trichion → menton, which is the
+// obvious choice and the wrong one: menton is the point that projects forward
+// under yaw, it is one of the points being corrected here, and using it would
+// tilt the whole frame by the size of the error being fixed. Pogonion is a
+// midline point the mesh lands within 0.03 head-widths of.
+function headFrame(p: SidePoints): HeadFrame | null {
+  const dx = p.pogonion.x - p.trichion.x;
+  const dy = p.pogonion.y - p.trichion.y;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 1)) return null;
+  const vx = dx / len;
+  const vy = dy / len;
+  // Perpendicular, flipped if it came out pointing away from the nose, so the
+  // caller never has to hand in a facing direction and cannot get its sign
+  // wrong. That sign has been wrong here before.
+  let ux = vy;
+  let uy = -vx;
+  const uNose = (p.pronasale.x - p.trichion.x) * ux + (p.pronasale.y - p.trichion.y) * uy;
+  if (uNose < 0) {
+    ux = -ux;
+    uy = -uy;
+  }
+  return {
+    ox: p.trichion.x, oy: p.trichion.y,
+    ux, uy, vx, vy,
+    uNose: Math.abs(uNose),
+    vlen: len / POGONION_V,
+  };
+}
+
+// A point's coordinate along the facing axis, measured from the hairline.
+function alongU(f: HeadFrame, x: number, y: number): number {
+  return (x - f.ox) * f.ux + (y - f.oy) * f.uy;
+}
 
 // ---------------------------------------------------------------------------
 // The four points behind the face, plus menton's x.
@@ -314,30 +376,22 @@ const TEMPLATE: Record<SidePointId, [number, number]> = {
 // -0.898 and -0.896 head-widths — so they are placed from the template instead
 // of measured, and the user drags any that miss.
 //
-// menton keeps its measured y (it defines the head height) and takes only its x,
-// because the chin's lowest point projects forward under yaw: it was 0.15
-// head-widths ahead of where it belongs.
+// menton is in the list because the chin's lowest point projects forward under
+// yaw — it was 0.15 head-widths ahead of where it belongs — and because the head
+// axis is taken from pogonion, so replacing menton outright cannot feed back
+// into the frame that placed it.
 // ---------------------------------------------------------------------------
-const BACK_POINTS: SidePointId[] = ["gonion", "condylion", "cervicale", "tragion"];
+const BACK_POINTS: SidePointId[] = ["menton", "gonion", "condylion", "cervicale", "tragion"];
 
-function placeBackPoints(
-  points: SidePoints,
-  faceDir: number,
-  headW: number,
-  headH: number,
-): void {
-  const noseX = points.pronasale.x;
-  const hairY = points.trichion.y;
+function placeBackPoints(points: SidePoints, f: HeadFrame, headW: number): void {
   for (const id of BACK_POINTS) {
+    const u = f.uNose + TEMPLATE[id][0] * headW;
+    const v = TEMPLATE[id][1] * f.vlen;
     points[id] = {
-      x: noseX + faceDir * TEMPLATE[id][0] * headW,
-      y: hairY + TEMPLATE[id][1] * headH,
+      x: f.ox + f.ux * u + f.vx * v,
+      y: f.oy + f.uy * u + f.vy * v,
     };
   }
-  points.menton = {
-    x: noseX + faceDir * TEMPLATE.menton[0] * headW,
-    y: points.menton.y,
-  };
 }
 
 // Head width — nose tip back to ear canal — from a rough estimate of it. Both
@@ -523,12 +577,16 @@ export function seedFromSilhouette(
     back = faceDir === 1 ? Math.min(back, sp[0]) : Math.max(back, sp[1]);
   }
   const backX = (back / m.w) * w;
-  placeBackPoints(
-    points,
-    faceDir,
-    headWidthFrom(Math.abs(points.pronasale.x - backX) * EAR_OVER_SKULL_DEPTH, headPx),
-    headPx,
-  );
+  const frame = headFrame(points);
+  if (frame) {
+    // This path lays its points out on image axes, so the frame it produces is
+    // upright and the horizontal distance to the back of the skull IS the depth.
+    placeBackPoints(
+      points,
+      frame,
+      headWidthFrom(Math.abs(points.pronasale.x - backX) * EAR_OVER_SKULL_DEPTH, frame.vlen),
+    );
+  }
   return { points, faceDir };
 }
 

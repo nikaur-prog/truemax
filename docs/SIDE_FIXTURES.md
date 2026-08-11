@@ -1,8 +1,12 @@
 # Side-profile ground truth
 
-> **`TEMPLATE` is now fitted from sets E and F only.** Sets A–D below carry the
-> `.vpoint` rightward bias described immediately underneath and are kept as a
-> record of the bug, not as ground truth. They are no longer part of any fit.
+> **`TEMPLATE` is fitted from sets E, F and G, in the head's own axes.** Sets
+> A–D below carry the `.vpoint` rightward bias described immediately underneath
+> and are kept as a record of the bug, not as ground truth. They are no longer
+> part of any fit.
+>
+> The frame changed with set G — see "Set G" below. Coordinates in the E/F
+> section further down are in the older image-axis frame and are superseded.
 
 ## Sets A–D — biased, retained for the record
 
@@ -182,6 +186,73 @@ against **0.42** for the old seed. In-sample on F it is 0.06.
 
 Two poses of one person is a centre of gravity, not a population. The next clean
 set should be someone else.
+
+## Set G — the reclined one, and why the frame changed
+
+Collected on the build that shipped the E+F refit, so it is the first set that
+measures the *new* seeder rather than the old one. It improved: the ear went
+from 0.34 head-widths out to 0.17, and gonion, cervicale and menton all landed
+inside 0.1. But the ear and the jaw condyle were still wrong, and this time they
+were wrong in the *opposite* direction — seeded too far back, not too far
+forward.
+
+Auto-seeded:
+
+```json
+{"trichion":[0.2794,0.4203],"glabella":[0.2727,0.4823],"nasion":[0.2824,0.5103],
+ "pronasale":[0.2474,0.6027],"subnasale":[0.278,0.6134],"labialeSuperius":[0.2683,0.6418],
+ "labialeInferius":[0.2898,0.6874],"pogonion":[0.3311,0.7359],"menton":[0.3295,0.745],
+ "gonion":[0.5677,0.6959],"condylion":[0.5977,0.5407],"cervicale":[0.4677,0.745],
+ "tragion":[0.6045,0.5846]}
+```
+
+Corrected by hand:
+
+```json
+{"trichion":[0.2794,0.4203],"glabella":[0.2727,0.4823],"nasion":[0.2824,0.5103],
+ "pronasale":[0.2433,0.5929],"subnasale":[0.278,0.6134],"labialeSuperius":[0.2683,0.6418],
+ "labialeInferius":[0.2898,0.6874],"pogonion":[0.3024,0.7405],"menton":[0.3585,0.7549],
+ "gonion":[0.5468,0.6891],"condylion":[0.5024,0.4911],"cervicale":[0.4677,0.745],
+ "tragion":[0.552,0.5401]}
+```
+
+**The subject is lying back**, and that is the whole finding. The template was
+expressed in image x and y, which quietly assumes the head is upright. Tilt the
+head and the ear and the jaw corner swing out from under an axis-aligned table
+while every point near the face's own midline stays roughly put — which is
+exactly the error pattern: front points right, back points rotated.
+
+So the frame is now the head's own axes:
+
+- **fu** runs from the nose tip (0) straight back to the ear canal (−1).
+- **fv** runs from the hairline (0) down the face axis, chin bottom at 0.988.
+- The axis is **trichion → pogonion**, not trichion → menton. Menton projects
+  forward under yaw and is one of the points being corrected; using it would
+  tilt the frame by the size of the error being fixed. Pogonion is a midline
+  point the mesh lands within 0.03 head-widths of. `POGONION_V` converts the
+  measured trichion-to-pogonion length back to a full head height.
+
+Agreement across E, F and G improves accordingly — mean spread per coordinate
+falls from 0.076 to 0.050, and the two points that were worst improve most:
+
+| point | image axes | head axes |
+|---|---|---|
+| tragion (vertical) | 0.164 | **0.037** |
+| condylion (vertical) | 0.166 | **0.058** |
+| gonion (depth) | 0.087 | **0.020** |
+| labialeInferius (depth) | 0.108 | 0.039 |
+
+The frame is also nearly independent of image aspect ratio (spread 0.052 at 9:16,
+0.051 at 3:4, 0.052 at 1:1), so nothing has to be assumed about the capture size.
+
+### What it is worth
+
+End to end on F — head frame and head width both taken from the raw mesh seed,
+template fitted on **E and G only**, so nothing about F is used — the worst
+back-point error is **0.117 head-widths against 0.419 for the old seeder**.
+Leave-one-out across all three sets: 0.09 to 0.13.
+
+Still one person in three poses. The next clean set should be someone else.
 
 ## Collecting more
 

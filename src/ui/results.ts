@@ -513,6 +513,7 @@ function showOverall(): void {
 // see which measurement did it.
 function renderSideInto(host: HTMLElement, report: Report): void {
   const regions = report.regions.filter((r) => r.metrics.length);
+  const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
 
   host.innerHTML = `
     <div class="reveal">
@@ -521,20 +522,76 @@ function renderSideInto(host: HTMLElement, report: Report): void {
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
         <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
       </div>
-      <p class="viewnote">Measured from the thirteen points you verified. Chin projection, jaw
-        angle and facial convexity have no front-view equivalent, which is why the profile is
-        taken at all, and the placement of those points is why it is capped at a quarter of
-        the total.
-        ${ctx?.onRedoSide ? `<button class="linkish" id="side-redo">Re-verify the landmarks</button>` : ""}</p>
+      ${provenance(measured)}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
       ${regions.map((r) => sideRegionDeck(r, report)).join("")}
+      ${sideNav()}
     </div>`;
 
   revealBars();
-  const redo = document.getElementById("side-redo");
-  if (redo) redo.onclick = () => ctx?.onRedoSide?.();
+  wireSideNav();
+}
+
+// Where the profile's numbers came from, said in three figures.
+//
+// This is the one block on the report that has no front-view equivalent, and it
+// exists because the two halves are NOT the same kind of measurement. The front
+// is 478 points the detector placed and nobody checked. The profile is thirteen
+// points a person dragged into position by hand — which is both why it can
+// measure things the front cannot, and why it is capped at a quarter of the
+// total. Saying that in a paragraph made it read as a disclaimer; as three
+// numbers it reads as what it is, which is the method.
+function provenance(measured: number): string {
+  return `<div class="sideprov">
+    <div><b>13</b><span>POINTS · PLACED BY HAND</span></div>
+    <div><b>${measured}</b><span>MEASUREMENTS · NO FRONT EQUIVALENT</span></div>
+    <div><b>25%</b><span>CAP ON THE OVERALL SCORE</span></div>
+  </div>`;
+}
+
+// The profile's own version of the actions under the front's Overall tab. It
+// had none: the only way on from here was the view toggle, and the only way to
+// fix a mis-dragged point was a link buried mid-paragraph.
+//
+// Same shape as the front row, because the destinations are the same shape —
+// but every action is the profile's. "New photo" becomes two, because on this
+// half of the scan there are two quite different things wrong you might be
+// trying to fix, and one of them is much cheaper: the photograph is usually
+// fine and it is the points that missed.
+function sideNav(): string {
+  const redo = ctx?.onRedoSide
+    ? `<button class="btn gho" id="sn-redo">Re-verify the points</button>`
+    : "";
+  const retake = ctx?.onSideProfile
+    ? `<button class="btn gho" id="sn-retake">Retake profile</button>`
+    : "";
+  return `<div class="navrow">${redo}
+      <button class="btn pri" id="sn-plan">See your plan</button></div>
+    <div class="navrow">${retake}
+      <button class="btn gho" id="sn-share">Share card</button></div>
+    ${hasHistory() ? `<button class="hist-entry" id="sn-history">View all your scans →</button>` : ""}`;
+}
+
+function wireSideNav(): void {
+  const on = (id: string, fn: () => void) => {
+    const b = document.getElementById(id);
+    if (b) b.onclick = fn;
+  };
+  on("sn-redo", () => ctx?.onRedoSide?.());
+  on("sn-retake", () => ctx?.onSideProfile?.());
+  on("sn-plan", () => select("improve"));
+  on("sn-history", () => openHistory());
+  on("sn-share", async () => {
+    if (!ctx) return;
+    // photo-canvas is showing the PROFILE while this tab is open, so the card
+    // that goes out is the profile with the merged score on it — not the front
+    // photograph relabelled.
+    const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
+    const card = await renderShareCard(ctx.report, photo);
+    await shareCard(card, ctx.report.overall);
+  });
 }
 
 // One profile region: its measurements beside its comparisons. Shared by the
