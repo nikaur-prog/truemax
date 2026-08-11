@@ -6,8 +6,7 @@ import { analyze } from "./engine/scoring.ts";
 import { REGION_NAMES } from "./engine/scoring.ts";
 import { isSupported, startCamera } from "./ui/camera.ts";
 import type { CameraHandle } from "./ui/camera.ts";
-import { curveSVG } from "./ui/curve.ts";
-import { rankShort, rarityText } from "./ui/templates.ts";
+import { rankShort } from "./ui/templates.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
@@ -210,16 +209,20 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   el.shot.getContext("2d")!.drawImage(photo, 0, 0);
 
   const regions = [...r.regions].sort((a, b) => b.score - a.score);
-  const best = regions[0];
-  const worst = regions[regions.length - 1];
 
+  // Trimmed for TikTok on purpose: the score, the percentile under it, and the
+  // eight face-part grid, then nothing. The population curve, the potential
+  // line, the best/worst sentence and the fine-print caveat were all cut —
+  // this page is a fifteen-second reveal, not a report, and every extra block
+  // is one the eye has to skip on camera. The full versions of all of that
+  // live on the main product.
   el.cards.innerHTML = `
     <div class="q-hero">
       <div class="q-headline">
         <button class="q-klabel q-switch" id="q-sex" type="button"
-          title="Switch the reference population">FRONT ONLY · VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button>
-        <b class="q-score">${r.overall.toFixed(2)}<small>/10</small></b>
-        <span class="q-rank">${rankShort(r.overallPercentile)} · about ${rarityText(r.overallPercentile)}</span>
+          title="Switch the reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button>
+        <b class="q-score">${r.overall.toFixed(1)}<small>/10</small></b>
+        <span class="q-rank">${rankShort(r.overallPercentile)}</span>
       </div>
     </div>
 
@@ -234,22 +237,6 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         )
         .join("")}
     </div>
-
-    <div class="q-note">
-      <b>${REGION_NAMES[best.region]}</b> carries it at ${best.score.toFixed(1)};
-      <b>${REGION_NAMES[worst.region]}</b> is the drag at ${worst.score.toFixed(1)}.
-      Potential ${r.potential.toFixed(1)} without changing your skeleton.
-    </div>
-
-    <div class="q-curve">${curveSVG(r.overallPercentile, "overall", r.sex, false, {
-      score: r.overall,
-      rank: rankShort(r.overallPercentile),
-    })}</div>
-
-    <p class="q-foot">
-      Front view only. Chin projection, jaw angle and facial convexity are not in this number.
-      Two photos of one face differ by about 1.3 points, so treat one scan as one reading.
-    </p>
 
     <div class="q-actions"><button class="btn pri" id="q-again">Scan again</button></div>`;
 
