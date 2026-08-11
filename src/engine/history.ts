@@ -1,7 +1,8 @@
 import type { RegionId, Report, Sex } from "./types.ts";
 
-// Device-local scan history (localStorage) — powers week-over-week deltas
-// with no accounts and no backend. One previous scan per sex is kept.
+// Device-local scan history (localStorage) — powers week-over-week deltas and
+// the history view with no accounts and no backend. A capped log of scans is
+// kept per sex; only the numbers are stored, never the photograph.
 
 export interface StoredScan {
   date: string; // ISO
@@ -12,10 +13,51 @@ export interface StoredScan {
 
 export interface ScanDelta {
   daysAgo: number;
-  overall: number; // signed score delta vs previous scan
+  overall: number; // signed score delta vs the previous scan
+  // Signed delta against the mean of all PRIOR scans, and how many that mean is
+  // drawn from. Null when this is the first scan. "vs last" answers "did it
+  // move since Tuesday"; "vs average" answers "where do I usually land", which
+  // is the more honest of the two against a noisy instrument — one prior scan
+  // can be an outlier, the running mean cannot.
+  vsAverage: number | null;
+  averageOf: number;
   regions: Array<{ region: RegionId; delta: number }>;
   reading: DeltaReading;
 }
+
+// How many scans to keep per sex. Enough for a long trend without letting
+// localStorage grow without bound; each entry is a few hundred bytes.
+const LOG_CAP = 120;
+const LOG_KEY = (sex: Sex) => `truemax:history:${sex}`;
+
+export function readHistory(sex: Sex): StoredScan[] {
+  try {
+    const raw = localStorage.getItem(LOG_KEY(sex));
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as StoredScan[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+// Every scan ever taken on this device, both sexes, newest first — for a
+// history view that does not care which reference population each was against.
+export function readAllHistory(): StoredScan[] {
+  return [...readHistory("male"), ...readHistory("female")].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+}
+
+function writeHistory(sex: Sex, log: StoredScan[]): void {
+  try {
+    localStorage.setItem(LOG_KEY(sex), JSON.stringify(log.slice(-LOG_CAP)));
+  } catch {
+    /* storage unavailable (private mode) — history just won't persist */
+  }
+}
+
+const mean = (a: number[]): number => a.reduce((s, x) => s + x, 0) / (a.length || 1);
 
 // What a change between two scans is actually worth taking seriously.
 //
@@ -50,16 +92,9 @@ export function readDelta(overall: number, daysAgo: number): DeltaReading {
   return daysAgo < STRUCTURAL_DAYS ? "tooSoon" : "worthNoting";
 }
 
-const KEY = (sex: Sex) => `truemax:lastScan:${sex}`;
-
 export function compareAndStore(report: Report): ScanDelta | null {
-  let prev: StoredScan | null = null;
-  try {
-    const rawPrev = localStorage.getItem(KEY(report.sex));
-    if (rawPrev) prev = JSON.parse(rawPrev) as StoredScan;
-  } catch {
-    prev = null;
-  }
+  const log = readHistory(report.sex);
+  const prev = log.length ? log[log.length - 1] : null;
 
   const current: StoredScan = {
     date: new Date().toISOString(),
@@ -67,11 +102,10 @@ export function compareAndStore(report: Report): ScanDelta | null {
     overall: report.overall,
     regions: Object.fromEntries(report.regions.map((r) => [r.region, r.score])),
   };
-  try {
-    localStorage.setItem(KEY(report.sex), JSON.stringify(current));
-  } catch {
-    /* storage unavailable (private mode) — deltas just won't show */
-  }
+  // Average is taken over PRIOR scans, before this one is appended, so a fresh
+  // scan is compared to where the face usually lands rather than to itself.
+  const priorMean = log.length ? mean(log.map((s) => s.overall)) : null;
+  writeHistory(report.sex, [...log, current]);
 
   if (!prev) return null;
   const daysAgo = Math.max(
@@ -82,6 +116,8 @@ export function compareAndStore(report: Report): ScanDelta | null {
   return {
     daysAgo,
     overall,
+    vsAverage: priorMean == null ? null : Math.round((report.overall - priorMean) * 10) / 10,
+    averageOf: log.length,
     reading: readDelta(overall, daysAgo),
     regions: report.regions
       .filter((r) => prev.regions[r.region] !== undefined)

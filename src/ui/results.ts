@@ -3,6 +3,7 @@ import { phi, REGION_NAMES } from "../engine/scoring.ts";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.ts";
 import type { ScanDelta } from "../engine/history.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
+import { hasHistory, openHistory } from "./historyView.ts";
 import { regionMatches } from "../engine/celebs.ts";
 import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
@@ -249,8 +250,14 @@ function showOverall(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
+  // Two chips when there is a running average: "vs last scan" answers whether
+  // it moved since Tuesday, "vs average" answers where the face usually lands —
+  // the steadier of the two against a noisy instrument.
   const deltaHTML = delta
-    ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`)
+    ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`) +
+      (delta.vsAverage != null
+        ? deltaChip(delta.vsAverage, `vs your average of ${delta.averageOf}`)
+        : "")
     : "";
   // Every score is now measured from both views — the flow requires the profile
   // before it will analyse anything. The flag stays because a report restored
@@ -305,9 +312,11 @@ function showOverall(): void {
                <button class="btn pri" id="btn-plan">See your plan</button></div>
              <div class="navrow"><button class="btn gho" id="btn-share">Share card</button></div>`
       }
+      ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
 
   countUp(document.getElementById("cnt")!, r.overall);
+  document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
   // The caveat, the rescan reading, the three view cards and the merge note
   // reveal together, in the order they are read. Everything below stays put:
   // the pillars have their own bar animation and the curve draws itself, and

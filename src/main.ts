@@ -18,6 +18,7 @@ import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
 import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
+import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
@@ -151,6 +152,15 @@ let selectedSex: Sex = storedSex() ?? "male";
 // The idle frame runs the demo reel — real scans of public-domain portraits.
 mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 el.ovalFrame.classList.add("showing-reel");
+
+// A returning visitor with scans on this device gets a way straight into their
+// history from the landing. Hidden entirely when there is nothing to show, so a
+// first-time visitor never sees a dead link.
+const landingHistory = document.getElementById("landing-history");
+if (landingHistory && hasHistory()) {
+  landingHistory.classList.remove("hidden");
+  landingHistory.addEventListener("click", () => openHistory());
+}
 
 // The idealized silhouette is a framing guide for the camera, not landing art
 let outline: ReturnType<typeof mountFaceOutline> | null = null;

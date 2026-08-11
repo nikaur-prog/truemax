@@ -701,3 +701,48 @@ body {
   background: rgba(10, 12, 14, 0.82); color: #8ff3e0; border: 1px solid rgba(143, 243, 224, 0.4);
   border-radius: 8px; padding: 6px 10px; cursor: pointer; }
 .vdump:hover { background: rgba(10, 12, 14, 0.95); }
+
+/* ---------- history view ---------- */
+.hist-overlay {
+  position: fixed; inset: 0; z-index: 220; display: flex; align-items: flex-start;
+  justify-content: center; padding: 5vh 16px; overflow-y: auto;
+  background: rgba(20, 21, 24, 0.5); backdrop-filter: blur(3px);
+}
+.hist-panel {
+  position: relative; width: min(680px, 100%); background: var(--card, #fff);
+  border-radius: 20px; padding: 28px 26px 22px; box-shadow: 0 30px 80px rgba(20, 21, 24, 0.25);
+}
+.hist-close {
+  position: absolute; top: 16px; right: 16px; border: 0; background: none; cursor: pointer;
+  font-size: 15px; color: var(--mut, #6b7280); line-height: 1;
+}
+.hist-panel h2 { font-family: var(--serif); font-weight: 300; font-size: 26px; margin: 0 0 16px; }
+.hist-empty { color: var(--mut, #6b7280); line-height: 1.55; }
+.hist-stats { display: flex; gap: 26px; margin-bottom: 18px; }
+.hist-stats b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.hist-stats span { font-size: 10px; letter-spacing: 0.09em; color: var(--mut, #6b7280); }
+.hist-svg { width: 100%; height: auto; display: block; margin: 4px 0 10px; }
+.hist-axis { font-family: var(--mono, monospace); font-size: 10px; fill: rgba(90, 100, 98, 0.7); }
+.hist-note, .hist-foot { color: var(--mut, #6b7280); font-size: 12.5px; line-height: 1.5; }
+.hist-note { margin: 6px 0 18px; }
+.hist-foot { margin-top: 16px; }
+.hist-list { display: flex; flex-direction: column; }
+.hist-row {
+  display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 12px;
+  padding: 11px 2px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.hist-date { color: var(--mut, #6b7280); font-size: 13px; }
+.hist-score { font-variant-numeric: tabular-nums; font-size: 17px; }
+.hist-score small { font-size: 11px; color: var(--mut, #6b7280); }
+.hist-sex { font-family: var(--mono, monospace); font-size: 9px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--mut, #6b7280); }
+.hist-chip { font-size: 11px; padding: 3px 9px; border-radius: 99px; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.hist-chip.up { background: rgba(47, 158, 115, 0.14); color: #2f9e73; }
+.hist-chip.down { background: rgba(192, 106, 84, 0.14); color: #c06a54; }
+.hist-chip.flat, .hist-chip.first { background: rgba(120, 130, 128, 0.12); color: var(--mut, #6b7280); }
+
+/* Landing entry point, only shown when there is something to see. */
+.hist-entry { background: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--acc, #107a57); margin-top: clamp(6px, 1.2svh, 14px); }
+.hist-entry:hover { text-decoration: underline; }
