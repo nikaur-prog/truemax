@@ -54,7 +54,7 @@ export function isAuthAvailable(): boolean {
 }
 
 let clientPromise: Promise<SupabaseClient> | null = null;
-async function getClient(): Promise<SupabaseClient> {
+export async function getSupabaseClient(): Promise<SupabaseClient> {
   const env = authEnv();
   if (!env) throw new Error("Auth is not configured");
   if (!clientPromise) {
@@ -77,7 +77,7 @@ export interface AuthResult {
 // result says so rather than pretending the user is signed in.
 export async function signUp(email: string, password: string): Promise<AuthResult> {
   try {
-    const c = await getClient();
+    const c = await getSupabaseClient();
     const { data, error } = await c.auth.signUp({ email, password });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true, needsConfirmation: !data.session };
@@ -88,7 +88,7 @@ export async function signUp(email: string, password: string): Promise<AuthResul
 
 export async function signIn(email: string, password: string): Promise<AuthResult> {
   try {
-    const c = await getClient();
+    const c = await getSupabaseClient();
     const { error } = await c.auth.signInWithPassword({ email, password });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true };
@@ -101,7 +101,7 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 // a one-time link to the address.
 export async function signInWithLink(email: string): Promise<AuthResult> {
   try {
-    const c = await getClient();
+    const c = await getSupabaseClient();
     const { error } = await c.auth.signInWithOtp({ email });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true, needsConfirmation: true };
@@ -112,15 +112,25 @@ export async function signInWithLink(email: string): Promise<AuthResult> {
 
 export async function signOut(): Promise<void> {
   if (!isAuthAvailable()) return;
-  const c = await getClient();
+  const c = await getSupabaseClient();
   await c.auth.signOut();
 }
 
 export async function currentUser(): Promise<User | null> {
   if (!isAuthAvailable()) return null;
-  const c = await getClient();
+  const c = await getSupabaseClient();
   const { data } = await c.auth.getSession();
   return data.session?.user ?? null;
+}
+
+// Used only for same-origin calls to TrueMax's Vercel functions. The token is
+// short-lived and lets the server verify who requested Checkout; it is never
+// sent to Stripe or stored outside Supabase's normal browser session.
+export async function currentAccessToken(): Promise<string | null> {
+  if (!isAuthAvailable()) return null;
+  const c = await getSupabaseClient();
+  const { data } = await c.auth.getSession();
+  return data.session?.access_token ?? null;
 }
 
 // App Store guideline 5.1.1(v): an account that can be created in the app must
@@ -128,7 +138,7 @@ export async function currentUser(): Promise<User | null> {
 // installs (auth.uid() has no client-side delete), then signs the user out.
 export async function deleteAccount(): Promise<AuthResult> {
   try {
-    const c = await getClient();
+    const c = await getSupabaseClient();
     const { error } = await c.rpc("delete_own_account");
     if (error) return { ok: false, message: friendly(error.message) };
     await c.auth.signOut();
@@ -143,7 +153,7 @@ export async function deleteAccount(): Promise<AuthResult> {
 export function onAuthChange(cb: (user: User | null) => void): () => void {
   if (!isAuthAvailable()) return () => {};
   let unsub = () => {};
-  void getClient().then((c) => {
+  void getSupabaseClient().then((c) => {
     const { data } = c.auth.onAuthStateChange((_e: string, session: Session | null) => {
       cb(session?.user ?? null);
     });

@@ -85,23 +85,25 @@ Note what this does *not* do yet: local scans are not synced up or down. Identit
 ships first so it can be tested on its own; sync is a focused follow-up against
 `history.ts`.
 
-### 2.2 Payments — not built
+### 2.2 Payments — code built, configuration required
 
-There is currently no payment code in the repository at all. This is the real
-gap between “live” and “earning”, and it is a build, not a configuration.
+The Stripe Checkout, customer portal, signed webhook and Supabase entitlement
+code are written. See `docs/PAYMENTS_SETUP.md` for the required Stripe, Supabase
+and Vercel configuration.
 
-- [ ] Decide the surface: Stripe for web. (RevenueCat only becomes relevant at
+- [x] Decide the surface: Stripe for web. (RevenueCat only becomes relevant at
       the app-store stage.)
 - [ ] Products and prices in Stripe.
-- [ ] Checkout. A Stripe **Payment Link** is the fastest start and needs no
-      backend, because the checkout page is hosted on Stripe’s domain.
-- [ ] **Knowing who paid** — this is the actual work. A Vercel serverless
-      function receives the Stripe webhook and writes entitlement to Supabase
-      using the `service_role` key server-side. Without this, checkout is
-      decorative.
-- [ ] Read entitlement in the app and gate the Max features.
-- [ ] If any Stripe JS runs in the page, add its domain to `connect-src` in
-      `vercel.json` — the CSP is `'self'` only and will silently block it.
+- [~] Hosted Checkout and customer portal Vercel Functions. Needs Stripe test
+      and live keys plus `STRIPE_MAX_PRICE_ID` in Vercel.
+- [~] **Knowing who paid** — a signature-verified webhook transaction writes an
+      idempotent entitlement to Supabase with the server-only secret key. Needs
+      the migration applied and webhook destination configured.
+- [x] Read the entitlement in the account UI and expose a reusable
+      `hasMaxAccess()` gate for Stage 2.3.
+- [x] No Stripe JS runs in the page: the browser calls only same-origin `/api`
+      routes and navigates to Stripe's hosted URL, so CSP `connect-src 'self'`
+      does not need weakening.
 
 ### 2.3 Tier enforcement
 

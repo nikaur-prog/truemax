@@ -8,6 +8,13 @@ import {
   signOut,
   signUp,
 } from "../engine/auth.ts";
+import {
+  consumeCheckoutResult,
+  hasMaxAccess,
+  loadEntitlement,
+  openBillingPortal,
+  startMaxCheckout,
+} from "../engine/entitlement.ts";
 import type { User } from "@supabase/supabase-js";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +58,8 @@ export function mountAccountButton(): void {
   // Keep the header pill in step with the session: a bare "Sign in" when out,
   // the email's initial in a disc when in. onAuthChange fires on load too, so
   // this also restores a returning, already-signed-in visitor.
+  const checkoutResult = consumeCheckoutResult();
+  let checkoutHandled = false;
   onAuthChange((user) => {
     if (user?.email) {
       btn.textContent = "";
@@ -65,10 +74,17 @@ export function mountAccountButton(): void {
       btn.title = "";
       btn.textContent = "Sign in";
     }
+    if (user && checkoutResult && !checkoutHandled) {
+      checkoutHandled = true;
+      const notice = checkoutResult === "success"
+        ? "Payment received. Stripe is confirming your Max membership now."
+        : "Checkout was cancelled. Nothing was charged.";
+      void openAccount(notice);
+    }
   });
 }
 
-export async function openAccount(): Promise<void> {
+export async function openAccount(notice?: string): Promise<void> {
   if (!isAuthAvailable()) return;
   close();
   const user = await currentUser();
@@ -79,7 +95,7 @@ export async function openAccount(): Promise<void> {
     <div class="acct-body"></div>
   </div>`;
   const body = overlay.querySelector(".acct-body") as HTMLElement;
-  if (user) renderSignedIn(body, user);
+  if (user) renderSignedIn(body, user, notice);
   else renderSignedOut(body, "link");
 
   overlay.addEventListener("click", (e) => {
@@ -198,7 +214,7 @@ function renderSignedOut(body: HTMLElement, mode: Mode): void {
 
 // --- signed in ------------------------------------------------------------
 
-function renderSignedIn(body: HTMLElement, user: User): void {
+function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
   body.innerHTML = `
     <h2>Your account</h2>
     <div class="acct-who">
@@ -208,6 +224,11 @@ function renderSignedIn(body: HTMLElement, user: User): void {
         <span>Your scans sync to this account.</span>
       </div>
     </div>
+    ${notice ? `<p class="acct-notice">${escapeHtml(notice)}</p>` : ""}
+    <section class="acct-membership" aria-live="polite">
+      <span class="acct-tier">MEMBERSHIP</span>
+      <p>Checking your plan…</p>
+    </section>
     <p class="acct-msg" role="status"></p>
     <div class="acct-actions">
       <button type="button" class="btn gho acct-signout">Sign out</button>
@@ -220,6 +241,8 @@ function renderSignedIn(body: HTMLElement, user: User): void {
     </details>`;
 
   const msg = body.querySelector(".acct-msg") as HTMLElement;
+  const membership = body.querySelector(".acct-membership") as HTMLElement;
+  void renderMembership(membership, notice?.startsWith("Payment received") ?? false);
 
   body.querySelector(".acct-signout")?.addEventListener("click", async () => {
     await signOut();
@@ -245,6 +268,65 @@ function renderSignedIn(body: HTMLElement, user: User): void {
       say(msg, res.message || "Could not delete the account.", "err");
     }
   });
+}
+
+async function renderMembership(node: HTMLElement, waitForWebhook: boolean): Promise<void> {
+  try {
+    let entitlement = await loadEntitlement();
+    for (let attempt = 0; waitForWebhook && !hasMaxAccess(entitlement) && attempt < 5; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (!node.isConnected) return;
+      entitlement = await loadEntitlement();
+    }
+    if (!node.isConnected) return;
+
+    const active = hasMaxAccess(entitlement);
+    const billingProblem = entitlement.status === "past_due" || entitlement.status === "unpaid";
+    const period = entitlement.currentPeriodEnd
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(entitlement.currentPeriodEnd))
+      : null;
+    const detail = active
+      ? entitlement.cancelAtPeriodEnd && period
+        ? `Max stays active until ${period}; cancellation is scheduled.`
+        : period
+          ? `Max is active. Your current billing period ends ${period}.`
+          : "Max is active on this account."
+      : billingProblem
+        ? "Stripe could not renew Max. Update your payment method to restore access."
+        : waitForWebhook
+          ? "Stripe has not confirmed the subscription yet. Reopen your account in a moment."
+          : "Free includes scanning, results and device-local progress.";
+
+    node.innerHTML = `
+      <span class="acct-tier">${active ? "TRUEMAX MAX" : "FREE"}</span>
+      <b>${active ? "Max membership" : billingProblem ? "Billing needs attention" : "Free plan"}</b>
+      <p>${detail}</p>
+      <button type="button" class="btn ${active || billingProblem ? "gho" : "pri"} acct-billing">
+        ${active || billingProblem ? "Manage billing" : "Upgrade to Max"}
+      </button>`;
+
+    const button = node.querySelector(".acct-billing") as HTMLButtonElement;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = active || billingProblem ? "Opening billing…" : "Opening secure checkout…";
+      const result = active || billingProblem
+        ? await openBillingPortal()
+        : await startMaxCheckout();
+      if (!result.ok) {
+        button.disabled = false;
+        button.textContent = active || billingProblem ? "Manage billing" : "Upgrade to Max";
+        const error = document.createElement("p");
+        error.className = "acct-msg err";
+        error.textContent = result.message || "Billing is not available yet.";
+        node.appendChild(error);
+      }
+    });
+  } catch {
+    if (!node.isConnected) return;
+    node.innerHTML = `<span class="acct-tier">MEMBERSHIP</span>
+      <b>Payments are being configured</b>
+      <p>Your scans and account still work. Max checkout will appear after the payment setup is complete.</p>`;
+  }
 }
 
 // --- helpers --------------------------------------------------------------

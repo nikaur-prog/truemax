@@ -1123,6 +1123,22 @@ body {
 .acct-who { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; }
 .acct-who b { display: block; font-size: 15px; font-weight: 600; word-break: break-all; }
 .acct-who span { font-size: 12.5px; color: var(--mut); }
+.acct-notice {
+  padding: 10px 12px; margin: 0 0 14px; border-radius: 11px;
+  background: var(--acc-soft); color: var(--ink); font-size: 12.5px; line-height: 1.45;
+}
+.acct-membership {
+  border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+  margin: 0 0 16px; background: var(--soft);
+}
+.acct-membership .acct-tier {
+  display: block; font-family: var(--mono); font-size: 8.5px;
+  letter-spacing: 0.13em; color: var(--mut); margin-bottom: 5px;
+}
+.acct-membership b { display: block; font-size: 14px; }
+.acct-membership p { color: var(--mut); font-size: 12px; line-height: 1.5; margin: 5px 0 11px; }
+.acct-membership .acct-billing { width: 100%; }
+.acct-membership .acct-msg { margin-top: 9px; }
 .acct-actions { display: flex; gap: 10px; }
 .acct-danger { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
 .acct-danger summary { cursor: pointer; font-size: 12.5px; color: var(--mut); list-style: none; }

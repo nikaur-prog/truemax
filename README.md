@@ -6,7 +6,9 @@ percentiles, no inflation, all computed in the browser.
 
 ## Stack
 
-- Vite + vanilla TypeScript, deployed as a static site (Vercel)
+- Vite + vanilla TypeScript, deployed on Vercel
+- Vercel Functions for Stripe Checkout/webhooks; Supabase stores account
+  identity and the server-written subscription entitlement
 - MediaPipe Face Landmarker (WASM, 478 landmarks), fully self-hosted:
   - model: `public/models/face_landmarker.task` (committed)
   - WASM runtime: copied from `node_modules` to `public/wasm/` by the
