@@ -177,12 +177,12 @@ export function hasOverlay(metricId: string): boolean {
 // photograph. A row that did nothing when tapped would be worse.
 const REGION_FALLBACK: Record<string, number[]> = {
   eyes: [33, 133, 159, 145, 362, 263, 386, 374],
-  midface: [234, 454, 116, 345, 50, 280],
+  midface: [234, 454, LM.ZYGO_R, LM.ZYGO_L, 50, 280],
   jaw: [58, 288, 172, 397, 136, 365, 152],
   chin: [152, 148, 377, 17, 18, 200],
   nose: [1, 4, 6, 168, 98, 327],
   lips: [61, 291, 0, 13, 14, 17],
-  proportions: [10, 9, 2, 152, 234, 454],
+  proportions: [10, 9, 2, 152, LM.ZYGO_R, LM.ZYGO_L],
   symmetry: [10, 168, 1, 152, 33, 263],
 };
 

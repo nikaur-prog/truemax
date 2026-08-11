@@ -53,6 +53,27 @@ set from published averages, then shifted to mesh space against test faces.
 Never copy a mean straight from an anthropometry paper without checking what
 the mesh actually measures.
 
+## Bizygomatic landmark selection (2026-08-12)
+
+The original `ZYGO_R`/`ZYGO_L` pair, 234/454, follows the face-oval contour at
+ear/sideburn height. It was replaced with 116/345 after rendering six candidate
+pairs over ten varied reference faces. The chosen pair consistently lands on
+the upper lateral malar prominence below the orbital rim; 111/340 and 117/346
+were too medial, while 123/352 and 50/280 sat lower in cheek soft tissue.
+
+Reproduce the visual check with `node tools/validate-zygo.mjs`. It writes contact
+sheets to `.calib/zygo-candidates/`; that directory and every downloaded
+reference photograph are ignored by Git.
+
+Because bizygomatic width is used by six metrics, the change was followed by a
+full reference pass. The run fetched 117/118 celebrity portraits and 153/155
+population-proxy portraits, detected faces in 115/117 and 153/153 respectively,
+then regenerated the six affected distributions, the celebrity measurement DB,
+and every aggregate quantile table. The distribution gate contained 40 male and
+18 female population references; aggregate normalization contained 61 male and
+81 female references. The final gated population median is 4.9 overall (4.9
+male, 4.8 female), which remains approximately the intended 5.0 midpoint.
+
 ## Tuning workflow
 
 1. `npm run dev`, upload a photo, open the "Engine" dev readout, or read
@@ -68,13 +89,13 @@ the mesh actually measures.
 
 ## Reference sets (two, and they do different jobs)
 
-1. **Population proxy** (`tools/population-list.mjs`) — 62 people notable for
-   their work, not their looks (scientists, politicians, economists, authors,
-   engineers). Effectively random draws with respect to appearance. **Defines
-   mean and SD.**
-2. **Celebrity set** — models, actors, musicians, athletes, streamers. A
-   hand-labeled top tier **defines the ideals**; the whole set becomes the
-   comparison DB.
+1. **Population proxy** (`tools/population-list.mjs` plus `tools/pop2-list.mjs`)
+   — 155 candidates notable for their work, not their looks (scientists,
+   politicians, economists, authors, engineers). Effectively random draws with
+   respect to appearance. **Defines mean and SD.**
+2. **Celebrity set** — 118 candidate models, actors, musicians, athletes and
+   streamers. A hand-labeled top tier **defines the ideals**; quality-gated
+   detections become the comparison DB.
 
 Using the celebrity set for spread was tried and is wrong in both directions:
 its own spread makes the median celebrity score 5.0 (they are not average),
@@ -88,8 +109,9 @@ the aggregate has heavy tails, so treating it as normal pushed top scores past
 9 and put the population's 90th percentile at 7.4. Anchoring to the sample's
 actual distribution keeps the median at 5.0 without inflating the top.
 
-Verified: gated population median **5.0** (p10 3.8, p90 6.3); top celebrity
-faces 7.2–7.3; 6.5+ stays rare.
+Latest bizygomatic recalibration: gated population median **4.9** (p10 3.9,
+p90 6.5); the per-sex medians are 4.9 male and 4.8 female. The midpoint remains
+approximately 5.0 and 6.5+ stays rare.
 
 ## Stability work: what was found and fixed
 
@@ -155,8 +177,8 @@ a real +0.3 improvement is currently inside the noise.
 
 ## Current calibration status
 
-Distributions are **derived from measured data**, not hand-guessed. 67 public
-figures were fetched and scanned with this engine; per metric and sex:
+Distributions are **derived from measured data**, not hand-guessed. Per metric
+and sex:
 
 - `mean` = median of the strict-gated pool (|yaw| ≤ 16°, |pitch| ≤ 17°, smile ≤ 0.6)
 - `sd`   = 1.25 × robust SD (1.4826 × MAD) of that pool — the general
@@ -169,7 +191,7 @@ pool median scores ~5.0. No inflation is introduced — scoring still converts
 closeness-to-ideal into a population percentile.
 
 Regenerate with the scratchpad pipeline: `fetch-photos.mjs` → `scan-celebs.mjs`
-→ `calibrate.mjs` → `apply.mjs`.
+→ `calibrate.mjs` → `apply.mjs` → `normalize.mjs`.
 
 ### Acceptance-test state (well-captured photos)
 

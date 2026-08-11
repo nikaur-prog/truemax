@@ -5,7 +5,7 @@ export interface QualityCheck {
   yawDeg: number;
   pitchDeg: number;
   rollDeg: number;
-  faceWidthFrac: number; // bizygomatic width as a fraction of image width
+  faceWidthFrac: number; // face-oval width as a fraction of image width
   smileScore: number; // 0..1 from blendshapes — smiling skews mouth/jaw metrics
   frontal: boolean;
   largeEnough: boolean;

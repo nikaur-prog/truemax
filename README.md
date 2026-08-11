@@ -48,7 +48,7 @@ npm run build   # type-checks then bundles to dist/
 - [x] Week-over-week deltas (device-local via localStorage — no accounts)
 - [x] Celebrity per-metric comparison (seeded DB + console export helper:
       `window.__truemax.celebEntry("Name")`)
-- [x] Celebrity DB: 63 public figures measured by this engine (37M / 26F),
+- [x] Celebrity DB: 108 public figures measured by this engine,
       per-metric matching, capture-quality tagged
 - [x] Data-derived calibration from the measured pool (see CALIBRATION.md)
 - [x] Side profile: 15 cephalometric metrics + drag-to-verify landmark editor
@@ -84,4 +84,5 @@ node tools/scan-celebs.mjs    # measure each with the real engine
 node tools/find-better.mjs    # optional: search Commons for more frontal shots
 node tools/calibrate.mjs      # derive per-sex distributions + celeb DB
 node tools/apply.mjs          # write them into src/engine/
+node tools/normalize.mjs      # regenerate aggregate empirical quantiles
 ```

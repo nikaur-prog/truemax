@@ -45,9 +45,12 @@ export const LM = {
   LIP_UPPER_INNER: 13, // stomion upper
   LIP_LOWER_INNER: 14, // stomion lower
   LIP_BOTTOM: 17, // labiale inferius (vermilion bottom center)
+  // Malar prominence / zygomatic width. Validated across ten varied reference
+  // faces: 116/345 sit on the upper lateral cheekbone below the orbital rim.
+  // The old 234/454 pair is the wider face-oval contour at ear/sideburn level.
+  ZYGO_R: 116,
+  ZYGO_L: 345,
   // Face contour
-  ZYGO_R: 234,
-  ZYGO_L: 454,
   GONION_R: 58,
   GONION_L: 288,
   // Mid-ramus points on the jaw outline, between the corner and the chin

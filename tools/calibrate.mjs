@@ -11,10 +11,11 @@
 // pool median scores ~5.0. No inflation is introduced: scoring still converts
 // closeness-to-ideal into a population percentile.
 import { readFileSync, writeFileSync } from "node:fs";
+import { dataFile } from "./runtime.mjs";
 
-const scans = JSON.parse(readFileSync(new URL("./scans.json", import.meta.url).pathname));
+const scans = JSON.parse(readFileSync(dataFile("scans.json")));
 // People notable for their work, not their looks — the population reference.
-const popScans = JSON.parse(readFileSync(new URL("./pop-scans.json", import.meta.url).pathname));
+const popScans = JSON.parse(readFileSync(dataFile("pop-scans.json")));
 
 // Strict gate defines the calibration sample (measurement fidelity matters
 // most when deriving distributions). The looser gate defines DB inclusion,
@@ -61,6 +62,9 @@ const DECIMALS = {
   middleLowerBalance: 2, fifthsEyeRatio: 3, facialIndex: 2,
   mirrorDeviation: 1, canthalAsymmetry: 1, eyeMouthParallel: 1, midlineDeviation: 1,
 };
+const requested = process.env.TM_METRICS
+  ? new Set(process.env.TM_METRICS.split(",").map((id) => id.trim()).filter(Boolean))
+  : null;
 const round = (v, d) => Number(v.toFixed(d + 2));
 
 const out = {};
@@ -74,6 +78,7 @@ for (const sex of ["male", "female"]) {
   counts[sex] = { pool: pool.length, top: top.length, topNames: top.map((t) => t.entry.name) };
 
   for (const id of Object.keys(DECIMALS)) {
+    if (requested && !requested.has(id)) continue;
     const vals = pool.map((s) => s.entry.metrics[id]).filter(Number.isFinite);
     if (vals.length < 6) continue;
     const mean = median(vals);
@@ -107,7 +112,7 @@ for (const [id, byS] of Object.entries(out)) {
   lines.push(`  ${id}: { male: ${fmt(byS.male)}, female: ${fmt(byS.female)} },`);
 }
 writeFileSync(
-  new URL("./derived-dists.txt", import.meta.url).pathname,
+  dataFile("derived-dists.txt"),
   `export const DERIVED_DISTS: Record<string, MetricDef["dist"]> = {\n${lines.join("\n")}\n};\n`,
 );
 console.log(`\nwrote derived-dists.txt (${lines.length} metrics)`);
@@ -117,7 +122,7 @@ const dbEntries = scans
   .filter((s) => passes(s.quality, GATE_LOOSE))
   .map((s) => ({ ...s.entry, capture: passes(s.quality, GATE) ? "high" : "moderate" }));
 writeFileSync(
-  new URL("./celeb-db.json", import.meta.url).pathname,
+  dataFile("celeb-db.json"),
   JSON.stringify(dbEntries, null, 2),
 );
 console.log(

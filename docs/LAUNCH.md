@@ -148,25 +148,18 @@ signed-in user chooses to sync. Say exactly that.
 
 ### 4.2 Known measurement debt
 
-- [ ] **`ZYGO_R`/`ZYGO_L` are the wrong landmarks.** They are MediaPipe 234/454,
-      the widest points of the face oval, which sit at ear and sideburn level —
-      not the zygomatic arch. These are the same landmarks that caused the
-      side-profile seeding bug.
+- [x] **Correct the `ZYGO_R`/`ZYGO_L` landmarks.** The old MediaPipe 234/454
+      face-oval pair was replaced with 116/345 after a six-pair visual comparison
+      across ten varied faces. The selected points sit on the upper lateral
+      malar prominence instead of the ear/sideburn contour.
 
   `bizygo` is the denominator of six metrics: `fwhr`, `cheekboneHeight`,
   `jawCheekRatio`, `eyeSeparationRatio`, `fifthsEyeRatio` and `facialIndex`.
 
-  **This is a naming and validity problem, not a scoring bug.** Every face is
-  measured with the same landmark and scored against norms built from that same
-  landmark, so the percentiles are internally consistent and comparable between
-  people. What is not safe is any specific claim that a number describes the
-  cheekbone.
-
-  Fixing it means re-deriving the affected metrics’ `dist[sex]` constants **and**
-  regenerating `AGG_NORM`, which requires the reference photograph set
-  (`.calib/`, deliberately gitignored) and a run of
-  `fetch-photos → scan → apply → normalize`. It cannot be done from the
-  repository alone. See “Regenerating the norms” below.
+  The affected `dist[sex]` constants, celebrity measurements, and `AGG_NORM`
+  quantile tables were regenerated from the reference sets. The gated population
+  proxy still centers at 4.9 overall. See `CALIBRATION.md` for the candidate
+  comparison, sample counts, and acceptance result.
 
 ---
 
@@ -178,6 +171,7 @@ holds the reference photo set.
 ```
 node tools/fetch-photos.mjs      # populates .calib/ — needs open internet
 node tools/scan-celebs.mjs
+TM_METRICS=eyeSeparationRatio,fwhr,cheekboneHeight,jawCheekRatio,fifthsEyeRatio,facialIndex node tools/calibrate.mjs
 node tools/apply.mjs
 node tools/normalize.mjs         # rewrites src/engine/aggNorm.ts
 npm run build

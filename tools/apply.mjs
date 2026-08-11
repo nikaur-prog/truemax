@@ -1,9 +1,11 @@
 // Patch metrics.ts dist blocks with the derived distributions, and rewrite
 // celebs.ts from the measured DB.
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { APP_DIR, dataFile } from "./runtime.mjs";
 
-const SRC = "/home/user/truemax/src/engine/";
-const derived = readFileSync(new URL("./derived-dists.txt", import.meta.url).pathname, "utf8");
+const SRC = resolve(APP_DIR, "src/engine");
+const derived = readFileSync(dataFile("derived-dists.txt"), "utf8");
 
 const dists = {};
 for (const line of derived.split("\n")) {
@@ -12,7 +14,7 @@ for (const line of derived.split("\n")) {
 }
 console.log(`${Object.keys(dists).length} derived metric dists`);
 
-let metrics = readFileSync(SRC + "metrics.ts", "utf8");
+let metrics = readFileSync(resolve(SRC, "metrics.ts"), "utf8");
 let patched = 0;
 for (const [id, d] of Object.entries(dists)) {
   // Match the dist block belonging to this metric's definition
@@ -27,11 +29,11 @@ for (const [id, d] of Object.entries(dists)) {
   metrics = metrics.replace(re, `$1      male: ${d.male},\n      female: ${d.female},`);
   patched++;
 }
-writeFileSync(SRC + "metrics.ts", metrics);
+writeFileSync(resolve(SRC, "metrics.ts"), metrics);
 console.log(`patched ${patched} dist blocks in metrics.ts`);
 
 // celebs.ts DB
-const db = JSON.parse(readFileSync(new URL("./celeb-db.json", import.meta.url).pathname, "utf8"));
+const db = JSON.parse(readFileSync(dataFile("celeb-db.json"), "utf8"));
 const entries = db
   .map((e) => {
     const ms = Object.entries(e.metrics)
@@ -41,10 +43,10 @@ const entries = db
   })
   .join("\n");
 
-let celebs = readFileSync(SRC + "celebs.ts", "utf8");
+let celebs = readFileSync(resolve(SRC, "celebs.ts"), "utf8");
 celebs = celebs.replace(
   /export const CELEBS: CelebEntry\[\] = \[[\s\S]*?\n\];/,
   `export const CELEBS: CelebEntry[] = [\n${entries}\n];`,
 );
-writeFileSync(SRC + "celebs.ts", celebs);
+writeFileSync(resolve(SRC, "celebs.ts"), celebs);
 console.log(`wrote ${db.length} celebrity entries to celebs.ts`);

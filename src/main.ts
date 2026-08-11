@@ -102,6 +102,7 @@ let captureMethod: "camera" | "upload" | null = null;
 (window as unknown as Record<string, unknown>).__truemaxMeasure = async (
   dataUrl: string,
   sex: Sex,
+  options?: { includeLandmarks?: boolean },
 ) => {
   const img = await new Promise<HTMLImageElement>((res, rej) => {
     const i = new Image();
@@ -120,7 +121,8 @@ let captureMethod: "camera" | "upload" | null = null;
   const res = detectStable(c);
   const quality = assessQuality(res);
   if (!quality.faceFound) return { faceFound: false };
-  const report = analyze(res.faceLandmarks[0], w, h, sex);
+  const landmarks = res.faceLandmarks[0];
+  const report = analyze(landmarks, w, h, sex);
   return {
     faceFound: true,
     overall: report.overall,
@@ -128,22 +130,27 @@ let captureMethod: "camera" | "upload" | null = null;
     yaw: quality.yawDeg,
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
-    gaze: estimateGaze(res.faceLandmarks[0]),
-    skin: analyzeSkin(c, res.faceLandmarks[0], w, h),
-    occlusion: detectOcclusion(c, res.faceLandmarks[0], w, h),
+    gaze: estimateGaze(landmarks),
+    skin: analyzeSkin(c, landmarks, w, h),
+    occlusion: detectOcclusion(c, landmarks, w, h),
     // Group shots are the main contaminant in scraped photo sets: the
     // detector locks onto whichever face it finds, which may not be the
     // subject. A face filling little of the frame is the tell.
     faceWidthFrac: quality.faceWidthFrac,
     entry: JSON.parse(toCelebEntry(report, "x")),
     zScores: report.zScores,
-    shape: extractShape(buildGeometry(res.faceLandmarks[0], w, h)),
+    shape: extractShape(buildGeometry(landmarks, w, h)),
     pillars: report.pillars,
+    ...(options?.includeLandmarks
+      ? {
+          landmarks: landmarks.map((point) => ({ x: point.x, y: point.y, z: point.z ?? 0 })),
+        }
+      : {}),
     // Per-region score plus the centroid of that region's landmarks, so the
     // demo reel can point a callout at the actual spot on the face
     regions: report.regions.map((r) => {
       const ids = REGION_LANDMARKS[r.region];
-      const lm = res.faceLandmarks[0];
+      const lm = landmarks;
       let sx = 0, sy = 0;
       for (const i of ids) { sx += lm[i].x; sy += lm[i].y; }
       return {
@@ -155,11 +162,11 @@ let captureMethod: "camera" | "upload" | null = null;
     }),
     // Outline points + face box for the landing-page reel builder
     reelLandmarks: shapeSubset().map((i) => [
-      +res.faceLandmarks[0][i].x.toFixed(4),
-      +res.faceLandmarks[0][i].y.toFixed(4),
+      +landmarks[i].x.toFixed(4),
+      +landmarks[i].y.toFixed(4),
     ]),
     reelBox: (() => {
-      const lm = res.faceLandmarks[0];
+      const lm = landmarks;
       let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
       for (const p of lm) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
       return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
