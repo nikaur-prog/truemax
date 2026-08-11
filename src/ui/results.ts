@@ -2,6 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { phi, REGION_NAMES } from "../engine/scoring.ts";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.ts";
 import type { ScanDelta } from "../engine/history.ts";
+import type { SidePoints } from "../engine/sideMetrics.ts";
 import { regionMatches } from "../engine/celebs.ts";
 import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
@@ -33,6 +34,12 @@ interface Ctx {
   // nothing called it, so a quarter of the score had no screen.
   sideReport?: Report;
   sidePhoto?: HTMLCanvasElement;
+  // The thirteen verified points, in the side photo's own pixel space, so the
+  // Side tab can draw them where they were actually placed. Without these the
+  // tab fell back to drawing the FRONT mesh at FRONT coordinates over the side
+  // photo — a dense cloud in the wrong place that read exactly like "my points
+  // jumped somewhere else after I confirmed them".
+  sidePoints?: SidePoints;
   onRedoSide?: () => void;
 }
 
@@ -189,8 +196,46 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
 // The side view, inside the tabbed report rather than as a separate screen.
 function showSide(): void {
   if (!ctx?.sideReport) return;
-  setZoom(null);
+  // Deliberately NOT setZoom(null): that draws the front mesh (ctx.landmarks,
+  // at front photoW/photoH) onto the overlay, and over the side photograph
+  // that lands as a dense cloud of points nowhere near the face. Instead draw
+  // the thirteen points the user actually verified, in the side photo's own
+  // pixel space, so the tab shows the placement they confirmed.
+  transition?.cancel();
+  transition = null;
+  shownRegion = null;
+  ctx.zoomable.style.transform = "none";
+  drawSidePoints();
   renderSideInto(body(), ctx.sideReport);
+}
+
+// The verified side points on the overlay, sized to the side photo so pixel
+// coordinates line up. Static (no animation) — this is the resting state of the
+// Side tab, not the reveal.
+function drawSidePoints(): void {
+  if (!ctx) return;
+  const overlay = ctx.overlay;
+  const src = ctx.sidePhoto;
+  const pts = ctx.sidePoints;
+  const g = overlay.getContext("2d");
+  if (!g) return;
+  if (!src || !pts) {
+    g.clearRect(0, 0, overlay.width, overlay.height);
+    return;
+  }
+  overlay.width = src.width;
+  overlay.height = src.height;
+  g.clearRect(0, 0, src.width, src.height);
+  const r = Math.max(3, src.width / 150);
+  for (const p of Object.values(pts)) {
+    g.beginPath();
+    g.arc(p.x, p.y, r, 0, Math.PI * 2);
+    g.fillStyle = "rgba(255,255,255,0.9)";
+    g.fill();
+    g.lineWidth = Math.max(1, r * 0.3);
+    g.strokeStyle = "rgba(10,20,17,0.7)";
+    g.stroke();
+  }
 }
 
 function deltaChip(delta: number, label: string): string {

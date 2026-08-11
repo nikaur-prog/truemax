@@ -555,6 +555,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     onSideProfile: () => startSide(),
     sideReport: sideReport ?? undefined,
     sidePhoto: lastSide?.photo,
+    sidePoints: lastSide?.points,
     // Correct the points on the profile already taken, rather than shooting it
     // again. The photograph is usually fine; it is the seed that missed.
     onRedoSide: () => {
