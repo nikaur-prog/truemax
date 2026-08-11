@@ -25,23 +25,35 @@ const TRACE_DOT = "rgba(255,255,255,0.5)";
 const ANCHOR = "#8FF3E0";
 const SCAN = "rgba(143,243,224,";
 
-// The profile silhouette, in order: down the front of the face, across the
-// chin and up the jaw to the ear. This is the outline the points actually trace.
-const OUTLINE: SidePointId[] = [
-  "trichion",
-  "glabella",
-  "nasion",
-  "pronasale",
-  "subnasale",
-  "labialeSuperius",
-  "labialeInferius",
-  "pogonion",
-  "menton",
-  "cervicale",
-  "gonion",
-  "condylion",
-  "tragion",
+// The outline is drawn as SEPARATE runs, not one loop through all thirteen.
+//
+// A single chain looked right until a point was mis-seeded: joining the lip
+// point to the ear point drew a line straight across the neck, and one bad dot
+// turned the whole reveal into a scribble. Anatomically these are different
+// edges anyway — the face profile is one continuous line, the jawline is
+// another, and the neck point belongs to neither. Split, a wrong point can
+// only spoil its own short segment.
+const CHAINS: SidePointId[][] = [
+  // The face profile: hairline down the brow, nose, lips and chin.
+  [
+    "trichion",
+    "glabella",
+    "nasion",
+    "pronasale",
+    "subnasale",
+    "labialeSuperius",
+    "labialeInferius",
+    "pogonion",
+    "menton",
+  ],
+  // The jawline, back up to the ear.
+  ["menton", "gonion", "condylion"],
+  // Under the chin to the throat.
+  ["menton", "cervicale"],
 ];
+
+// Drawn as anchors but never joined into a run.
+const LOOSE: SidePointId[] = ["tragion"];
 
 type Pt = [number, number];
 
@@ -55,23 +67,38 @@ export function revealSideScan(
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
 
-  const chain: Pt[] = OUTLINE.map((id) => [points[id].x, points[id].y]);
-  // Densify the polyline: many points spaced along the real outline. Each keeps
-  // the fractional position of the anchor it follows, so anchors light up as the
-  // trace reaches them.
-  const seg = Math.max(8, w / 42);
-  const trace: Array<{ p: Pt; anchor: number }> = [];
-  for (let i = 0; i < chain.length - 1; i++) {
-    const a = chain[i];
-    const b = chain[i + 1];
-    const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const n = Math.max(1, Math.round(d / seg));
-    for (let k = 0; k < n; k++) {
-      const f = k / n;
-      trace.push({ p: [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], anchor: i });
-    }
+  // Every anchor, in the order the trace reaches them, so each can light up.
+  const anchorOrder: SidePointId[] = [];
+  for (const chain of CHAINS) for (const id of chain) {
+    if (!anchorOrder.includes(id)) anchorOrder.push(id);
   }
-  trace.push({ p: chain[chain.length - 1], anchor: chain.length - 1 });
+  for (const id of LOOSE) if (!anchorOrder.includes(id)) anchorOrder.push(id);
+  const anchors: Pt[] = anchorOrder.map((id) => [points[id].x, points[id].y]);
+
+  // Densify each chain separately: many points spaced along the real edges.
+  // `anchor` is the index into anchorOrder that this trace point has reached,
+  // and `breakBefore` marks where one run ends and the next begins so the
+  // connecting line is never drawn between two unrelated edges.
+  const seg = Math.max(8, w / 42);
+  const trace: Array<{ p: Pt; anchor: number; breakBefore: boolean }> = [];
+  for (const chain of CHAINS) {
+    for (let i = 0; i < chain.length - 1; i++) {
+      const a = points[chain[i]];
+      const b = points[chain[i + 1]];
+      const d = Math.hypot(b.x - a.x, b.y - a.y);
+      const n = Math.max(1, Math.round(d / seg));
+      for (let k = 0; k < n; k++) {
+        const f = k / n;
+        trace.push({
+          p: [a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f],
+          anchor: anchorOrder.indexOf(chain[i]),
+          breakBefore: i === 0 && k === 0,
+        });
+      }
+    }
+    const last = chain[chain.length - 1];
+    trace.push({ p: [points[last].x, points[last].y], anchor: anchorOrder.indexOf(last), breakBefore: false });
+  }
 
   const r = Math.max(1.2, w / 240);
   const rAnchor = Math.max(3.5, w / 78);
@@ -85,14 +112,20 @@ export function revealSideScan(
     // How far along the outline the trace has reached.
     const reached = Math.floor(e * trace.length);
 
-    // The connecting line, drawn up to where the trace has reached.
+    // The connecting line, drawn up to where the trace has reached, lifting the
+    // pen between runs so the face profile and the jawline never get joined.
     if (reached > 1) {
       ctx.strokeStyle = TRACE;
       ctx.lineWidth = Math.max(1, w / 360);
       ctx.lineJoin = "round";
       ctx.beginPath();
-      ctx.moveTo(trace[0].p[0], trace[0].p[1]);
-      for (let i = 1; i < reached; i++) ctx.lineTo(trace[i].p[0], trace[i].p[1]);
+      let pen = false;
+      for (let i = 0; i < reached; i++) {
+        const [px, py] = trace[i].p;
+        if (!pen || trace[i].breakBefore) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+        pen = true;
+      }
       ctx.stroke();
     }
 
@@ -132,9 +165,9 @@ export function revealSideScan(
     const reachedAnchor = reached > 0 ? trace[Math.min(reached, trace.length) - 1].anchor : -1;
     ctx.shadowColor = ANCHOR;
     ctx.strokeStyle = "rgba(4,53,45,0.85)";
-    for (let i = 0; i < chain.length; i++) {
+    for (let i = 0; i < anchors.length; i++) {
       if (i > reachedAnchor) continue;
-      const [ax, ay] = chain[i];
+      const [ax, ay] = anchors[i];
       // The most recently reached anchor lands large and settles.
       const fresh = i === reachedAnchor ? 1 - Math.min(1, (e * trace.length - reached) * 3) : 0;
       ctx.shadowBlur = 7;

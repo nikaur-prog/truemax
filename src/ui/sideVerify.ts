@@ -239,12 +239,115 @@ function seedFromLandmarks(
   return { points, faceDir };
 }
 
+// ---------------------------------------------------------------------------
+// The shape template, and the sanity pass that uses it.
+//
+// Measured, not invented: these are the mean positions across hand-corrected
+// profiles (tools note in docs/SIDE_FIXTURES.md), expressed in a frame the
+// seeder can always rebuild — fx runs from the nose tip (0) toward the back of
+// the head in head-widths, fy from the hairline (0) to the chin (1) in head
+// heights. Across four independent profiles the agreement is tight: pogonion
+// landed at 0.98 / 0.96 / 0.95 / 0.96 of head height, condylion at exactly
+// -1.00 head-widths every time.
+//
+// What this is FOR is the failure that keeps happening. Both seed paths can put
+// a single point somewhere absurd — a mesh landmark drifting onto the cheek, a
+// silhouette trace catching a door frame — and the two real examples were a lip
+// point 2.27 head-widths behind the ear and a neck point off the bottom of the
+// picture. A lone dot at the frame edge is easy to miss in the verifier, and it
+// then feeds a real measurement.
+//
+// So after seeding, the template is fitted to the points that agree with each
+// other and any point that disagrees violently is moved to where the template
+// says it belongs. The fit is Theil-Sen (median of pairwise slopes) precisely
+// because the thing being defended against is outliers: a least-squares fit
+// would be dragged by the very point it is meant to catch.
+// ---------------------------------------------------------------------------
+const TEMPLATE: Record<SidePointId, [number, number]> = {
+  trichion: [-0.054, 0.0],
+  glabella: [-0.029, 0.236],
+  nasion: [-0.099, 0.32],
+  pronasale: [0.0, 0.558],
+  subnasale: [-0.131, 0.616],
+  labialeSuperius: [-0.111, 0.728],
+  labialeInferius: [-0.189, 0.831],
+  pogonion: [-0.289, 0.963],
+  menton: [-0.475, 1.0],
+  gonion: [-1.082, 0.674],
+  condylion: [-1.0, 0.177],
+  cervicale: [-0.826, 0.899],
+  tragion: [-1.023, 0.278],
+};
+
+function median(a: number[]): number {
+  const b = [...a].sort((x, y) => x - y);
+  const n = b.length;
+  return n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2;
+}
+
+// Robust 1-D fit of coord = origin + scale * feature.
+function theilSen(pairs: Array<[number, number]>): { scale: number; origin: number } | null {
+  const slopes: number[] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    for (let j = i + 1; j < pairs.length; j++) {
+      const df = pairs[i][0] - pairs[j][0];
+      // Points too close together on this axis turn a small coordinate error
+      // into a huge slope, so they do not get a vote.
+      if (Math.abs(df) < 0.12) continue;
+      slopes.push((pairs[i][1] - pairs[j][1]) / df);
+    }
+  }
+  if (slopes.length < 4) return null;
+  const scale = median(slopes);
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  return { scale, origin: median(pairs.map(([f, c]) => c - scale * f)) };
+}
+
+// How far a point may sit from its fitted position before it is treated as a
+// mis-seed. Deliberately loose: real faces differ, and this is here to catch
+// points that are wrong by a head, not points that are wrong by a nostril.
+const MAX_DX = 0.5; // head-widths
+const MAX_DY = 0.25; // head-heights
+
+function sanitizeSeed(
+  seed: { points: SidePoints; faceDir: number },
+  w: number,
+  h: number,
+): { points: SidePoints; faceDir: number } {
+  const { points, faceDir } = seed;
+  const ids = SIDE_POINTS.map((s) => s.id);
+  const fitY = theilSen(ids.map((id) => [TEMPLATE[id][1], points[id].y]));
+  const fitX = theilSen(ids.map((id) => [faceDir * TEMPLATE[id][0], points[id].x]));
+  if (!fitY || !fitX) return seed;
+
+  const out = { ...points } as SidePoints;
+  for (const id of ids) {
+    const ex = fitX.origin + fitX.scale * faceDir * TEMPLATE[id][0];
+    const ey = fitY.origin + fitY.scale * TEMPLATE[id][1];
+    const offFrame =
+      points[id].x < 0 || points[id].x > w || points[id].y < 0 || points[id].y > h;
+    if (
+      offFrame ||
+      Math.abs(points[id].x - ex) > fitX.scale * MAX_DX ||
+      Math.abs(points[id].y - ey) > fitY.scale * MAX_DY
+    ) {
+      out[id] = {
+        x: Math.max(2, Math.min(w - 2, ex)),
+        y: Math.max(2, Math.min(h - 2, ey)),
+      };
+    }
+  }
+  return { points: out, faceDir };
+}
+
 // Entry point. Real landmarks when the detector can still see the face, the
-// silhouette trace when it cannot.
+// silhouette trace when it cannot — and either way, the template pass above
+// catches any single point that came back somewhere impossible.
 export function seedSidePoints(
   canvas: HTMLCanvasElement,
 ): { points: SidePoints; faceDir: number } {
-  return seedFromLandmarks(canvas) ?? seedFromSilhouette(canvas);
+  const seed = seedFromLandmarks(canvas) ?? seedFromSilhouette(canvas);
+  return sanitizeSeed(seed, canvas.width, canvas.height);
 }
 
 // Fallback: trace the profile edge against the background, then place points at
