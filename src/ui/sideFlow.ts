@@ -3,7 +3,7 @@ import type { Report, Sex } from "../engine/types.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
 import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
-import { isSupported, permissionGranted, startCamera } from "./camera.ts";
+import { startCamera } from "./camera.ts";
 import { setRunningMode } from "../engine/landmarker.ts";
 import { detectStable } from "../engine/consensus.ts";
 import { assessQuality } from "../engine/quality.ts";
@@ -77,13 +77,10 @@ export function openSideCapture(ctx: SideCtx): void {
     close();
     ctx.onBack();
   };
-  // Already granted from the front capture, so open the profile preview
-  // straight away rather than making them ask for the camera twice.
-  if (isSupported()) {
-    permissionGranted().then((ok) => {
-      if (ok) void openSideCamera(ctx);
-    });
-  }
+  // The camera opens only on an explicit "Use camera" click here too, matching
+  // the front. It used to auto-open the profile preview because access was
+  // already granted, but the same principle applies: the preview should never
+  // appear until someone asks for it.
 
   e.input.onchange = async () => {
     const file = e.input.files?.[0];

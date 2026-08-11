@@ -16,7 +16,7 @@ import { mergeReports } from "./engine/scoring.ts";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
-import { isSupported, overrideGlasses, permissionGranted, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
+import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
@@ -323,11 +323,12 @@ el.btnNoGlasses.addEventListener("click", () => {
   el.btnNoGlasses.classList.add("hidden");
 });
 
-// Returning visitors who already granted access get a live preview with no
-// second prompt — the guidance starts working before they ask for it.
-permissionGranted().then((granted) => {
-  if (granted) openCamera();
-});
+// The camera never opens on its own, even for a returning visitor who has
+// already granted access. The landing plays the celebrity reel until the
+// moment someone clicks "Use camera" — auto-opening the preview replaced that
+// reel with a shot of the viewer's own room the instant the page loaded, which
+// is both worse as a first impression and startling on a page people open in
+// public. Explicit intent only.
 
 function resetToUpload(): void {
   el.main.classList.add("hidden");
@@ -432,15 +433,23 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     autoNote: `Scored against ${selectedSex} norms`,
   };
 
-  // Straight to the profile. A scan is two photographs, and showing a score
-  // after the first one taught people the second was optional garnish — the
-  // opposite of true, since chin projection, jaw angle and facial convexity
-  // have no front-view equivalent at all.
+  // Front-only is a complete result, and the side profile is an enhancement
+  // offered from the results screen rather than a toll gate before them.
+  //
+  // This reverses an earlier decision to force the profile first, on the
+  // reasoning that a score after one photo taught people the second was
+  // optional garnish. Two things overtook that. The side auto-seed is not
+  // reliable enough to stand between every user and any result — forcing a
+  // step that frequently needs hand-correction blocks the whole product on its
+  // weakest part. And the results screen already states plainly that the front
+  // carries 75% and names exactly what the profile would add, so "optional" is
+  // communicated without holding the score hostage. The "Add side profile"
+  // button on the results is the same startSide() path; taking it re-runs the
+  // analysis merged.
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "FRONT CAPTURED";
-  el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
   drawCalm(el.overlayCanvas, landmarks, width, height);
-  startSide();
+  void runFullAnalysis(null);
 }
 
 interface PendingFront {
@@ -456,9 +465,13 @@ let pending: PendingFront | null = null;
 let lastSide: { points: SidePoints; faceDir: number; photo?: HTMLCanvasElement } | null = null;
 
 // Both photographs are in. One analysis, one reveal, one score.
-async function runFullAnalysis(sideReport: Report): Promise<void> {
+async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   if (!pending) return;
   const { landmarks, width, height, quality, autoNote } = pending;
+  // The scan sequence only narrates the side view when there is one. Front-only
+  // is now a complete result rather than an unfinished one, so its loading bar
+  // must not claim to be reading a profile that was never taken.
+  const stages = sideReport ? SCAN_STAGES : SCAN_STAGES.filter((s) => s.view === "front");
   el.main.classList.remove("hidden");
   // The front photo, kept so the scan can switch back to it after showing the
   // profile being measured.
@@ -502,12 +515,12 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
   await new Promise<void>((done) => {
     let s = 0;
     const step = () => {
-      if (s < SCAN_STAGES.length) {
-        el.status.innerHTML = `<b>${SCAN_STAGES[s].text}</b> …`;
-        el.barFill.style.width = `${((s + 1) / SCAN_STAGES.length) * 100}%`;
-        swapTo(SCAN_STAGES[s].view);
+      if (s < stages.length) {
+        el.status.innerHTML = `<b>${stages[s].text}</b> …`;
+        el.barFill.style.width = `${((s + 1) / stages.length) * 100}%`;
+        swapTo(stages[s].view);
         s++;
-        setTimeout(step, SCAN_STAGES[s - 1].view === "side" ? 520 : 360);
+        setTimeout(step, stages[s - 1].view === "side" ? 520 : 360);
       } else done();
     };
     setTimeout(step, 200);
@@ -515,7 +528,11 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
   await reveal.done;
 
   const front = analyze(landmarks, width, height, selectedSex);
-  const report = mergeReports(front, sideReport);
+  // Front-only is a real result: mergeReports already returns the front report
+  // untouched when the side is absent, so the same call covers both and the
+  // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
+  // "Add side profile" nudge) does the rest.
+  const report = sideReport ? mergeReports(front, sideReport) : front;
   const delta = compareAndStore(report);
 
   el.frame.classList.remove("scanning");
@@ -536,7 +553,7 @@ async function runFullAnalysis(sideReport: Report): Promise<void> {
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
     onSideProfile: () => startSide(),
-    sideReport,
+    sideReport: sideReport ?? undefined,
     sidePhoto: lastSide?.photo,
     // Correct the points on the profile already taken, rather than shooting it
     // again. The photograph is usually fine; it is the seed that missed.
