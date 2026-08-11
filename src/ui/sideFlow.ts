@@ -8,6 +8,8 @@ import { setRunningMode } from "../engine/landmarker.ts";
 import { detectStable } from "../engine/consensus.ts";
 import { assessQuality } from "../engine/quality.ts";
 import { resetSideTracking } from "../engine/captureGuide.ts";
+import { createAutoCapture } from "./autoCapture.ts";
+import type { AutoCapture } from "./autoCapture.ts";
 import type { CameraHandle } from "./camera.ts";
 
 // Side-profile capture flow: camera or upload → auto-seeded landmarks → user
@@ -27,12 +29,18 @@ const PROFILE_MIN_YAW = 35;
 
 interface SideCtx {
   sex: Sex;
+  // How the front was captured, so the side matches it. "camera" opens the
+  // profile camera straight away; "upload" offers only the file drop; undefined
+  // shows both choices.
+  method?: "camera" | "upload";
   onDone: (report: Report, points: SidePoints, faceDir: number) => void;
   onBack: () => void;
 }
 
 let verifier: VerifyHandle | null = null;
 let sideCam: CameraHandle | null = null;
+let auto: AutoCapture | null = null;
+let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 const el = () => ({
   section: document.getElementById("v-side")!,
@@ -60,28 +68,43 @@ export function openSideCapture(ctx: SideCtx): void {
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
   e.live.classList.add("hidden");
+
+  // The side matches how the front was taken. Shot the front on camera → open
+  // the profile camera straight away; uploaded it → offer only the file drop.
+  // With no method known, both choices are shown as before.
+  if (ctx.method === "camera") {
+    void openSideCamera(ctx);
+    wireSideInputs(e, ctx);
+    return;
+  }
+
   // Both views are required, so there is no "skip" — but backing out of the
   // capture must still be possible, because capture is free. Nothing has been
   // spent at this point: the analysis is the costly step and it has not run.
   // So this is a plain Cancel, not an offer to abandon a half-finished scan.
-  e.actions.innerHTML = `
-    <button class="btn pri" id="side-cam">Use camera</button>
-    <button class="btn gho" id="side-pick">Upload a photo</button>`;
+  const camBtn = ctx.method === "upload"
+    ? ""
+    : `<button class="btn pri" id="side-cam">Use camera</button>`;
+  const pickBtn = ctx.method === "upload"
+    ? `<button class="btn pri" id="side-pick">Upload a photo</button>`
+    : `<button class="btn gho" id="side-pick">Upload a photo</button>`;
+  e.actions.innerHTML = camBtn + pickBtn;
   e.actions.insertAdjacentHTML(
     "beforeend",
     `<button class="btn cancel" id="side-quit">Cancel</button>`,
   );
-  document.getElementById("side-cam")!.onclick = () => openSideCamera(ctx);
+  document.getElementById("side-cam")?.addEventListener("click", () => openSideCamera(ctx));
   document.getElementById("side-pick")!.onclick = () => e.input.click();
   document.getElementById("side-quit")!.onclick = () => {
     close();
     ctx.onBack();
   };
-  // The camera opens only on an explicit "Use camera" click here too, matching
-  // the front. It used to auto-open the profile preview because access was
-  // already granted, but the same principle applies: the preview should never
-  // appear until someone asks for it.
+  wireSideInputs(e, ctx);
+}
 
+// The file input and drop handlers, shared by the choice screen and the
+// camera-first path (so an upload still works even when the camera opened first).
+function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
   e.input.onchange = async () => {
     const file = e.input.files?.[0];
     // Clear the selection before handling it. A file input fires `change` only
@@ -117,6 +140,26 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // That memory has to start empty on every new attempt.
   resetSideTracking();
   let ready = false;
+  // Hands-off shutter. On the side you are turned away from the screen, so the
+  // countdown is mostly audible; see ui/autoCapture.ts.
+  auto = createAutoCapture({
+    onTick: (remaining) => {
+      const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
+      if (remaining == null) {
+        e.hint.classList.remove("counting");
+        if (shoot && !shoot.disabled) shoot.textContent = "Capture";
+        return;
+      }
+      e.hint.classList.add("counting");
+      e.hintTitle.textContent = `Hold still · ${remaining}`;
+      e.hintDetail.textContent = "Taking it automatically · space to take it now";
+      if (shoot) shoot.textContent = `Capturing in ${remaining}`;
+    },
+    onFire: () => {
+      const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
+      shoot?.click();
+    },
+  });
   try {
     sideCam = await startCamera({
       video: e.video,
@@ -124,8 +167,15 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       mode: "side",
       onCheck: (c) => {
         ready = c.ready;
-        e.hintTitle.textContent = c.hint;
-        e.hintDetail.textContent = c.detail;
+        auto?.update(c.ready);
+        // While the count is running the hint belongs to the countdown, which
+        // has just written it. Only the two text lines are skipped — the lamp
+        // and the shutter below must keep updating, or the frame freezes
+        // visually at the exact moment it is about to fire.
+        if (!auto?.armed()) {
+          e.hintTitle.textContent = c.hint;
+          e.hintDetail.textContent = c.detail;
+        }
         e.hint.classList.toggle("ready", c.ready);
         e.hint.classList.toggle("red", c.status === "red");
         e.hint.classList.toggle("amber", c.status === "amber");
@@ -167,9 +217,34 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     stopSideCamera();
     if (shot) await loadCanvas(shot, ctx);
   };
+
+  // Space or Enter takes it now rather than waiting out the countdown. On a
+  // laptop the keyboard is under your hands while the screen is turned away,
+  // which makes it the one control you can still hit blind — and it does not
+  // shift the framing the way reaching for a button does.
+  sideKeyHandler = (e: KeyboardEvent) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    const t = e.target as HTMLElement | null;
+    // Never hijack a key from a field or another button.
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (t?.tagName === "BUTTON" && t.id !== "side-shoot") return;
+    if (!sideCam || !ready) return;
+    e.preventDefault();
+    document.getElementById("side-shoot")?.click();
+  };
+  window.addEventListener("keydown", sideKeyHandler);
 }
 
 function stopSideCamera(): void {
+  // Cancelled before the early return: the countdown must die even on paths
+  // where the camera was already gone, or a pending fire could click a shutter
+  // that no longer has a preview behind it.
+  auto?.cancel();
+  auto = null;
+  if (sideKeyHandler) {
+    window.removeEventListener("keydown", sideKeyHandler);
+    sideKeyHandler = null;
+  }
   if (!sideCam) return;
   sideCam.stop();
   sideCam = null;

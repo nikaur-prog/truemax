@@ -16,7 +16,7 @@
   </head>
   <body>
     <header class="topbar">
-      <span class="wordmark">TRUE<b>MAX</b></span>
+      <button class="wordmark" id="logo-home" type="button" title="Back to the start">TRUE<b>MAX</b></button>
       <div class="topbar-right">
         <span class="tag">FRONT + SIDE · V1</span>
       </div>
@@ -105,7 +105,11 @@
            score by a median of 0.70 points and up to 4.50. A guess that weak
            cannot be allowed to decide a number that large, so it is asked. See
            src/engine/sexPref.ts. -->
-      <fieldset class="refpop" id="refpop">
+      <!-- The reference population is now chosen through the full-screen
+           man/woman split that appears when a scan starts (src/ui/sexChooser.ts),
+           so this inline control is hidden. It stays in the DOM because the
+           results screen and the guide silhouette still read its state. -->
+      <fieldset class="refpop hidden" id="refpop">
         <legend>Score against</legend>
         <div class="seg">
           <button type="button" class="seg-btn" data-sex="male">Men</button>
@@ -144,6 +148,14 @@
         </div>
         <p class="scan-status" id="status"></p>
         <div class="bar"><div id="barFill"></div></div>
+        <!-- View toggle. The side profile is a quarter of the score and fifteen
+             of the measurements, and it used to be one tab lost among eight
+             region tabs — so it read as a footnote rather than as half the
+             product. It belongs next to the photograph it describes. -->
+        <div class="viewtoggle hidden" id="view-toggle">
+          <button type="button" class="vt-btn" data-view="front">Front</button>
+          <button type="button" class="vt-btn" data-view="side">Side</button>
+        </div>
         <div class="quality-chips" id="quality-chips"></div>
       </div>
       <div class="pane-analysis" id="analysis"></div>
@@ -190,13 +202,23 @@
             side, and they are among the strongest numbers on the report. The
             analysis runs once both views are in.
           </p>
+          <!-- The one thing that is genuinely different about this capture, and
+               it went unsaid for a long time: turned side-on you cannot read
+               the screen, so none of the visual guidance above reaches you.
+               That is why the shutter is hands-off and the countdown is
+               audible. Saying it here is what makes the beeping mean
+               something instead of being a surprise. -->
           <p class="side-sub">
-            The thirteen points are placed for you, from the face mesh where
-            the detector can still see you at this angle, and by tracing your
-            silhouette against the background where it cannot. Check them, and
-            drag any that have missed. Accuracy here is what makes the side
-            measurements real, and it is why the side view is capped at how far
-            it can move your score.
+            <b>You will not be able to see this screen.</b> So it takes the
+            photo itself: turn until you hear the countdown start, then hold
+            still. Two beeps, then a higher one is the shutter. Space bar takes
+            it immediately if you would rather not wait.
+          </p>
+          <p class="side-sub">
+            Afterwards, thirteen points are placed for you and you drag any
+            that missed. That check is what makes the side measurements real,
+            and it is why the side view is capped at how far it can move your
+            score.
           </p>
           <label class="drop drop-side" id="side-drop" for="side-input">
             <b>Add a side-profile photo</b>

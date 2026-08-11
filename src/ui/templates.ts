@@ -148,8 +148,15 @@ export function rarityText(pct: number): string {
   return n <= REFERENCE_N ? `1 in ${Math.max(2, n)}` : "the top 1%";
 }
 
-// The headline "Top X%" chip, floored at the same resolution.
+// The headline chip.
+//
+// Below the median this used to read "Top 99.1%", which is arithmetically true
+// and lands as praise — a 3.5 that sits ahead of 0.9% of faces was announcing
+// itself as top-99%, directly contradicting the curve underneath it saying
+// "Ahead of 0.9%". Under the median the honest phrasing is the one the curve
+// already uses.
 export function topPctText(pct: number): string {
+  if (pct < 50) return pct < 1 ? "Ahead of <1%" : `Ahead of ${Math.round(pct)}%`;
   const rest = 100 - pct;
   return rest < 1 ? "Top 1%" : `Top ${Math.round(rest * 10) / 10}%`;
 }

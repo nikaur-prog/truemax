@@ -6,7 +6,8 @@ import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
 import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.ts";
 import { extractShape, shapeSubset } from "./engine/shape.ts";
-import { compareAndStore } from "./engine/history.ts";
+import { compareAndStore, readAllHistory, readHistory } from "./engine/history.ts";
+import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
 import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
@@ -19,7 +20,13 @@ import type { SidePoints } from "./engine/sideMetrics.ts";
 import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
-import { mountAccountButton } from "./ui/authModal.ts";
+import { mountAccountButton, openAccount } from "./ui/authModal.ts";
+import { currentUser, isAuthAvailable } from "./engine/auth.ts";
+import { revealSideScan } from "./ui/sideScan.ts";
+import { openSexChooser } from "./ui/sexChooser.ts";
+import { createAutoCapture } from "./ui/autoCapture.ts";
+import type { AutoCapture } from "./ui/autoCapture.ts";
+import { openDashboard } from "./ui/dashboard.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
@@ -74,6 +81,19 @@ const el = {
 // base rate, while the choice itself moves the score by a median of 0.70 points
 // and up to 4.50. sexPref.ts has the measurements. One tap beats that.
 let selectedSex: Sex = storedSex() ?? "male";
+// Whether the reference population is a real choice yet, or still the silent
+// default. A face app is used mostly by young men, so "male" is the right
+// default to compute against — but computing a man a percentile "of women"
+// because he never saw the toggle is the kind of thing that gets screenshotted.
+// So the first scan requires the pick; a returning visitor who already chose is
+// never asked again.
+let sexChosen = storedSex() !== null;
+
+// How the front photo was obtained, carried into the side step so the two
+// halves of one scan use the same capture method. If you shot the front with
+// the camera, the side opens the camera; if you uploaded the front, the side
+// asks for a file. Null until the first capture.
+let captureMethod: "camera" | "upload" | null = null;
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
 // directly, skipping the UI and its scan animation. Same engine path as a
@@ -181,20 +201,44 @@ function showGuide(sex: Sex): void {
 const refpop = document.getElementById("refpop")!;
 function paintRefPop(): void {
   for (const b of refpop.querySelectorAll<HTMLButtonElement>(".seg-btn")) {
-    b.classList.toggle("on", b.dataset.sex === selectedSex);
-    b.setAttribute("aria-pressed", String(b.dataset.sex === selectedSex));
+    // Until the choice is made, neither button is lit — an unmade choice should
+    // look unmade, not like "male" was picked for you.
+    const on = sexChosen && b.dataset.sex === selectedSex;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
   }
 }
 refpop.addEventListener("click", (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>(".seg-btn");
   if (!b?.dataset.sex) return;
   selectedSex = b.dataset.sex as Sex;
+  sexChosen = true;
+  refpop.classList.remove("ask");
   storeSex(selectedSex);
   paintRefPop();
   setGuideSex(selectedSex);
   showGuide(selectedSex);
 });
 paintRefPop();
+
+// The gate: no scan runs against an unchosen population. If the choice has not
+// been made, the full-screen man/woman chooser is shown and the scan proceeds
+// only once it is picked. Chosen once, remembered forever, never asked again.
+function ensureSex(then: () => void): void {
+  if (sexChosen) {
+    then();
+    return;
+  }
+  openSexChooser((sex) => {
+    selectedSex = sex;
+    sexChosen = true;
+    storeSex(sex);
+    paintRefPop();
+    setGuideSex(sex);
+    showGuide(sex);
+    then();
+  });
+}
 setGuideSex(selectedSex);
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
@@ -214,7 +258,7 @@ el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
   if (file) handleFile(file);
 });
-el.btnUpload.addEventListener("click", () => el.fileInput.click());
+el.btnUpload.addEventListener("click", () => ensureSex(() => el.fileInput.click()));
 el.ovalFrame.addEventListener("dragover", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.add("dragover");
@@ -224,12 +268,56 @@ el.ovalFrame.addEventListener("drop", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.remove("dragover");
   const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file) handleFile(file);
+  if (file) ensureSex(() => handleFile(file));
 });
+
+// Wordmark goes home. Home is the dashboard for a signed-in user and the scan
+// screen for everyone else.
+//
+// The dashboard is the signed-in surface on purpose: it is where the history,
+// the streak and the personalised overview live, and all three are things an
+// account is FOR. A signed-out visitor gets the one screen that works without
+// one — scan your face — which is also the only screen a TikTok click needs.
+// Accounts are inert until Supabase keys are set (see engine/auth.ts), so with
+// no keys configured this correctly resolves to "everyone sees the scan screen".
+document.getElementById("logo-home")?.addEventListener("click", async () => {
+  if (cam) await closeCamera();
+  closeSide();
+  document.getElementById("v-side")?.classList.add("hidden");
+  resetToUpload();
+  // With no Supabase keys there is no such thing as signed out — there is no
+  // way to sign in at all — so gating on an account would just hide the
+  // dashboard from everybody forever. In that build the dashboard is simply
+  // open, which is also correct: the history it shows is device-local and
+  // needs no account to exist. The gate switches itself on the day keys are
+  // configured, with no code change.
+  if (!isAuthAvailable()) {
+    openDashboard({ onScan: () => resetToUpload() });
+    return;
+  }
+  const user = await currentUser();
+  if (!user) {
+    openAccount();
+    return;
+  }
+  openDashboard({ onScan: () => resetToUpload(), name: displayName(user.email) });
+});
+
+// First name from an email address, for the greeting. "nikau.robertson@" gives
+// "Nikau". Anything that does not look like a name is dropped rather than
+// guessed at — the greeting reads fine without one.
+function displayName(email: string | undefined): string | null {
+  const local = (email ?? "").split("@")[0];
+  const first = local.split(/[._\-+0-9]+/).filter(Boolean)[0];
+  if (!first || first.length < 2 || first.length > 20) return null;
+  return first[0].toUpperCase() + first.slice(1).toLowerCase();
+}
 
 // ---- camera ----
 let cam: CameraHandle | null = null;
 let lastCheck: FrameCheck | null = null;
+let autoFront: AutoCapture | null = null;
+let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 // Wall clock until which the opening capture instruction stays put.
 let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
@@ -258,7 +346,9 @@ async function openCamera(): Promise<void> {
         // — is the only chance to ask about them, and a hint that is replaced
         // on the very next frame is a hint nobody reads. The lamp underneath
         // is already live, so nothing is being hidden.
-        if (performance.now() >= holdHintUntil) {
+        // Not while the countdown owns the hint — it has just written it, and
+        // the two would flash against each other every frame.
+        if (performance.now() >= holdHintUntil && !autoFront?.armed()) {
           el.camHintTitle.textContent = c.hint;
           el.camHintDetail.textContent = c.detail;
         }
@@ -274,8 +364,37 @@ async function openCamera(): Promise<void> {
         el.btnNoGlasses.classList.toggle("hidden", c.hint !== "Take your glasses off");
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
+        autoFront?.update(c.ready);
       },
     });
+    // The front gets the same hands-off shutter as the side. It matters less
+    // here — you can see the screen — but a photo taken while reaching for a
+    // button is a photo that moved, and that is true of both views.
+    autoFront = createAutoCapture({
+      onTick: (remaining) => {
+        if (remaining == null) {
+          el.camHint.classList.remove("counting");
+          el.btnCamera.textContent = "Capture";
+          return;
+        }
+        el.camHint.classList.add("counting");
+        el.camHintTitle.textContent = `Hold still · ${remaining}`;
+        el.camHintDetail.textContent = "Taking it automatically · space to take it now";
+        el.btnCamera.textContent = `Capturing in ${remaining}`;
+      },
+      onFire: () => el.btnCamera.click(),
+    });
+    // Space or Enter fires the shutter now instead of waiting out the count.
+    frontKeyHandler = (e: KeyboardEvent) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (t?.tagName === "BUTTON" && t.id !== "btn-camera") return;
+      if (!cam || !lastCheck?.ready) return;
+      e.preventDefault();
+      el.btnCamera.click();
+    };
+    window.addEventListener("keydown", frontKeyHandler);
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
     // Headline and hints collapse so the preview can take the space — the
@@ -302,6 +421,12 @@ async function openCamera(): Promise<void> {
 // was, celebrity reel and all. Shared by capture and cancel so the two can
 // never drift apart and leave the page half in camera mode.
 async function closeCamera(): Promise<void> {
+  autoFront?.cancel();
+  autoFront = null;
+  if (frontKeyHandler) {
+    window.removeEventListener("keydown", frontKeyHandler);
+    frontKeyHandler = null;
+  }
   cam?.stop();
   cam = null;
   lastCheck = null;
@@ -321,11 +446,14 @@ async function closeCamera(): Promise<void> {
 
 el.btnCamera.addEventListener("click", async () => {
   if (!cam) {
-    await openCamera();
+    ensureSex(() => void openCamera());
     return;
   }
   if (!lastCheck?.ready) return;
   const shot = cam.capture();
+  // Remember that the front came from the camera, so the side step defaults to
+  // the camera too rather than making the user switch capture method mid-flow.
+  captureMethod = "camera";
   await closeCamera();
   if (shot) await handleCanvas(shot);
 });
@@ -374,6 +502,8 @@ async function handleFile(file: File): Promise<void> {
     el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
     return;
   }
+  // An uploaded front means the side step should ask for a file too.
+  captureMethod = "upload";
   let image;
   try {
     image = await loadImage(file);
@@ -513,10 +643,11 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
       el.photoCanvas.width = t.width;
       el.photoCanvas.height = t.height;
       el.photoCanvas.getContext("2d")!.drawImage(t, 0, 0);
-      // The profile gets its own reveal: the thirteen verified points, dropped
-      // in one at a time. Without this the side half of the scan was a photo
+      // The profile gets its own reveal: a synthesised mesh sweeping the face,
+      // matched to the front scan's density, with the thirteen measured anchors
+      // lighting up on top. Without this the side half of the scan was a photo
       // sitting still while the text claimed it was being measured.
-      if (lastSide) revealSidePoints(el.overlayCanvas, lastSide.points, t.width, t.height);
+      if (lastSide) revealSideScan(el.overlayCanvas, lastSide.points, t.width, t.height);
     } else {
       el.photoCanvas.width = width;
       el.photoCanvas.height = height;
@@ -546,6 +677,23 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
   const delta = compareAndStore(report);
+
+  // Keep a thumbnail of each view against this scan, keyed by the log entry's
+  // own date so the two cannot drift. Thumbnails only — see engine/photoStore.
+  // Fire-and-forget: a storage failure must never interrupt a finished
+  // analysis, and the report does not depend on it.
+  void (async () => {
+    const log = readHistory(report.sex);
+    const date = log[log.length - 1]?.date;
+    if (!date) return;
+    const frontThumb = toThumb(frontShot);
+    const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
+    await savePhotos(date, {
+      front: frontThumb ?? undefined,
+      side: sideThumb ?? undefined,
+    });
+    await pruneTo(readAllHistory().map((s) => s.date));
+  })();
 
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "ANALYZED";
@@ -611,47 +759,13 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   exposeDev(report, landmarks, quality);
 }
 
-// Drop the verified profile points in one by one, in reading order down the
-// face, so the side view visibly gets measured rather than just displayed.
-function revealSidePoints(
-  canvas: HTMLCanvasElement,
-  points: SidePoints,
-  w: number,
-  h: number,
-): void {
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d")!;
-  const pts = Object.values(points).sort((a, b) => a.y - b.y);
-  const r = Math.max(3, w / 130);
-  const total = 900;
-  const start = performance.now();
-  const frame = (now: number) => {
-    const t = Math.min(1, (now - start) / total);
-    ctx.clearRect(0, 0, w, h);
-    const shown = Math.ceil(t * pts.length);
-    for (let i = 0; i < shown; i++) {
-      const p = pts[i];
-      // The newest point lands slightly large and settles, so the eye catches
-      // which one just arrived.
-      const age = Math.min(1, (t * pts.length - i) * 2.2);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * (1 + (1 - age) * 0.9), 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(143,243,224,${0.35 + age * 0.55})`;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(4,53,45,0.85)";
-      ctx.lineWidth = Math.max(1, r * 0.32);
-      ctx.stroke();
-    }
-    if (t < 1) requestAnimationFrame(frame);
-  };
-  requestAnimationFrame(frame);
-}
-
 function startSide(): void {
   el.main.classList.add("hidden");
   openSideCapture({
     sex: selectedSex,
+    // Carry the front's capture method so the side does not make the user
+    // switch: camera stays camera, upload stays upload.
+    method: captureMethod ?? undefined,
     // There is no "back to results" any more, because there are no results yet.
     // The only way out of this step is forward, or starting over.
     onBack: () => resetToUpload(),

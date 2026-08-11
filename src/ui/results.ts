@@ -10,6 +10,7 @@ import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
 import { animateMeasurement, transitionMeasurement } from "./measureOverlay.ts";
 import type { OverlayFade } from "./measureOverlay.ts";
+import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite, typewriteBlock } from "./typewriter.ts";
@@ -56,6 +57,44 @@ export function renderResults(c: Ctx): void {
   shownRegion = null;
   const tabs = document.createElement("div");
   tabs.className = "rtabs";
+
+  // The Side tab is gone from this row: it is not a ninth region, it is the
+  // other half of the scan, and burying it among eight regions made a quarter
+  // of the score and fifteen measurements read as a footnote. It is now the
+  // toggle under the photograph.
+  const toggle = document.getElementById("view-toggle");
+  if (toggle) {
+    toggle.classList.toggle("hidden", !c.sideReport);
+    for (const b of toggle.querySelectorAll<HTMLButtonElement>(".vt-btn")) {
+      b.onclick = () => select(b.dataset.view === "side" ? "side" : "overall");
+    }
+  }
+
+  c.analysis.innerHTML = "";
+  c.analysis.appendChild(tabs);
+  const body = document.createElement("div");
+  body.id = "body";
+  c.analysis.appendChild(body);
+  tabView = "front";
+  buildTabs("front");
+  select("overall");
+}
+
+// Which half of the scan the tab row is currently describing.
+let tabView: "front" | "side" = "front";
+
+// The tab row belongs to the view, not to the report.
+//
+// It used to be built once, from the front regions, and stayed that way when
+// you switched to the profile — so the side had eight tabs across the top that
+// all took you back to the front photograph, and its own fifteen measurements
+// were stacked into one scrolling body underneath. The profile has regions of
+// its own; they should be reachable the same way the front's are.
+function buildTabs(view: "front" | "side"): void {
+  if (!ctx) return;
+  const tabs = ctx.analysis.querySelector<HTMLElement>(".rtabs");
+  if (!tabs) return;
+  tabs.innerHTML = "";
   const mk = (label: string, id: string) => {
     const b = document.createElement("button");
     b.className = "rtab";
@@ -64,17 +103,16 @@ export function renderResults(c: Ctx): void {
     b.onclick = () => select(id);
     tabs.appendChild(b);
   };
+  if (view === "side" && ctx.sideReport) {
+    mk("Profile", "side");
+    for (const r of ctx.sideReport.regions) {
+      if (r.metrics.length) mk(REGION_NAMES[r.region], `side:${r.region}`);
+    }
+    return;
+  }
   mk("Overall", "overall");
-  for (const r of c.report.regions) mk(REGION_NAMES[r.region], r.region);
-  if (c.sideReport) mk("Side", "side");
+  for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
   mk("Plan →", "improve");
-
-  c.analysis.innerHTML = "";
-  c.analysis.appendChild(tabs);
-  const body = document.createElement("div");
-  body.id = "body";
-  c.analysis.appendChild(body);
-  select("overall");
 }
 
 // Overall, front and side side by side, so the merge is legible: two views went
@@ -105,15 +143,29 @@ function viewCards(r: Report): string {
 function select(id: string): void {
   if (!ctx) return;
   stopTypewriter();
+  const onSide = id === "side" || id.startsWith("side:");
+  // Swap the tab row before marking one selected, or the mark lands on buttons
+  // that are about to be thrown away.
+  const view = onSide ? "side" : "front";
+  if (view !== tabView) {
+    tabView = view;
+    buildTabs(view);
+  }
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
   }
   // The photo pane follows the tab: the side numbers next to the front
   // photograph would be describing a picture that is not on screen.
-  showPhoto(id === "side" ? "side" : "front");
+  showPhoto(onSide ? "side" : "front");
+  // Keep the view toggle in step, however the view was reached — a region tab,
+  // the Plan, or the toggle itself.
+  for (const b of document.querySelectorAll<HTMLButtonElement>("#view-toggle .vt-btn")) {
+    b.classList.toggle("on", (b.dataset.view === "side") === onSide);
+  }
   if (id === "overall") showOverall();
   else if (id === "improve") showImprove();
   else if (id === "side") showSide();
+  else if (onSide) showSideRegion(id.slice(5) as RegionId);
   else showRegion(id as RegionId);
 }
 
@@ -197,17 +249,118 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
 // The side view, inside the tabbed report rather than as a separate screen.
 function showSide(): void {
   if (!ctx?.sideReport) return;
+  calmSide();
+  renderSideInto(body(), ctx.sideReport);
+  wireSideMeasurementTaps(ctx.sideReport);
+}
+
+// One region of the profile, reached from the side-specific tab row. Same shape
+// as a front region tab — measurements, comparisons, population position — with
+// no zoom, because the side view has no landmark mesh to re-light.
+function showSideRegion(id: RegionId): void {
+  if (!ctx?.sideReport) return;
+  const report = ctx.sideReport;
+  const r = report.regions.find((x) => x.region === id);
+  if (!r) return select("side");
+  calmSide();
+
+  body().innerHTML = `
+    <div class="reveal">
+      ${sideRegionDeck(r, report)}
+      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>${curveSVG(r.percentile, `region:${id}`, report.sex, true)}
+        ${curveLegend()}
+        <p class="rarity">${rarityLine(r)}</p></div>
+    </div>`;
+
+  revealBars();
+  wireSideMeasurementTaps(report);
+}
+
+// The resting state of any side tab: no zoom, no front mesh, just the thirteen
+// points where they were verified.
+function calmSide(): void {
+  if (!ctx) return;
   // Deliberately NOT setZoom(null): that draws the front mesh (ctx.landmarks,
-  // at front photoW/photoH) onto the overlay, and over the side photograph
-  // that lands as a dense cloud of points nowhere near the face. Instead draw
-  // the thirteen points the user actually verified, in the side photo's own
-  // pixel space, so the tab shows the placement they confirmed.
+  // at front photoW/photoH) onto the overlay, and over the side photograph that
+  // lands as a dense cloud of points nowhere near the face.
   transition?.cancel();
   transition = null;
   shownRegion = null;
   ctx.zoomable.style.transform = "none";
   drawSidePoints();
-  renderSideInto(body(), ctx.sideReport);
+}
+
+function revealBars(): void {
+  setTimeout(
+    () =>
+      document
+        .querySelectorAll<HTMLElement>(".rangebar i")
+        .forEach((i) => (i.style.left = `${i.dataset.l}%`)),
+    120,
+  );
+}
+
+// Hover a side measurement row → draw that measurement's real construction on
+// the profile photo, the same credibility gesture the front regions have. The
+// calm state is the thirteen verified points; leaving a row returns to them.
+let sideActive: string | null = null;
+let sidePinned: string | null = null;
+let sideFade: OverlayFade | null = null;
+function wireSideMeasurementTaps(report: Report): void {
+  if (!ctx?.sidePoints || !ctx.sidePhoto) return;
+  const pts = ctx.sidePoints;
+  const w = ctx.sidePhoto.width;
+  const h = ctx.sidePhoto.height;
+  const metrics = report.regions.flatMap((r) => r.metrics);
+  sideActive = null;
+  sidePinned = null;
+  sideFade?.cancel();
+  sideFade = null;
+
+  const hints = Array.from(document.querySelectorAll<HTMLElement>(".side-tap-hint"));
+  const setHints = (name: string | null, pinned: boolean) => {
+    for (const hint of hints) {
+      hint.classList.toggle("on", !!name);
+      hint.innerHTML = name
+        ? `<i>◱</i>Drawing <b>${name}</b>${pinned ? " (click again to release)" : ""}`
+        : `<i>◱</i>Hover a measurement to draw it on your profile`;
+    }
+  };
+
+  const show = (id: string | null) => {
+    if (!ctx || id === sideActive) return;
+    sideActive = id;
+    const metric = id ? metrics.find((m) => m.def.id === id) : null;
+    for (const other of document.querySelectorAll(".metric[data-side-metric]")) {
+      other.classList.toggle("active", (other as HTMLElement).dataset.sideMetric === id);
+    }
+    setHints(metric?.def.name ?? null, sidePinned === id && !!id);
+    sideFade?.cancel();
+    if (metric) {
+      sideFade = animateSideMeasurement(ctx.overlay, pts, w, h, metric);
+    } else {
+      drawSidePoints();
+    }
+  };
+
+  for (const row of document.querySelectorAll<HTMLElement>(".metric[data-side-metric]")) {
+    const id = row.dataset.sideMetric!;
+    if (!hasSideOverlay(id)) continue;
+    row.onpointerenter = (e) => {
+      if (e.pointerType === "touch") return;
+      show(id);
+    };
+    row.onpointerleave = (e) => {
+      if (e.pointerType === "touch") return;
+      show(sidePinned);
+    };
+    row.onclick = () => {
+      sidePinned = sidePinned === id ? null : id;
+      show(sidePinned ?? id);
+      const m = metrics.find((x) => x.def.id === id);
+      setHints(m?.def.name ?? null, sidePinned === id);
+    };
+  }
 }
 
 // The verified side points on the overlay, sized to the side photo so pixel
@@ -360,6 +513,7 @@ function showOverall(): void {
 // see which measurement did it.
 function renderSideInto(host: HTMLElement, report: Report): void {
   const regions = report.regions.filter((r) => r.metrics.length);
+  const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
 
   host.innerHTML = `
     <div class="reveal">
@@ -368,51 +522,113 @@ function renderSideInto(host: HTMLElement, report: Report): void {
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
         <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
       </div>
-      <p class="viewnote">Measured from the thirteen points you verified. Chin projection, jaw
-        angle and facial convexity have no front-view equivalent, which is why the profile is
-        taken at all, and the placement of those points is why it is capped at a quarter of
-        the total.
-        ${ctx?.onRedoSide ? `<button class="linkish" id="side-redo">Re-verify the landmarks</button>` : ""}</p>
+      ${provenance(measured)}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
-      ${regions
-        .map((r) => {
-          // Same comparison card the front regions carry, and wrapped for the
-          // same reason: a reference lookup must never be able to blank the
-          // measurements it sits beside.
-          let matches: ReturnType<typeof regionMatches> = [];
-          try {
-            matches = regionMatches(r.region, r.metrics, report.sex);
-          } catch (err) {
-            console.error("celebrity match failed", err);
-          }
-          return `<div class="deck">
-        <div class="dcard">
-          <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
-          ${r.metrics
-            .map(
-              (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
-            <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-            <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
-            )
-            .join("")}
-        </div>
-        <div class="dcard">
-          <h3>Notable comparisons<em>REFERENCE</em></h3>
-          ${celebCard(matches)}
-        </div>
-      </div>`;
-        })
-        .join("")}
+      ${regions.map((r) => sideRegionDeck(r, report)).join("")}
+      ${sideNav()}
     </div>`;
 
-  setTimeout(
-    () => host.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
-    120,
-  );
-  const redo = document.getElementById("side-redo");
-  if (redo) redo.onclick = () => ctx?.onRedoSide?.();
+  revealBars();
+  wireSideNav();
+}
+
+// Where the profile's numbers came from, said in three figures.
+//
+// This is the one block on the report that has no front-view equivalent, and it
+// exists because the two halves are NOT the same kind of measurement. The front
+// is 478 points the detector placed and nobody checked. The profile is thirteen
+// points a person dragged into position by hand — which is both why it can
+// measure things the front cannot, and why it is capped at a quarter of the
+// total. Saying that in a paragraph made it read as a disclaimer; as three
+// numbers it reads as what it is, which is the method.
+function provenance(measured: number): string {
+  return `<div class="sideprov">
+    <div><b>13</b><span>POINTS · PLACED BY HAND</span></div>
+    <div><b>${measured}</b><span>MEASUREMENTS · NO FRONT EQUIVALENT</span></div>
+    <div><b>25%</b><span>CAP ON THE OVERALL SCORE</span></div>
+  </div>`;
+}
+
+// The profile's own version of the actions under the front's Overall tab. It
+// had none: the only way on from here was the view toggle, and the only way to
+// fix a mis-dragged point was a link buried mid-paragraph.
+//
+// Same shape as the front row, because the destinations are the same shape —
+// but every action is the profile's. "New photo" becomes two, because on this
+// half of the scan there are two quite different things wrong you might be
+// trying to fix, and one of them is much cheaper: the photograph is usually
+// fine and it is the points that missed.
+function sideNav(): string {
+  const redo = ctx?.onRedoSide
+    ? `<button class="btn gho" id="sn-redo">Re-verify the points</button>`
+    : "";
+  const retake = ctx?.onSideProfile
+    ? `<button class="btn gho" id="sn-retake">Retake profile</button>`
+    : "";
+  return `<div class="navrow">${redo}
+      <button class="btn pri" id="sn-plan">See your plan</button></div>
+    <div class="navrow">${retake}
+      <button class="btn gho" id="sn-share">Share card</button></div>
+    ${hasHistory() ? `<button class="hist-entry" id="sn-history">View all your scans →</button>` : ""}`;
+}
+
+function wireSideNav(): void {
+  const on = (id: string, fn: () => void) => {
+    const b = document.getElementById(id);
+    if (b) b.onclick = fn;
+  };
+  on("sn-redo", () => ctx?.onRedoSide?.());
+  on("sn-retake", () => ctx?.onSideProfile?.());
+  on("sn-plan", () => select("improve"));
+  on("sn-history", () => openHistory());
+  on("sn-share", async () => {
+    if (!ctx) return;
+    // photo-canvas is showing the PROFILE while this tab is open, so the card
+    // that goes out is the profile with the merged score on it — not the front
+    // photograph relabelled.
+    const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
+    const card = await renderShareCard(ctx.report, photo);
+    await shareCard(card, ctx.report.overall);
+  });
+}
+
+// One profile region: its measurements beside its comparisons. Shared by the
+// profile overview, which stacks every region, and by the per-region side tabs,
+// which show one — so the two can never drift apart in what a side region looks
+// like or in which measurements are drawable.
+function sideRegionDeck(r: RegionScore, report: Report): string {
+  // Same comparison card the front regions carry, and wrapped for the same
+  // reason: a reference lookup must never be able to blank the measurements it
+  // sits beside.
+  let matches: ReturnType<typeof regionMatches> = [];
+  try {
+    matches = regionMatches(r.region, r.metrics, report.sex);
+  } catch (err) {
+    console.error("celebrity match failed", err);
+  }
+  return `<div class="deck">
+    <div class="dcard">
+      <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+      ${r.metrics
+        .map(
+          (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
+        <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+        <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+        )
+        .join("")}
+      ${
+        r.metrics.some((mm) => hasSideOverlay(mm.def.id))
+          ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover a measurement to draw it on your profile</button>`
+          : ""
+      }
+    </div>
+    <div class="dcard">
+      <h3>Notable comparisons<em>REFERENCE</em></h3>
+      ${celebCard(matches)}
+    </div>
+  </div>`;
 }
 
 // One renderer for the comparison card, so the front regions and the profile
@@ -421,11 +637,15 @@ function celebCard(matches: ReturnType<typeof regionMatches>): string {
   if (!matches.length) {
     return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point: a flattering comparison you did not earn would make every other number worth less.</p>`;
   }
+  // No sigma column. "Δ 0.03σ" is the distance between two z-scores, which is
+  // the correct way to pick these matches and a meaningless thing to show
+  // someone: nobody reads it, and the few who try will misread it as a score.
+  // The claim the card makes is "your jaw measures like his", and the metric
+  // name under the name is the whole of that claim.
   return matches
     .map(
       (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
-        <div class="nm">${m.name}<span>${m.metricName}</span></div>
-        <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
+        <div class="nm">${m.name}<span>${m.metricName}</span></div></div>`,
     )
     .join("");
 }
@@ -573,6 +793,33 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     }
     setHint(metric ?? null, pinnedMetric === id && !!id);
     fade?.cancel();
+
+    // A merged report puts the side metrics in their anatomical region, so the
+    // Jaw tab lists gonial angle and ramus:mandible next to the front ones.
+    // Those are measured from the thirteen profile points, which have no
+    // position in the front photograph — so hovering them used to light a
+    // generic cluster of jaw landmarks and print the number next to it, which
+    // shows nothing and explains nothing.
+    //
+    // They have a real construction, it is just on the other photo. So the pane
+    // switches to the profile and draws the actual angle there, the same as the
+    // Side tab does. The measurement is the thing being sold; showing it on the
+    // wrong face was worse than not showing it.
+    const onSide =
+      metric && hasSideOverlay(metric.def.id) && ctx.sidePoints && ctx.sidePhoto;
+    if (onSide && ctx.sidePhoto && ctx.sidePoints) {
+      showPhoto("side");
+      fade = animateSideMeasurement(
+        ctx.overlay,
+        ctx.sidePoints,
+        ctx.sidePhoto.width,
+        ctx.sidePhoto.height,
+        metric,
+      );
+      return;
+    }
+    showPhoto("front");
+
     // Arriving at a measurement DRAWS IT ON — the lines extend along their own
     // paths, which is the thing worth watching. Leaving it cross-fades back to
     // the calm region instead, because a region outline has no natural

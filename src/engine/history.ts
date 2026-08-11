@@ -2,7 +2,14 @@ import type { RegionId, Report, Sex } from "./types.ts";
 
 // Device-local scan history (localStorage) — powers week-over-week deltas and
 // the history view with no accounts and no backend. A capped log of scans is
-// kept per sex; only the numbers are stored, never the photograph.
+// kept per sex, and it holds only numbers.
+//
+// Thumbnails of the photographs live separately, in IndexedDB, keyed by the
+// same scan date — see engine/photoStore.ts for why they are stored at all and
+// what that does and does not change about the privacy promise. Keeping them
+// out of this file is deliberate: the log stays small, synchronous and cheap to
+// read on every scan, and anything that clears the images cannot corrupt the
+// numbers.
 
 export interface StoredScan {
   date: string; // ISO

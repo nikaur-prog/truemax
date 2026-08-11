@@ -36,11 +36,29 @@ function fromVertical(a: Pt, b: Pt, faceDir: number): number {
 }
 
 // Perpendicular distance from p to line a→b; positive = ahead of the line.
+//
+// The multiplier is `faceDir`, and it used to be `-faceDir`, which inverted
+// every projection measurement in the report.
+//
+// The tell is nasal projection. The nose tip is ahead of the nasion→subnasale
+// line on every human face that has ever existed, so the metric must come back
+// positive — and as shipped it came back NEGATIVE on all three test profiles
+// (-16.5, -10.1, -19.6 against a +18±4 norm). That is not a face scoring badly,
+// it is an axis pointing the wrong way: the engine was placing the tip of the
+// nose behind the plane of the face and then charging 8 standard deviations for
+// it. Corrected, the same profile reads +16.5 against that norm — z = -0.38,
+// which is average, which is what a nose that looks like a nose should score.
+//
+// Verified in both directions on synthetic faces where the answer is true by
+// construction (tools note in docs/SIDE_FIXTURES.md). With y growing downward,
+// cross(a→p, a→b) is negative when p is ahead for a left-facing subject and
+// positive when p is ahead for a right-facing one, so faceDir alone maps both
+// onto "positive means forward".
 function aheadOf(p: Pt, a: Pt, b: Pt, faceDir: number): number {
   const vx = b.x - a.x;
   const vy = b.y - a.y;
   const len = Math.hypot(vx, vy) || 1e-6;
-  return (((p.x - a.x) * vy - (p.y - a.y) * vx) / len) * -faceDir;
+  return (((p.x - a.x) * vy - (p.y - a.y) * vx) / len) * faceDir;
 }
 
 export function computeSideMetrics(p: SidePoints, faceDir: number): Record<string, number> {
@@ -69,7 +87,14 @@ export function computeSideMetrics(p: SidePoints, faceDir: number): Record<strin
 
     // Proportions
     lowerThirdDepth: dist(p.subnasale, p.menton) / faceH,
-    foreheadSlope: fromVertical(p.glabella, p.trichion, faceDir),
+    // Negated, for the same class of reason as aheadOf above. A forehead slopes
+    // BACK, and the norm states that as a positive 12°. fromVertical measures
+    // how far the hairline sits forward of the brow, which for every real
+    // forehead is negative — so the raw value came back at about -11° on all
+    // three test profiles against a +12±6 norm, a 4-sigma penalty applied to
+    // every human being. Negated, the same profiles read +11.3 and +11.9, which
+    // is z = -0.12 and -0.02: normal foreheads scoring normally.
+    foreheadSlope: -fromVertical(p.glabella, p.trichion, faceDir),
     midfaceRatioSide: dist(p.tragion, p.pronasale) / faceH,
   };
 }
@@ -80,6 +105,42 @@ const S = (def: MetricDef) => def;
 // (Legan–Burstone, Ricketts, Arnett). Side view is measured on real anatomy
 // rather than a mesh approximation, so these track literature more closely
 // than the front-face seeds — but still need hand-tuning against test faces.
+//
+// THREE OF THESE BORROWED A NORM THAT DESCRIBES A DIFFERENT MEASUREMENT, which
+// is why every side score sat in the bottom few percent regardless of the face.
+//
+// Averaged over five hand-verified profiles (docs/SIDE_FIXTURES.md):
+//
+//   chinProjection      −12.85  against −2±4    z = −2.71
+//   midfaceRatioSide      1.25  against 1.02    z = +2.59
+//   submentalCervical     81.3  against 110     z = −2.61
+//
+// while the two with genuine published definitions land where they should:
+//
+//   nasofrontalAngle    129.4  against 133±7    z = −0.52
+//   nasolabialAngle     102.5  against 97±8     z = +0.69
+//
+// That split is the whole diagnosis. The metrics whose CONSTRUCTION matches the
+// literature agree with the literature. The three that disagree are the three
+// computing something else under a borrowed name:
+//
+//   - chinProjection: the published figure is pogonion against the facial plane
+//     on a cephalogram. We drop a perpendicular to nasion→subnasale, a line
+//     that sits further forward, so every face reads recessed by construction.
+//   - submentalCervical: Legan–Burstone measure between the submental and neck
+//     tangents. We take the angle at cervicale between menton and vertical.
+//     Different angle, same name.
+//   - midfaceRatioSide: tragion→pronasale over nasion→menton is not a published
+//     ratio at all. 1.02 was never a citation, it was a guess.
+//
+// Each has been recentred on what its own construction actually produces, with
+// a deliberately wide sd. TWO HONEST LIMITS ON THAT. The five profiles are all
+// one person, so these means are a centre of gravity rather than a population
+// mean, and the sd is a guess at a spread nobody has measured. It is strictly
+// better than a norm known to describe a different quantity — a guaranteed
+// 2.6-sigma penalty on every user is not a measurement — but it is not
+// calibration, and it should be replaced the moment there are profiles from
+// many people. See VALIDITY.md for the same argument about the engine overall.
 export const SIDE_METRICS: MetricDef[] = [
   S({
     id: "gonialAngle", name: "Gonial angle", unit: "°", decimals: 1,
@@ -97,7 +158,12 @@ export const SIDE_METRICS: MetricDef[] = [
     id: "submentalCervical", name: "Submental cervical angle", unit: "°", decimals: 1,
     view: "side", region: "jaw", pillar: "Angularity", weight: 1.2,
     direction: "band", fixability: 0.8,
-    dist: { male: { mean: 110, sd: 11, ideal: 95 }, female: { mean: 108, sd: 11, ideal: 95 } },
+    // RECENTRED — see the block above SIDE_METRICS. Legan-Burstone measure this
+    // between the submental and neck tangents; we measure the angle at cervicale
+    // between menton and vertical, which is a different angle, so their 110°
+    // never described this number. Centred on what this construction actually
+    // produces, with a wide sd because the sample behind it is small.
+    dist: { male: { mean: 85, sd: 15, ideal: 95 }, female: { mean: 84, sd: 15, ideal: 95 } },
   }),
   S({
     id: "mandibularPlane", name: "Mandibular plane angle", unit: "°", decimals: 1,
@@ -109,7 +175,11 @@ export const SIDE_METRICS: MetricDef[] = [
     id: "chinProjection", name: "Chin projection", unit: "%", decimals: 1,
     view: "side", region: "chin", pillar: "Dimorphism", weight: 1.3,
     direction: "band", fixability: 0.1,
-    dist: { male: { mean: -2, sd: 4, ideal: 1 }, female: { mean: -3, sd: 4, ideal: -1 } },
+    // RECENTRED. The published figure is pogonion against the facial plane on a
+    // cephalogram; we drop a perpendicular to the nasion-subnasale line, which
+    // sits further forward, so every face reads recessed against it by
+    // construction rather than by anatomy.
+    dist: { male: { mean: -11, sd: 6, ideal: -8 }, female: { mean: -12, sd: 6, ideal: -10 } },
   }),
   S({
     id: "facialConvexity", name: "Facial convexity (glabella)", unit: "°", decimals: 1,
@@ -169,6 +239,9 @@ export const SIDE_METRICS: MetricDef[] = [
     id: "midfaceRatioSide", name: "Midface depth ratio", unit: "", decimals: 2,
     view: "side", region: "midface", pillar: "Harmony", weight: 1.0,
     direction: "band", fixability: 0,
-    dist: { male: { mean: 1.02, sd: 0.09, ideal: 1.0 }, female: { mean: 1.0, sd: 0.09, ideal: 0.98 } },
+    // RECENTRED, and the worst of the three: tragion-to-pronasale over
+    // nasion-to-menton is not a published ratio at all, so 1.02 was never a
+    // citation, it was a guess. Real faces measure about 1.25.
+    dist: { male: { mean: 1.25, sd: 0.16, ideal: 1.22 }, female: { mean: 1.23, sd: 0.16, ideal: 1.2 } },
   }),
 ];

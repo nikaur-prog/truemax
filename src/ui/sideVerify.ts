@@ -114,24 +114,25 @@ function foregroundMask(canvas: HTMLCanvasElement): Mask {
   return { fg, w, h };
 }
 
-// Anchors as fractions of HEAD height. The original table was in FRAME
-// fractions, which only lands correctly when the head happens to fill the frame
-// from 16% to 86% and puts every point somewhere else otherwise. Insets — how
-// far in from the silhouette edge a point sits — are in head heights too.
+// Anchors for the NINE front points, as fractions of HEAD height. The original
+// table was in FRAME fractions, which only lands correctly when the head happens
+// to fill the frame from 16% to 86% and puts every point somewhere else
+// otherwise. Insets — how far in from the silhouette edge a point sits — are in
+// head heights too.
+//
+// The four back points are no longer here. They are not on the silhouette and
+// they are not where an inset from it puts them; they come from the template
+// below, through placeBackPoints().
 const ANCHORS: Array<[SidePointId, number, number]> = [
-  ["trichion", 0.02, 0.0],
-  ["glabella", 0.30, 0.0],
-  ["nasion", 0.38, 0.02],
-  ["pronasale", 0.55, -0.01],
-  ["subnasale", 0.66, 0.03],
-  ["labialeSuperius", 0.72, 0.03],
-  ["labialeInferius", 0.80, 0.03],
-  ["pogonion", 0.92, 0.02],
-  ["menton", 0.99, 0.05],
-  ["gonion", 0.88, 0.42],
-  ["condylion", 0.48, 0.48],
-  ["cervicale", 1.06, 0.22],
-  ["tragion", 0.53, 0.42],
+  ["trichion", 0.0, 0.0],
+  ["glabella", 0.20, 0.0],
+  ["nasion", 0.31, 0.02],
+  ["pronasale", 0.50, -0.01],
+  ["subnasale", 0.58, 0.03],
+  ["labialeSuperius", 0.65, 0.03],
+  ["labialeInferius", 0.79, 0.03],
+  ["pogonion", 0.94, 0.02],
+  ["menton", 1.0, 0.05],
 ];
 
 // No usable silhouette: lay the same anchors over a head box occupying the
@@ -144,6 +145,8 @@ function centredSeed(w: number, h: number): { points: SidePoints; faceDir: numbe
   for (const [id, f, inset] of ANCHORS) {
     points[id] = { x: edge - inset * headH, y: top + f * headH };
   }
+  const frame = headFrame(points);
+  if (frame) placeBackPoints(points, frame, headWidthFrom(headH * 0.7, frame.vlen));
   return { points, faceDir: 1 };
 }
 
@@ -211,15 +214,6 @@ function seedFromLandmarks(
   const condylionId = near(127, 356);
 
   const menton = P(152);
-  const pogonion = P(175);
-  // The neck point has no landmark: it is below the jaw where the underside
-  // meets the throat. Placed by stepping down and back from the chin, which is
-  // the one point here the user will usually still need to nudge.
-  const faceH = Math.hypot(menton.x - P(168).x, menton.y - P(168).y) || 1;
-  const cervicale = {
-    x: menton.x - faceDir * faceH * 0.30,
-    y: menton.y + faceH * 0.24,
-  };
 
   const points: SidePoints = {
     trichion: P(10),
@@ -229,22 +223,256 @@ function seedFromLandmarks(
     subnasale: P(2),
     labialeSuperius: P(0),
     labialeInferius: P(17),
-    pogonion,
+    pogonion: P(175),
     menton,
+    // Overwritten immediately below. Kept in the literal so the object is a
+    // complete SidePoints and a missed point would be a type error, not a
+    // silent undefined that only shows up as a NaN in a jaw angle.
     gonion: P(gonionId),
     condylion: P(condylionId),
-    cervicale,
+    cervicale: menton,
     tragion: P(tragionId),
   };
+
+  // Head width from the oval point rather than the anatomy it is near. The mesh
+  // lands 234/454 at a consistent fraction of the way from the nose tip to the
+  // true ear canal — measured on a hand-corrected profile — and that fraction is
+  // a ratio of two depths, so it survives the yaw compression that scales both
+  // distances together. Everything behind the face is then placed from the
+  // template, in the head's own axes.
+  const f = headFrame(points);
+  if (f) {
+    const uOval = Math.abs(alongU(f, points.tragion.x, points.tragion.y) - f.uNose);
+    placeBackPoints(points, f, headWidthFrom(uOval / OVAL_DEPTH_FRACTION, f.vlen));
+  }
   return { points, faceDir };
 }
 
+// Where MediaPipe's widest face-oval landmark sits between the nose tip and the
+// ear canal, along the head's facing axis. Measured on set F: 0.607.
+const OVAL_DEPTH_FRACTION = 0.607;
+
+// ---------------------------------------------------------------------------
+// The shape template, and the sanity pass that uses it.
+//
+// Measured, not invented: these are the mean positions across hand-corrected
+// profiles (tools note in docs/SIDE_FIXTURES.md), expressed in a frame the
+// seeder can always rebuild — fx runs from the nose tip (0) toward the back of
+// the head in head-widths, fy from the hairline (0) to the chin (1) in head
+// heights.
+//
+// Refitted from sets E and F, the two collected AFTER the .vpoint offset bug was
+// fixed. The four earlier sets carried a documented rightward bias of 0.13-0.20
+// head-widths and are no longer part of the fit. E and F agree closely enough to
+// trust across two quite different poses — gonion at -0.898 and -0.896
+// head-widths, condylion fy at 0.364 and 0.377 — and they disagree with the old
+// numbers in exactly the direction the bias predicts.
+//
+// What this is FOR is the failure that keeps happening. Both seed paths can put
+// a single point somewhere absurd — a mesh landmark drifting onto the cheek, a
+// silhouette trace catching a door frame — and the two real examples were a lip
+// point 2.27 head-widths behind the ear and a neck point off the bottom of the
+// picture. A lone dot at the frame edge is easy to miss in the verifier, and it
+// then feeds a real measurement.
+//
+// So after seeding, the template is fitted to the points that agree with each
+// other and any point that disagrees violently is moved to where the template
+// says it belongs. The fit is Theil-Sen (median of pairwise slopes) precisely
+// because the thing being defended against is outliers: a least-squares fit
+// would be dragged by the very point it is meant to catch.
+// ---------------------------------------------------------------------------
+// The frame is the HEAD's own axes, not the image's. fu runs from the nose tip
+// (0) straight back to the ear canal (-1); fv runs from the hairline (0) down
+// the face axis, with the chin bottom just under 1. Both are perpendicular to
+// each other and both rotate with the head.
+//
+// That last part is the fix. The first version of this table was in image x and
+// y, which silently assumes the head is upright, and the moment someone shot a
+// profile lying back the ear and jaw corner rotated out from under it — the ear
+// came out a fifth of a head-width wrong on a photo where every front point was
+// right. In the head's own axes the same three fixtures agree three to four
+// times more closely: the ear's vertical spread across them falls from 0.164 to
+// 0.037.
+const TEMPLATE: Record<SidePointId, [number, number]> = {
+  trichion: [-0.159, 0.0],
+  glabella: [-0.111, 0.194],
+  nasion: [-0.136, 0.292],
+  pronasale: [0.0, 0.508],
+  subnasale: [-0.101, 0.575],
+  labialeSuperius: [-0.062, 0.651],
+  labialeInferius: [-0.096, 0.789],
+  pogonion: [-0.159, 0.942],
+  menton: [-0.305, 0.988],
+  gonion: [-0.940, 0.810],
+  condylion: [-0.927, 0.297],
+  cervicale: [-0.678, 0.969],
+  tragion: [-1.0, 0.435],
+};
+
+// Where pogonion sits on the head axis. The axis is defined by it, so this is
+// what converts the measured trichion-to-pogonion length back into a full
+// hairline-to-chin head height.
+const POGONION_V = TEMPLATE.pogonion[1];
+
+interface HeadFrame {
+  ox: number; oy: number; // origin: the hairline
+  ux: number; uy: number; // unit vector, pointing the way the face looks
+  vx: number; vy: number; // unit vector, hairline down to chin
+  uNose: number; // the nose tip's u coordinate, which is where fu = 0
+  vlen: number; // hairline to chin bottom, in pixels, along the axis
+}
+
+// The head's own axes, built from three points the detector places well.
+//
+// The axis runs trichion → POGONION rather than trichion → menton, which is the
+// obvious choice and the wrong one: menton is the point that projects forward
+// under yaw, it is one of the points being corrected here, and using it would
+// tilt the whole frame by the size of the error being fixed. Pogonion is a
+// midline point the mesh lands within 0.03 head-widths of.
+function headFrame(p: SidePoints): HeadFrame | null {
+  const dx = p.pogonion.x - p.trichion.x;
+  const dy = p.pogonion.y - p.trichion.y;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 1)) return null;
+  const vx = dx / len;
+  const vy = dy / len;
+  // Perpendicular, flipped if it came out pointing away from the nose, so the
+  // caller never has to hand in a facing direction and cannot get its sign
+  // wrong. That sign has been wrong here before.
+  let ux = vy;
+  let uy = -vx;
+  const uNose = (p.pronasale.x - p.trichion.x) * ux + (p.pronasale.y - p.trichion.y) * uy;
+  if (uNose < 0) {
+    ux = -ux;
+    uy = -uy;
+  }
+  return {
+    ox: p.trichion.x, oy: p.trichion.y,
+    ux, uy, vx, vy,
+    uNose: Math.abs(uNose),
+    vlen: len / POGONION_V,
+  };
+}
+
+// A point's coordinate along the facing axis, measured from the hairline.
+function alongU(f: HeadFrame, x: number, y: number): number {
+  return (x - f.ox) * f.ux + (y - f.oy) * f.uy;
+}
+
+// ---------------------------------------------------------------------------
+// The four points behind the face, plus menton's x.
+//
+// Neither seed path can find these by looking. The mesh has landmarks near them
+// and they are the WRONG landmarks: 234/454 is the widest point of the face
+// oval, which sits on the sideburn at about eye level, not in the ear canal, and
+// 127/356 is higher still on the temple. Measured against a hand-corrected set
+// the seeded ear came out 0.34 head-widths too far forward and 0.25 head-heights
+// too high, every time, and the jaw and neck followed it. The silhouette path
+// has the opposite problem: the ear and the jaw corner are not ON the outline at
+// all, so an inset from the edge was only ever a guess.
+//
+// Wrong in a fixed direction is the useful kind of wrong. These five sit at
+// stable places in the head's own frame — the two clean fixtures put gonion at
+// -0.898 and -0.896 head-widths — so they are placed from the template instead
+// of measured, and the user drags any that miss.
+//
+// menton is in the list because the chin's lowest point projects forward under
+// yaw — it was 0.15 head-widths ahead of where it belongs — and because the head
+// axis is taken from pogonion, so replacing menton outright cannot feed back
+// into the frame that placed it.
+// ---------------------------------------------------------------------------
+const BACK_POINTS: SidePointId[] = ["menton", "gonion", "condylion", "cervicale", "tragion"];
+
+function placeBackPoints(points: SidePoints, f: HeadFrame, headW: number): void {
+  for (const id of BACK_POINTS) {
+    const u = f.uNose + TEMPLATE[id][0] * headW;
+    const v = TEMPLATE[id][1] * f.vlen;
+    points[id] = {
+      x: f.ox + f.ux * u + f.vx * v,
+      y: f.oy + f.uy * u + f.vy * v,
+    };
+  }
+}
+
+// Head width — nose tip back to ear canal — from a rough estimate of it. Both
+// callers have something that scales with head width and neither has the width
+// itself; the clamp is against the estimator degenerating (a near-frontal mesh
+// puts the oval point almost on top of the nose, which would otherwise divide
+// out to an enormous head). The bounds are deliberately wide: they exist to
+// catch a broken measurement, not to argue with a real face.
+function headWidthFrom(estimate: number, headH: number): number {
+  return Math.max(headH * 0.3, Math.min(headH * 1.1, estimate));
+}
+
+function median(a: number[]): number {
+  const b = [...a].sort((x, y) => x - y);
+  const n = b.length;
+  return n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2;
+}
+
+// Robust 1-D fit of coord = origin + scale * feature.
+function theilSen(pairs: Array<[number, number]>): { scale: number; origin: number } | null {
+  const slopes: number[] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    for (let j = i + 1; j < pairs.length; j++) {
+      const df = pairs[i][0] - pairs[j][0];
+      // Points too close together on this axis turn a small coordinate error
+      // into a huge slope, so they do not get a vote.
+      if (Math.abs(df) < 0.12) continue;
+      slopes.push((pairs[i][1] - pairs[j][1]) / df);
+    }
+  }
+  if (slopes.length < 4) return null;
+  const scale = median(slopes);
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  return { scale, origin: median(pairs.map(([f, c]) => c - scale * f)) };
+}
+
+// How far a point may sit from its fitted position before it is treated as a
+// mis-seed. Deliberately loose: real faces differ, and this is here to catch
+// points that are wrong by a head, not points that are wrong by a nostril.
+const MAX_DX = 0.5; // head-widths
+const MAX_DY = 0.25; // head-heights
+
+function sanitizeSeed(
+  seed: { points: SidePoints; faceDir: number },
+  w: number,
+  h: number,
+): { points: SidePoints; faceDir: number } {
+  const { points, faceDir } = seed;
+  const ids = SIDE_POINTS.map((s) => s.id);
+  const fitY = theilSen(ids.map((id) => [TEMPLATE[id][1], points[id].y]));
+  const fitX = theilSen(ids.map((id) => [faceDir * TEMPLATE[id][0], points[id].x]));
+  if (!fitY || !fitX) return seed;
+
+  const out = { ...points } as SidePoints;
+  for (const id of ids) {
+    const ex = fitX.origin + fitX.scale * faceDir * TEMPLATE[id][0];
+    const ey = fitY.origin + fitY.scale * TEMPLATE[id][1];
+    const offFrame =
+      points[id].x < 0 || points[id].x > w || points[id].y < 0 || points[id].y > h;
+    if (
+      offFrame ||
+      Math.abs(points[id].x - ex) > fitX.scale * MAX_DX ||
+      Math.abs(points[id].y - ey) > fitY.scale * MAX_DY
+    ) {
+      out[id] = {
+        x: Math.max(2, Math.min(w - 2, ex)),
+        y: Math.max(2, Math.min(h - 2, ey)),
+      };
+    }
+  }
+  return { points: out, faceDir };
+}
+
 // Entry point. Real landmarks when the detector can still see the face, the
-// silhouette trace when it cannot.
+// silhouette trace when it cannot — and either way, the template pass above
+// catches any single point that came back somewhere impossible.
 export function seedSidePoints(
   canvas: HTMLCanvasElement,
 ): { points: SidePoints; faceDir: number } {
-  return seedFromLandmarks(canvas) ?? seedFromSilhouette(canvas);
+  const seed = seedFromLandmarks(canvas) ?? seedFromSilhouette(canvas);
+  return sanitizeSeed(seed, canvas.width, canvas.height);
 }
 
 // Fallback: trace the profile edge against the background, then place points at
@@ -337,8 +565,38 @@ export function seedFromSilhouette(
       y: (top / m.h) * h + f * headPx,
     };
   }
+
+  // The back of the skull is the one thing here that scales with head DEPTH, and
+  // unlike the ear it really is on the outline. Taken as the furthest the
+  // silhouette reaches away from the face across the cranial band — below the
+  // crown, above the neck — so a shoulder or a collar cannot claim it.
+  let back = faceDir === 1 ? m.w : 0;
+  for (let y = top + Math.round(headH * 0.15); y < top + Math.round(headH * 0.75); y++) {
+    const sp = rowSpan(y);
+    if (!sp) continue;
+    back = faceDir === 1 ? Math.min(back, sp[0]) : Math.max(back, sp[1]);
+  }
+  const backX = (back / m.w) * w;
+  const frame = headFrame(points);
+  if (frame) {
+    // This path lays its points out on image axes, so the frame it produces is
+    // upright and the horizontal distance to the back of the skull IS the depth.
+    placeBackPoints(
+      points,
+      frame,
+      headWidthFrom(Math.abs(points.pronasale.x - backX) * EAR_OVER_SKULL_DEPTH, frame.vlen),
+    );
+  }
   return { points, faceDir };
 }
+
+// Nose tip to ear canal, over nose tip to back of skull. Unlike
+// OVAL_DEPTH_FRACTION this one is not measured off a fixture — it comes from
+// published head depths (nose-to-tragion around 14cm against a nose-to-occiput
+// around 22cm) and is rounded down because hair adds to the back of the head and
+// nothing adds to the front. It only runs on the fallback path, which exists to
+// put the points somewhere sane for dragging rather than to be right.
+const EAR_OVER_SKULL_DEPTH = 0.6;
 
 export function mountVerifier(
   host: HTMLElement,
