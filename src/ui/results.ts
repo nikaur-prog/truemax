@@ -491,11 +491,15 @@ function celebCard(matches: ReturnType<typeof regionMatches>): string {
   if (!matches.length) {
     return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point: a flattering comparison you did not earn would make every other number worth less.</p>`;
   }
+  // No sigma column. "Δ 0.03σ" is the distance between two z-scores, which is
+  // the correct way to pick these matches and a meaningless thing to show
+  // someone: nobody reads it, and the few who try will misread it as a score.
+  // The claim the card makes is "your jaw measures like his", and the metric
+  // name under the name is the whole of that claim.
   return matches
     .map(
       (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
-        <div class="nm">${m.name}<span>${m.metricName}</span></div>
-        <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
+        <div class="nm">${m.name}<span>${m.metricName}</span></div></div>`,
     )
     .join("");
 }
@@ -643,6 +647,33 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     }
     setHint(metric ?? null, pinnedMetric === id && !!id);
     fade?.cancel();
+
+    // A merged report puts the side metrics in their anatomical region, so the
+    // Jaw tab lists gonial angle and ramus:mandible next to the front ones.
+    // Those are measured from the thirteen profile points, which have no
+    // position in the front photograph — so hovering them used to light a
+    // generic cluster of jaw landmarks and print the number next to it, which
+    // shows nothing and explains nothing.
+    //
+    // They have a real construction, it is just on the other photo. So the pane
+    // switches to the profile and draws the actual angle there, the same as the
+    // Side tab does. The measurement is the thing being sold; showing it on the
+    // wrong face was worse than not showing it.
+    const onSide =
+      metric && hasSideOverlay(metric.def.id) && ctx.sidePoints && ctx.sidePhoto;
+    if (onSide && ctx.sidePhoto && ctx.sidePoints) {
+      showPhoto("side");
+      fade = animateSideMeasurement(
+        ctx.overlay,
+        ctx.sidePoints,
+        ctx.sidePhoto.width,
+        ctx.sidePhoto.height,
+        metric,
+      );
+      return;
+    }
+    showPhoto("front");
+
     // Arriving at a measurement DRAWS IT ON — the lines extend along their own
     // paths, which is the thing worth watching. Leaving it cross-fades back to
     // the calm region instead, because a region outline has no natural

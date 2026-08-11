@@ -1,5 +1,19 @@
 # Side-profile ground truth
 
+> **These four sets carry a known rightward bias and should be re-collected.**
+> They were exported while `.vpoint` rendered its dot at the left edge of a
+> flex box containing the point's (invisible but still laid-out) label, so the
+> visible dot sat roughly 28 screen pixels LEFT of the coordinate it stored.
+> Everyone aiming the dot at their chin therefore stored a point to the right of
+> their chin. At the capture sizes used that is about 0.057 of image width, or
+> **0.13–0.20 head-widths**, and it varied per point because it depended on the
+> label's length.
+>
+> The template below is still fit for the job it does — `sanitizeSeed` only acts
+> on points more than 0.5 head-widths out, well past the bias — but the numbers
+> are not clean ground truth and should not be treated as such. Re-collect after
+> the fix and refit.
+
 Four profiles, thirteen points each, dragged into place by hand in the verifier
 and exported with the `?dev=1` "Copy points" button. Coordinates are normalised
 0..1 against the photo's own width and height. **No photographs are stored** —
