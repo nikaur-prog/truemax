@@ -105,6 +105,26 @@ const S = (def: MetricDef) => def;
 // (Legan–Burstone, Ricketts, Arnett). Side view is measured on real anatomy
 // rather than a mesh approximation, so these track literature more closely
 // than the front-face seeds — but still need hand-tuning against test faces.
+//
+// TWO OF THESE ARE MEASURABLY WRONG, and it is worth naming which rather than
+// leaving the next person to rediscover it. Across every hand-verified profile
+// measured so far (docs/SIDE_FIXTURES.md):
+//
+//   midfaceRatioSide   +2.7, +2.3, +2.5, +3.0   — every face, always high
+//   submentalCervical  −2.5, −3.5, −4.0, −1.9   — every face, always low
+//
+// A metric that scores four of four faces at three sigma is not describing four
+// unusual faces, it is describing a norm in the wrong place. midfaceRatioSide is
+// the clearer case: it is tragion→pronasale over nasion→menton, which is not a
+// standard cephalometric ratio at all, so its 1.02 mean was a guess rather than
+// a citation, and real faces land nearer 1.3.
+//
+// They are NOT corrected here, because the fix needs profiles from many people
+// and every fixture so far is one person. Setting a population mean from a
+// single face would replace a wrong number with a differently wrong number and
+// lose the evidence that it was wrong. Until then both quietly cost every user
+// roughly a point of side score. See VALIDITY.md for the same argument at the
+// level of the whole engine.
 export const SIDE_METRICS: MetricDef[] = [
   S({
     id: "gonialAngle", name: "Gonial angle", unit: "°", decimals: 1,

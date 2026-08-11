@@ -67,8 +67,19 @@ export function renderResults(c: Ctx): void {
   };
   mk("Overall", "overall");
   for (const r of c.report.regions) mk(REGION_NAMES[r.region], r.region);
-  if (c.sideReport) mk("Side", "side");
   mk("Plan →", "improve");
+
+  // The Side tab is gone from this row: it is not a ninth region, it is the
+  // other half of the scan, and burying it among eight regions made a quarter
+  // of the score and fifteen measurements read as a footnote. It is now the
+  // toggle under the photograph.
+  const toggle = document.getElementById("view-toggle");
+  if (toggle) {
+    toggle.classList.toggle("hidden", !c.sideReport);
+    for (const b of toggle.querySelectorAll<HTMLButtonElement>(".vt-btn")) {
+      b.onclick = () => select(b.dataset.view === "side" ? "side" : "overall");
+    }
+  }
 
   c.analysis.innerHTML = "";
   c.analysis.appendChild(tabs);
@@ -112,6 +123,11 @@ function select(id: string): void {
   // The photo pane follows the tab: the side numbers next to the front
   // photograph would be describing a picture that is not on screen.
   showPhoto(id === "side" ? "side" : "front");
+  // Keep the view toggle in step, however the view was reached — a region tab,
+  // the Plan, or the toggle itself.
+  for (const b of document.querySelectorAll<HTMLButtonElement>("#view-toggle .vt-btn")) {
+    b.classList.toggle("on", (b.dataset.view === "side") === (id === "side"));
+  }
   if (id === "overall") showOverall();
   else if (id === "improve") showImprove();
   else if (id === "side") showSide();
