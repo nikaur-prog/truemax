@@ -327,7 +327,17 @@ function drawHeadingArrow(
   cy: number,
   check: FrameCheck,
 ): void {
-  const { yaw, pitch } = check.pose;
+  // Only point where a gate is actually failing. The arrow used to draw off
+  // raw pose magnitude past a fixed 4-degree deadzone, but the pose gates are
+  // per-axis and their thresholds moved (pitch went to 20 once the guide was
+  // brought in line with what the analysis actually tolerates). The result was
+  // an up-arrow telling someone to raise the camera while the frame already
+  // read green. Tying the arrow to gates.level / gates.straight means "no
+  // arrow" and "pose is fine" are the same state by construction, whatever the
+  // numbers are — and a pitch that is within tolerance no longer contributes a
+  // direction just because it is non-zero.
+  const yaw = check.gates.straight ? 0 : check.pose.yaw;
+  const pitch = check.gates.level ? 0 : check.pose.pitch;
   const off = Math.hypot(yaw, pitch);
   if (off <= TURN_DEADZONE) return;
   // Short at the edge of the deadzone, full length at roughly twice the pose
