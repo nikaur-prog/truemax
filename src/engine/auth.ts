@@ -24,10 +24,28 @@ interface AuthEnv {
   key: string;
 }
 
+// The project URL and its PUBLISHABLE key.
+//
+// These are committed on purpose, and it is safe. A Supabase publishable key
+// (the `sb_publishable_…` format) is the client-side key: its entire job is to
+// ship in the browser bundle, and it grants no privileged access — every read
+// and write is governed by row-level security, which lives in the database and
+// cannot be bypassed with this key. Whether it sits here or in an env var, it
+// is public the instant the app loads in anyone's browser, so a public repo
+// exposes nothing the shipped page does not already. The SECRET key
+// (`sb_secret_…`) is the opposite and must never appear in this file or any
+// other client code — it bypasses RLS. It is not here.
+//
+// Env vars still win when set (below), so a second project — a staging one, or
+// a rotated key — needs no code change: set VITE_SUPABASE_URL and
+// VITE_SUPABASE_ANON_KEY in Vercel and they override these.
+const DEFAULT_URL = "https://ruvgkrlfmixfnmnzqgap.supabase.co";
+const DEFAULT_KEY = "sb_publishable_XLs-l72FzRD5C_QzP9xlkA_vMahWmgw";
+
 function authEnv(): AuthEnv | null {
   const env = import.meta.env as Record<string, string | undefined>;
-  const url = env.VITE_SUPABASE_URL;
-  const key = env.VITE_SUPABASE_ANON_KEY;
+  const url = env.VITE_SUPABASE_URL || DEFAULT_URL;
+  const key = env.VITE_SUPABASE_ANON_KEY || DEFAULT_KEY;
   return url && key ? { url, key } : null;
 }
 
