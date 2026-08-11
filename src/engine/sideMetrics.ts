@@ -36,11 +36,29 @@ function fromVertical(a: Pt, b: Pt, faceDir: number): number {
 }
 
 // Perpendicular distance from p to line a→b; positive = ahead of the line.
+//
+// The multiplier is `faceDir`, and it used to be `-faceDir`, which inverted
+// every projection measurement in the report.
+//
+// The tell is nasal projection. The nose tip is ahead of the nasion→subnasale
+// line on every human face that has ever existed, so the metric must come back
+// positive — and as shipped it came back NEGATIVE on all three test profiles
+// (-16.5, -10.1, -19.6 against a +18±4 norm). That is not a face scoring badly,
+// it is an axis pointing the wrong way: the engine was placing the tip of the
+// nose behind the plane of the face and then charging 8 standard deviations for
+// it. Corrected, the same profile reads +16.5 against that norm — z = -0.38,
+// which is average, which is what a nose that looks like a nose should score.
+//
+// Verified in both directions on synthetic faces where the answer is true by
+// construction (tools note in docs/SIDE_FIXTURES.md). With y growing downward,
+// cross(a→p, a→b) is negative when p is ahead for a left-facing subject and
+// positive when p is ahead for a right-facing one, so faceDir alone maps both
+// onto "positive means forward".
 function aheadOf(p: Pt, a: Pt, b: Pt, faceDir: number): number {
   const vx = b.x - a.x;
   const vy = b.y - a.y;
   const len = Math.hypot(vx, vy) || 1e-6;
-  return (((p.x - a.x) * vy - (p.y - a.y) * vx) / len) * -faceDir;
+  return (((p.x - a.x) * vy - (p.y - a.y) * vx) / len) * faceDir;
 }
 
 export function computeSideMetrics(p: SidePoints, faceDir: number): Record<string, number> {
@@ -69,7 +87,14 @@ export function computeSideMetrics(p: SidePoints, faceDir: number): Record<strin
 
     // Proportions
     lowerThirdDepth: dist(p.subnasale, p.menton) / faceH,
-    foreheadSlope: fromVertical(p.glabella, p.trichion, faceDir),
+    // Negated, for the same class of reason as aheadOf above. A forehead slopes
+    // BACK, and the norm states that as a positive 12°. fromVertical measures
+    // how far the hairline sits forward of the brow, which for every real
+    // forehead is negative — so the raw value came back at about -11° on all
+    // three test profiles against a +12±6 norm, a 4-sigma penalty applied to
+    // every human being. Negated, the same profiles read +11.3 and +11.9, which
+    // is z = -0.12 and -0.02: normal foreheads scoring normally.
+    foreheadSlope: -fromVertical(p.glabella, p.trichion, faceDir),
     midfaceRatioSide: dist(p.tragion, p.pronasale) / faceH,
   };
 }
