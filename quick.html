@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>TrueMax Quick</title>
+    <!-- Unlisted, not private. Nothing links here and search engines are asked
+         to stay away, but a URL anyone can reach is a URL anyone can reach.
+         Real access control needs Vercel's deployment protection or a backend;
+         see CALIBRATION.md. -->
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%231b1b19%22/><text x=%2250%22 y=%2268%22 font-size=%2252%22 font-family=%22sans-serif%22 font-weight=%22700%22 fill=%22white%22 text-anchor=%22middle%22>T</text></svg>" />
+    <link rel="preload" href="/models/face_landmarker.task" as="fetch" crossorigin="anonymous" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/quick.css" />
+  </head>
+  <body class="quick">
+    <main class="q-wrap">
+      <header class="q-top">
+        <span class="wordmark">TRUE<b>MAX</b></span>
+        <span class="tag">QUICK · FRONT ONLY</span>
+      </header>
+
+      <!-- Capture -->
+      <section id="q-capture">
+        <div class="q-frame" id="q-frame">
+          <video id="q-video" playsinline muted></video>
+          <canvas id="q-guide"></canvas>
+          <div class="q-hud">
+            <div class="q-hint" id="q-hint">
+              <b id="q-hint-title">Front photo</b>
+              <span id="q-hint-detail">Glasses, hats and hoods off</span>
+            </div>
+            <span class="lamp-track q-lamp"><i id="q-lamp-fill"></i></span>
+          </div>
+        </div>
+        <div class="q-actions">
+          <button class="btn pri" id="q-shoot">Use camera</button>
+          <button class="btn gho" id="q-pick">Upload</button>
+        </div>
+        <input type="file" id="q-file" accept="image/*" hidden />
+        <p class="engine-status" id="q-engine">Loading analysis engine…</p>
+      </section>
+
+      <!-- Result.
+           Three stages play here rather than the card simply appearing: a scan
+           line down the photo, then the landmark dots, then the photo shrinks to
+           the top while the score cards drop out of it. It is built to be
+           filmed — the point of this page is the fifteen seconds someone
+           records, and a result that pops into existence has nothing to record. -->
+      <section id="q-result" class="hidden">
+        <div class="q-stage" id="q-stage">
+          <div class="q-photo" id="q-photo">
+            <canvas id="q-shot"></canvas>
+            <canvas id="q-dots"></canvas>
+            <div class="q-scanline" id="q-scanline"></div>
+          </div>
+          <div class="q-cards" id="q-cards"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/quick.ts"></script>
+  </body>
+</html>

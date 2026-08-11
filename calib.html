@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <title>TrueMax · Calibration bench</title>
+    <!--
+      Unlisted, and it exists for one reason.
+
+      A single scan of one face moves by about 1.2 points depending on which
+      photograph you feed it, which is larger than the gap between two different
+      people. That is measurable from a set of photographs of the SAME face, and
+      until now there was no way to get such a set in front of the engine
+      without sending someone's face somewhere.
+
+      So this runs entirely in the browser, like the rest of the product. Drop
+      twenty photos of yourself in, every one is measured on your device, and
+      what comes out is a table of numbers. No upload, no network, no storage.
+      The photographs never leave the machine they are already on, and the thing
+      worth sharing is the table, not the faces.
+    -->
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/calib.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">TRUE<span>MAX</span></div>
+      <div class="ver">CALIBRATION BENCH</div>
+    </header>
+
+    <main class="cwrap">
+      <h1>Measure one face many times</h1>
+      <p class="lede">
+        Drop in every photograph you have of the same person. Each one is scored
+        on this device with the same engine the product uses, and nothing is
+        uploaded, stored or sent anywhere. What you get back is how much the
+        number moves for a face that did not change.
+      </p>
+
+      <div class="drop" id="drop">
+        <input type="file" id="files" accept="image/*" multiple hidden />
+        <button class="btn pri" id="pick">Choose photos</button>
+        <p class="hint">Or drag them here. Twenty is plenty; five is enough to see it.</p>
+      </div>
+
+      <p id="status" class="status">Loading the engine…</p>
+
+      <section id="out" class="hidden">
+        <div class="summary" id="summary"></div>
+        <div class="tablewrap"><table id="rows"></table></div>
+        <div class="conv" id="conv"></div>
+        <p class="foot">
+          Nothing on this page is saved. Reload and it is gone.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="/src/calib.ts"></script>
+  </body>
+</html>

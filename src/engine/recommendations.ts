@@ -1,3 +1,4 @@
+import { declaredSkin, skinAnswered } from "./goals.ts";
 import type { AdviceChannel, Profile } from "./goals.ts";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,10 @@ export interface Rec {
   caution?: string;
   // Dietary flags a profile can exclude on
   contains?: Array<"meat" | "fish" | "shellfish" | "dairy">;
+  // Self-declared skin concerns this addresses (ids from SKIN_CONCERNS).
+  // Absent means it is worth showing to anyone who picked skin as a goal —
+  // sunscreen and "go see someone" are not contingent on a complaint.
+  concerns?: string[];
 }
 
 export const EVIDENCE_LABEL: Record<Evidence, string> = {
@@ -69,11 +74,12 @@ export const RECS: Rec[] = [
     what: "Broad-spectrum SPF 30+, every day, regardless of weather",
     evidence: "strong",
     detail:
-      "The best-evidenced thing on this entire page, and the cheapest. Randomised trials show daily sunscreen measurably slows photoageing — the texture and pigment changes people later try to reverse.",
+      "The best-evidenced thing on this entire page, and the cheapest. Randomised trials show daily sunscreen measurably slows photoageing: the texture and pigment changes people later try to reverse.",
     otc: true,
   },
   {
     id: "adapalene",
+    concerns: ["acne"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -84,10 +90,11 @@ export const RECS: Rec[] = [
       "The best-evidenced non-prescription active for acne, and it improves texture over months rather than days. Expect irritation for the first few weeks.",
     otc: true,
     caution:
-      "Over the counter in the US; pharmacist-only or prescription in the UK, EU, Australia and New Zealand — ask a pharmacist what's available where you are. Retinoids are not for use in pregnancy.",
+      "Over the counter in the US; pharmacist-only or prescription in the UK, EU, Australia and New Zealand, so ask a pharmacist what's available where you are. Retinoids are not for use in pregnancy.",
   },
   {
     id: "azelaic",
+    concerns: ["redness", "marks", "acne", "pigmentation"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -101,6 +108,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "salicylic",
+    concerns: ["acne"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -112,6 +120,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "niacinamide",
+    concerns: ["redness", "dryness"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -119,7 +128,7 @@ export const RECS: Rec[] = [
     what: "A cosmetic ingredient for barrier support",
     evidence: "limited",
     detail:
-      "Modest but real effects on redness and barrier function. Not a headline act — it pairs well with the actives above rather than replacing them.",
+      "Modest but real effects on redness and barrier function. Not a headline act, but it pairs well with the actives above rather than replacing them.",
     otc: true,
   },
   {
@@ -131,7 +140,62 @@ export const RECS: Rec[] = [
     what: "For anything persistent, painful, or spreading",
     evidence: "strong",
     detail:
-      "TrueMax measures how evenly your face reflects light. It cannot tell acne from eczema from rosacea, and those need different treatment — a person who can actually look at your skin is worth more than any product on this list.",
+      "TrueMax measures how evenly your face reflects light. It cannot tell acne from eczema from rosacea, and those need different treatment. A person who can actually look at your skin is worth more than any product on this list.",
+  },
+  {
+    id: "emollient",
+    concerns: ["dryness"],
+    group: "topical",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "A plain fragrance-free moisturiser",
+    what: "Applied while the skin is still damp, twice a day",
+    evidence: "strong",
+    detail:
+      "Unglamorous and very well evidenced: regular emollient use is the first-line treatment for dry and eczema-prone skin in every clinical guideline that covers it. Fragrance is the usual culprit when a product stings, and the cheap tub often outperforms the expensive one.",
+    otc: true,
+    caution:
+      "If skin is cracked, weeping or painful, that is past what a moisturiser fixes, so see a pharmacist or doctor.",
+  },
+  {
+    id: "gentle-cleanse",
+    concerns: ["dryness", "redness"],
+    group: "habit",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Stop stripping it",
+    what: "Lukewarm water, one mild cleanser, nothing abrasive",
+    evidence: "moderate",
+    detail:
+      "Reactive and persistently red skin is very often over-treated skin. Scrubs, hot water, astringent toners and stacking three actives at once all damage the barrier, and the damage looks like the problem people are treating. Cutting back is free and reverses in weeks.",
+  },
+  {
+    id: "redness-triggers",
+    concerns: ["redness"],
+    group: "habit",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Find your flushing triggers",
+    what: "Heat, alcohol, spice and sun are the common four",
+    evidence: "moderate",
+    detail:
+      "Persistent facial flushing is strongly trigger-driven, and the triggers are individual. A fortnight of noting what preceded a flare identifies them better than any product does. Sun is the one that shows up for nearly everyone, which is another reason sunscreen sits at the top of this list.",
+    caution:
+      "Persistent central-face redness with visible vessels or bumps is a diagnosis someone needs to make in person, and the effective treatments for it are prescription-only. Worth a doctor's appointment rather than a shopping list.",
+  },
+  {
+    id: "undereye-truth",
+    concerns: ["undereye"],
+    group: "habit",
+    goals: ["skin", "eyes", "debloat"],
+    channel: "grooming",
+    title: "What actually moves dark circles",
+    what: "Mostly nothing you can buy",
+    evidence: "none",
+    detail:
+      "Under-eye shadow is usually structural, either thin skin over a tear-trough hollow or vessels showing through, and no over-the-counter cream changes either. What does move is the puffiness component: sleep timing, sodium and alcohol, within days. This is also the one skin number the scan reports, because it is the only one that repeats reliably between photos.",
+    caution:
+      "Caffeine gels, vitamin K creams and cooling rollers reduce puffiness for an hour or two. That is a real effect and a different claim from fixing the shadow.",
   },
 
   // ---- food ---------------------------------------------------------------
@@ -167,7 +231,7 @@ export const RECS: Rec[] = [
     what: "Kiwifruit, capsicum, citrus and berries",
     evidence: "moderate",
     detail:
-      "Collagen synthesis depends on vitamin C — it is a required cofactor, not an optional booster. Ordinary dietary amounts cover it; there is nothing to buy.",
+      "Collagen synthesis depends on vitamin C, which is a required cofactor rather than an optional booster. Ordinary dietary amounts cover it; there is nothing to buy.",
   },
   {
     id: "omega3",
@@ -175,7 +239,7 @@ export const RECS: Rec[] = [
     goals: ["skin", "debloat"],
     channel: "diet",
     title: "Omega-3 in food",
-    what: "Oily fish — salmon, sardines, mackerel",
+    what: "Oily fish: salmon, sardines, mackerel",
     evidence: "moderate",
     detail: "Associated with lower inflammatory markers. Walnuts, flaxseed and chia are the plant-based equivalents.",
     contains: ["fish"],
@@ -212,7 +276,7 @@ export const RECS: Rec[] = [
     title: "Fluoride toothpaste",
     what: "The single best-evidenced intervention in dentistry",
     evidence: "strong",
-    detail: "Spit, don't rinse — rinsing washes away the fluoride you just applied. Costs nothing and outperforms everything else here.",
+    detail: "Spit, don't rinse. Rinsing washes away the fluoride you just applied. Costs nothing and outperforms everything else here.",
     otc: true,
   },
   {
@@ -238,7 +302,7 @@ export const RECS: Rec[] = [
     detail: "Effective on staining from coffee, tea and wine. They do nothing for intrinsic tooth colour or for crowns and fillings.",
     otc: true,
     caution:
-      "Permitted peroxide concentration differs by country — the EU caps over-the-counter strength well below the US. Sensitivity is common and reverses when you stop.",
+      "Permitted peroxide concentration differs by country: the EU caps over-the-counter strength well below the US. Sensitivity is common and reverses when you stop.",
   },
   {
     id: "dentist",
@@ -261,7 +325,7 @@ export const RECS: Rec[] = [
     what: "Shaping the underside lifts the measured brow-to-eye gap",
     evidence: "strong",
     detail:
-      "This one is not a claim about biology — it directly changes a number on your report, because brow position is measured from the brow's lower edge. The fastest-moving metric you have.",
+      "This one is not a claim about biology. It directly changes a number on your report, because brow position is measured from the brow's lower edge. The fastest-moving metric you have.",
   },
   {
     id: "brow-tint",
@@ -283,7 +347,7 @@ export const RECS: Rec[] = [
     what: "Castor, argan and emu oil are widely recommended",
     evidence: "none",
     detail:
-      "There is essentially no clinical evidence that any of these grow hair. They condition what is already there, which can make brows look fuller — that is a real effect and a different claim. We would rather tell you that than sell you the story.",
+      "There is essentially no clinical evidence that any of these grow hair. They condition what is already there, which can make brows look fuller. That is a real effect and a different claim. We would rather tell you that than sell you the story.",
     caution:
       "The lash serums that do grow lashes contain prostaglandin analogues, are prescription-only, and can permanently darken the iris. TrueMax will not recommend them.",
   },
@@ -309,7 +373,7 @@ export const RECS: Rec[] = [
     what: "Neck, traps and shoulders change how the jaw reads",
     evidence: "strong",
     detail:
-      "Not measured here — a face mesh stops at the jaw. But the frame beneath a face changes how it is perceived, and it is one of the few things on this list fully within your control.",
+      "Not measured here, because a face mesh stops at the jaw. But the frame beneath a face changes how it is perceived, and it is one of the few things on this list fully within your control.",
   },
   {
     id: "posture",
@@ -333,7 +397,7 @@ export const RECS: Rec[] = [
     what: "The best-evidenced dietary change there is for eating less without trying",
     evidence: "strong",
     detail:
-      "In a controlled trial where both diets were matched for calories, sugar, fat, fibre and protein and people ate as much as they liked, the ultra-processed version led to roughly 500 more calories a day — without anyone noticing. This is not about any single ingredient. It is that processed food is easier to overeat.",
+      "In a controlled trial where both diets were matched for calories, sugar, fat, fibre and protein and people ate as much as they liked, the ultra-processed version led to roughly 500 more calories a day, without anyone noticing. This is not about any single ingredient. It is that processed food is easier to overeat.",
   },
   {
     id: "complex-carbs",
@@ -344,7 +408,7 @@ export const RECS: Rec[] = [
     what: "Oats, legumes, potatoes, intact grains and fruit over refined flour and sugar",
     evidence: "moderate",
     detail:
-      "Slower-digesting carbohydrates are more filling per calorie and flatten the blood-sugar swing that makes you hungry again an hour later. Maltodextrin and refined flour sit at the opposite end — they are near the top of the glycaemic scale and are in almost everything processed.",
+      "Slower-digesting carbohydrates are more filling per calorie and flatten the blood-sugar swing that makes you hungry again an hour later. Maltodextrin and refined flour sit at the opposite end, near the top of the glycaemic scale, and are in almost everything processed.",
   },
   {
     id: "water",
@@ -366,7 +430,7 @@ export const RECS: Rec[] = [
     what: "Olive oil, nuts, oily fish, avocado, dairy",
     evidence: "moderate",
     detail:
-      "Whole-food fat sources come with fibre, protein and micronutrients attached. That is the defensible version of the advice — the case for whole foods is strong and does not depend on any particular oil being harmful.",
+      "Whole-food fat sources come with fibre, protein and micronutrients attached. That is the defensible version of the advice: the case for whole foods is strong and does not depend on any particular oil being harmful.",
   },
   {
     id: "seed-oils",
@@ -381,6 +445,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "glycaemic-skin",
+    concerns: ["acne"],
     group: "food",
     goals: ["skin"],
     channel: "diet",
@@ -440,7 +505,7 @@ export const RECS: Rec[] = [
     detail:
       "Darker colour reads as more density at the same hair count, the same way brow tinting does. Bleaching does the reverse and damages the shaft.",
     otc: true,
-    caution: "Patch test 48 hours ahead — dye reactions are the common problem, and they can be severe.",
+    caution: "Patch test 48 hours ahead. Dye reactions are the common problem, and they can be severe.",
   },
   {
     id: "hair-doctor",
@@ -457,6 +522,7 @@ export const RECS: Rec[] = [
   // ---- texture and marks --------------------------------------------------
   {
     id: "silicone",
+    concerns: ["scarring"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -469,6 +535,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "scar-sun",
+    concerns: ["scarring", "marks", "pigmentation"],
     group: "habit",
     goals: ["skin"],
     channel: "grooming",
@@ -497,6 +564,13 @@ export function recsFor(profile: Profile, quietGoals: Set<string> = new Set()): 
   if (profile.diet?.includes("dairy-free")) exclude.add("dairy");
   if (profile.diet?.includes("no-shellfish")) exclude.add("shellfish");
 
+  // Concern filtering only engages once someone has actually answered the skin
+  // question. Filtering on an unanswered question would silently drop most of
+  // the skin section for anyone who skipped it, which is the opposite of what
+  // an optional question should do.
+  const concerns = new Set(declaredSkin(profile));
+  const filterConcerns = skinAnswered(profile);
+
   return RECS.filter((r) => {
     // Only what serves a goal they picked
     if (!r.goals.some((g) => profile.goals.includes(g))) return false;
@@ -505,6 +579,8 @@ export function recsFor(profile: Profile, quietGoals: Set<string> = new Set()): 
     if (!profile.advice[r.channel]) return false;
     // Dietary exclusions
     if (r.contains?.some((c) => exclude.has(c))) return false;
+    // Declared skin concerns. A card with no `concerns` is unconditional.
+    if (filterConcerns && r.concerns && !r.concerns.some((c) => concerns.has(c))) return false;
     return true;
   });
 }

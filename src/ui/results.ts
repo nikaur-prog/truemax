@@ -2,15 +2,18 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { phi, REGION_NAMES } from "../engine/scoring.ts";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.ts";
 import type { ScanDelta } from "../engine/history.ts";
+import type { SidePoints } from "../engine/sideMetrics.ts";
+import { hasHistory, openHistory } from "./historyView.ts";
 import { regionMatches } from "../engine/celebs.ts";
-import { curveSVG } from "./curve.ts";
+import { curveLegend, curveSVG } from "./curve.ts";
 import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
-import { drawCalm } from "./overlay.ts";
-import { drawMeasurement, hasOverlay } from "./measureOverlay.ts";
+import { drawCalm, transitionRegion } from "./overlay.ts";
+import { animateMeasurement, transitionMeasurement } from "./measureOverlay.ts";
+import type { OverlayFade } from "./measureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
-import { fmt, leverFor, rarityN, regionSummary } from "./templates.ts";
-import { stopTypewriter, typewrite } from "./typewriter.ts";
-import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile } from "../engine/goals.ts";
+import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
+import { stopTypewriter, typewrite, typewriteBlock } from "./typewriter.ts";
+import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
 import { GOALS } from "../engine/goals.ts";
@@ -26,12 +29,31 @@ interface Ctx {
   overlay: HTMLCanvasElement;
   onNewPhoto: () => void;
   onSideProfile?: () => void;
+  onSexChange?: (sex: Sex) => void;
+  // The side half of a merged report, so it can be looked at. It was computed,
+  // merged into the total and then unreachable — renderSideResults existed and
+  // nothing called it, so a quarter of the score had no screen.
+  sideReport?: Report;
+  sidePhoto?: HTMLCanvasElement;
+  // The thirteen verified points, in the side photo's own pixel space, so the
+  // Side tab can draw them where they were actually placed. Without these the
+  // tab fell back to drawing the FRONT mesh at FRONT coordinates over the side
+  // photo — a dense cloud in the wrong place that read exactly like "my points
+  // jumped somewhere else after I confirmed them".
+  sidePoints?: SidePoints;
+  onRedoSide?: () => void;
 }
 
 let ctx: Ctx | null = null;
 
 export function renderResults(c: Ctx): void {
   ctx = c;
+  // A new scan starts from the calm whole-face state. Without this the first
+  // tab change after re-scanning would animate out of the PREVIOUS photo's
+  // region, which is a transition from somewhere the user never was.
+  transition?.cancel();
+  transition = null;
+  shownRegion = null;
   const tabs = document.createElement("div");
   tabs.className = "rtabs";
   const mk = (label: string, id: string) => {
@@ -44,6 +66,7 @@ export function renderResults(c: Ctx): void {
   };
   mk("Overall", "overall");
   for (const r of c.report.regions) mk(REGION_NAMES[r.region], r.region);
+  if (c.sideReport) mk("Side", "side");
   mk("Plan →", "improve");
 
   c.analysis.innerHTML = "";
@@ -54,32 +77,166 @@ export function renderResults(c: Ctx): void {
   select("overall");
 }
 
+// Overall, front and side side by side, so the merge is legible: two views went
+// in and one number came out, and you can see which one pulled which way.
+//
+// Only drawn once both views are in. On a front-only report the front card
+// would be a copy of the overall card and the side card would be empty, which
+// is three boxes to say what one already said.
+function viewCards(r: Report): string {
+  if (!r.views) return "";
+  const cards: Array<[string, number, number]> = [
+    ["OVERALL", r.overall, r.overallPercentile],
+    ["FRONT", r.views.front.score, r.views.front.percentile],
+    ["SIDE", r.views.side.score, r.views.side.percentile],
+  ];
+  return `<div class="viewcards">${cards
+    .map(([label, score, pct]) => {
+      const tone = score >= 6.5 ? "hi" : score >= 4.5 ? "mid" : "lo";
+      return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
+        <span class="vc-label">${label}</span>
+        <span class="vc-rank">${rankShort(pct)}</span>
+        <b class="vc-score ${tone}">${score.toFixed(2)}<small>/10</small></b>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
 function select(id: string): void {
   if (!ctx) return;
   stopTypewriter();
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
   }
+  // The photo pane follows the tab: the side numbers next to the front
+  // photograph would be describing a picture that is not on screen.
+  showPhoto(id === "side" ? "side" : "front");
   if (id === "overall") showOverall();
   else if (id === "improve") showImprove();
+  else if (id === "side") showSide();
   else showRegion(id as RegionId);
 }
 
+// Which region the overlay is currently lit for, so a transition knows what it
+// is coming FROM. Null means the calm whole-face state.
+let shownRegion: RegionId | null = null;
+let transition: { cancel(): void } | null = null;
+
 function setZoom(region: RegionId | null): void {
   if (!ctx) return;
-  if (!region) {
+  // A fast tab-to-tab click must not leave two animations fighting over the
+  // same canvas; the newer one wins outright.
+  transition?.cancel();
+  transition = null;
+
+  if (region) {
+    const z = zoomFor(region, ctx.landmarks);
+    ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
+    ctx.zoomable.style.transform = `scale(${z.scale})`;
+  } else {
     ctx.zoomable.style.transform = "none";
+  }
+
+  const from = shownRegion ? REGION_LANDMARKS[shownRegion] : undefined;
+  const to = region ? REGION_LANDMARKS[region] : undefined;
+  shownRegion = region;
+
+  // Nothing to animate between on the very first paint of the calm state.
+  if (!from && !to) {
     drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
     return;
   }
-  const z = zoomFor(region, ctx.landmarks);
-  ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
-  ctx.zoomable.style.transform = `scale(${z.scale})`;
-  drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+  transition = transitionRegion(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, from, to);
 }
 
 function body(): HTMLElement {
   return document.getElementById("body")!;
+}
+
+// Swap the photo pane between the two captures. Both were taken; only one was
+// ever shown.
+let shownPhoto: "front" | "side" = "front";
+function showPhoto(which: "front" | "side"): void {
+  if (!ctx || which === shownPhoto) return;
+  const canvas = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
+  const cap = document.getElementById("capRight");
+  const label = document.querySelector(".photo-caption span");
+  if (!canvas) return;
+
+  if (which === "side" && ctx.sidePhoto) {
+    frontPhoto = frontPhoto ?? cloneCanvas(canvas);
+    paint(canvas, ctx.sidePhoto);
+    ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);
+    if (label) label.textContent = "SIDE";
+    if (cap) cap.textContent = "VERIFIED";
+    shownPhoto = "side";
+  } else if (which === "front" && frontPhoto) {
+    paint(canvas, frontPhoto);
+    drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
+    if (label) label.textContent = "FRONT";
+    if (cap) cap.textContent = "ANALYZED";
+    shownPhoto = "front";
+  }
+}
+let frontPhoto: HTMLCanvasElement | null = null;
+function cloneCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = src.width;
+  c.height = src.height;
+  c.getContext("2d")!.drawImage(src, 0, 0);
+  return c;
+}
+function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
+  dst.width = src.width;
+  dst.height = src.height;
+  const g = dst.getContext("2d")!;
+  g.clearRect(0, 0, dst.width, dst.height);
+  g.drawImage(src, 0, 0);
+}
+
+// The side view, inside the tabbed report rather than as a separate screen.
+function showSide(): void {
+  if (!ctx?.sideReport) return;
+  // Deliberately NOT setZoom(null): that draws the front mesh (ctx.landmarks,
+  // at front photoW/photoH) onto the overlay, and over the side photograph
+  // that lands as a dense cloud of points nowhere near the face. Instead draw
+  // the thirteen points the user actually verified, in the side photo's own
+  // pixel space, so the tab shows the placement they confirmed.
+  transition?.cancel();
+  transition = null;
+  shownRegion = null;
+  ctx.zoomable.style.transform = "none";
+  drawSidePoints();
+  renderSideInto(body(), ctx.sideReport);
+}
+
+// The verified side points on the overlay, sized to the side photo so pixel
+// coordinates line up. Static (no animation) — this is the resting state of the
+// Side tab, not the reveal.
+function drawSidePoints(): void {
+  if (!ctx) return;
+  const overlay = ctx.overlay;
+  const src = ctx.sidePhoto;
+  const pts = ctx.sidePoints;
+  const g = overlay.getContext("2d");
+  if (!g) return;
+  if (!src || !pts) {
+    g.clearRect(0, 0, overlay.width, overlay.height);
+    return;
+  }
+  overlay.width = src.width;
+  overlay.height = src.height;
+  g.clearRect(0, 0, src.width, src.height);
+  const r = Math.max(3, src.width / 150);
+  for (const p of Object.values(pts)) {
+    g.beginPath();
+    g.arc(p.x, p.y, r, 0, Math.PI * 2);
+    g.fillStyle = "rgba(255,255,255,0.9)";
+    g.fill();
+    g.lineWidth = Math.max(1, r * 0.3);
+    g.strokeStyle = "rgba(10,20,17,0.7)";
+    g.stroke();
+  }
 }
 
 function deltaChip(delta: number, label: string): string {
@@ -93,20 +250,43 @@ function showOverall(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
-  const topPct = Math.max(0.1, Math.round((100 - r.overallPercentile) * 10) / 10);
+  // Two chips when there is a running average: "vs last scan" answers whether
+  // it moved since Tuesday, "vs average" answers where the face usually lands —
+  // the steadier of the two against a noisy instrument.
   const deltaHTML = delta
-    ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`)
+    ? deltaChip(delta.overall, delta.daysAgo === 0 ? "vs last scan" : `vs ${delta.daysAgo}d ago`) +
+      (delta.vsAverage != null
+        ? deltaChip(delta.vsAverage, `vs your average of ${delta.averageOf}`)
+        : "")
     : "";
+  // Every score is now measured from both views — the flow requires the profile
+  // before it will analyse anything. The flag stays because a report restored
+  // from history may predate that.
+  const merged = Number.isFinite(r.zScores["view:side"]);
 
   body().innerHTML = `
     <div class="reveal">
       <div class="score-head">
-        <div><div class="klabel">OVERALL</div>
+        <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
+            · <button type="button" class="refswitch" id="ref-switch"
+              title="Score against the other reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button></div>
           <div class="big"><span id="cnt">0.0</span><small> /10</small></div></div>
         <div class="chipcol">
-          <span class="chip">Top ${topPct}%</span>
+          <span class="chip big-chip">${percentileLine(r.overallPercentile, r.sex)}</span>
           ${deltaHTML}
         </div>
+      </div>
+      <div class="ovw">
+      <p class="ego">${overviewCaveat()}</p>
+      ${delta ? `<div class="delta-read ${delta.reading}">${deltaReadingCopy(delta)}</div>` : ""}
+      ${viewCards(r)}
+      ${
+        merged
+          ? `<p class="viewnote done">Projection, chin and jaw angle can only be seen in profile. The front view carries 75% of the overall number and the side 25%. The side is capped because thirteen points placed by hand is the one input you can get wrong by mis-dragging.</p>`
+          : ctx.onSideProfile
+            ? `<p class="viewnote">Measured from the front only. <button class="linkish" id="side-nudge">Add a side profile</button> to include chin projection, jaw angle and facial convexity.</p>`
+            : ""
+      }
       </div>
       <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
         .map(
@@ -116,17 +296,33 @@ function showOverall(): void {
         )
         .join("")}
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile)}
-        <p class="rarity">Roughly <b>1 in ${rarityN(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
-      <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
-        <button class="btn pri" id="btn-plan">See your plan</button></div>
-      <div class="navrow">
-        <button class="btn gho" id="btn-share">Share card</button>
-        ${ctx.onSideProfile ? `<button class="btn gho" id="btn-side">Add side profile →</button>` : ""}
-      </div>
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex, false, { score: r.overall, rank: rankShort(r.overallPercentile) })}
+        ${curveLegend()}
+        <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
+      ${
+        // Until the profile is in, adding it IS the next step — so it is the
+        // primary button. A scan is not finished at one view, and burying that
+        // behind a ghost button next to "Share card" said the opposite.
+        !merged && ctx.onSideProfile
+          ? `<div class="navrow"><button class="btn gho" id="btn-plan">See your plan</button>
+               <button class="btn pri" id="btn-side">Add side profile →</button></div>
+             <div class="navrow"><button class="btn gho" id="btn-new">Start over</button>
+               <button class="btn gho" id="btn-share">Share card</button></div>`
+          : `<div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
+               <button class="btn pri" id="btn-plan">See your plan</button></div>
+             <div class="navrow"><button class="btn gho" id="btn-share">Share card</button></div>`
+      }
+      ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
 
   countUp(document.getElementById("cnt")!, r.overall);
+  document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
+  // The caveat, the rescan reading, the three view cards and the merge note
+  // reveal together, in the order they are read. Everything below stays put:
+  // the pillars have their own bar animation and the curve draws itself, and
+  // three animations competing for the same eye is worse than one.
+  const ovw = document.querySelector<HTMLElement>(".ovw");
+  if (ovw) typewriteBlock(ovw);
   setTimeout(
     () =>
       document
@@ -134,10 +330,18 @@ function showOverall(): void {
         .forEach((i) => (i.style.width = `${i.dataset.w}%`)),
     150,
   );
+  // Correcting the reference population where its effect is visible. Every
+  // percentile on this screen comes from it, and it moves the overall score by
+  // a median of 0.7 points, so it cannot be a choice you can only revisit by
+  // starting over.
+  const refBtn = document.getElementById("ref-switch");
+  if (refBtn) refBtn.onclick = () => ctx?.onSexChange?.(r.sex === "male" ? "female" : "male");
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const sideBtn = document.getElementById("btn-side");
   if (sideBtn) sideBtn.onclick = () => ctx?.onSideProfile?.();
+  const nudge = document.getElementById("side-nudge");
+  if (nudge) nudge.onclick = () => ctx?.onSideProfile?.();
   document.getElementById("btn-share")!.onclick = async () => {
     if (!ctx) return;
     const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
@@ -148,47 +352,82 @@ function showOverall(): void {
 
 // Side-profile results: same measurement language, its own report, no photo
 // zoom (the side view has no landmark mesh to re-light).
-export function renderSideResults(report: Report, onRedo: () => void): void {
-  if (!ctx) return;
-  setZoom(null);
+// The side profile, rendered into the tab body.
+//
+// Was `renderSideResults`, a full-screen takeover that nothing ever called: the
+// profile was captured, verified, scored, merged into the total, and then had
+// no screen. Someone whose score was dragged down by the side view could not
+// see which measurement did it.
+function renderSideInto(host: HTMLElement, report: Report): void {
   const regions = report.regions.filter((r) => r.metrics.length);
-  const topPct = Math.max(0.1, Math.round((100 - report.overallPercentile) * 10) / 10);
 
-  ctx.analysis.innerHTML = `
+  host.innerHTML = `
     <div class="reveal">
       <div class="score-head">
-        <div><div class="klabel">SIDE PROFILE</div>
+        <div><div class="klabel">SIDE PROFILE · 25% OF THE TOTAL</div>
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
-        <div class="chipcol"><span class="chip">Top ${topPct}%</span></div>
+        <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile)}
-        <p class="rarity">Roughly <b>1 in ${rarityN(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
+      <p class="viewnote">Measured from the thirteen points you verified. Chin projection, jaw
+        angle and facial convexity have no front-view equivalent, which is why the profile is
+        taken at all, and the placement of those points is why it is capped at a quarter of
+        the total.
+        ${ctx?.onRedoSide ? `<button class="linkish" id="side-redo">Re-verify the landmarks</button>` : ""}</p>
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
+        ${curveLegend()}
+        <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
       ${regions
-        .map(
-          (r) => `<div class="dcard" style="margin-bottom:12px">
-        <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
-        ${r.metrics
-          .map(
-            (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
-          <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-          <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
-          )
-          .join("")}
-      </div>`,
-        )
+        .map((r) => {
+          // Same comparison card the front regions carry, and wrapped for the
+          // same reason: a reference lookup must never be able to blank the
+          // measurements it sits beside.
+          let matches: ReturnType<typeof regionMatches> = [];
+          try {
+            matches = regionMatches(r.region, r.metrics, report.sex);
+          } catch (err) {
+            console.error("celebrity match failed", err);
+          }
+          return `<div class="deck">
+        <div class="dcard">
+          <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+          ${r.metrics
+            .map(
+              (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
+            <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+            <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+            )
+            .join("")}
+        </div>
+        <div class="dcard">
+          <h3>Notable comparisons<em>REFERENCE</em></h3>
+          ${celebCard(matches)}
+        </div>
+      </div>`;
+        })
         .join("")}
-      <div class="navrow">
-        <button class="btn gho" id="side-redo">Re-verify landmarks</button>
-        <button class="btn pri" id="side-front">Back to front results</button>
-      </div>
     </div>`;
 
   setTimeout(
-    () => document.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
+    () => host.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
     120,
   );
-  document.getElementById("side-redo")!.onclick = onRedo;
-  document.getElementById("side-front")!.onclick = () => renderResults(ctx!);
+  const redo = document.getElementById("side-redo");
+  if (redo) redo.onclick = () => ctx?.onRedoSide?.();
+}
+
+// One renderer for the comparison card, so the front regions and the profile
+// cannot drift apart in either wording or restraint.
+function celebCard(matches: ReturnType<typeof regionMatches>): string {
+  if (!matches.length) {
+    return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point: a flattering comparison you did not earn would make every other number worth less.</p>`;
+  }
+  return matches
+    .map(
+      (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
+        <div class="nm">${m.name}<span>${m.metricName}</span></div>
+        <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
+    )
+    .join("");
 }
 
 function countUp(el: HTMLElement, target: number): void {
@@ -206,16 +445,18 @@ function showRegion(id: RegionId): void {
   const r = ctx.report.regions.find((x) => x.region === id)!;
   setZoom(id);
 
-  const matches = regionMatches(id, r.metrics, ctx.report.sex);
-  const matchCard = matches.length
-    ? matches
-        .map(
-          (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
-        <div class="nm">${m.name}<span>${m.metricName}</span></div>
-        <div class="val">Δ ${m.deltaSigma.toFixed(2)}σ</div></div>`,
-        )
-        .join("")
-    : `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on metrics where you measure at or above average, and this region has none. That restraint is the point — a flattering comparison you did not earn would make every other number worth less.</p>`;
+  // Wrapped because this is the one call in the render path that reaches into
+  // a separate dataset, and it runs BEFORE the panel's innerHTML is assigned —
+  // so anything it throws leaves the whole analysis pane blank rather than
+  // just dropping the celebrity card. A comparison feature must never be able
+  // to take out the report it sits beside.
+  let matches: ReturnType<typeof regionMatches> = [];
+  try {
+    matches = regionMatches(id, r.metrics, ctx.report.sex);
+  } catch (err) {
+    console.error("celebrity match failed", err);
+  }
+  const matchCard = celebCard(matches);
 
   body().innerHTML = `
     <div class="reveal">
@@ -225,20 +466,28 @@ function showRegion(id: RegionId): void {
           <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
-              (m, i) => `<div class="metric${hasOverlay(m.def.id) ? " tappable" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+              (m, i) => `<div class="metric tappable" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
             <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
             )
             .join("")}
+          ${
+            // The overlay is the credibility feature and it was invisible: a
+            // 9px glyph at 55% opacity is not an affordance. Say it in words.
+            r.metrics.length
+              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Hover a measurement to draw it on your face</button>`
+              : ""
+          }
           <div class="typebox" id="tw"></div>
         </div>
         <div class="dcard">
-          <h3>Similar measurements<em>REFERENCE</em></h3>
+          <h3>Notable comparisons<em>REFERENCE</em></h3>
           ${matchCard}
           <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
       </div>
-      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, true)}
+      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, ctx!.report.sex, true)}
+        ${curveLegend()}
         <p class="rarity">${rarityLine(r)}</p></div>
     </div>`;
 
@@ -271,33 +520,102 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
 
 function rarityLine(r: RegionScore): string {
   return r.percentile >= 50
-    ? `Roughly <b>1 in ${rarityN(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
-    : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here — the drill-down above shows exactly why.`;
+    ? `Roughly <b>${rarityText(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
+    : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here, and the drill-down above shows exactly why.`;
 }
 
-// Tapping a measurement row draws that exact measurement on the face. A
-// number in a table is a claim; the same number drawn across the cheekbones
-// is evidence — this is the credibility wedge made visible.
-let activeMetric: string | null = null;
+// Hovering a measurement row draws that exact measurement on the face. A number
+// in a table is a claim; the same number drawn across the cheekbones is
+// evidence — this is the credibility wedge made visible.
+//
+// It was a click, and a click is the wrong gesture for it. Reading a column of
+// measurements is a scanning motion, and making someone commit a tap to each
+// one — then another tap to undo it — turns "show me" into a chore, so most
+// people pressed it once and never again. On hover the overlay simply follows
+// your eye down the list.
+//
+// Click still works and still pins, for two reasons that are not the same: a
+// touch screen has no hover at all, and on a mouse you sometimes want a
+// measurement to STAY drawn while you look away at the photo.
+let activeMetric: string | null = null; // hovered or pinned: what is drawn
+let pinnedMetric: string | null = null; // survives pointerleave
+let fade: OverlayFade | null = null;
+
+const HINT_IDLE = `<i>◱</i>Hover a measurement to draw it on your face`;
 
 function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
+  // Switching tabs re-renders the rows but used to leave this pointing at the
+  // previous region's metric, so the first interaction after coming back
+  // toggled the overlay OFF instead of on.
+  activeMetric = null;
+  pinnedMetric = null;
+  fade?.cancel();
+  fade = null;
+  const hint = document.getElementById("tap-hint");
+  const rows: HTMLElement[] = [];
+
+  const setHint = (metric: ScoredMetric | null, pinned: boolean) => {
+    if (!hint) return;
+    hint.classList.toggle("on", !!metric);
+    hint.innerHTML = metric
+      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>${pinned ? " (click again to release)" : ""}`
+      : HINT_IDLE;
+  };
+
+  // Every change of what is drawn goes through here, so the cross-fade cannot
+  // be skipped by one path and applied by another.
+  const show = (id: string | null) => {
+    if (!ctx || id === activeMetric) return;
+    activeMetric = id;
+    const metric = id ? r.metrics.find((m) => m.def.id === id) : null;
+    for (const other of document.querySelectorAll(".metric")) {
+      other.classList.toggle("active", (other as HTMLElement).dataset.metric === id);
+    }
+    setHint(metric ?? null, pinnedMetric === id && !!id);
+    fade?.cancel();
+    // Arriving at a measurement DRAWS IT ON — the lines extend along their own
+    // paths, which is the thing worth watching. Leaving it cross-fades back to
+    // the calm region instead, because a region outline has no natural
+    // direction to grow along and animating it would just be motion for its
+    // own sake.
+    fade = metric
+      ? animateMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric)
+      : transitionMeasurement(ctx.overlay, (target) => {
+          if (!ctx) return;
+          drawCalm(target, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+        });
+    shownRegion = region;
+  };
+
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
     const id = row.dataset.metric!;
-    const metric = r.metrics.find((m) => m.def.id === id);
-    if (!metric || !hasOverlay(id)) continue;
-    row.onclick = () => {
-      if (!ctx) return;
-      if (activeMetric === id) {
-        activeMetric = null;
-        row.classList.remove("active");
-        drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
-        return;
-      }
-      activeMetric = id;
-      for (const other of document.querySelectorAll(".metric")) other.classList.remove("active");
-      row.classList.add("active");
-      drawMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+    if (!r.metrics.some((m) => m.def.id === id)) continue;
+    rows.push(row);
+
+    // Mouse only. A touch "hover" fires on tap and would draw and then
+    // immediately pin on the same press.
+    row.onpointerenter = (e) => {
+      if (e.pointerType === "touch") return;
+      show(id);
     };
+    row.onpointerleave = (e) => {
+      if (e.pointerType === "touch") return;
+      show(pinnedMetric);
+    };
+    row.onclick = () => {
+      pinnedMetric = pinnedMetric === id ? null : id;
+      show(pinnedMetric ?? id);
+      // `show` returns early when the drawing is already correct, which it
+      // usually is here — the row is under the cursor. The hint still has to
+      // change, because pinning is a state the drawing cannot express.
+      setHint(r.metrics.find((m) => m.def.id === id) ?? null, pinnedMetric === id);
+    };
+  }
+
+  // The hint is the affordance, so it has to do the thing it describes:
+  // demonstrate on the first measurement, and release whatever is pinned.
+  if (hint && rows.length) {
+    hint.onclick = () => (rows.find((x) => x.dataset.metric === (pinnedMetric ?? activeMetric)) ?? rows[0]).click();
   }
 }
 
@@ -322,7 +640,7 @@ function showImprove(): void {
   const quietNote = profile.quiet.length
     ? `<p class="q-foot" style="margin:0 2px 14px">Your plan skips ${profile.quiet
         .map((q) => REGION_NAMES[q].toLowerCase())
-        .join(", ")} because you asked it to. Every one of those measurements is still on its own tab — nothing was hidden or softened.</p>`
+        .join(", ")} because you asked it to. Every one of those measurements is still on its own tab. Nothing was hidden or softened.</p>`
     : "";
 
   const progress = delta
@@ -342,7 +660,7 @@ function showImprove(): void {
     <div class="reveal">
       <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div>
-        <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming — no surgery, anywhere.</p></div>
+        <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
       ${quietNote}
       ${progress}
@@ -399,7 +717,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
   // the best-evidenced thing comes first, so the cheapest and most certain
   // options are what someone reads before anything they could spend money on.
   const GROUPS: Array<[string, string, string]> = [
-    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country — a pharmacist will know what's on the shelf where you are."],
+    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country, and a pharmacist will know what's on the shelf where you are."],
     ["food", "EAT", "Facts about food, not a diet. No targets, no counting, nothing to buy."],
     ["habit", "DO", "Free, and mostly the things that compound."],
     ["professional", "ASK SOMEONE", "The things worth paying a person for rather than guessing at."],
@@ -426,7 +744,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
 
   return `<div class="recs">
     <h4>WORTH TRYING</h4>
-    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure — over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't. Where the evidence for something popular is weak, it says so.</p>
+    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure. Over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't. Where the evidence for something popular is weak, it says so.</p>
     ${sections}
   </div>`;
 }
@@ -440,17 +758,25 @@ function goalHead(p: ReturnType<typeof loadProfile>): string {
     <div class="goal-tags">
       ${goals.length
         ? goals.map((g) => `<span class="goal-tag">${g.label}</span>`).join("")
-        : `<span class="goal-tag mut">No goals set — showing your weakest fixable numbers</span>`}
+        : `<span class="goal-tag mut">No goals set, showing your weakest fixable numbers</span>`}
+      ${skinConcernLabels(p)
+        .map((l) => `<span class="goal-tag alt">${l}</span>`)
+        .join("")}
       ${p.quiet.length ? `<span class="goal-tag mut">${p.quiet.length} topic${p.quiet.length > 1 ? "s" : ""} off-limits</span>` : ""}
     </div>
+    ${
+      skinConcernLabels(p).length
+        ? `<p class="goal-declared">You told us this, the scan didn't. It measures how evenly your face reflects light, which cannot tell one skin condition from another.</p>`
+        : ""
+    }
     <button class="goal-edit" id="goal-edit">Edit your goals</button>
   </div>`;
 }
 
 function progressCopy(d: ScanDelta): string {
   if (d.overall > 0.15)
-    return `<p class="rarity">Up <b>+${d.overall.toFixed(1)}</b> overall. The numbers moved — whatever you're doing, keep doing it.</p>`;
+    return `<p class="rarity">Up <b>+${d.overall.toFixed(1)}</b> overall. The numbers moved, so whatever you're doing, keep doing it.</p>`;
   if (d.overall < -0.15)
-    return `<p class="rarity">Down <b>${d.overall.toFixed(1)}</b> overall. Before reading into it: lighting, expression and angle explain most small drops — recapture in the same conditions first.</p>`;
-  return `<p class="rarity">Overall is <b>flat</b> (${d.overall >= 0 ? "+" : ""}${d.overall.toFixed(1)}) — within capture variance. Structural change shows up over weeks, not days.</p>`;
+    return `<p class="rarity">Down <b>${d.overall.toFixed(1)}</b> overall. Before reading into it: lighting, expression and angle explain most small drops, so recapture in the same conditions first.</p>`;
+  return `<p class="rarity">Overall is <b>flat</b> (${d.overall >= 0 ? "+" : ""}${d.overall.toFixed(1)}), which is within capture variance. Structural change shows up over weeks, not days.</p>`;
 }

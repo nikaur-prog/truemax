@@ -126,27 +126,29 @@ export function shapeZScore(shape: number[], sex: Sex): number | null {
   return (proj - model.axisMean) / (model.axisSD || 1);
 }
 
-// Which sex's reference population does this face's shape sit closer to?
+// REMOVED: detectSex.
 //
-// Uses the same mean shapes the scoring model is built on: align the face to
-// each, and compare residuals. This is a shape comparison against our own
-// measured reference sets — not a classifier trained on demographics — and it
-// is only ever a default the user can override.
-export function detectSex(shape: number[]): { sex: Sex; confidence: number } | null {
-  const m = SHAPE_MODEL.male;
-  const f = SHAPE_MODEL.female;
-  if (!m || !f || shape.length !== m.meanShape.length) return null;
-
-  const residual = (mean: number[]): number => {
-    const a = procrustes(shape, mean);
-    let s = 0;
-    for (let i = 0; i < a.length; i++) s += (a[i] - mean[i]) ** 2;
-    return Math.sqrt(s);
-  };
-  const dm = residual(m.meanShape);
-  const df = residual(f.meanShape);
-  const total = dm + df || 1e-9;
-  // Margin between the two fits, 0 = a coin flip, 1 = decisively one side
-  const confidence = Math.abs(df - dm) / total;
-  return { sex: dm <= df ? "male" : "female", confidence: Math.round(confidence * 1000) / 1000 };
-}
+// It aligned a face to each sex's mean shape and returned whichever residual
+// was smaller. Measured leave-one-out over 194 reference faces — rebuilding the
+// means with each face removed, then classifying it:
+//
+//   accuracy             58.8%   (male 61.9%, female 55.1%)
+//   always say "male"    54.1%   <- the base rate of the same sample
+//
+// Four points above a constant answer. The 70.7% it scored inside the app was
+// measured against a model trained on those very faces.
+//
+// A second rule was tried — project onto the between-means axis and threshold
+// at the midpoint — and it agreed with the first on 194 of 194 faces, because
+// nearest-centroid under Euclidean distance IS that threshold. There is no
+// better decision rule waiting to be found over this descriptor; the descriptor
+// does not carry the information.
+//
+// It mattered because the choice is not cosmetic: every percentile in a report
+// comes from the chosen population, and switching it moves the overall score by
+// a median of 0.70 points, 2.10 at p90, and 4.50 at worst. A coin flip was
+// deciding a number bigger than the entire within-person noise band.
+//
+// The reference population is now asked for and remembered — see
+// src/engine/sexPref.ts. If this is ever reinstated it needs a real classifier
+// and a real held-out accuracy figure, not this one.

@@ -10,6 +10,7 @@ import type {
   MetricDef,
   PillarId,
   RegionId,
+  RegionScore,
   Report,
   ScoredMetric,
   Sex,
@@ -249,9 +250,26 @@ function effWeight(m: ScoredMetric): number {
 }
 
 // How much of the overall score comes from the shape descriptor vs the
-// individual ratios. Ratios are legible but noisy; the descriptor averages
-// ~130 landmarks and reproduces far better, so it carries the majority.
-const W_SHAPE = 0.6;
+// individual ratios.
+//
+// This was 0.6, on the reasoning that the descriptor averages ~130 landmarks
+// and so reproduces far better across photos of one person than any single
+// ratio does. That reasoning was about RELIABILITY and it is still true — but
+// reliability is not validity. A metric can be perfectly repeatable and still
+// measure nothing you care about, and that is what was happening: the majority
+// of every score came from a term that barely distinguished the consensus-
+// attractive top tier from the general reference population.
+//
+// Measured, leave-one-out (tools rebuild the axis with each face removed, then
+// score that face on an axis it had no hand in defining):
+//
+//   shapeZ  d = 0.326 male / 0.263 female   <- in-sample it looks like .48/.70
+//   ratioZ  d = 1.189 male / 0.916 female
+//
+// Sweeping the blend against held-out separation peaks at 0.15, and the peak
+// is shallow — the descriptor adds about 4% over dropping it entirely. It
+// earns a small weight, not a majority one.
+const W_SHAPE = 0.15;
 
 function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>, shapeZ?: number | null): Report {
   const rawZ: Record<string, number> = {};
@@ -282,6 +300,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
       region: r,
       score: aggScore(rz),
       percentile: Math.round(phi(rz) * 1000) / 10,
+      z: rz,
       metrics: ms,
     };
   });
@@ -290,6 +309,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
     sex,
     overall: aggScore(overallZ),
     overallPercentile: Math.round(phi(overallZ) * 1000) / 10,
+    overallZ,
     potential: 0, // filled by analyze()
     pillars,
     regions,
@@ -323,6 +343,27 @@ export function analyze(
       lift.set(m.def.id, m.def.fixability * 0.9);
     }
   }
+  // shapeZ is passed through UNCHANGED, so potential can only move the ratio
+  // share of the score — W_SHAPE of it is pinned at today's value. That is
+  // deliberate, but it was not defensible while W_SHAPE was 0.6: it meant no
+  // amount of realistic change could shift 60% of someone's score, and
+  // potential topped out barely above actual for everyone. At 0.15 the pinned
+  // share is small enough to be honest.
+  //
+  // It stays pinned rather than getting lifted alongside the metrics because
+  // there is no measurement saying it should move. Across 229 scored faces the
+  // descriptor and the ratio composite are very nearly independent —
+  // r = 0.113 male, 0.019 female — so the fixable metrics carry almost no
+  // information about where the descriptor sits.
+  //
+  // That correlation is BETWEEN people, though, and what potential needs is the
+  // within-person slope: if one person's fixable metrics improve, how far does
+  // their own outline follow? Different skeletons dominate the between-person
+  // variance, so the two numbers are not the same and this one cannot stand in
+  // for the other. Settling it needs the same faces measured before and after a
+  // real change, which we do not have. Until then the conservative direction is
+  // to leave it pinned — overstating what someone can reach is the failure mode
+  // that makes a potential number worthless.
   report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
 
   return report;
@@ -340,6 +381,142 @@ export function analyzeSide(points: SidePoints, faceDir: number, sex: Sex): Repo
   }
   report.potential = Math.max(report.overall, buildReport(scored, sex, lift).overall);
   return report;
+}
+
+// ---------------------------------------------------------------------------
+// Combining the front and side scans into one number.
+//
+// The obvious implementation is wrong, and it is worth saying why in full,
+// because it is the kind of wrong that produces a plausible number.
+//
+// The obvious version pools the metric lists — buildReport([...front, ...side])
+// — and lets the normal aggregation run. That breaks the scale. AGG_NORM's
+// quantile tables were measured from FRONT-ONLY scans of the reference
+// population (tools/normalize.mjs), and the whole reason they exist is that
+// "5.0 = the 50th percentile" holds by construction rather than by assumption.
+// Feed a front+side aggregate into a front-only table and that guarantee is
+// gone: the combined aggregate has a different distribution, so every
+// percentile printed against it is a number with no referent.
+//
+// Fixing it properly would mean regenerating the tables from front+side scans
+// of all ~110 reference faces. We cannot: side landmarks are hand-placed by
+// the user, thirteen points at a time, because a true profile cannot be
+// landmarked automatically with any confidence. That is 1,430 manual
+// placements, and it is not happening.
+//
+// So combine one level up instead. front.zScores.overall and
+// side.zScores.overall have EACH already been mapped through their own
+// normalisation, so both are unit-normal by construction. Combining two
+// unit-normal variates with a correlation assumption is exactly what
+// aggregateZ already does for pillars, and the result is still unit-normal —
+// which is the property the whole scale rests on. No new reference data
+// required, and nothing about the front-only path changes.
+//
+// Two numbers here are assumptions, not measurements, and they are the honest
+// weak point of this function:
+// ---------------------------------------------------------------------------
+
+// Front carries 31 metrics plus a shape descriptor averaging ~130 landmarks,
+// all placed automatically. Side carries 15 metrics derived from 13 points a
+// person dragged into place by hand. The split reflects both how much is being
+// measured and how reliably it was located.
+const W_FRONT = 0.75;
+const W_SIDE = 0.25;
+
+// Correlation between the two views' aggregates. They describe the same skull
+// from different angles, so it is clearly neither 0 nor 1. Measuring it needs
+// paired front+side scans of the reference set — the same data we do not have.
+// 0.5 is a deliberate midpoint: it is the value that makes the combined score
+// move meaningfully when the side disagrees with the front, without letting a
+// hand-placed profile swing the result. Revisit the moment paired data exists.
+const RHO_VIEWS = 0.5;
+
+export function mergeReports(front: Report, side: Report): Report {
+  // The NORMALISED aggregates, not zScores.overall. zScores holds the raw
+  // pre-normalisation values that AGG_NORM is derived from; those are not
+  // unit-normal and combining them would be combining two different scales.
+  // This distinction cost a debugging round: the raw front aggregate read
+  // 0.029 where the normalised one was 0.308, so the merge was quietly
+  // under-weighting the front view by an order of magnitude.
+  const zf = front.overallZ;
+  const zsRaw = side.overallZ;
+  if (!Number.isFinite(zf) || !Number.isFinite(zsRaw)) return front;
+
+  // Clamp the side aggregate the same way every per-metric z is clamped.
+  //
+  // Found by testing rather than by reasoning: feeding the flow a profile photo
+  // of a different person, with the auto-placed points accepted unverified,
+  // produced a side aggregate near -3.4σ and dragged the merged score from 5.4
+  // to 4.1. Thirteen points placed by hand is the least reliable input in the
+  // whole pipeline — it is the ONLY one a user can get wrong by mis-dragging —
+  // so it is exactly the input that should not be able to swing the result
+  // without limit. At ±2.2 a genuinely extreme profile still moves the score
+  // hard; a mis-placed one cannot bury it.
+  const zs = clamp(zsRaw, -Z_CLAMP, Z_CLAMP);
+
+  const z = aggregateZ([zf, zs], [W_FRONT, W_SIDE], RHO_VIEWS);
+
+  // Regions the two views share get combined the same way; regions only one
+  // view measures pass through untouched.
+  const byRegion = new Map<RegionId, RegionScore>();
+  for (const r of front.regions) byRegion.set(r.region, r);
+  for (const r of side.regions) {
+    if (!r.metrics.length) continue;
+    const f = byRegion.get(r.region);
+    const zsr = r.z;
+    const zfr = f ? f.z : NaN;
+    if (!f || !Number.isFinite(zfr) || !Number.isFinite(zsr)) {
+      byRegion.set(r.region, r);
+      continue;
+    }
+    const rz = aggregateZ([zfr, clamp(zsr, -Z_CLAMP, Z_CLAMP)], [W_FRONT, W_SIDE], RHO_VIEWS);
+    byRegion.set(r.region, {
+      region: r.region,
+      score: aggScore(rz),
+      percentile: Math.round(phi(rz) * 1000) / 10,
+      z: rz,
+      metrics: [...f.metrics, ...r.metrics],
+    });
+  }
+
+  // Potential is a score, not a z, so it cannot go through aggregateZ. Combine
+  // the HEADROOM each view found instead — that is the quantity potential
+  // actually reports — and add it to the merged score.
+  const gap = W_FRONT * (front.potential - front.overall) + W_SIDE * (side.potential - side.overall);
+
+  return {
+    sex: front.sex,
+    overall: aggScore(z),
+    overallPercentile: Math.round(phi(z) * 1000) / 10,
+    overallZ: z,
+    // The two views as they stand on their own, so the report can show what
+    // went into the merge.
+    //
+    // The side figure is the UNCLAMPED one, which is not the value the merge
+    // arithmetic used. That is deliberate. The clamp only bites on a genuinely
+    // extreme profile, and when it does, the clamped number differs from the
+    // one the side-profile results screen shows for the same scan — two screens
+    // disagreeing about a number with the same name is a worse problem than
+    // arithmetic that does not visibly add up. It does not visibly add up
+    // anyway: this is a correlated aggregation of z-scores, not an average of
+    // two scores, so no pair of displayed figures would sum to the total. The
+    // cap is explained in the copy beneath the cards instead.
+    views: {
+      front: { score: aggScore(zf), percentile: Math.round(phi(zf) * 1000) / 10 },
+      side: { score: aggScore(zsRaw), percentile: Math.round(phi(zsRaw) * 1000) / 10 },
+    },
+    potential: Math.round(Math.max(aggScore(z), aggScore(z) + gap) * 10) / 10,
+    pillars: front.pillars,
+    regions: [...byRegion.values()],
+    metrics: [...front.metrics, ...side.metrics],
+    zScores: {
+      ...front.zScores,
+      overall: z,
+      "view:front": zf,
+      "view:side": zs,
+      "view:sideRaw": zsRaw,
+    },
+  };
 }
 
 // Max change in overall per 1σ change of a single metric — the brief requires

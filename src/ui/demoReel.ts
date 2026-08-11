@@ -1,4 +1,9 @@
-import { REEL } from "./demoReelData.ts";
+import { REEL as REEL_MEASURED } from "./demoReelData.ts";
+import { applyShim } from "./demoReelShim.ts";
+
+// The landing reel shows display scores rather than the engine's output, for
+// the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
+const REEL = applyShim(REEL_MEASURED);
 import type { ReelFace } from "./demoReelData.ts";
 
 // ---------------------------------------------------------------------------
@@ -125,7 +130,7 @@ export function mountDemoReel(
     // ---- phase label ------------------------------------------------------
     const phase =
       t < T.scan[1] ? "SCANNING" : t < T.measure[1] ? "MEASURING" : "ANALYSIS";
-    ctx.font = "500 9.5px ui-monospace, 'IBM Plex Mono', monospace";
+    ctx.font = "600 9.5px Inter Variable, Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.72)";
     ctx.textAlign = "left";
     ctx.fillText(phase, 14, 22);
@@ -134,7 +139,7 @@ export function mountDemoReel(
     if (t >= T.measure[0] && t < T.measure[1]) {
       const p = seg(t, T.measure[0], T.measure[1]);
       const i = Math.min(STAGES.length - 1, Math.floor(p * STAGES.length));
-      ctx.font = "500 11.5px Inter, system-ui, sans-serif";
+      ctx.font = "500 11.5px Inter Variable, Inter, system-ui, sans-serif";
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.fillText(`${STAGES[i]}…`, 14, 42);
       ctx.fillStyle = "rgba(255,255,255,0.22)";
@@ -157,10 +162,10 @@ export function mountDemoReel(
         ctx.fillRect(x, y + 16, bw, 3);
         ctx.fillStyle = "#8FF3E0";
         ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * appear, 3);
-        ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
+        ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.66)";
         ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
-        ctx.font = "600 11px Inter, system-ui, sans-serif";
+        ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "#fff";
         ctx.textAlign = "right";
         ctx.fillText(face.pillars[n].toFixed(1), x + bw, y + 10);
@@ -207,10 +212,10 @@ export function mountDemoReel(
         ctx.beginPath();
         ctx.roundRect(lx, ly - 4, 74, 26, 7);
         ctx.fill();
-        ctx.font = "500 8.5px ui-monospace, 'IBM Plex Mono', monospace";
+        ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.62)";
         ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
-        ctx.font = "600 12px Inter, system-ui, sans-serif";
+        ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "#fff";
         ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
         ctx.globalAlpha = alpha;
@@ -219,7 +224,7 @@ export function mountDemoReel(
 
     // ---- attribution ------------------------------------------------------
     // Required by the image licence, not optional decoration.
-    ctx.font = "400 7.5px ui-monospace, 'IBM Plex Mono', monospace";
+    ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.42)";
     ctx.textAlign = "right";
     ctx.fillText(face.credit, w - 12, h - 8);

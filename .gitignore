@@ -3,3 +3,14 @@ dist/
 public/wasm/
 .DS_Store
 *.local
+
+# Secrets. This repo is public — Supabase keys and any other env values live in
+# .env files locally and in the Vercel dashboard, never in git.
+.env
+.env.*
+!.env.example
+
+# Calibration photographs — the README, never the faces. See calib/README.md.
+calib/*
+!calib/README.md
+.reel-cache/

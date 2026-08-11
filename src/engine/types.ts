@@ -57,14 +57,31 @@ export interface RegionScore {
   region: RegionId;
   score: number;
   percentile: number;
+  // Normalised region aggregate, same distinction as Report.overallZ.
+  z: number;
   metrics: ScoredMetric[];
+}
+
+export interface ViewScore {
+  score: number;
+  percentile: number;
 }
 
 export interface Report {
   sex: Sex;
   overall: number;
   overallPercentile: number;
+  // The overall aggregate AFTER quantile normalisation — unit-normal across
+  // the reference population by construction. Distinct from zScores.overall,
+  // which is the RAW pre-normalisation aggregate that AGG_NORM is built from.
+  // Merging two views requires the normalised value; using the raw one silently
+  // combines quantities that are not on a common scale.
+  overallZ: number;
   potential: number;
+  // Each view's own standing, kept alongside the merged number so the report
+  // can show what combined into what. Absent on a single-view report — its
+  // score IS the front view, and restating it twice says nothing.
+  views?: { front: ViewScore; side: ViewScore };
   pillars: Record<PillarId, number>;
   regions: RegionScore[];
   metrics: ScoredMetric[]; // flat, every scored metric

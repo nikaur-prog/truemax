@@ -12,6 +12,12 @@ export async function renderShareCard(
   report: Report,
   photo: HTMLCanvasElement,
 ): Promise<HTMLCanvasElement> {
+  // Canvas text does not trigger a webfont load and does not wait for one. The
+  // page fonts are already in use by the time anyone can press Share, but this
+  // is the one artefact that leaves the device — it is not allowed to go out
+  // set in Georgia because of a race.
+  await document.fonts.ready;
+
   const c = document.createElement("canvas");
   c.width = W;
   c.height = H;
@@ -22,7 +28,7 @@ export async function renderShareCard(
 
   // Wordmark
   ctx.fillStyle = "#8B8E94";
-  ctx.font = '500 26px "IBM Plex Mono", monospace';
+  ctx.font = '600 26px Inter Variable, Inter, system-ui, sans-serif';
   ctx.textAlign = "left";
   ctx.letterSpacing = "6px";
   ctx.fillText("TRUE", 80, 108);
@@ -32,7 +38,7 @@ export async function renderShareCard(
   ctx.letterSpacing = "0px";
 
   ctx.fillStyle = "#6B6E74";
-  ctx.font = '400 22px "IBM Plex Mono", monospace';
+  ctx.font = '500 22px Inter Variable, Inter, system-ui, sans-serif';
   ctx.textAlign = "right";
   ctx.fillText(new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }), W - 80, 108);
 
@@ -58,14 +64,14 @@ export async function renderShareCard(
   // Overall score
   ctx.textAlign = "center";
   ctx.fillStyle = "#F4F3EF";
-  ctx.font = '300 168px Fraunces, Georgia, serif';
+  ctx.font = '300 168px Fraunces Variable, Fraunces, Georgia, serif';
   ctx.fillText(report.overall.toFixed(1), cx, 800);
   ctx.fillStyle = "#6B6E74";
-  ctx.font = '400 40px Fraunces, Georgia, serif';
+  ctx.font = '400 40px Fraunces Variable, Fraunces, Georgia, serif';
   ctx.fillText("/10", cx + 150, 800);
 
   ctx.fillStyle = "#4FD1B0";
-  ctx.font = '500 26px "IBM Plex Mono", monospace';
+  ctx.font = '600 26px Inter Variable, Inter, system-ui, sans-serif';
   ctx.fillText(
     `TOP ${Math.max(0.1, Math.round((100 - report.overallPercentile) * 10) / 10)}%  ·  ${report.sex.toUpperCase()} NORMS`,
     cx,
@@ -80,17 +86,17 @@ export async function renderShareCard(
     const x = gx[i % 2];
     const y = gy[Math.floor(i / 2)];
     ctx.fillStyle = score >= 6 ? "#4FD1B0" : score >= 4.5 ? "#E8CB84" : "#D6907C";
-    ctx.font = '400 60px Fraunces, Georgia, serif';
+    ctx.font = '400 60px Fraunces Variable, Fraunces, Georgia, serif';
     ctx.fillText(score.toFixed(1), x, y);
     ctx.fillStyle = "#6B6E74";
-    ctx.font = '500 20px "IBM Plex Mono", monospace';
+    ctx.font = '600 20px Inter Variable, Inter, system-ui, sans-serif';
     ctx.letterSpacing = "3px";
     ctx.fillText(name.toUpperCase(), x, y + 34);
     ctx.letterSpacing = "0px";
   });
 
   ctx.fillStyle = "#4A4C51";
-  ctx.font = '400 22px "IBM Plex Mono", monospace';
+  ctx.font = '500 22px Inter Variable, Inter, system-ui, sans-serif';
   ctx.fillText("MEASURED ON-DEVICE  ·  TRUEMAX.APP", cx, H - 70);
 
   return c;

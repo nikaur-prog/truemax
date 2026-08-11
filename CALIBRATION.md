@@ -480,3 +480,906 @@ This is a data problem, not a code problem. The top tier needs to be three or
 four times larger before the shape axis can discriminate as sharply as the
 biased version appeared to — and "appeared to" is the right phrase, because
 some of that d=1.02 was the female inflation itself widening the gap.
+
+## Showing the population curve instead of drawing a bell
+
+The "population position" chart used to be a textbook normal — the same
+perfect bell on every tab, for every region, for both sexes, with the subject's
+dot placed at `pct/100` along it. It was decoration, and worse, it quietly
+contradicted the numbers printed underneath it.
+
+The reference distributions are not normal. `AGG_NORM` already stores 21
+empirical quantiles per aggregate, which is a histogram in disguise: each
+consecutive pair brackets exactly 5% of the reference set, so that slice's
+height is `0.05 / (q[i+1] - q[i])`. The curve is now drawn from those.
+
+What this exposes, which the bell hid:
+
+- **`region:midface` (male) is bimodal.** Two clear modes, not one.
+- **`region:nose` (female) is severely left-shifted** — the entire table sits
+  below zero, from -2.67 to +1.07. A symmetric bell over that is a fiction.
+- **The upper tail is thin, visibly.** On most aggregates the top three or four
+  quantiles are spread across as much x-distance as the middle ten. The ticks
+  are drawn, so where the sample runs out is now something a user can see
+  rather than something buried in this file.
+
+The dot is placed by interpolating the *same* table that scoring interpolates,
+so the dot and the percentile printed under it cannot disagree — they are one
+lookup.
+
+Two honesty constraints on the chart:
+
+- The shaded middle band is the interquartile range and is labelled as such.
+  Shading "the middle" without saying what it is reads as a value judgement.
+- Slice heights are smoothed with two [1,2,1] passes. With ~110 faces behind 21
+  order statistics, two nearly-coincident quantiles produce a spike that is
+  sampling noise. This is smoothing a histogram, which is not the same thing as
+  the discarded experiment of shrinking the quantile table toward a fitted
+  normal — that changed the *scores* and made both stability and validity
+  worse (d 0.99 -> 0.84). This changes only the picture.
+
+Aggregates with no quantile table (side-profile metrics) still fall back to the
+idealized bell, since there is no data to draw.
+
+## Skin concerns are declared, never inferred
+
+The scan does not tell anyone what condition they have, and the recommendation
+layer no longer needs it to. A quiz card — shown only to people who picked skin
+as a goal — asks directly, and the answer routes the over-the-counter cards.
+
+This is not caution for its own sake. It is what the reliability numbers in
+"Skin: measured, and deliberately not scored yet" already established: of the
+five skin statistics, only `undereyeRatio` (0.532) repeats well enough across
+photos of the same person to be worth reporting. `rednessSpread` and
+`chromaSpread` reproduce at 0.000 — they measure the room, not the face. An
+app that read "you may have rosacea" off a number with zero test-retest
+reliability would be inventing a diagnosis, and it would be inventing it from
+the lighting.
+
+The competitor pattern — "our scanner has identified that you may have X, true
+or false?" — extracts the same answer while taking credit for knowing it. We
+ask, and say why we are asking. The declared concerns render in a different
+colour from the measured goals on the plan header, with a line stating the
+scan did not find them.
+
+Filtering only engages once the question has been answered: a card carrying no
+`concerns` is unconditional (sunscreen, "see a pharmacist"), and if someone
+skipped the question nothing is filtered at all. Filtering on an unanswered
+optional question would silently hide the useful half of the section.
+
+## Typefaces are self-hosted
+
+Fraunces, Inter and IBM Plex Mono came from the Google Fonts CDN via a
+render-blocking `<link>`. Three consequences, all bad:
+
+1. On a slow or filtered connection the entire app fell back to system
+   defaults, which is what made a carefully set page look like an unstyled
+   document.
+2. It was the only outbound request on a page whose headline promise is that
+   nothing leaves your device.
+3. Canvas text (the share card, the demo reel) does not trigger a webfont load
+   and does not wait for one, so the shareable artifact — the one thing that
+   leaves the device — could go out set in Georgia if the race went the wrong
+   way. `renderShareCard` now awaits `document.fonts.ready`.
+
+Now version-pinned via Fontsource and bundled. Only latin subsets are ever
+fetched (the packages ship per-script files behind `unicode-range`), and only
+upright faces are imported, since every `<em>` in the stylesheet is reset to
+`font-style: normal`. Verified: exactly one file loads per family, and the page
+makes zero external requests.
+
+Fraunces' `opsz` axis is now set explicitly rather than left on `auto`. Left to
+the browser, a 78px score renders at opsz 78 on an axis that runs to 144 — half
+way up an axis whose entire purpose is its top end.
+
+## The blur gate was measuring the light, not the lens
+
+Reported symptom: "Hold still — the image is too soft" on every frame, in an
+ordinary lit room, with the shutter held shut.
+
+The gate was the mean absolute Laplacian of the face crop, thresholded at 9.
+That quantity is proportional to local CONTRAST as well as to focus, so it
+cannot separate a dim room from a dirty lens. Measured across 20 portraits
+degraded synthetically (`scratchpad/sharp-lab2.mjs`), medians:
+
+```
+condition                    old metric     new metric
+in focus, well lit               17.5          0.396
+in focus, dim  (x0.45)           12.1          0.503
+in focus, very dim (x0.28)        7.6          0.503
+1.5px blur                       18.5          0.373
+3px blur                          9.4          0.244
+3px blur + dim                    4.3          0.244
+6px blur                          4.9          0.126
+```
+
+The old column ranks a **perfectly focused face in a dim room (7.6) BELOW a
+genuinely 3px-blurred one in a bright room (9.4)**. With the gate at 9, the
+focused-but-dim user is blocked and the actually-blurred user sails through.
+Anyone scanning in indoor evening light was stranded.
+
+The replacement asks a question with no brightness term: blur the crop again
+and measure how much that changes it. Sharp images lose a lot of neighbour
+difference; already-soft ones have little left to lose. The ratio cancels
+exposure and contrast exactly — note `dim` and `very dim` both land on 0.503,
+and `3px blur` and `3px blur + dim` both on 0.244. That invariance is the whole
+point and it is visible in the table.
+
+### Verified against the shipped function, not the lab reimplementation
+
+The thresholds above were chosen from a standalone script that reimplemented
+the metric. That validates the formula and says nothing about whether the code
+in `captureGuide.ts` computes it — the same gap that produced the front/side
+merge bug. Re-run by importing the real `frameStats`:
+
+```
+condition      p10    med    p90   med luma   verdict  (WARN 0.28, BLOCK 0.17)
+in focus      0.332  0.503  0.602      119    pass
+dim  x0.45    0.333  0.503  0.602       53    pass
+very dim x.28 0.335  0.503  0.602       33    pass
+1.5px blur    0.135  0.373  0.468      119    pass
+3px blur      0.057  0.244  0.330      119    warn, shutter open
+3px + dim     0.058  0.244  0.330       53    warn, shutter open
+6px blur      0.029  0.126  0.245      119    block
+```
+
+Brightness invariance holds in the shipped path: all three focused conditions
+land on **0.503** across a 3.6x range of exposure. The focused p10 is 0.332,
+comfortably clear of the warn threshold, so a well-lit or a dim in-focus face
+does not even draw the advisory.
+
+Note the shipped `sharp` (0.503) is higher than the lab's (0.396) while `dim`
+matches. The lab measured its `sharp` condition from the source image directly
+and every other condition through an intermediate canvas; that extra resample
+was softening the comparison. The shipped path puts every condition through the
+same route, which is why the focused conditions now agree exactly.
+
+### Why it now warns instead of blocking
+
+Two thresholds: warn below 0.28, hold the shutter only below 0.17.
+
+The justification is that a soft frame is not a wrong measurement. Running the
+detector over the same 20 portraits blurred and dimmed, the landmarks barely
+move:
+
+```
+condition     median centre shift   median scale change   p90 worst landmark
+1.5px blur           0.0012                0.0042               0.023
+3px blur             0.0021                0.0077               0.039
+6px blur             0.0007                0.0093               0.065
+dim                  0.0017                0.0027               0.018
+very dim             0.0011                0.0024               0.023
+```
+
+All as a fraction of face width; no detection was lost in any condition. A 6px
+blur — far past anything a webcam produces — moves the face centre by 0.07% of
+its width. Refusing to take the photo at all was never proportionate.
+
+This also rules out soft frames as the cause of a separate report of the mesh
+sitting low and left of the face. Blur does not move landmarks; something else
+does, and `?debug=1` now draws the rectangle the overlay believes the video
+occupies so the mapping and the landmarks can be told apart.
+
+## What the live overlay draws, and why it is only two things
+
+The face outline was removed. `FACE_LANDMARKS_FACE_OVAL` is an anatomical
+boundary, not the silhouette a person sees: its lower arc follows the underside
+of the jaw, so on anyone shot from slightly above it projects well below the
+visible chin. On a render verified pixel-perfect against a known 1280x720 feed,
+the oval still finished roughly 15% of face height below the chin, onto the
+neck. Nothing was wrong and it looked wrong — on the one screen whose job is to
+establish that the app can see you, that is the same thing.
+
+The same reasoning removed the boundary landmarks from the dot cloud (they land
+on the neck and in front of the ears) and, earlier, the eye and lip contours
+(MediaPipe's eye ring follows the orbital rim, not the lid).
+
+What is left: a depth-shaded dot cloud on interior features only, and a thin
+crosshair carrying the head's own 3D axes. The nine-chip gate checklist was
+also removed from the HUD — it restated what the readiness bar and the one-line
+hint already said.
+
+## Why the point cloud looked like random scatter
+
+The overlay drew every Nth landmark. That looks like it should give an even
+spread and does the opposite, for two reasons:
+
+- **MediaPipe's indices are ordered by mesh topology, not by position**, and the
+  mesh is far denser around the eyes and lips than across the cheeks and
+  forehead. A stride inherits that density, so the dots clump on the features
+  and leave bare patches everywhere else.
+- **Indices are not mirror-paired.** Taking every 8th index picks a different
+  pattern on the left of the face than on the right, so the cloud is visibly
+  asymmetric on a symmetric face.
+
+`tools/cloud-points.mjs` now picks the subset once, offline: detect 16 faces,
+normalise each to a common centre and scale, average into a canonical mesh,
+mirror-pair every landmark and symmetrise, then greedy farthest-point sample
+with each pick's mirror partner taken alongside it. Resulting nearest-neighbour
+spacing across the 64 chosen points, in face widths: **min 0.057, median 0.101,
+max 0.146** — a 2.5x spread, against the order-of-magnitude clumping a stride
+produces.
+
+The list is fixed, which matters as much as the spacing: every frame draws the
+same anatomical points, so the cloud deforms with the face. A per-frame sampler
+would reselect different points each frame and shimmer.
+
+Boundary landmarks stay excluded, for the reason in the section above.
+
+### A bug worth remembering
+
+The first run of the generator emitted one point. Cause: the image was released
+with `img.src = ""` *before* its intrinsic size was read, so the aspect ratio
+became `0/0`, every y-coordinate became NaN, and every `d < bestD` comparison
+was false — so the argmin returned -1, every landmark was classified as
+unpaired, and the greedy loop terminated after its seed. NaN does not propagate
+as an error through comparison-based selection; it propagates as "nothing is
+ever better than the current best".
+
+## Merging the front and side scans into one score
+
+Requested: the side profile should not be a separate page with its own number —
+both views should combine into one score.
+
+### The obvious implementation is wrong
+
+Pool the metric lists and let the normal aggregation run:
+`buildReport([...frontScored, ...sideScored])`. This produces a plausible
+number and a meaningless percentile.
+
+`AGG_NORM`'s quantile tables were measured from **front-only** scans of the
+reference population. Their entire purpose is that "5.0 = the 50th percentile"
+holds by construction rather than by assumption. A front+side aggregate has a
+different distribution, so mapping it through a front-only table gives a
+percentile with no referent — and the percentile is what the score is.
+
+Fixing that properly means regenerating the tables from front+side scans of all
+~110 reference faces. We cannot. Side landmarks are hand-placed by the user,
+thirteen points at a time, because a true profile cannot be landmarked
+automatically with confidence. That is 1,430 manual placements.
+
+### What is done instead
+
+Combine one level up. The two views' overall aggregates have each already been
+mapped through their own normalisation, so both are unit-normal by
+construction. Combining two unit-normal variates under a correlation assumption
+is exactly what `aggregateZ` already does for pillars, and the result is still
+unit-normal — which is the property the scale rests on.
+
+**The first implementation read the wrong field, and it is worth recording.**
+`Report.zScores` holds the aggregate BEFORE normalisation — that is its whole
+purpose, since `AGG_NORM` is derived from those values. So `zScores.overall`
+is not unit-normal, and merging it merged two quantities that were never on a
+common scale. It was invisible in the output: the merged score simply looked a
+bit low. It surfaced only when the end-to-end test printed the intermediate
+z's and the front aggregate read **0.029** where the score of 5.4 implied
+**0.308** — an order of magnitude of under-weighting on the view that carries
+31 of the 46 metrics. `Report.overallZ` and `RegionScore.z` now carry the
+normalised values explicitly, and the two fields are documented against each
+other in `types.ts` so the next person does not repeat it.
+
+Verified two ways. Monte Carlo over 400k draws with `corr(front, side) = 0.5`,
+confirming the combination preserves the scale:
+
+```
+merged z   mean 0.0110   sd 1.0060      (target 0.0000 / 1.0000)
+```
+
+And end to end in the browser, against an independent recomputation of the
+merge from the exposed intermediates:
+
+```
+front normalised z   0.295274      -> front-only score 5.4  (matches display)
+side raw z          -7.729783      -> clamped to -2.2
+expected merged z   -0.364487
+actual   merged z   -0.364487
+```
+
+So the merged score is percentile-anchored in exactly the same sense the
+front-only score is. The front-only path is untouched — Henry Cavill measures
+5.4 before and after.
+
+### The two assumptions, stated plainly
+
+- **W_FRONT 0.75 / W_SIDE 0.25.** Front carries 31 metrics plus a shape
+  descriptor averaging ~130 automatically placed landmarks. Side carries 15
+  metrics derived from 13 points a person dragged into place by hand. The split
+  reflects both how much is measured and how reliably it was located.
+- **RHO_VIEWS 0.5.** The two views describe the same skull from different
+  angles, so the correlation is clearly neither 0 nor 1. Measuring it needs
+  paired front+side scans of the reference set — the same data we do not have.
+  0.5 is a deliberate midpoint. Revisit the moment paired data exists.
+
+Note a consequence that is correct but surprising: someone above the median on
+*both* views scores higher than their front-only score, because two
+partially-independent pieces of evidence pointing the same way are stronger
+than one. Someone above on one view and below on the other moves toward the
+middle. That is what aggregating evidence is supposed to do, and it is the same
+arithmetic the pillar aggregation has always used.
+
+### The side aggregate is clamped
+
+Found by testing, not by reasoning. Feeding the flow a profile photo of a
+different person, with the auto-placed points accepted unverified, produced a
+side aggregate of **-7.7σ**. Unclamped that dragged the merged score from 5.4
+to 4.1.
+
+Thirteen points placed by hand is the least reliable input in the pipeline, and
+the only one a user can get wrong by mis-dragging. So it is clamped to the same
+±2.2 every per-metric z already uses. A genuinely extreme profile still moves
+the score hard — the deliberately-wrong one above still lands 4.6 — but a
+mis-placed one cannot bury someone.
+
+Potential cannot go through `aggregateZ` because it is a score, not a z. The
+merge combines the HEADROOM each view found — which is what potential actually
+reports — and adds it to the merged score.
+
+The headline now always states which views it came from: "OVERALL · FRONT ONLY"
+or "OVERALL · FRONT + SIDE". A front scan is a complete measurement of one
+plane, and chin projection, jaw angle and facial convexity do not exist in that
+plane at all.
+
+## Both views are now required, and the side has its own capture
+
+The flow was front photo -> score -> optionally add a profile. That taught
+people the second photo was garnish. It is not: chin projection, jaw angle and
+facial convexity have no front-view equivalent at all, so a front-only report
+is missing measurements rather than merely having fewer of them.
+
+Now: front photo -> side photo -> one analysis -> one score. No number is shown
+between the two.
+
+### The side camera gates on the detector FAILING
+
+The front gates cannot be reused, because the thing they all depend on is
+absent: MediaPipe's face mesh needs a roughly frontal face and does not track a
+true profile. That absence is the most reliable signal available, so it is used
+directly — if the frontal detector can see a face at under 42 degrees of yaw,
+the person has not turned far enough, and the shutter stays shut. "No detection"
+is the pass condition, which inverts every other gate in the file.
+
+Exposure and focus still gate normally, since `frameStats` needs no landmarks.
+Framing cannot be checked at all without them, so the copy states it and the
+verification step enforces what actually matters: all thirteen points get
+dragged into place by hand regardless.
+
+Verified against a fake camera device fed a front-facing clip: the capture
+button stays disabled and the hint reads "Turn to the side".
+
+### Two bugs this surfaced
+
+- **Uploading a photo while the live preview was running crashed**, with
+  "Landmarker is in VIDEO mode". Capturing had always torn the camera down
+  first; choosing a file never did. Pre-existing, and invisible until a test ran
+  with a camera attached — every earlier upload test ran with no device, so the
+  preview never started and the mode was never switched.
+- **The side HUD's hint drew its title and detail on top of each other.**
+  `.face-frame` sets `line-height: 0` so its canvases sit flush, and that
+  inherited into the overlaid HUD and collapsed its block children.
+
+## THE SCORE IS NOT VALID YET — measured, and unfixed
+
+Reported: "Chris Hemsworth and Henry Cavill are still rated like 5.6s, whereas
+Rihanna was 8.6." Investigated, and the report is correct. This section is the
+evidence, written down because the fix is not in yet.
+
+### The 60% component has no discriminating power
+
+`buildReport` blends two things into the overall: the shape descriptor at
+`W_SHAPE = 0.6`, and the 31 measured ratios at 0.4. Scoring the whole reference
+population (117) and the whole celebrity set (112) through the shipped engine
+and measuring Cohen's d, top tier vs reference population:
+
+```
+sex      nPop nTop |  shapeZ   ratioZ  overall
+male       58   14 |   0.177    1.285    0.892
+female     59   14 |   0.656    0.881    1.039
+```
+
+**d = 0.177 is nothing**, and it is *in-sample* — those fourteen faces defined
+the axis, so this is the flattering case. Out of sample it can only be worse.
+The component carrying the majority of the score does not separate attractive
+faces from ordinary ones at all for men.
+
+Weighted by measured separation, shape deserves 0.12 (male) and 0.43 (female).
+It is shipping at 0.60 for both.
+
+### What that produces
+
+```
+top-tier males:   Evans 9.0, Chalamet 8.1, Pattinson 8.1, Pitt 7.8, Gandy 7.7,
+                  Jordan 7.3, Cavill 5.4, Bale 5.4, Hemsworth 5.4, Efron 5.3,
+                  Barrett 4.8, Lachowski 4.7, Gosling 4.7, O'Pry 3.8
+highest scorers:  Chris Evans 9.0, Cillian Murphy 8.4, Chalamet 8.1,
+                  Pattinson 8.1, PETE BUTTIGIEG 7.8, Brad Pitt 7.8,
+                  Tom Hardy 7.8, STEVE BUSCEMI 7.8
+                  Giorgia MELONI 8.8, Kendall Jenner 8.7, Ana de Armas 8.3,
+                  Zendaya 8.1, WHOOPI GOLDBERG 8.1
+```
+
+Sean O'Pry — one of the most booked male models alive — scores **3.8**. Members
+of the ordinary reference population outrank the top tier. The reference
+population and the celebrity set have nearly identical medians (5.10 vs 5.40
+male, 5.00 vs 5.30 female), which is the same failure stated another way.
+
+It is also why a headline can disagree with its own pillars: Rihanna's overall
+(8.4) is higher than all four of her pillars, Cavill's (5.7) lower than three of
+his. The pillars feed only the 40% ratio term; the 60% shape term is not shown
+anywhere and is what actually moves the number.
+
+### Why the axis is dead
+
+It is one linear direction in ~250-dimensional shape space, fitted from 14
+top-tier faces per sex against the population mean, and normalised by the
+population's own spread along it (`axisSD`: 0.098 male, 0.050 female — the 2x
+difference between sexes is its own problem, since it doubles female z for the
+same deviation). Fourteen points cannot locate a direction in that many
+dimensions; the axis is fitting noise, and each face's projection is dominated
+by whatever idiosyncratic directions the noise picked up.
+
+### The fix, not yet applied
+
+1. Drop `W_SHAPE` toward the measured value (~0.15), or to zero.
+2. Regenerate `AGG_NORM` — the quantile tables were built with `W_SHAPE = 0.6`,
+   so changing the blend invalidates them. `tools/normalize.mjs` with `TM_DATA`
+   pointed at the reference photo set.
+3. Re-audit and confirm the top tier separates and no reference-population face
+   outranks it.
+
+Until that lands, the number shown to a user is not a measurement of their
+face — it is 60% noise. Do not ship this to paying users.
+
+Harness: `scratchpad/score-audit.mjs` (scores both sets) and
+`scratchpad/separation.mjs` (computes the table above).
+
+## Next: time-aware deltas, and what the numbers already say about them
+
+Requested: when someone rescans, read the gap between scans and interpret the
+change accordingly — two days apart is probably lighting or water retention, two
+weeks apart might be real.
+
+The thresholds for this do not need inventing. They are already measured, and
+they are the same numbers that make weekly tracking hard:
+
+```
+within-person SD across photos    1.32   (repeat photos of the same person)
+between-person SD                 1.20   (different people)
+```
+
+So the honest bands, before any structural change is claimed:
+
+- **A delta under ~1.3 is inside single-photo noise.** At two days apart it
+  should be stated as capture variance outright — lighting, expression, water
+  retention, camera. Not hedged: said.
+- **Above that, and weeks apart**, it is worth calling a change — but the copy
+  still has to name capture as the leading alternative, because 1.32 is an
+  upper bound measured on photos spanning years of real ageing, not a floor.
+- **Direction matters less than magnitude.** A -0.4 at three days is not a
+  decline; it is the same measurement twice.
+
+This is the one place the stability problem becomes a feature rather than a
+liability: an app that says "that is noise, ignore it" when its competitors say
+"you dropped 0.4, buy our fix" is exactly the positioning. But it only works if
+the bands come from the measurement. Hard-coding "2 days = lighting, 2 weeks =
+real" without reference to the SD would be the same invention we removed from
+the blur gate and the population curve.
+
+`history.ts` already stores scans and computes `daysAgo`, so the data is there.
+
+### The Coach Max profile idea changes the privacy posture
+
+Also raised: Max remembering what someone said they did, building a picture week
+over week, asking "you changed this much — what did you do differently?".
+
+That is a good product idea and a completely different security position. Today
+the app has no backend, no accounts and no uploads, so there is nothing to
+breach. A coach that recalls someone's daily habits across weeks means stored
+personal data about minors and adults describing their bodies and routines.
+
+If it gets built: keep it on-device for as long as possible (the profile already
+lives in localStorage), and if it must sync, store the CONVERSATION SUMMARY and
+the scan numbers — never the photographs. A breach of a face-photo database
+ends the company; a breach of a numbers table is an incident.
+
+## Potential can only move 40% of the score
+
+Reported: "I believe my potential is higher than a five" — shown 4.9 -> 5.0.
+
+That ceiling is structural, not a judgement about the face. `analyze()` builds
+potential by lifting each fixable metric's `zEff` and re-aggregating:
+
+```ts
+report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
+```
+
+`shapeZ` is passed through **unchanged**. And the blend is:
+
+```ts
+const blended = W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;   // W_SHAPE = 0.6
+```
+
+So the lift reaches `ratioZ` only. Sixty per cent of the aggregate is frozen at
+its measured value no matter how much every fixable metric improves. Potential
+is capped at roughly 40% of the range it should have.
+
+Measured across 111 faces, the potential gap is: mean 0.38, median 0.40, max
+1.20. So even the best case in the whole set gains 1.2 points — and a gap of
+0.1 sits near the bottom of our own distribution.
+
+Two things follow, and the second is the important one:
+
+1. Whatever weight the shape term ends up with, the potential run must lift it
+   too, or leave it out of both runs. Freezing a term in one and not the other
+   is not a conservative choice, it is an inconsistent one.
+2. **Potential inherits the validity failure above.** It is computed on top of a
+   term that separates attractive faces from ordinary ones at d = 0.177. Fixing
+   the ceiling before fixing the axis would just produce a confidently wrong
+   larger number.
+
+Whether any individual's true ceiling is higher than what is shown is not
+answerable from this engine yet, and saying otherwise would be inventing
+reassurance. It becomes answerable once the shape term is either fixed with
+enough top-tier faces or dropped.
+
+---
+
+# Resolved: the shape weight, measured out of sample
+
+The validity failure above is fixed, and the fix was chosen by measurement
+rather than by argument.
+
+The problem with the original evidence was that it was **in-sample**. The top
+tier defines the shape axis — the axis IS the vector from the population mean to
+their mean — so of course they project high on it. Any separation measured that
+way is flattered by an unknown amount.
+
+The honest test is leave-one-out: rebuild the axis with one face removed, then
+score that face on an axis it had no hand in choosing. Across the reference set
+(50 male / 52 female population, 11 / 13 top tier after gating):
+
+```
+                    in-sample    leave-one-out
+shapeZ, male          0.477          0.326
+shapeZ, female        0.704          0.263
+```
+
+The female axis was almost entirely overfit — 0.704 collapsing to 0.263 on
+held-out faces. Against `ratioZ` at d = 1.189 / 0.916, the descriptor is the
+weaker term by a factor of three to four, not the stronger one.
+
+Sweeping the blend against **held-out** separation:
+
+```
+W_SHAPE |  male d  female d  |  pooled
+  0.00  |  1.189    0.916   |  1.052
+  0.10  |  1.217    0.959   |  1.088
+  0.15  |  1.221    0.967   |  1.094   <- best
+  0.25  |  1.199    0.947   |  1.073
+  0.60  |  0.801    0.586   |  0.693   <- was shipped
+```
+
+An earlier sweep using in-sample shape scores put the optimum at 0.25. That was
+the same flattery showing up again, one level down. The held-out optimum is
+0.15, which is where CALIBRATION.md's original estimate had it before the
+in-sample sweep talked it upward.
+
+`W_SHAPE = 0.15`, `AGG_NORM` regenerated. Only the two `overall` rows in that
+table change, which is the check that the blend was the only thing touched —
+pillar and region normalisation never saw the shape term.
+
+End-to-end, top tier vs reference population:
+
+```
+              before    after
+male          0.716     1.324
+female        1.034     1.052
+pooled        0.875     1.188
+```
+
+**What is still wrong.** Individual placements remain noisy — Hemsworth 4.7,
+O'Pry 4.0, Hadid 4.6 — because each person is one photograph and one photograph
+is worth ±1.3. And the reference set produces its own 9.0s at the top, which is
+structural: a 58-person reference always contains someone at its own 100th
+percentile. Group separation is the claim that holds; individual placement is
+not yet.
+
+## Potential: the cap was the weight, not the freeze
+
+`shapeZ` is still passed through unchanged into the potential run, so potential
+can only move `1 - W_SHAPE` of the score. That was 40% frozen and is now 15%.
+
+It stays frozen rather than getting lifted, and the reason is measured: across
+229 scored faces the descriptor and the ratio composite are very nearly
+independent — **r = 0.113 male, 0.019 female** — so the fixable metrics carry
+almost no information about where the descriptor sits.
+
+That correlation is BETWEEN people, though, and what potential needs is the
+WITHIN-person slope: if one person's fixable metrics improve, how far does their
+own outline follow? Different skeletons dominate the between-person variance, so
+the two are not the same number and this one cannot stand in for the other.
+Answering it needs the same faces measured before and after a real change, which
+does not exist yet. Until it does, frozen is the conservative direction, and
+overstating a ceiling is the failure mode that makes a potential number
+worthless.
+
+## Time-aware deltas: shipped, on the measured bands
+
+`readDelta` in `history.ts`, using 1.32 (within-person SD) as the floor and four
+days as the point past which a structural change is even possible:
+
+```
+under 1.32                  noise — stated as capture variance outright
+over 1.32, under 4 days     still capture; a face does not restructure that fast
+over 1.32, 4 days or more   worth attention, capture named as the alternative
+```
+
+The top band deliberately stops short of claiming proof, because 1.32 was
+measured on repeat photos spanning years of genuine ageing. It is a ceiling on
+noise, not a floor.
+
+# Capture: three fixes, each found by looking at the render
+
+## The distance gate was measuring pixels nobody can see
+
+`checkFrame` measured face width as a fraction of the **video** frame, but the
+preview is `object-fit: cover`, so a camera whose aspect ratio differs from the
+frame's is centre-cropped. On a 16:9 webcam in a square frame only 56% of the
+width survives — a face filling 90% of what the user can see reads as 0.25 of
+the video and is told "move closer", indefinitely.
+
+Both distance and centring now divide through by the visible fraction. Verified
+across four frame/camera combinations; before the fix, two of the four could not
+be satisfied at all.
+
+```
+case                        visW  silhouette  gate sees  passes
+square frame / 16:9 cam    0.563     0.46       0.46      yes
+square frame / 4:3 cam     0.750     0.46       0.46      yes
+3:4 frame / 16:9 cam       0.422     0.46       0.46      yes
+3:4 frame / square cam     0.750     0.46       0.46      yes
+```
+
+## The front overlay is a silhouette now
+
+The dot cloud and the adaptive crosshair are gone. The crosshair anchored to the
+eye midpoint, which sits about a third of the way down a face, so its horizontal
+arm read as a level set far too high. The heading arrow — the one element that
+answered a question — stays.
+
+In its place is the Procrustes mean of the reference population the person will
+actually be scored against, sized to the midpoint of the distance band, so
+fitting the outline and passing the gate are the same act.
+
+The earlier objection to drawing FACE_OVAL still stands and does not apply here:
+it looked broken as a **live overlay** because it is an anatomical boundary
+rather than the visible silhouette. A fixed target in the frame cannot look like
+tracking that has come loose.
+
+Fixing it exposed a bug in the mean face itself: a 60-degree notch in one jaw.
+The symmetrizer pairs each point with its nearest mirror and drops any pair that
+disagrees — which left exactly two oval landmarks raw, and dropping both halves
+of a disagreement is what put the notch there. The oval now takes its pairs from
+the ring's own topology: walk both ways from the crown, and step k of one arc
+mirrors step k of the other. Mirror residual across all 36 oval points is zero.
+
+## Glasses are detected; hats and hoods are not
+
+Horizontal edge energy across the nose bridge, over the same quantity on the
+person's own cheek. The ratio is what makes it portable — an absolute edge count
+tracks sharpness and contrast far more strongly than eyewear, and would encode
+skin tone besides.
+
+Calibrated on 229 reference faces: median 1.53, p90 2.46. At 3.4 it flags eleven,
+of which nine are plainly wearing glasses and one or two are not callable from
+the photograph. Against a base rate near 8% that is real signal and it is not
+clean, so it never blocks the shutter and its wording is conditional — "if
+you're wearing glasses". A false positive then costs nothing.
+
+**Headwear was attempted and failed. Do not repeat it this way.** The feature was
+the strongest horizontal edge across the forehead, gated on the forehead being
+darker than the cheeks. Over the same 229 faces the twenty highest scores were
+seventeen people with hair on their forehead and three in headwear, and the
+shadow gate did not rescue it: the two clearest hats in the set were lit brightly
+enough to make the forehead LIGHTER than the cheeks. It caught one cap and two
+fringes. A fringe is far more common than a cap. Whatever eventually works will
+have to separate fabric from hair by texture, not by edges or by shadow. The
+capture screen asks instead.
+
+# Side profile: the seed was landing on the wall
+
+Two independent bugs, both worth naming because both are easy to write again.
+
+**Facing direction** was decided by comparing pixel mass in the left half of the
+FRAME against the right half. That measures where the person is standing, not
+which way they are looking. Now decided inside the head's own box, from which
+edge wanders more: the back of a skull is a smooth convex curve, while brow,
+nose, lips and chin all stick out and cut back in.
+
+**The profile edge** was found by scanning inward from the frame border for the
+first "skin-coloured" pixel, on fixed thresholds of `r > 70, r > g, r - b > 12`.
+A beige wall passes that, so the scan stopped where it started and the edge came
+back as the frame border. The replacement never asks whether a pixel looks like
+skin — it asks whether a pixel looks like the BACKGROUND, modelled from the top
+corners, which are background in any portrait framing. It is also independent of
+skin tone, which `r - b > 12` was not.
+
+The anchor table was in frame fractions, so it was only correct when the head
+happened to span 16%–86% of the frame. It is in head fractions now.
+
+Verified on twelve synthetic profiles with known geometry — two backgrounds
+including the beige that defeated the old test, both facing directions, three
+horizontal offsets: **12/12 correct on facing direction, all 13 points on the
+head**. Where the head fills the frame and the corners are hair rather than
+background, the trace cannot work and says so, falling back to a centred head
+box.
+
+External profile photographs were sought for a real-world set and Wikimedia
+returned drawings, mummy portraits and stone heads. The synthetic set tests the
+geometry exactly; the background model's behaviour on real backgrounds is still
+under-tested, and that is the known gap.
+
+**The gate** passed the moment the detector lost the face, on the first frame —
+which is what made the side view easier to shoot than the front, and which also
+passed for a hand over the lens or someone stepping out of shot. Passing now
+requires having watched the head turn past half the profile angle, then holding
+the loss for six frames.
+
+# The quick breakdown page
+
+`quick.html` / `src/quick.ts` — a second entry point, front-only, laid out to be
+read at arm's length in a screen recording.
+
+It shares the engine rather than approximating it: same detect, same `analyze`,
+same percentile tables. Verified by computing `analyze()` independently on the
+main page's module graph and comparing — 4.30 and potential 5.2 on both, exactly.
+
+It does NOT show the same total as the main app, deliberately. The main flow
+requires a profile and merges two views; this is front-only, and the page says so
+rather than presenting it as the same number.
+
+**It is unlisted, not private.** Nothing links to it, `robots` and `X-Robots-Tag`
+ask crawlers away, and that is the whole of it — anyone with the URL can open it.
+A client-side gate on a static page is theatre, since the bundle ships to whoever
+asks. Real access control means turning on Vercel deployment protection for the
+project, or putting it behind a backend.
+
+## The sex vote is wrong often enough to be a product problem
+
+Testing this page on a bearded man in glasses, the shape model returned **female**
+and the card printed WOMEN beside his face. That is not a labelling error: every
+percentile on the page is computed against whichever reference population it
+picked, and switching it moved the same photograph from **4.30 to 6.00** — a
+1.7-point swing, larger than the whole within-person noise band.
+
+The main app has the same behaviour and the same exposure. On the quick page the
+reference population is therefore shown as a button: one tap re-scores against
+the other population. Hiding the label would have hidden a load-bearing fact;
+asking up front would have put a demographic question between someone and their
+score, which on a page built for filming is the interaction guaranteed to end up
+in the clip.
+
+This wants fixing properly at some point — the vote should carry a confidence and
+say so when it is close.
+
+# The sex vote does not work, and has been removed
+
+Reported after the quick page printed WOMEN beside a bearded man's face.
+
+Measured against the manifests' own labels, which give 229 faces with a known
+sex. In the app the classifier scored **70.7%** — but that model was trained on
+these very faces. Rebuilding the mean shapes with each face removed and then
+classifying it:
+
+```
+leave-one-out accuracy    58.8%   (male 61.9%, female 55.1%)
+always say "male"         54.1%   <- base rate of the same sample
+```
+
+Four points above a constant answer.
+
+A second decision rule was tried — project onto the between-means axis and
+threshold at the midpoint — and it agreed with the first on **194 of 194** faces.
+That is not a coincidence: nearest-centroid under Euclidean distance IS that
+threshold. The two were one classifier wearing two names, so there is no better
+rule waiting to be found over this descriptor. The descriptor does not carry
+the information.
+
+**Why it mattered enough to remove rather than tolerate.** Every percentile in a
+report comes from the chosen reference population. Switching it moves the
+overall score by:
+
+```
+median 0.70    p90 2.10    max 4.50
+```
+
+Kim Kardashian scores 7.7 against women and 4.0 against men. Michael B. Jordan
+scores 7.6 against men and 4.4 against women — and the vote had him as female.
+A coin flip was deciding a number larger than the entire within-person noise
+band of 1.32.
+
+`detectSex` is deleted. The reference population is asked for on the capture
+screen, remembered on the device, and changeable from the results screen — where
+changing it re-runs both views and the merge, not just the label. That reverses
+the earlier decision to infer rather than ask, and the only reason for the
+reversal is that the inference was finally measured.
+
+One note for whoever tests this: a profile far off the bottom of the scale
+displays the same floored score under either population, so checking the side
+CARD is not a check that the profile was re-scored. The aggregate underneath it
+moves (-5.08 male vs -3.64 female on the test profile); the card is floored.
+
+## Hats and hoods, second attempt: texture. Also failed.
+
+The first attempt used edges and shadow and caught fringes. The second tested
+the obvious follow-up — hair has strand detail at a fine scale, fabric is a
+broad flat field — as high-frequency energy in the band above the hairline over
+the same quantity on the person's own cheek. Against 229 bare heads and 9
+portraits in caps, berets and military headwear:
+
+```
+crownTexture     Cohen's d 0.405
+best threshold   3% precision at 67% recall
+                 173 bare heads flagged to catch 6 hats
+```
+
+Colour spread looked much better at d = -0.630, and that number is a trap worth
+recording: the headwear portraits obtainable were largely historical monochrome,
+which has almost no chroma by construction. It was measuring the age of the
+photograph.
+
+**What would actually work is a segmentation model, not a hand-built feature.**
+MediaPipe ships an `ImageSegmenter` inside the bundle already loaded here, and
+Google publishes a multiclass selfie model whose classes include hair and
+clothes separately — a hood is clothes where hair should be, which states the
+question directly instead of proxying it. The cost is the download:
+
+```
+selfie_multiclass_256x256 (hair + clothes + skin)   16 MB
+hair_segmenter (hair vs not-hair)                  781 KB
+face_landmarker (already loaded)                   3.7 MB
+```
+
+The cheap one cannot tell a bald head from a covered one, and flagging bald
+users is a worse failure than the fringe problem it would replace. So the choice
+is 16 MB of extra download against detecting headwear at all, on a page whose
+audience arrives from a phone. That is a product decision rather than an
+engineering one and it has not been taken.
+
+## Glasses now hold the shutter, with a way past
+
+Full view of the face is a requirement, so the advisory became a block — but on
+a measure with roughly six-in-seven precision, a single threshold cannot do both
+jobs. Two thresholds, the same shape as the blur gate:
+
+```
+>= 3.4   advisory, conditional wording, never blocks     11 of 229 (4.8%)
+>= 4.3   holds the shutter                                7 of 229 (3.1%)
+```
+
+Of the seven above 4.3, six are plainly wearing glasses and one cannot be called
+from the photograph. That last one is why the block is always escapable: a wrong
+hint costs a glance, but a wrong block costs someone the use of the app with no
+way to comply, because there is nothing on their face to remove. The capture
+screen shows "I'm not wearing glasses" only while that block is what is stopping
+them. Requiring removal and stranding people are different things.
+
+## The reel generator's scan sequence
+
+The quick page now plays three stages instead of showing a card: a scan line
+down the full-bleed photo, then the landmark reveal, then the photo shrinks to
+the top of the screen while the score cards drop out of the space it vacates,
+staggered into reading order.
+
+It is sequenced in script rather than as one CSS animation because the middle
+stage is a canvas reveal that has to be started and awaited — and because it has
+to be skippable. Switching reference population re-scores and re-renders, and
+replaying the theatre on every toggle would be unwatchable, so only the first
+render after a scan animates.
+
+The photo collapses by `max-height`, not by `transform`. A scaled element keeps
+its layout box, so the cards would have slid underneath it rather than following
+it up the screen.
+
+Verified by sampling the sequence at four points and asserting the ORDER, not
+just the end state: scan line running and no dots at 0.7s, dots painted by 3.1s,
+photo shrunk from 597px to 317px and cards at full opacity by 5.4s.

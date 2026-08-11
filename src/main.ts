@@ -1,3 +1,4 @@
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts";
 import { detectStable } from "./engine/consensus.ts";
 import { assessQuality } from "./engine/quality.ts";
@@ -10,18 +11,23 @@ import { toCelebEntry } from "./engine/celebs.ts";
 import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
-import { renderResults, renderSideResults } from "./ui/results.ts";
-import { toggleMute } from "./ui/audio.ts";
-import { openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
-import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
+import { renderResults } from "./ui/results.ts";
+import { mergeReports } from "./engine/scoring.ts";
+import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
+import { analyzeSide } from "./engine/scoring.ts";
+import type { SidePoints } from "./engine/sideMetrics.ts";
+import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
+import { hasHistory, openHistory } from "./ui/historyView.ts";
+import { mountAccountButton } from "./ui/authModal.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
-import { detectSex } from "./engine/shape.ts";
 import { estimateGaze } from "./engine/gaze.ts";
 import { openQuiz } from "./ui/goalsQuiz.ts";
 import { analyzeSkin } from "./engine/skin.ts";
+import { storeSex, storedSex } from "./engine/sexPref.ts";
+import { detectOcclusion } from "./engine/occlusion.ts";
 import { REGION_LANDMARKS } from "./ui/regions.ts";
 
 const MAX_IMAGE_DIM = 1280;
@@ -37,9 +43,10 @@ const el = {
   camHint: document.getElementById("cam-hint")!,
   camHintTitle: document.getElementById("cam-hint-title")!,
   camHintDetail: document.getElementById("cam-hint-detail")!,
-  camGates: document.getElementById("cam-gates")!,
   btnCamera: document.getElementById("btn-camera") as HTMLButtonElement,
   btnUpload: document.getElementById("btn-upload") as HTMLButtonElement,
+  btnCancel: document.getElementById("btn-cancel") as HTMLButtonElement,
+  btnNoGlasses: document.getElementById("btn-noglasses") as HTMLButtonElement,
   reelCanvas: document.getElementById("reel-canvas") as HTMLCanvasElement,
   outlineCanvas: document.getElementById("outline-canvas") as HTMLCanvasElement,
   reelScore: document.getElementById("reel-score")!,
@@ -57,14 +64,16 @@ const el = {
   barFill: document.getElementById("barFill")!,
   qualityChips: document.getElementById("quality-chips")!,
   analysis: document.getElementById("analysis")!,
-  mute: document.getElementById("mute")!,
 };
 
-// The reference population is always inferred from face shape. Asking people
-// to classify themselves before a scan added a decision in front of the only
-// thing that matters (taking the photo), and the shape model is the thing
-// actually doing the work either way.
-let selectedSex: Sex = "male";
+// The reference population, chosen by the user and remembered on the device.
+//
+// It used to be inferred from face shape. That was the right instinct — a
+// decision in front of the only thing that matters is a cost — but the
+// inference turned out to be 58.8% accurate on held-out faces against a 54.1%
+// base rate, while the choice itself moves the score by a median of 0.70 points
+// and up to 4.50. sexPref.ts has the measurements. One tap beats that.
+let selectedSex: Sex = storedSex() ?? "male";
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
 // directly, skipping the UI and its scan animation. Same engine path as a
@@ -95,11 +104,13 @@ let selectedSex: Sex = "male";
   return {
     faceFound: true,
     overall: report.overall,
+    potential: report.potential,
     yaw: quality.yawDeg,
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
     gaze: estimateGaze(res.faceLandmarks[0]),
     skin: analyzeSkin(c, res.faceLandmarks[0], w, h),
+    occlusion: detectOcclusion(c, res.faceLandmarks[0], w, h),
     // Group shots are the main contaminant in scraped photo sets: the
     // detector locks onto whichever face it finds, which may not be the
     // subject. A face filling little of the frame is the tell.
@@ -143,6 +154,20 @@ let selectedSex: Sex = "male";
 mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 el.ovalFrame.classList.add("showing-reel");
 
+// A returning visitor with scans on this device gets a way straight into their
+// history from the landing. Hidden entirely when there is nothing to show, so a
+// first-time visitor never sees a dead link.
+const landingHistory = document.getElementById("landing-history");
+if (landingHistory && hasHistory()) {
+  landingHistory.classList.remove("hidden");
+  landingHistory.addEventListener("click", () => openHistory());
+}
+
+// Accounts light up only when Supabase keys are set in the build environment.
+// With no keys this call returns immediately and adds no header button, so the
+// signed-out product is exactly what shipped before. See src/engine/auth.ts.
+mountAccountButton();
+
 // The idealized silhouette is a framing guide for the camera, not landing art
 let outline: ReturnType<typeof mountFaceOutline> | null = null;
 function showGuide(sex: Sex): void {
@@ -150,20 +175,38 @@ function showGuide(sex: Sex): void {
   outline.morphTo(sex);
 }
 
-document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
-
-el.mute.addEventListener("click", () => {
-  el.mute.textContent = toggleMute() ? "🔇" : "🔊";
+// Reference-population control. Reflects the stored choice, writes it back, and
+// re-shapes the capture silhouette to match — the guide should be the average
+// face someone is about to be compared against, not a fixed one.
+const refpop = document.getElementById("refpop")!;
+function paintRefPop(): void {
+  for (const b of refpop.querySelectorAll<HTMLButtonElement>(".seg-btn")) {
+    b.classList.toggle("on", b.dataset.sex === selectedSex);
+    b.setAttribute("aria-pressed", String(b.dataset.sex === selectedSex));
+  }
+}
+refpop.addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>(".seg-btn");
+  if (!b?.dataset.sex) return;
+  selectedSex = b.dataset.sex as Sex;
+  storeSex(selectedSex);
+  paintRefPop();
+  setGuideSex(selectedSex);
+  showGuide(selectedSex);
 });
+paintRefPop();
+setGuideSex(selectedSex);
+
+document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
 initLandmarker()
   .then(() => {
-    el.engineStatus.textContent = "ENGINE READY — 478-POINT MODEL LOADED";
+    el.engineStatus.textContent = "ENGINE READY · 478-POINT MODEL LOADED";
     el.engineStatus.classList.add("ready");
   })
   .catch((err) => {
     console.error(err);
-    el.engineStatus.textContent = "ENGINE FAILED TO LOAD — REFRESH TO RETRY";
+    el.engineStatus.textContent = "ENGINE FAILED TO LOAD · REFRESH TO RETRY";
     el.engineStatus.classList.add("error");
   });
 
@@ -187,16 +230,21 @@ el.ovalFrame.addEventListener("drop", (e) => {
 // ---- camera ----
 let cam: CameraHandle | null = null;
 let lastCheck: FrameCheck | null = null;
+// Wall clock until which the opening capture instruction stays put.
+let holdHintUntil = 0;
+const HINT_HOLD_MS = 3200;
 
 async function openCamera(): Promise<void> {
   if (!isSupported()) {
-    el.camHintDetail.textContent = "This browser can't open a camera — upload a photo instead.";
+    el.camHintDetail.textContent = "This browser can't open a camera, so upload a photo instead.";
     return;
   }
   const desktop = !matchMedia("(pointer: coarse)").matches;
+  holdHintUntil = 0;
+  resetGlassesOverride();
   el.camHintTitle.textContent = "Allow camera access";
   el.camHintDetail.textContent = desktop
-    ? "Your browser will ask at the top of the window — choose Allow"
+    ? "Your browser will ask at the top of the window. Choose Allow"
     : "Tap Allow when your browser asks";
   try {
     cam = await startCamera({
@@ -204,8 +252,16 @@ async function openCamera(): Promise<void> {
       guideCanvas: el.camGuide,
       onCheck: (c) => {
         lastCheck = c;
-        el.camHintTitle.textContent = c.hint;
-        el.camHintDetail.textContent = c.detail;
+        // Hold the opening instruction for a beat before the live coaching
+        // takes over. Glasses can be detected once the camera is running; a
+        // cap or a hood cannot, so this moment — preview up, nothing shot yet
+        // — is the only chance to ask about them, and a hint that is replaced
+        // on the very next frame is a hint nobody reads. The lamp underneath
+        // is already live, so nothing is being hidden.
+        if (performance.now() >= holdHintUntil) {
+          el.camHintTitle.textContent = c.hint;
+          el.camHintDetail.textContent = c.detail;
+        }
         el.camHint.classList.toggle("ready", c.ready);
         el.camHint.classList.toggle("red", c.status === "red");
         el.camHint.classList.toggle("amber", c.status === "amber");
@@ -213,11 +269,12 @@ async function openCamera(): Promise<void> {
         el.camLampFill.className = c.status === "green" ? "green" : c.status;
         el.camLampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
         el.ovalFrame.classList.toggle("ready", c.ready);
+        // Offer the way out only while the glasses block is what is stopping
+        // them, so it is not a standing invitation to skip a real check.
+        el.btnNoGlasses.classList.toggle("hidden", c.hint !== "Take your glasses off");
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
-        renderGates(c);
       },
-      onSex: (sex) => showGuide(sex),
     });
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
@@ -227,27 +284,39 @@ async function openCamera(): Promise<void> {
     // Starts on the male silhouette and morphs once the shape vote settles —
     // waiting for the vote would leave the frame empty at the exact moment
     // someone needs help positioning.
-    showGuide("male");
+    showGuide(selectedSex);
+    el.camHintTitle.textContent = "Glasses, hats and hoods off";
+    el.camHintDetail.textContent = "They sit across the eye, brow and jaw measurements";
+    holdHintUntil = performance.now() + HINT_HOLD_MS;
     el.camLight.classList.remove("hidden");
-    el.camGates.classList.remove("hidden");
+    el.btnCancel.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
     el.btnCamera.disabled = true;
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
-    el.camHintDetail.textContent = "Permission was denied — you can still upload a photo.";
+    el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";
   }
 }
 
-const GATE_LABELS: Record<string, string> = {
-  face: "face", distance: "distance", centered: "centered", level: "level",
-  straight: "straight", light: "light", sharp: "sharp", neutral: "neutral",
-  gaze: "eyes on lens",
-};
-
-function renderGates(c: FrameCheck): void {
-  el.camGates.innerHTML = Object.entries(c.gates)
-    .map(([k, ok]) => `<span class="gate ${ok ? "ok" : ""}">${GATE_LABELS[k]}</span>`)
-    .join("");
+// Tear the live preview down and put the landing screen back exactly as it
+// was, celebrity reel and all. Shared by capture and cancel so the two can
+// never drift apart and leave the page half in camera mode.
+async function closeCamera(): Promise<void> {
+  cam?.stop();
+  cam = null;
+  lastCheck = null;
+  el.ovalFrame.classList.remove("live", "ready", "tracking");
+  el.stage.classList.remove("live-cam");
+  el.upload.classList.remove("camera-live");
+  el.camLight.classList.add("hidden");
+  el.btnCancel.classList.add("hidden");
+  el.btnNoGlasses.classList.add("hidden");
+  el.btnCamera.textContent = "Use camera";
+  el.btnCamera.disabled = false;
+  el.camHintTitle.textContent = "Take a photo, or upload one";
+  el.camHintDetail.textContent = "The camera preview will guide your framing";
+  el.camHint.classList.remove("ready", "red", "amber");
+  await setRunningMode("IMAGE");
 }
 
 el.btnCamera.addEventListener("click", async () => {
@@ -257,47 +326,52 @@ el.btnCamera.addEventListener("click", async () => {
   }
   if (!lastCheck?.ready) return;
   const shot = cam.capture();
-  cam.stop();
-  cam = null;
-  el.ovalFrame.classList.remove("live", "ready");
-  el.stage.classList.remove("live-cam");
-  el.upload.classList.remove("camera-live");
-  el.camLight.classList.add("hidden");
-  el.camGates.classList.add("hidden");
-  el.btnCamera.textContent = "Use camera";
-  el.btnCamera.disabled = false;
-  await setRunningMode("IMAGE");
+  await closeCamera();
   if (shot) await handleCanvas(shot);
 });
 
-// Returning visitors who already granted access get a live preview with no
-// second prompt — the guidance starts working before they ask for it.
-permissionGranted().then((granted) => {
-  if (granted) openCamera();
+el.btnCancel.addEventListener("click", async () => {
+  await closeCamera();
 });
+
+el.btnNoGlasses.addEventListener("click", () => {
+  overrideGlasses();
+  el.btnNoGlasses.classList.add("hidden");
+});
+
+// The camera never opens on its own, even for a returning visitor who has
+// already granted access. The landing plays the celebrity reel until the
+// moment someone clicks "Use camera" — auto-opening the preview replaced that
+// reel with a shot of the viewer's own room the instant the page loaded, which
+// is both worse as a first impression and startling on a page people open in
+// public. Explicit intent only.
 
 function resetToUpload(): void {
   el.main.classList.add("hidden");
   el.upload.classList.remove("hidden");
-  el.mute.classList.add("hidden");
   el.zoomable.style.transform = "none";
   el.analysis.innerHTML = "";
   el.qualityChips.innerHTML = "";
   el.fileInput.value = "";
 }
 
-const SCAN_STAGES = [
-  "Detecting facial landmarks",
-  "Normalizing to interpupillary scale",
-  "Measuring 31 proportions",
-  "Checking bilateral symmetry",
-  "Comparing against population",
-  "Composing report",
+// Two views go into the score, so the scan shows two views being measured. It
+// only ever showed the front, which made the profile someone had just spent
+// time verifying look like it had been filed away and ignored.
+const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
+  { text: "Detecting facial landmarks", view: "front" },
+  { text: "Normalizing to interpupillary scale", view: "front" },
+  { text: "Measuring 31 front proportions", view: "front" },
+  { text: "Checking bilateral symmetry", view: "front" },
+  { text: "Reading the profile: chin, jaw, convexity", view: "side" },
+  { text: "Measuring 15 side proportions", view: "side" },
+  { text: "Comparing against population", view: "side" },
+  { text: "Merging both views", view: "front" },
 ];
 
 async function handleFile(file: File): Promise<void> {
   if (!isReady()) {
-    el.engineStatus.textContent = "ENGINE STILL LOADING — ONE MOMENT";
+    el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
     return;
   }
   let image;
@@ -327,6 +401,11 @@ async function handleFile(file: File): Promise<void> {
 
 async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promise<void> {
   void exifOrientation;
+  // Uploading while the live preview is running left the landmarker in VIDEO
+  // mode, and the still-image detector then threw "Landmarker is in VIDEO
+  // mode". Capturing had always torn the camera down first; choosing a file
+  // never did.
+  if (cam) await closeCamera();
   const width = src.width;
   const height = src.height;
   el.photoCanvas.width = width;
@@ -335,7 +414,12 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
-  el.mute.classList.remove("hidden");
+  // The front photo, kept so the scan can switch back to it after showing the
+  // profile being measured.
+  const frontShot = document.createElement("canvas");
+  frontShot.width = el.photoCanvas.width;
+  frontShot.height = el.photoCanvas.height;
+  frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
@@ -356,29 +440,111 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   }
 
   const landmarks = result.faceLandmarks[0];
+
+  pending = {
+    landmarks,
+    width,
+    height,
+    quality,
+    autoNote: `Scored against ${selectedSex} norms`,
+  };
+
+  // The main product is two photographs: front, then side, then one analysis of
+  // both. That is the whole mechanism, so the side is a required step here, not
+  // an optional extra — after the front is captured the flow goes straight to
+  // the profile. (Front-only lives on the separate /quick.html page, which is
+  // built for filming and deliberately skips the side.)
+  //
+  // runFullAnalysis still accepts null so a report restored from history can
+  // render front-only; the interactive flow always supplies a side report.
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "FRONT CAPTURED";
+  el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
+  drawCalm(el.overlayCanvas, landmarks, width, height);
+  startSide();
+}
+
+interface PendingFront {
+  landmarks: NormalizedLandmark[];
+  width: number;
+  height: number;
+  quality: QualityCheck;
+  autoNote: string;
+}
+let pending: PendingFront | null = null;
+// The verified side points, kept so a change of reference population can
+// re-score the profile too rather than only the front.
+let lastSide: { points: SidePoints; faceDir: number; photo?: HTMLCanvasElement } | null = null;
+
+// Both photographs are in. One analysis, one reveal, one score.
+async function runFullAnalysis(sideReport: Report | null): Promise<void> {
+  if (!pending) return;
+  const { landmarks, width, height, quality, autoNote } = pending;
+  // The scan sequence only narrates the side view when there is one. Front-only
+  // is now a complete result rather than an unfinished one, so its loading bar
+  // must not claim to be reading a profile that was never taken.
+  const stages = sideReport ? SCAN_STAGES : SCAN_STAGES.filter((s) => s.view === "front");
+  el.main.classList.remove("hidden");
+  // The front photo, kept so the scan can switch back to it after showing the
+  // profile being measured.
+  const frontShot = document.createElement("canvas");
+  frontShot.width = el.photoCanvas.width;
+  frontShot.height = el.photoCanvas.height;
+  frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
+  el.frame.classList.add("scanning");
+  el.capRight.textContent = "SCANNING";
+  el.analysis.innerHTML = "";
+  await nextFrame();
   const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
 
-  // Staged status lines, ~360ms each
+  // Staged status lines, ~360ms each, with the photo pane following whichever
+  // view the current stage is about.
+  const sideShot = lastSide?.photo;
+  let showing: "front" | "side" = "front";
+  const swapTo = (view: "front" | "side") => {
+    if (view === showing) return;
+    if (view === "side" && !sideShot) return;
+    showing = view;
+    const cap = document.querySelector(".photo-caption span");
+    if (cap) cap.textContent = view === "side" ? "SIDE" : "FRONT";
+    el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
+    if (view === "side") {
+      const t = sideShot!;
+      el.photoCanvas.width = t.width;
+      el.photoCanvas.height = t.height;
+      el.photoCanvas.getContext("2d")!.drawImage(t, 0, 0);
+      // The profile gets its own reveal: the thirteen verified points, dropped
+      // in one at a time. Without this the side half of the scan was a photo
+      // sitting still while the text claimed it was being measured.
+      if (lastSide) revealSidePoints(el.overlayCanvas, lastSide.points, t.width, t.height);
+    } else {
+      el.photoCanvas.width = width;
+      el.photoCanvas.height = height;
+      el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
+      drawCalm(el.overlayCanvas, landmarks, width, height);
+    }
+  };
   await new Promise<void>((done) => {
     let s = 0;
     const step = () => {
-      if (s < SCAN_STAGES.length) {
-        el.status.innerHTML = `<b>${SCAN_STAGES[s]}</b> …`;
-        el.barFill.style.width = `${((s + 1) / SCAN_STAGES.length) * 100}%`;
+      if (s < stages.length) {
+        el.status.innerHTML = `<b>${stages[s].text}</b> …`;
+        el.barFill.style.width = `${((s + 1) / stages.length) * 100}%`;
+        swapTo(stages[s].view);
         s++;
-        setTimeout(step, 360);
+        setTimeout(step, stages[s - 1].view === "side" ? 520 : 360);
       } else done();
     };
     setTimeout(step, 200);
   });
   await reveal.done;
 
-  // The reference population is picked by shape, then stated — an unexplained
-  // switch would look like a guess.
-  const guess = detectSex(extractShape(buildGeometry(landmarks, width, height)));
-  selectedSex = guess?.sex ?? "male";
-  const autoNote = guess ? `Scored against ${guess.sex} norms (auto-detected)` : "";
-  const report = analyze(landmarks, width, height, selectedSex);
+  const front = analyze(landmarks, width, height, selectedSex);
+  // Front-only is a real result: mergeReports already returns the front report
+  // untouched when the side is absent, so the same call covers both and the
+  // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
+  // "Add side profile" nudge) does the rest.
+  const report = sideReport ? mergeReports(front, sideReport) : front;
   const delta = compareAndStore(report);
 
   el.frame.classList.remove("scanning");
@@ -388,7 +554,7 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   drawCalm(el.overlayCanvas, landmarks, width, height);
   renderQualityChips(quality, autoNote);
 
-  renderResults({
+  const ctxArgs = {
     report,
     delta,
     landmarks,
@@ -398,22 +564,117 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
-    onSideProfile: () => startSide(report),
-  });
+    onSideProfile: () => startSide(),
+    sideReport: sideReport ?? undefined,
+    sidePhoto: lastSide?.photo,
+    sidePoints: lastSide?.points,
+    // Correct the points on the profile already taken, rather than shooting it
+    // again. The photograph is usually fine; it is the seed that missed.
+    onRedoSide: () => {
+      if (!lastSide?.photo) {
+        startSide();
+        return;
+      }
+      el.main.classList.add("hidden");
+      openSideAdjust(lastSide.photo, { points: lastSide.points, faceDir: lastSide.faceDir }, {
+        sex: selectedSex,
+        onBack: () => {
+          closeSide();
+          el.main.classList.remove("hidden");
+        },
+        onDone: async (sideReport, points, faceDir) => {
+          closeSide();
+          lastSide = { points, faceDir, photo: lastSide?.photo };
+          await runFullAnalysis(sideReport);
+        },
+      });
+    },
+    // Changing the reference population re-runs BOTH views and the merge. It
+    // cannot just relabel: every percentile, every region and the side metrics
+    // are all scored against the chosen population, so a relabel would leave
+    // the numbers describing a group the header no longer names.
+    onSexChange: (sex: Sex) => {
+      selectedSex = sex;
+      storeSex(sex);
+      paintRefPop();
+      setGuideSex(sex);
+      if (!lastSide) return;
+      const f = analyze(landmarks, width, height, sex);
+      const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
+      const merged = mergeReports(f, sd);
+      renderQualityChips(quality, `Scored against ${sex} norms`);
+      renderResults({ ...ctxArgs, report: merged, delta: null });
+    },
+  };
+  renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
 }
 
-function startSide(frontReport: Report): void {
+// Drop the verified profile points in one by one, in reading order down the
+// face, so the side view visibly gets measured rather than just displayed.
+function revealSidePoints(
+  canvas: HTMLCanvasElement,
+  points: SidePoints,
+  w: number,
+  h: number,
+): void {
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const pts = Object.values(points).sort((a, b) => a.y - b.y);
+  const r = Math.max(3, w / 130);
+  const total = 900;
+  const start = performance.now();
+  const frame = (now: number) => {
+    const t = Math.min(1, (now - start) / total);
+    ctx.clearRect(0, 0, w, h);
+    const shown = Math.ceil(t * pts.length);
+    for (let i = 0; i < shown; i++) {
+      const p = pts[i];
+      // The newest point lands slightly large and settles, so the eye catches
+      // which one just arrived.
+      const age = Math.min(1, (t * pts.length - i) * 2.2);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * (1 + (1 - age) * 0.9), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(143,243,224,${0.35 + age * 0.55})`;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(4,53,45,0.85)";
+      ctx.lineWidth = Math.max(1, r * 0.32);
+      ctx.stroke();
+    }
+    if (t < 1) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+function startSide(): void {
   el.main.classList.add("hidden");
   openSideCapture({
-    sex: frontReport.sex,
-    onBack: () => el.main.classList.remove("hidden"),
-    onDone: (sideReport) => {
+    sex: selectedSex,
+    // There is no "back to results" any more, because there are no results yet.
+    // The only way out of this step is forward, or starting over.
+    onBack: () => resetToUpload(),
+    onDone: async (sideReport, points, faceDir) => {
+      // Copy the profile out before the side screen is torn down — the results
+      // panel shows it under the Side tab, and after closeSide() the canvas it
+      // lives on is fair game.
+      const shot = document.getElementById("side-canvas") as HTMLCanvasElement | null;
+      let photo: HTMLCanvasElement | undefined;
+      if (shot?.width) {
+        photo = document.createElement("canvas");
+        photo.width = shot.width;
+        photo.height = shot.height;
+        photo.getContext("2d")!.drawImage(shot, 0, 0);
+      }
       closeSide();
-      el.main.classList.remove("hidden");
-      renderSideResults(sideReport, () => startSide(frontReport));
+      lastSide = { points, faceDir, photo };
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
+      // The verified points, for the calibration harnesses — re-scoring the
+      // profile under a different reference population needs the input, not
+      // the finished report.
+      (window as unknown as Record<string, unknown>).__truemaxSidePoints = { points, faceDir };
+      await runFullAnalysis(sideReport);
     },
   });
 }

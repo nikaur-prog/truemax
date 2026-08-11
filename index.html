@@ -3,19 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TrueMax — Facial Analysis</title>
+    <title>TrueMax · Facial Analysis</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%231b1b19%22/><text x=%2250%22 y=%2268%22 font-size=%2252%22 font-family=%22sans-serif%22 font-weight=%22700%22 fill=%22white%22 text-anchor=%22middle%22>T</text></svg>" />
     <link rel="preload" href="/models/face_landmarker.task" as="fetch" crossorigin="anonymous" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@400;500;600;650&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <!-- Typefaces are self-hosted (see src/style.css). They used to come from
+         the Google Fonts CDN, which meant a render-blocking third-party request
+         before any text appeared — and on a slow or filtered connection the
+         whole app fell back to system defaults, which is what made it look
+         like an unstyled document. It was also the only outbound request on a
+         page that promises nothing leaves your device. -->
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <header class="topbar">
       <span class="wordmark">TRUE<b>MAX</b></span>
       <div class="topbar-right">
-        <span class="tag">FRONT · V1</span>
-        <button class="mute hidden" id="mute" title="Sound">🔊</button>
+        <span class="tag">FRONT + SIDE · V1</span>
       </div>
     </header>
 
@@ -33,7 +36,7 @@
         <summary>What gets measured</summary>
         <p>
           Jaw angularity, canthal tilt, facial thirds, midface ratio, cheekbone
-          height, lip fullness, nose harmony and symmetry — 31 measurements,
+          height, lip fullness, nose harmony and symmetry: 31 measurements,
           each scored against a population reference, showing what already works
           and what is worth changing.
         </p>
@@ -62,12 +65,15 @@
               <b id="cam-hint-title">Take a photo, or upload one</b>
               <span id="cam-hint-detail">The camera preview will guide your framing</span>
             </div>
+            <!-- Readiness bar only. A nine-chip checklist used to sit under
+                 here; it restated what the bar and the one-line hint already
+                 said, and nine words competing for attention is not a
+                 checklist, it is noise. -->
             <div class="hud-bottom">
               <div class="cam-light hidden" id="cam-light">
                 <span class="lamp" id="cam-lamp"></span>
                 <span class="lamp-track"><i id="cam-lamp-fill"></i></span>
               </div>
-              <div class="cam-gates hidden" id="cam-gates"></div>
             </div>
           </div>
         </div>
@@ -76,6 +82,15 @@
           <button class="btn pri shutter" id="btn-camera">Use camera</button>
           <button class="btn gho" id="btn-upload">Upload a photo</button>
         </div>
+        <!-- Only while the camera is live. Backing out of an open camera had no
+             exit before this: the only ways out were to take a photo you did
+             not want or to reload the page. -->
+        <button class="btn cancel hidden" id="btn-cancel">Cancel</button>
+        <!-- The glasses gate holds the shutter, and it is right about six of
+             every seven faces it fires on. This is for the seventh: someone
+             with nothing on their face cannot comply with "take your glasses
+             off", so they can say so. Only shown while that block is active. -->
+        <button class="linkish hidden" id="btn-noglasses">I'm not wearing glasses</button>
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
 
@@ -84,12 +99,34 @@
         <span>one quick question · optional</span>
       </button>
 
+      <!-- Which reference population to score against. This was inferred from
+           face shape until the inference was measured: 58.8% correct on
+           held-out faces against a 54.1% base rate, while the choice moves the
+           score by a median of 0.70 points and up to 4.50. A guess that weak
+           cannot be allowed to decide a number that large, so it is asked. See
+           src/engine/sexPref.ts. -->
+      <fieldset class="refpop" id="refpop">
+        <legend>Score against</legend>
+        <div class="seg">
+          <button type="button" class="seg-btn" data-sex="male">Men</button>
+          <button type="button" class="seg-btn" data-sex="female">Women</button>
+        </div>
+        <p class="refpop-why">Every percentile is measured against this group. You can change it on your results.</p>
+      </fieldset>
+
       <div class="hints">
         <div><i></i>Look straight at the lens</div>
         <div><i></i>Neutral expression</div>
+        <!-- All three sit across something the scan measures: frames cross the
+             eye and brow metrics, a brim shadows the upper face, a hood pulls
+             in at the jaw. Only glasses are detectable once the camera is
+             running (see occlusion.ts), so asking here is the whole defence
+             for the other two. -->
+        <div><i></i>Glasses, hats and hoods off</div>
         <div><i></i>Photos never leave your device</div>
       </div>
       <p class="engine-status" id="engine-status">Loading analysis engine…</p>
+      <button class="hist-entry hidden" id="landing-history">View your scan history →</button>
     </section>
 
     <!-- Two-pane results -->
@@ -120,22 +157,52 @@
             <canvas id="side-canvas"></canvas>
             <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
             <div id="side-verify"></div>
+            <!-- Live profile capture, layered over the same frame so the
+                 preview and the captured still occupy identical geometry. -->
+            <div class="side-live hidden" id="side-live">
+              <video id="side-video" playsinline muted></video>
+              <canvas id="side-guide"></canvas>
+              <div class="cam-hud">
+                <div class="cam-hint" id="side-hint">
+                  <b id="side-hint-title">Turn to the side</b>
+                  <span id="side-hint-detail">One ear toward the lens</span>
+                </div>
+                <div class="hud-bottom">
+                  <div class="cam-light" id="side-light">
+                    <span class="lamp" id="side-lamp"></span>
+                    <span class="lamp-track"><i id="side-lamp-fill"></i></span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="photo-caption"><span>SIDE</span><b id="side-cap">VERIFY LANDMARKS</b></div>
+          <!-- Under the photo, not off in the text column. The shutter belongs
+               next to the thing it acts on: with the buttons in the right-hand
+               panel you had to look away from your own framing to find them. -->
+          <div class="navrow" id="side-actions"></div>
         </div>
         <div class="side-panel" id="side-panel">
-          <h2 class="side-title">Verify your landmarks</h2>
+          <h2 class="side-title">Now the side profile</h2>
           <p class="side-sub">
-            Auto-placement gets close, but a true profile can't be landmarked
-            automatically with confidence. Drag each point onto its anatomical
-            spot — accuracy here is what makes the side measurements real.
+            Second of two. Chin projection, jaw angle and facial convexity do
+            not exist in a front photo. They can only be measured from the
+            side, and they are among the strongest numbers on the report. The
+            analysis runs once both views are in.
+          </p>
+          <p class="side-sub">
+            The thirteen points are placed for you, from the face mesh where
+            the detector can still see you at this angle, and by tracing your
+            silhouette against the background where it cannot. Check them, and
+            drag any that have missed. Accuracy here is what makes the side
+            measurements real, and it is why the side view is capped at how far
+            it can move your score.
           </p>
           <label class="drop drop-side" id="side-drop" for="side-input">
             <b>Add a side-profile photo</b>
             <span>Full profile · looking straight ahead · hair off the face</span>
           </label>
           <input type="file" id="side-input" accept="image/*" hidden />
-          <div class="navrow" id="side-actions"></div>
         </div>
       </div>
     </section>

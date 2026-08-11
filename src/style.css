@@ -1,5 +1,21 @@
 /* TrueMax — warm whitish-grey, generous whitespace, soft shadows.
-   Serif numerals (Fraunces), grotesk body (Inter), mono labels (IBM Plex). */
+   Serif display numerals (Fraunces), everything else Inter.
+
+   Self-hosted and version-pinned rather than pulled from the Google Fonts CDN.
+   Only the latin subsets are ever fetched — the packages ship per-script files
+   behind unicode-range, so the rest never leave the bundle. Upright faces only:
+   every <em> in this stylesheet is reset to font-style: normal, so shipping
+   italics would be ~120KB nothing renders.
+
+   TWO families, not three. IBM Plex Mono used to set every label, chip, caption
+   and measured value — roughly half the words in the app — and at 9-10px
+   uppercase a monospace reads as source code rather than as an instrument.
+   Monospace earns its keep when columns of figures must align; that job is now
+   done by tabular-nums, which Inter has, so the mono was paying 30KB and the
+   whole visual register for nothing. --mono is kept as a name because it still
+   means "the small technical label voice", but it resolves to Inter. */
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/inter/wght.css";
 
 :root {
   --bg: #f4f3ef;
@@ -13,15 +29,43 @@
   --warm: #c4694f;
   --up: #2e7d4f;
   --down: #c4694f;
-  --serif: "Fraunces", serif;
-  --sans: "Inter", -apple-system, sans-serif;
-  --mono: "IBM Plex Mono", monospace;
+  --serif: "Fraunces Variable", "Fraunces", Georgia, serif;
+  --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Inter Variable", "Inter", -apple-system, sans-serif;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { scroll-behavior: smooth; }
-body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-height: 100vh; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+body {
+  background: var(--bg); font-family: var(--sans); color: var(--ink);
+  min-height: 100vh; font-size: 16px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  /* Every number on this page is a measurement, and the overall score counts
+     up digit by digit. Proportional figures make the whole block twitch
+     sideways while it animates; tabular ones hold still. */
+  font-variant-numeric: tabular-nums;
+  /* Never let the browser fake a weight we did not ship. Synthesised bold is
+     the cheapest-looking thing a typeface can do. */
+  font-synthesis: none;
+}
 ::selection { background: var(--acc-soft); }
+
+/* Optical sizing. Fraunces carries a real opsz axis from 9 to 144, and left on
+   `auto` the browser just hands it the font size — so a 78px score renders at
+   opsz 78, roughly halfway up an axis whose whole point is the top of it. The
+   display end is where the serifs sharpen and the thin strokes actually thin
+   out; the small end is where they thicken so labels stay legible. Setting it
+   deliberately is most of the difference between this reading as typeset and
+   reading as a serif at a large size. Weight has to be restated because
+   font-variation-settings wins over font-weight. */
+#v-upload h1 { font-variation-settings: "opsz" 144, "wght" 300; }
+.big { font-variation-settings: "opsz" 144, "wght" 300; }
+.pot .n { font-variation-settings: "opsz" 120, "wght" 300; }
+.reel-caption b { font-variation-settings: "opsz" 120, "wght" 300; }
+.side-title, .q-body h2 { font-variation-settings: "opsz" 96, "wght" 300; }
+.goal-head .endgoal { font-variation-settings: "opsz" 72, "wght" 300; }
+.pillar b { font-variation-settings: "opsz" 36, "wght" 400; }
+.celeb .ava { font-variation-settings: "opsz" 20, "wght" 400; }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 .hidden { display: none !important; }
@@ -35,7 +79,12 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
-.wordmark { font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; font-weight: 500; }
+.wordmark { font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; font-weight: 500;
+  flex: none; white-space: nowrap; }
+/* The version chip yields first: it can shorten or, on a narrow screen, hide,
+   but it must never be the reason the wordmark leaves the screen. */
+.topbar-right { min-width: 0; }
+@media (max-width: 420px) { .topbar .tag { display: none; } }
 .wordmark b { color: var(--acc); font-weight: 500; }
 .tag { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: #b6b8b2; border: 1px solid var(--line); padding: 4px 9px; border-radius: 99px; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
@@ -67,7 +116,7 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 #v-main { display: grid; grid-template-columns: 44% 1fr; gap: 34px; max-width: 1080px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
 .pane-photo { position: sticky; top: 78px; }
 .face-frame { position: relative; border-radius: 22px; overflow: hidden; background: #101113; box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); line-height: 0; }
-.zoomable { transition: transform 0.55s cubic-bezier(0.32, 0, 0.15, 1); transform-origin: center; }
+.zoomable { transition: transform 0.34s cubic-bezier(0.32, 0, 0.15, 1); transform-origin: center; }
 .zoomable canvas { width: 100%; height: auto; display: block; }
 #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .sweep { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, #79e8d2, transparent); box-shadow: 0 0 16px #79e8d2; display: none; }
@@ -86,9 +135,26 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 
 /* ---------- right pane ---------- */
 .pane-analysis { min-width: 0; }
-.rtabs { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 18px; scrollbar-width: none; }
+.rtabs {
+  display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 18px;
+}
+/* Below the two-pane breakpoint the analysis column is narrow enough that
+   wrapping the tabs eats too much height, so they scroll instead — with a
+   right-edge fade so it reads as scrollable rather than cut off. That fade,
+   not a wider strip, is the fix for "the Proportions tab looks chopped": the
+   tabs were always scrollable, they just never looked it. */
+@media (max-width: 760px) {
+  .rtabs {
+    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
+  }
+}
 .rtabs::-webkit-scrollbar { display: none; }
-.rtab { flex: none; font-size: 12.5px; font-weight: 500; padding: 8px 15px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--mut); cursor: pointer; transition: all 0.18s; font-family: var(--sans); }
+/* `transition: all` animates layout-affecting properties too, so every tab
+   change paid for transitions on things that had not changed. Naming the two
+   properties that actually move keeps the press feeling instant. */
+.rtab { flex: none; font-size: 12.5px; font-weight: 500; padding: 8px 15px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--mut); cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s; font-family: var(--sans); }
 .rtab:hover { border-color: #c9c7c0; }
 .rtab.sel { background: var(--ink); color: #fff; border-color: var(--ink); }
 
@@ -107,6 +173,30 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .delta-chip.down { color: var(--down); background: #f6e9e4; }
 .delta-chip.flat { color: var(--mut); background: var(--soft); }
 
+/* Overall / front / side, side by side. Equal columns because the point is the
+   comparison — sizing the overall card larger would make the eye read it as the
+   only real number, when the whole reason for the row is to show what it is
+   made of. It gets a tinted ground instead. */
+/* Reading of a rescan. The noise case is deliberately the calm grey one: it is
+   the message that says stop worrying, and colouring it red or green would
+   contradict the sentence it contains. */
+.delta-read { font-size: 13px; line-height: 1.65; color: var(--mut); background: var(--soft);
+  border-radius: 12px; padding: 12px 14px; margin: 14px 2px 0; max-width: 62ch; }
+.delta-read b { color: var(--ink); font-weight: 600; }
+.delta-read.worthNoting { background: var(--acc-soft); color: #4a6b63; }
+.delta-read.worthNoting b { color: var(--acc); }
+
+.viewcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 4px; }
+.viewcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 10px 11px; text-align: center; }
+.viewcard.lead { background: var(--acc-soft); border-color: transparent; }
+.vc-label { display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.14em; color: var(--mut); }
+.viewcard.lead .vc-label { color: var(--acc); }
+.vc-rank { display: block; font-size: 11px; color: var(--mut); margin: 5px 0 6px; }
+.vc-score { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
+.vc-score small { font-size: 12px; color: var(--mut); }
+.vc-score.hi { color: var(--acc); }
+.vc-score.lo { color: var(--down); }
+
 .pillars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
 .pillar { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 13px 12px 12px; }
 .pillar b { font-family: var(--serif); font-weight: 400; font-size: 21px; display: block; }
@@ -119,17 +209,42 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .rarity { font-size: 13px; margin-top: 8px; line-height: 1.5; }
 .rarity b { color: var(--acc); }
 
+/* Curve legend. Without it the shaded middle reads as "good", when all it is
+   is the interquartile range. */
+.curve-key { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 2px; }
+.curve-key span { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mut); }
+.curve-key i { width: 11px; height: 9px; border-radius: 2px; flex: none; }
+.curve-key .k-band { background: #dceBe5; border: 1px solid #c3d8d0; }
+.curve-key .k-tick { width: 7px; height: 10px; border-radius: 0; background: repeating-linear-gradient(90deg, #c9c7c0 0 1px, transparent 1px 3px); }
+.curve-key .k-you { width: 9px; height: 9px; border-radius: 99px; background: var(--acc); }
+.curve-note { font-size: 11px; color: var(--mut); line-height: 1.55; margin-top: 9px; }
+
 /* region cards */
 .dots { display: flex; gap: 6px; justify-content: center; margin: 2px 0 14px; }
 .dots i { width: 5.5px; height: 5.5px; border-radius: 99px; background: #d4d2cb; transition: background 0.2s, transform 0.2s; }
 .dots i.on { background: var(--ink); transform: scale(1.15); }
-.deck { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; scrollbar-width: none; margin-bottom: 14px; }
+/* Measurements and the comparisons that go with them.
+   These were a swipe deck at every width, so on a desktop the second card —
+   the celebrity comparisons — sat off-screen behind a gesture nobody makes with
+   a mouse, and the two dots above it were the only clue it existed. Wide
+   viewports get both side by side; the swipe stays where it belongs, on a
+   phone. */
+.deck { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; scrollbar-width: none; margin-bottom: 14px; align-items: start; }
 .deck::-webkit-scrollbar { display: none; }
+@media (min-width: 900px) {
+  .deck { display: grid; grid-template-columns: 1.35fr 1fr; overflow: visible; }
+  .dots { display: none; }
+}
 .dcard { flex: 0 0 100%; scroll-snap-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 19px 20px 21px; min-width: 0; }
 .dcard h3 { font-size: 13.5px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 .dcard h3 em { font-family: var(--mono); font-style: normal; font-size: 9.5px; letter-spacing: 0.15em; color: var(--mut); font-weight: 400; }
 
-.metric { margin-bottom: 14px; opacity: 0; transform: translateY(6px); animation: rise 0.45s cubic-bezier(0.2, 0.6, 0.2, 1) forwards; }
+.metric { margin-bottom: 14px; opacity: 0; transform: translateY(6px); animation: rise 0.32s cubic-bezier(0.2, 0.6, 0.2, 1) forwards; border-radius: 10px; transition: background-color 0.12s; }
+/* Hovering a row is now the primary gesture, so it needs to look like a target.
+   Padding is baked in at rest rather than added on hover — changing padding on
+   hover reflows the whole column under the cursor. */
+.metric.tappable { padding: 6px 8px; margin-left: -8px; margin-right: -8px; }
+.metric.tappable:hover { background: var(--soft); }
 .metric:last-of-type { margin-bottom: 16px; }
 .mrow { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; margin-bottom: 7px; }
 .mrow b { font-weight: 500; }
@@ -173,6 +288,13 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 
 .navrow { display: flex; gap: 10px; margin-top: 20px; }
 .btn { flex: 1; border: none; border-radius: 14px; padding: 15px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.12s, opacity 0.2s; }
+/* Backing out of the camera. Deliberately quieter than Capture and Upload —
+   it is an escape hatch, not a third thing to choose between. */
+.btn.cancel {
+  display: block; width: min(420px, 100%); margin: 10px auto 0;
+  background: none; border: 1px solid #e3c6bd; color: var(--warm);
+}
+.btn.cancel:hover { background: #f8ece8; }
 .btn:active { transform: scale(0.985); }
 .btn.pri { background: var(--ink); color: #fff; }
 .btn.gho { background: var(--card); border: 1px solid var(--line); }
@@ -187,11 +309,25 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .verify-layer { touch-action: none; }
 
 .vpoint { position: absolute; transform: translate(-50%, -50%); background: none; border: 0; padding: 0; cursor: grab; display: flex; align-items: center; gap: 6px; }
-.vpoint i { width: 13px; height: 13px; border-radius: 99px; background: #8ff3e0; border: 2px solid #0b1f1b; box-shadow: 0 0 8px rgba(120, 235, 210, 0.8); display: block; flex: none; }
+/* Small enough to aim with, still big enough to grab.
+   The dot was 13px of solid fill, which is wider than the features being
+   placed on: at the nose tip or the lip border the marker covered the very
+   detail it was meant to sit on, so there was no way to tell a good placement
+   from one that was three pixels out. It is now a 7px ring with a 1px hollow
+   centre, so the pixel under the point is visible through it.
+   The touch target does NOT shrink with it — .vpoint carries its own padded
+   hit area below, because a 7px tap target on a phone is unusable. */
+.vpoint i { width: 7px; height: 7px; border-radius: 99px; background: transparent;
+  border: 2px solid #8ff3e0; box-shadow: 0 0 6px rgba(120, 235, 210, 0.75), inset 0 0 0 1px rgba(6, 20, 17, 0.9);
+  display: block; flex: none; }
+.vpoint.grabbing i { background: #fff; border-color: #fff; }
+/* The invisible grab area, sized for a fingertip rather than for the eye. */
+.vpoint::before { content: ""; position: absolute; left: 50%; top: 50%;
+  width: 34px; height: 34px; transform: translate(-50%, -50%); border-radius: 99px; }
 .vpoint span { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.82); white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); opacity: 0; transition: opacity 0.18s; }
 .vpoint:hover span, .vpoint.grabbing span { opacity: 1; }
 .vpoint.grabbing { cursor: grabbing; }
-.vpoint.grabbing i { background: #fff; transform: scale(1.15); }
+.vpoint.grabbing i { transform: scale(1.25); }
 
 .verify-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #fff; background: rgba(16, 17, 19, 0.82); border-radius: 10px; padding: 9px 12px; opacity: 0; transition: opacity 0.18s; pointer-events: none; }
 .verify-hint.show { opacity: 1; }
@@ -224,6 +360,20 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .metric.tappable .mrow b::after { content: "◱"; font-size: 9px; color: var(--mut); margin-left: 7px; opacity: 0.55; }
 .metric.tappable.active { background: var(--acc-soft); }
 .metric.tappable.active .mrow b { color: var(--acc); }
+
+/* The instruction for the overlay. It was previously only implied by a 9px
+   glyph, which nobody found. */
+.tap-hint {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  margin: 2px 0 16px; padding: 9px 11px;
+  background: var(--soft); border: 1px dashed var(--line); border-radius: 10px;
+  font-family: var(--sans); font-size: 11.5px; color: var(--mut);
+  text-align: left; cursor: pointer; transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.tap-hint i { font-style: normal; font-size: 12px; opacity: 0.7; }
+.tap-hint:hover { background: #eae8e1; color: var(--ink); }
+.tap-hint.on { background: var(--acc-soft); border-color: transparent; border-style: solid; color: var(--acc); }
+.tap-hint.on b { font-weight: 600; }
 
 /* ---------- capture stage: live camera + guidance ---------- */
 #capture-stage { width: min(420px, 100%); display: flex; flex-direction: column; align-items: center; gap: 18px; }
@@ -297,7 +447,7 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 
 /* The frame grows once the camera is live — the preview becomes the subject */
 .oval-frame { transition: max-width 0.45s var(--ease, cubic-bezier(.22,1,.36,1)), aspect-ratio 0.45s ease; }
-#capture-stage.live-cam { width: min(560px, 100%); }
+#capture-stage.live-cam { width: auto; max-width: min(560px, 100%); }
 .cam-hint.red b { color: #ffb59c; }
 .cam-hint.amber b { color: #ffd7a1; }
 
@@ -415,6 +565,10 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .goal-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .goal-tag { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 10px; border-radius: 99px; background: var(--acc-soft); color: var(--acc); }
 .goal-tag.mut { background: var(--soft); color: var(--mut); }
+/* Declared, not measured — a different colour so the two can never be read as
+   the same kind of statement. */
+.goal-tag.alt { background: #f6ece6; color: var(--warm); }
+.goal-declared { font-size: 11.5px; line-height: 1.55; color: var(--mut); margin-top: 10px; }
 .goal-edit { margin-top: 12px; font-size: 12px; color: var(--acc); background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--sans); text-decoration: underline; text-underline-offset: 3px; }
 .imp .because { display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--acc); margin-top: 9px; }
 
@@ -462,3 +616,187 @@ body { background: var(--bg); font-family: var(--sans); color: var(--ink); min-h
 .rec-group h5 { font-family: var(--mono); font-size: 9px; letter-spacing: 0.18em; color: var(--ink);
   font-weight: 500; margin-bottom: 4px; }
 .rec-group-note { font-size: 11px; line-height: 1.5; color: var(--mut); margin-bottom: 10px; }
+
+/* The percentile beside the score, and the line that lands it. */
+.chip.big-chip { font-size: 13px; font-weight: 600; padding: 9px 15px; letter-spacing: 0; }
+.ego { font-size: 13.5px; line-height: 1.6; color: var(--mut); margin: 14px 2px 0; max-width: 52ch; }
+
+/* Which views the headline number was measured from. */
+.viewnote { font-size: 12.5px; line-height: 1.6; color: var(--mut); margin: 10px 2px 0; max-width: 54ch; }
+.viewnote.done { color: var(--acc); }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--acc); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Live side-profile capture, layered over the same frame the still will use.
+   The frame is given an explicit portrait ratio while live, because with no
+   photo loaded yet the canvas inside it has no intrinsic size and the box
+   collapses to a wide letterbox. */
+.side-live { position: absolute; inset: 0;
+  /* .face-frame sets line-height: 0 so its canvases sit flush. Inherited into
+     the HUD that collapses the hint's block children onto one line and the
+     title and detail draw on top of each other. */
+  line-height: 1.5; }
+#side-frame.live { aspect-ratio: 3 / 4; max-height: 66vh; }
+#side-frame.live #side-canvas, #side-frame.live #side-lines { display: none; }
+#side-video, #side-guide { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.side-live .cam-hud::before, .side-live .cam-hud::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 92px; pointer-events: none;
+}
+.side-live .cam-hud::before { top: 0; background: linear-gradient(rgba(10,11,13,0.5), transparent); }
+.side-live .cam-hud::after { bottom: 0; background: linear-gradient(transparent, rgba(10,11,13,0.55)); }
+
+/* Reference-population control on the capture screen.
+   Deliberately not a modal and not a required step before the shutter: it has
+   a sensible remembered default, and it sits where someone will see it while
+   they are getting into position rather than blocking them from starting. */
+.refpop { border: 0; margin: 16px 0 2px; padding: 0; text-align: center; }
+.refpop legend { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  color: var(--mut); text-transform: uppercase; padding: 0; margin-bottom: 8px; float: none; }
+.seg { display: inline-flex; background: var(--soft); border-radius: 99px; padding: 3px; gap: 2px; }
+.seg-btn { border: 0; background: none; cursor: pointer; font: inherit; font-size: 13.5px;
+  color: var(--mut); padding: 7px 20px; border-radius: 99px; transition: background .18s, color .18s; }
+.seg-btn.on { background: var(--card); color: var(--ink); font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .07); }
+.refpop-why { font-size: 11.5px; color: var(--mut); margin: 8px 0 0; }
+
+/* Same control on the results screen, so a wrong choice is correctable where
+   its effect is visible rather than only where it was made. */
+.refswitch { background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--mut); }
+.refswitch:hover { color: var(--acc); }
+
+/* ---------------------------------------------------------------------------
+   Landing fit — the conservative version.
+
+   An earlier pass made <body> a flex column so the section could fill the space
+   under the topbar. That reached too far: it stretched every other body child,
+   which blew the Cancel button up to full width, and it knocked the topbar out
+   of flow so the logo vanished. Reverted.
+
+   What is left is the smallest thing that helps and cannot break a sibling
+   view: less top padding, and the capture card capped by viewport HEIGHT as
+   well as width so a short laptop window shrinks it instead of pushing the
+   shutter off-screen. The card keeps its original 4:5 proportions — the height
+   cap feeds width, aspect-ratio turns width back into height. Nothing here
+   touches <body>, the camera-live frame, or the side view.
+
+   svh not vh: on iOS and Android `vh` is the viewport with browser chrome
+   retracted, i.e. taller than what you actually see, so a height-capped layout
+   in vh still overflows on a phone. The plain line above is the fallback. */
+#v-upload { padding-top: clamp(18px, 4vh, 56px); padding-bottom: clamp(24px, 4vh, 60px); }
+
+/* Capped by height too. On a tall phone the 100% still wins and the card is
+   full-width as before; on a short laptop the svh cap shrinks it. */
+#capture-stage { width: min(420px, 100%, 52svh); }
+
+/* Very short windows (phone landscape, tiny laptop): drop the lines nobody
+   re-reads so the shutter stays on screen. Harmless display toggles only. */
+@media (max-height: 640px) { .hints { display: none; } }
+@media (max-height: 520px) { .sub-note, .sub-more { display: none; } }
+
+/* Dev-only affordance on the side verifier (?dev=1). Deliberately plain and
+   deliberately out of the way: it exists to collect test fixtures, not to be
+   part of the product. */
+.vdump { position: absolute; right: 10px; bottom: 10px; z-index: 5;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  background: rgba(10, 12, 14, 0.82); color: #8ff3e0; border: 1px solid rgba(143, 243, 224, 0.4);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.vdump:hover { background: rgba(10, 12, 14, 0.95); }
+
+/* ---------- history view ---------- */
+.hist-overlay {
+  position: fixed; inset: 0; z-index: 220; display: flex; align-items: flex-start;
+  justify-content: center; padding: 5vh 16px; overflow-y: auto;
+  background: rgba(20, 21, 24, 0.5); backdrop-filter: blur(3px);
+}
+.hist-panel {
+  position: relative; width: min(680px, 100%); background: var(--card, #fff);
+  border-radius: 20px; padding: 28px 26px 22px; box-shadow: 0 30px 80px rgba(20, 21, 24, 0.25);
+}
+.hist-close {
+  position: absolute; top: 16px; right: 16px; border: 0; background: none; cursor: pointer;
+  font-size: 15px; color: var(--mut, #6b7280); line-height: 1;
+}
+.hist-panel h2 { font-family: var(--serif); font-weight: 300; font-size: 26px; margin: 0 0 16px; }
+.hist-empty { color: var(--mut, #6b7280); line-height: 1.55; }
+.hist-stats { display: flex; gap: 26px; margin-bottom: 18px; }
+.hist-stats b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.hist-stats span { font-size: 10px; letter-spacing: 0.09em; color: var(--mut, #6b7280); }
+.hist-svg { width: 100%; height: auto; display: block; margin: 4px 0 10px; }
+.hist-axis { font-family: var(--mono, monospace); font-size: 10px; fill: rgba(90, 100, 98, 0.7); }
+.hist-note, .hist-foot { color: var(--mut, #6b7280); font-size: 12.5px; line-height: 1.5; }
+.hist-note { margin: 6px 0 18px; }
+.hist-foot { margin-top: 16px; }
+.hist-list { display: flex; flex-direction: column; }
+.hist-row {
+  display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 12px;
+  padding: 11px 2px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.hist-date { color: var(--mut, #6b7280); font-size: 13px; }
+.hist-score { font-variant-numeric: tabular-nums; font-size: 17px; }
+.hist-score small { font-size: 11px; color: var(--mut, #6b7280); }
+.hist-sex { font-family: var(--mono, monospace); font-size: 9px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--mut, #6b7280); }
+.hist-chip { font-size: 11px; padding: 3px 9px; border-radius: 99px; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.hist-chip.up { background: rgba(47, 158, 115, 0.14); color: #2f9e73; }
+.hist-chip.down { background: rgba(192, 106, 84, 0.14); color: #c06a54; }
+.hist-chip.flat, .hist-chip.first { background: rgba(120, 130, 128, 0.12); color: var(--mut, #6b7280); }
+
+/* Landing entry point, only shown when there is something to see. */
+.hist-entry { background: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--acc, #107a57); margin-top: clamp(6px, 1.2svh, 14px); }
+.hist-entry:hover { text-decoration: underline; }
+
+/* ---- Accounts (present only when Supabase keys are configured) ---- */
+.acct-btn {
+  font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: 99px;
+  padding: 6px 13px; cursor: pointer; line-height: 1; transition: background 0.12s, border-color 0.12s;
+}
+.acct-btn:hover { background: var(--soft); }
+.acct-btn.in { padding: 3px; border-color: transparent; background: none; }
+.acct-disc {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 99px; background: var(--ink); color: #fff;
+  font-size: 12px; font-weight: 600; letter-spacing: 0;
+}
+.acct-disc.lg { width: 40px; height: 40px; font-size: 16px; flex: none; }
+
+.acct-panel { width: min(420px, 100%); padding: 26px 26px 22px; }
+.acct-lede { color: var(--mut); font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
+.acct-form { display: flex; flex-direction: column; gap: 12px; }
+.acct-field { display: flex; flex-direction: column; gap: 5px; }
+.acct-field span { font-size: 11px; letter-spacing: 0.04em; color: var(--mut); text-transform: uppercase; }
+.acct-field input {
+  width: 100%; font-family: var(--sans); font-size: 15px; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px;
+}
+.acct-field input:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+.acct-msg { min-height: 0; font-size: 12.5px; line-height: 1.4; margin: 0; }
+.acct-msg.err { color: var(--warm); }
+.acct-msg.ok { color: var(--acc); }
+.acct-submit { width: 100%; margin-top: 2px; }
+.acct-switch { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
+.acct-switch button {
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--acc);
+}
+.acct-switch button:hover { text-decoration: underline; }
+
+.acct-who { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; }
+.acct-who b { display: block; font-size: 15px; font-weight: 600; word-break: break-all; }
+.acct-who span { font-size: 12.5px; color: var(--mut); }
+.acct-actions { display: flex; gap: 10px; }
+.acct-danger { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.acct-danger summary { cursor: pointer; font-size: 12.5px; color: var(--mut); list-style: none; }
+.acct-danger summary::-webkit-details-marker { display: none; }
+.acct-danger summary:hover { color: var(--warm); }
+.acct-danger p { font-size: 12px; color: var(--mut); line-height: 1.5; margin: 10px 0 12px; }
+.acct-delete {
+  font-family: var(--sans); font-size: 12.5px; color: var(--warm); cursor: pointer;
+  background: none; border: 1px solid color-mix(in srgb, var(--warm) 40%, var(--line));
+  border-radius: 10px; padding: 9px 13px;
+}
+.acct-delete:hover { background: color-mix(in srgb, var(--warm) 8%, transparent); }
+.acct-delete:disabled { opacity: 0.6; cursor: default; }
+.acct-done { margin-top: 4px; }
