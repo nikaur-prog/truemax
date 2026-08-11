@@ -57,17 +57,6 @@ export function renderResults(c: Ctx): void {
   shownRegion = null;
   const tabs = document.createElement("div");
   tabs.className = "rtabs";
-  const mk = (label: string, id: string) => {
-    const b = document.createElement("button");
-    b.className = "rtab";
-    b.textContent = label;
-    b.dataset.id = id;
-    b.onclick = () => select(id);
-    tabs.appendChild(b);
-  };
-  mk("Overall", "overall");
-  for (const r of c.report.regions) mk(REGION_NAMES[r.region], r.region);
-  mk("Plan →", "improve");
 
   // The Side tab is gone from this row: it is not a ninth region, it is the
   // other half of the scan, and burying it among eight regions made a quarter
@@ -86,7 +75,44 @@ export function renderResults(c: Ctx): void {
   const body = document.createElement("div");
   body.id = "body";
   c.analysis.appendChild(body);
+  tabView = "front";
+  buildTabs("front");
   select("overall");
+}
+
+// Which half of the scan the tab row is currently describing.
+let tabView: "front" | "side" = "front";
+
+// The tab row belongs to the view, not to the report.
+//
+// It used to be built once, from the front regions, and stayed that way when
+// you switched to the profile — so the side had eight tabs across the top that
+// all took you back to the front photograph, and its own fifteen measurements
+// were stacked into one scrolling body underneath. The profile has regions of
+// its own; they should be reachable the same way the front's are.
+function buildTabs(view: "front" | "side"): void {
+  if (!ctx) return;
+  const tabs = ctx.analysis.querySelector<HTMLElement>(".rtabs");
+  if (!tabs) return;
+  tabs.innerHTML = "";
+  const mk = (label: string, id: string) => {
+    const b = document.createElement("button");
+    b.className = "rtab";
+    b.textContent = label;
+    b.dataset.id = id;
+    b.onclick = () => select(id);
+    tabs.appendChild(b);
+  };
+  if (view === "side" && ctx.sideReport) {
+    mk("Profile", "side");
+    for (const r of ctx.sideReport.regions) {
+      if (r.metrics.length) mk(REGION_NAMES[r.region], `side:${r.region}`);
+    }
+    return;
+  }
+  mk("Overall", "overall");
+  for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
+  mk("Plan →", "improve");
 }
 
 // Overall, front and side side by side, so the merge is legible: two views went
@@ -117,20 +143,29 @@ function viewCards(r: Report): string {
 function select(id: string): void {
   if (!ctx) return;
   stopTypewriter();
+  const onSide = id === "side" || id.startsWith("side:");
+  // Swap the tab row before marking one selected, or the mark lands on buttons
+  // that are about to be thrown away.
+  const view = onSide ? "side" : "front";
+  if (view !== tabView) {
+    tabView = view;
+    buildTabs(view);
+  }
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
   }
   // The photo pane follows the tab: the side numbers next to the front
   // photograph would be describing a picture that is not on screen.
-  showPhoto(id === "side" ? "side" : "front");
+  showPhoto(onSide ? "side" : "front");
   // Keep the view toggle in step, however the view was reached — a region tab,
   // the Plan, or the toggle itself.
   for (const b of document.querySelectorAll<HTMLButtonElement>("#view-toggle .vt-btn")) {
-    b.classList.toggle("on", (b.dataset.view === "side") === (id === "side"));
+    b.classList.toggle("on", (b.dataset.view === "side") === onSide);
   }
   if (id === "overall") showOverall();
   else if (id === "improve") showImprove();
   else if (id === "side") showSide();
+  else if (onSide) showSideRegion(id.slice(5) as RegionId);
   else showRegion(id as RegionId);
 }
 
@@ -214,18 +249,55 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
 // The side view, inside the tabbed report rather than as a separate screen.
 function showSide(): void {
   if (!ctx?.sideReport) return;
+  calmSide();
+  renderSideInto(body(), ctx.sideReport);
+  wireSideMeasurementTaps(ctx.sideReport);
+}
+
+// One region of the profile, reached from the side-specific tab row. Same shape
+// as a front region tab — measurements, comparisons, population position — with
+// no zoom, because the side view has no landmark mesh to re-light.
+function showSideRegion(id: RegionId): void {
+  if (!ctx?.sideReport) return;
+  const report = ctx.sideReport;
+  const r = report.regions.find((x) => x.region === id);
+  if (!r) return select("side");
+  calmSide();
+
+  body().innerHTML = `
+    <div class="reveal">
+      ${sideRegionDeck(r, report)}
+      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>${curveSVG(r.percentile, `region:${id}`, report.sex, true)}
+        ${curveLegend()}
+        <p class="rarity">${rarityLine(r)}</p></div>
+    </div>`;
+
+  revealBars();
+  wireSideMeasurementTaps(report);
+}
+
+// The resting state of any side tab: no zoom, no front mesh, just the thirteen
+// points where they were verified.
+function calmSide(): void {
+  if (!ctx) return;
   // Deliberately NOT setZoom(null): that draws the front mesh (ctx.landmarks,
-  // at front photoW/photoH) onto the overlay, and over the side photograph
-  // that lands as a dense cloud of points nowhere near the face. Instead draw
-  // the thirteen points the user actually verified, in the side photo's own
-  // pixel space, so the tab shows the placement they confirmed.
+  // at front photoW/photoH) onto the overlay, and over the side photograph that
+  // lands as a dense cloud of points nowhere near the face.
   transition?.cancel();
   transition = null;
   shownRegion = null;
   ctx.zoomable.style.transform = "none";
   drawSidePoints();
-  renderSideInto(body(), ctx.sideReport);
-  wireSideMeasurementTaps(ctx.sideReport);
+}
+
+function revealBars(): void {
+  setTimeout(
+    () =>
+      document
+        .querySelectorAll<HTMLElement>(".rangebar i")
+        .forEach((i) => (i.style.left = `${i.dataset.l}%`)),
+    120,
+  );
 }
 
 // Hover a side measurement row → draw that measurement's real construction on
@@ -457,48 +529,49 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
-      ${regions
-        .map((r) => {
-          // Same comparison card the front regions carry, and wrapped for the
-          // same reason: a reference lookup must never be able to blank the
-          // measurements it sits beside.
-          let matches: ReturnType<typeof regionMatches> = [];
-          try {
-            matches = regionMatches(r.region, r.metrics, report.sex);
-          } catch (err) {
-            console.error("celebrity match failed", err);
-          }
-          return `<div class="deck">
-        <div class="dcard">
-          <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
-          ${r.metrics
-            .map(
-              (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
-            <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-            <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
-            )
-            .join("")}
-          ${
-            r.metrics.some((mm) => hasSideOverlay(mm.def.id))
-              ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover a measurement to draw it on your profile</button>`
-              : ""
-          }
-        </div>
-        <div class="dcard">
-          <h3>Notable comparisons<em>REFERENCE</em></h3>
-          ${celebCard(matches)}
-        </div>
-      </div>`;
-        })
-        .join("")}
+      ${regions.map((r) => sideRegionDeck(r, report)).join("")}
     </div>`;
 
-  setTimeout(
-    () => host.querySelectorAll<HTMLElement>(".rangebar i").forEach((i) => (i.style.left = `${i.dataset.l}%`)),
-    120,
-  );
+  revealBars();
   const redo = document.getElementById("side-redo");
   if (redo) redo.onclick = () => ctx?.onRedoSide?.();
+}
+
+// One profile region: its measurements beside its comparisons. Shared by the
+// profile overview, which stacks every region, and by the per-region side tabs,
+// which show one — so the two can never drift apart in what a side region looks
+// like or in which measurements are drawable.
+function sideRegionDeck(r: RegionScore, report: Report): string {
+  // Same comparison card the front regions carry, and wrapped for the same
+  // reason: a reference lookup must never be able to blank the measurements it
+  // sits beside.
+  let matches: ReturnType<typeof regionMatches> = [];
+  try {
+    matches = regionMatches(r.region, r.metrics, report.sex);
+  } catch (err) {
+    console.error("celebrity match failed", err);
+  }
+  return `<div class="deck">
+    <div class="dcard">
+      <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+      ${r.metrics
+        .map(
+          (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
+        <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+        <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+        )
+        .join("")}
+      ${
+        r.metrics.some((mm) => hasSideOverlay(mm.def.id))
+          ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover a measurement to draw it on your profile</button>`
+          : ""
+      }
+    </div>
+    <div class="dcard">
+      <h3>Notable comparisons<em>REFERENCE</em></h3>
+      ${celebCard(matches)}
+    </div>
+  </div>`;
 }
 
 // One renderer for the comparison card, so the front regions and the profile

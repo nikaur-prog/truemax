@@ -114,24 +114,25 @@ function foregroundMask(canvas: HTMLCanvasElement): Mask {
   return { fg, w, h };
 }
 
-// Anchors as fractions of HEAD height. The original table was in FRAME
-// fractions, which only lands correctly when the head happens to fill the frame
-// from 16% to 86% and puts every point somewhere else otherwise. Insets — how
-// far in from the silhouette edge a point sits — are in head heights too.
+// Anchors for the NINE front points, as fractions of HEAD height. The original
+// table was in FRAME fractions, which only lands correctly when the head happens
+// to fill the frame from 16% to 86% and puts every point somewhere else
+// otherwise. Insets — how far in from the silhouette edge a point sits — are in
+// head heights too.
+//
+// The four back points are no longer here. They are not on the silhouette and
+// they are not where an inset from it puts them; they come from the template
+// below, through placeBackPoints().
 const ANCHORS: Array<[SidePointId, number, number]> = [
-  ["trichion", 0.02, 0.0],
-  ["glabella", 0.30, 0.0],
-  ["nasion", 0.38, 0.02],
-  ["pronasale", 0.55, -0.01],
-  ["subnasale", 0.66, 0.03],
-  ["labialeSuperius", 0.72, 0.03],
-  ["labialeInferius", 0.80, 0.03],
-  ["pogonion", 0.92, 0.02],
-  ["menton", 0.99, 0.05],
-  ["gonion", 0.88, 0.42],
-  ["condylion", 0.48, 0.48],
-  ["cervicale", 1.06, 0.22],
-  ["tragion", 0.53, 0.42],
+  ["trichion", 0.0, 0.0],
+  ["glabella", 0.20, 0.0],
+  ["nasion", 0.31, 0.02],
+  ["pronasale", 0.50, -0.01],
+  ["subnasale", 0.58, 0.03],
+  ["labialeSuperius", 0.65, 0.03],
+  ["labialeInferius", 0.79, 0.03],
+  ["pogonion", 0.94, 0.02],
+  ["menton", 1.0, 0.05],
 ];
 
 // No usable silhouette: lay the same anchors over a head box occupying the
@@ -144,6 +145,7 @@ function centredSeed(w: number, h: number): { points: SidePoints; faceDir: numbe
   for (const [id, f, inset] of ANCHORS) {
     points[id] = { x: edge - inset * headH, y: top + f * headH };
   }
+  placeBackPoints(points, 1, headH * 0.7, headH);
   return { points, faceDir: 1 };
 }
 
@@ -211,15 +213,6 @@ function seedFromLandmarks(
   const condylionId = near(127, 356);
 
   const menton = P(152);
-  const pogonion = P(175);
-  // The neck point has no landmark: it is below the jaw where the underside
-  // meets the throat. Placed by stepping down and back from the chin, which is
-  // the one point here the user will usually still need to nudge.
-  const faceH = Math.hypot(menton.x - P(168).x, menton.y - P(168).y) || 1;
-  const cervicale = {
-    x: menton.x - faceDir * faceH * 0.30,
-    y: menton.y + faceH * 0.24,
-  };
 
   const points: SidePoints = {
     trichion: P(10),
@@ -229,15 +222,35 @@ function seedFromLandmarks(
     subnasale: P(2),
     labialeSuperius: P(0),
     labialeInferius: P(17),
-    pogonion,
+    pogonion: P(175),
     menton,
+    // Overwritten immediately below. Kept in the literal so the object is a
+    // complete SidePoints and a missed point would be a type error, not a
+    // silent undefined that only shows up as a NaN in a jaw angle.
     gonion: P(gonionId),
     condylion: P(condylionId),
-    cervicale,
+    cervicale: menton,
     tragion: P(tragionId),
   };
+
+  // Head width from the oval point rather than the anatomy it is near. The mesh
+  // lands 234/454 at a consistent 0.66 of the way from the nose tip to the true
+  // ear canal — measured on a hand-corrected profile — and that fraction is a
+  // depth ratio, so it survives the yaw compression that scales both distances
+  // together. Everything behind the face is then placed from the template.
+  const headH = Math.abs(menton.y - points.trichion.y) || 1;
+  const headW = headWidthFrom(
+    Math.abs(points.tragion.x - points.pronasale.x) / OVAL_DEPTH_FRACTION,
+    headH,
+  );
+  placeBackPoints(points, faceDir, headW, headH);
   return { points, faceDir };
 }
+
+// Where MediaPipe's widest face-oval landmark sits between the nose tip and the
+// ear canal, along the head's depth axis. From set F: the seeded ear was at
+// 0.664 of the corrected nose-to-ear distance.
+const OVAL_DEPTH_FRACTION = 0.664;
 
 // ---------------------------------------------------------------------------
 // The shape template, and the sanity pass that uses it.
@@ -246,9 +259,14 @@ function seedFromLandmarks(
 // profiles (tools note in docs/SIDE_FIXTURES.md), expressed in a frame the
 // seeder can always rebuild — fx runs from the nose tip (0) toward the back of
 // the head in head-widths, fy from the hairline (0) to the chin (1) in head
-// heights. Across four independent profiles the agreement is tight: pogonion
-// landed at 0.98 / 0.96 / 0.95 / 0.96 of head height, condylion at exactly
-// -1.00 head-widths every time.
+// heights.
+//
+// Refitted from sets E and F, the two collected AFTER the .vpoint offset bug was
+// fixed. The four earlier sets carried a documented rightward bias of 0.13-0.20
+// head-widths and are no longer part of the fit. E and F agree closely enough to
+// trust across two quite different poses — gonion at -0.898 and -0.896
+// head-widths, condylion fy at 0.364 and 0.377 — and they disagree with the old
+// numbers in exactly the direction the bias predicts.
 //
 // What this is FOR is the failure that keeps happening. Both seed paths can put
 // a single point somewhere absurd — a mesh landmark drifting onto the cheek, a
@@ -264,20 +282,73 @@ function seedFromLandmarks(
 // would be dragged by the very point it is meant to catch.
 // ---------------------------------------------------------------------------
 const TEMPLATE: Record<SidePointId, [number, number]> = {
-  trichion: [-0.054, 0.0],
-  glabella: [-0.029, 0.236],
-  nasion: [-0.099, 0.32],
-  pronasale: [0.0, 0.558],
-  subnasale: [-0.131, 0.616],
-  labialeSuperius: [-0.111, 0.728],
-  labialeInferius: [-0.189, 0.831],
-  pogonion: [-0.289, 0.963],
-  menton: [-0.475, 1.0],
-  gonion: [-1.082, 0.674],
-  condylion: [-1.0, 0.177],
-  cervicale: [-0.826, 0.899],
-  tragion: [-1.023, 0.278],
+  trichion: [-0.216, 0.0],
+  glabella: [-0.139, 0.197],
+  nasion: [-0.152, 0.306],
+  pronasale: [0.0, 0.504],
+  subnasale: [-0.087, 0.577],
+  labialeSuperius: [-0.038, 0.649],
+  labialeInferius: [-0.044, 0.790],
+  pogonion: [-0.107, 0.945],
+  menton: [-0.230, 1.0],
+  gonion: [-0.897, 0.849],
+  condylion: [-0.981, 0.371],
+  cervicale: [-0.617, 1.0],
+  tragion: [-1.0, 0.506],
 };
+
+// ---------------------------------------------------------------------------
+// The four points behind the face, plus menton's x.
+//
+// Neither seed path can find these by looking. The mesh has landmarks near them
+// and they are the WRONG landmarks: 234/454 is the widest point of the face
+// oval, which sits on the sideburn at about eye level, not in the ear canal, and
+// 127/356 is higher still on the temple. Measured against a hand-corrected set
+// the seeded ear came out 0.34 head-widths too far forward and 0.25 head-heights
+// too high, every time, and the jaw and neck followed it. The silhouette path
+// has the opposite problem: the ear and the jaw corner are not ON the outline at
+// all, so an inset from the edge was only ever a guess.
+//
+// Wrong in a fixed direction is the useful kind of wrong. These five sit at
+// stable places in the head's own frame — the two clean fixtures put gonion at
+// -0.898 and -0.896 head-widths — so they are placed from the template instead
+// of measured, and the user drags any that miss.
+//
+// menton keeps its measured y (it defines the head height) and takes only its x,
+// because the chin's lowest point projects forward under yaw: it was 0.15
+// head-widths ahead of where it belongs.
+// ---------------------------------------------------------------------------
+const BACK_POINTS: SidePointId[] = ["gonion", "condylion", "cervicale", "tragion"];
+
+function placeBackPoints(
+  points: SidePoints,
+  faceDir: number,
+  headW: number,
+  headH: number,
+): void {
+  const noseX = points.pronasale.x;
+  const hairY = points.trichion.y;
+  for (const id of BACK_POINTS) {
+    points[id] = {
+      x: noseX + faceDir * TEMPLATE[id][0] * headW,
+      y: hairY + TEMPLATE[id][1] * headH,
+    };
+  }
+  points.menton = {
+    x: noseX + faceDir * TEMPLATE.menton[0] * headW,
+    y: points.menton.y,
+  };
+}
+
+// Head width — nose tip back to ear canal — from a rough estimate of it. Both
+// callers have something that scales with head width and neither has the width
+// itself; the clamp is against the estimator degenerating (a near-frontal mesh
+// puts the oval point almost on top of the nose, which would otherwise divide
+// out to an enormous head). The bounds are deliberately wide: they exist to
+// catch a broken measurement, not to argue with a real face.
+function headWidthFrom(estimate: number, headH: number): number {
+  return Math.max(headH * 0.3, Math.min(headH * 1.1, estimate));
+}
 
 function median(a: number[]): number {
   const b = [...a].sort((x, y) => x - y);
@@ -440,8 +511,34 @@ export function seedFromSilhouette(
       y: (top / m.h) * h + f * headPx,
     };
   }
+
+  // The back of the skull is the one thing here that scales with head DEPTH, and
+  // unlike the ear it really is on the outline. Taken as the furthest the
+  // silhouette reaches away from the face across the cranial band — below the
+  // crown, above the neck — so a shoulder or a collar cannot claim it.
+  let back = faceDir === 1 ? m.w : 0;
+  for (let y = top + Math.round(headH * 0.15); y < top + Math.round(headH * 0.75); y++) {
+    const sp = rowSpan(y);
+    if (!sp) continue;
+    back = faceDir === 1 ? Math.min(back, sp[0]) : Math.max(back, sp[1]);
+  }
+  const backX = (back / m.w) * w;
+  placeBackPoints(
+    points,
+    faceDir,
+    headWidthFrom(Math.abs(points.pronasale.x - backX) * EAR_OVER_SKULL_DEPTH, headPx),
+    headPx,
+  );
   return { points, faceDir };
 }
+
+// Nose tip to ear canal, over nose tip to back of skull. Unlike
+// OVAL_DEPTH_FRACTION this one is not measured off a fixture — it comes from
+// published head depths (nose-to-tragion around 14cm against a nose-to-occiput
+// around 22cm) and is rounded down because hair adds to the back of the head and
+// nothing adds to the front. It only runs on the fallback path, which exists to
+// put the points somewhere sane for dragging rather than to be right.
+const EAR_OVER_SKULL_DEPTH = 0.6;
 
 export function mountVerifier(
   host: HTMLElement,

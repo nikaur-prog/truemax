@@ -1,5 +1,11 @@
 # Side-profile ground truth
 
+> **`TEMPLATE` is now fitted from sets E and F only.** Sets A–D below carry the
+> `.vpoint` rightward bias described immediately underneath and are kept as a
+> record of the bug, not as ground truth. They are no longer part of any fit.
+
+## Sets A–D — biased, retained for the record
+
 > **These four sets carry a known rightward bias and should be re-collected.**
 > They were exported while `.vpoint` rendered its dot at the left edge of a
 > flex box containing the point's (invisible but still laid-out) label, so the
@@ -70,15 +76,17 @@ feeds a real measurement. That is what `sanitizeSeed()` now catches.
 
 ## Checking a change to the seeder
 
-Refit and re-run the outlier check whenever `TEMPLATE`, `ANCHORS`, or either
-seed path changes. The behaviour to preserve:
+Re-run the outlier check whenever `TEMPLATE`, `ANCHORS`, `placeBackPoints`, or
+either seed path changes. The behaviour to preserve:
 
-- **A and C are corrected zero times.** Every point in them is plausible, so a
+- **A clean seed is corrected zero times.** Every point in it is plausible, so a
   sanity pass that touches any of them is too aggressive and is now fighting
-  good seeds instead of catching bad ones.
-- **B is corrected exactly once** (`cervicale`, to ≈0.60, 0.67).
-- **D is corrected exactly once** (`labialeInferius`, to ≈0.61, 0.62 — between
-  the upper lip and the chin, where a lower lip belongs).
+  good seeds instead of catching bad ones. A point wrong by 0.06 head-widths —
+  a nostril — must also survive untouched.
+- **A point thrown to the frame edge is always pulled back.** Test it on
+  `labialeInferius` and `cervicale` at minimum: those are the two that really
+  happened (a lip point 2.27 head-widths behind the ear, a neck point off the
+  bottom of the picture).
 
 The fit is Theil-Sen (median of pairwise slopes) rather than least squares
 precisely because outliers are the thing being defended against: least squares
@@ -109,12 +117,71 @@ bias predicts:
 - The ear region sits LOWER (`condylion`, `tragion`, `gonion` all about +0.20
   head-heights).
 
-**The template has deliberately not been refitted from this.** One clean set
+**The template was deliberately not refitted from this alone.** One clean set
 cannot separate "the template is biased" from "this photograph is reclined" —
 the subject is lying back in it, which tilts the whole ear-to-jaw relationship,
-and that alone could produce the vertical offsets above. Refit when there are
-three or four clean sets across different poses; until then the four biased
-sets plus this one still catch the failure the pass exists for.
+and that alone could produce the vertical offsets above. Set F settled it.
+
+## Set F — clean, and the first with its automatic seed recorded
+
+The valuable part of this one is not the corrected points, it is that the seed
+the app produced for the *same photograph* was captured alongside them. That
+turns a fixture into a measurement of the seeder's error.
+
+Auto-seeded:
+
+```json
+{"trichion":[0.3402,0.3227],"glabella":[0.3158,0.3906],"nasion":[0.3174,0.4215],
+ "pronasale":[0.2487,0.5087],"subnasale":[0.277,0.5293],"labialeSuperius":[0.2669,0.5599],
+ "labialeInferius":[0.2718,0.6066],"pogonion":[0.2844,0.6737],"menton":[0.2945,0.6887],
+ "gonion":[0.5025,0.6483],"condylion":[0.4651,0.3868],"cervicale":[0.4274,0.6503],
+ "tragion":[0.47,0.4237]}
+```
+
+Corrected by hand:
+
+```json
+{"trichion":[0.3392,0.3217],"glabella":[0.2958,0.3916],"nasion":[0.3047,0.433],
+ "pronasale":[0.2456,0.4889],"subnasale":[0.277,0.5293],"labialeSuperius":[0.2606,0.5579],
+ "labialeInferius":[0.2599,0.6124],"pogonion":[0.2733,0.6683],"menton":[0.3454,0.697],
+ "gonion":[0.5482,0.6357],"condylion":[0.5641,0.4633],"cervicale":[0.4728,0.6983],
+ "tragion":[0.5833,0.5178]}
+```
+
+### What the difference says
+
+In head-widths and head-heights, the error is not spread across the thirteen —
+it is entirely in the five points behind the face:
+
+| point | error (head-widths) | error (head-heights) |
+|---|---|---|
+| the eight front points | −0.03 to +0.06 | −0.05 to +0.03 |
+| menton | −0.151 | +0.022 |
+| gonion | −0.135 | −0.034 |
+| cervicale | −0.134 | +0.128 |
+| condylion | −0.293 | +0.204 |
+| tragion | **−0.336** | **+0.251** |
+
+That is the mesh seed path naming the wrong anatomy. MediaPipe's 234/454 is the
+widest point of the face oval — the sideburn, at roughly eye level — and 127/356
+is higher still on the temple; neither is an ear. The seeded ear landed at
+**0.664** of the way from the nose tip to the true ear canal, and because that is
+a ratio of two depths it survives the yaw compression that scales both.
+
+### The refit
+
+`TEMPLATE` is now the mean of E and F. Its back points are no longer only a
+sanity check — `placeBackPoints()` in `src/ui/sideVerify.ts` *places* gonion,
+condylion, cervicale, tragion and menton's x from it, on both seed paths, since
+neither path can see them. Head width comes from dividing the mesh's oval point
+by 0.664 (mesh path) or from the back of the skull on the silhouette (fallback).
+
+Leave-one-out is the honest number: fit on E alone and predict F, or the
+reverse, and the worst back-point error is **0.13 head-widths** (menton x)
+against **0.42** for the old seed. In-sample on F it is 0.06.
+
+Two poses of one person is a centre of gravity, not a population. The next clean
+set should be someone else.
 
 ## Collecting more
 
