@@ -6,6 +6,7 @@ import { loadPhotos } from "../engine/photoStore.ts";
 import { openHistory } from "./historyView.ts";
 import { REEL } from "./demoReelData.ts";
 import { applyShim } from "./demoReelShim.ts";
+import { mountDemoReel } from "./demoReel.ts";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -22,6 +23,7 @@ import { applyShim } from "./demoReelShim.ts";
 // ---------------------------------------------------------------------------
 
 let overlay: HTMLDivElement | null = null;
+let reel: ReturnType<typeof mountDemoReel> | null = null;
 
 export function isDashboardOpen(): boolean {
   return overlay !== null;
@@ -53,13 +55,13 @@ export function openDashboard(opts: { onScan: () => void; name?: string | null }
           </button>
           <div class="dash-drop">
             <div class="dash-drop-in">
-              <b>What happens</b>
-              <ol class="dash-steps">
-                <li><span>1</span>Front photo, guided until the frame is right</li>
-                <li><span>2</span>Turn side-on, it shoots itself</li>
-                <li><span>3</span>31 front and 15 side measurements, scored</li>
-              </ol>
-              <p>Nothing is uploaded. The whole engine runs on this device.</p>
+              <div class="dash-reel">
+                <canvas id="dash-reel-canvas"></canvas>
+                <div class="dash-reel-cap">
+                  <b id="dash-reel-score"></b><span id="dash-reel-name"></span>
+                </div>
+              </div>
+              <p>A real scan, running. Nothing is uploaded — the whole engine runs on this device.</p>
             </div>
           </div>
         </div>
@@ -103,11 +105,67 @@ export function openDashboard(opts: { onScan: () => void; name?: string | null }
     row.onclick = () => openHistory();
   }
   wireScanHovers(overlay);
+
+  // The scan card's dropdown runs the real reel — the same engine output the
+  // landing plays — rather than describing the steps in words. Mounted lazily
+  // on first hover so a dashboard nobody hovers never starts an animation loop
+  // or decodes nine portraits.
+  const scanSlot = overlay.querySelector<HTMLElement>(".dash-slot");
+  if (scanSlot) {
+    const mountOnce = () => {
+      if (reel) return;
+      const c = overlay?.querySelector<HTMLCanvasElement>("#dash-reel-canvas");
+      const s = overlay?.querySelector<HTMLElement>("#dash-reel-score");
+      const n = overlay?.querySelector<HTMLElement>("#dash-reel-name");
+      if (c && s && n) reel = mountDemoReel(c, s, n);
+    };
+    scanSlot.addEventListener("pointerenter", mountOnce);
+    scanSlot.addEventListener("focusin", mountOnce);
+  }
+  startFanCycle(overlay, faces);
 }
 
 export function close(): void {
+  reel?.stop();
+  reel = null;
+  if (fanTimer) clearInterval(fanTimer);
+  fanTimer = null;
   overlay?.remove();
   overlay = null;
+}
+
+// The fan cycles: one card at a time flips to a face that is not currently
+// shown. One at a time, on a stagger, because six cards changing together reads
+// as the panel reloading rather than as a deck being dealt through.
+let fanTimer: ReturnType<typeof setInterval> | null = null;
+function startFanCycle(root: HTMLElement, faces: ReturnType<typeof applyShim>): void {
+  const cards = Array.from(root.querySelectorAll<HTMLElement>(".dash-fan-card"));
+  if (cards.length < 2 || faces.length <= cards.length) return;
+  let next = cards.length; // first face not already on screen
+  let which = 0;
+  if (fanTimer) clearInterval(fanTimer);
+  fanTimer = setInterval(() => {
+    // Only animate while the panel is actually open; a hidden dropdown flipping
+    // cards is work nobody can see.
+    const slot = cards[0].closest(".dash-slot");
+    if (!slot?.matches(":hover, :focus-within")) return;
+
+    const card = cards[which % cards.length];
+    const face = faces[next % faces.length];
+    which++;
+    next++;
+    card.classList.add("flipping");
+    // Swap at the midpoint of the flip, while the card is edge-on and its face
+    // is not visible — otherwise the change happens in full view and the flip
+    // looks like a separate, pointless spin.
+    setTimeout(() => {
+      const img = card.querySelector("img");
+      const val = card.querySelector("span");
+      if (img) img.src = `/demo/${face.slug}.jpg`;
+      if (val) val.textContent = face.overall.toFixed(1);
+    }, 260);
+    setTimeout(() => card.classList.remove("flipping"), 560);
+  }, 1400);
 }
 
 // Only shown once there is a run worth naming. A "0 week streak" is a way of
