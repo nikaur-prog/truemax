@@ -55,11 +55,14 @@ export function revealSideScan(
   const frame = (now: number) => {
     const t = Math.min(1, (now - start) / REVEAL_MS);
     const e = easeOut(t);
+    // The scan field (mesh + cloud) fades back in the final quarter so the
+    // thirteen real anchors are what is left standing.
+    const cloudFade = 1 - easeOut(Math.max(0, (t - 0.75) / 0.25)) * 0.75;
     ctx.clearRect(0, 0, w, h);
 
     // Mesh first, under everything, fading in with the cloud.
     ctx.strokeStyle = MESH;
-    ctx.globalAlpha = e;
+    ctx.globalAlpha = e * cloudFade;
     ctx.lineWidth = Math.max(0.4, w / 1400);
     ctx.beginPath();
     const shown = Math.floor(e * order.length);
@@ -72,7 +75,10 @@ export function revealSideScan(
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // The synthesised cloud: dim white, appearing in scattered order.
+    // The synthesised cloud: dim white, appearing in scattered order. Fades on
+    // the same clock as the mesh so the thirteen real anchors are what is left
+    // standing — the cloud is the scan field, not the measurement.
+    ctx.globalAlpha = cloudFade;
     ctx.fillStyle = DOT_DIM;
     for (let i = 0; i < shown; i++) {
       const p = cloud[order[i]];
@@ -80,6 +86,7 @@ export function revealSideScan(
       ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
 
     // A scan line sweeping top to bottom, brightening the points it is level
     // with — the futuristic tell, and it ties the reveal to a direction.

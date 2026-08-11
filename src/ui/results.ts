@@ -10,6 +10,7 @@ import { REGION_LANDMARKS, zoomFor } from "./regions.ts";
 import { drawCalm, transitionRegion } from "./overlay.ts";
 import { animateMeasurement, transitionMeasurement } from "./measureOverlay.ts";
 import type { OverlayFade } from "./measureOverlay.ts";
+import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite, typewriteBlock } from "./typewriter.ts";
@@ -208,6 +209,70 @@ function showSide(): void {
   ctx.zoomable.style.transform = "none";
   drawSidePoints();
   renderSideInto(body(), ctx.sideReport);
+  wireSideMeasurementTaps(ctx.sideReport);
+}
+
+// Hover a side measurement row → draw that measurement's real construction on
+// the profile photo, the same credibility gesture the front regions have. The
+// calm state is the thirteen verified points; leaving a row returns to them.
+let sideActive: string | null = null;
+let sidePinned: string | null = null;
+let sideFade: OverlayFade | null = null;
+function wireSideMeasurementTaps(report: Report): void {
+  if (!ctx?.sidePoints || !ctx.sidePhoto) return;
+  const pts = ctx.sidePoints;
+  const w = ctx.sidePhoto.width;
+  const h = ctx.sidePhoto.height;
+  const metrics = report.regions.flatMap((r) => r.metrics);
+  sideActive = null;
+  sidePinned = null;
+  sideFade?.cancel();
+  sideFade = null;
+
+  const hints = Array.from(document.querySelectorAll<HTMLElement>(".side-tap-hint"));
+  const setHints = (name: string | null, pinned: boolean) => {
+    for (const hint of hints) {
+      hint.classList.toggle("on", !!name);
+      hint.innerHTML = name
+        ? `<i>◱</i>Drawing <b>${name}</b>${pinned ? " (click again to release)" : ""}`
+        : `<i>◱</i>Hover a measurement to draw it on your profile`;
+    }
+  };
+
+  const show = (id: string | null) => {
+    if (!ctx || id === sideActive) return;
+    sideActive = id;
+    const metric = id ? metrics.find((m) => m.def.id === id) : null;
+    for (const other of document.querySelectorAll(".metric[data-side-metric]")) {
+      other.classList.toggle("active", (other as HTMLElement).dataset.sideMetric === id);
+    }
+    setHints(metric?.def.name ?? null, sidePinned === id && !!id);
+    sideFade?.cancel();
+    if (metric) {
+      sideFade = animateSideMeasurement(ctx.overlay, pts, w, h, metric);
+    } else {
+      drawSidePoints();
+    }
+  };
+
+  for (const row of document.querySelectorAll<HTMLElement>(".metric[data-side-metric]")) {
+    const id = row.dataset.sideMetric!;
+    if (!hasSideOverlay(id)) continue;
+    row.onpointerenter = (e) => {
+      if (e.pointerType === "touch") return;
+      show(id);
+    };
+    row.onpointerleave = (e) => {
+      if (e.pointerType === "touch") return;
+      show(sidePinned);
+    };
+    row.onclick = () => {
+      sidePinned = sidePinned === id ? null : id;
+      show(sidePinned ?? id);
+      const m = metrics.find((x) => x.def.id === id);
+      setHints(m?.def.name ?? null, sidePinned === id);
+    };
+  }
 }
 
 // The verified side points on the overlay, sized to the side photo so pixel
@@ -392,11 +457,16 @@ function renderSideInto(host: HTMLElement, report: Report): void {
           <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
           ${r.metrics
             .map(
-              (m, i) => `<div class="metric" style="animation-delay:${60 + i * 60}ms">
+              (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
             <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
             )
             .join("")}
+          ${
+            r.metrics.some((mm) => hasSideOverlay(mm.def.id))
+              ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover a measurement to draw it on your profile</button>`
+              : ""
+          }
         </div>
         <div class="dcard">
           <h3>Notable comparisons<em>REFERENCE</em></h3>

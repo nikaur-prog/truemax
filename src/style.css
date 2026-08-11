@@ -80,7 +80,11 @@ body {
   border-bottom: 1px solid var(--line);
 }
 .wordmark { font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; font-weight: 500;
-  flex: none; white-space: nowrap; }
+  flex: none; white-space: nowrap; color: var(--ink);
+  /* It is a button now (click to return to the start), so strip the button
+     chrome and keep it reading as a wordmark. */
+  background: none; border: 0; padding: 0; cursor: pointer; }
+.wordmark:hover b { color: var(--ink); }
 /* The version chip yields first: it can shorten or, on a narrow screen, hide,
    but it must never be the reason the wordmark leaves the screen. */
 .topbar-right { min-width: 0; }
@@ -657,6 +661,16 @@ body {
 .seg-btn.on { background: var(--card); color: var(--ink); font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .07); }
 .refpop-why { font-size: 11.5px; color: var(--mut); margin: 8px 0 0; }
+
+/* When a scan is attempted before the population is chosen, the picker asks for
+   the choice rather than the app silently defaulting. */
+.refpop.ask .seg { box-shadow: 0 0 0 2px var(--acc); animation: refpop-pulse 1s ease 2; }
+.refpop.ask .refpop-why { color: var(--acc); font-weight: 600; }
+.refpop.ask .refpop-why::before { content: "Pick who to score against first. "; }
+@keyframes refpop-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--acc); }
+  50% { box-shadow: 0 0 0 5px var(--acc-soft); }
+}
 
 /* Same control on the results screen, so a wrong choice is correctable where
    its effect is visible rather than only where it was made. */

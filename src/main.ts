@@ -75,6 +75,13 @@ const el = {
 // base rate, while the choice itself moves the score by a median of 0.70 points
 // and up to 4.50. sexPref.ts has the measurements. One tap beats that.
 let selectedSex: Sex = storedSex() ?? "male";
+// Whether the reference population is a real choice yet, or still the silent
+// default. A face app is used mostly by young men, so "male" is the right
+// default to compute against — but computing a man a percentile "of women"
+// because he never saw the toggle is the kind of thing that gets screenshotted.
+// So the first scan requires the pick; a returning visitor who already chose is
+// never asked again.
+let sexChosen = storedSex() !== null;
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
 // directly, skipping the UI and its scan animation. Same engine path as a
@@ -182,20 +189,34 @@ function showGuide(sex: Sex): void {
 const refpop = document.getElementById("refpop")!;
 function paintRefPop(): void {
   for (const b of refpop.querySelectorAll<HTMLButtonElement>(".seg-btn")) {
-    b.classList.toggle("on", b.dataset.sex === selectedSex);
-    b.setAttribute("aria-pressed", String(b.dataset.sex === selectedSex));
+    // Until the choice is made, neither button is lit — an unmade choice should
+    // look unmade, not like "male" was picked for you.
+    const on = sexChosen && b.dataset.sex === selectedSex;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
   }
 }
 refpop.addEventListener("click", (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>(".seg-btn");
   if (!b?.dataset.sex) return;
   selectedSex = b.dataset.sex as Sex;
+  sexChosen = true;
+  refpop.classList.remove("ask");
   storeSex(selectedSex);
   paintRefPop();
   setGuideSex(selectedSex);
   showGuide(selectedSex);
 });
 paintRefPop();
+
+// The gate: no scan runs against an unchosen population. Returns true when the
+// caller may proceed; otherwise it nudges the picker and stops.
+function requireSex(): boolean {
+  if (sexChosen) return true;
+  refpop.classList.add("ask");
+  refpop.scrollIntoView({ behavior: "smooth", block: "center" });
+  return false;
+}
 setGuideSex(selectedSex);
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
@@ -215,7 +236,10 @@ el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
   if (file) handleFile(file);
 });
-el.btnUpload.addEventListener("click", () => el.fileInput.click());
+el.btnUpload.addEventListener("click", () => {
+  if (!requireSex()) return;
+  el.fileInput.click();
+});
 el.ovalFrame.addEventListener("dragover", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.add("dragover");
@@ -224,8 +248,19 @@ el.ovalFrame.addEventListener("dragleave", () => el.ovalFrame.classList.remove("
 el.ovalFrame.addEventListener("drop", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.remove("dragover");
+  if (!requireSex()) return;
   const file = (e as DragEvent).dataTransfer?.files?.[0];
   if (file) handleFile(file);
+});
+
+// Wordmark returns to the start — the landing is the closest thing to a home
+// screen, and until a proper dashboard exists this is how you get back to it
+// from a result without reloading.
+document.getElementById("logo-home")?.addEventListener("click", async () => {
+  if (cam) await closeCamera();
+  closeSide();
+  document.getElementById("v-side")?.classList.add("hidden");
+  resetToUpload();
 });
 
 // ---- camera ----
@@ -322,6 +357,7 @@ async function closeCamera(): Promise<void> {
 
 el.btnCamera.addEventListener("click", async () => {
   if (!cam) {
+    if (!requireSex()) return;
     await openCamera();
     return;
   }
