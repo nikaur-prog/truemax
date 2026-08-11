@@ -19,6 +19,7 @@ import type { SidePoints } from "./engine/sideMetrics.ts";
 import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
+import { mountAccountButton } from "./ui/authModal.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
@@ -161,6 +162,11 @@ if (landingHistory && hasHistory()) {
   landingHistory.classList.remove("hidden");
   landingHistory.addEventListener("click", () => openHistory());
 }
+
+// Accounts light up only when Supabase keys are set in the build environment.
+// With no keys this call returns immediately and adds no header button, so the
+// signed-out product is exactly what shipped before. See src/engine/auth.ts.
+mountAccountButton();
 
 // The idealized silhouette is a framing guide for the camera, not landing art
 let outline: ReturnType<typeof mountFaceOutline> | null = null;

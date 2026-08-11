@@ -746,3 +746,57 @@ body {
 .hist-entry { background: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px;
   color: var(--acc, #107a57); margin-top: clamp(6px, 1.2svh, 14px); }
 .hist-entry:hover { text-decoration: underline; }
+
+/* ---- Accounts (present only when Supabase keys are configured) ---- */
+.acct-btn {
+  font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: 99px;
+  padding: 6px 13px; cursor: pointer; line-height: 1; transition: background 0.12s, border-color 0.12s;
+}
+.acct-btn:hover { background: var(--soft); }
+.acct-btn.in { padding: 3px; border-color: transparent; background: none; }
+.acct-disc {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 99px; background: var(--ink); color: #fff;
+  font-size: 12px; font-weight: 600; letter-spacing: 0;
+}
+.acct-disc.lg { width: 40px; height: 40px; font-size: 16px; flex: none; }
+
+.acct-panel { width: min(420px, 100%); padding: 26px 26px 22px; }
+.acct-lede { color: var(--mut); font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
+.acct-form { display: flex; flex-direction: column; gap: 12px; }
+.acct-field { display: flex; flex-direction: column; gap: 5px; }
+.acct-field span { font-size: 11px; letter-spacing: 0.04em; color: var(--mut); text-transform: uppercase; }
+.acct-field input {
+  width: 100%; font-family: var(--sans); font-size: 15px; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px;
+}
+.acct-field input:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+.acct-msg { min-height: 0; font-size: 12.5px; line-height: 1.4; margin: 0; }
+.acct-msg.err { color: var(--warm); }
+.acct-msg.ok { color: var(--acc); }
+.acct-submit { width: 100%; margin-top: 2px; }
+.acct-switch { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
+.acct-switch button {
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--acc);
+}
+.acct-switch button:hover { text-decoration: underline; }
+
+.acct-who { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; }
+.acct-who b { display: block; font-size: 15px; font-weight: 600; word-break: break-all; }
+.acct-who span { font-size: 12.5px; color: var(--mut); }
+.acct-actions { display: flex; gap: 10px; }
+.acct-danger { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.acct-danger summary { cursor: pointer; font-size: 12.5px; color: var(--mut); list-style: none; }
+.acct-danger summary::-webkit-details-marker { display: none; }
+.acct-danger summary:hover { color: var(--warm); }
+.acct-danger p { font-size: 12px; color: var(--mut); line-height: 1.5; margin: 10px 0 12px; }
+.acct-delete {
+  font-family: var(--sans); font-size: 12.5px; color: var(--warm); cursor: pointer;
+  background: none; border: 1px solid color-mix(in srgb, var(--warm) 40%, var(--line));
+  border-radius: 10px; padding: 9px 13px;
+}
+.acct-delete:hover { background: color-mix(in srgb, var(--warm) 8%, transparent); }
+.acct-delete:disabled { opacity: 0.6; cursor: default; }
+.acct-done { margin-top: 4px; }
