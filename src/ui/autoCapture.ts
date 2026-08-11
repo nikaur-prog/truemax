@@ -52,7 +52,11 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     if (!startedAt || fired) return;
     const elapsed = now - startedAt;
     const remaining = Math.max(0, total - elapsed);
-    const whole = Math.ceil(remaining / 1000);
+    // Clamped to the whole seconds the duration actually contains. Without the
+    // clamp a 2.5s countdown opens on "3" — ceil(2.5) — so it reads and sounds
+    // like a three second wait, which is not what it is. Counting 2, 1 over 2.5
+    // seconds is the honest display of the same timer.
+    const whole = Math.min(Math.floor(total / 1000), Math.ceil(remaining / 1000));
 
     // One tick per whole second as it falls. Counting down out loud is what a
     // person turned away from the screen actually has.

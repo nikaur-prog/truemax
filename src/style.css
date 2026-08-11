@@ -735,6 +735,34 @@ body {
 .dash-card.pri { background: var(--ink); border-color: var(--ink); color: #fff; }
 .dash-card.pri span { color: rgba(255, 255, 255, 0.7); }
 .dash-logo { display: block; margin-bottom: 14px; color: var(--ink); }
+
+/* ---- Entry animation ----
+   Everything on the dashboard rises and fades in on one clock, staggered down
+   the page so it reads as the screen assembling rather than six things arriving
+   at once. --d is set per element in dashboard.ts. */
+.dash-anim {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: dash-in 0.62s cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes dash-in {
+  to { opacity: 1; transform: none; }
+}
+/* The headline gets a touch more travel and a slight blur, which is what makes
+   it read as "whooshing" in rather than merely sliding. */
+.dash-head h1.dash-anim { transform: translateY(20px); filter: blur(5px); animation-name: dash-in-head; }
+@keyframes dash-in-head {
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-anim { animation: none; opacity: 1; transform: none; filter: none; }
+}
+
+/* The celebrity card's star is gold — the one warm accent on the screen, and it
+   marks the one section that is about other people rather than about you. */
+.dash-card .dash-ic.gold { color: #c9a227; }
+.dash-card .dash-ic svg { display: block; }
 .dash-streak {
   display: inline-block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
   color: var(--acc); background: var(--acc-soft); border-radius: 99px; padding: 5px 11px;

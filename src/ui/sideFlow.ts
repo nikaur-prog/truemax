@@ -40,6 +40,7 @@ interface SideCtx {
 let verifier: VerifyHandle | null = null;
 let sideCam: CameraHandle | null = null;
 let auto: AutoCapture | null = null;
+let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 const el = () => ({
   section: document.getElementById("v-side")!,
@@ -151,7 +152,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       }
       e.hint.classList.add("counting");
       e.hintTitle.textContent = `Hold still · ${remaining}`;
-      e.hintDetail.textContent = "Taking it automatically";
+      e.hintDetail.textContent = "Taking it automatically · space to take it now";
       if (shoot) shoot.textContent = `Capturing in ${remaining}`;
     },
     onFire: () => {
@@ -216,6 +217,22 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     stopSideCamera();
     if (shot) await loadCanvas(shot, ctx);
   };
+
+  // Space or Enter takes it now rather than waiting out the countdown. On a
+  // laptop the keyboard is under your hands while the screen is turned away,
+  // which makes it the one control you can still hit blind — and it does not
+  // shift the framing the way reaching for a button does.
+  sideKeyHandler = (e: KeyboardEvent) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    const t = e.target as HTMLElement | null;
+    // Never hijack a key from a field or another button.
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (t?.tagName === "BUTTON" && t.id !== "side-shoot") return;
+    if (!sideCam || !ready) return;
+    e.preventDefault();
+    document.getElementById("side-shoot")?.click();
+  };
+  window.addEventListener("keydown", sideKeyHandler);
 }
 
 function stopSideCamera(): void {
@@ -224,6 +241,10 @@ function stopSideCamera(): void {
   // that no longer has a preview behind it.
   auto?.cancel();
   auto = null;
+  if (sideKeyHandler) {
+    window.removeEventListener("keydown", sideKeyHandler);
+    sideKeyHandler = null;
+  }
   if (!sideCam) return;
   sideCam.stop();
   sideCam = null;

@@ -1,7 +1,7 @@
 import { readAllHistory } from "../engine/history.ts";
 import type { StoredScan } from "../engine/history.ts";
 import { computeStreak } from "../engine/streak.ts";
-import { headline, subline } from "./greeting.ts";
+import { headline, nextVisit, subline } from "./greeting.ts";
 import { loadPhotos } from "../engine/photoStore.ts";
 import { openHistory } from "./historyView.ts";
 import { REEL } from "./demoReelData.ts";
@@ -25,12 +25,35 @@ import { mountDemoReel } from "./demoReel.ts";
 let overlay: HTMLDivElement | null = null;
 let reel: ReturnType<typeof mountDemoReel> | null = null;
 
+// Two half-faces sharing one outline: a squarer, heavier-browed left half and a
+// softer, narrower right half, split down the facial midline. It says "this
+// measures men and women" at 26px, which a single generic head does not, and it
+// echoes the blue/pink chooser that opens every scan. Drawn rather than
+// photographed so it stays sharp at any size and adds no image weight.
+const SPLIT_FACE = `<svg viewBox="0 0 48 48" width="26" height="26" aria-hidden="true" fill="none">
+  <g stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+    <!-- left half: broader jaw, flatter crown -->
+    <path d="M24 6c-6.2 0-10.4 3.6-10.4 9.6 0 2.1.2 4.4.7 6.6.4 1.9.9 3.6 1.5 5.1 1.6 4.1 4.5 7.2 8.2 8.6"/>
+    <path d="M13.9 13.2c2.2-1.1 4.3-1.4 6.3-.9"/>
+    <!-- right half: narrower jaw, rounder crown -->
+    <path d="M24 6c6.2 0 10.4 3.6 10.4 9.6 0 2.1-.2 4.4-.7 6.6-.4 1.9-.9 3.6-1.5 5.1-1.5 3.9-4.1 6.9-8.2 8.6"/>
+    <path d="M34.1 13.9c-2-1.4-4-1.9-6.1-1.5"/>
+    <!-- the split -->
+    <path d="M24 6v30" opacity=".45" stroke-dasharray="2.4 3"/>
+    <!-- shoulders, same on both sides -->
+    <path d="M11 43c1.6-4.3 6.6-7 13-7s11.4 2.7 13 7"/>
+  </g>
+</svg>`;
+
 export function isDashboardOpen(): boolean {
   return overlay !== null;
 }
 
 export function openDashboard(opts: { onScan: () => void; name?: string | null }): void {
   close();
+  // Advance the rotation once per open, so coming back to the dashboard gives a
+  // different headline and a different quote rather than the same pair all day.
+  nextVisit();
   const scans = readAllHistory();
   const streak = computeStreak(scans);
   const ctx = { name: opts.name ?? null, streak };
@@ -40,16 +63,16 @@ export function openDashboard(opts: { onScan: () => void; name?: string | null }
   overlay.innerHTML = `
     <div class="dash-inner">
       <header class="dash-head">
-        <span class="wordmark dash-logo">TRUE<b>MAX</b></span>
-        <h1>${escapeHtml(headline(ctx))}</h1>
-        <p>${escapeHtml(subline(ctx))}</p>
+        <span class="wordmark dash-logo dash-anim" style="--d:0ms">TRUE<b>MAX</b></span>
+        <h1 class="dash-anim" style="--d:70ms">${escapeHtml(headline(ctx))}</h1>
+        <p class="dash-anim" style="--d:170ms">${escapeHtml(subline(ctx))}</p>
         ${streakChip(streak)}
       </header>
 
       <div class="dash-actions">
-        <div class="dash-slot">
+        <div class="dash-slot dash-anim" style="--d:260ms">
           <button class="dash-card pri" id="dash-scan">
-            <span class="dash-ic">◎</span>
+            <span class="dash-ic">${SPLIT_FACE}</span>
             <b>Scan your face</b>
             <span>Front and side, measured on your device</span>
           </button>
@@ -65,9 +88,9 @@ export function openDashboard(opts: { onScan: () => void; name?: string | null }
             </div>
           </div>
         </div>
-        <div class="dash-slot">
+        <div class="dash-slot dash-anim" style="--d:330ms">
           <button class="dash-card" id="dash-celeb">
-            <span class="dash-ic">★</span>
+            <span class="dash-ic gold">★</span>
             <b>Search a celebrity</b>
             <span>See how the numbers read on a famous face</span>
           </button>
@@ -196,7 +219,7 @@ function scanSection(scans: StoredScan[]): string {
   const recent = scans.slice(0, 5);
   return `<div class="dash-cols">
     ${profilePanel(scans, avg)}
-    <section class="dash-scans">
+    <section class="dash-scans dash-anim" style="--d:480ms">
       <div class="dash-scans-head">
         <h2>Your scans</h2>
         ${scans.length > 5 ? `<button class="linkish" id="dash-history">View all ${scans.length} →</button>` : ""}
@@ -245,7 +268,7 @@ function profilePanel(scans: StoredScan[], avg: number): string {
       ? Math.sqrt(scans.reduce((a, s) => a + (s.overall - avg) ** 2, 0) / (scans.length - 1))
       : null;
 
-  return `<aside class="dash-profile">
+  return `<aside class="dash-profile dash-anim" style="--d:410ms">
     <h2>Your profile</h2>
     <div class="dash-prof-score">
       <b>${avg.toFixed(1)}</b>

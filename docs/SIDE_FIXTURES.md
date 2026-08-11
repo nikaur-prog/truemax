@@ -84,6 +84,38 @@ The fit is Theil-Sen (median of pairwise slopes) rather than least squares
 precisely because outliers are the thing being defended against: least squares
 is dragged by the very point it is meant to catch.
 
+## Set E — the first clean one
+
+Collected after the `.vpoint` fix, so it carries none of the rightward bias
+above. It is the first set that is ground truth in the strict sense.
+
+```json
+{"trichion":[0.3486,0.3469],"glabella":[0.3406,0.4212],"nasion":[0.3405,0.4594],
+ "pronasale":[0.2995,0.5484],"subnasale":[0.3254,0.562],"labialeSuperius":[0.3094,0.5857],
+ "labialeInferius":[0.3139,0.6352],"pogonion":[0.341,0.6926],"menton":[0.3517,0.7045],
+ "gonion":[0.5836,0.6551],"condylion":[0.6216,0.477],"cervicale":[0.477,0.7036],
+ "tragion":[0.6159,0.5222]}
+```
+
+Against the current template it differs by a mean of 0.115 head-widths and
+0.064 head-heights — comfortably inside the 0.5 / 0.25 thresholds
+`sanitizeSeed` acts on, so the template still does its job on it and moves
+nothing. The differences are not random, though, and they point the way the
+bias predicts:
+
+- The lower face sits further BACK than the template says (`menton` +0.31,
+  `cervicale` +0.27, `gonion` +0.20, `pogonion` +0.16), which is exactly the
+  direction a forward-shifted template would be wrong in.
+- The ear region sits LOWER (`condylion`, `tragion`, `gonion` all about +0.20
+  head-heights).
+
+**The template has deliberately not been refitted from this.** One clean set
+cannot separate "the template is biased" from "this photograph is reclined" —
+the subject is lying back in it, which tilts the whole ear-to-jaw relationship,
+and that alone could produce the vertical offsets above. Refit when there are
+three or four clean sets across different poses; until then the four biased
+sets plus this one still catch the failure the pass exists for.
+
 ## Collecting more
 
 Open the app with `?dev=1`, capture or upload a profile, drag all thirteen

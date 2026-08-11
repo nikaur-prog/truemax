@@ -317,6 +317,7 @@ function displayName(email: string | undefined): string | null {
 let cam: CameraHandle | null = null;
 let lastCheck: FrameCheck | null = null;
 let autoFront: AutoCapture | null = null;
+let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 // Wall clock until which the opening capture instruction stays put.
 let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
@@ -378,11 +379,22 @@ async function openCamera(): Promise<void> {
         }
         el.camHint.classList.add("counting");
         el.camHintTitle.textContent = `Hold still · ${remaining}`;
-        el.camHintDetail.textContent = "Taking it automatically";
+        el.camHintDetail.textContent = "Taking it automatically · space to take it now";
         el.btnCamera.textContent = `Capturing in ${remaining}`;
       },
       onFire: () => el.btnCamera.click(),
     });
+    // Space or Enter fires the shutter now instead of waiting out the count.
+    frontKeyHandler = (e: KeyboardEvent) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (t?.tagName === "BUTTON" && t.id !== "btn-camera") return;
+      if (!cam || !lastCheck?.ready) return;
+      e.preventDefault();
+      el.btnCamera.click();
+    };
+    window.addEventListener("keydown", frontKeyHandler);
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
     // Headline and hints collapse so the preview can take the space — the
@@ -411,6 +423,10 @@ async function openCamera(): Promise<void> {
 async function closeCamera(): Promise<void> {
   autoFront?.cancel();
   autoFront = null;
+  if (frontKeyHandler) {
+    window.removeEventListener("keydown", frontKeyHandler);
+    frontKeyHandler = null;
+  }
   cam?.stop();
   cam = null;
   lastCheck = null;
