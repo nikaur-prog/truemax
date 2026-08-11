@@ -32,6 +32,7 @@ export function openDashboard(opts: { onScan: () => void }): void {
   overlay.innerHTML = `
     <div class="dash-inner">
       <header class="dash-head">
+        <span class="wordmark dash-logo">TRUE<b>MAX</b></span>
         <h1>Your dashboard</h1>
         <p>Measure your face, watch it over time, and see exactly where you land.</p>
       </header>
@@ -82,20 +83,91 @@ function scanSection(scans: StoredScan[]): string {
   const best = Math.max(...scans.map((s) => s.overall));
   const avg = scans.reduce((s, x) => s + x.overall, 0) / scans.length;
   const recent = scans.slice(0, 5);
-  return `<section class="dash-scans">
-    <div class="dash-scans-head">
-      <h2>Your scans</h2>
-      ${scans.length > 5 ? `<button class="linkish" id="dash-history">View all ${scans.length} →</button>` : ""}
+  return `<div class="dash-cols">
+    ${profilePanel(scans, avg)}
+    <section class="dash-scans">
+      <div class="dash-scans-head">
+        <h2>Your scans</h2>
+        ${scans.length > 5 ? `<button class="linkish" id="dash-history">View all ${scans.length} →</button>` : ""}
+      </div>
+      <div class="dash-stats">
+        <div><b>${scans.length}</b><span>SCANS</span></div>
+        <div><b>${avg.toFixed(1)}</b><span>AVERAGE</span></div>
+        <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
+      </div>
+      <div class="dash-scan-list">
+        ${recent.map((s) => scanRow(s)).join("")}
+      </div>
+    </section>
+  </div>`;
+}
+
+// Region labels, kept local so the dashboard does not drag the whole results
+// module in for six words.
+const REGION_LABEL: Record<string, string> = {
+  eyes: "Eyes", midface: "Midface", jaw: "Jaw", chin: "Chin",
+  nose: "Nose", lips: "Lips", proportions: "Proportions", symmetry: "Symmetry",
+};
+
+// Everything here is averaged across scans rather than read off the latest one.
+// A single scan carries about 1.3 points of photo-to-photo noise, which is more
+// than the gap between two different people — so "your strongest feature" taken
+// from one photograph is mostly a statement about that photograph. The mean over
+// several is the first number on this screen that describes the face.
+function profilePanel(scans: StoredScan[], avg: number): string {
+  const sex = scans[0].sex;
+  const totals: Record<string, { sum: number; n: number }> = {};
+  for (const s of scans) {
+    for (const [region, score] of Object.entries(s.regions)) {
+      if (typeof score !== "number") continue;
+      totals[region] = totals[region] ?? { sum: 0, n: 0 };
+      totals[region].sum += score;
+      totals[region].n++;
+    }
+  }
+  const means = Object.entries(totals)
+    .map(([region, t]) => ({ region, mean: t.sum / t.n }))
+    .sort((a, b) => b.mean - a.mean);
+
+  const spread =
+    scans.length > 1
+      ? Math.sqrt(scans.reduce((a, s) => a + (s.overall - avg) ** 2, 0) / (scans.length - 1))
+      : null;
+
+  return `<aside class="dash-profile">
+    <h2>Your profile</h2>
+    <div class="dash-prof-score">
+      <b>${avg.toFixed(1)}</b>
+      <span>AVERAGE OF ${scans.length} SCAN${scans.length > 1 ? "S" : ""}</span>
     </div>
-    <div class="dash-stats">
-      <div><b>${scans.length}</b><span>SCANS</span></div>
-      <div><b>${avg.toFixed(1)}</b><span>AVERAGE</span></div>
-      <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
-    </div>
-    <div class="dash-scan-list">
-      ${recent.map((s) => scanRow(s)).join("")}
-    </div>
-  </section>`;
+    <p class="dash-prof-note">Scored against ${sex === "male" ? "men" : "women"}. Averaged across
+      every scan on this device, because one photograph carries about 1.3 points of noise on its own.</p>
+    ${
+      means.length
+        ? `<div class="dash-prof-bars">
+            ${means
+              .map(
+                (m) => `<div class="dash-prof-row">
+                  <span>${REGION_LABEL[m.region] ?? m.region}</span>
+                  <i><b style="width:${Math.max(3, Math.min(100, m.mean * 10))}%"></b></i>
+                  <em>${m.mean.toFixed(1)}</em>
+                </div>`,
+              )
+              .join("")}
+          </div>
+          <div class="dash-prof-ends">
+            <div><span>STRONGEST</span><b>${REGION_LABEL[means[0].region] ?? means[0].region}</b></div>
+            <div><span>WEAKEST</span><b>${REGION_LABEL[means[means.length - 1].region] ?? means[means.length - 1].region}</b></div>
+          </div>`
+        : ""
+    }
+    ${
+      spread != null
+        ? `<p class="dash-prof-note">Your scans vary by ${spread.toFixed(1)} points either side of that
+           average. Anything inside that band is the camera, not your face.</p>`
+        : ""
+    }
+  </aside>`;
 }
 
 function scanRow(s: StoredScan): string {
