@@ -8,6 +8,8 @@ import { setRunningMode } from "../engine/landmarker.ts";
 import { detectStable } from "../engine/consensus.ts";
 import { assessQuality } from "../engine/quality.ts";
 import { resetSideTracking } from "../engine/captureGuide.ts";
+import { createAutoCapture } from "./autoCapture.ts";
+import type { AutoCapture } from "./autoCapture.ts";
 import type { CameraHandle } from "./camera.ts";
 
 // Side-profile capture flow: camera or upload → auto-seeded landmarks → user
@@ -37,6 +39,7 @@ interface SideCtx {
 
 let verifier: VerifyHandle | null = null;
 let sideCam: CameraHandle | null = null;
+let auto: AutoCapture | null = null;
 
 const el = () => ({
   section: document.getElementById("v-side")!,
@@ -136,6 +139,26 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // That memory has to start empty on every new attempt.
   resetSideTracking();
   let ready = false;
+  // Hands-off shutter. On the side you are turned away from the screen, so the
+  // countdown is mostly audible; see ui/autoCapture.ts.
+  auto = createAutoCapture({
+    onTick: (remaining) => {
+      const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
+      if (remaining == null) {
+        e.hint.classList.remove("counting");
+        if (shoot && !shoot.disabled) shoot.textContent = "Capture";
+        return;
+      }
+      e.hint.classList.add("counting");
+      e.hintTitle.textContent = `Hold still · ${remaining}`;
+      e.hintDetail.textContent = "Taking it automatically";
+      if (shoot) shoot.textContent = `Capturing in ${remaining}`;
+    },
+    onFire: () => {
+      const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
+      shoot?.click();
+    },
+  });
   try {
     sideCam = await startCamera({
       video: e.video,
@@ -143,8 +166,15 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       mode: "side",
       onCheck: (c) => {
         ready = c.ready;
-        e.hintTitle.textContent = c.hint;
-        e.hintDetail.textContent = c.detail;
+        auto?.update(c.ready);
+        // While the count is running the hint belongs to the countdown, which
+        // has just written it. Only the two text lines are skipped — the lamp
+        // and the shutter below must keep updating, or the frame freezes
+        // visually at the exact moment it is about to fire.
+        if (!auto?.armed()) {
+          e.hintTitle.textContent = c.hint;
+          e.hintDetail.textContent = c.detail;
+        }
         e.hint.classList.toggle("ready", c.ready);
         e.hint.classList.toggle("red", c.status === "red");
         e.hint.classList.toggle("amber", c.status === "amber");
@@ -189,6 +219,11 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
 }
 
 function stopSideCamera(): void {
+  // Cancelled before the early return: the countdown must die even on paths
+  // where the camera was already gone, or a pending fire could click a shutter
+  // that no longer has a preview behind it.
+  auto?.cancel();
+  auto = null;
   if (!sideCam) return;
   sideCam.stop();
   sideCam = null;

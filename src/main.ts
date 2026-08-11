@@ -22,6 +22,8 @@ import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton } from "./ui/authModal.ts";
 import { revealSideScan } from "./ui/sideScan.ts";
 import { openSexChooser } from "./ui/sexChooser.ts";
+import { createAutoCapture } from "./ui/autoCapture.ts";
+import type { AutoCapture } from "./ui/autoCapture.ts";
 import { openDashboard } from "./ui/dashboard.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
@@ -280,6 +282,7 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
 // ---- camera ----
 let cam: CameraHandle | null = null;
 let lastCheck: FrameCheck | null = null;
+let autoFront: AutoCapture | null = null;
 // Wall clock until which the opening capture instruction stays put.
 let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
@@ -308,7 +311,9 @@ async function openCamera(): Promise<void> {
         // — is the only chance to ask about them, and a hint that is replaced
         // on the very next frame is a hint nobody reads. The lamp underneath
         // is already live, so nothing is being hidden.
-        if (performance.now() >= holdHintUntil) {
+        // Not while the countdown owns the hint — it has just written it, and
+        // the two would flash against each other every frame.
+        if (performance.now() >= holdHintUntil && !autoFront?.armed()) {
           el.camHintTitle.textContent = c.hint;
           el.camHintDetail.textContent = c.detail;
         }
@@ -324,7 +329,25 @@ async function openCamera(): Promise<void> {
         el.btnNoGlasses.classList.toggle("hidden", c.hint !== "Take your glasses off");
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
         el.btnCamera.disabled = !c.ready;
+        autoFront?.update(c.ready);
       },
+    });
+    // The front gets the same hands-off shutter as the side. It matters less
+    // here — you can see the screen — but a photo taken while reaching for a
+    // button is a photo that moved, and that is true of both views.
+    autoFront = createAutoCapture({
+      onTick: (remaining) => {
+        if (remaining == null) {
+          el.camHint.classList.remove("counting");
+          el.btnCamera.textContent = "Capture";
+          return;
+        }
+        el.camHint.classList.add("counting");
+        el.camHintTitle.textContent = `Hold still · ${remaining}`;
+        el.camHintDetail.textContent = "Taking it automatically";
+        el.btnCamera.textContent = `Capturing in ${remaining}`;
+      },
+      onFire: () => el.btnCamera.click(),
     });
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
@@ -352,6 +375,8 @@ async function openCamera(): Promise<void> {
 // was, celebrity reel and all. Shared by capture and cancel so the two can
 // never drift apart and leave the page half in camera mode.
 async function closeCamera(): Promise<void> {
+  autoFront?.cancel();
+  autoFront = null;
   cam?.stop();
   cam = null;
   lastCheck = null;

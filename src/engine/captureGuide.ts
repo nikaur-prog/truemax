@@ -90,6 +90,12 @@ const YAW_OK = 10;
 // still clears the analysis gate afterwards. The direction of the advice is
 // unchanged; only the point at which it starts nagging has moved.
 const PITCH_OK = 20;
+
+// Side-profile pitch band. Tighter than the front's 20 in the tucked direction
+// because a tucked chin HIDES anatomy the side measurements need, rather than
+// merely skewing it — see checkSideFrame. Negative pitch is chin-down.
+const SIDE_PITCH_DOWN = 8;
+const SIDE_PITCH_UP = 26;
 const ROLL_OK = 7;
 const SMILE_OK = 0.35;
 const DARK = 42; // mean luma, 0-255
@@ -316,6 +322,22 @@ export function checkSideFrame(
     // No face, and no turn on record to explain it. Almost always someone who
     // has not started yet, or has stepped out of frame.
     add(1, "Face the camera first", "Start front-on, then turn until you are fully side-on");
+  }
+  // The chin has to come up, and this is stricter than the front deliberately.
+  //
+  // Four of the fifteen side measurements live under the jaw: the gonial angle,
+  // the ramus, the mandibular plane and the submental-cervical angle at the
+  // throat. Tuck the chin and that whole region folds into the neck — the jaw
+  // corner and the neck point stop being visible at all, so they cannot be
+  // placed, and the measurements that depend on them are then read off two
+  // guesses. A front photo has no equivalent failure; nothing there is hidden
+  // by a few degrees of pitch. Hence a gate here and not there.
+  //
+  // Only the tucked direction is policed hard. A chin raised too far flattens
+  // the same angles the other way, so that is caught too, just later.
+  if (lm) {
+    add((-pose.pitch - SIDE_PITCH_DOWN) / SIDE_PITCH_DOWN, "Lift your chin", "The jaw corner and the line under your chin have to be visible");
+    add((pose.pitch - SIDE_PITCH_UP) / SIDE_PITCH_UP, "Chin down a little", "Too far up flattens the jaw angle");
   }
   add((DARK - stats.luma) / DARK, "Too dark", "Face a window or turn a light on");
   add((stats.luma - BRIGHT) / BRIGHT, "Too bright", "Move out of direct light");

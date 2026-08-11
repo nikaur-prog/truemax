@@ -121,6 +121,7 @@ export function openCelebSearch(): void {
     <div class="dash-inner">
       <button class="hist-close" aria-label="Close">✕</button>
       <header class="dash-head">
+        <button class="wordmark celeb-home" type="button" title="Back to the dashboard">TRUE<b>MAX</b></button>
         <h1>Celebrities</h1>
         <p>How the same measurements read on a face people already have a number for. Search a name, or browse.</p>
       </header>
@@ -130,10 +131,14 @@ export function openCelebSearch(): void {
     </div>`;
 
   document.body.appendChild(celebEl);
-  celebEl.querySelector(".hist-close")!.addEventListener("click", () => {
+  const closeCeleb = () => {
     celebEl?.remove();
     celebEl = null;
-  });
+  };
+  celebEl.querySelector(".hist-close")!.addEventListener("click", closeCeleb);
+  // The wordmark means the same thing everywhere: go home. Here home is the
+  // dashboard sitting underneath, so this only has to close the overlay.
+  celebEl.querySelector(".celeb-home")!.addEventListener("click", closeCeleb);
   const q = celebEl.querySelector("#celeb-q") as HTMLInputElement;
   const grid = celebEl.querySelector("#celeb-grid")!;
   const empty = celebEl.querySelector("#celeb-empty")!;
