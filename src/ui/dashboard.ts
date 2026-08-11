@@ -2,6 +2,7 @@ import { readAllHistory } from "../engine/history.ts";
 import type { StoredScan } from "../engine/history.ts";
 import { computeStreak } from "../engine/streak.ts";
 import { headline, subline } from "./greeting.ts";
+import { loadPhotos } from "../engine/photoStore.ts";
 import { openHistory } from "./historyView.ts";
 import { REEL } from "./demoReelData.ts";
 import { applyShim } from "./demoReelShim.ts";
@@ -101,6 +102,7 @@ export function openDashboard(opts: { onScan: () => void; name?: string | null }
   for (const row of overlay.querySelectorAll<HTMLElement>(".dash-scan-row")) {
     row.onclick = () => openHistory();
   }
+  wireScanHovers(overlay);
 }
 
 export function close(): void {
@@ -224,11 +226,60 @@ function profilePanel(scans: StoredScan[], avg: number): string {
 function scanRow(s: StoredScan): string {
   const when = new Date(s.date);
   const date = when.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `<button class="dash-scan-row">
-    <span class="dash-scan-date">${date}</span>
-    <span class="dash-scan-sex">${s.sex === "male" ? "VS MEN" : "VS WOMEN"}</span>
-    <span class="dash-scan-score">${s.overall.toFixed(1)}<small>/10</small></span>
-  </button>`;
+  const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const top = Object.entries(s.regions)
+    .filter(([, v]) => typeof v === "number")
+    .sort((a, b) => (b[1] as number) - (a[1] as number));
+  const stat = (label: string, v: string) => `<div><span>${label}</span><b>${v}</b></div>`;
+  return `<div class="dash-scan-slot">
+    <button class="dash-scan-row" data-date="${s.date}">
+      <span class="dash-scan-date">${date}</span>
+      <span class="dash-scan-sex">${s.sex === "male" ? "VS MEN" : "VS WOMEN"}</span>
+      <span class="dash-scan-score">${s.overall.toFixed(1)}<small>/10</small></span>
+    </button>
+    <div class="dash-scan-pop">
+      <div class="dash-scan-pop-in">
+        <div class="dash-pop-shots" data-shots="${s.date}">
+          <div class="dash-pop-shot ph"><span>FRONT</span></div>
+          <div class="dash-pop-shot ph"><span>SIDE</span></div>
+        </div>
+        <div class="dash-pop-stats">
+          ${stat("SCORE", s.overall.toFixed(1))}
+          ${stat("TAKEN", time)}
+          ${top[0] ? stat("BEST", `${REGION_LABEL[top[0][0]] ?? top[0][0]} ${(top[0][1] as number).toFixed(1)}`) : ""}
+          ${top.length > 1 ? stat("WEAKEST", `${REGION_LABEL[top[top.length - 1][0]] ?? top[top.length - 1][0]} ${(top[top.length - 1][1] as number).toFixed(1)}`) : ""}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Thumbnails are fetched only when a row is actually hovered, and only once.
+// Reading every scan's photo up front would mean a dozen IndexedDB round trips
+// and a dozen decoded images for a panel most people never open.
+function wireScanHovers(root: HTMLElement): void {
+  for (const slot of root.querySelectorAll<HTMLElement>(".dash-scan-slot")) {
+    const row = slot.querySelector<HTMLElement>(".dash-scan-row");
+    const shots = slot.querySelector<HTMLElement>(".dash-pop-shots");
+    if (!row || !shots) continue;
+    let loaded = false;
+    const load = () => {
+      if (loaded) return;
+      loaded = true;
+      const date = row.dataset.date!;
+      void loadPhotos(date).then((p) => {
+        if (!p || (!p.front && !p.side)) {
+          shots.innerHTML = `<p class="dash-pop-none">No photo kept for this scan. Scans taken before thumbnails were added, or on another device, keep only their numbers.</p>`;
+          return;
+        }
+        shots.innerHTML =
+          (p.front ? `<div class="dash-pop-shot"><img src="${p.front}" alt="" /><span>FRONT</span></div>` : "") +
+          (p.side ? `<div class="dash-pop-shot"><img src="${p.side}" alt="" /><span>SIDE</span></div>` : "");
+      });
+    };
+    slot.addEventListener("pointerenter", load);
+    slot.addEventListener("focusin", load);
+  }
 }
 
 // --- celebrity search ------------------------------------------------------
@@ -275,7 +326,73 @@ export function openCelebSearch(): void {
     }
     empty.classList.toggle("hidden", shown > 0);
   };
+  for (const card of grid.querySelectorAll<HTMLElement>(".celeb-card")) {
+    card.addEventListener("click", () => {
+      const f = faces.find((x) => x.slug === card.dataset.slug);
+      if (f) openCelebDetail(f);
+    });
+  }
   q.focus();
+}
+
+// The full breakdown for one face: the same pillars and per-region scores the
+// user's own report shows, on somebody whose number they already have an
+// opinion about. That comparison is the point of the screen.
+let detailEl: HTMLDivElement | null = null;
+function openCelebDetail(f: ReturnType<typeof applyShim>[number]): void {
+  detailEl?.remove();
+  const regions = [...f.regions].sort((a, b) => b.score - a.score);
+  const tone = (v: number) => (v >= 7.5 ? "hi" : v >= 5.5 ? "mid" : "lo");
+  detailEl = document.createElement("div");
+  detailEl.className = "dash celeb-detail";
+  detailEl.innerHTML = `
+    <div class="dash-inner">
+      <button class="hist-close" aria-label="Close">✕</button>
+      <div class="cd-head">
+        <div class="cd-photo"><img src="/demo/${f.slug}.jpg" alt="${f.name}" /></div>
+        <div class="cd-meta">
+          <h1>${f.name}</h1>
+          <div class="cd-score ${tone(f.overall)}">${f.overall.toFixed(1)}<small>/10</small></div>
+          <p class="cd-sub">Scored against ${f.sex === "male" ? "men" : "women"}.</p>
+        </div>
+      </div>
+
+      <h2 class="cd-h2">Pillars</h2>
+      <div class="cd-pillars">
+        ${Object.entries(f.pillars)
+          .map(
+            ([k, v]) => `<div class="cd-pillar">
+              <b>${(v as number).toFixed(1)}</b><span>${k.toUpperCase()}</span>
+              <i><em style="width:${Math.min(100, (v as number) * 10)}%"></em></i>
+            </div>`,
+          )
+          .join("")}
+      </div>
+
+      <h2 class="cd-h2">Region by region</h2>
+      <div class="cd-regions">
+        ${regions
+          .map(
+            (r) => `<div class="cd-region">
+              <span>${REGION_LABEL[r.id] ?? r.id}</span>
+              <i><em style="width:${Math.min(100, r.score * 10)}%"></em></i>
+              <b class="${tone(r.score)}">${r.score.toFixed(1)}</b>
+            </div>`,
+          )
+          .join("")}
+      </div>
+
+      <p class="cd-credit">${f.credit}</p>
+      <p class="cd-note">These are the scores this face is commonly given rather than a
+        live measurement, and the engine's own output is one query parameter away
+        (<code>?real=1</code>). Two photographs of one person differ by about 1.3 points, so any
+        single number here is a reading rather than a verdict.</p>
+    </div>`;
+  document.body.appendChild(detailEl);
+  detailEl.querySelector(".hist-close")!.addEventListener("click", () => {
+    detailEl?.remove();
+    detailEl = null;
+  });
 }
 
 function celebCard(f: ReturnType<typeof applyShim>[number]): string {
@@ -286,7 +403,7 @@ function celebCard(f: ReturnType<typeof applyShim>[number]): string {
         <span>${k[0]}</span></div>`,
     )
     .join("");
-  return `<div class="celeb-card" data-name="${f.name.toLowerCase()}">
+  return `<div class="celeb-card" data-name="${f.name.toLowerCase()}" data-slug="${f.slug}" role="button" tabindex="0">
     <div class="celeb-photo"><img src="/demo/${f.slug}.jpg" alt="" loading="lazy" /></div>
     <div class="celeb-meta">
       <b>${f.name}</b>

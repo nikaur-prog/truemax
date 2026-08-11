@@ -1,5 +1,6 @@
 import { readAllHistory } from "../engine/history.ts";
 import type { StoredScan } from "../engine/history.ts";
+import { clearAllPhotos } from "../engine/photoStore.ts";
 
 // ---------------------------------------------------------------------------
 // The history view: every scan taken on this device, as a trend.
@@ -130,9 +131,27 @@ export function openHistory(): void {
         A dot inside it has not really moved — same face, different photo. Only dots clear of the
         band are a change worth reading.</p>
       <div class="hist-list">${rows(scans)}</div>
-      <p class="hist-foot">Stored on this device only. Nothing here was ever uploaded, and clearing
-        your browser data clears it.</p>
+      <p class="hist-foot">Stored on this device only, numbers and a thumbnail of each photo.
+        Nothing here was ever uploaded, and clearing your browser data clears it.
+        <button class="linkish" id="hist-clear-photos">Delete the stored photos</button></p>
     </div>`;
+  }
+
+  // Anything stored has to be removable. The numbers stay — they are what the
+  // trend is made of, and they are not the sensitive part.
+  const clearBtn = wrap.querySelector<HTMLButtonElement>("#hist-clear-photos");
+  if (clearBtn) {
+    let armed = false;
+    clearBtn.onclick = async () => {
+      if (!armed) {
+        armed = true;
+        clearBtn.textContent = "Tap again to delete every stored photo";
+        return;
+      }
+      clearBtn.disabled = true;
+      await clearAllPhotos();
+      clearBtn.textContent = "Photos deleted";
+    };
   }
 
   const close = () => wrap.remove();

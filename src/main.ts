@@ -6,7 +6,8 @@ import type { QualityCheck } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
 import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.ts";
 import { extractShape, shapeSubset } from "./engine/shape.ts";
-import { compareAndStore } from "./engine/history.ts";
+import { compareAndStore, readAllHistory, readHistory } from "./engine/history.ts";
+import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.ts";
 import { toCelebEntry } from "./engine/celebs.ts";
 import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
@@ -284,7 +285,16 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
   resetToUpload();
-  if (!isAuthAvailable()) return;
+  // With no Supabase keys there is no such thing as signed out — there is no
+  // way to sign in at all — so gating on an account would just hide the
+  // dashboard from everybody forever. In that build the dashboard is simply
+  // open, which is also correct: the history it shows is device-local and
+  // needs no account to exist. The gate switches itself on the day keys are
+  // configured, with no code change.
+  if (!isAuthAvailable()) {
+    openDashboard({ onScan: () => resetToUpload() });
+    return;
+  }
   const user = await currentUser();
   if (!user) {
     openAccount();
@@ -651,6 +661,23 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
   const delta = compareAndStore(report);
+
+  // Keep a thumbnail of each view against this scan, keyed by the log entry's
+  // own date so the two cannot drift. Thumbnails only — see engine/photoStore.
+  // Fire-and-forget: a storage failure must never interrupt a finished
+  // analysis, and the report does not depend on it.
+  void (async () => {
+    const log = readHistory(report.sex);
+    const date = log[log.length - 1]?.date;
+    if (!date) return;
+    const frontThumb = toThumb(frontShot);
+    const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
+    await savePhotos(date, {
+      front: frontThumb ?? undefined,
+      side: sideThumb ?? undefined,
+    });
+    await pruneTo(readAllHistory().map((s) => s.date));
+  })();
 
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "ANALYZED";
