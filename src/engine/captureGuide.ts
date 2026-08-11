@@ -469,8 +469,14 @@ export function checkFrame(
         : !gates.gaze
           ? { hint: "Look at the lens", detail: "Framing is good, but your eyes are off to one side" }
           : null;
+    // Green means "you can take this shot", so an advisory that does not block
+    // the shutter must not turn the light amber. It used to: a full, shootable
+    // frame carrying only a soft-focus note showed amber, which reads as "not
+    // ready yet" while the button is enabled and everything is framed. The note
+    // still shows as text so the user can improve it if they want; the light
+    // tells the truth, which is that the frame is good to go.
     return advisory
-      ? { ready: true, ...advisory, status: "amber", progress: 1, gaze, pose, gates }
+      ? { ready: true, ...advisory, status: "green", progress: 1, gaze, pose, gates }
       : { ready: true, hint: "Hold still", detail: "Everything checks out", status: "green", progress: 1, gaze, pose, gates };
   }
 

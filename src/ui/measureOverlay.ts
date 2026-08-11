@@ -11,8 +11,13 @@ import type { ScoredMetric } from "../engine/types.ts";
 // where the engine measured.
 // ---------------------------------------------------------------------------
 
-const ACCENT = "#8FF3E0";
-const WARM = "#FFC98B";
+// The measurement overlay is monochrome white. The teal-and-orange it replaced
+// read as two systems fighting; a single white line over the photograph, with
+// the reference line the same white at half strength, reads as one instrument
+// and looks more premium. The label chips stay dark so the white text on them
+// keeps its contrast.
+const ACCENT = "#FFFFFF";
+const WARM = "rgba(255,255,255,0.5)";
 
 type Seg =
   | { kind: "span"; a: number | Pt2; b: number | Pt2; label?: string; color?: string }
@@ -259,8 +264,14 @@ export function drawMeasurement(
   metric: ScoredMetric,
   progress = 1,
 ): boolean {
-  canvas.width = width;
-  canvas.height = height;
+  // Only resize when the size actually changed. Assigning to canvas.width or
+  // canvas.height reallocates the whole backing buffer and resets the context,
+  // and this function runs on every animation frame — so doing it
+  // unconditionally forced ~25 full buffer reallocations per hover, which was
+  // the entire source of the lag when moving between measurements. clearRect
+  // does the per-frame wipe; the resize only has to happen once.
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, width, height);
 
@@ -390,7 +401,7 @@ const STAGGER = 0.45;
 // Draw a measurement on, over `DRAW_MS`. Returns a handle so a fast hover down
 // the list can cancel the previous one instead of leaving two rAF loops
 // fighting over the same canvas.
-const DRAW_MS = 420;
+const DRAW_MS = 300;
 
 export function animateMeasurement(
   canvas: HTMLCanvasElement,
