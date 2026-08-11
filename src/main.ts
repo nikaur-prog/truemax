@@ -21,6 +21,8 @@ import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton } from "./ui/authModal.ts";
 import { revealSideScan } from "./ui/sideScan.ts";
+import { openSexChooser } from "./ui/sexChooser.ts";
+import { openDashboard } from "./ui/dashboard.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
@@ -82,6 +84,12 @@ let selectedSex: Sex = storedSex() ?? "male";
 // So the first scan requires the pick; a returning visitor who already chose is
 // never asked again.
 let sexChosen = storedSex() !== null;
+
+// How the front photo was obtained, carried into the side step so the two
+// halves of one scan use the same capture method. If you shot the front with
+// the camera, the side opens the camera; if you uploaded the front, the side
+// asks for a file. Null until the first capture.
+let captureMethod: "camera" | "upload" | null = null;
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
 // directly, skipping the UI and its scan animation. Same engine path as a
@@ -209,13 +217,23 @@ refpop.addEventListener("click", (e) => {
 });
 paintRefPop();
 
-// The gate: no scan runs against an unchosen population. Returns true when the
-// caller may proceed; otherwise it nudges the picker and stops.
-function requireSex(): boolean {
-  if (sexChosen) return true;
-  refpop.classList.add("ask");
-  refpop.scrollIntoView({ behavior: "smooth", block: "center" });
-  return false;
+// The gate: no scan runs against an unchosen population. If the choice has not
+// been made, the full-screen man/woman chooser is shown and the scan proceeds
+// only once it is picked. Chosen once, remembered forever, never asked again.
+function ensureSex(then: () => void): void {
+  if (sexChosen) {
+    then();
+    return;
+  }
+  openSexChooser((sex) => {
+    selectedSex = sex;
+    sexChosen = true;
+    storeSex(sex);
+    paintRefPop();
+    setGuideSex(sex);
+    showGuide(sex);
+    then();
+  });
 }
 setGuideSex(selectedSex);
 
@@ -236,10 +254,7 @@ el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
   if (file) handleFile(file);
 });
-el.btnUpload.addEventListener("click", () => {
-  if (!requireSex()) return;
-  el.fileInput.click();
-});
+el.btnUpload.addEventListener("click", () => ensureSex(() => el.fileInput.click()));
 el.ovalFrame.addEventListener("dragover", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.add("dragover");
@@ -248,19 +263,18 @@ el.ovalFrame.addEventListener("dragleave", () => el.ovalFrame.classList.remove("
 el.ovalFrame.addEventListener("drop", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.remove("dragover");
-  if (!requireSex()) return;
   const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file) handleFile(file);
+  if (file) ensureSex(() => handleFile(file));
 });
 
-// Wordmark returns to the start — the landing is the closest thing to a home
-// screen, and until a proper dashboard exists this is how you get back to it
-// from a result without reloading.
+// Wordmark opens the dashboard — the app's home. From a result or the side
+// step it first tears those down, then shows the dashboard over the landing.
 document.getElementById("logo-home")?.addEventListener("click", async () => {
   if (cam) await closeCamera();
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
   resetToUpload();
+  openDashboard({ onScan: () => resetToUpload() });
 });
 
 // ---- camera ----
@@ -357,12 +371,14 @@ async function closeCamera(): Promise<void> {
 
 el.btnCamera.addEventListener("click", async () => {
   if (!cam) {
-    if (!requireSex()) return;
-    await openCamera();
+    ensureSex(() => void openCamera());
     return;
   }
   if (!lastCheck?.ready) return;
   const shot = cam.capture();
+  // Remember that the front came from the camera, so the side step defaults to
+  // the camera too rather than making the user switch capture method mid-flow.
+  captureMethod = "camera";
   await closeCamera();
   if (shot) await handleCanvas(shot);
 });
@@ -411,6 +427,8 @@ async function handleFile(file: File): Promise<void> {
     el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
     return;
   }
+  // An uploaded front means the side step should ask for a file too.
+  captureMethod = "upload";
   let image;
   try {
     image = await loadImage(file);
@@ -653,6 +671,9 @@ function startSide(): void {
   el.main.classList.add("hidden");
   openSideCapture({
     sex: selectedSex,
+    // Carry the front's capture method so the side does not make the user
+    // switch: camera stays camera, upload stays upload.
+    method: captureMethod ?? undefined,
     // There is no "back to results" any more, because there are no results yet.
     // The only way out of this step is forward, or starting over.
     onBack: () => resetToUpload(),

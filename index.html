@@ -105,7 +105,11 @@
            score by a median of 0.70 points and up to 4.50. A guess that weak
            cannot be allowed to decide a number that large, so it is asked. See
            src/engine/sexPref.ts. -->
-      <fieldset class="refpop" id="refpop">
+      <!-- The reference population is now chosen through the full-screen
+           man/woman split that appears when a scan starts (src/ui/sexChooser.ts),
+           so this inline control is hidden. It stays in the DOM because the
+           results screen and the guide silhouette still read its state. -->
+      <fieldset class="refpop hidden" id="refpop">
         <legend>Score against</legend>
         <div class="seg">
           <button type="button" class="seg-btn" data-sex="male">Men</button>

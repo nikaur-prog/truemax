@@ -27,6 +27,10 @@ const PROFILE_MIN_YAW = 35;
 
 interface SideCtx {
   sex: Sex;
+  // How the front was captured, so the side matches it. "camera" opens the
+  // profile camera straight away; "upload" offers only the file drop; undefined
+  // shows both choices.
+  method?: "camera" | "upload";
   onDone: (report: Report, points: SidePoints, faceDir: number) => void;
   onBack: () => void;
 }
@@ -60,28 +64,43 @@ export function openSideCapture(ctx: SideCtx): void {
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
   e.live.classList.add("hidden");
+
+  // The side matches how the front was taken. Shot the front on camera → open
+  // the profile camera straight away; uploaded it → offer only the file drop.
+  // With no method known, both choices are shown as before.
+  if (ctx.method === "camera") {
+    void openSideCamera(ctx);
+    wireSideInputs(e, ctx);
+    return;
+  }
+
   // Both views are required, so there is no "skip" — but backing out of the
   // capture must still be possible, because capture is free. Nothing has been
   // spent at this point: the analysis is the costly step and it has not run.
   // So this is a plain Cancel, not an offer to abandon a half-finished scan.
-  e.actions.innerHTML = `
-    <button class="btn pri" id="side-cam">Use camera</button>
-    <button class="btn gho" id="side-pick">Upload a photo</button>`;
+  const camBtn = ctx.method === "upload"
+    ? ""
+    : `<button class="btn pri" id="side-cam">Use camera</button>`;
+  const pickBtn = ctx.method === "upload"
+    ? `<button class="btn pri" id="side-pick">Upload a photo</button>`
+    : `<button class="btn gho" id="side-pick">Upload a photo</button>`;
+  e.actions.innerHTML = camBtn + pickBtn;
   e.actions.insertAdjacentHTML(
     "beforeend",
     `<button class="btn cancel" id="side-quit">Cancel</button>`,
   );
-  document.getElementById("side-cam")!.onclick = () => openSideCamera(ctx);
+  document.getElementById("side-cam")?.addEventListener("click", () => openSideCamera(ctx));
   document.getElementById("side-pick")!.onclick = () => e.input.click();
   document.getElementById("side-quit")!.onclick = () => {
     close();
     ctx.onBack();
   };
-  // The camera opens only on an explicit "Use camera" click here too, matching
-  // the front. It used to auto-open the profile preview because access was
-  // already granted, but the same principle applies: the preview should never
-  // appear until someone asks for it.
+  wireSideInputs(e, ctx);
+}
 
+// The file input and drop handlers, shared by the choice screen and the
+// camera-first path (so an upload still works even when the camera opened first).
+function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
   e.input.onchange = async () => {
     const file = e.input.files?.[0];
     // Clear the selection before handling it. A file input fires `change` only

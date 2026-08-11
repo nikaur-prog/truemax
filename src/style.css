@@ -662,15 +662,105 @@ body {
   box-shadow: 0 1px 3px rgba(0, 0, 0, .07); }
 .refpop-why { font-size: 11.5px; color: var(--mut); margin: 8px 0 0; }
 
-/* When a scan is attempted before the population is chosen, the picker asks for
-   the choice rather than the app silently defaulting. */
-.refpop.ask .seg { box-shadow: 0 0 0 2px var(--acc); animation: refpop-pulse 1s ease 2; }
-.refpop.ask .refpop-why { color: var(--acc); font-weight: 600; }
-.refpop.ask .refpop-why::before { content: "Pick who to score against first. "; }
-@keyframes refpop-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px var(--acc); }
-  50% { box-shadow: 0 0 0 5px var(--acc-soft); }
+/* ---- Reference-population chooser (full-screen split) ---- */
+.sexpick {
+  position: fixed; inset: 0; z-index: 400; display: flex; flex-direction: column;
+  background: var(--bg); opacity: 0; transition: opacity 0.22s ease;
 }
+.sexpick.in { opacity: 1; }
+.sexpick-head { text-align: center; padding: clamp(24px, 6vh, 60px) 20px 18px; }
+.sexpick-head h2 { font-family: var(--serif); font-weight: 300; font-size: clamp(24px, 4vw, 38px); margin: 0 0 8px; }
+.sexpick-head p { color: var(--mut); font-size: 14px; max-width: 40ch; margin: 0 auto; line-height: 1.5; }
+.sexpick-split { flex: 1; display: flex; min-height: 0; }
+.sexpick-side {
+  flex: 1; border: 0; cursor: pointer; font: inherit; position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  transition: flex 0.3s cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+.sexpick-side .sexpick-ic { font-size: clamp(46px, 9vw, 92px); line-height: 1; }
+.sexpick-side b { font-family: var(--serif); font-weight: 400; font-size: clamp(22px, 3.4vw, 34px); }
+.sexpick-sub { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.7; }
+.sexpick-glow { position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
+/* Man: cool blue undertone. Woman: warm pink undertone. */
+.sexpick-side.man { background: linear-gradient(180deg, #e9f1f8, #d6e4f0); color: #22415f; }
+.sexpick-side.man .sexpick-glow { background: radial-gradient(60% 60% at 50% 45%, rgba(59, 110, 165, 0.28), transparent 70%); }
+.sexpick-side.woman { background: linear-gradient(180deg, #f9e9ef, #f1d6e0); color: #7a3350; }
+.sexpick-side.woman .sexpick-glow { background: radial-gradient(60% 60% at 50% 45%, rgba(175, 74, 118, 0.26), transparent 70%); }
+.sexpick-side:hover, .sexpick-side:focus-visible { flex: 1.25; outline: none; }
+.sexpick-side:hover .sexpick-glow, .sexpick-side:focus-visible .sexpick-glow { opacity: 1; }
+@media (max-width: 560px) {
+  .sexpick-split { flex-direction: column; }
+  .sexpick-side:hover, .sexpick-side:focus-visible { flex: 1.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sexpick, .sexpick-side, .sexpick-glow { transition: none; }
+}
+
+/* ---- Dashboard (home) + celebrity search ---- */
+.dash {
+  position: fixed; inset: 0; z-index: 300; overflow-y: auto; background: var(--bg);
+}
+.dash-inner { max-width: 760px; margin: 0 auto; padding: clamp(28px, 6vh, 64px) 20px 60px; }
+.dash-head h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 5vw, 42px); margin: 0 0 8px; }
+.dash-head p { color: var(--mut); font-size: 14.5px; line-height: 1.5; margin: 0 0 26px; max-width: 46ch; }
+.dash-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 34px; }
+@media (max-width: 520px) { .dash-actions { grid-template-columns: 1fr; } }
+.dash-card {
+  text-align: left; border: 1px solid var(--line); background: var(--card); border-radius: 18px;
+  padding: 20px 20px 18px; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 3px;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+}
+.dash-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(20, 21, 24, 0.08); }
+.dash-card .dash-ic { font-size: 24px; margin-bottom: 8px; }
+.dash-card b { font-size: 17px; font-weight: 600; }
+.dash-card span { color: var(--mut); font-size: 13px; }
+.dash-card.pri { background: var(--ink); border-color: var(--ink); color: #fff; }
+.dash-card.pri span { color: rgba(255, 255, 255, 0.7); }
+.dash-scans-head { display: flex; align-items: baseline; justify-content: space-between; }
+.dash-scans h2 { font-family: var(--serif); font-weight: 300; font-size: 22px; margin: 0 0 14px; }
+.dash-stats { display: flex; gap: 26px; margin-bottom: 16px; }
+.dash-stats b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.dash-stats span { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: var(--mut); }
+.dash-scan-list { display: flex; flex-direction: column; }
+.dash-scan-row {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px;
+  padding: 13px 4px; border-bottom: 1px solid var(--line); background: none; border-left: 0;
+  border-right: 0; border-top: 0; cursor: pointer; font: inherit; text-align: left; width: 100%;
+}
+.dash-scan-row:hover { background: var(--soft); }
+.dash-scan-date { color: var(--mut); font-size: 13.5px; }
+.dash-scan-sex { font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--mut); }
+.dash-scan-score { font-variant-numeric: tabular-nums; font-size: 18px; }
+.dash-scan-score small { font-size: 11px; color: var(--mut); }
+.dash-empty { border: 1px dashed var(--line); border-radius: 16px; padding: 22px; text-align: center; }
+.dash-empty b { display: block; font-size: 15px; margin-bottom: 6px; }
+.dash-empty span { color: var(--mut); font-size: 13.5px; line-height: 1.5; }
+
+.celeb-q {
+  width: 100%; font-family: var(--sans); font-size: 15px; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 15px; margin-bottom: 18px;
+}
+.celeb-q:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+.celeb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.celeb-card {
+  border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--card);
+}
+.celeb-card.hidden { display: none; }
+.celeb-photo { aspect-ratio: 1; background: var(--soft); overflow: hidden; }
+.celeb-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.celeb-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 11px 12px 4px; }
+.celeb-meta b { font-size: 13.5px; font-weight: 600; line-height: 1.2; }
+.celeb-score { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
+.celeb-score small { font-size: 10px; color: var(--mut); font-weight: 400; }
+.celeb-score.hi { color: var(--up); }
+.celeb-score.lo { color: var(--warm); }
+.celeb-pillars { display: flex; gap: 5px; padding: 4px 12px 13px; }
+.celeb-pill { flex: 1; height: 20px; background: var(--soft); border-radius: 5px; position: relative; overflow: hidden; }
+.celeb-pill i { position: absolute; left: 0; top: 0; height: 100%; background: color-mix(in srgb, var(--acc) 40%, var(--line)); }
+.celeb-pill span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 8px; color: var(--ink); z-index: 1; }
+.celeb-empty { color: var(--mut); text-align: center; padding: 30px; }
 
 /* Same control on the results screen, so a wrong choice is correctable where
    its effect is visible rather than only where it was made. */
