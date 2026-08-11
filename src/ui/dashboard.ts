@@ -1,5 +1,7 @@
 import { readAllHistory } from "../engine/history.ts";
 import type { StoredScan } from "../engine/history.ts";
+import { computeStreak } from "../engine/streak.ts";
+import { headline, subline } from "./greeting.ts";
 import { openHistory } from "./historyView.ts";
 import { REEL } from "./demoReelData.ts";
 import { applyShim } from "./demoReelShim.ts";
@@ -24,30 +26,66 @@ export function isDashboardOpen(): boolean {
   return overlay !== null;
 }
 
-export function openDashboard(opts: { onScan: () => void }): void {
+export function openDashboard(opts: { onScan: () => void; name?: string | null }): void {
   close();
   const scans = readAllHistory();
+  const streak = computeStreak(scans);
+  const ctx = { name: opts.name ?? null, streak };
+  const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
   overlay = document.createElement("div");
   overlay.className = "dash";
   overlay.innerHTML = `
     <div class="dash-inner">
       <header class="dash-head">
         <span class="wordmark dash-logo">TRUE<b>MAX</b></span>
-        <h1>Your dashboard</h1>
-        <p>Measure your face, watch it over time, and see exactly where you land.</p>
+        <h1>${escapeHtml(headline(ctx))}</h1>
+        <p>${escapeHtml(subline(ctx))}</p>
+        ${streakChip(streak)}
       </header>
 
       <div class="dash-actions">
-        <button class="dash-card pri" id="dash-scan">
-          <span class="dash-ic">◎</span>
-          <b>Scan your face</b>
-          <span>Front and side, measured on your device</span>
-        </button>
-        <button class="dash-card" id="dash-celeb">
-          <span class="dash-ic">★</span>
-          <b>Search a celebrity</b>
-          <span>See how the numbers read on a famous face</span>
-        </button>
+        <div class="dash-slot">
+          <button class="dash-card pri" id="dash-scan">
+            <span class="dash-ic">◎</span>
+            <b>Scan your face</b>
+            <span>Front and side, measured on your device</span>
+          </button>
+          <div class="dash-drop">
+            <div class="dash-drop-in">
+              <b>What happens</b>
+              <ol class="dash-steps">
+                <li><span>1</span>Front photo, guided until the frame is right</li>
+                <li><span>2</span>Turn side-on, it shoots itself</li>
+                <li><span>3</span>31 front and 15 side measurements, scored</li>
+              </ol>
+              <p>Nothing is uploaded. The whole engine runs on this device.</p>
+            </div>
+          </div>
+        </div>
+        <div class="dash-slot">
+          <button class="dash-card" id="dash-celeb">
+            <span class="dash-ic">★</span>
+            <b>Search a celebrity</b>
+            <span>See how the numbers read on a famous face</span>
+          </button>
+          <div class="dash-drop">
+            <div class="dash-drop-in">
+              <b>${faces.length} faces measured</b>
+              <div class="dash-fan">
+                ${faces
+                  .slice(0, 6)
+                  .map(
+                    (f, i) => `<div class="dash-fan-card" style="--i:${i}">
+                      <img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />
+                      <span>${f.overall.toFixed(1)}</span>
+                    </div>`,
+                  )
+                  .join("")}
+              </div>
+              <p>The same measurements, on faces people already have a number for.</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       ${scanSection(scans)}
@@ -68,6 +106,19 @@ export function openDashboard(opts: { onScan: () => void }): void {
 export function close(): void {
   overlay?.remove();
   overlay = null;
+}
+
+// Only shown once there is a run worth naming. A "0 week streak" is a way of
+// telling somebody they have failed at something they had not started.
+function streakChip(s: { alive: boolean; weeks: number }): string {
+  if (!s.alive || s.weeks < 2) return "";
+  return `<span class="dash-streak">${s.weeks} WEEK STREAK</span>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] || c,
+  );
 }
 
 function scanSection(scans: StoredScan[]): string {

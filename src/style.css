@@ -735,6 +735,53 @@ body {
 .dash-card.pri { background: var(--ink); border-color: var(--ink); color: #fff; }
 .dash-card.pri span { color: rgba(255, 255, 255, 0.7); }
 .dash-logo { display: block; margin-bottom: 14px; color: var(--ink); }
+.dash-streak {
+  display: inline-block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+  color: var(--acc); background: var(--acc-soft); border-radius: 99px; padding: 5px 11px;
+  margin-bottom: 22px;
+}
+
+/* Hover dropdowns under each action card. Grid-rows 0fr -> 1fr animates a
+   height the browser can actually interpolate, without hard-coding a pixel
+   height that would clip the taller of the two panels. */
+.dash-slot { position: relative; }
+.dash-drop {
+  display: grid; grid-template-rows: 0fr; opacity: 0;
+  transition: grid-template-rows 0.28s cubic-bezier(0.2, 0.6, 0.2, 1), opacity 0.2s ease;
+  pointer-events: none;
+}
+.dash-drop-in { overflow: hidden; }
+.dash-slot:hover .dash-drop, .dash-slot:focus-within .dash-drop {
+  grid-template-rows: 1fr; opacity: 1; pointer-events: auto;
+}
+.dash-drop-in > * { margin-top: 12px; }
+.dash-drop b { display: block; font-size: 12.5px; font-weight: 600; }
+.dash-drop p { font-size: 12px; color: var(--mut); line-height: 1.5; }
+.dash-steps { list-style: none; display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; }
+.dash-steps li { display: flex; align-items: center; gap: 9px; color: var(--mut); }
+.dash-steps span {
+  flex: none; width: 18px; height: 18px; border-radius: 99px; background: var(--soft);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 9px; color: var(--ink);
+}
+/* The celebrity fan: cards overlap at rest and spread out on hover. */
+.dash-fan { display: flex; padding-left: 6px; }
+.dash-fan-card {
+  position: relative; width: 54px; height: 54px; border-radius: 12px; overflow: hidden;
+  border: 2px solid var(--card); margin-left: -18px; background: var(--soft);
+  transform: rotate(calc((var(--i) - 2.5) * 3deg));
+  transition: margin-left 0.3s cubic-bezier(0.2, 0.6, 0.2, 1), transform 0.3s ease;
+}
+.dash-slot:hover .dash-fan-card { margin-left: -4px; transform: rotate(0deg); }
+.dash-fan-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dash-fan-card span {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
+  font-size: 9px; font-variant-numeric: tabular-nums; color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75)); padding: 6px 0 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-drop, .dash-fan-card { transition: none; }
+}
 /* Profile panel beside the scan list. Stacks under it on narrow screens, where
    two columns would give each about twenty characters of width. */
 .dash-cols { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr); gap: 28px; align-items: start; }

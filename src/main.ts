@@ -19,7 +19,8 @@ import type { SidePoints } from "./engine/sideMetrics.ts";
 import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
-import { mountAccountButton } from "./ui/authModal.ts";
+import { mountAccountButton, openAccount } from "./ui/authModal.ts";
+import { currentUser, isAuthAvailable } from "./engine/auth.ts";
 import { revealSideScan } from "./ui/sideScan.ts";
 import { openSexChooser } from "./ui/sexChooser.ts";
 import { createAutoCapture } from "./ui/autoCapture.ts";
@@ -269,15 +270,38 @@ el.ovalFrame.addEventListener("drop", (e) => {
   if (file) ensureSex(() => handleFile(file));
 });
 
-// Wordmark opens the dashboard — the app's home. From a result or the side
-// step it first tears those down, then shows the dashboard over the landing.
+// Wordmark goes home. Home is the dashboard for a signed-in user and the scan
+// screen for everyone else.
+//
+// The dashboard is the signed-in surface on purpose: it is where the history,
+// the streak and the personalised overview live, and all three are things an
+// account is FOR. A signed-out visitor gets the one screen that works without
+// one — scan your face — which is also the only screen a TikTok click needs.
+// Accounts are inert until Supabase keys are set (see engine/auth.ts), so with
+// no keys configured this correctly resolves to "everyone sees the scan screen".
 document.getElementById("logo-home")?.addEventListener("click", async () => {
   if (cam) await closeCamera();
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
   resetToUpload();
-  openDashboard({ onScan: () => resetToUpload() });
+  if (!isAuthAvailable()) return;
+  const user = await currentUser();
+  if (!user) {
+    openAccount();
+    return;
+  }
+  openDashboard({ onScan: () => resetToUpload(), name: displayName(user.email) });
 });
+
+// First name from an email address, for the greeting. "nikau.robertson@" gives
+// "Nikau". Anything that does not look like a name is dropped rather than
+// guessed at — the greeting reads fine without one.
+function displayName(email: string | undefined): string | null {
+  const local = (email ?? "").split("@")[0];
+  const first = local.split(/[._\-+0-9]+/).filter(Boolean)[0];
+  if (!first || first.length < 2 || first.length > 20) return null;
+  return first[0].toUpperCase() + first.slice(1).toLowerCase();
+}
 
 // ---- camera ----
 let cam: CameraHandle | null = null;
