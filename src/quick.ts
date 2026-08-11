@@ -4,7 +4,7 @@ import { detectStable } from "./engine/consensus.ts";
 import { assessQuality } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
 import { REGION_NAMES } from "./engine/scoring.ts";
-import { isSupported, permissionGranted, startCamera } from "./ui/camera.ts";
+import { isSupported, startCamera } from "./ui/camera.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import { curveSVG } from "./ui/curve.ts";
 import { rankShort, rarityText } from "./ui/templates.ts";
@@ -67,11 +67,10 @@ initLandmarker()
   .then(() => {
     el.engine.textContent = "ENGINE READY";
     el.engine.classList.add("ready");
-    // Same courtesy as the main app: someone who already granted the camera
-    // gets a live preview without being asked twice.
-    permissionGranted().then((ok) => {
-      if (ok) void openCamera();
-    });
+    // The camera opens only on an explicit "Use camera" click. This page is
+    // built to be filmed, so a creator needs to start the preview on cue rather
+    // than have it spring open the moment the page loads. Matches the main app,
+    // which also no longer auto-opens.
   })
   .catch(() => {
     el.engine.textContent = "ENGINE FAILED TO LOAD · REFRESH";

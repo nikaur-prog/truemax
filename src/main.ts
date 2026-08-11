@@ -443,23 +443,19 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     autoNote: `Scored against ${selectedSex} norms`,
   };
 
-  // Front-only is a complete result, and the side profile is an enhancement
-  // offered from the results screen rather than a toll gate before them.
+  // The main product is two photographs: front, then side, then one analysis of
+  // both. That is the whole mechanism, so the side is a required step here, not
+  // an optional extra — after the front is captured the flow goes straight to
+  // the profile. (Front-only lives on the separate /quick.html page, which is
+  // built for filming and deliberately skips the side.)
   //
-  // This reverses an earlier decision to force the profile first, on the
-  // reasoning that a score after one photo taught people the second was
-  // optional garnish. Two things overtook that. The side auto-seed is not
-  // reliable enough to stand between every user and any result — forcing a
-  // step that frequently needs hand-correction blocks the whole product on its
-  // weakest part. And the results screen already states plainly that the front
-  // carries 75% and names exactly what the profile would add, so "optional" is
-  // communicated without holding the score hostage. The "Add side profile"
-  // button on the results is the same startSide() path; taking it re-runs the
-  // analysis merged.
+  // runFullAnalysis still accepts null so a report restored from history can
+  // render front-only; the interactive flow always supplies a side report.
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "FRONT CAPTURED";
+  el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
   drawCalm(el.overlayCanvas, landmarks, width, height);
-  void runFullAnalysis(null);
+  startSide();
 }
 
 interface PendingFront {
