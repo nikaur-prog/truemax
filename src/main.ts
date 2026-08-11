@@ -20,6 +20,7 @@ import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startC
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton } from "./ui/authModal.ts";
+import { revealSideScan } from "./ui/sideScan.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
@@ -513,10 +514,11 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
       el.photoCanvas.width = t.width;
       el.photoCanvas.height = t.height;
       el.photoCanvas.getContext("2d")!.drawImage(t, 0, 0);
-      // The profile gets its own reveal: the thirteen verified points, dropped
-      // in one at a time. Without this the side half of the scan was a photo
+      // The profile gets its own reveal: a synthesised mesh sweeping the face,
+      // matched to the front scan's density, with the thirteen measured anchors
+      // lighting up on top. Without this the side half of the scan was a photo
       // sitting still while the text claimed it was being measured.
-      if (lastSide) revealSidePoints(el.overlayCanvas, lastSide.points, t.width, t.height);
+      if (lastSide) revealSideScan(el.overlayCanvas, lastSide.points, t.width, t.height);
     } else {
       el.photoCanvas.width = width;
       el.photoCanvas.height = height;
@@ -609,43 +611,6 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
-}
-
-// Drop the verified profile points in one by one, in reading order down the
-// face, so the side view visibly gets measured rather than just displayed.
-function revealSidePoints(
-  canvas: HTMLCanvasElement,
-  points: SidePoints,
-  w: number,
-  h: number,
-): void {
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d")!;
-  const pts = Object.values(points).sort((a, b) => a.y - b.y);
-  const r = Math.max(3, w / 130);
-  const total = 900;
-  const start = performance.now();
-  const frame = (now: number) => {
-    const t = Math.min(1, (now - start) / total);
-    ctx.clearRect(0, 0, w, h);
-    const shown = Math.ceil(t * pts.length);
-    for (let i = 0; i < shown; i++) {
-      const p = pts[i];
-      // The newest point lands slightly large and settles, so the eye catches
-      // which one just arrived.
-      const age = Math.min(1, (t * pts.length - i) * 2.2);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * (1 + (1 - age) * 0.9), 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(143,243,224,${0.35 + age * 0.55})`;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(4,53,45,0.85)";
-      ctx.lineWidth = Math.max(1, r * 0.32);
-      ctx.stroke();
-    }
-    if (t < 1) requestAnimationFrame(frame);
-  };
-  requestAnimationFrame(frame);
 }
 
 function startSide(): void {
