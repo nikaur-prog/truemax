@@ -2,7 +2,7 @@ import { analyzeSide } from "../engine/scoring.ts";
 import type { Report, Sex } from "../engine/types.ts";
 import { sidePointIntegrityIssues } from "../engine/sideMetrics.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
-import { assessSideSilhouette, mountVerifier, seedSidePoints } from "./sideVerify.ts";
+import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
 import {
   cloneSidePoints,
@@ -14,12 +14,7 @@ import type {
 } from "../engine/sideFeedbackPayload.ts";
 import { startCamera } from "./camera.ts";
 import { setRunningMode } from "../engine/landmarker.ts";
-import { detectStable } from "../engine/consensus.ts";
-import { assessQuality } from "../engine/quality.ts";
-import { resetSideTracking, stillFrameStats } from "../engine/captureGuide.ts";
-import { sidePhotoRejection } from "../engine/photoEligibility.ts";
-import { headCoveringRejection } from "../engine/photoEligibility.ts";
-import { detectHeadCovering } from "../engine/headCovering.ts";
+import { resetSideTracking } from "../engine/captureGuide.ts";
 import { createAutoCapture } from "./autoCapture.ts";
 import type { AutoCapture } from "./autoCapture.ts";
 import type { CameraHandle } from "./camera.ts";
@@ -27,8 +22,9 @@ import type { CameraHandle } from "./camera.ts";
 // Side-profile capture flow: camera or upload → auto-seeded landmarks → user
 // verifies by dragging → side report.
 //
-// The camera here runs in "side" mode, which gates on exposure, focus, and the
-// frontal detector NOT finding a square-on face. See checkSideFrame.
+// The camera still coaches the turn, but its shutter is never held hostage by
+// a heuristic. The review screen is the accuracy gate: TrueMax estimates the
+// points, then the user corrects them before any side score is calculated.
 
 const MAX_DIM = 1000;
 
@@ -203,7 +199,11 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       guideCanvas: e.guide,
       mode: "side",
       onCheck: (c) => {
-        ready = c.ready;
+        // Guidance and auto-capture can wait for the ideal turn. Manual
+        // capture cannot: side detection is deliberately uncertain at a true
+        // 90-degree profile, and that uncertainty used to strand users even
+        // though the following screen already supports point correction.
+        ready = true;
         e.turnCue.classList.toggle("hidden", c.ready || Math.abs(c.pose.yaw) >= 38);
         auto?.update(c.ready);
         // While the count is running the hint belongs to the countdown, which
@@ -221,7 +221,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         e.lampFill.className = c.status === "green" ? "green" : c.status;
         e.lampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
         const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
-        if (shoot) shoot.disabled = !c.ready;
+        if (shoot) shoot.disabled = false;
       },
     });
   } catch {
@@ -235,7 +235,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // reversed here, so the button under your thumb changed meaning between the
   // two steps of the same flow.
   e.actions.innerHTML = `
-    <button class="btn pri" id="side-shoot" disabled>Capture</button>
+    <button class="btn pri" id="side-shoot">Capture</button>
     <button class="btn gho" id="side-stop">Upload a photo</button>`;
   e.actions.insertAdjacentHTML(
     "beforeend",
@@ -353,40 +353,12 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   e.canvas.height = h;
   e.canvas.getContext("2d")!.drawImage(src, 0, 0, w, h);
 
-  // A clearly frontal face is still the wrong input. Every other recognisable
-  // side attempt proceeds to estimated landmarks: background segmentation and
-  // a lost profile mesh are too noisy to justify blocking a user when the next
-  // screen already asks them to review and correct every consequential point.
-  const q = assessQuality(detectStable(e.canvas));
-  const silhouette = assessSideSilhouette(e.canvas);
-  const stats = stillFrameStats(e.canvas);
-  let rejection = sidePhotoRejection(q, stats, silhouette, w, h);
-  if (!rejection) rejection = headCoveringRejection(await detectHeadCovering(e.canvas));
-  if (rejection) {
-    e.cap.textContent = "SIDE";
-    e.drop.classList.remove("hidden");
-    const b = e.drop.querySelector("b");
-    const span = e.drop.querySelector("span");
-    if (b) b.textContent = rejection.title;
-    if (span) span.textContent = rejection.detail;
-    // The rejected still stays visible so the person can see what failed, but
-    // the primary action must start a fresh camera. Previously it still said
-    // Capture while the camera had already been stopped, leaving the flow
-    // permanently stuck.
-    const retake = ctx.method === "upload"
-      ? ""
-      : `<button class="btn pri" id="side-retake">Retake photo</button>`;
-    const upload = `<button class="btn ${ctx.method === "upload" ? "pri" : "gho"}" id="side-repick">Upload another photo</button>`;
-    e.actions.innerHTML = `${retake}${upload}<button class="btn cancel" id="side-reject-cancel">Cancel</button>`;
-    document.getElementById("side-retake")?.addEventListener("click", () => void openSideCamera(ctx));
-    document.getElementById("side-repick")?.addEventListener("click", () => e.input.click());
-    document.getElementById("side-reject-cancel")?.addEventListener("click", () => {
-      close();
-      ctx.onBack();
-    });
-    return;
-  }
-
+  // Do not reject a side still here. Profile focus, crop, lighting, pose and
+  // silhouette classifiers all produced false negatives on plainly usable
+  // photos. The safer workflow is visible and reversible: estimate thirteen
+  // points on every loaded image, show them over the actual photo, and require
+  // confirmation/correction before analysis. If automatic detection fails,
+  // seedSidePoints deliberately falls back to an editable centred template.
   e.drop.classList.add("hidden");
   e.cap.textContent = "VERIFY LANDMARKS";
 
