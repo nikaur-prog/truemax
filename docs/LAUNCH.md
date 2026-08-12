@@ -38,7 +38,7 @@ and TLS itself — which is what you want; you are not losing anything.
 
 ### 1.2 Deployment protection
 
-- [ ] Vercel → Settings → Deployment Protection → **Vercel Authentication**.
+- [x] Vercel → Settings → Deployment Protection → **Vercel Authentication**.
       Set to *Only Preview Deployments*, or off. If it is on for Production, the
       site returns 401 to the public while working perfectly for you, logged in.
       This one wastes a lot of people’s afternoon.
@@ -46,7 +46,7 @@ and TLS itself — which is what you want; you are not losing anything.
 ### 1.3 Production build
 
 - [x] Production Branch is `main`, and `main` carries the current code.
-- [ ] Vercel → Deployments shows a **Production** (not Preview) deployment on the
+- [x] Vercel → Deployments shows a **Production** (not Preview) deployment on the
       latest `main` commit, status Ready.
 
 ### 1.4 Smoke test on the real domain
@@ -66,14 +66,18 @@ and TLS itself — which is what you want; you are not losing anything.
 Code is written and ships dark. See `docs/ACCOUNTS_SETUP.md` for the full
 walkthrough including the SQL.
 
-- [~] Create the Supabase project.
-- [~] Authentication → Providers → Email: enabled.
+- [x] Create the Supabase project.
+- [x] Authentication → Providers → Email: enabled; confirmation is required.
 - [~] Authentication → URL Configuration → **Site URL** = `https://truemax.app`,
       with `http://localhost:5173` added under Redirect URLs.
-- [~] Run the SQL from `ACCOUNTS_SETUP.md` (scans table, RLS policies,
-      `delete_own_account`).
-- [~] Vercel → Environment Variables: `VITE_SUPABASE_URL` and
+- [x] Apply the account migration from `ACCOUNTS_SETUP.md` (scans table,
+      hardened RLS policies, `delete_own_account`).
+- [x] Vercel → Environment Variables: `VITE_SUPABASE_URL` and
       `VITE_SUPABASE_ANON_KEY`. Redeploy.
+- [~] Signup/login modal, `/auth` portal, forgot/reset password, and post-scan
+      account gate are built. Merge and deploy the auth PR.
+- [ ] Enable Google and Apple providers. Both currently report disabled in
+      Supabase; see `ACCOUNTS_SETUP.md`.
 - [ ] Verify: “Sign in” appears top-right; create an account; delete it; confirm
       it is gone from Authentication → Users.
 
@@ -93,12 +97,12 @@ and Vercel configuration.
 
 - [x] Decide the surface: Stripe for web. (RevenueCat only becomes relevant at
       the app-store stage.)
-- [ ] Products and prices in Stripe.
+- [ ] Confirm products and prices in Stripe. The Supabase/Vercel connections do
+      not expose the Stripe catalogue, and `STRIPE_MAX_PRICE_ID` is not set.
 - [~] Hosted Checkout and customer portal Vercel Functions. Needs Stripe test
       and live keys plus `STRIPE_MAX_PRICE_ID` in Vercel.
-- [~] **Knowing who paid** — a signature-verified webhook transaction writes an
-      idempotent entitlement to Supabase with the server-only secret key. Needs
-      the migration applied and webhook destination configured.
+- [~] **Knowing who paid** — the entitlement migration is applied to live
+      Supabase. The webhook destination and server-only Vercel variables remain.
 - [x] Read the entitlement in the account UI and expose a reusable
       `hasMaxAccess()` gate for Stage 2.3.
 - [x] No Stripe JS runs in the page: the browser calls only same-origin `/api`

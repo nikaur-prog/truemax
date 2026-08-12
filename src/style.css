@@ -1101,6 +1101,19 @@ body {
 
 .acct-panel { width: min(420px, 100%); padding: 26px 26px 22px; }
 .acct-lede { color: var(--mut); font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
+.acct-social { display: grid; gap: 9px; }
+.acct-oauth {
+  width: 100%; min-height: 43px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink);
+  font: 500 13.5px/1 var(--sans); cursor: pointer; transition: background 0.12s, border-color 0.12s;
+}
+.acct-oauth:hover { background: var(--soft); border-color: #cfcdc5; }
+.acct-oauth:disabled { opacity: 0.58; cursor: wait; }
+.acct-oauth span { width: 18px; text-align: center; font-size: 14px; }
+.acct-oauth.apple { background: var(--ink); color: #fff; border-color: var(--ink); }
+.acct-oauth.apple:hover { background: #2a2c30; }
+.acct-divider { display: flex; align-items: center; gap: 10px; color: var(--mut); margin: 15px 0; font-size: 11px; }
+.acct-divider::before, .acct-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .acct-form { display: flex; flex-direction: column; gap: 12px; }
 .acct-field { display: flex; flex-direction: column; gap: 5px; }
 .acct-field span { font-size: 11px; letter-spacing: 0.04em; color: var(--mut); text-transform: uppercase; }
@@ -1119,6 +1132,9 @@ body {
   color: var(--acc);
 }
 .acct-switch button:hover { text-decoration: underline; }
+.acct-portal-link { display: inline-block; color: var(--mut); font-size: 11.5px; margin-top: 15px; text-decoration: none; }
+.acct-portal-link:hover { color: var(--acc); }
+.acct-home { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 
 .acct-who { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; }
 .acct-who b { display: block; font-size: 15px; font-weight: 600; word-break: break-all; }
@@ -1153,3 +1169,33 @@ body {
 .acct-delete:hover { background: color-mix(in srgb, var(--warm) 8%, transparent); }
 .acct-delete:disabled { opacity: 0.6; cursor: default; }
 .acct-done { margin-top: 4px; }
+
+/* Account portal. The modal and this page share the exact form renderer; this
+   shell is just the dedicated URL people can bookmark or receive in support. */
+.auth-page { min-height: 100svh; }
+.auth-page .wordmark { text-decoration: none; }
+.auth-scan-link { color: var(--acc); font-size: 12.5px; text-decoration: none; }
+.auth-scan-link:hover { text-decoration: underline; }
+.auth-shell { width: min(460px, calc(100% - 32px)); margin: clamp(34px, 9vh, 90px) auto 50px; }
+.auth-card {
+  position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 24px;
+  padding: 34px 34px 30px; box-shadow: 0 22px 70px rgba(20, 21, 24, 0.1);
+}
+.auth-card h2 { font-family: var(--serif); font-weight: 300; font-size: 31px; line-height: 1.12; margin: 0 0 12px; }
+.auth-mark { height: 42px; margin-bottom: 22px; }
+.auth-mark span { display: block; width: 32px; height: 42px; border: 1.5px solid var(--acc); border-radius: 50%/46%; position: relative; }
+.auth-mark span::after { content: ""; position: absolute; left: 7px; right: 7px; top: 20px; height: 1px; background: var(--acc); }
+.auth-foot { text-align: center; color: var(--mut); font-size: 11.5px; line-height: 1.5; margin: 16px auto 0; max-width: 42ch; }
+
+/* Post-capture account gate. It occupies the result column so closing the
+   modal never strands somebody on a blank page; the captured scan stays ready. */
+.analysis-gate { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 28px; }
+.analysis-gate h2 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4vw, 38px); line-height: 1.08; margin: 3px 0 13px; }
+.analysis-gate > p { color: var(--mut); font-size: 14px; line-height: 1.65; max-width: 46ch; margin-bottom: 20px; }
+.analysis-gate .analysis-gate-warn { color: var(--warm); font-size: 12px; }
+.analysis-gate-open { width: 100%; }
+
+@media (max-width: 520px) {
+  .auth-card { padding: 28px 22px 24px; border-radius: 19px; }
+  .auth-shell { margin-top: 24px; }
+}

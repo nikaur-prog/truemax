@@ -5,6 +5,17 @@ created by same-origin Vercel Functions, Stripe hosts the payment page, and a
 signature-verified webhook writes the resulting entitlement to Supabase. No
 Stripe secret or Supabase admin key is ever present in browser code.
 
+## Current verified state (12 August 2026)
+
+- The Stripe/Vercel/Supabase implementation exists in draft PR #16 and its
+  Vercel preview builds successfully.
+- The production Supabase project does **not** yet contain `entitlements` or
+  `stripe_webhook_events`.
+- Vercel currently contains only the two public Supabase browser variables.
+  None of the server-side Stripe or Supabase variables below are present.
+- Stripe product/price values cannot be read through the Supabase MCP. A Stripe
+  dashboard/connector check is still required to confirm the claimed pricing.
+
 ## 1. Install the entitlement schema
 
 Run `supabase/migrations/20260812000000_stripe_entitlements.sql` in the Supabase
@@ -42,7 +53,7 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_MAX_PRICE_ID=price_...
 SUPABASE_URL=https://ruvgkrlfmixfnmnzqgap.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_...
-TRUEMAX_APP_URL=https://truemax.app
+TRUEMAX_APP_URL=https://www.truemax.app
 ```
 
 Supabase's new `sb_secret_...` server key is preferred. A legacy project can set
@@ -57,7 +68,7 @@ flow is green.
 Deploy once so this endpoint exists:
 
 ```text
-https://truemax.app/api/stripe-webhook
+https://www.truemax.app/api/stripe-webhook
 ```
 
 Stripe Workbench → Webhooks → Add destination. Select:

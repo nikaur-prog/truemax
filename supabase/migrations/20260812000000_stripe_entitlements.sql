@@ -18,7 +18,8 @@ alter table public.entitlements enable row level security;
 drop policy if exists "own entitlement - read" on public.entitlements;
 create policy "own entitlement - read"
   on public.entitlements for select
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 revoke all on public.entitlements from anon;
 revoke insert, update, delete on public.entitlements from authenticated;
@@ -53,7 +54,7 @@ create or replace function public.apply_stripe_entitlement(
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 begin
   if p_tier not in ('free', 'max') then

@@ -21,7 +21,7 @@ import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startC
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton, openAccount } from "./ui/authModal.ts";
-import { currentUser, isAuthAvailable } from "./engine/auth.ts";
+import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.ts";
 import { revealSideScan } from "./ui/sideScan.ts";
 import { openSexChooser } from "./ui/sexChooser.ts";
 import { createAutoCapture } from "./ui/autoCapture.ts";
@@ -36,6 +36,12 @@ import { analyzeSkin } from "./engine/skin.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { detectOcclusion } from "./engine/occlusion.ts";
 import { REGION_LANDMARKS } from "./ui/regions.ts";
+import {
+  clearPendingAnalysis,
+  drawStoredPhoto,
+  readPendingAnalysis,
+  savePendingAnalysis,
+} from "./engine/pendingAnalysis.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -475,6 +481,7 @@ el.btnNoGlasses.addEventListener("click", () => {
 // public. Explicit intent only.
 
 function resetToUpload(): void {
+  clearPendingAnalysis();
   el.main.classList.add("hidden");
   el.upload.classList.remove("hidden");
   el.zoomable.style.transform = "none";
@@ -757,6 +764,118 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
+  // Any redirect-survival copy has served its one purpose. The full-size
+  // captures remain in memory for this result; the reduced temporary copies
+  // are removed from device storage immediately.
+  clearPendingAnalysis();
+  resumePendingStarted = false;
+}
+
+// The visitor has completed both photographs before we ask for an account.
+// That ordering is the acquisition flow: let them experience the scan first,
+// then ask for identity only at the moment the result becomes valuable.
+async function gateAnalysis(sideReport: Report): Promise<void> {
+  if (!isAuthAvailable() || await currentUser()) {
+    await runFullAnalysis(sideReport);
+    return;
+  }
+
+  const saved = pending && lastSide
+    ? savePendingAnalysis({
+        sex: selectedSex,
+        front: { ...pending, canvas: el.photoCanvas },
+        side: { points: lastSide.points, faceDir: lastSide.faceDir, canvas: lastSide.photo },
+      })
+    : false;
+
+  el.upload.classList.add("hidden");
+  el.main.classList.remove("hidden");
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "SCAN READY";
+  el.status.innerHTML = saved
+    ? "<b>Both views captured.</b> Create your account to run the analysis."
+    : "<b>Both views captured.</b> Sign in with an existing account to continue.";
+  el.barFill.style.width = "100%";
+  el.analysis.innerHTML = `<section class="analysis-gate">
+    <span class="klabel">YOUR SCAN IS READY</span>
+    <h2>Reveal your facial analysis</h2>
+    <p>Create a free account to see the score, measurements and personalised direction. Your face photos stay on this device.</p>
+    ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
+    <button type="button" class="btn pri analysis-gate-open">Create account and analyse</button>
+  </section>`;
+
+  const openGate = () => {
+    void openAccount({
+      initialMode: saved ? "signup" : "password",
+      reason: "analysis",
+      onDeferred: () => {
+        el.status.innerHTML = "<b>Scan saved on this device.</b> Open the newest email link to continue.";
+      },
+      onAuthenticated: async () => {
+        // Supabase emits SIGNED_IN before signInWithPassword resolves. Claim
+        // this continuation before the deferred auth listener gets a turn, so
+        // one password login cannot analyze and append history twice.
+        if (saved) resumePendingStarted = true;
+        await runFullAnalysis(sideReport);
+      },
+    });
+  };
+  el.analysis.querySelector(".analysis-gate-open")?.addEventListener("click", openGate);
+  openGate();
+}
+
+let resumePendingStarted = false;
+async function resumePendingAfterAuth(): Promise<void> {
+  if (resumePendingStarted) return;
+  const saved = readPendingAnalysis();
+  if (!saved || !await currentUser()) return;
+  resumePendingStarted = true;
+
+  const frontOk = await drawStoredPhoto(
+    el.photoCanvas,
+    saved.front.photo,
+    saved.front.width,
+    saved.front.height,
+  );
+  if (!frontOk) {
+    clearPendingAnalysis();
+    resumePendingStarted = false;
+    return;
+  }
+
+  let sidePhoto: HTMLCanvasElement | undefined;
+  if (saved.side.photo) {
+    sidePhoto = document.createElement("canvas");
+    const sideOk = await drawStoredPhoto(
+      sidePhoto,
+      saved.side.photo,
+      saved.side.width,
+      saved.side.height,
+    );
+    if (!sideOk) sidePhoto = undefined;
+  }
+
+  selectedSex = saved.sex;
+  sexChosen = true;
+  storeSex(saved.sex);
+  paintRefPop();
+  setGuideSex(saved.sex);
+  pending = {
+    landmarks: saved.front.landmarks,
+    width: saved.front.width,
+    height: saved.front.height,
+    quality: saved.front.quality,
+    autoNote: saved.front.autoNote,
+  };
+  lastSide = {
+    points: saved.side.points,
+    faceDir: saved.side.faceDir,
+    photo: sidePhoto,
+  };
+  closeSide();
+  el.upload.classList.add("hidden");
+  el.main.classList.remove("hidden");
+  await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex));
 }
 
 function startSide(): void {
@@ -788,7 +907,7 @@ function startSide(): void {
       // profile under a different reference population needs the input, not
       // the finished report.
       (window as unknown as Record<string, unknown>).__truemaxSidePoints = { points, faceDir };
-      await runFullAnalysis(sideReport);
+      await gateAnalysis(sideReport);
     },
   });
 }
@@ -848,4 +967,18 @@ async function loadImage(file: File): Promise<CanvasImageSource & { width: numbe
 
 function nextFrame(): Promise<void> {
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+}
+
+// INITIAL_SESSION handles an OAuth or confirmation redirect, while SIGNED_IN
+// covers an immediate password flow. The guard makes the two events harmless
+// when Supabase emits both for one navigation.
+if (isAuthAvailable()) {
+  // Also performs expiry cleanup for a signed-out visitor returning later.
+  readPendingAnalysis();
+  onAuthChange((user) => {
+    // Give an in-page password flow the first chance to continue with its
+    // full-resolution canvases. OAuth and email-confirmation returns have no
+    // in-page callback, so the saved scan resumes on the next navigation.
+    if (user) setTimeout(() => void resumePendingAfterAuth(), 0);
+  });
 }

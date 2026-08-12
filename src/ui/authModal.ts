@@ -3,10 +3,7 @@ import {
   deleteAccount,
   isAuthAvailable,
   onAuthChange,
-  signIn,
-  signInWithLink,
   signOut,
-  signUp,
 } from "../engine/auth.ts";
 import {
   consumeCheckoutResult,
@@ -16,6 +13,8 @@ import {
   startMaxCheckout,
 } from "../engine/entitlement.ts";
 import type { User } from "@supabase/supabase-js";
+import { renderAuthForm } from "./authForm.ts";
+import type { AuthMode } from "./authForm.ts";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.
@@ -25,17 +24,20 @@ import type { User } from "@supabase/supabase-js";
 // product it was before accounts existed. The moment the two env vars are set
 // the button appears and the modal works, with no code change.
 //
-// An account is deliberately small here. Signed out, the app is complete: a
-// scan runs on device and the history lives in localStorage. Signing in buys
-// exactly two things — history that follows you to another device, and an
-// identity to hang a subscription on later — and the copy says so rather than
-// pretending an account is required.
+// An account is deliberately small here. Capture runs on device and history
+// stays in localStorage; identity is required only when revealing an analysis
+// or attaching a subscription.
 // ---------------------------------------------------------------------------
 
 let overlay: HTMLDivElement | null = null;
 
-// Mode of the form inside the modal when signed out.
-type Mode = "link" | "password" | "signup";
+export interface OpenAccountOptions {
+  notice?: string;
+  initialMode?: AuthMode;
+  reason?: "account" | "analysis";
+  onAuthenticated?: (user: User) => void | Promise<void>;
+  onDeferred?: () => void | Promise<void>;
+}
 
 function initials(email: string): string {
   return email.trim().slice(0, 1).toUpperCase() || "•";
@@ -84,8 +86,9 @@ export function mountAccountButton(): void {
   });
 }
 
-export async function openAccount(notice?: string): Promise<void> {
+export async function openAccount(input?: string | OpenAccountOptions): Promise<void> {
   if (!isAuthAvailable()) return;
+  const options: OpenAccountOptions = typeof input === "string" ? { notice: input } : input ?? {};
   close();
   const user = await currentUser();
   overlay = document.createElement("div");
@@ -95,8 +98,23 @@ export async function openAccount(notice?: string): Promise<void> {
     <div class="acct-body"></div>
   </div>`;
   const body = overlay.querySelector(".acct-body") as HTMLElement;
-  if (user) renderSignedIn(body, user, notice);
-  else renderSignedOut(body, "link");
+  if (user) renderSignedIn(body, user, options.notice);
+  else {
+    renderAuthForm(body, {
+      initialMode: options.initialMode ?? (options.reason === "analysis" ? "signup" : "password"),
+      context: options.reason === "analysis" ? "analysis" : "account",
+      portalHref: `/auth?mode=${options.reason === "analysis" ? "signup" : "password"}`,
+      onDeferred: options.onDeferred,
+      onAuthenticated: async (signedInUser) => {
+        if (options.onAuthenticated) {
+          close();
+          await options.onAuthenticated(signedInUser);
+        } else {
+          renderSignedIn(body, signedInUser, options.notice);
+        }
+      },
+    });
+  }
 
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
@@ -116,102 +134,6 @@ function close(): void {
   overlay = null;
 }
 
-// --- signed out -----------------------------------------------------------
-
-function renderSignedOut(body: HTMLElement, mode: Mode): void {
-  const isSignup = mode === "signup";
-  const isLink = mode === "link";
-  const title = isLink ? "Sign in" : isSignup ? "Create an account" : "Sign in";
-
-  body.innerHTML = `
-    <h2>${title}</h2>
-    <p class="acct-lede">Your scans are saved on this device already. An account carries
-      them to your phone or a new browser, and nothing else changes: every scan still runs
-      on your device, and nothing is uploaded but the numbers.</p>
-    <form class="acct-form" novalidate>
-      <label class="acct-field">
-        <span>Email</span>
-        <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
-      </label>
-      ${
-        isLink
-          ? ""
-          : `<label class="acct-field">
-              <span>Password</span>
-              <input type="password" name="password" autocomplete="${
-                isSignup ? "new-password" : "current-password"
-              }" placeholder="At least 6 characters" required minlength="6" />
-            </label>`
-      }
-      <p class="acct-msg" role="status"></p>
-      <button type="submit" class="btn pri acct-submit">${
-        isLink ? "Email me a sign-in link" : isSignup ? "Create account" : "Sign in"
-      }</button>
-    </form>
-    <div class="acct-switch">
-      ${
-        isLink
-          ? `<button type="button" data-mode="password">Use a password instead</button>
-             <button type="button" data-mode="signup">Create an account</button>`
-          : isSignup
-            ? `<button type="button" data-mode="link">Email me a link instead</button>
-               <button type="button" data-mode="password">I already have an account</button>`
-            : `<button type="button" data-mode="link">Email me a link instead</button>
-               <button type="button" data-mode="signup">Create an account</button>`
-      }
-    </div>`;
-
-  const form = body.querySelector(".acct-form") as HTMLFormElement;
-  const msg = body.querySelector(".acct-msg") as HTMLElement;
-  const submit = body.querySelector(".acct-submit") as HTMLButtonElement;
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const data = new FormData(form);
-    const email = String(data.get("email") || "").trim();
-    const password = String(data.get("password") || "");
-    if (!email) {
-      say(msg, "Enter your email.", "err");
-      return;
-    }
-    submit.disabled = true;
-    submit.textContent = "Working…";
-    const res = isLink
-      ? await signInWithLink(email)
-      : isSignup
-        ? await signUp(email, password)
-        : await signIn(email, password);
-    submit.disabled = false;
-
-    if (!res.ok) {
-      submit.textContent = isLink ? "Email me a sign-in link" : isSignup ? "Create account" : "Sign in";
-      say(msg, res.message || "Something went wrong.", "err");
-      return;
-    }
-    if (isLink || res.needsConfirmation) {
-      // Both the magic link and a confirm-email signup end the same way: go
-      // check your inbox. The modal stays open with the instruction rather
-      // than closing on an action that has not finished.
-      body.innerHTML = `<h2>Check your email</h2>
-        <p class="acct-lede">We sent a link to <b>${escapeHtml(email)}</b>. Open it on this
-          device to finish${isLink ? " signing in" : " and confirm your account"}. You can
-          close this and keep using the app.</p>
-        <button type="button" class="btn gho acct-done">Done</button>`;
-      body.querySelector(".acct-done")?.addEventListener("click", () => close());
-      return;
-    }
-    // Password sign-in / instant signup: onAuthChange repaints the header,
-    // re-render the modal to the signed-in state.
-    const u = await currentUser();
-    if (u) renderSignedIn(body, u);
-    else close();
-  });
-
-  for (const b of body.querySelectorAll<HTMLButtonElement>(".acct-switch button")) {
-    b.addEventListener("click", () => renderSignedOut(body, b.dataset.mode as Mode));
-  }
-}
-
 // --- signed in ------------------------------------------------------------
 
 function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
@@ -221,7 +143,7 @@ function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
       <span class="acct-disc lg">${initials(user.email || "?")}</span>
       <div>
         <b>${escapeHtml(user.email || "Signed in")}</b>
-        <span>Your scans sync to this account.</span>
+        <span>Your membership is linked here. Scan history stays on this device for now.</span>
       </div>
     </div>
     ${notice ? `<p class="acct-notice">${escapeHtml(notice)}</p>` : ""}
@@ -235,8 +157,8 @@ function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
     </div>
     <details class="acct-danger">
       <summary>Delete my account</summary>
-      <p>This permanently removes your account and any synced scans. Scans stored on this
-        device stay until you clear your browser. This cannot be undone.</p>
+      <p>This permanently removes your account and its membership link. Scans stored on
+        this device stay until you clear your browser. This cannot be undone.</p>
       <button type="button" class="acct-delete">Delete account permanently</button>
     </details>`;
 

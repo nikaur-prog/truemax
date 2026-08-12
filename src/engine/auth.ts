@@ -1,19 +1,16 @@
-import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 // ---------------------------------------------------------------------------
 // Accounts, on Supabase.
 //
 // The app is otherwise entirely client-side and stays that way: a scan still
 // runs on device with nothing uploaded, and a signed-out visitor loses no
-// capability. An account exists for the two things localStorage cannot do —
-// carry your history to another device, and hang a subscription off a real
-// identity.
+// capability. An account hangs a subscription off a real identity; scan
+// history remains device-local for the MVP.
 //
 // Everything here is guarded by isAuthAvailable(). With no Supabase keys in the
-// environment the whole feature is inert: no account button, no network, the
-// product behaves exactly as it did before. So this can ship dark and light up
-// the moment the keys are set, without a second deploy that could break the
-// live app.
+// environment the whole feature is inert: no account button and no auth
+// network requests. Production supplies the public client settings.
 //
 // The client library is dynamically imported on first use, so the ~120KB it
 // weighs never lands on a visitor who only wants a scan.
@@ -71,6 +68,38 @@ export interface AuthResult {
   ok: boolean;
   message?: string;
   needsConfirmation?: boolean;
+  redirecting?: boolean;
+}
+
+export type SocialProvider = "google" | "apple";
+export type SocialAvailability = Record<SocialProvider, boolean>;
+
+// Every ordinary auth path returns to the scan screen. Password recovery is
+// the one deliberate exception: the recovery link must first land on a page
+// that can accept the new password, then that page returns to the scan.
+export function authRedirects(origin = window.location.origin): { scan: string; reset: string } {
+  return {
+    scan: new URL("/", origin).toString(),
+    reset: new URL("/auth?mode=reset", origin).toString(),
+  };
+}
+
+export async function socialAvailability(): Promise<SocialAvailability | null> {
+  const env = authEnv();
+  if (!env) return null;
+  try {
+    const response = await fetch(`${env.url}/auth/v1/settings`, {
+      headers: { apikey: env.key },
+    });
+    if (!response.ok) return null;
+    const settings = await response.json() as { external?: Partial<SocialAvailability> };
+    return {
+      google: settings.external?.google === true,
+      apple: settings.external?.apple === true,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // A password sign-up. Supabase can be set to require email confirmation; the
@@ -78,7 +107,11 @@ export interface AuthResult {
 export async function signUp(email: string, password: string): Promise<AuthResult> {
   try {
     const c = await getSupabaseClient();
-    const { data, error } = await c.auth.signUp({ email, password });
+    const { data, error } = await c.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: authRedirects().scan },
+    });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true, needsConfirmation: !data.session };
   } catch {
@@ -102,11 +135,56 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 export async function signInWithLink(email: string): Promise<AuthResult> {
   try {
     const c = await getSupabaseClient();
-    const { error } = await c.auth.signInWithOtp({ email });
+    const { error } = await c.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: authRedirects().scan,
+        // This is a sign-in surface, not a second unlabelled signup path.
+        shouldCreateUser: false,
+      },
+    });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true, needsConfirmation: true };
   } catch {
     return { ok: false, message: "Could not reach the sign-in service. Try again." };
+  }
+}
+
+export async function signInWithProvider(provider: SocialProvider): Promise<AuthResult> {
+  try {
+    const c = await getSupabaseClient();
+    const { error } = await c.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: authRedirects().scan },
+    });
+    if (error) return { ok: false, message: friendly(error.message) };
+    return { ok: true, redirecting: true };
+  } catch {
+    return { ok: false, message: "Could not start social sign-in. Try again." };
+  }
+}
+
+export async function requestPasswordReset(email: string): Promise<AuthResult> {
+  try {
+    const c = await getSupabaseClient();
+    const { error } = await c.auth.resetPasswordForEmail(email, {
+      redirectTo: authRedirects().reset,
+    });
+    if (error) return { ok: false, message: friendly(error.message) };
+    return { ok: true, needsConfirmation: true };
+  } catch {
+    return { ok: false, message: "Could not send the reset email. Try again." };
+  }
+}
+
+export async function updatePassword(password: string): Promise<AuthResult> {
+  try {
+    const c = await getSupabaseClient();
+    const { error } = await c.auth.updateUser({ password });
+    if (error) return { ok: false, message: friendly(error.message) };
+    return { ok: true };
+  } catch {
+    return { ok: false, message: "Could not update the password. Open the newest reset link and try again." };
   }
 }
 
@@ -150,16 +228,25 @@ export async function deleteAccount(): Promise<AuthResult> {
 
 // Fires on sign-in and sign-out so the header can reflect the state. Returns an
 // unsubscribe, and a no-op one when auth is off.
-export function onAuthChange(cb: (user: User | null) => void): () => void {
+export function onAuthChange(
+  cb: (user: User | null, event: AuthChangeEvent) => void,
+): () => void {
   if (!isAuthAvailable()) return () => {};
-  let unsub = () => {};
+  let disposed = false;
+  let unsub: (() => void) | null = null;
   void getSupabaseClient().then((c) => {
-    const { data } = c.auth.onAuthStateChange((_e: string, session: Session | null) => {
-      cb(session?.user ?? null);
+    const { data } = c.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      cb(session?.user ?? null, event);
     });
     unsub = () => data.subscription.unsubscribe();
+    // A caller can unmount before the dynamic Supabase import resolves. Do not
+    // leave a subscription behind in that race.
+    if (disposed) unsub();
   });
-  return () => unsub();
+  return () => {
+    disposed = true;
+    unsub?.();
+  };
 }
 
 // Supabase's error strings are for developers. These are the ones a user can
@@ -168,6 +255,11 @@ function friendly(msg: string): string {
   const m = msg.toLowerCase();
   if (m.includes("already registered")) return "That email already has an account. Sign in instead.";
   if (m.includes("invalid login")) return "Email or password is wrong.";
+  if (m.includes("provider is not enabled") || m.includes("unsupported provider"))
+    return "That sign-in option is not enabled yet.";
+  if (m.includes("same password")) return "Choose a password you have not used for this account.";
+  if (m.includes("session") || m.includes("expired"))
+    return "That link has expired. Request a new one and try again.";
   if (m.includes("password")) return "Password must be at least 6 characters.";
   if (m.includes("email")) return "That does not look like a valid email.";
   if (m.includes("rate limit")) return "Too many tries. Wait a minute and try again.";
