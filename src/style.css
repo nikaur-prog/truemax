@@ -84,6 +84,17 @@ body {
   /* It is a button now (click to return to the start), so strip the button
      chrome and keep it reading as a wordmark. */
   background: none; border: 0; padding: 0; cursor: pointer; }
+.wordmark::before {
+  content: "";
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: url("/brand/truemax-glyph.svg") center / contain no-repeat;
+  mask: url("/brand/truemax-glyph.svg") center / contain no-repeat;
+}
 .wordmark:hover b { color: var(--ink); }
 /* The version chip yields first: it can shorten or, on a narrow screen, hide,
    but it must never be the reason the wordmark leaves the screen. */
@@ -108,6 +119,13 @@ body {
 .wordmark.brand-max b {
   color: #ffd54a;
   text-shadow: 0 0 8px rgba(255, 213, 74, 0.62), 0 0 18px rgba(255, 191, 46, 0.25);
+}
+.acct-oauth small {
+  margin-left: auto;
+  font: 500 9px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.55;
 }
 .tag { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: #b6b8b2; border: 1px solid var(--line); padding: 4px 9px; border-radius: 99px; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }

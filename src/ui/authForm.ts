@@ -164,6 +164,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       button.disabled = true;
       button.title = `${provider === "google" ? "Google" : "Apple"} sign-in is awaiting provider setup`;
       button.setAttribute("aria-label", button.title);
+      button.innerHTML = `${socialLabel(provider)}<small>Coming soon</small>`;
     }
   });
 }
