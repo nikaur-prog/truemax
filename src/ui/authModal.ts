@@ -3,12 +3,20 @@ import {
   deleteAccount,
   isAuthAvailable,
   onAuthChange,
-  signIn,
-  signInWithLink,
   signOut,
-  signUp,
 } from "../engine/auth.ts";
+import {
+  consumeCheckoutResult,
+  hasPaidAccess,
+  hasMaxAccess,
+  loadEntitlement,
+  openBillingPortal,
+} from "../engine/entitlement.ts";
 import type { User } from "@supabase/supabase-js";
+import { renderAuthForm } from "./authForm.ts";
+import type { AuthMode } from "./authForm.ts";
+import { announceMembershipBrand } from "./membershipBrand.ts";
+import { openTrialFunnel } from "./onboardingFunnel.ts";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.
@@ -18,17 +26,20 @@ import type { User } from "@supabase/supabase-js";
 // product it was before accounts existed. The moment the two env vars are set
 // the button appears and the modal works, with no code change.
 //
-// An account is deliberately small here. Signed out, the app is complete: a
-// scan runs on device and the history lives in localStorage. Signing in buys
-// exactly two things — history that follows you to another device, and an
-// identity to hang a subscription on later — and the copy says so rather than
-// pretending an account is required.
+// An account is deliberately small here. Capture runs on device and history
+// stays in localStorage; identity is required only when revealing an analysis
+// or attaching a subscription.
 // ---------------------------------------------------------------------------
 
 let overlay: HTMLDivElement | null = null;
 
-// Mode of the form inside the modal when signed out.
-type Mode = "link" | "password" | "signup";
+export interface OpenAccountOptions {
+  notice?: string;
+  initialMode?: AuthMode;
+  reason?: "account" | "analysis";
+  onAuthenticated?: (user: User) => void | Promise<void>;
+  onDeferred?: () => void | Promise<void>;
+}
 
 function initials(email: string): string {
   return email.trim().slice(0, 1).toUpperCase() || "•";
@@ -51,6 +62,8 @@ export function mountAccountButton(): void {
   // Keep the header pill in step with the session: a bare "Sign in" when out,
   // the email's initial in a disc when in. onAuthChange fires on load too, so
   // this also restores a returning, already-signed-in visitor.
+  const checkoutResult = consumeCheckoutResult();
+  let checkoutHandled = false;
   onAuthChange((user) => {
     if (user?.email) {
       btn.textContent = "";
@@ -65,11 +78,19 @@ export function mountAccountButton(): void {
       btn.title = "";
       btn.textContent = "Sign in";
     }
+    if (user && checkoutResult && !checkoutHandled) {
+      checkoutHandled = true;
+      const notice = checkoutResult === "success"
+        ? "Payment received. Stripe is confirming your Max membership now."
+        : "Checkout was cancelled. Nothing was charged.";
+      void openAccount(notice);
+    }
   });
 }
 
-export async function openAccount(): Promise<void> {
+export async function openAccount(input?: string | OpenAccountOptions): Promise<void> {
   if (!isAuthAvailable()) return;
+  const options: OpenAccountOptions = typeof input === "string" ? { notice: input } : input ?? {};
   close();
   const user = await currentUser();
   overlay = document.createElement("div");
@@ -79,8 +100,23 @@ export async function openAccount(): Promise<void> {
     <div class="acct-body"></div>
   </div>`;
   const body = overlay.querySelector(".acct-body") as HTMLElement;
-  if (user) renderSignedIn(body, user);
-  else renderSignedOut(body, "link");
+  if (user) renderSignedIn(body, user, options.notice);
+  else {
+    renderAuthForm(body, {
+      initialMode: options.initialMode ?? (options.reason === "analysis" ? "signup" : "password"),
+      context: options.reason === "analysis" ? "analysis" : "account",
+      portalHref: `/auth?mode=${options.reason === "analysis" ? "signup" : "password"}`,
+      onDeferred: options.onDeferred,
+      onAuthenticated: async (signedInUser) => {
+        if (options.onAuthenticated) {
+          close();
+          await options.onAuthenticated(signedInUser);
+        } else {
+          renderSignedIn(body, signedInUser, options.notice);
+        }
+      },
+    });
+  }
 
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
@@ -100,126 +136,37 @@ function close(): void {
   overlay = null;
 }
 
-// --- signed out -----------------------------------------------------------
-
-function renderSignedOut(body: HTMLElement, mode: Mode): void {
-  const isSignup = mode === "signup";
-  const isLink = mode === "link";
-  const title = isLink ? "Sign in" : isSignup ? "Create an account" : "Sign in";
-
-  body.innerHTML = `
-    <h2>${title}</h2>
-    <p class="acct-lede">Your scans are saved on this device already. An account carries
-      them to your phone or a new browser, and nothing else changes: every scan still runs
-      on your device, and nothing is uploaded but the numbers.</p>
-    <form class="acct-form" novalidate>
-      <label class="acct-field">
-        <span>Email</span>
-        <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
-      </label>
-      ${
-        isLink
-          ? ""
-          : `<label class="acct-field">
-              <span>Password</span>
-              <input type="password" name="password" autocomplete="${
-                isSignup ? "new-password" : "current-password"
-              }" placeholder="At least 6 characters" required minlength="6" />
-            </label>`
-      }
-      <p class="acct-msg" role="status"></p>
-      <button type="submit" class="btn pri acct-submit">${
-        isLink ? "Email me a sign-in link" : isSignup ? "Create account" : "Sign in"
-      }</button>
-    </form>
-    <div class="acct-switch">
-      ${
-        isLink
-          ? `<button type="button" data-mode="password">Use a password instead</button>
-             <button type="button" data-mode="signup">Create an account</button>`
-          : isSignup
-            ? `<button type="button" data-mode="link">Email me a link instead</button>
-               <button type="button" data-mode="password">I already have an account</button>`
-            : `<button type="button" data-mode="link">Email me a link instead</button>
-               <button type="button" data-mode="signup">Create an account</button>`
-      }
-    </div>`;
-
-  const form = body.querySelector(".acct-form") as HTMLFormElement;
-  const msg = body.querySelector(".acct-msg") as HTMLElement;
-  const submit = body.querySelector(".acct-submit") as HTMLButtonElement;
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const data = new FormData(form);
-    const email = String(data.get("email") || "").trim();
-    const password = String(data.get("password") || "");
-    if (!email) {
-      say(msg, "Enter your email.", "err");
-      return;
-    }
-    submit.disabled = true;
-    submit.textContent = "Working…";
-    const res = isLink
-      ? await signInWithLink(email)
-      : isSignup
-        ? await signUp(email, password)
-        : await signIn(email, password);
-    submit.disabled = false;
-
-    if (!res.ok) {
-      submit.textContent = isLink ? "Email me a sign-in link" : isSignup ? "Create account" : "Sign in";
-      say(msg, res.message || "Something went wrong.", "err");
-      return;
-    }
-    if (isLink || res.needsConfirmation) {
-      // Both the magic link and a confirm-email signup end the same way: go
-      // check your inbox. The modal stays open with the instruction rather
-      // than closing on an action that has not finished.
-      body.innerHTML = `<h2>Check your email</h2>
-        <p class="acct-lede">We sent a link to <b>${escapeHtml(email)}</b>. Open it on this
-          device to finish${isLink ? " signing in" : " and confirm your account"}. You can
-          close this and keep using the app.</p>
-        <button type="button" class="btn gho acct-done">Done</button>`;
-      body.querySelector(".acct-done")?.addEventListener("click", () => close());
-      return;
-    }
-    // Password sign-in / instant signup: onAuthChange repaints the header,
-    // re-render the modal to the signed-in state.
-    const u = await currentUser();
-    if (u) renderSignedIn(body, u);
-    else close();
-  });
-
-  for (const b of body.querySelectorAll<HTMLButtonElement>(".acct-switch button")) {
-    b.addEventListener("click", () => renderSignedOut(body, b.dataset.mode as Mode));
-  }
-}
-
 // --- signed in ------------------------------------------------------------
 
-function renderSignedIn(body: HTMLElement, user: User): void {
+function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
   body.innerHTML = `
     <h2>Your account</h2>
     <div class="acct-who">
       <span class="acct-disc lg">${initials(user.email || "?")}</span>
       <div>
         <b>${escapeHtml(user.email || "Signed in")}</b>
-        <span>Your scans sync to this account.</span>
+        <span>Your membership is linked here. Scan history stays on this device for now.</span>
       </div>
     </div>
+    ${notice ? `<p class="acct-notice">${escapeHtml(notice)}</p>` : ""}
+    <section class="acct-membership" aria-live="polite">
+      <span class="acct-tier">MEMBERSHIP</span>
+      <p>Checking your plan…</p>
+    </section>
     <p class="acct-msg" role="status"></p>
     <div class="acct-actions">
       <button type="button" class="btn gho acct-signout">Sign out</button>
     </div>
     <details class="acct-danger">
       <summary>Delete my account</summary>
-      <p>This permanently removes your account and any synced scans. Scans stored on this
-        device stay until you clear your browser. This cannot be undone.</p>
+      <p>This permanently removes your account and its membership link. Scans stored on
+        this device stay until you clear your browser. This cannot be undone.</p>
       <button type="button" class="acct-delete">Delete account permanently</button>
     </details>`;
 
   const msg = body.querySelector(".acct-msg") as HTMLElement;
+  const membership = body.querySelector(".acct-membership") as HTMLElement;
+  void renderMembership(membership, user, notice?.startsWith("Payment received") ?? false);
 
   body.querySelector(".acct-signout")?.addEventListener("click", async () => {
     await signOut();
@@ -245,6 +192,71 @@ function renderSignedIn(body: HTMLElement, user: User): void {
       say(msg, res.message || "Could not delete the account.", "err");
     }
   });
+}
+
+async function renderMembership(node: HTMLElement, user: User, waitForWebhook: boolean): Promise<void> {
+  try {
+    let entitlement = await loadEntitlement();
+    for (let attempt = 0; waitForWebhook && !hasPaidAccess(entitlement) && attempt < 5; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (!node.isConnected) return;
+      entitlement = await loadEntitlement();
+    }
+    if (!node.isConnected) return;
+
+    const active = hasPaidAccess(entitlement);
+    const max = hasMaxAccess(entitlement);
+    const planName = max ? "Max" : entitlement.tier === "starter" ? "Starter" : "Free";
+    announceMembershipBrand(max ? "max" : "member");
+    const billingProblem = entitlement.status === "past_due" || entitlement.status === "unpaid";
+    const period = entitlement.currentPeriodEnd
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(entitlement.currentPeriodEnd))
+      : null;
+    const detail = active
+      ? entitlement.cancelAtPeriodEnd && period
+        ? `${planName} stays active until ${period}; cancellation is scheduled.`
+        : period
+          ? `${planName} is active. Your current billing period ends ${period}.`
+          : `${planName} is active on this account.`
+      : billingProblem
+        ? `Stripe could not renew ${planName}. Update your payment method to restore access.`
+        : waitForWebhook
+          ? "Stripe has not confirmed the subscription yet. Reopen your account in a moment."
+          : "Free includes scanning, results and device-local progress.";
+
+    node.innerHTML = `
+      <span class="acct-tier">${active ? `TRUEMAX ${planName.toUpperCase()}` : "FREE"}</span>
+      <b>${active ? `${planName} membership` : billingProblem ? "Billing needs attention" : "Free plan"}</b>
+      <p>${detail}</p>
+      <button type="button" class="btn ${active || billingProblem ? "gho" : "pri"} acct-billing">
+        ${active || billingProblem ? "Manage billing" : "Explore plans"}
+      </button>`;
+
+    const button = node.querySelector(".acct-billing") as HTMLButtonElement;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = active || billingProblem ? "Opening billing…" : "Preparing plans…";
+      if (!active && !billingProblem) {
+        close();
+        await openTrialFunnel(user);
+        return;
+      }
+      const result = await openBillingPortal();
+      if (!result.ok) {
+        button.disabled = false;
+        button.textContent = active || billingProblem ? "Manage billing" : "Explore plans";
+        const error = document.createElement("p");
+        error.className = "acct-msg err";
+        error.textContent = result.message || "Billing is not available yet.";
+        node.appendChild(error);
+      }
+    });
+  } catch {
+    if (!node.isConnected) return;
+    node.innerHTML = `<span class="acct-tier">MEMBERSHIP</span>
+      <b>Payments are being configured</b>
+      <p>Your scans and account still work. Max checkout will appear after the payment setup is complete.</p>`;
+  }
 }
 
 // --- helpers --------------------------------------------------------------

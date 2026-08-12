@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Account · TrueMax</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%231b1b19%22/><text x=%2250%22 y=%2268%22 font-size=%2252%22 font-family=%22sans-serif%22 font-weight=%22700%22 fill=%22white%22 text-anchor=%22middle%22>T</text></svg>" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="auth-page">
+    <header class="topbar">
+      <a class="wordmark" href="/">TRUE<b>MAX</b></a>
+      <a class="auth-scan-link" href="/">Scan your face →</a>
+    </header>
+    <main class="auth-shell">
+      <section class="auth-card" aria-labelledby="auth-title">
+        <div class="auth-mark" aria-hidden="true"><span></span></div>
+        <div id="auth-root"><p class="acct-lede">Loading your account…</p></div>
+      </section>
+      <p class="auth-foot">Your face photos are processed on this device and are not sent to Supabase.</p>
+    </main>
+    <script type="module" src="/src/authPage.ts"></script>
+  </body>
+</html>

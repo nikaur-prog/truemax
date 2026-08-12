@@ -1,4 +1,5 @@
 import type { FaceLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { landmarkIntegrityIssues } from "./geometry.ts";
 
 export interface QualityCheck {
   faceFound: boolean;
@@ -46,6 +47,22 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
   }
 
   const landmarks = result.faceLandmarks[0];
+  const integrity = landmarkIntegrityIssues(landmarks);
+  if (integrity.length) {
+    return {
+      faceFound: false,
+      yawDeg: 0,
+      pitchDeg: 0,
+      rollDeg: 0,
+      faceWidthFrac: 0,
+      smileScore: 0,
+      frontal: false,
+      largeEnough: false,
+      neutralExpression: false,
+      pass: false,
+      issues: ["Face landmarks were incomplete. Retake the photo"],
+    };
+  }
   const { yawDeg, pitchDeg, rollDeg } = headPose(result);
 
   const left = landmarks[LEFT_FACE_EDGE];

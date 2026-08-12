@@ -1,5 +1,6 @@
 import type { FaceLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { detect } from "./landmarker.ts";
+import { FACE_LANDMARK_COUNT, landmarkIntegrityIssues } from "./geometry.ts";
 
 // ---------------------------------------------------------------------------
 // Consensus landmarks.
@@ -94,6 +95,7 @@ export function detectStable(src: HTMLCanvasElement): FaceLandmarkerResult {
   const aspect = src.width / Math.max(1, src.height);
   const base = detect(src);
   if (!base.faceLandmarks?.length) return base;
+  if (landmarkIntegrityIssues(base.faceLandmarks[0]).length) return base;
 
   const sets: NormalizedLandmark[][] = [];
   for (const v of VARIANTS) {
@@ -104,7 +106,7 @@ export function detectStable(src: HTMLCanvasElement): FaceLandmarkerResult {
       continue;
     }
     const lm = r.faceLandmarks?.[0];
-    if (!lm) continue;
+    if (!lm || lm.length < FACE_LANDMARK_COUNT || lm.length !== base.faceLandmarks[0].length) continue;
     sets.push(lm.map((p) => invert(p, v, aspect)));
   }
   if (sets.length < 3) return base;

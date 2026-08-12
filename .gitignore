@@ -14,3 +14,4 @@ public/wasm/
 calib/*
 !calib/README.md
 .reel-cache/
+.vercel

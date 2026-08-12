@@ -29,6 +29,41 @@ export const SIDE_POINTS = [
 export type SidePointId = (typeof SIDE_POINTS)[number]["id"];
 export type SidePoints = Record<SidePointId, Pt>;
 
+// Runtime guard for the hand-verified profile. TypeScript can prove that the
+// keys exist in source code; it cannot protect a restored scan, malformed
+// browser storage, or a point that became NaN while dragging. These checks are
+// intentionally anatomical only at the "obviously impossible" level so real
+// variation is never rejected for failing a beauty template.
+export function sidePointIntegrityIssues(
+  p: SidePoints,
+  width?: number,
+  height?: number,
+  faceDir = 1,
+): string[] {
+  const issues: string[] = [];
+  for (const { id, label } of SIDE_POINTS) {
+    const v = p?.[id];
+    if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+      issues.push(`${label} is missing`);
+      continue;
+    }
+    if (width && height && (v.x < 0 || v.x > width || v.y < 0 || v.y > height)) {
+      issues.push(`${label} is outside the photo`);
+    }
+  }
+  if (issues.length) return issues.slice(0, 4);
+
+  const faceH = dist(p.nasion, p.menton);
+  if (!(faceH > 1)) issues.push("Nose bridge and chin bottom overlap");
+  if (p.nasion.y >= p.subnasale.y) issues.push("Nose bridge must sit above the nose base");
+  if (p.subnasale.y >= p.labialeInferius.y) issues.push("The lip points are out of vertical order");
+  if (p.condylion.y >= p.gonion.y) issues.push("Jaw top must sit above the jaw corner");
+  if ((p.pronasale.x - p.tragion.x) * faceDir <= 0) {
+    issues.push("Nose tip must sit in front of the ear notch");
+  }
+  return issues.slice(0, 4);
+}
+
 // Signed angle of a→b from vertical, positive = b is forward of a.
 // `faceDir` is +1 when the subject faces image-right, -1 when image-left.
 function fromVertical(a: Pt, b: Pt, faceDir: number): number {
@@ -141,7 +176,7 @@ const S = (def: MetricDef) => def;
 // 2.6-sigma penalty on every user is not a measurement — but it is not
 // calibration, and it should be replaced the moment there are profiles from
 // many people. See VALIDITY.md for the same argument about the engine overall.
-export const SIDE_METRICS: MetricDef[] = [
+const ALL_SIDE_METRICS: MetricDef[] = [
   S({
     id: "gonialAngle", name: "Gonial angle", unit: "°", decimals: 1,
     view: "side", region: "jaw", pillar: "Angularity", weight: 1.4,
@@ -245,3 +280,21 @@ export const SIDE_METRICS: MetricDef[] = [
     dist: { male: { mean: 1.25, sd: 0.16, ideal: 1.22 }, female: { mean: 1.23, sd: 0.16, ideal: 1.2 } },
   }),
 ];
+
+// These constructions are still useful to draw during development, but their
+// labels/norms do not match a published measurement or depend on image
+// vertical/hairline placement. Scoring them created confident percentiles
+// with no defensible reference population. Keep the computers for research;
+// keep them out of every user score until paired, hand-labelled profile data
+// supplies a real distribution and a repeatability result.
+export const EXPERIMENTAL_SIDE_METRIC_IDS = new Set([
+  "submentalCervical",
+  "mandibularPlane",
+  "chinProjection",
+  "foreheadSlope",
+  "midfaceRatioSide",
+]);
+
+export const SIDE_METRICS: MetricDef[] = ALL_SIDE_METRICS.filter(
+  (m) => !EXPERIMENTAL_SIDE_METRIC_IDS.has(m.id),
+);

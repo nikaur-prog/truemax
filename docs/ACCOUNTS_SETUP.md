@@ -1,130 +1,153 @@
-# Accounts (Supabase) — setup
+# Accounts and social login (Supabase)
 
-Accounts are **off by default**. The code ships dark: with no keys set, there is
-no account button, no network call, and the app is byte-for-byte the on-device
-product it was before. Everything below is what turns it on. You can do it once,
-paste two keys, and redeploy — no code changes.
+The production app is connected to Supabase project `ruvgkrlfmixfnmnzqgap`.
+Email/password, magic-link, Google and Apple UI are implemented in both the
+post-scan modal and the dedicated `/auth` portal. The app always returns normal
+auth flows to `/`, the scan screen; password recovery alone lands on
+`/auth?mode=reset` long enough to accept a new password.
 
-You already have a Supabase account, so this reuses it.
+Face photographs remain on the device by default. A reduced copy of a completed
+scan is usable locally for 30 minutes only when an email or OAuth redirect is
+needed, then deleted after analysis resumes or on the first app open after it
+expires. The sole upload exception is a side photo that the person separately
+chooses to share with its automatic and corrected landmark positions; see
+[`SIDE_CORRECTION_FEEDBACK.md`](SIDE_CORRECTION_FEEDBACK.md).
 
----
+## Current verified state (12 August 2026)
 
-## 1. Create a project (2 min)
+- The project URL and publishable key are connected in production.
+- Email signup is enabled and email confirmation is required.
+- The `scans` table exists with RLS, but scan sync is not wired yet.
+- Google is enabled in the live Supabase project. Apple is still disabled; its
+  button activates automatically after Apple credentials are configured.
+- The live account schema was created manually, so the repository now captures
+  and hardens it in `supabase/migrations/20260812004415_harden_accounts.sql`.
 
-1. Go to <https://supabase.com/dashboard> → **New project**.
-2. Name it `truemax`. Pick a region close to your users (US East or EU are safe).
-3. Save the database password somewhere — you won't need it for the app, but
-   you'll want it to log into the DB later.
+## 1. Apply the account migration
 
-## 2. Turn on email auth
+Apply:
 
-1. **Authentication → Providers → Email**: make sure it's enabled.
-2. **Authentication → Providers → Email → "Confirm email"**:
-   - Leave **on** if you want people to click a link before their account is
-     real (recommended — stops junk signups).
-   - The app handles both cases: with confirm on, signup shows "check your
-     email"; with it off, they're signed in immediately.
-3. Magic-link sign-in ("email me a link") uses this same email provider, so
-   nothing extra to enable.
-4. **Authentication → URL Configuration → Site URL**: set to your live URL
-   (`https://truemax.app`). This is where the email links send people back.
-   Add `http://localhost:5173` under **Redirect URLs** so links work in dev too.
-
-## 3. Run the SQL
-
-Open **SQL Editor → New query**, paste all of this, and run it. It creates the
-scans table, locks each row to its owner, and installs the delete-account
-function the app calls (Apple requires in-app account deletion).
-
-```sql
--- One row per saved scan. Only the numbers are stored — never a photo.
-create table if not exists public.scans (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references auth.users(id) on delete cascade,
-  created_at  timestamptz not null default now(),
-  sex         text not null check (sex in ('male','female')),
-  overall     numeric not null,
-  -- The full report as the app stores it in localStorage, so sync is a
-  -- straight round-trip. jsonb, not columns, because the report shape is the
-  -- app's to evolve.
-  payload     jsonb not null
-);
-
-alter table public.scans enable row level security;
-
--- A signed-in user sees and writes only their own rows. auth.uid() is the
--- caller's id; there is no way to read another account's scans.
-create policy "own scans - read"   on public.scans for select using (auth.uid() = user_id);
-create policy "own scans - insert" on public.scans for insert with check (auth.uid() = user_id);
-create policy "own scans - update" on public.scans for update using (auth.uid() = user_id);
-create policy "own scans - delete" on public.scans for delete using (auth.uid() = user_id);
-
-create index if not exists scans_user_created on public.scans (user_id, created_at desc);
-
--- App Store guideline 5.1.1(v): an account made in the app must be deletable in
--- the app. The client cannot delete an auth user directly, so it calls this.
--- security definer lets it run with the privilege to remove the row from
--- auth.users; it can only ever delete the caller's own account.
-create or replace function public.delete_own_account()
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  delete from auth.users where id = auth.uid();
-end;
-$$;
-
-revoke all on function public.delete_own_account() from public;
-grant execute on function public.delete_own_account() to authenticated;
+```text
+supabase/migrations/20260812004415_harden_accounts.sql
 ```
 
-## 4. Get the two keys
+It creates the table if needed, scopes every policy to `authenticated`, uses
+the cached `(select auth.uid())` RLS form, adds the required update `WITH CHECK`,
+and removes anonymous access to `delete_own_account()`.
 
-**Project Settings → API**:
+Afterward, run the Supabase security and performance advisors. The deletion
+function is intentionally `SECURITY DEFINER` because a browser user cannot
+delete its own row in `auth.users`; it checks `auth.uid()` internally and only
+the `authenticated` role receives execute permission.
 
-- **Project URL** → `VITE_SUPABASE_URL`
-- **anon / public** key → `VITE_SUPABASE_ANON_KEY`
+## 2. Set auth URLs
 
-The anon key is safe to ship in a web app — that's its job. Row-level security
-(step 3) is what actually protects the data, not the key. **Never** put the
-`service_role` key in the app; it bypasses RLS.
+In **Authentication → URL Configuration**:
 
-## 5. Set the keys
+- Site URL: `https://www.truemax.app/`
+- Exact production redirects:
+  - `https://www.truemax.app/`
+  - `https://www.truemax.app/auth`
+- Local development: `http://localhost:5173/**`
+- Add a narrowly scoped Vercel preview wildcard only while testing previews.
 
-**Local dev** — create `.env.local` in the project root (it's gitignored):
+The `www` host is canonical in production. Do not leave the Site URL at
+`localhost`, because confirmation and reset emails will send customers there.
 
+## 3. Configure email
+
+Keep **Authentication → Providers → Email** enabled. Confirmation is currently
+on, which is the safer launch setting and is supported by the post-scan flow.
+
+Before a public launch, configure custom SMTP. Supabase's default sender is for
+testing and has restrictive limits; it is not a dependable customer email
+channel. New Free-plan projects also cannot customize the default sender's
+templates, so SMTP is required for the branded set.
+
+Production-ready HTML bodies and their exact subjects are in
+[`supabase/email-templates/`](../supabase/email-templates/README.md). They use
+inline styles for broad email-client compatibility, show no raw URLs, and put
+Supabase's single-use `{{ .ConfirmationURL }}` behind a clean action button.
+The signup confirmation is deliberately titled **Welcome to TrueMax**, so the
+welcome and account-confirmation steps are one email instead of two.
+
+Install and test at least these three templates on a real phone:
+
+1. Confirm signup
+2. Magic link
+3. Reset password
+
+Disable click/open tracking in the SMTP provider because rewritten links can
+break single-use Supabase auth URLs. The password reset names `{{ .Email }}` and
+clearly says that an unrequested message can be ignored without changing the
+password. A public “find my email” lookup is intentionally absent because it
+would reveal whether an address has a TrueMax account.
+
+The complete copy-paste Resend SMTP values, template map, Google console fields
+and Apple Developer fields are in
+[`SUPABASE_AUTH_PROVIDER_SETUP.md`](SUPABASE_AUTH_PROVIDER_SETUP.md).
+
+## 4. Enable Google
+
+1. Create a Web OAuth client in Google Auth Platform.
+2. Set the authorised callback URI to:
+
+   ```text
+   https://ruvgkrlfmixfnmnzqgap.supabase.co/auth/v1/callback
+   ```
+
+3. Configure the consent-screen branding and the minimum `openid`, email and
+   profile scopes.
+4. Paste the client ID and secret into **Supabase → Authentication → Providers
+   → Google**, then enable the provider.
+5. Verify `/auth/v1/settings` reports `external.google: true`, then complete a
+   real signup from `https://www.truemax.app/auth`.
+
+## 5. Enable Apple
+
+Apple web login does not require a published App Store build. It does require an
+active Apple Developer Program membership. Create an explicit App ID, enable
+Sign in with Apple, create an associated Services ID, register the same
+Supabase callback URL above, create a Sign in with Apple `.p8` key, and generate
+the client-secret JWT. Enter the Services ID first under Client IDs and the
+generated secret in **Supabase → Authentication → Providers → Apple**.
+
+Apple client secrets expire, so record an owner and renewal date. Test Apple's
+private-email relay as well as an ordinary address.
+
+## 6. Environment and CSP
+
+The browser uses only a Supabase publishable key. Never expose a secret or
+`service_role` key in client code. Vercel currently has the public variables in
+Preview and Production:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
 ```
-VITE_SUPABASE_URL=https://xxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGc...
-```
 
-**Vercel** — Project → Settings → Environment Variables, add the same two names
-and values, then redeploy. The account button appears on the next deploy.
+The opt-in side-correction route additionally needs server-only
+`SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `CRON_SECRET`. These must never use a
+`VITE_` prefix; the exact setup is in `SIDE_CORRECTION_FEEDBACK.md`.
 
-## 6. Check it
+`vercel.json` allows connections only to this exact Supabase project over HTTPS
+and WSS. Do not replace that allowlist with a wildcard.
 
-- No keys → no account button. That's the safe default; a broken key won't take
-  the app down, it just stays dark.
-- Keys set → **Sign in** appears top-right. Create an account, and after the
-  email step (if confirm is on) the header shows your initial in a disc.
-- **Delete my account** under the account panel removes the row from
-  `auth.users`; confirm it's gone in **Authentication → Users**.
+## 7. Verification checklist
 
----
+- `/` opens the scan page whether signed in or out.
+- `/auth` supports create account and sign in.
+- A completed scan prompts for signup before analysis.
+- Email confirmation returns to `/` and resumes the saved scan.
+- Google and Apple each return to `/` and resume the saved scan.
+- Forgot password sends an email; its link opens the new-password form; success
+  returns to `/`.
+- Sign out works.
+- Delete account removes only the caller and anonymous RPC access is denied.
+- No face image appears in Supabase tables or network requests.
 
-## What this does and does not do yet
+## Still separate work
 
-**Does:** identity (sign up / in / magic link / sign out / delete), the table
-and security for syncing scans, and the deletion path Apple requires.
-
-**Not yet wired:** pushing local scans up and pulling them down. That's the next
-step — `history.ts` already keeps the scan log locally, so sync is: on sign-in,
-upload any local scans the account doesn't have and merge the account's scans
-back into local. Left out here on purpose so identity can ship and be tested
-first. When you want it, that's a focused follow-up.
-
-**Subscriptions** (the $6.99 / $11.99 tiers) hang off this identity but are a
-separate piece — RevenueCat for the app, Stripe for the web. An account is the
-prerequisite, which is why it comes first.
+The database table exists, but local scan history is not yet uploaded or merged
+across devices. The UI now says this plainly. Scan sync remains its own focused
+PR after identity and payments are smoke-tested.

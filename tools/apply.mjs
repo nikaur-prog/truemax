@@ -1,9 +1,12 @@
 // Patch metrics.ts dist blocks with the derived distributions, and rewrite
 // celebs.ts from the measured DB.
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const SRC = "/home/user/truemax/src/engine/";
-const derived = readFileSync(new URL("./derived-dists.txt", import.meta.url).pathname, "utf8");
+const APP_DIR = fileURLToPath(new URL("..", import.meta.url));
+const DATA = process.env.TM_DATA ?? fileURLToPath(new URL("../.calib/", import.meta.url));
+const SRC = `${APP_DIR}/src/engine/`;
+const derived = readFileSync(`${DATA}derived-dists.txt`, "utf8");
 
 const dists = {};
 for (const line of derived.split("\n")) {
@@ -31,7 +34,7 @@ writeFileSync(SRC + "metrics.ts", metrics);
 console.log(`patched ${patched} dist blocks in metrics.ts`);
 
 // celebs.ts DB
-const db = JSON.parse(readFileSync(new URL("./celeb-db.json", import.meta.url).pathname, "utf8"));
+const db = JSON.parse(readFileSync(`${DATA}celeb-db.json`, "utf8"));
 const entries = db
   .map((e) => {
     const ms = Object.entries(e.metrics)

@@ -248,7 +248,7 @@ function boxBlur3(lum: Float32Array, W: number, H: number): Float32Array {
 // ---------------------------------------------------------------------------
 
 // Below this yaw the detector is still seeing a broadly front-on face.
-const PROFILE_YAW = 42;
+const PROFILE_YAW = 55;
 // Consecutive frames with no detection before that counts as "turned away".
 //
 // Losing the face used to pass the gate on its own and on the first frame, and

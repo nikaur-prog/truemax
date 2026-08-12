@@ -4,10 +4,10 @@
 // The scan log has always stored numbers and never pixels. This adds pixels,
 // and it is worth being exact about what that does and does not change.
 //
-// It does NOT change the promise. "Nothing is uploaded, it all runs on your
-// device" is still true to the letter: an IndexedDB record never leaves the
-// machine it was written on, there is no network call anywhere in this file,
-// and there is no server to send it to. What changes is that a photograph now
+// This store never uploads: an IndexedDB record does not leave the machine it
+// was written on and there is no network call anywhere in this file. Optional,
+// separately consented side-landmark feedback is handled by another module and
+// never reads these history thumbnails. What changes here is that a photograph
 // PERSISTS on the device rather than living only for the length of a session,
 // so it survives a refresh and can be shown against a past scan.
 //

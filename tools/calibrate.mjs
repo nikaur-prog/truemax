@@ -11,10 +11,12 @@
 // pool median scores ~5.0. No inflation is introduced: scoring still converts
 // closeness-to-ideal into a population percentile.
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const scans = JSON.parse(readFileSync(new URL("./scans.json", import.meta.url).pathname));
+const DATA = process.env.TM_DATA ?? fileURLToPath(new URL("../.calib/", import.meta.url));
+const scans = JSON.parse(readFileSync(`${DATA}scans.json`, "utf8"));
 // People notable for their work, not their looks — the population reference.
-const popScans = JSON.parse(readFileSync(new URL("./pop-scans.json", import.meta.url).pathname));
+const popScans = JSON.parse(readFileSync(`${DATA}pop-scans.json`, "utf8"));
 
 // Strict gate defines the calibration sample (measurement fidelity matters
 // most when deriving distributions). The looser gate defines DB inclusion,
@@ -22,8 +24,21 @@ const popScans = JSON.parse(readFileSync(new URL("./pop-scans.json", import.meta
 // Pose normalization removes yaw/pitch from the measurements, so the
 // calibration gate only needs to exclude photos where landmark accuracy
 // itself degrades (self-occlusion) or expression distorts the mouth/jaw.
-const GATE = { yaw: 25, pitch: 22, smile: 0.7 };
+const GATE = { yaw: 25, pitch: 22, smile: 1.01 };
 const GATE_LOOSE = { yaw: 26, pitch: 23, smile: 0.99 };
+
+// Press photography contains far more smiling women than smiling men. Using a
+// global neutral-expression gate left only 18 female reference faces versus 40
+// male and biased even eye/face-width norms toward the tiny non-smiling subset.
+// Apply the smile gate only where expression actually changes the construction.
+const EXPRESSION_SENSITIVE = new Set([
+  "eyeAspectRatio", "cheekboneHeight", "gonialProxy", "jawFrontalAngle",
+  "chinHeightRatio", "philtrumChinRatio", "lowerFacePct", "lipRatio",
+  "mouthIPD", "lipHeightLowerThird", "mouthCornerTilt", "middleLowerBalance",
+  "mirrorDeviation", "eyeMouthParallel", "midlineDeviation",
+]);
+const expressionPasses = (scan, id) =>
+  !EXPRESSION_SENSITIVE.has(id) || scan.quality.smile <= 0.7;
 
 const passes = (q, g) =>
   Math.abs(q.yaw) <= g.yaw && Math.abs(q.pitch) <= g.pitch && q.smile <= g.smile;
@@ -74,7 +89,10 @@ for (const sex of ["male", "female"]) {
   counts[sex] = { pool: pool.length, top: top.length, topNames: top.map((t) => t.entry.name) };
 
   for (const id of Object.keys(DECIMALS)) {
-    const vals = pool.map((s) => s.entry.metrics[id]).filter(Number.isFinite);
+    const vals = pool
+      .filter((s) => expressionPasses(s, id))
+      .map((s) => s.entry.metrics[id])
+      .filter(Number.isFinite);
     if (vals.length < 6) continue;
     const mean = median(vals);
     // Robust SD from a real population sample — no artificial inflation.
@@ -82,7 +100,10 @@ for (const sex of ["male", "female"]) {
 
     let ideal;
     if (!LOWER.has(id)) {
-      const topVals = top.map((s) => s.entry.metrics[id]).filter(Number.isFinite);
+      const topVals = top
+        .filter((s) => expressionPasses(s, id))
+        .map((s) => s.entry.metrics[id])
+        .filter(Number.isFinite);
       ideal = topVals.length >= 4 ? median(topVals) : mean;
       // Small samples can throw an ideal far out; keep it within 1σ of center.
       ideal = Math.max(mean - sd, Math.min(mean + sd, ideal));
@@ -107,7 +128,7 @@ for (const [id, byS] of Object.entries(out)) {
   lines.push(`  ${id}: { male: ${fmt(byS.male)}, female: ${fmt(byS.female)} },`);
 }
 writeFileSync(
-  new URL("./derived-dists.txt", import.meta.url).pathname,
+  `${DATA}derived-dists.txt`,
   `export const DERIVED_DISTS: Record<string, MetricDef["dist"]> = {\n${lines.join("\n")}\n};\n`,
 );
 console.log(`\nwrote derived-dists.txt (${lines.length} metrics)`);
@@ -117,7 +138,7 @@ const dbEntries = scans
   .filter((s) => passes(s.quality, GATE_LOOSE))
   .map((s) => ({ ...s.entry, capture: passes(s.quality, GATE) ? "high" : "moderate" }));
 writeFileSync(
-  new URL("./celeb-db.json", import.meta.url).pathname,
+  `${DATA}celeb-db.json`,
   JSON.stringify(dbEntries, null, 2),
 );
 console.log(

@@ -3,6 +3,30 @@
 This is the record of trying to answer that, because it is the only question
 that matters and the answer is currently **no, not demonstrably**.
 
+## Integrity update — 12 August 2026
+
+The measurement implementation has since had a separate integrity repair. It
+does **not** change the conclusion above about attractiveness validity:
+
+- the non-orthogonal pose basis was made rigid before projection;
+- canthal tilt is now read from the visible canthi with image-roll correction;
+  median left/right disagreement on a 40-face regression sample fell from
+  22.5° to 1.0°;
+- the false face-oval “bizygomatic” pair was replaced by an explicitly labelled
+  approximate malar pair, then 115 celebrity and 153 population photos were
+  rescanned and every dependent front norm was regenerated;
+- incomplete/NaN 478-point meshes and impossible profile point sets now stop
+  analysis instead of producing a score;
+- five profile constructions with mismatched names, image-axis dependence or
+  one-person guessed norms were removed from user scoring.
+
+Those changes make the instrument less internally wrong. They do not turn its
+headline score into a validated “PSL” score. TrueMax still has no licensed
+per-feature PSL label set and no established scientific PSL scale exists for
+these 31 features. The remaining headline score and “ideal” direction are an
+experimental model built from selected reference photographs until they are
+fit and tested against independent human ratings.
+
 Everything below is reproducible from `tools/` plus Wikimedia Commons. No
 private data, no hand-picked photographs.
 

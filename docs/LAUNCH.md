@@ -38,7 +38,7 @@ and TLS itself — which is what you want; you are not losing anything.
 
 ### 1.2 Deployment protection
 
-- [ ] Vercel → Settings → Deployment Protection → **Vercel Authentication**.
+- [x] Vercel → Settings → Deployment Protection → **Vercel Authentication**.
       Set to *Only Preview Deployments*, or off. If it is on for Production, the
       site returns 401 to the public while working perfectly for you, logged in.
       This one wastes a lot of people’s afternoon.
@@ -46,7 +46,7 @@ and TLS itself — which is what you want; you are not losing anything.
 ### 1.3 Production build
 
 - [x] Production Branch is `main`, and `main` carries the current code.
-- [ ] Vercel → Deployments shows a **Production** (not Preview) deployment on the
+- [x] Vercel → Deployments shows a **Production** (not Preview) deployment on the
       latest `main` commit, status Ready.
 
 ### 1.4 Smoke test on the real domain
@@ -66,16 +66,26 @@ and TLS itself — which is what you want; you are not losing anything.
 Code is written and ships dark. See `docs/ACCOUNTS_SETUP.md` for the full
 walkthrough including the SQL.
 
-- [~] Create the Supabase project.
-- [~] Authentication → Providers → Email: enabled.
+- [x] Create the Supabase project.
+- [x] Authentication → Providers → Email: enabled; confirmation is required.
 - [~] Authentication → URL Configuration → **Site URL** = `https://truemax.app`,
       with `http://localhost:5173` added under Redirect URLs.
-- [~] Run the SQL from `ACCOUNTS_SETUP.md` (scans table, RLS policies,
-      `delete_own_account`).
-- [~] Vercel → Environment Variables: `VITE_SUPABASE_URL` and
+- [x] Apply the account migration from `ACCOUNTS_SETUP.md` (scans table,
+      hardened RLS policies, `delete_own_account`).
+- [x] Vercel → Environment Variables: `VITE_SUPABASE_URL` and
       `VITE_SUPABASE_ANON_KEY`. Redeploy.
+- [~] Signup/login modal, `/auth` portal, forgot/reset password, and post-scan
+      account gate are built. Merge and deploy the auth PR.
+- [x] Enable Google. The live Auth settings report it enabled.
+- [ ] Enable Apple. A published iOS app is not required for web login, but an
+      Apple Developer membership, App ID, Services ID and signing key are; see
+      `SUPABASE_AUTH_PROVIDER_SETUP.md`.
 - [ ] Verify: “Sign in” appears top-right; create an account; delete it; confirm
       it is gone from Authentication → Users.
+- [~] Side-landmark review, manual correction and separate opt-in feedback are
+      built; the private Supabase table/bucket are live. Add the three
+      server-only Vercel variables and complete the consent/cleanup acceptance
+      tests in `SIDE_CORRECTION_FEEDBACK.md` before deploying the upload route.
 
 **Anon key only.** The `service_role` key bypasses row-level security and must
 never reach the browser. It belongs in server-side environment variables and
@@ -85,29 +95,38 @@ Note what this does *not* do yet: local scans are not synced up or down. Identit
 ships first so it can be tested on its own; sync is a focused follow-up against
 `history.ts`.
 
-### 2.2 Payments — not built
+### 2.2 Payments — code built, configuration required
 
-There is currently no payment code in the repository at all. This is the real
-gap between “live” and “earning”, and it is a build, not a configuration.
+The Stripe Checkout, customer portal, signed webhook and Supabase entitlement
+code are written. See `docs/PAYMENTS_SETUP.md` for the required Stripe, Supabase
+and Vercel configuration.
 
-- [ ] Decide the surface: Stripe for web. (RevenueCat only becomes relevant at
+- [x] Decide the surface: Stripe for web. (RevenueCat only becomes relevant at
       the app-store stage.)
-- [ ] Products and prices in Stripe.
-- [ ] Checkout. A Stripe **Payment Link** is the fastest start and needs no
-      backend, because the checkout page is hosted on Stripe’s domain.
-- [ ] **Knowing who paid** — this is the actual work. A Vercel serverless
-      function receives the Stripe webhook and writes entitlement to Supabase
-      using the `service_role` key server-side. Without this, checkout is
-      decorative.
-- [ ] Read entitlement in the app and gate the Max features.
-- [ ] If any Stripe JS runs in the page, add its domain to `connect-src` in
-      `vercel.json` — the CSP is `'self'` only and will silently block it.
+- [x] Audit the connected Stripe account. It currently contains no products,
+      prices or webhook endpoints.
+- [~] Confirm the USD catalog: Starter $6.99/month, Max $11.99/month, member
+      scan $2.99 and non-member scan $5.99. Trial duration still conflicts
+      between 7 and 30 days.
+- [~] Hosted Checkout and customer portal Vercel Functions exist as a secure
+      single-Max skeleton. Extend them for Starter, scan credits, trial
+      eligibility and age enforcement before adding live keys.
+- [~] **Knowing who paid** — the entitlement migration is applied to live
+      Supabase. The webhook destination and server-only Vercel variables remain.
+- [x] Read the entitlement in the account UI and expose a reusable
+      `hasMaxAccess()` gate for Stage 2.3.
+- [x] No Stripe JS runs in the page: the browser calls only same-origin `/api`
+      routes and navigates to Stripe's hosted URL, so CSP `connect-src 'self'`
+      does not need weakening.
 
 ### 2.3 Tier enforcement
 
-- [ ] Free / minimum tier: overview, generalised direction, progress tracking.
-- [ ] Max: personalisation, actionable steps, product tracking, follow-up.
-- [ ] The split is designed but nothing in the code enforces it yet.
+- [ ] Free: first analysis per verified account; exact ongoing feature access
+      still needs to be written.
+- [ ] Starter: exact features still need to be written; this is the only paid
+      plan available to under-18 users.
+- [ ] Max: Max AI plus the still-to-be-written premium feature set.
+- [ ] No result or plan components enforce this three-tier split yet.
 
 ---
 
@@ -118,10 +137,12 @@ gap between “live” and “earning”, and it is a build, not a configuration
 - [ ] Write and publish one. Required because the app requests camera access,
       and required later by both app stores.
 
-Yours is unusually easy and unusually strong, because the honest version is
-short and true: images are processed on the device, nothing is uploaded, and the
-only thing that leaves the browser once accounts are on is the numeric report a
-signed-in user chooses to sync. Say exactly that.
+The honest version is still strong but must name the exception precisely:
+images are processed on the device by default. A side-profile photo leaves the
+browser only after a separate, optional consent to send the automatic and
+corrected landmark positions to TrueMax for product improvement. State the
+purpose, private Supabase processing, 90-day maximum retention and deletion
+path. The front photo is not included.
 
 ### 3.2 Terms — does not exist
 
@@ -148,25 +169,21 @@ signed-in user chooses to sync. Say exactly that.
 
 ### 4.2 Known measurement debt
 
-- [ ] **`ZYGO_R`/`ZYGO_L` are the wrong landmarks.** They are MediaPipe 234/454,
-      the widest points of the face oval, which sit at ear and sideburn level —
-      not the zygomatic arch. These are the same landmarks that caused the
-      side-profile seeding bug.
+- [x] **Replace the false cheekbone pair and regenerate every dependent norm.**
+      The engine now uses MediaPipe 116/345 as an approximate malar-prominence
+      pair. It deliberately calls this *malar*, not a clinical skeletal zygion:
+      a monocular face mesh cannot locate a bone it cannot see.
 
   `bizygo` is the denominator of six metrics: `fwhr`, `cheekboneHeight`,
   `jawCheekRatio`, `eyeSeparationRatio`, `fifthsEyeRatio` and `facialIndex`.
 
-  **This is a naming and validity problem, not a scoring bug.** Every face is
-  measured with the same landmark and scored against norms built from that same
-  landmark, so the percentiles are internally consistent and comparable between
-  people. What is not safe is any specific claim that a number describes the
-  cheekbone.
+  Completed in the analysis-integrity pass: candidate overlays were reviewed
+  across ten different faces; 115 celebrity and 153 population photos were
+  rescanned; all 31 front distributions, the 108-entry comparison database,
+  both shape models and both aggregate quantile tables were regenerated.
 
-  Fixing it means re-deriving the affected metrics’ `dist[sex]` constants **and**
-  regenerating `AGG_NORM`, which requires the reference photograph set
-  (`.calib/`, deliberately gitignored) and a run of
-  `fetch-photos → scan → apply → normalize`. It cannot be done from the
-  repository alone. See “Regenerating the norms” below.
+  Remaining limit: this is a repeatable mesh proxy, not a direct anthropometric
+  bizygomatic-breadth measurement.
 
 ---
 

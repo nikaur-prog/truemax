@@ -46,8 +46,12 @@ export const LM = {
   LIP_LOWER_INNER: 14, // stomion lower
   LIP_BOTTOM: 17, // labiale inferius (vermilion bottom center)
   // Face contour
-  ZYGO_R: 234,
-  ZYGO_L: 454,
+  // Approximate malar prominence. MediaPipe has no true skeletal
+  // "zygion" landmark; 116/345 sit on the upper lateral cheek consistently.
+  // The old 234/454 pair is the widest face-oval/sideburn pair and was
+  // incorrectly labelled as cheekbone width.
+  MALAR_R: 116,
+  MALAR_L: 345,
   GONION_R: 58,
   GONION_L: 288,
   // Mid-ramus points on the jaw outline, between the corner and the chin
@@ -64,7 +68,7 @@ export const MIRROR_PAIRS: ReadonlyArray<readonly [number, number]> = [
   [159, 386],
   [145, 374],
   [61, 291],
-  [234, 454],
+  [116, 345],
   [58, 288],
   [172, 397],
   [136, 365],
@@ -78,6 +82,10 @@ export const MIRROR_PAIRS: ReadonlyArray<readonly [number, number]> = [
 
 export interface Geom {
   pt(i: number): Pt;
+  // Original image-space points. A few measurements (notably canthal tilt)
+  // are more faithfully read in the photograph after correcting only the
+  // image roll than after reconstructing depth from MediaPipe's estimated z.
+  imagePt(i: number): Pt;
   // Distance between the two eye centers, used as the global scale reference.
   //
   // NOT interpupillary distance: iris centers track GAZE, so they shift
@@ -91,6 +99,7 @@ export interface Geom {
   eyeL: Pt;
   // Head pose that was removed, measured from the landmark cloud itself
   rollDeg: number;
+  imageRollDeg: number;
   yawDeg: number;
   pitchDeg: number;
 }
@@ -127,6 +136,26 @@ const MIDLINE = [10, 151, 9, 8, 168, 6, 197, 195, 5, 4, 1, 2, 164, 0, 13, 14, 17
 // the same person (0.80 → 0.40 average, 1.1 → 0.5 worst).
 export const POSE_CALIBRATION = { zScale: 4.5 };
 
+export const FACE_LANDMARK_COUNT = 478;
+
+// MediaPipe normally returns all 478 points even when some are poor estimates.
+// That makes an incomplete/NaN result especially dangerous: it can otherwise
+// travel a long way through ratios before surfacing as a nonsense score.
+export function landmarkIntegrityIssues(landmarks: NormalizedLandmark[]): string[] {
+  if (!Array.isArray(landmarks) || landmarks.length < FACE_LANDMARK_COUNT) {
+    return [`Expected ${FACE_LANDMARK_COUNT} face landmarks; received ${landmarks?.length ?? 0}`];
+  }
+  const issues: string[] = [];
+  for (let i = 0; i < FACE_LANDMARK_COUNT; i++) {
+    const p = landmarks[i];
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z ?? 0)) {
+      issues.push(`Landmark ${i} is missing or invalid`);
+      if (issues.length >= 4) break;
+    }
+  }
+  return issues;
+}
+
 // ---------------------------------------------------------------------------
 // Pose normalization. MediaPipe returns 3D landmarks, so instead of measuring
 // in image space (where a turned or tilted head distorts every ratio) we
@@ -145,6 +174,11 @@ export function buildGeometry(
   width: number,
   height: number,
 ): Geom {
+  const integrity = landmarkIntegrityIssues(landmarks);
+  if (integrity.length) throw new Error(`Face scan is incomplete: ${integrity.join("; ")}`);
+  if (!(width > 0) || !(height > 0)) throw new Error("Face scan has invalid image dimensions");
+
+  const image: Pt[] = landmarks.map((l) => ({ x: l.x * width, y: l.y * height }));
   // MediaPipe's z is scaled roughly like x, so both use image width.
   const p3: V3[] = landmarks.map((l) => ({
     x: l.x * width,
@@ -199,7 +233,15 @@ export function buildGeometry(
   // measurement means what its name says.
   const unscale = (v: V3): V3 => norm3({ x: v.x, y: v.y, z: v.z / POSE_CALIBRATION.zScale });
   const lateralT = unscale(lateral);
-  const verticalT = unscale(vertical);
+  const verticalUnscaled = unscale(vertical);
+  // Anisotropically undoing zScale does not preserve perpendicularity. The
+  // old code normalized the two axes independently, leaving a sheared basis;
+  // on real reference faces that inflated median canthal asymmetry from about
+  // 7° in the image to nearly 30° after "correction". Gram-Schmidt restores a
+  // rigid orthonormal face frame before any metric is projected into it.
+  const verticalT = norm3(
+    sub3(verticalUnscaled, scale3(lateralT, dot3(verticalUnscaled, lateralT))),
+  );
   const pTrue: V3[] = landmarks.map((l) => ({
     x: l.x * width,
     y: l.y * height,
@@ -227,6 +269,15 @@ export function buildGeometry(
   const eyeR = project(eyeR3);
   const eyeL = project(eyeL3);
 
+  const imageEye = (a: number, b: number): Pt => ({
+    x: (image[a].x + image[b].x) / 2,
+    y: (image[a].y + image[b].y) / 2,
+  });
+  const imageEyeR = imageEye(LM.EYE_R_OUTER, LM.EYE_R_INNER);
+  const imageEyeL = imageEye(LM.EYE_L_OUTER, LM.EYE_L_INNER);
+  const imageRollDeg =
+    (Math.atan2(imageEyeL.y - imageEyeR.y, imageEyeL.x - imageEyeR.x) * 180) / Math.PI;
+
   // Pose actually removed, for the capture-quality report.
   const yawDeg = (Math.asin(Math.max(-1, Math.min(1, lateral.z))) * 180) / Math.PI;
   const pitchDeg = (Math.asin(Math.max(-1, Math.min(1, -vertical.z))) * 180) / Math.PI;
@@ -234,10 +285,12 @@ export function buildGeometry(
 
   return {
     pt: (i: number) => flat[i],
+    imagePt: (i: number) => image[i],
     interEye: dist(eyeR, eyeL),
     eyeR,
     eyeL,
     rollDeg,
+    imageRollDeg,
     yawDeg,
     pitchDeg,
   };

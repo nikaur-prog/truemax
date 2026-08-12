@@ -5,8 +5,9 @@ export default defineConfig({
   build: {
     target: "es2020",
     rollupOptions: {
-      // Three entry points, both extras unlisted and both sharing the engine
-      // rather than approximating it — that shared import is what keeps the
+      // Four entry points: two unlisted engine tools, the product, and the
+      // dedicated account portal. The tools share the engine rather than
+      // approximating it — that shared import is what keeps the
       // numbers they show identical to the real ones.
       //
       //   quick.html  the fifteen-second breakdown, built for filming
@@ -17,6 +18,7 @@ export default defineConfig({
       //               makes handing over such a set unnecessary.
       input: {
         main: resolve(import.meta.dirname, "index.html"),
+        auth: resolve(import.meta.dirname, "auth.html"),
         quick: resolve(import.meta.dirname, "quick.html"),
         calib: resolve(import.meta.dirname, "calib.html"),
       },

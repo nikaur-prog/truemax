@@ -9,10 +9,16 @@
 // Run AFTER apply.mjs, then rebuild.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const APP_DIR = "/home/user/truemax";
-const DATA = process.env.TM_DATA ?? new URL("../.calib/", import.meta.url).pathname;
+const APP_DIR = fileURLToPath(new URL("..", import.meta.url));
+const DATA = process.env.TM_DATA ?? fileURLToPath(new URL("../.calib/", import.meta.url));
+const CHROME = process.env.TM_CHROME ?? [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/opt/pw-browsers/chromium",
+].find(existsSync);
+if (!CHROME) throw new Error("No Chrome executable found. Set TM_CHROME.");
 const pop = JSON.parse(readFileSync(DATA + "pop-manifest.json", "utf8"));
 
 // The smile gate used to sit at 0.7 and it introduced a sex-correlated
@@ -30,7 +36,7 @@ const GATE = { yaw: 25, pitch: 22, smile: 1.01, face: 0.2 };
 
 const server = spawn("npx", ["vite", "preview", "--port", "4186", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await chromium.launch({ executablePath: CHROME });
 
 const bySex = { male: [], female: [] };
 try {

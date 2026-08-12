@@ -17,11 +17,15 @@ import { mergeReports } from "./engine/scoring.ts";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
+import { submitSideCorrectionFeedback } from "./engine/sideFeedback.ts";
+import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.ts";
 import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton, openAccount } from "./ui/authModal.ts";
-import { currentUser, isAuthAvailable } from "./engine/auth.ts";
+import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.ts";
+import { hasMaxAccess, loadEntitlement } from "./engine/entitlement.ts";
+import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.ts";
 import { openSexChooser } from "./ui/sexChooser.ts";
 import { createAutoCapture } from "./ui/autoCapture.ts";
@@ -36,8 +40,28 @@ import { analyzeSkin } from "./engine/skin.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { detectOcclusion } from "./engine/occlusion.ts";
 import { REGION_LANDMARKS } from "./ui/regions.ts";
+import {
+  clearPendingAnalysis,
+  drawStoredPhoto,
+  readPendingAnalysis,
+  savePendingAnalysis,
+} from "./engine/pendingAnalysis.ts";
+import {
+  brandClass,
+  membershipBrand,
+  MEMBERSHIP_BRAND_EVENT,
+} from "./ui/membershipBrand.ts";
+import type { MembershipBrand } from "./ui/membershipBrand.ts";
+import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.ts";
 
 const MAX_IMAGE_DIM = 1280;
+
+if (import.meta.env.DEV) {
+  const preview = new URLSearchParams(location.search).get("preview");
+  if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
+    queueMicrotask(() => void openTrialFunnelPreview(preview !== "offer-minor", preview !== "funnel"));
+  }
+}
 
 const el = {
   engineStatus: document.getElementById("engine-status")!,
@@ -271,36 +295,84 @@ el.ovalFrame.addEventListener("drop", (e) => {
   if (file) ensureSex(() => handleFile(file));
 });
 
-// Wordmark goes home. Home is the dashboard for a signed-in user and the scan
-// screen for everyone else.
+// Wordmark goes home only for a signed-in member. Signed-out visitors already
+// are on the acquisition screen, so a fake "home" action would either do
+// nothing or unexpectedly open auth. The disabled grey mark makes that state
+// explicit; the account button remains the way to sign in.
 //
 // The dashboard is the signed-in surface on purpose: it is where the history,
 // the streak and the personalised overview live, and all three are things an
 // account is FOR. A signed-out visitor gets the one screen that works without
 // one — scan your face — which is also the only screen a TikTok click needs.
-// Accounts are inert until Supabase keys are set (see engine/auth.ts), so with
-// no keys configured this correctly resolves to "everyone sees the scan screen".
+// The public project settings are present in production; a build without auth
+// configuration still leaves this control in its disabled guest state.
 document.getElementById("logo-home")?.addEventListener("click", async () => {
+  const user = await currentUser();
+  if (!user) {
+    await refreshHomeBrand(null);
+    return;
+  }
   if (cam) await closeCamera();
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
   resetToUpload();
-  // With no Supabase keys there is no such thing as signed out — there is no
-  // way to sign in at all — so gating on an account would just hide the
-  // dashboard from everybody forever. In that build the dashboard is simply
-  // open, which is also correct: the history it shows is device-local and
-  // needs no account to exist. The gate switches itself on the day keys are
-  // configured, with no code change.
-  if (!isAuthAvailable()) {
-    openDashboard({ onScan: () => resetToUpload() });
-    return;
-  }
-  const user = await currentUser();
+  const brand = await refreshHomeBrand(user);
+  openDashboard({
+    onScan: () => resetToUpload(),
+    name: displayName(user.email),
+    membership: brand === "max" ? "max" : "member",
+  });
+});
+
+let homeBrandToken = 0;
+let homeBrandState: MembershipBrand = "guest";
+
+function paintHomeBrand(brand: MembershipBrand): void {
+  homeBrandState = brand;
+  const button = document.getElementById("logo-home") as HTMLButtonElement | null;
+  if (!button) return;
+  button.classList.remove("brand-guest", "brand-member", "brand-max");
+  button.classList.add(brandClass(brand));
+  button.disabled = brand === "guest";
+  button.title = brand === "guest"
+    ? "Sign in to open your dashboard"
+    : brand === "max"
+      ? "Open your Max dashboard"
+      : "Open your dashboard";
+  button.setAttribute(
+    "aria-label",
+    brand === "guest" ? "TrueMax dashboard unavailable while signed out" : button.title,
+  );
+}
+
+async function refreshHomeBrand(user: User | null): Promise<MembershipBrand> {
+  const token = ++homeBrandToken;
   if (!user) {
-    openAccount();
-    return;
+    paintHomeBrand("guest");
+    return "guest";
   }
-  openDashboard({ onScan: () => resetToUpload(), name: displayName(user.email) });
+
+  // Authentication unlocks the dashboard immediately. The entitlement read
+  // can then upgrade the identity to Max without holding the navigation hostage
+  // on a network request or trusting client-editable metadata.
+  paintHomeBrand("member");
+  let max = false;
+  try {
+    max = hasMaxAccess(await loadEntitlement());
+  } catch {
+    // A temporary entitlement read failure must never lock a real member out
+    // of their device-local dashboard. It simply stays in the member state.
+  }
+  const brand = membershipBrand(true, max);
+  if (token === homeBrandToken) paintHomeBrand(brand);
+  return token === homeBrandToken ? brand : homeBrandState;
+}
+
+window.addEventListener(MEMBERSHIP_BRAND_EVENT, (event) => {
+  const brand = (event as CustomEvent<{ brand?: MembershipBrand }>).detail?.brand;
+  if (brand !== "member" && brand !== "max") return;
+  homeBrandToken++;
+  paintHomeBrand(brand);
 });
 
 // First name from an email address, for the greeting. "nikau.robertson@" gives
@@ -475,6 +547,7 @@ el.btnNoGlasses.addEventListener("click", () => {
 // public. Explicit intent only.
 
 function resetToUpload(): void {
+  clearPendingAnalysis();
   el.main.classList.add("hidden");
   el.upload.classList.remove("hidden");
   el.zoomable.style.transform = "none";
@@ -604,7 +677,41 @@ interface PendingFront {
 let pending: PendingFront | null = null;
 // The verified side points, kept so a change of reference population can
 // re-score the profile too rather than only the front.
-let lastSide: { points: SidePoints; faceDir: number; photo?: HTMLCanvasElement } | null = null;
+interface LastSide {
+  points: SidePoints;
+  faceDir: number;
+  photo?: HTMLCanvasElement;
+  automaticPoints?: SidePoints;
+  seedMethod?: SideSeedMethod;
+  feedback?: SideFeedbackIntent;
+  feedbackSubmitted?: boolean;
+}
+let lastSide: LastSide | null = null;
+let feedbackDeliveryNote: { ok: boolean; message: string } | null = null;
+
+// Upload exists only after an explicit Yes. It is deliberately best-effort:
+// optional product-improvement feedback must never hold a person's analysis
+// hostage if Storage or the network is unavailable.
+async function submitConsentedSideFeedback(): Promise<void> {
+  const side = lastSide;
+  if (!side?.feedback || side.feedbackSubmitted || !side.photo) return;
+  const result = await submitSideCorrectionFeedback(
+    side.photo,
+    side.points,
+    side.faceDir,
+    side.feedback,
+  );
+  if (result.ok) {
+    side.feedbackSubmitted = true;
+    feedbackDeliveryNote = { ok: true, message: "Optional side-landmark feedback sent privately" };
+  } else {
+    feedbackDeliveryNote = {
+      ok: false,
+      message: "Optional side-landmark feedback could not be sent; analysis was unaffected",
+    };
+    console.warn("Optional side correction feedback was not sent:", result.message);
+  }
+}
 
 // Both photographs are in. One analysis, one reveal, one score.
 async function runFullAnalysis(sideReport: Report | null): Promise<void> {
@@ -712,6 +819,18 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
+    onContinue: async () => {
+      const user = await currentUser();
+      if (user) {
+        await openTrialFunnel(user);
+        return;
+      }
+      await openAccount({
+        reason: "analysis",
+        notice: "Create your account to save your pathway and choose a trial.",
+        onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser),
+      });
+    },
     onSideProfile: () => startSide(),
     sideReport: sideReport ?? undefined,
     sidePhoto: lastSide?.photo,
@@ -719,20 +838,34 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     // Correct the points on the profile already taken, rather than shooting it
     // again. The photograph is usually fine; it is the seed that missed.
     onRedoSide: () => {
+      feedbackDeliveryNote = null;
       if (!lastSide?.photo) {
         startSide();
         return;
       }
       el.main.classList.add("hidden");
-      openSideAdjust(lastSide.photo, { points: lastSide.points, faceDir: lastSide.faceDir }, {
+      openSideAdjust(lastSide.photo, {
+        points: lastSide.points,
+        faceDir: lastSide.faceDir,
+        automaticPoints: lastSide.automaticPoints,
+        method: lastSide.seedMethod,
+      }, {
         sex: selectedSex,
         onBack: () => {
           closeSide();
           el.main.classList.remove("hidden");
         },
-        onDone: async (sideReport, points, faceDir) => {
+        onDone: async (sideReport, points, faceDir, review) => {
           closeSide();
-          lastSide = { points, faceDir, photo: lastSide?.photo };
+          lastSide = {
+            points,
+            faceDir,
+            photo: lastSide?.photo,
+            automaticPoints: review.automaticPoints,
+            seedMethod: review.seedMethod,
+            feedback: review.feedback ?? undefined,
+          };
+          await submitConsentedSideFeedback();
           await runFullAnalysis(sideReport);
         },
       });
@@ -757,9 +890,137 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   renderResults(ctxArgs);
 
   exposeDev(report, landmarks, quality);
+  // Any redirect-survival copy has served its one purpose. The full-size
+  // captures remain in memory for this result; the reduced temporary copies
+  // are removed from device storage immediately.
+  clearPendingAnalysis();
+  resumePendingStarted = false;
+}
+
+// The visitor has completed both photographs before we ask for an account.
+// That ordering is the acquisition flow: let them experience the scan first,
+// then ask for identity only at the moment the result becomes valuable.
+async function gateAnalysis(sideReport: Report): Promise<void> {
+  if (!isAuthAvailable() || await currentUser()) {
+    await submitConsentedSideFeedback();
+    await runFullAnalysis(sideReport);
+    return;
+  }
+
+  const saved = pending && lastSide
+    ? savePendingAnalysis({
+        sex: selectedSex,
+        front: { ...pending, canvas: el.photoCanvas },
+        side: {
+          points: lastSide.points,
+          faceDir: lastSide.faceDir,
+          canvas: lastSide.photo,
+          automaticPoints: lastSide.automaticPoints,
+          seedMethod: lastSide.seedMethod,
+          feedback: lastSide.feedback,
+        },
+      })
+    : false;
+
+  el.upload.classList.add("hidden");
+  el.main.classList.remove("hidden");
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "SCAN READY";
+  el.status.innerHTML = saved
+    ? "<b>Both views captured.</b> Create your account to run the analysis."
+    : "<b>Both views captured.</b> Sign in with an existing account to continue.";
+  el.barFill.style.width = "100%";
+  el.analysis.innerHTML = `<section class="analysis-gate">
+    <span class="klabel">YOUR SCAN IS READY</span>
+    <h2>Reveal your facial analysis</h2>
+    <p>Create a free account to see the score, measurements and personalised direction. ${lastSide?.feedback
+      ? "Your front photo stays on this device; the side feedback you approved is sent privately after sign-in."
+      : "Your face photos stay on this device."}</p>
+    ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
+    <button type="button" class="btn pri analysis-gate-open">Create account and analyse</button>
+  </section>`;
+
+  const openGate = () => {
+    void openAccount({
+      initialMode: saved ? "signup" : "password",
+      reason: "analysis",
+      onDeferred: () => {
+        el.status.innerHTML = "<b>Scan saved on this device.</b> Open the newest email link to continue.";
+      },
+      onAuthenticated: async () => {
+        // Supabase emits SIGNED_IN before signInWithPassword resolves. Claim
+        // this continuation before the deferred auth listener gets a turn, so
+        // one password login cannot analyze and append history twice.
+        if (saved) resumePendingStarted = true;
+        await submitConsentedSideFeedback();
+        await runFullAnalysis(sideReport);
+      },
+    });
+  };
+  el.analysis.querySelector(".analysis-gate-open")?.addEventListener("click", openGate);
+  openGate();
+}
+
+let resumePendingStarted = false;
+async function resumePendingAfterAuth(): Promise<void> {
+  if (resumePendingStarted) return;
+  const saved = readPendingAnalysis();
+  if (!saved || !await currentUser()) return;
+  resumePendingStarted = true;
+
+  const frontOk = await drawStoredPhoto(
+    el.photoCanvas,
+    saved.front.photo,
+    saved.front.width,
+    saved.front.height,
+  );
+  if (!frontOk) {
+    clearPendingAnalysis();
+    resumePendingStarted = false;
+    return;
+  }
+
+  let sidePhoto: HTMLCanvasElement | undefined;
+  if (saved.side.photo) {
+    sidePhoto = document.createElement("canvas");
+    const sideOk = await drawStoredPhoto(
+      sidePhoto,
+      saved.side.photo,
+      saved.side.width,
+      saved.side.height,
+    );
+    if (!sideOk) sidePhoto = undefined;
+  }
+
+  selectedSex = saved.sex;
+  sexChosen = true;
+  storeSex(saved.sex);
+  paintRefPop();
+  setGuideSex(saved.sex);
+  pending = {
+    landmarks: saved.front.landmarks,
+    width: saved.front.width,
+    height: saved.front.height,
+    quality: saved.front.quality,
+    autoNote: saved.front.autoNote,
+  };
+  lastSide = {
+    points: saved.side.points,
+    faceDir: saved.side.faceDir,
+    photo: sidePhoto,
+    automaticPoints: saved.side.automaticPoints,
+    seedMethod: saved.side.seedMethod,
+    feedback: saved.side.feedback,
+  };
+  closeSide();
+  el.upload.classList.add("hidden");
+  el.main.classList.remove("hidden");
+  await submitConsentedSideFeedback();
+  await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex));
 }
 
 function startSide(): void {
+  feedbackDeliveryNote = null;
   el.main.classList.add("hidden");
   openSideCapture({
     sex: selectedSex,
@@ -769,7 +1030,7 @@ function startSide(): void {
     // There is no "back to results" any more, because there are no results yet.
     // The only way out of this step is forward, or starting over.
     onBack: () => resetToUpload(),
-    onDone: async (sideReport, points, faceDir) => {
+    onDone: async (sideReport, points, faceDir, review) => {
       // Copy the profile out before the side screen is torn down — the results
       // panel shows it under the Side tab, and after closeSide() the canvas it
       // lives on is fair game.
@@ -782,13 +1043,20 @@ function startSide(): void {
         photo.getContext("2d")!.drawImage(shot, 0, 0);
       }
       closeSide();
-      lastSide = { points, faceDir, photo };
+      lastSide = {
+        points,
+        faceDir,
+        photo,
+        automaticPoints: review.automaticPoints,
+        seedMethod: review.seedMethod,
+        feedback: review.feedback ?? undefined,
+      };
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
       // The verified points, for the calibration harnesses — re-scoring the
       // profile under a different reference population needs the input, not
       // the finished report.
       (window as unknown as Record<string, unknown>).__truemaxSidePoints = { points, faceDir };
-      await runFullAnalysis(sideReport);
+      await gateAnalysis(sideReport);
     },
   });
 }
@@ -796,6 +1064,9 @@ function startSide(): void {
 function renderQualityChips(q: QualityCheck, autoNote = ""): void {
   const chips = q.issues.map((i) => `<span class="qchip warn">${i}</span>`);
   if (autoNote) chips.push(`<span class="qchip">${autoNote}</span>`);
+  if (feedbackDeliveryNote) {
+    chips.push(`<span class="qchip${feedbackDeliveryNote.ok ? "" : " warn"}">${feedbackDeliveryNote.message}</span>`);
+  }
   // Surfacing the correction is part of showing the math: the user can see
   // that an off-axis photo was accounted for rather than silently mismeasured.
   const off = Math.max(Math.abs(q.yawDeg), Math.abs(q.pitchDeg));
@@ -848,4 +1119,21 @@ async function loadImage(file: File): Promise<CanvasImageSource & { width: numbe
 
 function nextFrame(): Promise<void> {
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+}
+
+// INITIAL_SESSION handles an OAuth or confirmation redirect, while SIGNED_IN
+// covers an immediate password flow. The guard makes the two events harmless
+// when Supabase emits both for one navigation.
+if (isAuthAvailable()) {
+  // Also performs expiry cleanup for a signed-out visitor returning later.
+  readPendingAnalysis();
+  onAuthChange((user) => {
+    void refreshHomeBrand(user);
+    // Give an in-page password flow the first chance to continue with its
+    // full-resolution canvases. OAuth and email-confirmation returns have no
+    // in-page callback, so the saved scan resumes on the next navigation.
+    if (user) setTimeout(() => void resumePendingAfterAuth(), 0);
+  });
+} else {
+  paintHomeBrand("guest");
 }
