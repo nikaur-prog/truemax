@@ -1,9 +1,7 @@
 import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
-import { TARGET_MAX, TARGET_MIN, checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
-import { idealShape, shapeExtent, strokeOutline } from "./faceOutline.ts";
+import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
 import { detectOcclusion } from "../engine/occlusion.ts";
 import type { FrameCheck, Viewport } from "../engine/captureGuide.ts";
-import type { Sex } from "../engine/types.ts";
 
 // Live camera capture. The preview starts on the landing screen so the first
 // thing someone sees is their own face already being tracked — the guidance is
@@ -96,7 +94,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         ? checkSideFrame(result, stats)
         : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
       opts.onCheck(check);
-      drawGuide(opts.guideCanvas, v, check, side);
+      drawGuide(opts.guideCanvas, v);
     }
     raf = requestAnimationFrame(loop);
   };
@@ -178,15 +176,10 @@ function coverMap(video: HTMLVideoElement, w: number, h: number): Mapper {
   return f;
 }
 
-// Neither guide reads the landmark result any more. The front one draws a fixed
-// target and the side one has no landmarks to draw; everything derived from the
-// detection now arrives inside `check`.
-function drawGuide(
-  canvas: HTMLCanvasElement,
-  video: HTMLVideoElement,
-  check: FrameCheck,
-  side = false,
-): void {
+// Keep the live image unobstructed. The status copy, readiness lamp and audio
+// cues provide the useful guidance; generic front/profile silhouettes and a
+// direction arrow made the camera feel busier without improving measurement.
+function drawGuide(canvas: HTMLCanvasElement, video: HTMLVideoElement): void {
   const w = canvas.clientWidth || canvas.width;
   const h = canvas.clientHeight || canvas.height;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -199,25 +192,6 @@ function drawGuide(
   ctx.clearRect(0, 0, w, h);
   const P = coverMap(video, w, h);
   if (DEBUG) drawDebug(ctx, P, video, w, h, dpr);
-
-  if (side) {
-    drawProfileGuide(ctx, w, h, check);
-    return;
-  }
-
-  drawFrontGuide(ctx, w, h, check);
-}
-
-// Which reference population's average face the front silhouette is drawn from.
-//
-// Set by the user's own choice, not by a vote. The camera used to classify the
-// face from its shape and morph the guide to match; that classifier scores
-// 58.8% on held-out faces against a 54.1% base rate (see sexPref.ts), so what
-// it produced in practice was a silhouette that changed its mind about you
-// while you were still lining up.
-let guideSex: Sex = "male";
-export function setGuideSex(sex: Sex): void {
-  guideSex = sex;
 }
 
 // Someone the glasses measure is wrong about has no way to comply with "take
@@ -228,216 +202,6 @@ export function overrideGlasses(): void {
 }
 export function resetGlassesOverride(): void {
   glassesOverride = false;
-}
-
-// ONE element now: the silhouette you fit your face into.
-//
-// What was here before was a dot cloud plus an adaptive crosshair, and both are
-// gone. The crosshair anchored to the eye midpoint, which sits around a third of
-// the way down a face, so its horizontal arm read as a level that was set far
-// too high — people lined their face up to it and ended up framed high in the
-// shot. The dots proved the tracker was alive but told you nothing about where
-// to move.
-//
-// The side view already worked this way and was the easier of the two to shoot,
-// which is backwards: the front view is the one that carries most of the score.
-// A silhouette states the target directly — get inside the outline — and the
-// hint line handles the rest in words. Two views, one idea.
-//
-// Two things were removed earlier for a reason that still holds, and the
-// temptation to add them back is constant. Feature contours on the eyes, brows
-// and lips went first: MediaPipe's eye ring follows the orbital rim, not the
-// lid, so locked to a live face it sat visibly wide of the eye and read as
-// broken tracking even while the measurements underneath were correct. The face
-// outline went second: FACE_OVAL is an anatomical boundary, not the silhouette
-// you see, and its lower arc follows the jaw's underside, so on anyone shot from
-// slightly above it projected onto the neck.
-//
-// Neither objection applies to what is drawn now, and the difference is the
-// point: this outline is not locked to the face. It is a fixed target sitting in
-// the frame, so it cannot look like tracking that has come loose. It is also the
-// same shape the gate is written against — the landmark bounding box — so fitting
-// it and passing the distance check are the same act.
-
-// ---------------------------------------------------------------------------
-// Front guide: the average face of the reference population you will be scored
-// against, drawn at the size and position the capture gates actually want.
-//
-// Sized against the canvas, because the distance gate is now written in visible
-// terms too. Both were previously in video units, which under `object-fit:
-// cover` means units the user cannot see: on a 16:9 webcam in a square frame
-// roughly half the width is cropped away, so a face satisfying "0.46 of the
-// video" is wider than the whole preview.
-// ---------------------------------------------------------------------------
-
-// Midpoint of the distance gate's accepted band, so there is room on both sides.
-const GUIDE_FACE_FRAC = (TARGET_MIN + TARGET_MAX) / 2;
-
-function drawFrontGuide(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  check: FrameCheck,
-): void {
-  const shape = idealShape(guideSex);
-  if (!shape) return;
-  const ext = shapeExtent(shape);
-  // Width sets the scale, but a tall narrow frame can still cut the chin off,
-  // so take whichever of the two constraints binds first.
-  const scale = Math.min(
-    (GUIDE_FACE_FRAC * w) / (ext.w || 1),
-    (0.78 * h) / (ext.h || 1),
-  );
-  // Cover crops symmetrically, so the visible centre and the video centre are
-  // the same point — verified in the render harness rather than assumed.
-  const c = { x: w / 2, y: h / 2 };
-
-  const tint =
-    check.status === "green" ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
-  strokeOutline(ctx, shape, {
-    cx: c.x,
-    cy: c.y,
-    scale,
-    stroke: `rgba(${tint},${check.ready ? 0.9 : 0.62})`,
-    lineWidth: check.ready ? 2 : 1.5,
-    dash: check.ready ? undefined : [9, 7],
-    // Face shape only. The eyes, brows, nose and lips used to be drawn faintly
-    // to make the outline "read as a face", and they did the opposite: a second
-    // set of features floating over the real ones, never lining up, on a target
-    // whose entire job is "get your face inside this line". A framing guide is
-    // an outline.
-    features: 0,
-  });
-
-  drawHeadingArrow(ctx, c.x, c.y - scale * ext.h * 0.08, check);
-}
-
-// ---------------------------------------------------------------------------
-// Heading arrow.
-//
-// The one part of the old crosshair worth keeping. Which way you are turned is a
-// direction, so it is drawn as one: the arrow grows out of the centre along the
-// head's heading and lengthens with how far off-axis you are. Face the lens
-// squarely and it vanishes, which makes its absence the target.
-// ---------------------------------------------------------------------------
-
-function drawHeadingArrow(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  check: FrameCheck,
-): void {
-  // Only point where a gate is actually failing. The arrow used to draw off
-  // raw pose magnitude past a fixed 4-degree deadzone, but the pose gates are
-  // per-axis and their thresholds moved (pitch went to 20 once the guide was
-  // brought in line with what the analysis actually tolerates). The result was
-  // an up-arrow telling someone to raise the camera while the frame already
-  // read green. Tying the arrow to gates.level / gates.straight means "no
-  // arrow" and "pose is fine" are the same state by construction, whatever the
-  // numbers are — and a pitch that is within tolerance no longer contributes a
-  // direction just because it is non-zero.
-  const yaw = check.gates.straight ? 0 : check.pose.yaw;
-  const pitch = check.gates.level ? 0 : check.pose.pitch;
-  const off = Math.hypot(yaw, pitch);
-  if (off <= TURN_DEADZONE) return;
-  // Short at the edge of the deadzone, full length at roughly twice the pose
-  // gate. Past that it stops growing: the message is the direction, not the
-  // magnitude.
-  const t = Math.min(1, (off - TURN_DEADZONE) / 16);
-  const base = 13;
-  const len = base + 6 + t * 26;
-  const ux = yaw / off;
-  const uy = pitch / off;
-  const tipX = cx + ux * len;
-  const tipY = cy + uy * len;
-  ctx.save();
-  ctx.strokeStyle = `rgba(255,201,139,${(0.55 + t * 0.4).toFixed(2)})`;
-  ctx.lineWidth = 1.4;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  ctx.moveTo(cx + ux * (base - 4), cy + uy * (base - 4));
-  ctx.lineTo(tipX, tipY);
-  ctx.stroke();
-  // Chevron head, built from the perpendicular so it always points outward
-  const hx = -uy;
-  const hy = ux;
-  const back = 7;
-  const wide = 4.5;
-  ctx.beginPath();
-  ctx.moveTo(tipX - ux * back + hx * wide, tipY - uy * back + hy * wide);
-  ctx.lineTo(tipX, tipY);
-  ctx.lineTo(tipX - ux * back - hx * wide, tipY - uy * back - hy * wide);
-  ctx.stroke();
-  ctx.restore();
-}
-
-// Below this the arrow does not draw at all. Set just inside the pose gate so
-// "no arrow" and "straight enough to shoot" mean the same thing.
-const TURN_DEADZONE = 4;
-
-// ---------------------------------------------------------------------------
-// Profile guide.
-//
-// There is nothing to track here — the face mesh does not follow a true
-// profile, which is the whole reason the thirteen points are placed by hand
-// afterwards. So this draws a target rather than a measurement: a facing
-// silhouette to line up against, and three rules marking where the brow, the
-// nose base and the chin should sit.
-//
-// It is deliberately loose. A silhouette drawn tightly enough to be a real
-// template would be wrong for most faces, and the accuracy that matters is
-// enforced at the verification step regardless. This only has to get someone
-// close enough that the auto-placement has a chance.
-// ---------------------------------------------------------------------------
-
-function drawProfileGuide(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  check: FrameCheck,
-): void {
-  const tint = check.ready ? "143,243,224" : check.status === "amber" ? "255,201,139" : "255,255,255";
-  // A head box sized to how a profile should fill the frame, shifted back from
-  // centre so there is room in front of the face for nose and chin projection —
-  // which is exactly what the side view exists to measure.
-  const bh = h * 0.62;
-  const bw = bh * 0.78;
-  const cx = w * 0.54;
-  const cy = h * 0.5;
-  const left = cx - bw * 0.5;
-  const top = cy - bh * 0.5;
-
-  ctx.save();
-  ctx.strokeStyle = `rgba(${tint},0.5)`;
-  ctx.lineWidth = 1.2;
-  ctx.setLineDash([7, 6]);
-
-  // Facing silhouette, drawn as a single open curve: crown, brow, nose, lips,
-  // chin, jaw. Bezier control points are proportions of the box, so it scales.
-  const X = (f: number) => left + bw * f;
-  const Y = (f: number) => top + bh * f;
-  ctx.beginPath();
-  ctx.moveTo(X(0.16), Y(0.30));
-  ctx.bezierCurveTo(X(0.22), Y(0.02), X(0.78), Y(0.0), X(0.82), Y(0.30)); // crown
-  ctx.bezierCurveTo(X(0.86), Y(0.40), X(0.80), Y(0.40), X(0.80), Y(0.44)); // brow
-  ctx.bezierCurveTo(X(0.94), Y(0.55), X(0.94), Y(0.57), X(0.78), Y(0.60)); // nose
-  ctx.bezierCurveTo(X(0.86), Y(0.68), X(0.84), Y(0.72), X(0.76), Y(0.74)); // lips
-  ctx.bezierCurveTo(X(0.82), Y(0.82), X(0.74), Y(0.92), X(0.58), Y(0.93)); // chin
-  ctx.bezierCurveTo(X(0.36), Y(0.94), X(0.18), Y(0.80), X(0.16), Y(0.58)); // jaw
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Height rules: brow, nose base, chin.
-  ctx.strokeStyle = `rgba(${tint},0.22)`;
-  ctx.lineWidth = 1;
-  for (const f of [0.34, 0.6, 0.93]) {
-    ctx.beginPath();
-    ctx.moveTo(left - bw * 0.18, Y(f));
-    ctx.lineTo(left + bw * 1.18, Y(f));
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
 // Alignment diagnostic, off unless the page is loaded with ?debug=1.

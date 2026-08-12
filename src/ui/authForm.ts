@@ -38,12 +38,12 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const isLink = mode === "link";
   const analysis = options.context === "analysis";
   const title = analysis
-    ? "Your analysis is ready"
+    ? "Create an account to analyse your face"
     : isSignup
       ? "Create your account"
       : "Welcome back";
   const lede = analysis
-    ? "Create a free account to reveal your results. Photos stay on this device by default; a side photo is sent only if you separately chose to share landmark feedback."
+    ? "In order to be able to analyze your face, you must create an account. Sign up or log in to continue."
     : "Photos stay on this device by default. Your account keeps your membership attached to you across browsers.";
 
   root.innerHTML = `

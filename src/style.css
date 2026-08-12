@@ -580,6 +580,25 @@ body.funnel-open { overflow: hidden; }
 .verify-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #fff; background: rgba(16, 17, 19, 0.82); border-radius: 10px; padding: 9px 12px; opacity: 0; transition: opacity 0.18s; pointer-events: none; }
 .verify-hint.show { opacity: 1; }
 
+.verify-magnifier {
+  position: absolute; top: 12px; z-index: 8; width: 132px;
+  overflow: hidden; border: 2px solid rgba(143, 243, 224, 0.96);
+  border-radius: 18px; background: #101113;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
+  opacity: 0; transform: translateY(-6px) scale(0.96);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  pointer-events: none;
+}
+.verify-magnifier.at-left { left: 12px; }
+.verify-magnifier.at-right { right: 12px; }
+.verify-magnifier.show { opacity: 1; transform: translateY(0) scale(1); }
+.verify-magnifier canvas { width: 132px; height: 132px; display: block; }
+.verify-magnifier span {
+  display: block; padding: 7px 9px 8px; overflow: hidden;
+  color: #fff; font-family: var(--mono); font-size: 9px;
+  letter-spacing: 0.06em; text-overflow: ellipsis; white-space: nowrap;
+}
+
 .side-panel { min-width: 0; }
 .side-title { font-family: var(--serif); font-weight: 300; font-size: 32px; letter-spacing: -0.01em; margin-bottom: 12px; }
 .side-sub { color: var(--mut); font-size: 14px; line-height: 1.6; margin-bottom: 22px; }

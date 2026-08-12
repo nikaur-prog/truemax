@@ -687,6 +687,16 @@ export function mountVerifier(
   labelEl.className = "verify-hint";
   host.appendChild(labelEl);
 
+  const magnifier = document.createElement("div");
+  magnifier.className = "verify-magnifier";
+  magnifier.setAttribute("aria-hidden", "true");
+  const magnifierCanvas = document.createElement("canvas");
+  magnifierCanvas.width = 180;
+  magnifierCanvas.height = 180;
+  const magnifierLabel = document.createElement("span");
+  magnifier.append(magnifierCanvas, magnifierLabel);
+  host.appendChild(magnifier);
+
   const handles = new Map<SidePointId, HTMLElement>();
   for (const spec of SIDE_POINTS) {
     const el = document.createElement("button");
@@ -752,6 +762,34 @@ export function mountVerifier(
     };
   };
 
+  const paintMagnifier = (id: SidePointId) => {
+    const r = host.getBoundingClientRect();
+    const point = points[id];
+    const ctx = magnifierCanvas.getContext("2d")!;
+    const displayPatch = Math.max(34, Math.min(54, r.width * 0.12));
+    const sourceSize = displayPatch * (photo.width / Math.max(1, r.width));
+    const sx = Math.max(0, Math.min(photo.width - sourceSize, point.x - sourceSize / 2));
+    const sy = Math.max(0, Math.min(photo.height - sourceSize, point.y - sourceSize / 2));
+    ctx.clearRect(0, 0, 180, 180);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(photo, sx, sy, sourceSize, sourceSize, 0, 0, 180, 180);
+    ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(90, 72); ctx.lineTo(90, 108);
+    ctx.moveTo(72, 90); ctx.lineTo(108, 90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(90, 90, 7, 0, Math.PI * 2);
+    ctx.stroke();
+    magnifierLabel.textContent = SIDE_POINTS.find((s) => s.id === id)?.label ?? "Landmark";
+    // Put the lens opposite the selected point so the finger and lens do not
+    // hide the same part of the profile.
+    magnifier.classList.toggle("at-left", point.x > photo.width / 2);
+    magnifier.classList.toggle("at-right", point.x <= photo.width / 2);
+  };
+
   const down = (e: PointerEvent) => {
     if (!editable) return;
     const target = (e.target as HTMLElement).closest<HTMLElement>(".vpoint");
@@ -760,6 +798,8 @@ export function mountVerifier(
     target.classList.add("grabbing");
     labelEl.textContent = SIDE_POINTS.find((s) => s.id === dragging)?.hint ?? "";
     labelEl.classList.add("show");
+    paintMagnifier(dragging);
+    magnifier.classList.add("show");
     host.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
@@ -771,6 +811,7 @@ export function mountVerifier(
       y: Math.max(0, Math.min(photo.height, p.y)),
     };
     place();
+    paintMagnifier(dragging);
     onChange(points);
   };
   const up = () => {
@@ -778,6 +819,7 @@ export function mountVerifier(
     handles.get(dragging)?.classList.remove("grabbing");
     dragging = null;
     labelEl.classList.remove("show");
+    magnifier.classList.remove("show");
   };
 
   host.addEventListener("pointerdown", down);
