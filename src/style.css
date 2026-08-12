@@ -354,19 +354,11 @@ body.funnel-open { overflow: hidden; }
 .trial-offer h2 { font-size: clamp(31px, 4vw, 48px); }
 .trial-offer-head p { margin-bottom: 0; }
 .max-guide {
-  position: relative; width: 108px; height: 96px; border-radius: 44% 44% 38% 38%;
-  background: linear-gradient(145deg, #123e3b, #071d23 60%, #11192a); border: 2px solid #30f1bf;
-  box-shadow: 0 0 0 9px rgba(24,223,171,.08), 0 0 34px rgba(24,223,171,.38), inset 0 -16px 28px rgba(0,0,0,.38);
+  position: relative; width: 116px; height: 116px;
   animation: max-float 3s ease-in-out infinite;
 }
 @keyframes max-float { 50% { transform: translateY(-6px) rotate(1deg); } }
-.max-guide::before, .max-guide::after { content: ""; position: absolute; top: -11px; width: 23px; height: 25px; background: #0b2e31; border: 2px solid #30f1bf; z-index: -1; }
-.max-guide::before { left: 9px; transform: rotate(-23deg); border-radius: 16px 4px 8px; }
-.max-guide::after { right: 9px; transform: rotate(23deg); border-radius: 4px 16px 8px; }
-.max-guide > i { position: absolute; top: 34px; width: 10px; height: 7px; border-radius: 99px; background: #7effdf; box-shadow: 0 0 12px #30f1bf; }
-.max-guide > i:first-child { left: 29px; }
-.max-guide > i:nth-child(2) { right: 29px; }
-.max-guide > b { position: absolute; left: 43px; top: 55px; width: 22px; height: 9px; border-bottom: 2px solid #7effdf; border-radius: 50%; }
+.max-guide > img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 13px 18px rgba(20,65,155,.25)); }
 .max-guide > span { position: absolute; left: 0; right: 0; bottom: -24px; text-align: center; font: 8px var(--mono); letter-spacing: .2em; color: var(--acc); }
 .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .plan-card {
@@ -417,10 +409,7 @@ body.funnel-open { overflow: hidden; }
   .trial-actions { padding: 13px 20px max(18px, env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(12px); }
   .trial-offer { padding-top: max(20px, env(safe-area-inset-top)) !important; padding-bottom: max(20px, env(safe-area-inset-bottom)) !important; }
   .trial-offer-head { grid-template-columns: 76px 1fr; gap: 16px; padding: 6px 36px 20px 0; }
-  .max-guide { width: 72px; height: 66px; border-radius: 40%; }
-  .max-guide > i { top: 24px; width: 7px; height: 5px; }
-  .max-guide > i:first-child { left: 20px; } .max-guide > i:nth-child(2) { right: 20px; }
-  .max-guide > b { left: 27px; top: 39px; width: 18px; }
+  .max-guide { width: 76px; height: 76px; }
   .max-guide > span { bottom: -19px; }
   .plan-grid { grid-template-columns: 1fr; }
   .plan-card { min-height: 345px; border-radius: 20px; }
