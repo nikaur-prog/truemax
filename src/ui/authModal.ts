@@ -15,6 +15,7 @@ import {
 import type { User } from "@supabase/supabase-js";
 import { renderAuthForm } from "./authForm.ts";
 import type { AuthMode } from "./authForm.ts";
+import { announceMembershipBrand } from "./membershipBrand.ts";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.
@@ -203,6 +204,7 @@ async function renderMembership(node: HTMLElement, waitForWebhook: boolean): Pro
     if (!node.isConnected) return;
 
     const active = hasMaxAccess(entitlement);
+    announceMembershipBrand(active ? "max" : "member");
     const billingProblem = entitlement.status === "past_due" || entitlement.status === "unpaid";
     const period = entitlement.currentPeriodEnd
       ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(entitlement.currentPeriodEnd))

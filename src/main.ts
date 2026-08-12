@@ -22,6 +22,8 @@ import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton, openAccount } from "./ui/authModal.ts";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.ts";
+import { hasMaxAccess, loadEntitlement } from "./engine/entitlement.ts";
+import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.ts";
 import { openSexChooser } from "./ui/sexChooser.ts";
 import { createAutoCapture } from "./ui/autoCapture.ts";
@@ -42,6 +44,12 @@ import {
   readPendingAnalysis,
   savePendingAnalysis,
 } from "./engine/pendingAnalysis.ts";
+import {
+  brandClass,
+  membershipBrand,
+  MEMBERSHIP_BRAND_EVENT,
+} from "./ui/membershipBrand.ts";
+import type { MembershipBrand } from "./ui/membershipBrand.ts";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -277,36 +285,84 @@ el.ovalFrame.addEventListener("drop", (e) => {
   if (file) ensureSex(() => handleFile(file));
 });
 
-// Wordmark goes home. Home is the dashboard for a signed-in user and the scan
-// screen for everyone else.
+// Wordmark goes home only for a signed-in member. Signed-out visitors already
+// are on the acquisition screen, so a fake "home" action would either do
+// nothing or unexpectedly open auth. The disabled grey mark makes that state
+// explicit; the account button remains the way to sign in.
 //
 // The dashboard is the signed-in surface on purpose: it is where the history,
 // the streak and the personalised overview live, and all three are things an
 // account is FOR. A signed-out visitor gets the one screen that works without
 // one — scan your face — which is also the only screen a TikTok click needs.
-// Accounts are inert until Supabase keys are set (see engine/auth.ts), so with
-// no keys configured this correctly resolves to "everyone sees the scan screen".
+// The public project settings are present in production; a build without auth
+// configuration still leaves this control in its disabled guest state.
 document.getElementById("logo-home")?.addEventListener("click", async () => {
+  const user = await currentUser();
+  if (!user) {
+    await refreshHomeBrand(null);
+    return;
+  }
   if (cam) await closeCamera();
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
   resetToUpload();
-  // With no Supabase keys there is no such thing as signed out — there is no
-  // way to sign in at all — so gating on an account would just hide the
-  // dashboard from everybody forever. In that build the dashboard is simply
-  // open, which is also correct: the history it shows is device-local and
-  // needs no account to exist. The gate switches itself on the day keys are
-  // configured, with no code change.
-  if (!isAuthAvailable()) {
-    openDashboard({ onScan: () => resetToUpload() });
-    return;
-  }
-  const user = await currentUser();
+  const brand = await refreshHomeBrand(user);
+  openDashboard({
+    onScan: () => resetToUpload(),
+    name: displayName(user.email),
+    membership: brand === "max" ? "max" : "member",
+  });
+});
+
+let homeBrandToken = 0;
+let homeBrandState: MembershipBrand = "guest";
+
+function paintHomeBrand(brand: MembershipBrand): void {
+  homeBrandState = brand;
+  const button = document.getElementById("logo-home") as HTMLButtonElement | null;
+  if (!button) return;
+  button.classList.remove("brand-guest", "brand-member", "brand-max");
+  button.classList.add(brandClass(brand));
+  button.disabled = brand === "guest";
+  button.title = brand === "guest"
+    ? "Sign in to open your dashboard"
+    : brand === "max"
+      ? "Open your Max dashboard"
+      : "Open your dashboard";
+  button.setAttribute(
+    "aria-label",
+    brand === "guest" ? "TrueMax dashboard unavailable while signed out" : button.title,
+  );
+}
+
+async function refreshHomeBrand(user: User | null): Promise<MembershipBrand> {
+  const token = ++homeBrandToken;
   if (!user) {
-    openAccount();
-    return;
+    paintHomeBrand("guest");
+    return "guest";
   }
-  openDashboard({ onScan: () => resetToUpload(), name: displayName(user.email) });
+
+  // Authentication unlocks the dashboard immediately. The entitlement read
+  // can then upgrade the identity to Max without holding the navigation hostage
+  // on a network request or trusting client-editable metadata.
+  paintHomeBrand("member");
+  let max = false;
+  try {
+    max = hasMaxAccess(await loadEntitlement());
+  } catch {
+    // A temporary entitlement read failure must never lock a real member out
+    // of their device-local dashboard. It simply stays in the member state.
+  }
+  const brand = membershipBrand(true, max);
+  if (token === homeBrandToken) paintHomeBrand(brand);
+  return token === homeBrandToken ? brand : homeBrandState;
+}
+
+window.addEventListener(MEMBERSHIP_BRAND_EVENT, (event) => {
+  const brand = (event as CustomEvent<{ brand?: MembershipBrand }>).detail?.brand;
+  if (brand !== "member" && brand !== "max") return;
+  homeBrandToken++;
+  paintHomeBrand(brand);
 });
 
 // First name from an email address, for the greeting. "nikau.robertson@" gives
@@ -976,9 +1032,12 @@ if (isAuthAvailable()) {
   // Also performs expiry cleanup for a signed-out visitor returning later.
   readPendingAnalysis();
   onAuthChange((user) => {
+    void refreshHomeBrand(user);
     // Give an in-page password flow the first chance to continue with its
     // full-resolution canvases. OAuth and email-confirmation returns have no
     // in-page callback, so the saved scan resumes on the next navigation.
     if (user) setTimeout(() => void resumePendingAfterAuth(), 0);
   });
+} else {
+  paintHomeBrand("guest");
 }

@@ -7,6 +7,8 @@ import { openHistory } from "./historyView.ts";
 import { REEL } from "./demoReelData.ts";
 import { applyShim } from "./demoReelShim.ts";
 import { mountDemoReel } from "./demoReel.ts";
+import { brandClass, logoMarkup } from "./membershipBrand.ts";
+import type { MembershipBrand } from "./membershipBrand.ts";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -15,8 +17,9 @@ import { mountDemoReel } from "./demoReel.ts";
 // or look up a celebrity. Under those sits your own history, so returning is
 // about seeing the line move rather than taking a cold first scan. The premium
 // surface (the Max coach, goal tracking, the wishlist) hangs off this same
-// screen, but it needs accounts and a subscription gate that are not live yet,
-// so it is deliberately not here — this is the part that works today.
+// screen. The server entitlement can now brand the dashboard as Max, but a
+// conversational assistant is still a separate product surface; this module
+// does not fake one with generic copy.
 //
 // Reached from the wordmark. First load still goes straight to capture so the
 // TikTok funnel is one tap from a scan, not two.
@@ -24,6 +27,7 @@ import { mountDemoReel } from "./demoReel.ts";
 
 let overlay: HTMLDivElement | null = null;
 let reel: ReturnType<typeof mountDemoReel> | null = null;
+let dashboardBrand: Exclude<MembershipBrand, "guest"> = "member";
 
 // Two half-faces sharing one outline: a squarer, heavier-browed left half and a
 // softer, narrower right half, split down the facial midline. It says "this
@@ -49,8 +53,13 @@ export function isDashboardOpen(): boolean {
   return overlay !== null;
 }
 
-export function openDashboard(opts: { onScan: () => void; name?: string | null }): void {
+export function openDashboard(opts: {
+  onScan: () => void;
+  name?: string | null;
+  membership: Exclude<MembershipBrand, "guest">;
+}): void {
   close();
+  dashboardBrand = opts.membership;
   // Advance the rotation once per open, so coming back to the dashboard gives a
   // different headline and a different quote rather than the same pair all day.
   nextVisit();
@@ -63,14 +72,17 @@ export function openDashboard(opts: { onScan: () => void; name?: string | null }
   overlay.innerHTML = `
     <div class="dash-inner">
       <header class="dash-head">
-        <span class="wordmark dash-logo dash-anim" style="--d:0ms">TRUE<b>MAX</b></span>
+        <div class="dash-brand-row dash-anim" style="--d:0ms">
+          <span class="wordmark dash-logo ${brandClass(dashboardBrand)}">${logoMarkup()}</span>
+          ${dashboardBrand === "max" ? `<span class="max-ai-badge"><i></i>MAX AI · YOUR ASSISTANT</span>` : ""}
+        </div>
         <h1 class="dash-anim" style="--d:70ms">${escapeHtml(headline(ctx))}</h1>
         <p class="dash-anim" style="--d:170ms">${escapeHtml(subline(ctx))}</p>
         ${streakChip(streak)}
       </header>
 
       <div class="dash-actions">
-        <div class="dash-slot dash-anim" style="--d:260ms">
+        <div class="dash-slot scan-slot dash-anim" style="--d:260ms">
           <button class="dash-card pri" id="dash-scan">
             <span class="dash-ic">${SPLIT_FACE}</span>
             <b>Scan your face</b>
@@ -376,7 +388,7 @@ export function openCelebSearch(): void {
     <div class="dash-inner">
       <button class="hist-close" aria-label="Close">✕</button>
       <header class="dash-head">
-        <button class="wordmark celeb-home" type="button" title="Back to the dashboard">TRUE<b>MAX</b></button>
+        <button class="wordmark celeb-home ${brandClass(dashboardBrand)}" type="button" title="Back to the dashboard">${logoMarkup()}</button>
         <h1>Celebrities</h1>
         <p>How the same measurements read on a face people already have a number for. Search a name, or browse.</p>
       </header>

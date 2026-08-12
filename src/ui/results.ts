@@ -13,7 +13,7 @@ import type { OverlayFade } from "./measureOverlay.ts";
 import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
 import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
-import { stopTypewriter, typewrite, typewriteBlock } from "./typewriter.ts";
+import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
@@ -134,7 +134,7 @@ function viewCards(r: Report): string {
       return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
         <span class="vc-label">${label}</span>
         <span class="vc-rank">${rankShort(pct)}</span>
-        <b class="vc-score ${tone}">${score.toFixed(2)}<small>/10</small></b>
+        <b class="vc-score ${tone}"><span data-count="${score}" data-decimals="2">0.00</span><small>/10</small></b>
       </div>`;
     })
     .join("")}</div>`;
@@ -418,12 +418,12 @@ function showOverall(): void {
   const merged = Number.isFinite(r.zScores["view:side"]);
 
   body().innerHTML = `
-    <div class="reveal">
+    <div class="reveal overview-reveal">
       <div class="score-head">
         <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
               title="Score against the other reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button></div>
-          <div class="big"><span id="cnt">0.0</span><small> /10</small></div></div>
+          <div class="big"><span id="cnt" data-count="${r.overall}" data-decimals="1">0.0</span><small> /10</small></div></div>
         <div class="chipcol">
           <span class="chip big-chip">${percentileLine(r.overallPercentile, r.sex)}</span>
           ${deltaHTML}
@@ -444,7 +444,7 @@ function showOverall(): void {
       <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
         .map(
           ([p, s]) => `
-        <div class="pillar"><b>${s.toFixed(1)}</b><span>${p.toUpperCase()}</span>
+        <div class="pillar"><b data-count="${s}" data-decimals="1">0.0</b><span>${p.toUpperCase()}</span>
         <div class="pbar"><i data-w="${s * 10}"></i></div></div>`,
         )
         .join("")}
@@ -468,21 +468,9 @@ function showOverall(): void {
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
 
-  countUp(document.getElementById("cnt")!, r.overall);
+  const overview = body().querySelector<HTMLElement>(".overview-reveal");
+  if (overview) animateOverview(overview);
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
-  // The caveat, the rescan reading, the three view cards and the merge note
-  // reveal together, in the order they are read. Everything below stays put:
-  // the pillars have their own bar animation and the curve draws itself, and
-  // three animations competing for the same eye is worse than one.
-  const ovw = document.querySelector<HTMLElement>(".ovw");
-  if (ovw) typewriteBlock(ovw);
-  setTimeout(
-    () =>
-      document
-        .querySelectorAll<HTMLElement>(".pbar i")
-        .forEach((i) => (i.style.width = `${i.dataset.w}%`)),
-    150,
-  );
   // Correcting the reference population where its effect is visible. Every
   // percentile on this screen comes from it, and it moves the overall score by
   // a median of 0.7 points, so it cannot be a choice you can only revisit by
@@ -650,13 +638,62 @@ function celebCard(matches: ReturnType<typeof regionMatches>): string {
     .join("");
 }
 
-function countUp(el: HTMLElement, target: number): void {
-  let n = 0;
-  const iv = setInterval(() => {
-    n = Math.min(target, n + 0.12);
-    el.textContent = n.toFixed(1);
-    if (n >= target) clearInterval(iv);
-  }, 22);
+function animateOverview(root: HTMLElement): void {
+  const items: HTMLElement[] = [];
+  const add = (node: Element | null) => {
+    if (node instanceof HTMLElement && !items.includes(node)) items.push(node);
+  };
+  add(root.querySelector(".score-head"));
+  root.querySelectorAll<HTMLElement>(".ovw > *").forEach(add);
+  root.querySelectorAll<HTMLElement>(".pillars > *").forEach(add);
+  add(root.querySelector(":scope > .panel"));
+  root.querySelectorAll<HTMLElement>(":scope > .navrow").forEach(add);
+  add(root.querySelector(":scope > .hist-entry"));
+
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  items.forEach((item, index) => {
+    const delay = reduced ? 0 : 40 + index * 68;
+    item.classList.add("overview-step");
+    item.style.setProperty("--overview-delay", `${delay}ms`);
+
+    for (const number of item.querySelectorAll<HTMLElement>("[data-count]")) {
+      const target = Number(number.dataset.count);
+      const decimals = Number(number.dataset.decimals ?? "1");
+      if (Number.isFinite(target)) countUp(number, target, decimals, delay);
+    }
+    for (const bar of item.querySelectorAll<HTMLElement>(".pbar i")) {
+      const finish = () => {
+        if (bar.isConnected) bar.style.width = `${bar.dataset.w}%`;
+      };
+      if (reduced) finish();
+      else setTimeout(finish, delay + 190);
+    }
+  });
+}
+
+function countUp(el: HTMLElement, target: number, decimals: number, delay: number): void {
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const finish = () => {
+    el.textContent = target.toFixed(decimals);
+  };
+  if (reduced) {
+    finish();
+    return;
+  }
+
+  const duration = 720;
+  setTimeout(() => {
+    const start = performance.now();
+    const step = (now: number) => {
+      if (!el.isConnected) return;
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      el.textContent = (target * eased).toFixed(decimals);
+      if (progress < 1) requestAnimationFrame(step);
+      else finish();
+    };
+    requestAnimationFrame(step);
+  }, delay);
 }
 
 // ---------------- region ----------------
