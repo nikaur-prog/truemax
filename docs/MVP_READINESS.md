@@ -58,6 +58,9 @@ and a mobile smoke test are blockers.
    preserves it.
 7. The live Supabase project had no migration history and no payment tables.
    Account/payment migrations are now recorded and applied.
+8. A same-page password sign-in could race the auth listener and append the
+   finished scan to local history twice. The in-page continuation now claims
+   the result before the redirect-resume listener runs.
 
 ## Go-live gates
 

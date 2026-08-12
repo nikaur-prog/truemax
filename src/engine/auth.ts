@@ -3,10 +3,10 @@ import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/s
 // ---------------------------------------------------------------------------
 // Accounts, on Supabase.
 //
-// The app is otherwise entirely client-side and stays that way: a scan still
-// runs on device with nothing uploaded, and a signed-out visitor loses no
-// capability. An account hangs a subscription off a real identity; scan
-// history remains device-local for the MVP.
+// Face capture and analysis stay client-side with nothing uploaded. An account
+// is requested only after capture, before revealing the result, and hangs a
+// subscription off a real identity. Scan history remains device-local for the
+// MVP.
 //
 // Everything here is guarded by isAuthAvailable(). With no Supabase keys in the
 // environment the whole feature is inert: no account button and no auth
