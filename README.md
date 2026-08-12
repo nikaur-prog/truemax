@@ -28,6 +28,14 @@ npm run dev
 npm run build   # type-checks then bundles to dist/
 ```
 
+## Planning documents
+
+- [SEO plan](docs/SEO_PLAN.md) — technical audit, search positioning, content
+  architecture, measurement, and the 90-day rollout.
+- [Launch checklist](docs/LAUNCH.md)
+- [MVP readiness](docs/MVP_READINESS.md)
+- [Billing catalog](docs/BILLING_CATALOG.md)
+
 ## Determinism notes
 
 - Detection runs in `IMAGE` mode with the CPU delegate — the same photo always
