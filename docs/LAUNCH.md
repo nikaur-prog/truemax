@@ -105,9 +105,12 @@ and Vercel configuration.
       the app-store stage.)
 - [x] Audit the connected Stripe account. It currently contains no products,
       prices or webhook endpoints.
-- [~] Confirm the USD catalog: Starter $6.99/month, Max $11.99/month, member
-      scan $2.99 and non-member scan $5.99. Trial duration still conflicts
-      between 7 and 30 days.
+- [x] Confirm the USD catalog: Starter $6.99/month, Max $11.99/month, member
+      scan $2.99 and non-member scan $5.99. **Trial is 7 days** — this was
+      recorded as an unresolved 7-vs-30 conflict, but nothing actually
+      implements 30: `api/create-checkout-session.ts` sets
+      `trial_period_days: 7`, the onboarding buttons say "Start 7-day free
+      trial", and `PRICING_DECISION.md` says 7. Only this line disagreed.
 - [~] Hosted Checkout and customer portal Vercel Functions exist as a secure
       single-Max skeleton. Extend them for Starter, scan credits, trial
       eligibility and age enforcement before adding live keys.
