@@ -135,10 +135,14 @@ and Vercel configuration.
 
 ## Stage 3 — legal and trust
 
-### 3.1 Privacy policy — does not exist
+### 3.1 Privacy policy — written
 
-- [ ] Write and publish one. Required because the app requests camera access,
-      and required later by both app stores.
+- [x] `privacy.html`, served at `/privacy`. Static, no script, indexable, and
+      readable by someone who has accepted nothing — which is what an app-store
+      reviewer following a bare URL is.
+- [ ] Create the `privacy@truemax.app` and `support@truemax.app` inboxes. Both
+      documents name them, and a policy that names an address nobody reads is
+      worse than one that names none.
 
 The honest version is still strong but must name the exception precisely:
 images are processed on the device by default. A side-profile photo leaves the
@@ -147,11 +151,19 @@ corrected landmark positions to TrueMax for product improvement. State the
 purpose, private Supabase processing, 90-day maximum retention and deletion
 path. The front photo is not included.
 
-### 3.2 Terms — does not exist
+### 3.2 Terms — written
 
-- [ ] Publish terms covering the obvious: this is not medical advice, scores are
-      measurements against a reference sample rather than judgements of worth,
-      and no surgical or prescription guidance is given.
+- [x] `terms.html`, served at `/terms`. Covers the score's meaning and limits,
+      eligibility, billing and the 7-day trial, cancellation, acceptable use,
+      liability and governing law.
+- [x] The score's limits lead the document rather than sitting in a disclaimer
+      at the bottom: it measures geometry against a reference sample, and it is
+      not a measure of worth, health or attractiveness to any given person. It
+      also says plainly that if measuring your face is making you feel worse, a
+      doctor is a better next step than another scan. That paragraph is not
+      legally required. It is there because it is true, and because a product
+      that hands young men a number about their face should say it.
+- [ ] Confirm New Zealand as the governing-law jurisdiction, or change it.
 
 ### 3.3 Age gate — does not exist
 

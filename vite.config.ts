@@ -21,6 +21,11 @@ export default defineConfig({
         auth: resolve(import.meta.dirname, "auth.html"),
         quick: resolve(import.meta.dirname, "quick.html"),
         calib: resolve(import.meta.dirname, "calib.html"),
+        // Static, indexable, and carrying no script at all. The privacy policy
+        // in particular has to be readable by someone who has not accepted
+        // anything and by an app-store reviewer following a bare URL.
+        privacy: resolve(import.meta.dirname, "privacy.html"),
+        terms: resolve(import.meta.dirname, "terms.html"),
       },
     },
   },

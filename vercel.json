@@ -2,7 +2,9 @@
   "rewrites": [
     { "source": "/auth", "destination": "/auth.html" },
     { "source": "/quick", "destination": "/quick.html" },
-    { "source": "/calib", "destination": "/calib.html" }
+    { "source": "/calib", "destination": "/calib.html" },
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/terms", "destination": "/terms.html" }
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" }
