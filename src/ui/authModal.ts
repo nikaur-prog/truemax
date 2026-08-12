@@ -122,15 +122,9 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   document.body.classList.add("auth-modal-open");
   document.body.appendChild(activeOverlay);
 
-  // Mount the sheet before checking the session so the click has immediate
-  // visual feedback, even on a slow connection. Ignore a late session result
-  // if this particular sheet was closed or replaced in the meantime.
-  const user = await currentUser();
-  if (overlay !== activeOverlay || !activeOverlay.isConnected) return;
   const body = activeOverlay.querySelector(".acct-body") as HTMLElement;
-  if (user) renderSignedIn(body, user, options.notice);
-  else {
-    const initialMode = options.initialMode ?? (options.reason === "analysis" ? "signup" : "password");
+  const requestedMode = options.initialMode ?? (options.reason === "analysis" ? "signup" : null);
+  const renderSignedOut = (initialMode: AuthMode) => {
     renderAuthForm(body, {
       initialMode,
       context: options.reason === "analysis" ? "analysis" : "account",
@@ -144,6 +138,39 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
           renderSignedIn(body, signedInUser, options.notice);
         }
       },
+    });
+  };
+
+  // A deliberate Sign in / Sign up click should never wait on Supabase's
+  // persisted-session lock. Render the requested sheet now, then replace it
+  // with the account view only if a late session check proves the visitor is
+  // already signed in.
+  const sessionCheck = currentUser().catch(() => null);
+  if (requestedMode) {
+    renderSignedOut(requestedMode);
+    void sessionCheck.then((lateUser) => {
+      if (lateUser && overlay === activeOverlay && body.isConnected) {
+        renderSignedIn(body, lateUser, options.notice);
+      }
+    });
+    return;
+  }
+
+  // Automatic account openings (for example after Checkout) still prefer the
+  // signed-in view, but a stuck browser storage lock must not leave an endless
+  // loading sheet. Fall back to sign-in after a short bounded check.
+  const user = await Promise.race([
+    sessionCheck,
+    new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1200)),
+  ]);
+  if (overlay !== activeOverlay || !activeOverlay.isConnected) return;
+  if (user) renderSignedIn(body, user, options.notice);
+  else {
+    renderSignedOut("password");
+    void sessionCheck.then((lateUser) => {
+      if (lateUser && overlay === activeOverlay && body.isConnected) {
+        renderSignedIn(body, lateUser, options.notice);
+      }
     });
   }
 }
