@@ -11,10 +11,6 @@ import { rankShort } from "./ui/templates.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
-import { stillFrameStats } from "./engine/captureGuide.ts";
-import { detectOcclusion } from "./engine/occlusion.ts";
-import { frontPhotoRejection, headCoveringRejection, landmarkBox } from "./engine/photoEligibility.ts";
-import { detectHeadCovering } from "./engine/headCovering.ts";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.ts";
 
 // ---------------------------------------------------------------------------
@@ -123,13 +119,20 @@ async function openCamera(): Promise<void> {
       video: el.video,
       guideCanvas: el.guide,
       onCheck: (c) => {
-        ready = c.ready;
-        el.hintTitle.textContent = c.hint;
-        el.hintDetail.textContent = c.detail;
-        el.hint.classList.toggle("ready", c.ready);
-        el.lampFill.className = c.status === "green" ? "green" : c.status;
-        el.lampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
-        el.shoot.disabled = !c.ready;
+        // Quick is a creator tool, not the accuracy-sensitive analysis flow.
+        // Once the detector can see a face, never hold the shutter for focus,
+        // lighting, expression, pose, crop, glasses, or framing. Those checks
+        // made ordinary webcam footage impossible to film and add no value to
+        // a short-form clip whose main job is simply capturing the creator.
+        ready = c.gates.face;
+        el.hintTitle.textContent = ready ? "Ready to capture" : "Center your face in the frame";
+        el.hintDetail.textContent = ready
+          ? "Quick mode accepts the frame as shown"
+          : "Looking for one visible face…";
+        el.hint.classList.toggle("ready", ready);
+        el.lampFill.className = ready ? "green" : "red";
+        el.lampFill.style.width = ready ? "100%" : "0%";
+        el.shoot.disabled = !ready;
       },
     });
   } catch {
@@ -190,20 +193,9 @@ async function run(src: HTMLCanvasElement): Promise<void> {
     return;
   }
   const lm = det.faceLandmarks[0];
-  const stats = stillFrameStats(src, landmarkBox(lm));
-  const occlusion = detectOcclusion(src, lm, src.width, src.height);
-  const rejection = frontPhotoRejection(q, stats, occlusion, lm, src.width, src.height);
-  if (rejection) {
-    el.hintTitle.textContent = rejection.title;
-    el.hintDetail.textContent = rejection.detail;
-    return;
-  }
-  const covering = headCoveringRejection(await detectHeadCovering(src));
-  if (covering) {
-    el.hintTitle.textContent = covering.title;
-    el.hintDetail.textContent = covering.detail;
-    return;
-  }
+  // Deliberately no quality rejection here. /quick exists for filming social
+  // clips, so a detected face proceeds even if the full scan would warn about
+  // softness, lighting, expression, glasses, framing, or camera angle.
   // No demographic question in front of the score — on a page built for
   // filming, that is the one interaction guaranteed to end up in the clip. The
   // stored choice is used if there is one, and the label on the card is a
