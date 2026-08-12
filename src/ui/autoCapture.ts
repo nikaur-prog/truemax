@@ -35,7 +35,16 @@ interface Opts {
 }
 
 export function createAutoCapture(opts: Opts): AutoCapture {
-  const total = (opts.seconds ?? 2.5) * 1000;
+  const total = (opts.seconds ?? 1.5) * 1000;
+  // Two beeps then the shutter, evenly spaced, however long the timer is.
+  //
+  // This used to tick once per whole SECOND, which tied the number of beeps to
+  // the duration: shortening the countdown to 1.5s under that rule would have
+  // produced a single lonely beep and then a shutter, which does not read as a
+  // countdown at all. Counting in fixed steps instead means the rhythm is the
+  // same — beep, beep, click — whether the wait is 1.5 seconds or three.
+  const STEPS = 2;
+  const stepMs = total / STEPS;
   let startedAt = 0;
   let raf = 0;
   let lastBeep = -1;
@@ -52,14 +61,13 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     if (!startedAt || fired) return;
     const elapsed = now - startedAt;
     const remaining = Math.max(0, total - elapsed);
-    // Clamped to the whole seconds the duration actually contains. Without the
-    // clamp a 2.5s countdown opens on "3" — ceil(2.5) — so it reads and sounds
-    // like a three second wait, which is not what it is. Counting 2, 1 over 2.5
-    // seconds is the honest display of the same timer.
-    const whole = Math.min(Math.floor(total / 1000), Math.ceil(remaining / 1000));
+    // Steps remaining, not seconds remaining. Both the beep and the number on
+    // screen come from the same counter, so what you hear and what you see can
+    // never disagree.
+    const whole = Math.min(STEPS, Math.ceil(remaining / stepMs));
 
-    // One tick per whole second as it falls. Counting down out loud is what a
-    // person turned away from the screen actually has.
+    // Counting down out loud is the whole point: on the side capture the person
+    // is turned away from the screen and the audio is all they have.
     if (whole !== lastBeep && whole > 0) {
       lastBeep = whole;
       tick(whole);

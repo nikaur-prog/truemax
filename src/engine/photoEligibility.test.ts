@@ -50,8 +50,18 @@ test("a clear straight front photo passes the upload gate", () => {
 });
 
 test("front uploads reject diagonal pose instead of silently pose-correcting it", () => {
-  const rejection = frontPhotoRejection(quality({ yawDeg: 11 }), stats, occlusion, landmarks, 1200, 1600);
+  const rejection = frontPhotoRejection(quality({ yawDeg: 20 }), stats, occlusion, landmarks, 1200, 1600);
   assert.match(rejection?.title ?? "", /turned too far/i);
+});
+
+// The gate still exists; it just sits where the measurements actually need it.
+// A hand-held phone is never dead square to a face, and refusing eleven degrees
+// of turn — comfortably inside the envelope assessQuality pose-corrects over —
+// rejected photographs that were fine and asked people to fix a tilt the engine
+// had already removed.
+test("front uploads accept the ordinary imprecision of a hand-held phone", () => {
+  assert.equal(frontPhotoRejection(quality({ yawDeg: 11 }), stats, occlusion, landmarks, 1200, 1600), null);
+  assert.equal(frontPhotoRejection(quality({ pitchDeg: 15 }), stats, occlusion, landmarks, 1200, 1600), null);
 });
 
 test("front uploads reject covered eyes, severe blur and cropped faces", () => {

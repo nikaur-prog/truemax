@@ -69,29 +69,45 @@ export interface Viewport {
   visH: number;
 }
 const FULL_VIEW: Viewport = { visW: 1, visH: 1 };
-// A skin/blemish read needs a substantially cleaner source than the geometry
-// engine can sometimes recover from. At larger turns one cheek is foreshortened
-// and partly hidden; pose-normalising landmarks cannot restore the missing skin
-// pixels. Keep live capture inside the same strict envelope used for uploads.
-export const FRONT_YAW_OK = 8;
-// Structural ratios can tolerate more pitch after pose correction, but the
-// visible-skin trial cannot: a high or low camera hides pixels and changes the
-// way texture catches the light. The stricter 10-degree capture envelope is
-// therefore shared by the live camera and file uploads.
-export const FRONT_PITCH_OK = 10;
+// How far off-axis a capture may be.
+//
+// These were 8 / 10 / 5, and that was the wrong standard by a wide margin: it
+// held the shutter for a pose roughly two and a half times tighter than the
+// measurements need. assessQuality accepts yaw to 28 and pitch to 26 precisely
+// because the geometry is pose-corrected, and those numbers mark where LANDMARK
+// accuracy starts to degrade from self-occlusion, not where the maths breaks.
+// Asking someone to raise or lower a hand-held phone over four degrees of pitch
+// is asking them to correct something the engine had already corrected.
+//
+// The old envelope was justified by the skin read rather than the geometry, and
+// that justification does not survive the numbers either: a cheek does not begin
+// to hide until roughly 25-30 degrees of turn. At 14 the whole face is still
+// square to the lens. So the band moves to a little over half of what the
+// engine tolerates, which keeps real margin for landmark quality while ending
+// the nagging.
+export const FRONT_YAW_OK = 14;
+export const FRONT_PITCH_OK = 18;
+// Roll is the most forgiving of the three: it is a rotation in the image plane,
+// so it costs no pixels and is undone exactly. It was the tightest.
+export const FRONT_ROLL_OK = 10;
 
-// Side-profile pitch band. Tighter than the front in the tucked direction
-// because a tucked chin HIDES anatomy the side measurements need, rather than
-// merely skewing it — see checkSideFrame. Negative pitch is chin-down.
-const SIDE_PITCH_DOWN = 8;
-const SIDE_PITCH_UP = 26;
-export const FRONT_ROLL_OK = 5;
+// Side-profile pitch band. Still tighter than the front in the tucked direction,
+// because a tucked chin HIDES anatomy the side measurements need rather than
+// merely skewing it — see checkSideFrame. But 8 degrees was inside the noise of
+// a pitch estimate taken from a half-occluded profile mesh, so it was refusing
+// level heads. Negative pitch is chin-down.
+const SIDE_PITCH_DOWN = 14;
+const SIDE_PITCH_UP = 32;
 // Mild expression is still measurable. The former 0.25 cutoff rejected a
 // relaxed mouth corner as a smile; reserve the block for a clear smile that
 // materially shifts cheeks, lips and jaw.
 export const FRONT_SMILE_OK = 0.42;
-export const PHOTO_DARK = 48; // mean luma, 0-255
-export const PHOTO_BRIGHT = 225;
+// Lighting. Widened at both ends: these block the capture outright, and a face
+// lit well enough to see is a face well enough lit to measure. The metrics that
+// actually care about light — the skin reads — are ratios and trimmed
+// percentiles built to survive it.
+export const PHOTO_DARK = 38; // mean luma, 0-255
+export const PHOTO_BRIGHT = 235;
 // Sharpness. Measured on the FACE CROP, not the whole scene.
 //
 // This used to be the mean absolute Laplacian of the crop, gated at 9. That

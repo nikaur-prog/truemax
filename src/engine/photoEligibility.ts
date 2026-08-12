@@ -179,13 +179,25 @@ export function sidePhotoRejection(
   // drag any missed point before a score exists. Only a clearly frontal shot
   // is blocked here; detector uncertainty and silhouette "crop" guesses are
   // allowed through to that review step.
-  if (quality.faceFound && Math.abs(quality.yawDeg) < 35) {
+  // Both gates below read a pose estimated from a HALF-OCCLUDED mesh. On a real
+  // profile the far side of the face is gone, and MediaPipe's yaw and pitch get
+  // correspondingly noisy — yaw in particular reads well short of the true turn,
+  // so the better the profile, the more these two under-report it. That is the
+  // wrong way round for a gate, and it is why photographs that are obviously
+  // fine to a human were being refused.
+  //
+  // So both are widened to catch only what is unambiguous: a shot that is
+  // plainly still frontal, and a chin plainly buried in the chest. Everything
+  // between goes to the thirteen-point review, where the person can see their
+  // own photograph and drag anything that missed — which is the same reasoning
+  // the comment above already applies to silhouette crop guesses.
+  if (quality.faceFound && Math.abs(quality.yawDeg) < 25) {
     return {
       title: "Sorry, you are not sideways enough in this photo.",
       detail: "Turn farther until the nose is in silhouette and one ear faces the camera.",
     };
   }
-  if (quality.faceFound && (quality.pitchDeg < -8 || quality.pitchDeg > 26)) {
+  if (quality.faceFound && (quality.pitchDeg < -20 || quality.pitchDeg > 38)) {
     return {
       title: "Sorry, your chin angle hides part of the profile.",
       detail: "Keep your head level so the jaw corner and the line under your chin are visible.",
