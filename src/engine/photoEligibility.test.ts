@@ -83,7 +83,7 @@ test("side uploads reject a detected three-quarter view", () => {
   assert.match(rejection?.title ?? "", /not sideways enough/i);
 });
 
-test("a detected turn still rejects a profile whose anatomy is cropped", () => {
+test("a detected profile ignores a background silhouette crop false-positive", () => {
   const rejection = sidePhotoRejection(
     quality({ yawDeg: 70 }),
     stats,
@@ -91,12 +91,17 @@ test("a detected turn still rejects a profile whose anatomy is cropped", () => {
     1200,
     1600,
   );
-  assert.match(rejection?.title ?? "", /cut off/i);
+  assert.equal(rejection, null);
 });
 
-test("a strong three-quarter turn is still not a full profile", () => {
+test("a strong, measurable turn is accepted even when it is not mathematically 90 degrees", () => {
   const rejection = sidePhotoRejection(quality({ yawDeg: 70 }), stats, silhouette(), 1200, 1600);
-  assert.match(rejection?.title ?? "", /not sideways enough/i);
+  assert.equal(rejection, null);
+});
+
+test("a relaxed partial smile passes but a broad smile still blocks", () => {
+  assert.equal(frontPhotoRejection(quality({ smileScore: 0.34 }), stats, occlusion, landmarks, 1200, 1600), null);
+  assert.match(frontPhotoRejection(quality({ smileScore: 0.72 }), stats, occlusion, landmarks, 1200, 1600)?.title ?? "", /neutral expression/i);
 });
 
 test("detector loss is not accepted as proof of a side profile", () => {

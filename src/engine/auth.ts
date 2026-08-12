@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 // ---------------------------------------------------------------------------
@@ -14,8 +15,11 @@ import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/s
 // environment the whole feature is inert: no account button and no auth
 // network requests. Production supplies the public client settings.
 //
-// The client library is dynamically imported on first use, so the ~120KB it
-// weighs never lands on a visitor who only wants a scan.
+// Auth used to be dynamically imported on first click. A person who kept the
+// page open across a deployment could then request an obsolete hashed chunk;
+// the request failed before Supabase saw it and signup misleadingly reported
+// that the sign-in service was unreachable. Keep the small client in the
+// versioned application bundle so the form and its auth code can never drift.
 // ---------------------------------------------------------------------------
 
 interface AuthEnv {
@@ -57,8 +61,8 @@ export async function getSupabaseClient(): Promise<SupabaseClient> {
   const env = authEnv();
   if (!env) throw new Error("Auth is not configured");
   if (!clientPromise) {
-    clientPromise = import("@supabase/supabase-js").then((m) =>
-      m.createClient(env.url, env.key, {
+    clientPromise = Promise.resolve(
+      createClient(env.url, env.key, {
         auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
       }),
     );
@@ -116,8 +120,9 @@ export async function signUp(email: string, password: string): Promise<AuthResul
     });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true, needsConfirmation: !data.session };
-  } catch {
-    return { ok: false, message: "Could not reach the sign-in service. Try again." };
+  } catch (error) {
+    console.error("TrueMax signup client failure", error);
+    return { ok: false, message: clientFailure(error, "Could not reach the sign-in service. Refresh the page and try again.") };
   }
 }
 
@@ -127,8 +132,9 @@ export async function signIn(email: string, password: string): Promise<AuthResul
     const { error } = await c.auth.signInWithPassword({ email, password });
     if (error) return { ok: false, message: friendly(error.message) };
     return { ok: true };
-  } catch {
-    return { ok: false, message: "Could not reach the sign-in service. Try again." };
+  } catch (error) {
+    console.error("TrueMax sign-in client failure", error);
+    return { ok: false, message: clientFailure(error, "Could not reach the sign-in service. Refresh the page and try again.") };
   }
 }
 
@@ -262,7 +268,9 @@ export function onAuthChange(
 function friendly(msg: string): string {
   const m = msg.toLowerCase();
   if (m.includes("already registered")) return "That email already has an account. Sign in instead.";
-  if (m.includes("invalid login")) return "Email or password is wrong.";
+  if (m.includes("invalid login")) return "Email address or password not found.";
+  if (m.includes("email address not authorized"))
+    return "Email signup is awaiting production email setup. Continue with Google for now.";
   if (m.includes("provider is not enabled") || m.includes("unsupported provider"))
     return "That sign-in option is not enabled yet.";
   if (m.includes("same password")) return "Choose a password you have not used for this account.";
@@ -272,4 +280,10 @@ function friendly(msg: string): string {
   if (m.includes("email")) return "That does not look like a valid email.";
   if (m.includes("rate limit")) return "Too many tries. Wait a minute and try again.";
   return "Something went wrong. Try again.";
+}
+
+function clientFailure(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/failed to fetch|network|load chunk|dynamically imported/i.test(message)) return fallback;
+  return friendly(message);
 }

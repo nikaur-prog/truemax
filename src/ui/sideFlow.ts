@@ -84,6 +84,7 @@ const el = () => ({
   hint: document.getElementById("side-hint")!,
   lamp: document.getElementById("side-lamp")!,
   lampFill: document.getElementById("side-lamp-fill")!,
+  turnCue: document.getElementById("side-turn-cue")!,
 });
 
 function renderSideCaptureCopy(copy: HTMLElement): void {
@@ -169,6 +170,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   e.drop.classList.add("hidden");
   e.live.classList.remove("hidden");
   e.frame.classList.add("live");
+  e.turnCue.classList.remove("hidden");
   e.cap.textContent = "LINE UP YOUR PROFILE";
   // The gate remembers having seen the head turn, so that losing the face can
   // be read as "they turned away" rather than "there was never anyone there".
@@ -202,6 +204,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       mode: "side",
       onCheck: (c) => {
         ready = c.ready;
+        e.turnCue.classList.toggle("hidden", c.ready || Math.abs(c.pose.yaw) >= 38);
         auto?.update(c.ready);
         // While the count is running the hint belongs to the countdown, which
         // has just written it. Only the two text lines are skipped — the lamp
@@ -295,6 +298,7 @@ function stopSideCamera(): void {
   void setRunningMode("IMAGE");
   const e = el();
   e.live.classList.add("hidden");
+  e.turnCue.classList.add("hidden");
   e.frame.classList.remove("live");
 }
 
@@ -371,6 +375,21 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
     const span = e.drop.querySelector("span");
     if (b) b.textContent = rejection.title;
     if (span) span.textContent = rejection.detail;
+    // The rejected still stays visible so the person can see what failed, but
+    // the primary action must start a fresh camera. Previously it still said
+    // Capture while the camera had already been stopped, leaving the flow
+    // permanently stuck.
+    const retake = ctx.method === "upload"
+      ? ""
+      : `<button class="btn pri" id="side-retake">Retake photo</button>`;
+    const upload = `<button class="btn ${ctx.method === "upload" ? "pri" : "gho"}" id="side-repick">Upload another photo</button>`;
+    e.actions.innerHTML = `${retake}${upload}<button class="btn cancel" id="side-reject-cancel">Cancel</button>`;
+    document.getElementById("side-retake")?.addEventListener("click", () => void openSideCamera(ctx));
+    document.getElementById("side-repick")?.addEventListener("click", () => e.input.click());
+    document.getElementById("side-reject-cancel")?.addEventListener("click", () => {
+      close();
+      ctx.onBack();
+    });
     return;
   }
 

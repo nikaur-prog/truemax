@@ -173,13 +173,18 @@ export function sidePhotoRejection(
       detail: "Use a sharp original with no portrait blur, smoothing or beauty filter.",
     };
   }
-  if (silhouette.reason === "cropped") {
+  // When MediaPipe still sees a strongly turned face, its face geometry is the
+  // better crop signal. The background silhouette includes shoulders, doors
+  // and furniture; treating any foreground pixel at the frame edge as a cut
+  // head rejected perfectly usable profiles.
+  const detectedProfile = quality.faceFound && Math.abs(quality.yawDeg) >= 60;
+  if (!detectedProfile && silhouette.reason === "cropped") {
     return {
       title: "Sorry, part of the profile is cut off.",
       detail: "Show the full forehead, nose, lips, chin, jaw, ear and neck with space around the head.",
     };
   }
-  if (quality.faceFound && Math.abs(quality.yawDeg) < 75) {
+  if (quality.faceFound && Math.abs(quality.yawDeg) < 60) {
     return {
       title: "Sorry, you are not sideways enough in this photo.",
       detail: "Use a full 90° profile: one ear toward the camera, nose in silhouette, eyes looking straight ahead.",
@@ -191,7 +196,7 @@ export function sidePhotoRejection(
       detail: "Keep your head level so the jaw corner and the line under your chin are visible.",
     };
   }
-  if (!silhouette.usable) {
+  if (!detectedProfile && !silhouette.usable) {
     const copy: Record<NonNullable<SideSilhouetteCheck["reason"]>, PhotoRejection> = {
       "no-head": {
         title: "Sorry, we couldn't verify a head in that profile photo.",
