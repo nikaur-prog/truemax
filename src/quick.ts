@@ -15,7 +15,7 @@ import { stillFrameStats } from "./engine/captureGuide.ts";
 import { detectOcclusion } from "./engine/occlusion.ts";
 import { frontPhotoRejection, headCoveringRejection, landmarkBox } from "./engine/photoEligibility.ts";
 import { detectHeadCovering } from "./engine/headCovering.ts";
-import { downloadQuickVideo } from "./ui/quickVideoExport.ts";
+import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.ts";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -76,11 +76,44 @@ initLandmarker()
     // built to be filmed, so a creator needs to start the preview on cue rather
     // than have it spring open the moment the page loads. Matches the main app,
     // which also no longer auto-opens.
+    if (import.meta.env.DEV && new URLSearchParams(location.search).get("preview") === "video") {
+      void loadPreviewPhoto();
+    }
   })
   .catch(() => {
     el.engine.textContent = "ENGINE FAILED TO LOAD · REFRESH";
     el.engine.classList.add("error");
   });
+
+async function loadPreviewPhoto(): Promise<void> {
+  const response = await fetch("/demo/michael-b-jordan.jpg");
+  const blob = await response.blob();
+  const image = await loadImage(new File([blob], "preview.jpg", { type: blob.type }));
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth * 2;
+  canvas.height = image.naturalHeight * 2;
+  canvas.getContext("2d")!.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const result = detectStable(canvas);
+  const landmarks = result.faceLandmarks[0];
+  if (!landmarks) return;
+  el.capture.classList.add("hidden");
+  el.result.classList.remove("hidden");
+  el.cards.innerHTML = `<div class="q-actions"><button class="btn pri" id="q-preview-export">Export preview MP4</button></div>`;
+  el.stage.classList.add("q-video-preview");
+  const regions = ["Eyes", "Jaw", "Chin", "Midface", "Lips", "Nose", "Symmetry", "Proportions"]
+    .map((name, i) => ({ name, score: [7.2, 7.8, 7.1, 6.9, 7.4, 6.8, 8.1, 7.3][i] }));
+  renderQuickVideoFrame(el.shot, canvas, landmarks, "male", {
+    overall: 7.4,
+    percentile: 82,
+    regions,
+  }, 4.2);
+  document.getElementById("q-preview-export")!.onclick = () => void downloadQuickVideo(
+    canvas,
+    landmarks,
+    "male",
+    { overall: 7.4, percentile: 82, regions },
+  );
+}
 
 async function openCamera(): Promise<void> {
   if (cam || !isSupported()) return;
