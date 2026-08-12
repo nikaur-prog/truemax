@@ -54,17 +54,28 @@ test("front uploads reject diagonal pose instead of silently pose-correcting it"
   assert.match(rejection?.title ?? "", /turned too far/i);
 });
 
-test("front uploads reject covered eyes, blur and cropped faces", () => {
+test("front uploads reject covered eyes, severe blur and cropped faces", () => {
   assert.match(
     frontPhotoRejection(quality(), stats, { ...occlusion, glassesStrong: true }, landmarks, 1200, 1600)?.detail ?? "",
     /Remove glasses/i,
   );
   assert.match(
-    frontPhotoRejection(quality(), { ...stats, sharpness: 0.2 }, occlusion, landmarks, 1200, 1600)?.title ?? "",
+    frontPhotoRejection(quality(), { ...stats, sharpness: 0.12 }, occlusion, landmarks, 1200, 1600)?.title ?? "",
     /blurred/i,
   );
   const cropped = [{ x: 0.01, y: 0.1, z: 0 }, landmarks[1]] as NormalizedLandmark[];
   assert.match(frontPhotoRejection(quality(), stats, occlusion, cropped, 1200, 1600)?.title ?? "", /cut off/i);
+});
+
+test("a usable webcam frame between the focus warning and block floor is accepted", () => {
+  assert.equal(
+    frontPhotoRejection(quality(), { ...stats, sharpness: 0.2 }, occlusion, landmarks, 1200, 1600),
+    null,
+  );
+  assert.equal(
+    sidePhotoRejection(quality({ faceFound: false, pass: false }), { ...stats, sharpness: 0.2 }, silhouette(), 1200, 1600),
+    null,
+  );
 });
 
 test("side uploads reject a detected three-quarter view", () => {

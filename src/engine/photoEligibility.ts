@@ -9,7 +9,7 @@ import {
   FRONT_YAW_OK,
   PHOTO_BRIGHT,
   PHOTO_DARK,
-  PHOTO_SHARP_WARN,
+  PHOTO_SHARP_BLOCK,
 } from "./captureGuide.ts";
 import type { FrameStats } from "./captureGuide.ts";
 
@@ -135,7 +135,11 @@ export function frontPhotoRejection(
       detail: "Move out of direct sunlight so skin colour and texture remain visible.",
     };
   }
-  if (stats.sharpness < PHOTO_SHARP_WARN) {
+  // The live guide starts warning at PHOTO_SHARP_WARN, but a warning is not a
+  // failed photograph. Only refuse a still below the calibrated hard floor.
+  // Using the warning threshold here made ordinary webcam frames impossible
+  // to capture even though the live gate correctly considered them usable.
+  if (stats.sharpness < PHOTO_SHARP_BLOCK) {
     return {
       title: "Sorry, that photo is too soft or blurred.",
       detail: "Use an in-focus original with no beauty filter, portrait blur, smoothing or heavy compression.",
@@ -163,7 +167,7 @@ export function sidePhotoRejection(
       detail: "Use soft light from the side of the camera so the brow, nose, lips, chin and jaw edge are all visible.",
     };
   }
-  if (stats.sharpness < PHOTO_SHARP_WARN) {
+  if (stats.sharpness < PHOTO_SHARP_BLOCK) {
     return {
       title: "Sorry, that profile photo is too blurred.",
       detail: "Use a sharp original with no portrait blur, smoothing or beauty filter.",

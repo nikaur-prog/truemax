@@ -19,7 +19,7 @@ import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.ts";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.ts";
-import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
+import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
 import { mountAccountButton, openAccount } from "./ui/authModal.ts";
@@ -250,7 +250,6 @@ refpop.addEventListener("click", (e) => {
   refpop.classList.remove("ask");
   storeSex(selectedSex);
   paintRefPop();
-  setGuideSex(selectedSex);
   showGuide(selectedSex);
 });
 paintRefPop();
@@ -268,12 +267,10 @@ function ensureSex(then: () => void): void {
     sexChosen = true;
     storeSex(sex);
     paintRefPop();
-    setGuideSex(sex);
     showGuide(sex);
     then();
   });
 }
-setGuideSex(selectedSex);
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
@@ -901,7 +898,6 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
       selectedSex = sex;
       storeSex(sex);
       paintRefPop();
-      setGuideSex(sex);
       if (!lastSide) return;
       const f = analyze(landmarks, width, height, sex);
       const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
@@ -924,7 +920,12 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
 // That ordering is the acquisition flow: let them experience the scan first,
 // then ask for identity only at the moment the result becomes valuable.
 async function gateAnalysis(sideReport: Report): Promise<void> {
-  if (!isAuthAvailable() || await currentUser()) {
+  // A temporary auth/session read failure must never strand a signed-out user
+  // on an empty result view. Treat an unreadable session as signed out and
+  // present the account gate, which remains usable as the fallback screen even
+  // if the modal itself cannot open.
+  const user = await currentUser().catch(() => null);
+  if (!isAuthAvailable() || user) {
     await submitConsentedSideFeedback();
     await runFullAnalysis(sideReport);
     return;
@@ -950,21 +951,21 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "SCAN READY";
   el.status.innerHTML = saved
-    ? "<b>Both views captured.</b> Create your account to run the analysis."
+    ? "<b>Both views captured.</b> Sign up or log in to run the analysis."
     : "<b>Both views captured.</b> Sign in with an existing account to continue.";
   el.barFill.style.width = "100%";
   el.analysis.innerHTML = `<section class="analysis-gate">
     <span class="klabel">YOUR SCAN IS READY</span>
-    <h2>Reveal your facial analysis</h2>
-    <p>Create a free account to see the score, measurements and personalised direction. ${lastSide?.feedback
+    <h2>Create an account to analyse your face</h2>
+    <p>In order to be able to analyze your face, you must create an account. Sign up or log in to continue. ${lastSide?.feedback
       ? "Your front photo stays on this device; the side feedback you approved is sent privately after sign-in."
       : "Your face photos stay on this device."}</p>
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
     <button type="button" class="btn pri analysis-gate-open">Create account and analyse</button>
   </section>`;
 
-  const openGate = () => {
-    void openAccount({
+  const openGate = async () => {
+    await openAccount({
       initialMode: saved ? "signup" : "password",
       reason: "analysis",
       onDeferred: () => {
@@ -978,10 +979,16 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
         await submitConsentedSideFeedback();
         await runFullAnalysis(sideReport);
       },
+    }).catch(() => {
+      // Keep the visible inline gate available if a browser blocks or fails to
+      // mount the modal. The user can retry without losing the scan.
+      el.status.innerHTML = "<b>Your scan is ready.</b> Sign up or log in to continue.";
     });
   };
-  el.analysis.querySelector(".analysis-gate-open")?.addEventListener("click", openGate);
-  openGate();
+  el.analysis.querySelector(".analysis-gate-open")?.addEventListener("click", () => void openGate());
+  // Mount after the result shell has painted. This avoids mobile browsers
+  // dropping the overlay while the capture view is being replaced.
+  requestAnimationFrame(() => void openGate());
 }
 
 let resumePendingStarted = false;
@@ -1019,7 +1026,6 @@ async function resumePendingAfterAuth(): Promise<void> {
   sexChosen = true;
   storeSex(saved.sex);
   paintRefPop();
-  setGuideSex(saved.sex);
   pending = {
     landmarks: saved.front.landmarks,
     width: saved.front.width,

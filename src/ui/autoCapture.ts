@@ -62,7 +62,7 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     // person turned away from the screen actually has.
     if (whole !== lastBeep && whole > 0) {
       lastBeep = whole;
-      tick();
+      tick(whole);
     }
     opts.onTick(whole);
 
@@ -143,9 +143,11 @@ function beep(freq: number, ms: number, gain: number): void {
   }
 }
 
-// A soft mid tick for each second of the count.
-function tick(): void {
-  beep(660, 90, 0.05);
+// Traffic-light progression: a low first beat, a higher second beat, then the
+// distinct high shutter ping. This matters most for the side photo, when the
+// person is looking away from the screen and cannot read visual directions.
+function tick(remaining: number): void {
+  beep(remaining >= 2 ? 440 : 660, 100, 0.055);
 }
 
 // A higher, longer tone the moment the photo is taken, so "it fired" is
