@@ -1,110 +1,124 @@
 # Payments (Stripe + Supabase) — setup
 
-The payment code is complete but deliberately ships unconfigured. Checkout is
-created by same-origin Vercel Functions, Stripe hosts the payment page, and a
-signature-verified webhook writes the resulting entitlement to Supabase. No
-Stripe secret or Supabase admin key is ever present in browser code.
+Stripe Checkout, the Customer Portal, a signed webhook and a Supabase
+entitlement read model already exist. They are a secure **single-Max-plan
+skeleton**, not the final two-plan billing implementation.
+
+See [`BILLING_CATALOG.md`](BILLING_CATALOG.md) for the connected-account audit,
+target product catalog and the bugs that must be fixed before accepting money.
+See [`PRICING_DECISION.md`](PRICING_DECISION.md) for the confirmed prices and
+the unresolved trial duration.
 
 ## Current verified state (12 August 2026)
 
-- The Stripe/Vercel/Supabase implementation exists in draft PR #16 and its
-  Vercel preview builds successfully.
-- The production Supabase project does **not** yet contain `entitlements` or
-  `stripe_webhook_events`.
-- Vercel currently contains only the two public Supabase browser variables.
-  None of the server-side Stripe or Supabase variables below are present.
-- Stripe product/price values cannot be read through the Supabase MCP. A Stripe
-  dashboard/connector check is still required to confirm the claimed pricing.
+- Stripe MCP is authenticated to the TrueMax account
+  `acct_1U3RfMJdkPdozJUk`.
+- That connected account currently has no active products, prices or webhook
+  endpoints.
+- The entitlement tables and hardened RPC exist in the production Supabase
+  project.
+- The app code supports only `free | max` and one `STRIPE_MAX_PRICE_ID`.
+- No sandbox checkout → webhook → entitlement → cancellation cycle has passed.
+- Do not point the existing endpoint at a live price: it cannot yet represent
+  Starter, scan credits, age restrictions or one-time trial eligibility.
 
-## 1. Install the entitlement schema
+## 1. Finalize the product rules
 
-Run `supabase/migrations/20260812000000_stripe_entitlements.sql` in the Supabase
-SQL Editor (or apply it with the Supabase CLI/MCP). It creates:
+Before payment code or store offers are published, choose 7 or 30 days for the
+trial and write the complete Starter/Max feature table. All remaining confirmed
+rules are recorded in `PRICING_DECISION.md`.
 
-- `entitlements`, readable only by the signed-in owner;
-- `stripe_webhook_events`, inaccessible to browser roles; and
-- `apply_stripe_entitlement`, a server-only, idempotent transaction that also
-  rejects older webhook state arriving after a newer event.
+## 2. Build the target server model
 
-Do this before enabling checkout. The checkout function intentionally refuses
-to take payment if entitlement storage is missing.
+The next payment PR must:
 
-## 2. Create the Stripe product and recurring price
+1. add `starter` to the entitlement model;
+2. add server-owned trial eligibility;
+3. add an immutable scan-credit ledger;
+4. permit only the four server-configured price IDs;
+5. check the under-18 restriction again on the server;
+6. prevent duplicate active subscriptions;
+7. cancel billing safely as part of paid-account deletion; and
+8. grant one-time credits only after Stripe reports a paid session.
 
-First resolve [`docs/PRICING_DECISION.md`](PRICING_DECISION.md). An older handoff
-mentions $6.99 and $11.99 tiers, while the current checkout and entitlement
-schema implement Free plus one recurring Max price. Currency, interval and the
-two-tier feature split were not preserved, so they must not be guessed.
+The browser must never send an arbitrary Stripe Price ID or decide that it is
+eligible for Max, a trial or the member scan price.
 
-In Stripe **test mode** first:
+## 3. Create the catalog in a Stripe sandbox
 
-1. Product catalogue → Add product → name it `TrueMax Max`.
-2. Add one recurring price using the billing interval and amount you decide.
-3. Copy its `price_...` ID. This becomes `STRIPE_MAX_PRICE_ID`.
-4. Settings → Billing → Customer portal: enable subscription cancellation and
-   payment-method updates, then save the portal configuration.
+Create these prices in a Stripe sandbox first:
 
-The price is never accepted from the browser; the server reads the one allowed
-price ID from its environment. Changing price later is a Vercel configuration
-change, not a client release, and existing subscriptions retain the server-set
-Max marker on their Stripe metadata.
+```text
+TrueMax Starter      $6.99 USD monthly
+TrueMax Max          $11.99 USD monthly
+TrueMax Extra Scan   $2.99 USD one-time member price
+TrueMax Extra Scan   $5.99 USD one-time standard price
+```
 
-## 3. Add server-only Vercel variables
+The two scan prices may belong to the same product, but only the server chooses
+which price applies. Keep the trial on the Checkout subscription rather than
+creating another Price.
 
-Vercel → TrueMax → Settings → Environment Variables:
+Configure the Customer Portal for payment-method updates, cancellation,
+invoice/receipt history and safe Starter/Max plan changes. Enable Stripe's
+trial-ending notice, successful-payment email, failed-payment email and Smart
+Retries. Keep the exact trial and renewal language visible before Checkout.
+
+## 4. Add server-only Vercel Preview variables
 
 ```text
 STRIPE_SECRET_KEY=sk_test_...
+STRIPE_STARTER_PRICE_ID=price_...
 STRIPE_MAX_PRICE_ID=price_...
+STRIPE_MEMBER_SCAN_PRICE_ID=price_...
+STRIPE_SCAN_PRICE_ID=price_...
 SUPABASE_URL=https://ruvgkrlfmixfnmnzqgap.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_...
 TRUEMAX_APP_URL=https://www.truemax.app
 ```
 
 Supabase's new `sb_secret_...` server key is preferred. A legacy project can set
-`SUPABASE_SERVICE_ROLE_KEY` instead. Neither key may start with `VITE_`, because
-every `VITE_` variable is eligible for the public browser bundle.
+`SUPABASE_SERVICE_ROLE_KEY` instead. Neither key may start with `VITE_`; every
+`VITE_` value is eligible for the public browser bundle.
 
-Set these for Preview first. Add Production values only after the full test-mode
-flow is green.
+Use sandbox/test secrets in Preview. Never paste a Stripe or Supabase secret
+into source control or a chat message.
 
-## 4. Deploy, then register the webhook
+## 5. Register the sandbox webhook
 
-Deploy once so this endpoint exists:
+After deploying the target payment PR, add a sandbox webhook destination:
 
 ```text
-https://www.truemax.app/api/stripe-webhook
+https://<the-preview-host>/api/stripe-webhook
 ```
 
-Stripe Workbench → Webhooks → Add destination. Select:
+Select the subscription, invoice, trial, paid Checkout, async-payment and refund
+events implemented by that PR. Put the destination's `whsec_...` value into the
+Preview environment as `STRIPE_WEBHOOK_SECRET`, then redeploy.
 
-- `checkout.session.completed`
-- `customer.subscription.created`
-- `customer.subscription.updated`
-- `customer.subscription.deleted`
+Stripe signs the exact raw request body. The handler must stay non-2xx on a
+temporary server failure so Stripe retries it, but repeated events must remain
+idempotent.
 
-Copy the destination signing secret (`whsec_...`) into Vercel as
-`STRIPE_WEBHOOK_SECRET`, then redeploy. Stripe signs the exact raw request body;
-the function rejects any event whose signature does not match.
+## 6. Sandbox acceptance test
 
-## 5. Test end to end
+Run at least these scenarios before creating live configuration:
 
-1. Sign in to the Vercel Preview deployment with a test account.
-2. Account → Upgrade to Max.
-3. Complete Stripe Checkout using a Stripe test payment method.
-4. Confirm Stripe shows a successful Checkout Session and delivered webhook.
-5. Confirm `public.entitlements` has that Supabase user ID with `tier = 'max'`
-   and `status = 'active'`.
-6. Return to Account and confirm **Max membership** appears.
-7. Manage billing → cancel at period end. Confirm the next webhook updates
-   `cancel_at_period_end` while access stays Max until Stripe ends the period.
-8. Replay the same webhook in Stripe. The row must not duplicate or regress.
+1. Starter trial signup and conversion to a first paid invoice.
+2. Max trial signup and conversion for an eligible adult.
+3. Max rejected server-side for an under-18 account.
+4. Second trial rejected for a previous trial user.
+5. Second subscription rejected for an already subscribed account.
+6. Upgrade, downgrade, cancel at period end and payment-method update in Portal.
+7. Successful, failed and recovered renewal.
+8. Weekly scan grant, expiry and no accidental rollover.
+9. $2.99 member scan and $5.99 free-user scan.
+10. Async payment: no credit until payment succeeds.
+11. Refund/chargeback credit reversal.
+12. Paid-account deletion cancels billing before deleting the identity.
+13. Duplicate and out-of-order webhook replay does not duplicate or regress
+    entitlement or credit state.
 
-Only after this test passes should the Stripe account be switched to live mode,
-with live `sk_live_...`, `price_...`, and `whsec_...` values added to Production.
-
-## What this PR does not do
-
-It establishes the trusted `free`/`max` entitlement and account controls. The
-actual product split—exactly which result and plan components Max unlocks—is
-Stage 2.3 and stays in its own reviewable change.
+Only after these pass should the sandbox products be copied to live mode. Live
+prices, `sk_live_...`, a separate live `whsec_...` and Production Vercel secrets
+are separate objects and must be configured deliberately.

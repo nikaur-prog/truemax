@@ -12,9 +12,9 @@ is not enforced, and the privacy/terms/age surfaces do not exist.
 
 This verdict assumes the MVP is:
 
-- a web product for adults;
+- a web product with an explicitly designed under-18 mode;
 - cosmetic/self-improvement information, not a medical or diagnostic service;
-- one free experience plus one recurring `Max` subscription;
+- one free analysis plus Starter and Max monthly subscriptions;
 - on-device photo processing, with no face photographs uploaded;
 - allowed to keep scan history on one device at launch (cross-device sync can
   follow), provided the UI says so honestly.
@@ -35,8 +35,8 @@ and a mobile smoke test are blockers.
 | Supabase security | Pass with one intentional warning | Anonymous execute on `delete_own_account` was removed. The advisor still flags authenticated execution because that RPC intentionally lets a signed-in user delete only itself. |
 | OAuth provider config | Fail | Public Auth settings report `google: false` and `apple: false`. Buttons remain disabled until Supabase is configured. |
 | Email readiness | Partial | Email confirmation is on. Custom SMTP and real-device confirmation/magic/reset tests are not verified. |
-| Stripe catalogue | Unverified | Supabase MCP cannot see Stripe products. Vercel has no `STRIPE_SECRET_KEY`, `STRIPE_MAX_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SECRET_KEY`, `SUPABASE_URL` or `TRUEMAX_APP_URL`. |
-| Payment code | Built, not revenue-tested | Draft PR #16 builds; the entitlement schema is now live; no test checkout/webhook/cancel cycle has run. |
+| Stripe catalogue | Verified empty | The authenticated Stripe connector reports no active products, prices or webhook endpoints in the connected TrueMax account. |
+| Payment code | Skeleton only | The entitlement schema is live and the secure single-Max flow builds, but it does not represent Starter, scan credits, age gates or one-time trial eligibility; no sandbox revenue cycle has run. |
 | Free vs Max enforcement | Fail | The reusable entitlement check exists, but result/plan features are not gated. |
 | Legal and age | Fail | Privacy policy, terms and the under-18 rule are absent. |
 | Measurement change | Awaiting merge | Cheekbone/bizygomatic fix and regenerated norms are in draft PR #15, not production. |
@@ -71,9 +71,9 @@ TrueMax is a paid web MVP only when all of these are green:
    magic link, reset and delete account using a real inbox.
 3. Enable Google. Enable Apple if it is required for the web audience or before
    an iOS release; record Apple secret renewal ownership.
-4. Add the six server-only payment variables in Vercel Preview, register the
-   Stripe test webhook and enable the customer portal.
-5. Complete test checkout → webhook → Max → cancel-at-period-end → replay.
+4. Resolve the 7-day versus 30-day trial, then implement the catalog and credit
+   ledger in `BILLING_CATALOG.md` before adding server-only Preview variables.
+5. Complete the full sandbox acceptance matrix in `PAYMENTS_SETUP.md`.
 6. Enforce the promised free/Max boundary in the product, not just the account
    badge.
 7. Publish privacy policy and terms; implement the under-18 product rule.

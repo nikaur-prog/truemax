@@ -97,10 +97,14 @@ and Vercel configuration.
 
 - [x] Decide the surface: Stripe for web. (RevenueCat only becomes relevant at
       the app-store stage.)
-- [ ] Confirm products and prices in Stripe. The Supabase/Vercel connections do
-      not expose the Stripe catalogue, and `STRIPE_MAX_PRICE_ID` is not set.
-- [~] Hosted Checkout and customer portal Vercel Functions. Needs Stripe test
-      and live keys plus `STRIPE_MAX_PRICE_ID` in Vercel.
+- [x] Audit the connected Stripe account. It currently contains no products,
+      prices or webhook endpoints.
+- [~] Confirm the USD catalog: Starter $6.99/month, Max $11.99/month, member
+      scan $2.99 and non-member scan $5.99. Trial duration still conflicts
+      between 7 and 30 days.
+- [~] Hosted Checkout and customer portal Vercel Functions exist as a secure
+      single-Max skeleton. Extend them for Starter, scan credits, trial
+      eligibility and age enforcement before adding live keys.
 - [~] **Knowing who paid** — the entitlement migration is applied to live
       Supabase. The webhook destination and server-only Vercel variables remain.
 - [x] Read the entitlement in the account UI and expose a reusable
@@ -111,9 +115,12 @@ and Vercel configuration.
 
 ### 2.3 Tier enforcement
 
-- [ ] Free / minimum tier: overview, generalised direction, progress tracking.
-- [ ] Max: personalisation, actionable steps, product tracking, follow-up.
-- [ ] The split is designed but nothing in the code enforces it yet.
+- [ ] Free: first analysis per verified account; exact ongoing feature access
+      still needs to be written.
+- [ ] Starter: exact features still need to be written; this is the only paid
+      plan available to under-18 users.
+- [ ] Max: Max AI plus the still-to-be-written premium feature set.
+- [ ] No result or plan components enforce this three-tier split yet.
 
 ---
 

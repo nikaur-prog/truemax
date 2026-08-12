@@ -81,6 +81,10 @@ clearly says that an unrequested message can be ignored without changing the
 password. A public “find my email” lookup is intentionally absent because it
 would reveal whether an address has a TrueMax account.
 
+The complete copy-paste Resend SMTP values, template map, Google console fields
+and Apple Developer fields are in
+[`SUPABASE_AUTH_PROVIDER_SETUP.md`](SUPABASE_AUTH_PROVIDER_SETUP.md).
+
 ## 4. Enable Google
 
 1. Create a Web OAuth client in Google Auth Platform.

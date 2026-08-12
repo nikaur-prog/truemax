@@ -34,9 +34,10 @@ production build.
 
 ## Install
 
-1. Configure a custom SMTP provider in **Supabase → Authentication → Emails →
-   SMTP Settings**. Supabase's default sender is only suitable for testing and
-   new Free-plan projects cannot customize its templates.
+1. Follow the exact Resend and provider setup in
+   [`docs/SUPABASE_AUTH_PROVIDER_SETUP.md`](../../docs/SUPABASE_AUTH_PROVIDER_SETUP.md).
+   Supabase's default sender is only suitable for testing and new Free-plan
+   projects cannot customize its templates.
 2. Open **Authentication → Emails → Templates**.
 3. Select each template, paste the matching subject and complete HTML file, and
    save.
