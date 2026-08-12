@@ -3,6 +3,7 @@ import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts"
 import { detectStable } from "./engine/consensus.ts";
 import { assessQuality } from "./engine/quality.ts";
 import { analyze } from "./engine/scoring.ts";
+import { aggregateScoreToPercentile } from "./engine/scoring.ts";
 import { REGION_NAMES } from "./engine/scoring.ts";
 import { isSupported, startCamera } from "./ui/camera.ts";
 import type { CameraHandle } from "./ui/camera.ts";
@@ -10,6 +11,11 @@ import { rankShort } from "./ui/templates.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
+import { stillFrameStats } from "./engine/captureGuide.ts";
+import { detectOcclusion } from "./engine/occlusion.ts";
+import { frontPhotoRejection, headCoveringRejection, landmarkBox } from "./engine/photoEligibility.ts";
+import { detectHeadCovering } from "./engine/headCovering.ts";
+import { downloadQuickVideo } from "./ui/quickVideoExport.ts";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -150,6 +156,21 @@ async function run(src: HTMLCanvasElement): Promise<void> {
     el.hintDetail.textContent = "Try again with the whole face in frame";
     return;
   }
+  const lm = det.faceLandmarks[0];
+  const stats = stillFrameStats(src, landmarkBox(lm));
+  const occlusion = detectOcclusion(src, lm, src.width, src.height);
+  const rejection = frontPhotoRejection(q, stats, occlusion, lm, src.width, src.height);
+  if (rejection) {
+    el.hintTitle.textContent = rejection.title;
+    el.hintDetail.textContent = rejection.detail;
+    return;
+  }
+  const covering = headCoveringRejection(await detectHeadCovering(src));
+  if (covering) {
+    el.hintTitle.textContent = covering.title;
+    el.hintDetail.textContent = covering.detail;
+    return;
+  }
   // No demographic question in front of the score — on a page built for
   // filming, that is the one interaction guaranteed to end up in the clip. The
   // stored choice is used if there is one, and the label on the card is a
@@ -158,7 +179,6 @@ async function run(src: HTMLCanvasElement): Promise<void> {
   // What is NOT used here is the shape model's guess. It classified a bearded
   // man as female while testing this page, and at 58.8% on held-out faces
   // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
-  const lm = det.faceLandmarks[0];
   last = { lm, w: src.width, h: src.height, photo: src };
   show(storedSex() ?? "male", true);
 }
@@ -245,7 +265,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     </div>
 
     <div class="q-actions">
-      <button class="btn pri" id="q-download">Download</button>
+      <button class="btn pri" id="q-download">Download image</button>
+      <button class="btn pri" id="q-video-download">Download MP4</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>`;
 
@@ -263,6 +284,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
   document.getElementById("q-sex")!.onclick = () => show(r.sex === "male" ? "female" : "male");
   document.getElementById("q-download")!.onclick = () => void downloadCard();
+  document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r);
   document.getElementById("q-again")!.onclick = () => {
     // Reset the stage, or the next scan starts already open with last scan's
     // landmarks still painted over the new photo.
@@ -330,7 +352,50 @@ function wireEditing(): void {
       n.textContent = v.toFixed(1);
       const bar = n.parentElement?.querySelector<HTMLElement>(".q-bar i");
       if (bar) bar.style.width = `${Math.max(2, Math.min(100, v * 10))}%`;
+      if (n.classList.contains("q-score-num")) {
+        const pct = aggregateScoreToPercentile(v);
+        const rank = el.cards.querySelector<HTMLElement>(".q-rank");
+        if (rank) rank.textContent = rankShort(pct);
+      }
     });
+  }
+}
+
+function editedExportScores(r: Report): { overall: number; percentile: number; regions: Array<{ name: string; score: number }> } {
+  const overall = parseFloat(el.cards.querySelector<HTMLElement>(".q-score-num")?.textContent ?? "") || r.overall;
+  const cells = [...el.cards.querySelectorAll<HTMLElement>(".q-cell")];
+  return {
+    overall,
+    percentile: overall === r.overall ? r.overallPercentile : aggregateScoreToPercentile(overall),
+    regions: cells.map((cell) => ({
+      name: cell.querySelector("span")?.textContent ?? "Feature",
+      score: parseFloat(cell.querySelector<HTMLElement>(".q-num")?.textContent ?? "") || 0,
+    })),
+  };
+}
+
+async function downloadVideo(r: Report): Promise<void> {
+  if (!last) return;
+  const btn = document.getElementById("q-video-download") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Building video…";
+  }
+  try {
+    await downloadQuickVideo(last.photo, last.lm, r.sex, editedExportScores(r), (progress) => {
+      if (btn) btn.textContent = `Building MP4 · ${Math.round(progress * 100)}%`;
+    });
+    if (btn) btn.textContent = "MP4 downloaded";
+  } catch (error) {
+    console.error(error);
+    if (btn) btn.textContent = "MP4 unavailable here";
+  } finally {
+    if (btn) {
+      window.setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Download MP4";
+      }, 1600);
+    }
   }
 }
 
@@ -341,7 +406,7 @@ async function downloadCard(): Promise<void> {
   const btn = document.getElementById("q-download") as HTMLButtonElement | null;
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Rendering…";
+    btn.textContent = "Rendering image…";
   }
   try {
     const { toPng } = await import("html-to-image");
@@ -356,7 +421,7 @@ async function downloadCard(): Promise<void> {
   } finally {
     if (btn && btn.textContent !== "Couldn't render") {
       btn.disabled = false;
-      btn.textContent = "Download";
+      btn.textContent = "Download image";
     }
   }
 }

@@ -108,7 +108,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "salicylic",
-    concerns: ["acne"],
+    concerns: ["acne", "pores"],
     group: "topical",
     goals: ["skin"],
     channel: "grooming",
@@ -117,6 +117,20 @@ export const RECS: Rec[] = [
     evidence: "moderate",
     detail: "Oil-soluble, so it reaches into blocked pores rather than just the surface. Best for congestion and blackheads.",
     otc: true,
+  },
+  {
+    id: "benzoyl-peroxide",
+    concerns: ["acne"],
+    group: "topical",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Benzoyl peroxide 2.5%",
+    what: "A lower-strength OTC starting point for inflamed spots",
+    evidence: "strong",
+    detail:
+      "Lower strengths can work with less irritation. Start slowly, follow the product label and give a mild breakout routine six to eight weeks before judging it.",
+    otc: true,
+    caution: "It can irritate skin and bleach towels, bedding and clothing. Stop and seek help for swelling or blistering.",
   },
   {
     id: "niacinamide",
@@ -159,7 +173,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "gentle-cleanse",
-    concerns: ["dryness", "redness"],
+    concerns: ["dryness", "redness", "scaling", "oiliness", "lips"],
     group: "habit",
     goals: ["skin"],
     channel: "grooming",
@@ -168,6 +182,43 @@ export const RECS: Rec[] = [
     evidence: "moderate",
     detail:
       "Reactive and persistently red skin is very often over-treated skin. Scrubs, hot water, astringent toners and stacking three actives at once all damage the barrier, and the damage looks like the problem people are treating. Cutting back is free and reverses in weeks.",
+  },
+  {
+    id: "razor-technique",
+    concerns: ["razorbumps"],
+    group: "habit",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Give the hair room to grow out",
+    what: "Pause close shaving when possible, or shave with the direction of growth",
+    evidence: "moderate",
+    detail:
+      "Soften the hair first, use a moisturising shaving cream, avoid stretching the skin and never pluck a hair from inside a bump. Persistent, painful or pus-filled bumps need a clinician because folliculitis can look similar.",
+  },
+  {
+    id: "milia-professional",
+    concerns: ["milia"],
+    group: "professional",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Identify the bump before removing it",
+    what: "A dermatologist can distinguish milia from look-alikes and extract it safely when appropriate",
+    evidence: "strong",
+    detail:
+      "Do not lance or squeeze a firm facial bump at home, particularly around the eyes. The scanner cannot confirm that a pale bump is milia.",
+  },
+  {
+    id: "silicone-scar",
+    concerns: ["scarring"],
+    group: "topical",
+    goals: ["skin"],
+    channel: "grooming",
+    title: "Silicone for a raised healing scar",
+    what: "Silicone gel or sheets—not for indented acne scars",
+    evidence: "moderate",
+    detail:
+      "Silicone may help a raised healing scar. Indented, tethered or keloid-like scars need classification first because the useful procedures are different.",
+    otc: true,
   },
   {
     id: "redness-triggers",

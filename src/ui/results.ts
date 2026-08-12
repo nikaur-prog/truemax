@@ -1044,7 +1044,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
 
   return `<div class="recs">
     <h4>WORTH TRYING</h4>
-    <p class="recs-note">Nothing here is a prescription, a supplement or a procedure. Over-the-counter items and facts about food only. It isn't medical advice and none of it is required; a pharmacist or doctor knows your situation and we don't. Where the evidence for something popular is weak, it says so.</p>
+    <p class="recs-note">Nothing here instructs you to use a prescription, supplement or at-home procedure. Over-the-counter items follow label directions; professional cards only explain options a qualified clinician may discuss after assessment. It isn't medical advice and none of it is required. Where evidence is weak, it says so.</p>
     ${sections}
   </div>`;
 }

@@ -4,6 +4,7 @@ import type { SidePointId, SidePoints } from "../engine/sideMetrics.ts";
 import { detect } from "../engine/landmarker.ts";
 import { cloneSidePoints } from "../engine/sideFeedbackPayload.ts";
 import type { SideSeedMethod } from "../engine/sideFeedbackPayload.ts";
+import type { SideSilhouetteCheck } from "../engine/photoEligibility.ts";
 
 // Drag-to-verify landmark editor for the side profile. MediaPipe can't place
 // true-profile landmarks reliably, so the app seeds a best guess from the
@@ -63,6 +64,17 @@ interface Mask {
   fg: Uint8Array;
   w: number;
   h: number;
+}
+
+interface SilhouetteGeometry {
+  mask: Mask;
+  top: number;
+  chin: number;
+  headH: number;
+  faceDir: number;
+  rowSpan: (y: number) => [number, number] | null;
+  wanderLeft: number;
+  wanderRight: number;
 }
 
 // Foreground mask by distance from a background colour model built from the
@@ -320,6 +332,106 @@ const TEMPLATE: Record<SidePointId, [number, number]> = {
   tragion: [-1.0, 0.435],
 };
 
+function silhouetteGeometry(canvas: HTMLCanvasElement): SilhouetteGeometry | null {
+  const m = foregroundMask(canvas);
+  const at = (x: number, y: number) => m.fg[y * m.w + x] === 1;
+  const rowSpan = (y: number): [number, number] | null => {
+    let a = -1;
+    let b = -1;
+    for (let x = 0; x < m.w; x++) if (at(x, y)) { a = x; break; }
+    for (let x = m.w - 1; x >= 0; x--) if (at(x, y)) { b = x; break; }
+    return a < 0 || b < a ? null : [a, b];
+  };
+
+  let top = -1;
+  for (let y = 0; y < m.h; y++) {
+    const span = rowSpan(y);
+    if (span && span[1] - span[0] > m.w * 0.06) { top = y; break; }
+  }
+  if (top < 0) return null;
+
+  let narrow = Infinity;
+  let chin = m.h - 1;
+  for (let y = top; y < m.h; y++) {
+    const span = rowSpan(y);
+    if (!span) continue;
+    const width = span[1] - span[0];
+    if (y < top + (m.h - top) * 0.55) narrow = Math.min(narrow, width);
+    else if (width > narrow * 1.5) { chin = y; break; }
+  }
+  const headH = chin - top;
+  if (!(headH > m.h * 0.15)) return null;
+
+  const wander = (side: "l" | "r"): number => {
+    let prev = -1;
+    let sum = 0;
+    let n = 0;
+    for (let y = top + Math.round(headH * 0.25); y < top + Math.round(headH * 0.95); y++) {
+      const span = rowSpan(y);
+      if (!span) continue;
+      const edge = side === "l" ? span[0] : span[1];
+      if (prev >= 0) { sum += Math.abs(edge - prev); n++; }
+      prev = edge;
+    }
+    return n ? sum / n : 0;
+  };
+  const wanderLeft = wander("l");
+  const wanderRight = wander("r");
+  return {
+    mask: m,
+    top,
+    chin,
+    headH,
+    faceDir: wanderRight >= wanderLeft ? 1 : -1,
+    rowSpan,
+    wanderLeft,
+    wanderRight,
+  };
+}
+
+// When a true profile makes the frontal face detector disappear, validate the
+// actual silhouette instead of treating detector failure as proof of a good
+// profile. This is conservative by design: a busy background can make the
+// answer inconclusive, in which case the guided camera is the safe fallback.
+export function assessSideSilhouette(canvas: HTMLCanvasElement): SideSilhouetteCheck {
+  const g = silhouetteGeometry(canvas);
+  if (!g) {
+    return { usable: false, reason: "no-head", headHeightFrac: 0, headWidthFrac: 0, nasalRelief: 0 };
+  }
+  const { mask: m, top, chin, headH, faceDir, rowSpan, wanderLeft, wanderRight } = g;
+  const edgeAt = (f: number): number | null => {
+    const span = rowSpan(Math.max(0, Math.min(m.h - 1, Math.round(top + headH * f))));
+    return span ? (faceDir === 1 ? span[1] : span[0]) : null;
+  };
+  let x0 = m.w;
+  let x1 = 0;
+  for (let y = top; y <= chin; y++) {
+    const span = rowSpan(y);
+    if (!span) continue;
+    x0 = Math.min(x0, span[0]);
+    x1 = Math.max(x1, span[1]);
+  }
+  const headHeightFrac = headH / m.h;
+  const headWidthFrac = Math.max(0, x1 - x0) / m.w;
+  const nose = edgeAt(0.5);
+  const bridge = edgeAt(0.33);
+  const upperLip = edgeAt(0.66);
+  const nasalRelief = nose == null || bridge == null || upperLip == null
+    ? 0
+    : faceDir * (nose - (bridge + upperLip) / 2) / Math.max(1, headH);
+  const cropped = top <= m.h * 0.02 || chin >= m.h * 0.985 || x0 <= 0 || x1 >= m.w - 1;
+  const asymmetric = Math.max(wanderLeft, wanderRight) >= Math.max(0.45, Math.min(wanderLeft, wanderRight) * 1.18);
+  const profileLike = nasalRelief >= 0.035 && asymmetric;
+  const reason: SideSilhouetteCheck["reason"] = cropped
+    ? "cropped"
+    : headHeightFrac < 0.38 || headWidthFrac < 0.2
+      ? "too-small"
+      : profileLike
+        ? null
+        : "not-profile";
+  return { usable: reason === null, reason, headHeightFrac, headWidthFrac, nasalRelief: +nasalRelief.toFixed(4) };
+}
+
 // Where pogonion sits on the head axis. The axis is defined by it, so this is
 // what converts the measured trichion-to-pogonion length back into a full
 // hairline-to-chin head height.
@@ -498,40 +610,9 @@ export function seedFromSilhouette(
 ): { points: SidePoints; faceDir: number } {
   const w = canvas.width;
   const h = canvas.height;
-  const m = foregroundMask(canvas);
-  const at = (x: number, y: number) => m.fg[y * m.w + x] === 1;
-
-  // Head band: the upper part of the foreground, above the shoulders. Rows are
-  // scanned for their foreground extent, and the head is where that extent is
-  // narrow — shoulders are wide.
-  const rowSpan = (y: number): [number, number] | null => {
-    let a = -1;
-    let b = -1;
-    for (let x = 0; x < m.w; x++) if (at(x, y)) { a = x; break; }
-    for (let x = m.w - 1; x >= 0; x--) if (at(x, y)) { b = x; break; }
-    return a < 0 || b < a ? null : [a, b];
-  };
-
-  let top = -1;
-  for (let y = 0; y < m.h; y++) {
-    const s = rowSpan(y);
-    if (s && s[1] - s[0] > m.w * 0.06) { top = y; break; }
-  }
-  if (top < 0) top = Math.round(m.h * 0.1);
-
-  // The chin is where the silhouette stops narrowing and starts widening into
-  // the neck and shoulders. Taken as the first row below the head's midpoint
-  // whose span exceeds 1.5x the narrowest span found so far.
-  let narrow = Infinity;
-  let chin = m.h - 1;
-  for (let y = top; y < m.h; y++) {
-    const s = rowSpan(y);
-    if (!s) continue;
-    const width = s[1] - s[0];
-    if (y < top + (m.h - top) * 0.55) narrow = Math.min(narrow, width);
-    else if (width > narrow * 1.5) { chin = y; break; }
-  }
-  const headH = Math.max(8, chin - top);
+  const g = silhouetteGeometry(canvas);
+  if (!g) return centredSeed(w, h);
+  const { mask: m, top, headH, faceDir, rowSpan } = g;
 
   // The background model assumes the top corners of the frame ARE background,
   // which holds for a portrait and fails for a tight crop where those corners
@@ -542,27 +623,6 @@ export function seedFromSilhouette(
   if (top <= m.h * 0.02 && headH >= m.h * 0.85) {
     return centredSeed(w, h);
   }
-
-  // Which way the face points, decided INSIDE the head's own box rather than
-  // against the frame. The back of a head is a smooth convex curve; the front
-  // is not — brow, nose, lips and chin all stick out and cut back in. So the
-  // side whose edge wanders more is the face. Measured as the mean absolute
-  // change in edge position from row to row, down the middle of the head where
-  // the features are.
-  const wander = (side: "l" | "r"): number => {
-    let prev = -1;
-    let s = 0;
-    let n = 0;
-    for (let y = top + Math.round(headH * 0.25); y < top + Math.round(headH * 0.95); y++) {
-      const sp = rowSpan(y);
-      if (!sp) continue;
-      const e = side === "l" ? sp[0] : sp[1];
-      if (prev >= 0) { s += Math.abs(e - prev); n++; }
-      prev = e;
-    }
-    return n ? s / n : 0;
-  };
-  const faceDir = wander("r") >= wander("l") ? 1 : -1;
 
   // Profile edge at a given fraction of head height, in source pixels.
   const edgeAt = (f: number): number => {

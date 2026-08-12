@@ -91,7 +91,7 @@ const ADVICE_STEP: Step = {
        ${chip("Food and drink", "adv:diet", "Body fat, sodium, alcohol")}
        ${chip("Sleep and habits", "adv:lifestyle", "Rest, posture, routine")}
      </div>
-     <p class="q-foot">Nothing here is medical advice, and there is nothing to buy: no supplements, no procedures, ever.</p>`,
+     <p class="q-foot">Nothing here is medical advice. There are no supplements or at-home procedures; professional options are clearly labelled and require a qualified clinician.</p>`,
   pick: (k, p) => {
     const c = k.slice(4) as AdviceChannel;
     p.advice[c] = !p.advice[c];

@@ -1162,7 +1162,7 @@ of a disagreement is what put the notch there. The oval now takes its pairs from
 the ring's own topology: walk both ways from the crown, and step k of one arc
 mirrors step k of the other. Mirror residual across all 36 oval points is zero.
 
-## Glasses are detected; hats and hoods are not
+## Glasses are calibrated; hats and hoods use an on-device trial model
 
 Horizontal edge energy across the nose bridge, over the same quantity on the
 person's own cheek. The ratio is what makes it portable — an absolute edge count
@@ -1175,15 +1175,21 @@ the photograph. Against a base rate near 8% that is real signal and it is not
 clean, so it never blocks the shutter and its wording is conditional — "if
 you're wearing glasses". A false positive then costs nothing.
 
-**Headwear was attempted and failed. Do not repeat it this way.** The feature was
+**The hand-built headwear feature was attempted and failed. Do not repeat it this way.** The feature was
 the strongest horizontal edge across the forehead, gated on the forehead being
 darker than the cheeks. Over the same 229 faces the twenty highest scores were
 seventeen people with hair on their forehead and three in headwear, and the
 shadow gate did not rescue it: the two clearest hats in the set were lit brightly
 enough to make the forehead LIGHTER than the cheeks. It caught one cap and two
-fringes. A fringe is far more common than a cap. Whatever eventually works will
-have to separate fabric from hair by texture, not by edges or by shadow. The
-capture screen asks instead.
+fringes. A fringe is far more common than a cap.
+
+The replacement does not use that proxy. `headCovering.ts` lazy-loads Google's
+SelfieMulticlass model, whose categories separate hair, face skin, clothes and
+accessories, and checks for clothes/accessories immediately above or beside the
+face-skin mask. The 16.4 MB model is self-hosted and SHA-256 pinned. This is an
+experimental capture gate, not a calibrated classifier: the spatial thresholds
+still require a labelled set covering hats, hoods, religious headwear, textured
+hair and bald heads before its error rates can be claimed.
 
 # Side profile: the seed was landing on the wall
 
@@ -1340,10 +1346,11 @@ face_landmarker (already loaded)                   3.7 MB
 ```
 
 The cheap one cannot tell a bald head from a covered one, and flagging bald
-users is a worse failure than the fringe problem it would replace. So the choice
-is 16 MB of extra download against detecting headwear at all, on a page whose
-audience arrives from a phone. That is a product decision rather than an
-engineering one and it has not been taken.
+users is a worse failure than the fringe problem it would replace. The product
+decision is now taken in favour of coverage: the 16 MB multiclass model loads
+only after the cheaper photo gates pass, rather than on page load. Its accuracy
+gate and mobile-latency benchmark remain open; see
+`docs/SKIN_ANALYSIS_TRIAL.md`.
 
 ## Glasses now hold the shutter, with a way past
 

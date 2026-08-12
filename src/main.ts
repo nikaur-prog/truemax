@@ -33,12 +33,16 @@ import type { AutoCapture } from "./ui/autoCapture.ts";
 import { openDashboard } from "./ui/dashboard.ts";
 import { mountFaceOutline } from "./ui/faceOutline.ts";
 import type { CameraHandle } from "./ui/camera.ts";
+import { stillFrameStats } from "./engine/captureGuide.ts";
 import type { FrameCheck } from "./engine/captureGuide.ts";
 import { estimateGaze } from "./engine/gaze.ts";
 import { openQuiz } from "./ui/goalsQuiz.ts";
 import { analyzeSkin } from "./engine/skin.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { detectOcclusion } from "./engine/occlusion.ts";
+import { frontPhotoRejection, landmarkBox } from "./engine/photoEligibility.ts";
+import { headCoveringRejection } from "./engine/photoEligibility.ts";
+import { detectHeadCovering } from "./engine/headCovering.ts";
 import { REGION_LANDMARKS } from "./ui/regions.ts";
 import {
   clearPendingAnalysis,
@@ -144,7 +148,12 @@ let captureMethod: "camera" | "upload" | null = null;
   const res = detectStable(c);
   const quality = assessQuality(res);
   if (!quality.faceFound) return { faceFound: false };
-  const report = analyze(res.faceLandmarks[0], w, h, sex);
+  const landmarks = res.faceLandmarks[0];
+  const faceBox = landmarkBox(landmarks);
+  const stats = stillFrameStats(c, faceBox);
+  const occlusion = detectOcclusion(c, landmarks, w, h);
+  const eligibility = frontPhotoRejection(quality, stats, occlusion, landmarks, w, h);
+  const report = analyze(landmarks, w, h, sex);
   return {
     faceFound: true,
     overall: report.overall,
@@ -152,22 +161,23 @@ let captureMethod: "camera" | "upload" | null = null;
     yaw: quality.yawDeg,
     pitch: quality.pitchDeg,
     smile: quality.smileScore,
-    gaze: estimateGaze(res.faceLandmarks[0]),
-    skin: analyzeSkin(c, res.faceLandmarks[0], w, h),
-    occlusion: detectOcclusion(c, res.faceLandmarks[0], w, h),
+    gaze: estimateGaze(landmarks),
+    skin: analyzeSkin(c, landmarks, w, h),
+    occlusion,
+    photo: { eligible: eligibility === null, rejection: eligibility, ...stats },
     // Group shots are the main contaminant in scraped photo sets: the
     // detector locks onto whichever face it finds, which may not be the
     // subject. A face filling little of the frame is the tell.
     faceWidthFrac: quality.faceWidthFrac,
     entry: JSON.parse(toCelebEntry(report, "x")),
     zScores: report.zScores,
-    shape: extractShape(buildGeometry(res.faceLandmarks[0], w, h)),
+    shape: extractShape(buildGeometry(landmarks, w, h)),
     pillars: report.pillars,
     // Per-region score plus the centroid of that region's landmarks, so the
     // demo reel can point a callout at the actual spot on the face
     regions: report.regions.map((r) => {
       const ids = REGION_LANDMARKS[r.region];
-      const lm = res.faceLandmarks[0];
+      const lm = landmarks;
       let sx = 0, sy = 0;
       for (const i of ids) { sx += lm[i].x; sy += lm[i].y; }
       return {
@@ -643,6 +653,19 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   }
 
   const landmarks = result.faceLandmarks[0];
+  const faceBox = landmarkBox(landmarks);
+  const stats = stillFrameStats(el.photoCanvas, faceBox);
+  const occlusion = detectOcclusion(el.photoCanvas, landmarks, width, height);
+  let rejection = frontPhotoRejection(quality, stats, occlusion, landmarks, width, height);
+  if (!rejection) rejection = headCoveringRejection(await detectHeadCovering(el.photoCanvas));
+  if (rejection) {
+    el.frame.classList.remove("scanning");
+    el.capRight.textContent = "PHOTO NOT VALID";
+    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}`;
+    el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
+    setTimeout(() => resetToUpload(), 4200);
+    return;
+  }
 
   pending = {
     landmarks,

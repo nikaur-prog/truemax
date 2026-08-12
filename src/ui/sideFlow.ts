@@ -2,7 +2,7 @@ import { analyzeSide } from "../engine/scoring.ts";
 import type { Report, Sex } from "../engine/types.ts";
 import { sidePointIntegrityIssues } from "../engine/sideMetrics.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
-import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
+import { assessSideSilhouette, mountVerifier, seedSidePoints } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
 import {
   cloneSidePoints,
@@ -16,7 +16,10 @@ import { startCamera } from "./camera.ts";
 import { setRunningMode } from "../engine/landmarker.ts";
 import { detectStable } from "../engine/consensus.ts";
 import { assessQuality } from "../engine/quality.ts";
-import { resetSideTracking } from "../engine/captureGuide.ts";
+import { resetSideTracking, stillFrameStats } from "../engine/captureGuide.ts";
+import { sidePhotoRejection } from "../engine/photoEligibility.ts";
+import { headCoveringRejection } from "../engine/photoEligibility.ts";
+import { detectHeadCovering } from "../engine/headCovering.ts";
 import { createAutoCapture } from "./autoCapture.ts";
 import type { AutoCapture } from "./autoCapture.ts";
 import type { CameraHandle } from "./camera.ts";
@@ -28,15 +31,6 @@ import type { CameraHandle } from "./camera.ts";
 // frontal detector NOT finding a square-on face. See checkSideFrame.
 
 const MAX_DIM = 1000;
-
-// Below this yaw the mesh is confident it is looking at a front-on face, which
-// is precisely the photo the side step must refuse. A true profile reads much
-// higher, or is not detected at all; either way it clears this gate. 35 sits
-// well above ordinary front-capture yaw (the front gate allows 10). At 55° a
-// detected face is at least a strong three-quarter turn; a true profile is
-// normally lost by the frontal mesh and passes through the loss-after-turn
-// path instead.
-const PROFILE_MIN_YAW = 55;
 
 interface SideCtx {
   sex: Sex;
@@ -360,21 +354,23 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // that has no profile to measure, and produced a side score of 3.3 / "ahead
   // of 0%" — a garbage number dragging down the merged total.
   //
-  // The tell of a frontal face is that the mesh detects it confidently at low
-  // yaw. A true profile is the opposite: the detector either loses the face or
-  // reports a large yaw as the far half self-occludes. So a face found at low
-  // yaw is the one case we can be SURE is wrong, and it is the one we reject.
-  // Anything turned far enough — or too turned for the mesh to see at all —
-  // passes through to the hand-placed points, which is exactly what they exist
-  // for.
+  // A frontal mesh at low yaw proves the shot is not a profile. Detector loss,
+  // however, does not prove that it is one: a wall, pet or badly cropped photo
+  // can also make the detector disappear. The eligibility gate therefore
+  // requires a detected turn of at least 75 degrees when the mesh survives and
+  // an independently usable head silhouette before hand-placed points appear.
   const q = assessQuality(detectStable(e.canvas));
-  if (q.faceFound && Math.abs(q.yawDeg) < PROFILE_MIN_YAW) {
+  const silhouette = assessSideSilhouette(e.canvas);
+  const stats = stillFrameStats(e.canvas);
+  let rejection = sidePhotoRejection(q, stats, silhouette, w, h);
+  if (!rejection) rejection = headCoveringRejection(await detectHeadCovering(e.canvas));
+  if (rejection) {
     e.cap.textContent = "SIDE";
     e.drop.classList.remove("hidden");
     const b = e.drop.querySelector("b");
     const span = e.drop.querySelector("span");
-    if (b) b.textContent = "That is a front-on photo. Turn to the side.";
-    if (span) span.textContent = "A profile is one ear to the lens, nose in silhouette. Chin, jaw and brow angles only exist from the side.";
+    if (b) b.textContent = rejection.title;
+    if (span) span.textContent = rejection.detail;
     return;
   }
 

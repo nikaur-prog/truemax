@@ -66,8 +66,9 @@ import type { Pt } from "./geometry.ts";
 // The cost is the download: 16 MB for the multiclass model, against the 3.7 MB
 // face model already loaded. The hair-only segmenter is 781 KB but cannot tell
 // a bald head from a covered one, and flagging bald users is worse than the
-// fringe problem it would replace. That trade is a product decision, not an
-// engineering one, so it is written down here rather than taken.
+// fringe problem it would replace. The product now takes that trade in
+// headCovering.ts: the model is lazy-loaded after capture and its thresholds
+// remain explicitly trial-only until they pass the labelled benchmark.
 // ---------------------------------------------------------------------------
 
 export interface Occlusion {

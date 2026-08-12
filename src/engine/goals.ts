@@ -144,12 +144,19 @@ export const GOALS: GoalDef[] = [
 // skin better than a 220-pixel crop of it does.
 export const SKIN_CONCERNS: Array<{ id: string; label: string; blurb: string }> = [
   { id: "acne", label: "Breakouts", blurb: "Spots, congestion, blackheads" },
+  { id: "milia", label: "Small pale bumps", blurb: "Milia-like bumps around the eyes or cheeks" },
+  { id: "pores", label: "Pores or black dots", blurb: "Visible pores, filaments or blackheads" },
   { id: "redness", label: "Redness or flushing", blurb: "Persistent colour across the cheeks or nose" },
   { id: "dryness", label: "Dryness or irritation", blurb: "Tight, flaky or reactive skin" },
+  { id: "scaling", label: "Flaking around brows or nose", blurb: "Dry or greasy-looking scale" },
+  { id: "oiliness", label: "Oiliness or shine", blurb: "Repeated shine through the centre of the face" },
+  { id: "razorbumps", label: "Razor bumps", blurb: "Ingrown-looking hairs or bumps after hair removal" },
   { id: "marks", label: "Marks left behind", blurb: "Brown or red patches after a spot heals" },
   { id: "scarring", label: "Scarring", blurb: "Raised or indented texture" },
   { id: "pigmentation", label: "Pigmentation", blurb: "Sun spots or uneven tone" },
   { id: "undereye", label: "Dark circles", blurb: "Shadowing under the eyes" },
+  { id: "lines", label: "Fine lines", blurb: "Fine surface lines visible at rest" },
+  { id: "lips", label: "Dry or chapped lips", blurb: "Flaking, roughness or small cracks" },
   { id: "none", label: "None of these", blurb: "Nothing I'd call a problem" },
 ];
 
