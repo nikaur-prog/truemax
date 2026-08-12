@@ -1354,6 +1354,11 @@ body.funnel-open { overflow: hidden; }
   padding: 6px 13px; cursor: pointer; line-height: 1; transition: background 0.12s, border-color 0.12s;
 }
 .acct-btn:hover { background: var(--soft); }
+.acct-signup-trigger {
+  color: #fff; background: var(--ink); border-color: var(--ink);
+  box-shadow: 0 6px 18px rgba(20, 21, 24, 0.12);
+}
+.acct-signup-trigger:hover { color: #fff; background: #2a2c30; border-color: #2a2c30; }
 .acct-btn.in { padding: 3px; border-color: transparent; background: none; }
 .acct-disc {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1362,7 +1367,23 @@ body.funnel-open { overflow: hidden; }
 }
 .acct-disc.lg { width: 40px; height: 40px; font-size: 16px; flex: none; }
 
-.acct-panel { width: min(420px, 100%); padding: 26px 26px 22px; }
+body.auth-modal-open { overflow: hidden; }
+.acct-overlay {
+  background: rgba(18, 20, 22, 0.46);
+  -webkit-backdrop-filter: blur(14px) saturate(0.82);
+  backdrop-filter: blur(14px) saturate(0.82);
+  animation: acct-backdrop-in 180ms ease-out both;
+}
+.acct-panel {
+  width: min(420px, 100%); padding: 26px 26px 22px;
+  animation: acct-sheet-in 240ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+.acct-loading { color: var(--mut); font-size: 13px; margin: 12px 0; }
+@keyframes acct-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes acct-sheet-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .acct-lede { color: var(--mut); font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
 .acct-social { display: grid; gap: 9px; }
 .acct-oauth {
@@ -1460,6 +1481,8 @@ body.funnel-open { overflow: hidden; }
 .analysis-gate-open { width: 100%; }
 
 @media (max-width: 520px) {
+  .acct-overlay { padding: 18px 12px; }
+  .acct-panel { padding: 24px 20px 20px; border-radius: 20px; }
   .auth-card { padding: 28px 22px 24px; border-radius: 19px; }
   .auth-shell { margin-top: 24px; }
 }
