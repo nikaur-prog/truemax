@@ -1524,3 +1524,64 @@ body.auth-modal-open { overflow: hidden; }
   .auth-card { padding: 28px 22px 24px; border-radius: 19px; }
   .auth-shell { margin-top: 24px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Legal pages (/privacy, /terms)
+   --------------------------------------------------------------------------- */
+
+/* Set at a comfortable reading measure rather than the app's dense layout.
+   These are the two documents on the site somebody actually has to read
+   start-to-finish — an app-store reviewer will, and so will anyone worried
+   about where their photograph goes — so the type is larger and the line
+   length shorter than anywhere else in the product. */
+.legal-shell { max-width: 62ch; margin: 40px auto 0; padding: 0 24px; }
+.legal-kicker {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em;
+  color: var(--mut); margin-bottom: 10px;
+}
+.legal-shell h1 {
+  font-family: var(--serif); font-weight: 300; font-size: 40px;
+  letter-spacing: -0.015em; line-height: 1.1; margin-bottom: 10px;
+  text-wrap: balance;
+}
+.legal-meta { font-size: 12.5px; color: var(--mut); margin-bottom: 30px; }
+.legal-shell h2 {
+  font-size: 17px; font-weight: 600; margin: 34px 0 10px; text-wrap: balance;
+}
+.legal-shell h3 { font-size: 14.5px; font-weight: 600; margin: 24px 0 8px; }
+.legal-shell p { font-size: 15px; line-height: 1.65; margin-bottom: 14px; }
+.legal-shell ul { margin: 0 0 16px 20px; }
+.legal-shell li { font-size: 15px; line-height: 1.6; margin-bottom: 8px; }
+.legal-shell a { color: var(--acc); }
+
+/* The plain-language summary at the top of each document. Given a real card so
+   it cannot be mistaken for an introduction and skipped. */
+.legal-summary {
+  background: var(--acc-soft); border-radius: 16px;
+  padding: 20px 22px 8px; margin-bottom: 12px;
+}
+.legal-summary h2 { margin-top: 0; font-size: 14px; color: var(--acc); }
+.legal-summary p:last-child { margin-bottom: 14px; }
+
+.legal-table { width: 100%; border-collapse: collapse; margin: 6px 0 18px; font-size: 13.5px; }
+.legal-table th {
+  text-align: left; font-family: var(--mono); font-size: 9px;
+  letter-spacing: 0.13em; color: var(--mut); font-weight: 500;
+  padding: 0 10px 8px 0; border-bottom: 1px solid var(--line);
+}
+.legal-table td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--line); line-height: 1.5; vertical-align: top; }
+
+.legal-nav { margin: 40px 0 10px; font-size: 14px; }
+.foot-links { display: block; margin-top: 8px; letter-spacing: 0.06em; }
+.foot-links a { color: inherit; }
+
+@media (max-width: 640px) {
+  .legal-shell { margin-top: 24px; padding: 0 18px; }
+  .legal-shell h1 { font-size: 31px; }
+  /* A three-column table at 360px is unreadable, so each row becomes a small
+     stacked block with its heading inlined. */
+  .legal-table thead { display: none; }
+  .legal-table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .legal-table td { display: block; border: 0; padding: 0 0 4px; }
+  .legal-table td:first-child { font-weight: 600; }
+}
