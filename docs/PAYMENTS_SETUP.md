@@ -31,6 +31,11 @@ to take payment if entitlement storage is missing.
 
 ## 2. Create the Stripe product and recurring price
 
+First resolve [`docs/PRICING_DECISION.md`](PRICING_DECISION.md). An older handoff
+mentions $6.99 and $11.99 tiers, while the current checkout and entitlement
+schema implement Free plus one recurring Max price. Currency, interval and the
+two-tier feature split were not preserved, so they must not be guessed.
+
 In Stripe **test mode** first:
 
 1. Product catalogue → Add product → name it `TrueMax Max`.

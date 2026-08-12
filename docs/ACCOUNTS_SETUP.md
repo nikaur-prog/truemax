@@ -59,14 +59,27 @@ on, which is the safer launch setting and is supported by the post-scan flow.
 
 Before a public launch, configure custom SMTP. Supabase's default sender is for
 testing and has restrictive limits; it is not a dependable customer email
-channel. Test all three templates on a real phone:
+channel. New Free-plan projects also cannot customize the default sender's
+templates, so SMTP is required for the branded set.
+
+Production-ready HTML bodies and their exact subjects are in
+[`supabase/email-templates/`](../supabase/email-templates/README.md). They use
+inline styles for broad email-client compatibility, show no raw URLs, and put
+Supabase's single-use `{{ .ConfirmationURL }}` behind a clean action button.
+The signup confirmation is deliberately titled **Welcome to TrueMax**, so the
+welcome and account-confirmation steps are one email instead of two.
+
+Install and test at least these three templates on a real phone:
 
 1. Confirm signup
 2. Magic link
 3. Reset password
 
-Templates that use a redirect variable must honor `{{ .RedirectTo }}` so the
-code's scan/reset destination is not discarded.
+Disable click/open tracking in the SMTP provider because rewritten links can
+break single-use Supabase auth URLs. The password reset names `{{ .Email }}` and
+clearly says that an unrequested message can be ignored without changing the
+password. A public “find my email” lookup is intentionally absent because it
+would reveal whether an address has a TrueMax account.
 
 ## 4. Enable Google
 

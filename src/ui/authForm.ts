@@ -51,10 +51,10 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     <p class="acct-lede">${lede}</p>
     <div class="acct-social" aria-label="Social sign in">
       <button type="button" class="acct-oauth" data-provider="google">
-        <span aria-hidden="true">G</span> Continue with Google
+        ${socialLabel("google")}
       </button>
       <button type="button" class="acct-oauth apple" data-provider="apple">
-        <span aria-hidden="true">●</span> Continue with Apple
+        ${socialLabel("apple")}
       </button>
     </div>
     <div class="acct-divider"><span>or</span></div>
@@ -148,9 +148,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       const result = await signInWithProvider(provider);
       if (!result.ok) {
         disableSocial(root, false);
-        button.innerHTML = provider === "google"
-          ? `<span aria-hidden="true">G</span> Continue with Google`
-          : `<span aria-hidden="true">●</span> Continue with Apple`;
+        button.innerHTML = socialLabel(provider);
         say(msg, result.message || "Could not start social sign-in.", "err");
       }
     });
@@ -261,4 +259,18 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] || character,
   );
+}
+
+function socialLabel(provider: "google" | "apple"): string {
+  if (provider === "google") {
+    return `<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path fill="#4285f4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.91h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.4Z"/>
+      <path fill="#34a853" d="M12 22c2.7 0 4.98-.9 6.63-2.43l-3.24-2.54c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22Z"/>
+      <path fill="#fbbc05" d="M6.39 13.86a6.01 6.01 0 0 1 0-3.72V7.52H3.04a10 10 0 0 0 0 8.96l3.35-2.62Z"/>
+      <path fill="#ea4335" d="M12 6.01c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.52l3.35 2.62C7.18 7.77 9.39 6.01 12 6.01Z"/>
+    </svg><span>Continue with Google</span>`;
+  }
+  return `<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+    <path fill="currentColor" d="M16.7 12.76c.02 2.45 2.15 3.27 2.18 3.28-.02.06-.34 1.17-1.12 2.31-.68.99-1.39 1.97-2.5 1.99-1.08.02-1.44-.65-2.69-.65-1.24 0-1.64.63-2.66.67-1.06.04-1.88-1.07-2.56-2.06-1.39-2.01-2.45-5.68-1.02-8.17a3.97 3.97 0 0 1 3.38-2.05c1.05-.02 2.05.71 2.69.71.63 0 1.83-.88 3.08-.75.53.02 2 .21 2.95 1.6-.08.05-1.76 1.03-1.73 3.12Zm-2.04-6.05c.57-.69.96-1.65.85-2.61-.83.03-1.84.55-2.43 1.24-.53.61-.99 1.59-.87 2.53.93.07 1.88-.47 2.45-1.16Z"/>
+  </svg><span>Continue with Apple</span>`;
 }

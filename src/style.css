@@ -1170,7 +1170,8 @@ body {
 }
 .acct-oauth:hover { background: var(--soft); border-color: #cfcdc5; }
 .acct-oauth:disabled { opacity: 0.58; cursor: wait; }
-.acct-oauth span { width: 18px; text-align: center; font-size: 14px; }
+.acct-oauth svg { width: 18px; height: 18px; flex: none; }
+.acct-oauth span { line-height: 1; }
 .acct-oauth.apple { background: var(--ink); color: #fff; border-color: var(--ink); }
 .acct-oauth.apple:hover { background: #2a2c30; }
 .acct-divider { display: flex; align-items: center; gap: 10px; color: var(--mut); margin: 15px 0; font-size: 11px; }
