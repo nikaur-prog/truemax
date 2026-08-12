@@ -353,16 +353,10 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   e.canvas.height = h;
   e.canvas.getContext("2d")!.drawImage(src, 0, 0, w, h);
 
-  // This must be a profile, and the shocking failure was that it did not check.
-  // A near-frontal photo sailed through, got thirteen points placed on a face
-  // that has no profile to measure, and produced a side score of 3.3 / "ahead
-  // of 0%" — a garbage number dragging down the merged total.
-  //
-  // A frontal mesh at low yaw proves the shot is not a profile. Detector loss,
-  // however, does not prove that it is one: a wall, pet or badly cropped photo
-  // can also make the detector disappear. The eligibility gate therefore
-  // requires a detected turn of at least 75 degrees when the mesh survives and
-  // an independently usable head silhouette before hand-placed points appear.
+  // A clearly frontal face is still the wrong input. Every other recognisable
+  // side attempt proceeds to estimated landmarks: background segmentation and
+  // a lost profile mesh are too noisy to justify blocking a user when the next
+  // screen already asks them to review and correct every consequential point.
   const q = assessQuality(detectStable(e.canvas));
   const silhouette = assessSideSilhouette(e.canvas);
   const stats = stillFrameStats(e.canvas);
@@ -429,7 +423,7 @@ function mountVerify(
     verifier?.setEditable(false);
     e.cap.textContent = "REVIEW LANDMARKS";
     e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
-      <p class="side-sub">TrueMax has placed the thirteen profile landmarks. If every ring sits on the named feature, confirm them. If one is wrong, choose <b>Edit point placement</b> and drag only the points that need correcting.</p>
+      <p class="side-sub">TrueMax has estimated the thirteen profile landmarks. If every ring sits on the named feature, confirm them. If one is wrong, choose <b>Edit point placement</b> and drag only the points that need correcting.</p>
       <p class="side-review-note">Nothing leaves this device unless you separately choose to share it after confirming.</p>`;
     e.actions.innerHTML = `
       <button class="btn gho" id="side-back">Retake profile</button>

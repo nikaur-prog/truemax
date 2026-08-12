@@ -173,21 +173,16 @@ export function sidePhotoRejection(
       detail: "Use a sharp original with no portrait blur, smoothing or beauty filter.",
     };
   }
-  // When MediaPipe still sees a strongly turned face, its face geometry is the
-  // better crop signal. The background silhouette includes shoulders, doors
-  // and furniture; treating any foreground pixel at the frame edge as a cut
-  // head rejected perfectly usable profiles.
-  const detectedProfile = quality.faceFound && Math.abs(quality.yawDeg) >= 60;
-  if (!detectedProfile && silhouette.reason === "cropped") {
-    return {
-      title: "Sorry, part of the profile is cut off.",
-      detail: "Show the full forehead, nose, lips, chin, jaw, ear and neck with space around the head.",
-    };
-  }
-  if (quality.faceFound && Math.abs(quality.yawDeg) < 60) {
+  // Side landmark placement is reviewable. Once a real face has made a useful
+  // turn, prefer giving the person our best thirteen-point estimate over
+  // inventing a crop failure from a noisy background silhouette. The user can
+  // drag any missed point before a score exists. Only a clearly frontal shot
+  // is blocked here; detector uncertainty and silhouette "crop" guesses are
+  // allowed through to that review step.
+  if (quality.faceFound && Math.abs(quality.yawDeg) < 35) {
     return {
       title: "Sorry, you are not sideways enough in this photo.",
-      detail: "Use a full 90° profile: one ear toward the camera, nose in silhouette, eyes looking straight ahead.",
+      detail: "Turn farther until the nose is in silhouette and one ear faces the camera.",
     };
   }
   if (quality.faceFound && (quality.pitchDeg < -8 || quality.pitchDeg > 26)) {
@@ -196,26 +191,11 @@ export function sidePhotoRejection(
       detail: "Keep your head level so the jaw corner and the line under your chin are visible.",
     };
   }
-  if (!detectedProfile && !silhouette.usable) {
-    const copy: Record<NonNullable<SideSilhouetteCheck["reason"]>, PhotoRejection> = {
-      "no-head": {
-        title: "Sorry, we couldn't verify a head in that profile photo.",
-        detail: "Use a clear photo against a plain background, with your full head and neck visible.",
-      },
-      cropped: {
-        title: "Sorry, part of the profile is cut off.",
-        detail: "Show the full forehead, nose, lips, chin, jaw, ear and neck with space around the head.",
-      },
-      "too-small": {
-        title: "Sorry, the profile is too small in the frame.",
-        detail: "Move closer or use a tighter original photo while keeping the full head visible.",
-      },
-      "not-profile": {
-        title: "Sorry, we couldn't verify a full side profile.",
-        detail: "Use a full 90° profile against a plain background, or use the guided camera instead.",
-      },
+  if (!quality.faceFound && silhouette.reason === "no-head") {
+    return {
+      title: "Sorry, we couldn't find a face in that photo.",
+      detail: "Use a photo containing one visible head. TrueMax will estimate the profile points for you to review.",
     };
-    return copy[silhouette.reason ?? "not-profile"];
   }
   return null;
 }
