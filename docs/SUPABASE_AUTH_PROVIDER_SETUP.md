@@ -71,7 +71,16 @@ In Google Cloud / Google Auth Platform:
 2. Configure Branding and Audience. Request only `openid`, `userinfo.email` and
    `userinfo.profile`.
 3. Create an OAuth client of type **Web application**.
-4. Add authorised JavaScript origin `https://www.truemax.app`.
+   The current screen is available directly at
+   <https://console.cloud.google.com/auth/clients/create>.
+4. Add authorised JavaScript origins (origins have no path or trailing slash):
+
+   ```text
+   https://www.truemax.app
+   http://localhost:5173
+   ```
+
+   Remove the localhost origin after local OAuth testing if you do not need it.
 5. Add this exact authorised redirect URI:
 
    ```text
@@ -81,33 +90,51 @@ In Google Cloud / Google Auth Platform:
 6. Copy the client ID and client secret into **Supabase → Authentication →
    Providers → Google**, then enable and save the provider.
 
+The JavaScript origin is the TrueMax website; the redirect URI is Supabase's
+callback. Do not swap them. Supabase then sends the completed session back to
+the Site URL/redirect allowlist in Authentication → URL Configuration.
+
 Do not put the Google client secret in Vite or browser code.
 
 ## 5. Enable Apple sign-in
 
-This requires an active Apple Developer Program membership. In Certificates,
-Identifiers & Profiles:
+TrueMax does **not** need to be published in the App Store first. Web OAuth works
+for the existing website. It does require an active Apple Developer Program
+membership so you can create the identifiers and signing key below.
 
-1. Create the final TrueMax App ID/bundle ID and enable **Sign in with Apple**.
-2. Create a Services ID for the web login and configure Sign in with Apple.
+In **Apple Developer → Certificates, Identifiers & Profiles**:
+
+1. Under **Identifiers → App IDs**, create an explicit TrueMax App ID such as
+   `com.truemax.app`, enable **Sign in with Apple**, and leave the
+   Server-to-Server notification endpoint blank. The identifier can later be
+   reused by the native iOS app; creating it does not publish an app.
+2. Under **Identifiers → Services IDs**, create the web client, for example
+   `com.truemax.app.web`. Open it, enable **Sign in with Apple**, choose the
+   TrueMax App ID as its primary App ID, then choose **Configure**.
 3. Use domain `ruvgkrlfmixfnmnzqgap.supabase.co` and return URL:
 
    ```text
    https://ruvgkrlfmixfnmnzqgap.supabase.co/auth/v1/callback
    ```
 
-4. Create a Sign in with Apple key and download the `.p8` file once. Store it
-   in a password manager or secrets vault.
-5. Use Supabase's Apple secret generator with the Team ID, Key ID, Services ID
-   and private key.
+4. Under **Keys**, create a Sign in with Apple key associated with the TrueMax
+   App ID. Download the `.p8` file once and store it in a password manager or
+   secrets vault. Do not put it in this repository, Vite or chat.
+5. Record the 10-character Team ID and the Key ID. In Chrome or Firefox, use
+   Supabase's Apple client-secret generator with the Team ID, Key ID, Services
+   ID and `.p8` key. The generator runs locally in the browser and currently
+   does not work in Safari.
 6. In **Supabase → Authentication → Providers → Apple**, put the Services ID
-   first in Client IDs, paste the generated secret, enable and save.
+   (for example `com.truemax.app.web`) first in **Client IDs**, paste the
+   generated JWT in **Secret Key**, enable and save.
 7. Register TrueMax's sending domain with Apple's private email relay before
    emailing users who choose Hide My Email.
 
 Apple web OAuth client secrets expire every six months. Record the owner and
 renewal date when it is created. Apple may not return a person's name in the
 web OAuth flow, so TrueMax correctly asks for first and last name in onboarding.
+When a native iOS build is added later, use native Sign in with Apple there;
+that is a later App Store task and does not block web sign-in now.
 
 ## 6. Real-device verification
 

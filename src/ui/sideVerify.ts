@@ -153,8 +153,9 @@ function centredSeed(w: number, h: number): { points: SidePoints; faceDir: numbe
 // ---------------------------------------------------------------------------
 // Preferred path: real landmarks.
 //
-// The side capture opens the shutter at 42 degrees of yaw, and MediaPipe holds
-// a face well past that — it tracked a 46-degree turn in the reference set. So
+// The side capture now requires at least 55 degrees of detected yaw (or a
+// detector loss after a clear turn), and MediaPipe can occasionally hold a
+// face into that range. So
 // a good proportion of side photographs still carry a full mesh, and when they
 // do, tracing a silhouette against the background instead is throwing away the
 // better measurement for the worse one.

@@ -16,8 +16,8 @@ expires.
 - The project URL and publishable key are connected in production.
 - Email signup is enabled and email confirmation is required.
 - The `scans` table exists with RLS, but scan sync is not wired yet.
-- Google and Apple providers are currently disabled in Supabase. Their buttons
-  activate automatically after provider credentials are configured.
+- Google is enabled in the live Supabase project. Apple is still disabled; its
+  button activates automatically after Apple credentials are configured.
 - The live account schema was created manually, so the repository now captures
   and hardens it in `supabase/migrations/20260812004415_harden_accounts.sql`.
 
@@ -103,9 +103,11 @@ and Apple Developer fields are in
 
 ## 5. Enable Apple
 
-Apple requires an Apple Developer account. Create a Services ID, enable Sign in
-with Apple, register the same Supabase callback URL above, create a Sign in with
-Apple private key, and generate the client-secret JWT. Enter the Services ID and
+Apple web login does not require a published App Store build. It does require an
+active Apple Developer Program membership. Create an explicit App ID, enable
+Sign in with Apple, create an associated Services ID, register the same
+Supabase callback URL above, create a Sign in with Apple `.p8` key, and generate
+the client-secret JWT. Enter the Services ID first under Client IDs and the
 generated secret in **Supabase → Authentication → Providers → Apple**.
 
 Apple client secrets expire, so record an owner and renewal date. Test Apple's

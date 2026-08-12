@@ -76,8 +76,10 @@ walkthrough including the SQL.
       `VITE_SUPABASE_ANON_KEY`. Redeploy.
 - [~] Signup/login modal, `/auth` portal, forgot/reset password, and post-scan
       account gate are built. Merge and deploy the auth PR.
-- [ ] Enable Google and Apple providers. Both currently report disabled in
-      Supabase; see `ACCOUNTS_SETUP.md`.
+- [x] Enable Google. The live Auth settings report it enabled.
+- [ ] Enable Apple. A published iOS app is not required for web login, but an
+      Apple Developer membership, App ID, Services ID and signing key are; see
+      `SUPABASE_AUTH_PROVIDER_SETUP.md`.
 - [ ] Verify: “Sign in” appears top-right; create an account; delete it; confirm
       it is gone from Authentication → Users.
 
@@ -161,25 +163,21 @@ signed-in user chooses to sync. Say exactly that.
 
 ### 4.2 Known measurement debt
 
-- [ ] **`ZYGO_R`/`ZYGO_L` are the wrong landmarks.** They are MediaPipe 234/454,
-      the widest points of the face oval, which sit at ear and sideburn level —
-      not the zygomatic arch. These are the same landmarks that caused the
-      side-profile seeding bug.
+- [x] **Replace the false cheekbone pair and regenerate every dependent norm.**
+      The engine now uses MediaPipe 116/345 as an approximate malar-prominence
+      pair. It deliberately calls this *malar*, not a clinical skeletal zygion:
+      a monocular face mesh cannot locate a bone it cannot see.
 
   `bizygo` is the denominator of six metrics: `fwhr`, `cheekboneHeight`,
   `jawCheekRatio`, `eyeSeparationRatio`, `fifthsEyeRatio` and `facialIndex`.
 
-  **This is a naming and validity problem, not a scoring bug.** Every face is
-  measured with the same landmark and scored against norms built from that same
-  landmark, so the percentiles are internally consistent and comparable between
-  people. What is not safe is any specific claim that a number describes the
-  cheekbone.
+  Completed in the analysis-integrity pass: candidate overlays were reviewed
+  across ten different faces; 115 celebrity and 153 population photos were
+  rescanned; all 31 front distributions, the 108-entry comparison database,
+  both shape models and both aggregate quantile tables were regenerated.
 
-  Fixing it means re-deriving the affected metrics’ `dist[sex]` constants **and**
-  regenerating `AGG_NORM`, which requires the reference photograph set
-  (`.calib/`, deliberately gitignored) and a run of
-  `fetch-photos → scan → apply → normalize`. It cannot be done from the
-  repository alone. See “Regenerating the norms” below.
+  Remaining limit: this is a repeatable mesh proxy, not a direct anthropometric
+  bizygomatic-breadth measurement.
 
 ---
 

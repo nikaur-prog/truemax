@@ -7,8 +7,8 @@ Audit date: 12 August 2026 (Pacific/Auckland)
 **No-go for a public paid MVP today.** The core scanner is strong enough for a
 closed alpha, and the account implementation is now reviewable, but the revenue
 and trust boundaries have not been proven end to end. In particular, the Stripe
-server variables are absent, Google and Apple are disabled, the free/Max split
-is not enforced, and the privacy/terms/age surfaces do not exist.
+server variables are absent, Apple is disabled, the free/Max split is not
+enforced, and the privacy/terms/age surfaces do not exist.
 
 This verdict assumes the MVP is:
 
@@ -33,13 +33,13 @@ and a mobile smoke test are blockers.
 | Post-scan acquisition flow | Built, not deployed | The scan remains the default page; signup appears only after both captures; a reduced local copy is usable through an email/OAuth redirect for 30 minutes and is deleted after use or on the next app open after expiry. |
 | Supabase schema | Pass | `scans`, `entitlements` and `stripe_webhook_events` exist with RLS. Anonymous reads/RPC return 401. |
 | Supabase security | Pass with one intentional warning | Anonymous execute on `delete_own_account` was removed. The advisor still flags authenticated execution because that RPC intentionally lets a signed-in user delete only itself. |
-| OAuth provider config | Fail | Public Auth settings report `google: false` and `apple: false`. Buttons remain disabled until Supabase is configured. |
+| OAuth provider config | Partial | Public Auth settings report `google: true` and `apple: false`. The app enables each button from that server-owned setting. |
 | Email readiness | Partial | Email confirmation is on. Custom SMTP and real-device confirmation/magic/reset tests are not verified. |
 | Stripe catalogue | Verified empty | The authenticated Stripe connector reports no active products, prices or webhook endpoints in the connected TrueMax account. |
 | Payment code | Skeleton only | The entitlement schema is live and the secure single-Max flow builds, but it does not represent Starter, scan credits, age gates or one-time trial eligibility; no sandbox revenue cycle has run. |
 | Free vs Max enforcement | Fail | The reusable entitlement check exists, but result/plan features are not gated. |
 | Legal and age | Fail | Privacy policy, terms and the under-18 rule are absent. |
-| Measurement change | Awaiting merge | Cheekbone/bizygomatic fix and regenerated norms are in draft PR #15, not production. |
+| Measurement integrity | Built locally, not deployed | Malar pair, rigid pose frame, roll-corrected canthal tilt, landmark guards and regenerated front norms are complete. Five unvalidated side constructions no longer affect scores. Human-rated validity is still a launch limitation. |
 | Dependencies | Pass | Production dependency audit reports 0 known vulnerabilities; unit/type/build checks pass. |
 
 ## Hidden defects found and handled in the auth work
@@ -66,11 +66,16 @@ and a mobile smoke test are blockers.
 
 TrueMax is a paid web MVP only when all of these are green:
 
-1. Merge and deploy PRs #15, #16 and the auth-gate PR in a conflict-safe order.
-2. Set Supabase Site URL/redirect URLs and custom SMTP; test confirmation,
+1. Merge the stacked release in dependency order: #16 → #17 → #18 → #19 →
+   #20 → `codex/analysis-integrity`. Do not merge #15 first: the newer analysis
+   layer supersedes its cheekbone proxy and includes the broader geometry,
+   landmark-integrity and recalibration fixes. Deploy only after the full stack
+   is on `main`.
+2. Verify the deployed `/auth`, `/quick` and `/calib` rewrites, then set
+   Supabase Site URL/redirect URLs and custom SMTP; test confirmation,
    magic link, reset and delete account using a real inbox.
-3. Enable Google. Enable Apple if it is required for the web audience or before
-   an iOS release; record Apple secret renewal ownership.
+3. Run one real Google signup. Enable Apple if it is required for the web
+   audience or before an iOS release; record six-month secret renewal ownership.
 4. Resolve the 7-day versus 30-day trial, then implement the catalog and credit
    ledger in `BILLING_CATALOG.md` before adding server-only Preview variables.
 5. Complete the full sandbox acceptance matrix in `PAYMENTS_SETUP.md`.

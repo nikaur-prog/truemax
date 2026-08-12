@@ -49,6 +49,12 @@ let ctx: Ctx | null = null;
 
 export function renderResults(c: Ctx): void {
   ctx = c;
+  // A previous report may have been left on its side photograph. main.ts has
+  // already painted the new front capture; reset the cached state so this scan
+  // cannot restore the previous person's canvas or stale quality chips.
+  shownPhoto = "front";
+  frontPhoto = null;
+  frontQualityHTML = document.getElementById("quality-chips")?.innerHTML ?? "";
   // A new scan starts from the calm whole-face state. Without this the first
   // tab change after re-scanning would animate out of the PREVIOUS photo's
   // region, which is a transition from somewhere the user never was.
@@ -208,11 +214,13 @@ function body(): HTMLElement {
 // Swap the photo pane between the two captures. Both were taken; only one was
 // ever shown.
 let shownPhoto: "front" | "side" = "front";
+let frontQualityHTML = "";
 function showPhoto(which: "front" | "side"): void {
   if (!ctx || which === shownPhoto) return;
   const canvas = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
   const cap = document.getElementById("capRight");
   const label = document.querySelector(".photo-caption span");
+  const quality = document.getElementById("quality-chips");
   if (!canvas) return;
 
   if (which === "side" && ctx.sidePhoto) {
@@ -220,13 +228,17 @@ function showPhoto(which: "front" | "side"): void {
     paint(canvas, ctx.sidePhoto);
     ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);
     if (label) label.textContent = "SIDE";
-    if (cap) cap.textContent = "VERIFIED";
+    if (cap) cap.textContent = "POINTS CHECKED";
+    if (quality) {
+      quality.innerHTML = `<span class="qchip">Profile capture</span><span class="qchip">13 landmarks checked by you</span>`;
+    }
     shownPhoto = "side";
   } else if (which === "front" && frontPhoto) {
     paint(canvas, frontPhoto);
     drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
     if (label) label.textContent = "FRONT";
     if (cap) cap.textContent = "ANALYZED";
+    if (quality) quality.innerHTML = frontQualityHTML;
     shownPhoto = "front";
   }
 }

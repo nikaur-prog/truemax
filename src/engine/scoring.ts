@@ -4,7 +4,7 @@ import { METRICS, computeRawMetrics } from "./metrics.ts";
 import { AGG_NORM } from "./aggNorm.ts";
 import { reliabilityOf } from "./reliability.ts";
 import { extractShape, shapeZScore } from "./shape.ts";
-import { SIDE_METRICS, computeSideMetrics } from "./sideMetrics.ts";
+import { SIDE_METRICS, computeSideMetrics, sidePointIntegrityIssues } from "./sideMetrics.ts";
 import type { SidePoints } from "./sideMetrics.ts";
 import type {
   MetricDef,
@@ -326,6 +326,11 @@ export function analyze(
 ): Report {
   const g = buildGeometry(landmarks, width, height);
   const raw = computeRawMetrics(g);
+  const invalid = METRICS
+    .filter((m) => m.view === "front")
+    .filter((m) => !Number.isFinite(raw[m.id]))
+    .map((m) => m.id);
+  if (invalid.length) throw new Error(`Face scan produced invalid measurements: ${invalid.join(", ")}`);
   const shapeZ = shapeZScore(extractShape(g), sex);
 
   const scored = METRICS.filter((m) => m.view === "front").map((def) =>
@@ -371,7 +376,11 @@ export function analyze(
 
 // Side profile: same scoring pipeline, driven by the user-verified points.
 export function analyzeSide(points: SidePoints, faceDir: number, sex: Sex): Report {
+  const integrity = sidePointIntegrityIssues(points, undefined, undefined, faceDir);
+  if (integrity.length) throw new Error(`Profile landmarks need correction: ${integrity.join("; ")}`);
   const raw = computeSideMetrics(points, faceDir);
+  const invalid = SIDE_METRICS.filter((m) => !Number.isFinite(raw[m.id])).map((m) => m.id);
+  if (invalid.length) throw new Error(`Profile scan produced invalid measurements: ${invalid.join(", ")}`);
   const scored = SIDE_METRICS.map((def) => scoreMetric(def, raw[def.id], sex));
   const report = buildReport(scored, sex);
 

@@ -1,5 +1,6 @@
 import { analyzeSide } from "../engine/scoring.ts";
 import type { Report, Sex } from "../engine/types.ts";
+import { sidePointIntegrityIssues } from "../engine/sideMetrics.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
 import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
@@ -23,9 +24,11 @@ const MAX_DIM = 1000;
 // Below this yaw the mesh is confident it is looking at a front-on face, which
 // is precisely the photo the side step must refuse. A true profile reads much
 // higher, or is not detected at all; either way it clears this gate. 35 sits
-// well above ordinary front-capture yaw (the front gate allows 10) and well
-// below a real profile, so it separates the two cleanly.
-const PROFILE_MIN_YAW = 35;
+// well above ordinary front-capture yaw (the front gate allows 10). At 55° a
+// detected face is at least a strong three-quarter turn; a true profile is
+// normally lost by the frontal mesh and passes through the loss-after-turn
+// path instead.
+const PROFILE_MIN_YAW = 55;
 
 interface SideCtx {
   sex: Sex;
@@ -372,9 +375,29 @@ function mountVerify(
   document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
   document.getElementById("side-go")!.onclick = () => {
     if (!verifier) return;
-    const report = analyzeSide(verifier.points, verifier.faceDir, ctx.sex);
-    e.cap.textContent = "ANALYZED";
-    ctx.onDone(report, verifier.points, verifier.faceDir);
+    const issues = sidePointIntegrityIssues(verifier.points, w, h, verifier.faceDir);
+    if (issues.length) {
+      e.cap.textContent = "CHECK LANDMARKS";
+      const first = issues[0];
+      const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
+      if (hint) {
+        hint.textContent = first;
+        hint.classList.add("show");
+      }
+      return;
+    }
+    try {
+      const report = analyzeSide(verifier.points, verifier.faceDir, ctx.sex);
+      e.cap.textContent = "ANALYZED";
+      ctx.onDone(report, verifier.points, verifier.faceDir);
+    } catch (err) {
+      e.cap.textContent = "CHECK LANDMARKS";
+      const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
+      if (hint) {
+        hint.textContent = err instanceof Error ? err.message : "Those points could not be measured";
+        hint.classList.add("show");
+      }
+    }
   };
 }
 
