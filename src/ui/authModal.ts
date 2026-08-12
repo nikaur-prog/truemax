@@ -51,13 +51,20 @@ export function mountAccountButton(): void {
   if (!right) return;
 
   const btn = document.createElement("button");
-  btn.className = "acct-btn";
+  btn.className = "acct-btn acct-signin-trigger";
   btn.type = "button";
-  btn.setAttribute("aria-label", "Account");
+  btn.setAttribute("aria-label", "Sign in to TrueMax");
   btn.textContent = "Sign in";
-  right.appendChild(btn);
 
-  btn.addEventListener("click", () => openAccount());
+  const signupBtn = document.createElement("button");
+  signupBtn.className = "acct-btn acct-signup-trigger";
+  signupBtn.type = "button";
+  signupBtn.setAttribute("aria-label", "Create a TrueMax account");
+  signupBtn.textContent = "Sign up";
+  right.append(btn, signupBtn);
+
+  btn.addEventListener("click", () => openAccount({ initialMode: "password" }));
+  signupBtn.addEventListener("click", () => openAccount({ initialMode: "signup" }));
 
   // Keep the header pill in step with the session: a bare "Sign in" when out,
   // the email's initial in a disc when in. onAuthChange fires on load too, so
@@ -66,16 +73,20 @@ export function mountAccountButton(): void {
   let checkoutHandled = false;
   onAuthChange((user) => {
     if (user?.email) {
+      signupBtn.classList.add("hidden");
       btn.textContent = "";
       btn.classList.add("in");
       btn.title = user.email;
+      btn.setAttribute("aria-label", `Open account for ${user.email}`);
       const disc = document.createElement("span");
       disc.className = "acct-disc";
       disc.textContent = initials(user.email);
       btn.replaceChildren(disc);
     } else {
+      signupBtn.classList.remove("hidden");
       btn.classList.remove("in");
       btn.title = "";
+      btn.setAttribute("aria-label", "Sign in to TrueMax");
       btn.textContent = "Sign in";
     }
     if (user && checkoutResult && !checkoutHandled) {
@@ -92,20 +103,38 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   if (!isAuthAvailable()) return;
   const options: OpenAccountOptions = typeof input === "string" ? { notice: input } : input ?? {};
   close();
-  const user = await currentUser();
-  overlay = document.createElement("div");
-  overlay.className = "hist-overlay acct-overlay";
-  overlay.innerHTML = `<div class="hist-panel acct-panel">
+  const activeOverlay = document.createElement("div");
+  overlay = activeOverlay;
+  activeOverlay.className = "hist-overlay acct-overlay";
+  activeOverlay.setAttribute("role", "dialog");
+  activeOverlay.setAttribute("aria-modal", "true");
+  activeOverlay.setAttribute("aria-labelledby", "auth-title");
+  activeOverlay.innerHTML = `<div class="hist-panel acct-panel">
     <button class="hist-close" aria-label="Close">✕</button>
-    <div class="acct-body"></div>
+    <div class="acct-body"><p id="auth-title" class="acct-loading" role="status">Opening your account…</p></div>
   </div>`;
-  const body = overlay.querySelector(".acct-body") as HTMLElement;
+
+  activeOverlay.addEventListener("click", (e) => {
+    if (e.target === activeOverlay) close();
+  });
+  activeOverlay.querySelector(".hist-close")?.addEventListener("click", () => close());
+  document.addEventListener("keydown", escClose);
+  document.body.classList.add("auth-modal-open");
+  document.body.appendChild(activeOverlay);
+
+  // Mount the sheet before checking the session so the click has immediate
+  // visual feedback, even on a slow connection. Ignore a late session result
+  // if this particular sheet was closed or replaced in the meantime.
+  const user = await currentUser();
+  if (overlay !== activeOverlay || !activeOverlay.isConnected) return;
+  const body = activeOverlay.querySelector(".acct-body") as HTMLElement;
   if (user) renderSignedIn(body, user, options.notice);
   else {
+    const initialMode = options.initialMode ?? (options.reason === "analysis" ? "signup" : "password");
     renderAuthForm(body, {
-      initialMode: options.initialMode ?? (options.reason === "analysis" ? "signup" : "password"),
+      initialMode,
       context: options.reason === "analysis" ? "analysis" : "account",
-      portalHref: `/auth?mode=${options.reason === "analysis" ? "signup" : "password"}`,
+      portalHref: `/auth?mode=${initialMode}`,
       onDeferred: options.onDeferred,
       onAuthenticated: async (signedInUser) => {
         if (options.onAuthenticated) {
@@ -117,13 +146,6 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
       },
     });
   }
-
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
-  overlay.querySelector(".hist-close")?.addEventListener("click", () => close());
-  document.addEventListener("keydown", escClose);
-  document.body.appendChild(overlay);
 }
 
 function escClose(ev: KeyboardEvent): void {
@@ -134,6 +156,7 @@ function close(): void {
   document.removeEventListener("keydown", escClose);
   overlay?.remove();
   overlay = null;
+  document.body.classList.remove("auth-modal-open");
 }
 
 // --- signed in ------------------------------------------------------------
