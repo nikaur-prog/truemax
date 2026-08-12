@@ -42,7 +42,7 @@ const DEFAULT_URL = "https://ruvgkrlfmixfnmnzqgap.supabase.co";
 const DEFAULT_KEY = "sb_publishable_XLs-l72FzRD5C_QzP9xlkA_vMahWmgw";
 
 function authEnv(): AuthEnv | null {
-  const env = import.meta.env as Record<string, string | undefined>;
+  const env = import.meta.env;
   const url = env.VITE_SUPABASE_URL || DEFAULT_URL;
   const key = env.VITE_SUPABASE_ANON_KEY || DEFAULT_KEY;
   return url && key ? { url, key } : null;
@@ -214,13 +214,19 @@ export async function currentAccessToken(): Promise<string | null> {
 }
 
 // App Store guideline 5.1.1(v): an account that can be created in the app must
-// be deletable in the app. This calls a Postgres function the setup SQL
-// installs (auth.uid() has no client-side delete), then signs the user out.
+// be deletable in the app. The server cancels any Stripe subscription first,
+// deletes the Supabase identity second, then the browser clears its session.
 export async function deleteAccount(): Promise<AuthResult> {
   try {
+    const token = await currentAccessToken();
+    if (!token) return { ok: false, message: "Sign in again before deleting your account." };
+    const response = await fetch("/api/delete-account", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) return { ok: false, message: body?.error || "Could not delete the account." };
     const c = await getSupabaseClient();
-    const { error } = await c.rpc("delete_own_account");
-    if (error) return { ok: false, message: friendly(error.message) };
     await c.auth.signOut();
     return { ok: true };
   } catch {

@@ -7,15 +7,16 @@ import {
 } from "../engine/auth.ts";
 import {
   consumeCheckoutResult,
+  hasPaidAccess,
   hasMaxAccess,
   loadEntitlement,
   openBillingPortal,
-  startMaxCheckout,
 } from "../engine/entitlement.ts";
 import type { User } from "@supabase/supabase-js";
 import { renderAuthForm } from "./authForm.ts";
 import type { AuthMode } from "./authForm.ts";
 import { announceMembershipBrand } from "./membershipBrand.ts";
+import { openTrialFunnel } from "./onboardingFunnel.ts";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.
@@ -165,7 +166,7 @@ function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
 
   const msg = body.querySelector(".acct-msg") as HTMLElement;
   const membership = body.querySelector(".acct-membership") as HTMLElement;
-  void renderMembership(membership, notice?.startsWith("Payment received") ?? false);
+  void renderMembership(membership, user, notice?.startsWith("Payment received") ?? false);
 
   body.querySelector(".acct-signout")?.addEventListener("click", async () => {
     await signOut();
@@ -193,52 +194,57 @@ function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
   });
 }
 
-async function renderMembership(node: HTMLElement, waitForWebhook: boolean): Promise<void> {
+async function renderMembership(node: HTMLElement, user: User, waitForWebhook: boolean): Promise<void> {
   try {
     let entitlement = await loadEntitlement();
-    for (let attempt = 0; waitForWebhook && !hasMaxAccess(entitlement) && attempt < 5; attempt++) {
+    for (let attempt = 0; waitForWebhook && !hasPaidAccess(entitlement) && attempt < 5; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       if (!node.isConnected) return;
       entitlement = await loadEntitlement();
     }
     if (!node.isConnected) return;
 
-    const active = hasMaxAccess(entitlement);
-    announceMembershipBrand(active ? "max" : "member");
+    const active = hasPaidAccess(entitlement);
+    const max = hasMaxAccess(entitlement);
+    const planName = max ? "Max" : entitlement.tier === "starter" ? "Starter" : "Free";
+    announceMembershipBrand(max ? "max" : "member");
     const billingProblem = entitlement.status === "past_due" || entitlement.status === "unpaid";
     const period = entitlement.currentPeriodEnd
       ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(entitlement.currentPeriodEnd))
       : null;
     const detail = active
       ? entitlement.cancelAtPeriodEnd && period
-        ? `Max stays active until ${period}; cancellation is scheduled.`
+        ? `${planName} stays active until ${period}; cancellation is scheduled.`
         : period
-          ? `Max is active. Your current billing period ends ${period}.`
-          : "Max is active on this account."
+          ? `${planName} is active. Your current billing period ends ${period}.`
+          : `${planName} is active on this account.`
       : billingProblem
-        ? "Stripe could not renew Max. Update your payment method to restore access."
+        ? `Stripe could not renew ${planName}. Update your payment method to restore access.`
         : waitForWebhook
           ? "Stripe has not confirmed the subscription yet. Reopen your account in a moment."
           : "Free includes scanning, results and device-local progress.";
 
     node.innerHTML = `
-      <span class="acct-tier">${active ? "TRUEMAX MAX" : "FREE"}</span>
-      <b>${active ? "Max membership" : billingProblem ? "Billing needs attention" : "Free plan"}</b>
+      <span class="acct-tier">${active ? `TRUEMAX ${planName.toUpperCase()}` : "FREE"}</span>
+      <b>${active ? `${planName} membership` : billingProblem ? "Billing needs attention" : "Free plan"}</b>
       <p>${detail}</p>
       <button type="button" class="btn ${active || billingProblem ? "gho" : "pri"} acct-billing">
-        ${active || billingProblem ? "Manage billing" : "Upgrade to Max"}
+        ${active || billingProblem ? "Manage billing" : "Explore plans"}
       </button>`;
 
     const button = node.querySelector(".acct-billing") as HTMLButtonElement;
     button.addEventListener("click", async () => {
       button.disabled = true;
-      button.textContent = active || billingProblem ? "Opening billing…" : "Opening secure checkout…";
-      const result = active || billingProblem
-        ? await openBillingPortal()
-        : await startMaxCheckout();
+      button.textContent = active || billingProblem ? "Opening billing…" : "Preparing plans…";
+      if (!active && !billingProblem) {
+        close();
+        await openTrialFunnel(user);
+        return;
+      }
+      const result = await openBillingPortal();
       if (!result.ok) {
         button.disabled = false;
-        button.textContent = active || billingProblem ? "Manage billing" : "Upgrade to Max";
+        button.textContent = active || billingProblem ? "Manage billing" : "Explore plans";
         const error = document.createElement("p");
         error.className = "acct-msg err";
         error.textContent = result.message || "Billing is not available yet.";

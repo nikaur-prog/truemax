@@ -29,21 +29,16 @@ The acquisition flow is also confirmed:
 Under-18 users see Max as a visible but locked option with a plain explanation.
 The server, not CSS or browser metadata, must enforce that restriction.
 
-## One contradiction still needs a decision
+## Trial decision
 
-The same product brief says both:
+The current web MVP uses a **7-day free trial**, with a payment method collected
+in Stripe Checkout, one additional scan, and one trial per account. The initial
+analysis provides proof of value before the offer. The renewal price and the
+plain “cancel before the trial ends and pay $0” explanation appear both in the
+TrueMax offer and secure Checkout.
 
-- **one month free trial**; and
-- **one-week free trial**.
-
-Do not add `trial_period_days` to Checkout or publish native introductory offers
-until one duration is selected. The trial duration must match in Stripe, Apple,
-Google, the offer UI, reminder emails, terms and analytics.
-
-Recommended MVP choice: **7 days**, payment method required, one additional
-scan, and one trial per verified person. The initial analysis already provides
-the proof of value; a 30-day timer paired with only one scan is harder to
-explain and delays the first paid conversion.
+The earlier one-month wording is superseded. Native introductory offers must
+use the same seven-day term when Apple and Google billing are implemented.
 
 ## Decisions needed before the credit ledger is final
 

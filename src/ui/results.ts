@@ -29,6 +29,7 @@ interface Ctx {
   zoomable: HTMLElement;
   overlay: HTMLCanvasElement;
   onNewPhoto: () => void;
+  onContinue?: () => void;
   onSideProfile?: () => void;
   onSexChange?: (sex: Sex) => void;
   // The side half of a merged report, so it can be looked at. It was computed,
@@ -473,9 +474,10 @@ function showOverall(): void {
                <button class="btn pri" id="btn-side">Add side profile →</button></div>
              <div class="navrow"><button class="btn gho" id="btn-new">Start over</button>
                <button class="btn gho" id="btn-share">Share card</button></div>`
-          : `<div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
-               <button class="btn pri" id="btn-plan">See your plan</button></div>
-             <div class="navrow"><button class="btn gho" id="btn-share">Share card</button></div>`
+          : `<div class="navrow"><button class="btn gho" id="btn-plan">See your plan</button>
+               ${ctx.onContinue ? `<button class="btn pri result-next" id="btn-continue">Next · Build my pathway →</button>` : ""}</div>
+             <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
+               <button class="btn gho" id="btn-share">Share card</button></div>`
       }
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
@@ -491,6 +493,8 @@ function showOverall(): void {
   if (refBtn) refBtn.onclick = () => ctx?.onSexChange?.(r.sex === "male" ? "female" : "male");
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-plan")!.onclick = () => select("improve");
+  const continueBtn = document.getElementById("btn-continue");
+  if (continueBtn) continueBtn.onclick = () => ctx?.onContinue?.();
   const sideBtn = document.getElementById("btn-side");
   if (sideBtn) sideBtn.onclick = () => ctx?.onSideProfile?.();
   const nudge = document.getElementById("side-nudge");

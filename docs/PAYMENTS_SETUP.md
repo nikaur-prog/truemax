@@ -1,13 +1,14 @@
 # Payments (Stripe + Supabase) — setup
 
 Stripe Checkout, the Customer Portal, a signed webhook and a Supabase
-entitlement read model already exist. They are a secure **single-Max-plan
-skeleton**, not the final two-plan billing implementation.
+entitlement read model exist. The web implementation now includes the
+Starter/Max trial funnel, but it is not ready to take live money until the
+catalog, migration, secrets and sandbox acceptance test are complete.
 
 See [`BILLING_CATALOG.md`](BILLING_CATALOG.md) for the connected-account audit,
 target product catalog and the bugs that must be fixed before accepting money.
 See [`PRICING_DECISION.md`](PRICING_DECISION.md) for the confirmed prices and
-the unresolved trial duration.
+seven-day trial decision.
 
 ## Current verified state (12 August 2026)
 
@@ -17,29 +18,30 @@ the unresolved trial duration.
   endpoints.
 - The entitlement tables and hardened RPC exist in the production Supabase
   project.
-- The app code supports only `free | max` and one `STRIPE_MAX_PRICE_ID`.
+- The current branch supports `free | starter | max`, a one-trial-per-account
+  reservation, server-side age enforcement and duplicate-subscription blocking.
+- The post-analysis onboarding and responsive Starter/Max offer are built and
+  browser-verified at desktop and phone viewports.
 - No sandbox checkout → webhook → entitlement → cancellation cycle has passed.
-- Do not point the existing endpoint at a live price: it cannot yet represent
-  Starter, scan credits, age restrictions or one-time trial eligibility.
+- Do not add live prices yet: weekly and purchased scan-credit enforcement is
+  still outstanding.
 
-## 1. Finalize the product rules
+## 1. Finalize the remaining product rules
 
-Before payment code or store offers are published, choose 7 or 30 days for the
-trial and write the complete Starter/Max feature table. All remaining confirmed
-rules are recorded in `PRICING_DECISION.md`.
+Before paid feature gates or store offers are published, write the complete
+Starter/Max feature table and choose the weekly-credit renewal/rollover rules.
+All confirmed rules are recorded in `PRICING_DECISION.md`.
 
 ## 2. Build the target server model
 
-The next payment PR must:
+The current funnel PR completes Starter/Max entitlement, trial reservation,
+server age enforcement, duplicate-subscription blocking and safe paid-account
+deletion. Remaining work before taking money is:
 
-1. add `starter` to the entitlement model;
-2. add server-owned trial eligibility;
-3. add an immutable scan-credit ledger;
-4. permit only the four server-configured price IDs;
-5. check the under-18 restriction again on the server;
-6. prevent duplicate active subscriptions;
-7. cancel billing safely as part of paid-account deletion; and
-8. grant one-time credits only after Stripe reports a paid session.
+1. add an immutable scan-credit ledger;
+2. enforce the initial, trial, weekly and purchased scan allowances server-side;
+3. add the two server-configured one-time scan Price IDs; and
+4. grant one-time credits only after Stripe reports a paid session.
 
 The browser must never send an arbitrary Stripe Price ID or decide that it is
 eligible for Max, a trial or the member scan price.
@@ -92,8 +94,10 @@ After deploying the target payment PR, add a sandbox webhook destination:
 https://<the-preview-host>/api/stripe-webhook
 ```
 
-Select the subscription, invoice, trial, paid Checkout, async-payment and refund
-events implemented by that PR. Put the destination's `whsec_...` value into the
+Select `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.created`,
+`customer.subscription.updated` and `customer.subscription.deleted` for the
+current trial implementation. Add invoice, async-payment and refund events when
+one-time scan credits are implemented. Put the destination's `whsec_...` into the
 Preview environment as `STRIPE_WEBHOOK_SECRET`, then redeploy.
 
 Stripe signs the exact raw request body. The handler must stay non-2xx on a

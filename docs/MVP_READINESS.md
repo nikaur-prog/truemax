@@ -38,9 +38,10 @@ and a mobile smoke test are blockers.
 | OAuth provider config | Partial | Public Auth settings report `google: true` and `apple: false`. The app enables each button from that server-owned setting. |
 | Email readiness | Partial | Email confirmation is on. Custom SMTP and real-device confirmation/magic/reset tests are not verified. |
 | Stripe catalogue | Verified empty | The authenticated Stripe connector reports no active products, prices or webhook endpoints in the connected TrueMax account. |
-| Payment code | Skeleton only | The entitlement schema is live and the secure single-Max flow builds, but it does not represent Starter, scan credits, age gates or one-time trial eligibility; no sandbox revenue cycle has run. |
+| Trial funnel | Built locally | Responsive six-step onboarding leads from the first result to Starter/Max; Max is visibly locked for minors and checked again on the server. Trial reservation is one-per-account and Checkout collects a payment method for seven days free. |
+| Payment code | Partially built | Starter/Max, duplicate-subscription protection, age gating and paid-account deletion build; scan credits, Stripe products/prices and a sandbox revenue cycle remain incomplete. |
 | Free vs Max enforcement | Fail | The reusable entitlement check exists, but result/plan features are not gated. |
-| Legal and age | Fail | Privacy policy, terms and the under-18 rule are absent. |
+| Legal and age | Partial | The Max plan is locked for minors in both UI and server Checkout. Privacy policy, terms and any parental-consent rule are still absent. |
 | Measurement integrity | Built locally, not deployed | Malar pair, rigid pose frame, roll-corrected canthal tilt, landmark guards and regenerated front norms are complete. Five unvalidated side constructions no longer affect scores. Human-rated validity is still a launch limitation. |
 | Dependencies | Pass | Production dependency audit reports 0 known vulnerabilities; unit/type/build checks pass. |
 
@@ -72,18 +73,16 @@ and a mobile smoke test are blockers.
 
 TrueMax is a paid web MVP only when all of these are green:
 
-1. Merge the stacked release in dependency order: #16 → #17 → #18 → #19 →
-   #20 → `codex/analysis-integrity`. Do not merge #15 first: the newer analysis
-   layer supersedes its cheekbone proxy and includes the broader geometry,
-   landmark-integrity and recalibration fixes. Deploy only after the full stack
-   is on `main`.
+1. Merge #14 independently, then merge the release stack #16–#22 plus
+   `codex/onboarding-trial-funnel` into `main`. Close #15 as superseded: #21
+   contains the broader geometry, landmark-integrity and recalibration fixes.
 2. Verify the deployed `/auth`, `/quick` and `/calib` rewrites, then set
    Supabase Site URL/redirect URLs and custom SMTP; test confirmation,
    magic link, reset and delete account using a real inbox.
 3. Run one real Google signup. Enable Apple if it is required for the web
    audience or before an iOS release; record six-month secret renewal ownership.
-4. Resolve the 7-day versus 30-day trial, then implement the catalog and credit
-   ledger in `BILLING_CATALOG.md` before adding server-only Preview variables.
+4. Implement the scan-credit ledger and remaining catalog in
+   `BILLING_CATALOG.md` before adding live Production billing variables.
 5. Complete the full sandbox acceptance matrix in `PAYMENTS_SETUP.md`.
 6. Enforce the promised free/Max boundary in the product, not just the account
    badge.

@@ -29,6 +29,13 @@ test("trialing subscriptions grant Max", () => {
   assert.equal(result?.tier, "max");
 });
 
+test("active server-stamped Starter subscriptions grant Starter", () => {
+  const result = entitlementFromSubscription(subscription({
+    metadata: { supabase_user_id: "00000000-0000-0000-0000-000000000001", tier: "starter" },
+  }) as never);
+  assert.equal(result?.tier, "starter");
+});
+
 test("past-due subscriptions revoke Max until billing is fixed", () => {
   const result = entitlementFromSubscription(subscription({ status: "past_due" }) as never);
   assert.equal(result?.tier, "free");

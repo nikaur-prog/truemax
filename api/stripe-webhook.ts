@@ -6,7 +6,7 @@ type CheckoutSession = Omit<Awaited<ReturnType<StripeClient["checkout"]["session
 
 interface EntitlementUpdate {
   userId: string;
-  tier: "free" | "max";
+  tier: "free" | "starter" | "max";
   status: string;
   customerId: string;
   subscriptionId: string;
@@ -31,11 +31,12 @@ export function entitlementFromSubscription(subscription: Subscription): Entitle
   // The server stamps this metadata when it creates Checkout. Trusting that
   // marker keeps existing subscribers entitled if a new price replaces the
   // current STRIPE_MAX_PRICE_ID; unrelated Stripe products have no marker.
-  const isMax = subscription.metadata.tier === "max" && paidStatus;
+  const stampedTier = subscription.metadata.tier;
+  if (stampedTier !== "starter" && stampedTier !== "max") return null;
 
   return {
     userId,
-    tier: isMax ? "max" : "free",
+    tier: paidStatus ? stampedTier : "free",
     status: subscription.status,
     customerId,
     subscriptionId: subscription.id,
@@ -71,6 +72,22 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    if (event.type === "checkout.session.expired") {
+      const session = event.data.object;
+      const userId = session.metadata?.supabase_user_id;
+      const reservationId = session.metadata?.trial_reservation_id;
+      if (userId && reservationId) {
+        const { error } = await getSupabaseAdmin()
+          .from("trial_redemptions")
+          .delete()
+          .eq("user_id", userId)
+          .eq("reservation_id", reservationId)
+          .eq("status", "reserved");
+        if (error) throw new Error(`Expired trial release failed: ${error.message}`);
+      }
+      return json({ received: true });
+    }
+
     let update: EntitlementUpdate | null = null;
     if (event.type === "checkout.session.completed") {
       update = await fromCheckout(event.data.object);

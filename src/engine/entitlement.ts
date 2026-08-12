@@ -1,6 +1,7 @@
 import { currentAccessToken, getSupabaseClient } from "./auth.ts";
 
-export type EntitlementTier = "free" | "max";
+export type EntitlementTier = "free" | "starter" | "max";
+export type PaidTier = Exclude<EntitlementTier, "free">;
 
 export interface Entitlement {
   tier: EntitlementTier;
@@ -49,7 +50,12 @@ export function hasMaxAccess(entitlement: Entitlement): boolean {
     (entitlement.status === "active" || entitlement.status === "trialing");
 }
 
-async function billingRedirect(path: string): Promise<BillingResult> {
+export function hasPaidAccess(entitlement: Entitlement): boolean {
+  return entitlement.tier !== "free" &&
+    (entitlement.status === "active" || entitlement.status === "trialing");
+}
+
+async function billingRedirect(path: string, payload?: unknown): Promise<BillingResult> {
   const accessToken = await currentAccessToken();
   if (!accessToken) return { ok: false, message: "Sign in before opening billing." };
 
@@ -59,7 +65,9 @@ async function billingRedirect(path: string): Promise<BillingResult> {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "X-Idempotency-Key": crypto.randomUUID(),
+        ...(payload ? { "Content-Type": "application/json" } : {}),
       },
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
     });
     const body = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
     if (!response.ok || !body?.url) {
@@ -72,8 +80,12 @@ async function billingRedirect(path: string): Promise<BillingResult> {
   }
 }
 
+export function startTrialCheckout(tier: PaidTier): Promise<BillingResult> {
+  return billingRedirect("/api/create-checkout-session", { tier });
+}
+
 export function startMaxCheckout(): Promise<BillingResult> {
-  return billingRedirect("/api/create-checkout-session");
+  return startTrialCheckout("max");
 }
 
 export function openBillingPortal(): Promise<BillingResult> {
@@ -87,6 +99,7 @@ export function consumeCheckoutResult(): CheckoutResult | null {
   const value = url.searchParams.get("checkout");
   if (value !== "success" && value !== "cancelled") return null;
   url.searchParams.delete("checkout");
+  url.searchParams.delete("plan");
   history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   return value;
 }

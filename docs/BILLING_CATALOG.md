@@ -28,9 +28,8 @@ allowances and product access.
 | TrueMax Extra Scan | One-time member price | $2.99 USD | `STRIPE_MEMBER_SCAN_PRICE_ID` |
 | TrueMax Extra Scan | One-time standard price | $5.99 USD | `STRIPE_SCAN_PRICE_ID` |
 
-The trial belongs on the Checkout-created subscription, not in a second product
-or price. Its duration is deliberately unset until the contradiction in
-`PRICING_DECISION.md` is resolved.
+The seven-day trial belongs on the Checkout-created subscription, not in a
+second product or price.
 
 Consumer Checkout creates ordinary Billing invoices and receipts, so the MVP
 does not need a separate Invoicing API flow. Use Dashboard-created one-off
@@ -49,35 +48,23 @@ The current code has good security foundations:
 - entitlement rows are server-written and owner-readable under RLS; and
 - the Customer Portal is used for self-service billing.
 
-It currently supports only `free | max` and one `STRIPE_MAX_PRICE_ID`. It does
-not yet implement Starter, one-time scan purchases, weekly scan grants, trial
-eligibility, the post-analysis offer, native-store receipts or age gating.
+The current funnel branch also adds `free | starter | max`, atomic trial
+reservation, duplicate-subscription blocking, server-side adult enforcement,
+safe paid-account deletion and the post-analysis offer. It does not yet
+implement one-time scan purchases, weekly scan grants, native-store receipts or
+the immutable credit ledger.
 
 ## Bugs and gaps to fix before accepting money
 
-1. **Deleting a paid account does not cancel Stripe.** The current database RPC
-   deletes the Supabase identity and cascades the entitlement row, but the
-   Stripe subscription can keep billing. Account deletion must cancel billing
-   first, then delete the identity, and late Stripe events for the deleted user
-   must be acknowledged safely.
-2. **The checkout endpoint can create duplicate subscriptions.** The UI hides
-   the upgrade button from a Max user, but the server does not reject a second
-   direct POST. It also has a short race before the first webhook stores the
-   Stripe customer. Enforce one active subscription per account server-side.
-3. **Trial abuse is not prevented.** A Stripe trial must be backed by a
-   server-owned, one-time trial redemption record; browser metadata is not an
-   eligibility source.
-4. **One-time scan payments are not fulfilled.** Credits must be granted only
+1. **One-time scan payments are not fulfilled.** Credits must be granted only
    after a paid Checkout event. Async payment methods must not receive a credit
    from an unpaid `checkout.session.completed` event.
-5. **There is no immutable scan-credit ledger.** A balance alone is too easy to
+2. **There is no immutable scan-credit ledger.** A balance alone is too easy to
    corrupt. Store grants, purchases, use, expiry and refunds as ledger entries.
-6. **Age gating is only a design request.** Max eligibility must be derived from
-   a protected profile field and checked again inside the Checkout function.
-7. **Past-due access is revoked immediately.** Decide whether a short grace
+3. **Past-due access is revoked immediately.** Decide whether a short grace
    period is intended and align it with Stripe Smart Retries and customer
    emails.
-8. **Same-second webhook ordering is ambiguous.** Stripe event timestamps have
+4. **Same-second webhook ordering is ambiguous.** Stripe event timestamps have
    second precision. The database currently permits a later-processed event
    with the same timestamp to overwrite state; add a deterministic status or
    event ordering rule before launch.
@@ -108,13 +95,12 @@ support policy.
 
 ## Safe rollout order
 
-1. Resolve trial length and the Starter/Max feature table.
-2. Fix account deletion and duplicate-subscription handling.
-3. Add the new Supabase entitlement and credit-ledger migration with RLS tests.
-4. Extend Checkout using a server allowlist for the four price IDs.
-5. Extend signed webhooks and add replay/out-of-order tests.
-6. Create the four prices in a Stripe sandbox and configure Customer Portal,
+1. Complete the Starter/Max feature table and weekly-credit rules.
+2. Add the immutable credit-ledger migration with RLS tests.
+3. Extend Checkout using a server allowlist for the two one-time scan price IDs.
+4. Extend signed webhooks and add replay/out-of-order tests.
+5. Create the four prices in a Stripe sandbox and configure Customer Portal,
    recovery emails, trial notices and Radar.
-7. Add Vercel Preview secrets and run end-to-end sandbox tests.
-8. Copy products to live mode, create a separate live webhook and set live
+6. Add Vercel Preview secrets and run end-to-end sandbox tests.
+7. Copy products to live mode, create a separate live webhook and set live
    Production secrets only after the sandbox gate is green.

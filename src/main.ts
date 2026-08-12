@@ -52,8 +52,16 @@ import {
   MEMBERSHIP_BRAND_EVENT,
 } from "./ui/membershipBrand.ts";
 import type { MembershipBrand } from "./ui/membershipBrand.ts";
+import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.ts";
 
 const MAX_IMAGE_DIM = 1280;
+
+if (import.meta.env.DEV) {
+  const preview = new URLSearchParams(location.search).get("preview");
+  if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
+    queueMicrotask(() => void openTrialFunnelPreview(preview !== "offer-minor", preview !== "funnel"));
+  }
+}
 
 const el = {
   engineStatus: document.getElementById("engine-status")!,
@@ -811,6 +819,18 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
+    onContinue: async () => {
+      const user = await currentUser();
+      if (user) {
+        await openTrialFunnel(user);
+        return;
+      }
+      await openAccount({
+        reason: "analysis",
+        notice: "Create your account to save your pathway and choose a trial.",
+        onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser),
+      });
+    },
     onSideProfile: () => startSide(),
     sideReport: sideReport ?? undefined,
     sidePhoto: lastSide?.photo,
