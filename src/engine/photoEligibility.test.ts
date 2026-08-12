@@ -78,9 +78,9 @@ test("a usable webcam frame between the focus warning and block floor is accepte
   );
 });
 
-test("side uploads reject a detected three-quarter view", () => {
-  const rejection = sidePhotoRejection(quality({ yawDeg: 42 }), stats, silhouette(), 1200, 1600);
-  assert.match(rejection?.title ?? "", /not sideways enough/i);
+test("side uploads reject only a clearly frontal detected face", () => {
+  assert.match(sidePhotoRejection(quality({ yawDeg: 20 }), stats, silhouette(), 1200, 1600)?.title ?? "", /not sideways enough/i);
+  assert.equal(sidePhotoRejection(quality({ yawDeg: 42 }), stats, silhouette(), 1200, 1600), null);
 });
 
 test("a detected profile ignores a background silhouette crop false-positive", () => {
@@ -104,16 +104,11 @@ test("a relaxed partial smile passes but a broad smile still blocks", () => {
   assert.match(frontPhotoRejection(quality({ smileScore: 0.72 }), stats, occlusion, landmarks, 1200, 1600)?.title ?? "", /neutral expression/i);
 });
 
-test("detector loss is not accepted as proof of a side profile", () => {
+test("detector uncertainty proceeds to review unless no head exists", () => {
   const noFace = quality({ faceFound: false, pass: false });
-  const rejection = sidePhotoRejection(
-    noFace,
-    stats,
-    silhouette({ usable: false, reason: "not-profile", nasalRelief: 0.01 }),
-    1200,
-    1600,
-  );
-  assert.match(rejection?.title ?? "", /couldn't verify a full side profile/i);
+  assert.equal(sidePhotoRejection(noFace, stats, silhouette({ usable: false, reason: "not-profile", nasalRelief: 0.01 }), 1200, 1600), null);
+  assert.equal(sidePhotoRejection(noFace, stats, silhouette({ usable: false, reason: "cropped" }), 1200, 1600), null);
+  assert.match(sidePhotoRejection(noFace, stats, silhouette({ usable: false, reason: "no-head" }), 1200, 1600)?.title ?? "", /find a face/i);
 });
 
 test("a full profile may pass through its independently verified silhouette", () => {

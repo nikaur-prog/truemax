@@ -122,6 +122,9 @@ export async function signUp(email: string, password: string): Promise<AuthResul
     return { ok: true, needsConfirmation: !data.session };
   } catch (error) {
     console.error("TrueMax signup client failure", error);
+    if (reloadOnceAfterClientFailure(error)) {
+      return { ok: false, message: "TrueMax was updated. Refreshing the secure sign-up service…" };
+    }
     return { ok: false, message: clientFailure(error, "Could not reach the sign-in service. Refresh the page and try again.") };
   }
 }
@@ -286,4 +289,19 @@ function clientFailure(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/failed to fetch|network|load chunk|dynamically imported/i.test(message)) return fallback;
   return friendly(message);
+}
+
+// A tab can stay open across a Vercel release. If it later submits code whose
+// hashed bundle no longer exists, the request never reaches Supabase and looks
+// like an auth outage. Recover once automatically. The session guard prevents
+// an actual network outage from creating a reload loop.
+function reloadOnceAfterClientFailure(error: unknown): boolean {
+  if (typeof window === "undefined") return false;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (!/failed to fetch|network|load chunk|dynamically imported/i.test(message)) return false;
+  const key = "truemax:auth-reload-v1";
+  if (window.sessionStorage.getItem(key)) return false;
+  window.sessionStorage.setItem(key, "1");
+  window.setTimeout(() => window.location.reload(), 120);
+  return true;
 }
