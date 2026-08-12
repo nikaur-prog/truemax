@@ -114,10 +114,29 @@ const FLOOR = 3.2;
 const KNEE = 5.0;
 
 function aggScore(z: number): number {
+  return Math.round(aggScoreUnrounded(z) * 10) / 10;
+}
+
+function aggScoreUnrounded(z: number): number {
   const raw = clamp(5 + SCORE_SCALE * z, 0.5, 9.9);
-  if (raw >= KNEE) return Math.round(raw * 10) / 10;
+  if (raw >= KNEE) return raw;
   const span = KNEE - FLOOR;
-  return Math.round((KNEE - span * (1 - Math.exp(-(KNEE - raw) / span))) * 10) / 10;
+  return KNEE - span * (1 - Math.exp(-(KNEE - raw) / span));
+}
+
+// Convert an editable headline score back to the percentile represented by
+// the aggregate display curve. This must invert aggScore rather than the raw
+// 5 + 1.3z scale because scores below 5 use the documented soft floor.
+export function aggregateScoreToPercentile(score: number): number {
+  if (score <= FLOOR) return 0;
+  let lo = -8;
+  let hi = 8;
+  for (let i = 0; i < 64; i++) {
+    const mid = (lo + hi) / 2;
+    if (aggScoreUnrounded(mid) < score) lo = mid;
+    else hi = mid;
+  }
+  return Math.round(phi((lo + hi) / 2) * 1000) / 10;
 }
 
 function clamp(v: number, lo: number, hi: number): number {

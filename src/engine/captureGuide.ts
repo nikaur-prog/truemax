@@ -69,37 +69,26 @@ export interface Viewport {
   visH: number;
 }
 const FULL_VIEW: Viewport = { visW: 1, visH: 1 };
-const YAW_OK = 10;
-// Pitch tolerance, and it was the reason a correctly framed face got told to
-// move.
-//
-// This was 10 degrees. A laptop webcam sits above the eye line essentially
-// always, and a phone held naturally sits below it, so ordinary use starts
-// somewhere past 10 and the guide opened with "Lower the camera" at a face
-// that was squarely inside the oval.
-//
-// Ten was never a measured number. quality.ts — the gate that decides whether
-// a photograph is actually good enough to MEASURE — allows 26, and says why:
-// the ratios are pose-corrected in geometry.ts, so moderate pitch does not
-// distort them, and the threshold marks where landmark accuracy degrades from
-// self-occlusion rather than where the geometry breaks. The capture guide was
-// therefore 2.6x stricter than the analysis it feeds, refusing shots the
-// engine would have measured without complaint.
-//
-// 20 keeps a margin under quality.ts's 26, so anything the shutter allows
-// still clears the analysis gate afterwards. The direction of the advice is
-// unchanged; only the point at which it starts nagging has moved.
-const PITCH_OK = 20;
+// A skin/blemish read needs a substantially cleaner source than the geometry
+// engine can sometimes recover from. At larger turns one cheek is foreshortened
+// and partly hidden; pose-normalising landmarks cannot restore the missing skin
+// pixels. Keep live capture inside the same strict envelope used for uploads.
+export const FRONT_YAW_OK = 8;
+// Structural ratios can tolerate more pitch after pose correction, but the
+// visible-skin trial cannot: a high or low camera hides pixels and changes the
+// way texture catches the light. The stricter 10-degree capture envelope is
+// therefore shared by the live camera and file uploads.
+export const FRONT_PITCH_OK = 10;
 
-// Side-profile pitch band. Tighter than the front's 20 in the tucked direction
+// Side-profile pitch band. Tighter than the front in the tucked direction
 // because a tucked chin HIDES anatomy the side measurements need, rather than
 // merely skewing it — see checkSideFrame. Negative pitch is chin-down.
 const SIDE_PITCH_DOWN = 8;
 const SIDE_PITCH_UP = 26;
-const ROLL_OK = 7;
-const SMILE_OK = 0.35;
-const DARK = 42; // mean luma, 0-255
-const BRIGHT = 232;
+export const FRONT_ROLL_OK = 5;
+export const FRONT_SMILE_OK = 0.25;
+export const PHOTO_DARK = 48; // mean luma, 0-255
+export const PHOTO_BRIGHT = 225;
 // Sharpness. Measured on the FACE CROP, not the whole scene.
 //
 // This used to be the mean absolute Laplacian of the crop, gated at 9. That
@@ -133,8 +122,8 @@ const BRIGHT = 232;
 // soft frame costs a little measurement precision — landmark positions barely
 // move under blur (median shift 0.1% of face width even at 6px) — so refusing
 // to take the photo at all was never proportionate to the harm.
-const SHARP_WARN = 0.28;
-const SHARP_BLOCK = 0.17;
+export const PHOTO_SHARP_WARN = 0.28;
+export const PHOTO_SHARP_BLOCK = 0.17;
 // Iris offset inside its own eye opening: 0 = down the lens, 1 = at the corner.
 //
 // Calibrated against 216 real portraits (tools/gaze-calibrate.mjs): median
@@ -154,6 +143,21 @@ export interface FrameStats {
   // 0..1. Higher is sharper. Brightness- and contrast-invariant by
   // construction: it is a ratio of the same quantity measured twice.
   sharpness: number;
+}
+
+function statsFromPixels(d: Uint8ClampedArray, width: number, height: number): FrameStats {
+  const lum = new Float32Array(width * height);
+  let sum = 0;
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    lum[p] = v;
+    sum += v;
+  }
+  const luma = sum / Math.max(1, width * height);
+  const d0 = meanNeighbourDiff(lum, width, height);
+  const d1 = meanNeighbourDiff(boxBlur3(lum, width, height), width, height);
+  const sharpness = d0 <= 1e-6 ? 0 : Math.max(0, (d0 - d1) / d0);
+  return { luma, sharpness };
 }
 
 // Sample the face region for exposure and focus. Deliberately cheap: a small
@@ -178,22 +182,28 @@ export function frameStats(
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, W, H);
   const d = ctx.getImageData(0, 0, W, H).data;
 
-  const lum = new Float32Array(W * H);
-  let sum = 0;
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    lum[p] = v;
-    sum += v;
-  }
-  const luma = sum / (W * H);
+  return statsFromPixels(d, W, H);
+}
 
-  // Mean absolute neighbour difference, before and after a 3x3 box blur. The
-  // fraction that blurring destroys IS the focus measure: a sharp image loses
-  // a lot of neighbour difference, an already-soft one has little left to lose.
-  const d0 = meanNeighbourDiff(lum, W, H);
-  const d1 = meanNeighbourDiff(boxBlur3(lum, W, H), W, H);
-  const sharpness = d0 <= 1e-6 ? 0 : Math.max(0, (d0 - d1) / d0);
-  return { luma, sharpness };
+// Still uploads used to skip the exposure/focus checks entirely. Sample them
+// through the same statistic as the camera so choosing a file is not a back
+// door around capture quality. `box` is normalized to the source image.
+export function stillFrameStats(
+  source: HTMLCanvasElement,
+  box?: { x: number; y: number; w: number; h: number },
+): FrameStats {
+  const W = 160;
+  const H = 160;
+  const scratch = document.createElement("canvas");
+  scratch.width = W;
+  scratch.height = H;
+  const ctx = scratch.getContext("2d", { willReadFrequently: true })!;
+  const sx = box ? box.x * source.width : 0;
+  const sy = box ? box.y * source.height : 0;
+  const sw = box ? Math.max(1, box.w * source.width) : source.width;
+  const sh = box ? Math.max(1, box.h * source.height) : source.height;
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, W, H);
+  return statsFromPixels(ctx.getImageData(0, 0, W, H).data, W, H);
 }
 
 function meanNeighbourDiff(lum: Float32Array, W: number, H: number): number {
@@ -280,8 +290,8 @@ export function checkSideFrame(
     centered: true,
     level: true,
     straight: true,
-    light: stats.luma >= DARK && stats.luma <= BRIGHT,
-    sharp: stats.sharpness >= SHARP_WARN,
+    light: stats.luma >= PHOTO_DARK && stats.luma <= PHOTO_BRIGHT,
+    sharp: stats.sharpness >= PHOTO_SHARP_WARN,
     neutral: true,
     gaze: true,
   };
@@ -339,10 +349,10 @@ export function checkSideFrame(
     add((-pose.pitch - SIDE_PITCH_DOWN) / SIDE_PITCH_DOWN, "Lift your chin", "The jaw corner and the line under your chin have to be visible");
     add((pose.pitch - SIDE_PITCH_UP) / SIDE_PITCH_UP, "Chin down a little", "Too far up flattens the jaw angle");
   }
-  add((DARK - stats.luma) / DARK, "Too dark", "Face a window or turn a light on");
-  add((stats.luma - BRIGHT) / BRIGHT, "Too bright", "Move out of direct light");
+  add((PHOTO_DARK - stats.luma) / PHOTO_DARK, "Too dark", "Face a window or turn a light on");
+  add((stats.luma - PHOTO_BRIGHT) / PHOTO_BRIGHT, "Too bright", "Move out of direct light");
   add(
-    (SHARP_BLOCK - stats.sharpness) / SHARP_BLOCK,
+    (PHOTO_SHARP_BLOCK - stats.sharpness) / PHOTO_SHARP_BLOCK,
     "Can't focus",
     "Give the lens a wipe. The image is too smeared to measure",
   );
@@ -432,11 +442,11 @@ export function checkFrame(
 
   gates.distance = w >= TARGET_MIN && w <= TARGET_MAX;
   gates.centered = Math.abs(cxOff) < 0.1 && Math.abs(cyOff) < 0.12;
-  gates.level = Math.abs(q.pitchDeg) <= PITCH_OK;
-  gates.straight = Math.abs(q.yawDeg) <= YAW_OK && Math.abs(q.rollDeg) <= ROLL_OK;
-  gates.light = stats.luma >= DARK && stats.luma <= BRIGHT;
-  gates.sharp = stats.sharpness >= SHARP_WARN;
-  gates.neutral = q.smileScore <= SMILE_OK;
+  gates.level = Math.abs(q.pitchDeg) <= FRONT_PITCH_OK;
+  gates.straight = Math.abs(q.yawDeg) <= FRONT_YAW_OK && Math.abs(q.rollDeg) <= FRONT_ROLL_OK;
+  gates.light = stats.luma >= PHOTO_DARK && stats.luma <= PHOTO_BRIGHT;
+  gates.sharp = stats.sharpness >= PHOTO_SHARP_WARN;
+  gates.neutral = q.smileScore <= FRONT_SMILE_OK;
   // A blink loses the irises for a frame or two. Holding the last verdict
   // instead of failing keeps the light from flickering on every blink.
   gates.gaze = gaze ? gaze.offset <= GAZE_OK : true;
@@ -455,20 +465,20 @@ export function checkFrame(
   add((w - TARGET_MAX) / TARGET_MAX, "Move back a little", "You're too close to the lens");
   add((Math.abs(cxOff) - 0.1) / 0.1, cxOff > 0 ? "Move left" : "Move right", "Center your face");
   add((Math.abs(cyOff) - 0.12) / 0.12, cyOff > 0 ? "Move up" : "Move down", "Center your face");
-  add((DARK - stats.luma) / DARK, "Too dark", "Face a window or turn a light on");
-  add((stats.luma - BRIGHT) / BRIGHT, "Too bright", "Move out of direct light");
-  add((-q.pitchDeg - PITCH_OK) / PITCH_OK, "Lower the camera", "It's above your eye line, looking down");
-  add((q.pitchDeg - PITCH_OK) / PITCH_OK, "Raise the camera", "It's below your eye line, looking up");
-  add((Math.abs(q.yawDeg) - YAW_OK) / YAW_OK, "Face the camera directly", "Your head is turned");
-  add((Math.abs(q.rollDeg) - ROLL_OK) / ROLL_OK, "Straighten your head", "It's tilted to one side");
+  add((PHOTO_DARK - stats.luma) / PHOTO_DARK, "Too dark", "Face a window or turn a light on");
+  add((stats.luma - PHOTO_BRIGHT) / PHOTO_BRIGHT, "Too bright", "Move out of direct light");
+  add((-q.pitchDeg - FRONT_PITCH_OK) / FRONT_PITCH_OK, "Lower the camera", "It's above your eye line, looking down");
+  add((q.pitchDeg - FRONT_PITCH_OK) / FRONT_PITCH_OK, "Raise the camera", "It's below your eye line, looking up");
+  add((Math.abs(q.yawDeg) - FRONT_YAW_OK) / FRONT_YAW_OK, "Face the camera directly", "Your head is turned");
+  add((Math.abs(q.rollDeg) - FRONT_ROLL_OK) / FRONT_ROLL_OK, "Straighten your head", "It's tilted to one side");
   // Only genuine smear holds the shutter. Merely-soft is handled below, after
   // the blocking problems, so a dim room never strands anyone.
   add(
-    (SHARP_BLOCK - stats.sharpness) / SHARP_BLOCK,
+    (PHOTO_SHARP_BLOCK - stats.sharpness) / PHOTO_SHARP_BLOCK,
     "Can't focus on your face",
     "Give the lens a wipe. The image is too smeared to measure",
   );
-  add((q.smileScore - SMILE_OK) / SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
+  add((q.smileScore - FRONT_SMILE_OK) / FRONT_SMILE_OK, "Relax your expression", "A smile shifts mouth and jaw measurements");
   // A blocking problem like any other, so it sorts against the rest by how far
   // off it is rather than jumping the queue: someone in glasses who is also
   // badly framed should be told about the framing first, because they have to

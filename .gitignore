@@ -1,6 +1,7 @@
 node_modules/
 dist/
 public/wasm/
+public/models/selfie_multiclass_256x256.tflite
 .DS_Store
 *.local
 

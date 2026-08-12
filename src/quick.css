@@ -30,7 +30,13 @@
 .q-hint b { display: block; font-size: 15px; font-weight: 600; }
 .q-hint span { display: block; font-size: 12.5px; opacity: 0.8; }
 .q-hint.ready b { color: #8ff3e0; }
-.q-lamp { display: block; height: 3px; border-radius: 99px; background: rgba(255, 255, 255, 0.22); }
+.q-lamp {
+  /* `.lamp-track` is shared with a horizontal flex row and sets flex:1. Inside
+     this vertical HUD that made the progress track consume every spare pixel,
+     producing the enormous amber slab seen on /quick. */
+  display: block; flex: none; width: 100%; height: 3px; border-radius: 99px;
+  background: rgba(255, 255, 255, 0.22);
+}
 
 .q-actions { display: flex; gap: 10px; margin-top: 14px; }
 .q-actions .btn { flex: 1; }
@@ -180,4 +186,11 @@
 
 /* The download/new-photo row sits at the bottom of the frame, out of the shot
    the creator is composing. */
-#q-result .q-actions { margin-top: 12px; }
+#q-result .q-actions { margin-top: 12px; flex-wrap: wrap; }
+#q-result .q-actions .btn { min-width: calc(50% - 6px); }
+
+@media (min-width: 760px) {
+  /* The capture tool stays phone-sized on desktop, but it should start near
+     the top of the page rather than floating halfway down a tall monitor. */
+  .q-wrap { justify-content: flex-start; padding-top: 34px; }
+}
