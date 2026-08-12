@@ -12,7 +12,7 @@ import { toCelebEntry } from "./engine/celebs.ts";
 import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
-import { renderResults } from "./ui/results.ts";
+import { renderResults, setMaxAccess } from "./ui/results.ts";
 import { mergeReports } from "./engine/scoring.ts";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
@@ -59,6 +59,18 @@ import type { MembershipBrand } from "./ui/membershipBrand.ts";
 import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.ts";
 
 const MAX_IMAGE_DIM = 1280;
+
+// Read the entitlement and tell the results screen. Never throws: a billing
+// read that fails leaves the plan locked, which is the safe direction — it
+// shows a paywall to a paying customer, who can retry, rather than handing the
+// paid product to everyone the moment Supabase has a bad minute.
+async function refreshMaxAccess(): Promise<void> {
+  try {
+    setMaxAccess(hasMaxAccess(await loadEntitlement()));
+  } catch {
+    setMaxAccess(false);
+  }
+}
 
 if (import.meta.env.DEV) {
   const preview = new URLSearchParams(location.search).get("preview");
@@ -853,6 +865,25 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
+    // Same destination as "continue" — the plan chooser, which already handles
+    // signed-out users and the under-18 rule. The upgrade button is not a
+    // second, parallel billing path.
+    onUpgrade: async () => {
+      const user = await currentUser();
+      if (user) {
+        await openTrialFunnel(user);
+        await refreshMaxAccess();
+        return;
+      }
+      await openAccount({
+        reason: "analysis",
+        notice: "Create your account to choose a plan.",
+        onAuthenticated: async (signedInUser) => {
+          await openTrialFunnel(signedInUser);
+          await refreshMaxAccess();
+        },
+      });
+    },
     onContinue: async () => {
       const user = await currentUser();
       if (user) {
@@ -921,6 +952,11 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     },
   };
   renderResults(ctxArgs);
+
+  // The plan renders locked and unlocks in place if this comes back positive.
+  // Deliberately not awaited: a finished analysis must never wait on a billing
+  // read, and a failed read leaves the paywall up rather than giving Max away.
+  void refreshMaxAccess();
 
   exposeDev(report, landmarks, quality);
   // Any redirect-survival copy has served its one purpose. The full-size
