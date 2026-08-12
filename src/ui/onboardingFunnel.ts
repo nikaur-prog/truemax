@@ -138,7 +138,10 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
     host.innerHTML = `<div class="trial-shell trial-offer" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <div class="trial-offer-head">
-        <div class="max-guide" aria-hidden="true"><i></i><i></i><b></b><span>MAX</span></div>
+        <div class="max-guide" aria-hidden="true">
+          <img src="/brand/max-avatar-v1.webp" alt="" width="640" height="640">
+          <span>MAX</span>
+        </div>
         <div><span class="trial-eyebrow">YOUR PATHWAY IS READY</span>
           <h2 id="trial-title">One more scan. Seven days to explore.</h2>
           <p>Your card is collected securely by Stripe. Cancel before the trial ends and you pay $0.</p></div>
