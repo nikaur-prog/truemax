@@ -86,7 +86,10 @@ export const FRONT_PITCH_OK = 10;
 const SIDE_PITCH_DOWN = 8;
 const SIDE_PITCH_UP = 26;
 export const FRONT_ROLL_OK = 5;
-export const FRONT_SMILE_OK = 0.25;
+// Mild expression is still measurable. The former 0.25 cutoff rejected a
+// relaxed mouth corner as a smile; reserve the block for a clear smile that
+// materially shifts cheeks, lips and jaw.
+export const FRONT_SMILE_OK = 0.42;
 export const PHOTO_DARK = 48; // mean luma, 0-255
 export const PHOTO_BRIGHT = 225;
 // Sharpness. Measured on the FACE CROP, not the whole scene.

@@ -555,6 +555,20 @@ el.btnNoGlasses.addEventListener("click", () => {
 
 function resetToUpload(): void {
   clearPendingAnalysis();
+  // A new scan is a hard privacy boundary. Clearing only localStorage left the
+  // previous front landmarks, full-resolution canvas and verified side points
+  // alive in this tab. A second person could then capture only the side and
+  // receive a report rendered over the first person's front photo.
+  pending = null;
+  lastSide = null;
+  feedbackDeliveryNote = null;
+  resumePendingStarted = false;
+  el.photoCanvas.width = 1;
+  el.photoCanvas.height = 1;
+  el.photoCanvas.getContext("2d")?.clearRect(0, 0, 1, 1);
+  el.overlayCanvas.width = 1;
+  el.overlayCanvas.height = 1;
+  el.overlayCanvas.getContext("2d")?.clearRect(0, 0, 1, 1);
   el.main.classList.add("hidden");
   el.upload.classList.remove("hidden");
   el.zoomable.style.transform = "none";

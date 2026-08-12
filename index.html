@@ -175,6 +175,13 @@
             <div class="side-live hidden" id="side-live">
               <video id="side-video" playsinline muted></video>
               <canvas id="side-guide"></canvas>
+              <div class="side-turn-cue" id="side-turn-cue" aria-hidden="true">
+                <svg viewBox="0 0 180 150" role="presentation">
+                  <path class="turn-head" d="M88 35c24 0 38 18 38 40 0 15-7 24-18 31v20H70v-20C59 99 53 89 53 75c0-22 13-40 35-40Z"/>
+                  <path class="turn-arrow" d="M31 77c8-27 30-44 57-44m-57 44 2-19m-2 19 18-5M149 77c-8-27-30-44-57-44m57 44-2-19m2 19-18-5"/>
+                </svg>
+                <span>Turn fully left or right</span>
+              </div>
               <div class="cam-hud">
                 <div class="cam-hint" id="side-hint">
                   <b id="side-hint-title">Turn to the side</b>

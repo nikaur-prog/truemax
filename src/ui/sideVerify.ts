@@ -6,9 +6,9 @@ import { cloneSidePoints } from "../engine/sideFeedbackPayload.ts";
 import type { SideSeedMethod } from "../engine/sideFeedbackPayload.ts";
 import type { SideSilhouetteCheck } from "../engine/photoEligibility.ts";
 
-// Drag-to-verify landmark editor for the side profile. MediaPipe can't place
-// true-profile landmarks reliably, so the app seeds a best guess from the
-// silhouette and the user corrects it — "verify your landmarks for accuracy".
+// Drag-to-verify landmark editor for the side profile. MediaPipe's visible-side
+// mesh is the primary seed; a background-independent silhouette estimate is a
+// fallback only when no mesh survives. The user confirms either one.
 
 export interface VerifyHandle {
   points: SidePoints;
@@ -53,12 +53,6 @@ export interface SideSeed {
 
 // Downsampled working resolution. The silhouette is a shape, not a texture.
 const TRACE_W = 200;
-
-// Landmark-box width over height, below which the mesh is not to be trusted for
-// seeding. A frontal face lands near 0.75; a true profile projects far narrower,
-// and that is exactly the range where MediaPipe keeps answering confidently and
-// stops being correct.
-const MESH_TRUSTED_ASPECT = 0.62;
 
 interface Mask {
   fg: Uint8Array;
@@ -199,25 +193,11 @@ function seedFromLandmarks(
   }
   if (!lm || lm.length < 468) return null;
 
-  // The mesh has to be TRUSTWORTHY, not merely present.
-  //
-  // MediaPipe keeps returning a full mesh well past the angle at which it stops
-  // being right — it does not report "I am guessing". Past roughly 55 degrees
-  // the far half of the face is invented, and the named landmarks drift off the
-  // profile edge and onto the cheek. Seeding from that is worse than not using
-  // it, because it is confidently wrong in a way the silhouette trace is not.
-  //
-  // The tell is the mesh's own width. A face turned to a true profile projects
-  // narrow; one the detector thinks is near-frontal projects wide. Below this
-  // ratio of landmark-box width to height, the mesh is describing a turn it
-  // cannot actually resolve, so the trace takes over.
-  let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
-  for (const p of lm) {
-    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
-    y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
-  }
-  const aspect = (x1 - x0) / Math.max(1e-6, y1 - y0);
-  if (aspect < MESH_TRUSTED_ASPECT) return null;
+  // A true profile produces a narrow mesh, but its named visible-side points
+  // still stay attached to the head. The old width cutoff threw that geometry
+  // away precisely on true profiles and traced the room background instead;
+  // busy walls then received landmark dots. Use the on-head mesh whenever it
+  // exists and let the template/sanity pass replace individual weak points.
 
   const w = canvas.width;
   const h = canvas.height;

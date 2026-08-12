@@ -23,7 +23,7 @@ export interface QualityCheck {
 const YAW_TOLERANCE_DEG = 28;
 const PITCH_TOLERANCE_DEG = 26;
 const MIN_FACE_WIDTH_FRAC = 0.2;
-const SMILE_TOLERANCE = 0.35;
+const SMILE_TOLERANCE = 0.42;
 
 // Landmark indices (MediaPipe 478-point mesh)
 const LEFT_FACE_EDGE = 234;
