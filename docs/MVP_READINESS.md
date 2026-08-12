@@ -15,7 +15,8 @@ This verdict assumes the MVP is:
 - a web product with an explicitly designed under-18 mode;
 - cosmetic/self-improvement information, not a medical or diagnostic service;
 - one free analysis plus Starter and Max monthly subscriptions;
-- on-device photo processing, with no face photographs uploaded;
+- on-device photo processing by default, with an explicit optional side-photo
+  upload solely for automatic-versus-corrected landmark improvement;
 - allowed to keep scan history on one device at launch (cross-device sync can
   follow), provided the UI says so honestly.
 
@@ -31,6 +32,7 @@ and a mobile smoke test are blockers.
 | Core capture flow | Pass locally | Mobile-sized browser test completed front capture, rejected a false side photo, accepted a profile, showed 13-point verification, and reached the account gate. |
 | Account UI | Built, not deployed | Modal and `/auth` portal cover signup, password login, magic link, Google, Apple, forgot password and new password. |
 | Post-scan acquisition flow | Built, not deployed | The scan remains the default page; signup appears only after both captures; a reduced local copy is usable through an email/OAuth redirect for 30 minutes and is deleted after use or on the next app open after expiry. |
+| Side correction feedback | Built, schema live, not deployable yet | Automatic points are reviewed before analysis; editing is explicit; No creates no upload intent; Yes privately pairs the side photo with automatic/corrected coordinates. Vercel is missing the server secret and cron variables, and the public privacy policy is still absent. |
 | Supabase schema | Pass | `scans`, `entitlements` and `stripe_webhook_events` exist with RLS. Anonymous reads/RPC return 401. |
 | Supabase security | Pass with one intentional warning | Anonymous execute on `delete_own_account` was removed. The advisor still flags authenticated execution because that RPC intentionally lets a signed-in user delete only itself. |
 | OAuth provider config | Partial | Public Auth settings report `google: true` and `apple: false`. The app enables each button from that server-owned setting. |
@@ -61,6 +63,10 @@ and a mobile smoke test are blockers.
 8. A same-page password sign-in could race the auth listener and append the
    finished scan to local history twice. The in-page continuation now claims
    the result before the redirect-resume listener runs.
+9. Side points previously opened directly in a draggable state, with no durable
+   record of what automation placed versus what the person corrected. Review is
+   now locked first, editing is explicit, and any paired feedback requires a
+   separate opt-in after confirmation.
 
 ## Go-live gates
 

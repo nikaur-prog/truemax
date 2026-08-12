@@ -27,7 +27,7 @@
       <h1>Looks are no longer <em>subjective</em>.</h1>
       <p class="sub">
         478 points measured on your face, compared against real population data.
-        <span class="sub-note">Nothing is uploaded. It all runs on your device.</span>
+        <span class="sub-note">Analysis runs on your device. Sharing side-point feedback is always optional.</span>
       </p>
 
       <!-- The full list is what someone reads once and never again. Behind a
@@ -127,7 +127,7 @@
              running (see occlusion.ts), so asking here is the whole defence
              for the other two. -->
         <div><i></i>Glasses, hats and hoods off</div>
-        <div><i></i>Photos never leave your device</div>
+        <div><i></i>Photos stay on your device by default</div>
       </div>
       <p class="engine-status" id="engine-status">Loading analysis engine…</p>
       <button class="hist-entry hidden" id="landing-history">View your scan history →</button>
@@ -195,31 +195,28 @@
           <div class="navrow" id="side-actions"></div>
         </div>
         <div class="side-panel" id="side-panel">
-          <h2 class="side-title">Now the side profile</h2>
-          <p class="side-sub">
-            Second of two. Chin projection, jaw angle and facial convexity do
-            not exist in a front photo. They can only be measured from the
-            side, and they are among the strongest numbers on the report. The
-            analysis runs once both views are in.
-          </p>
-          <!-- The one thing that is genuinely different about this capture, and
-               it went unsaid for a long time: turned side-on you cannot read
-               the screen, so none of the visual guidance above reaches you.
-               That is why the shutter is hands-off and the countdown is
-               audible. Saying it here is what makes the beeping mean
-               something instead of being a surprise. -->
-          <p class="side-sub">
-            <b>You will not be able to see this screen.</b> So it takes the
-            photo itself: turn until you hear the countdown start, then hold
-            still. Two beeps, then a higher one is the shutter. Space bar takes
-            it immediately if you would rather not wait.
-          </p>
-          <p class="side-sub">
-            Afterwards, thirteen points are placed for you and you drag any
-            that missed. That check is what makes the side measurements real,
-            and it is why the side view is capped at how far it can move your
-            score.
-          </p>
+          <div id="side-panel-copy">
+            <h2 class="side-title">Now the side profile</h2>
+            <p class="side-sub">
+              Second of two. Chin projection, jaw angle and facial convexity do
+              not exist in a front photo. They can only be measured from the
+              side, and they are among the strongest numbers on the report. The
+              analysis runs once both views are in.
+            </p>
+            <!-- Turned side-on, the person cannot read the screen. The audible
+                 countdown and keyboard shutter make this step usable without
+                 reaching back toward the device and changing the framing. -->
+            <p class="side-sub">
+              <b>You will not be able to see this screen.</b> So it takes the
+              photo itself: turn until you hear the countdown start, then hold
+              still. Two beeps, then a higher one is the shutter. Space bar takes
+              it immediately if you would rather not wait.
+            </p>
+            <p class="side-sub">
+              Afterwards, thirteen points are placed for you to review. If any
+              missed, choose edit and drag only those points before confirming.
+            </p>
+          </div>
           <label class="drop drop-side" id="side-drop" for="side-input">
             <b>Add a side-profile photo</b>
             <span>Full profile · looking straight ahead · hair off the face</span>

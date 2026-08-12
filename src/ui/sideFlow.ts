@@ -4,6 +4,14 @@ import { sidePointIntegrityIssues } from "../engine/sideMetrics.ts";
 import type { SidePoints } from "../engine/sideMetrics.ts";
 import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
 import type { VerifyHandle } from "./sideVerify.ts";
+import {
+  cloneSidePoints,
+  createSideFeedbackIntent,
+} from "../engine/sideFeedbackPayload.ts";
+import type {
+  SideFeedbackIntent,
+  SideSeedMethod,
+} from "../engine/sideFeedbackPayload.ts";
 import { startCamera } from "./camera.ts";
 import { setRunningMode } from "../engine/landmarker.ts";
 import { detectStable } from "../engine/consensus.ts";
@@ -36,8 +44,26 @@ interface SideCtx {
   // profile camera straight away; "upload" offers only the file drop; undefined
   // shows both choices.
   method?: "camera" | "upload";
-  onDone: (report: Report, points: SidePoints, faceDir: number) => void;
+  onDone: (
+    report: Report,
+    points: SidePoints,
+    faceDir: number,
+    review: SidePlacementReview,
+  ) => void;
   onBack: () => void;
+}
+
+export interface SidePlacementReview {
+  automaticPoints: SidePoints;
+  seedMethod: SideSeedMethod;
+  feedback: SideFeedbackIntent | null;
+}
+
+interface SidePlacementSeed {
+  points: SidePoints;
+  faceDir: number;
+  automaticPoints?: SidePoints;
+  method?: SideSeedMethod;
 }
 
 let verifier: VerifyHandle | null = null;
@@ -54,6 +80,7 @@ const el = () => ({
   drop: document.getElementById("side-drop")!,
   input: document.getElementById("side-input") as HTMLInputElement,
   actions: document.getElementById("side-actions")!,
+  panelCopy: document.getElementById("side-panel-copy")!,
   frame: document.getElementById("side-frame")!,
   live: document.getElementById("side-live")!,
   video: document.getElementById("side-video") as HTMLVideoElement,
@@ -65,12 +92,23 @@ const el = () => ({
   lampFill: document.getElementById("side-lamp-fill")!,
 });
 
+function renderSideCaptureCopy(copy: HTMLElement): void {
+  copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
+    <p class="side-sub">Second of two. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
+    <p class="side-sub"><b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two beeps, then a higher shutter beep. Space bar takes it immediately.</p>
+    <p class="side-sub">Afterwards, TrueMax places thirteen points for you to review. If any missed, choose edit and drag only those points before confirming.</p>`;
+}
+
 export function openSideCapture(ctx: SideCtx): void {
   const e = el();
+  verifier?.destroy();
+  verifier = null;
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
   e.live.classList.add("hidden");
+  e.lines.replaceChildren();
+  renderSideCaptureCopy(e.panelCopy);
 
   // The side matches how the front was taken. Shot the front on camera → open
   // the profile camera straight away; uploaded it → offer only the file drop.
@@ -275,7 +313,7 @@ function stopSideCamera(): void {
 // the good capture and their time.
 export function openSideAdjust(
   photo: HTMLCanvasElement,
-  seed: { points: SidePoints; faceDir: number },
+  seed: SidePlacementSeed,
   ctx: SideCtx,
 ): void {
   const e = el();
@@ -283,7 +321,7 @@ export function openSideAdjust(
   e.drop.classList.add("hidden");
   e.live.classList.add("hidden");
   e.frame.classList.remove("live");
-  mountVerify(photo, seed, ctx, "ADJUST LANDMARKS");
+  mountVerify(photo, { ...seed, method: seed.method ?? "existing" }, ctx, "REVIEW LANDMARKS");
 }
 
 export function close(): void {
@@ -350,7 +388,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
 // apart in what dragging a point does.
 function mountVerify(
   photo: HTMLCanvasElement,
-  seed: { points: SidePoints; faceDir: number },
+  seed: SidePlacementSeed,
   ctx: SideCtx,
   caption: string,
 ): void {
@@ -365,18 +403,53 @@ function mountVerify(
   e.drop.classList.add("hidden");
   e.cap.textContent = caption;
 
+  const automaticPoints = cloneSidePoints(seed.automaticPoints ?? seed.points);
+  const seedMethod = seed.method ?? "existing";
+
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
   drawGuides(e.lines, seed.points, w, h);
 
-  e.actions.innerHTML = `
-    <button class="btn gho" id="side-back">Retake profile</button>
-    <button class="btn pri" id="side-go">Run the analysis</button>`;
-  document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
-  document.getElementById("side-go")!.onclick = () => {
+  const showReviewActions = () => {
+    verifier?.setEditable(false);
+    e.cap.textContent = "REVIEW LANDMARKS";
+    e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
+      <p class="side-sub">TrueMax has placed the thirteen profile landmarks. If every ring sits on the named feature, confirm them. If one is wrong, choose <b>Edit point placement</b> and drag only the points that need correcting.</p>
+      <p class="side-review-note">Nothing leaves this device unless you separately choose to share it after confirming.</p>`;
+    e.actions.innerHTML = `
+      <button class="btn gho" id="side-back">Retake profile</button>
+      <button class="btn gho" id="side-edit">Edit point placement</button>
+      <button class="btn pri" id="side-go">Points look right</button>`;
+    document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
+    document.getElementById("side-edit")!.onclick = () => showEditActions();
+    document.getElementById("side-go")!.onclick = () => void confirmPlacement();
+  };
+
+  const showEditActions = () => {
+    verifier?.setEditable(true);
+    e.cap.textContent = "EDIT LANDMARKS";
+    e.panelCopy.innerHTML = `<h2 class="side-title">Correct only what is wrong</h2>
+      <p class="side-sub">Drag a ring onto the exact feature named when you touch it. The hollow centre lets you see the pixel underneath. Confirm when the placement matches the photo.</p>
+      <p class="side-review-note">You can reset every point to TrueMax's automatic placement at any time.</p>`;
+    e.actions.innerHTML = `
+      <button class="btn gho" id="side-reset">Reset automatic</button>
+      <button class="btn gho" id="side-back">Retake profile</button>
+      <button class="btn pri" id="side-go">Confirm placement</button>`;
+    document.getElementById("side-reset")!.onclick = () => {
+      verifier?.reset(automaticPoints);
+      drawGuides(e.lines, automaticPoints, w, h);
+    };
+    document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
+    document.getElementById("side-go")!.onclick = () => void confirmPlacement();
+  };
+
+  const confirmPlacement = async () => {
     if (!verifier) return;
+    const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
+    if (confirmButton) confirmButton.disabled = true;
     const issues = sidePointIntegrityIssues(verifier.points, w, h, verifier.faceDir);
     if (issues.length) {
+      if (confirmButton) confirmButton.disabled = false;
       e.cap.textContent = "CHECK LANDMARKS";
       const first = issues[0];
       const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
@@ -387,10 +460,23 @@ function mountVerify(
       return;
     }
     try {
+      const correctedPoints = cloneSidePoints(verifier.points);
       const report = analyzeSide(verifier.points, verifier.faceDir, ctx.sex);
+      const consented = await askSideFeedbackConsent();
+      const feedback = createSideFeedbackIntent(
+        consented,
+        crypto.randomUUID(),
+        automaticPoints,
+        seedMethod,
+      );
       e.cap.textContent = "ANALYZED";
-      ctx.onDone(report, verifier.points, verifier.faceDir);
+      ctx.onDone(report, correctedPoints, verifier.faceDir, {
+        automaticPoints,
+        seedMethod,
+        feedback,
+      });
     } catch (err) {
+      if (confirmButton) confirmButton.disabled = false;
       e.cap.textContent = "CHECK LANDMARKS";
       const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
       if (hint) {
@@ -399,6 +485,51 @@ function mountVerify(
       }
     }
   };
+
+  showReviewActions();
+}
+
+function askSideFeedbackConsent(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "side-feedback-backdrop";
+    backdrop.innerHTML = `<section class="side-feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="side-feedback-title" aria-describedby="side-feedback-copy">
+      <span class="klabel">OPTIONAL · YOUR CHOICE</span>
+      <h2 id="side-feedback-title">Help improve TrueMax?</h2>
+      <p id="side-feedback-copy">With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans.</p>
+      <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
+      <div class="side-feedback-actions">
+        <button type="button" class="btn gho" data-choice="no">No, keep it on this device</button>
+        <button type="button" class="btn pri" data-choice="yes">Yes, share this scan</button>
+      </div>
+    </section>`;
+    document.body.appendChild(backdrop);
+    const no = backdrop.querySelector<HTMLButtonElement>('[data-choice="no"]')!;
+    const yes = backdrop.querySelector<HTMLButtonElement>('[data-choice="yes"]')!;
+    let finished = false;
+    const finish = (choice: boolean) => {
+      if (finished) return;
+      finished = true;
+      if (!choice) {
+        backdrop.remove();
+        resolve(false);
+        return;
+      }
+      const dialog = backdrop.querySelector<HTMLElement>(".side-feedback-dialog")!;
+      dialog.innerHTML = `<span class="side-feedback-thanks" aria-live="polite">Thank you.</span>
+        <p>We’ll share it privately after you are signed in.</p>`;
+      window.setTimeout(() => {
+        backdrop.remove();
+        resolve(true);
+      }, 850);
+    };
+    no.onclick = () => finish(false);
+    yes.onclick = () => finish(true);
+    backdrop.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish(false);
+    });
+    no.focus();
+  });
 }
 
 // Reference lines the user can sanity-check their placement against:

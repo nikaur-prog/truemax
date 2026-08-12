@@ -37,7 +37,8 @@ test("signup confirmation is also the branded welcome email", async () => {
   const html = await template("confirm-signup.html");
   assert.match(html, /<h1[^>]*>Welcome to TrueMax<\/h1>/);
   assert.match(html, /Confirm my email/);
-  assert.match(html, /face photos stay on your device/i);
+  assert.match(html, /face photos stay on your device by default/i);
+  assert.match(html, /only if you separately choose/i);
 });
 
 test("reauthentication uses a code and does not invent a link", async () => {

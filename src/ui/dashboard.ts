@@ -96,7 +96,7 @@ export function openDashboard(opts: {
                   <b id="dash-reel-score"></b><span id="dash-reel-name"></span>
                 </div>
               </div>
-              <p>A real scan, running. Nothing is uploaded — the whole engine runs on this device.</p>
+              <p>A real scan running on this device. Side-point feedback is shared only when you explicitly choose it.</p>
             </div>
           </div>
         </div>

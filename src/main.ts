@@ -17,6 +17,8 @@ import { mergeReports } from "./engine/scoring.ts";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
 import type { SidePoints } from "./engine/sideMetrics.ts";
+import { submitSideCorrectionFeedback } from "./engine/sideFeedback.ts";
+import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.ts";
 import { isSupported, overrideGlasses, resetGlassesOverride, setGuideSex, startCamera } from "./ui/camera.ts";
 import { mountDemoReel } from "./ui/demoReel.ts";
 import { hasHistory, openHistory } from "./ui/historyView.ts";
@@ -667,7 +669,41 @@ interface PendingFront {
 let pending: PendingFront | null = null;
 // The verified side points, kept so a change of reference population can
 // re-score the profile too rather than only the front.
-let lastSide: { points: SidePoints; faceDir: number; photo?: HTMLCanvasElement } | null = null;
+interface LastSide {
+  points: SidePoints;
+  faceDir: number;
+  photo?: HTMLCanvasElement;
+  automaticPoints?: SidePoints;
+  seedMethod?: SideSeedMethod;
+  feedback?: SideFeedbackIntent;
+  feedbackSubmitted?: boolean;
+}
+let lastSide: LastSide | null = null;
+let feedbackDeliveryNote: { ok: boolean; message: string } | null = null;
+
+// Upload exists only after an explicit Yes. It is deliberately best-effort:
+// optional product-improvement feedback must never hold a person's analysis
+// hostage if Storage or the network is unavailable.
+async function submitConsentedSideFeedback(): Promise<void> {
+  const side = lastSide;
+  if (!side?.feedback || side.feedbackSubmitted || !side.photo) return;
+  const result = await submitSideCorrectionFeedback(
+    side.photo,
+    side.points,
+    side.faceDir,
+    side.feedback,
+  );
+  if (result.ok) {
+    side.feedbackSubmitted = true;
+    feedbackDeliveryNote = { ok: true, message: "Optional side-landmark feedback sent privately" };
+  } else {
+    feedbackDeliveryNote = {
+      ok: false,
+      message: "Optional side-landmark feedback could not be sent; analysis was unaffected",
+    };
+    console.warn("Optional side correction feedback was not sent:", result.message);
+  }
+}
 
 // Both photographs are in. One analysis, one reveal, one score.
 async function runFullAnalysis(sideReport: Report | null): Promise<void> {
@@ -782,20 +818,34 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     // Correct the points on the profile already taken, rather than shooting it
     // again. The photograph is usually fine; it is the seed that missed.
     onRedoSide: () => {
+      feedbackDeliveryNote = null;
       if (!lastSide?.photo) {
         startSide();
         return;
       }
       el.main.classList.add("hidden");
-      openSideAdjust(lastSide.photo, { points: lastSide.points, faceDir: lastSide.faceDir }, {
+      openSideAdjust(lastSide.photo, {
+        points: lastSide.points,
+        faceDir: lastSide.faceDir,
+        automaticPoints: lastSide.automaticPoints,
+        method: lastSide.seedMethod,
+      }, {
         sex: selectedSex,
         onBack: () => {
           closeSide();
           el.main.classList.remove("hidden");
         },
-        onDone: async (sideReport, points, faceDir) => {
+        onDone: async (sideReport, points, faceDir, review) => {
           closeSide();
-          lastSide = { points, faceDir, photo: lastSide?.photo };
+          lastSide = {
+            points,
+            faceDir,
+            photo: lastSide?.photo,
+            automaticPoints: review.automaticPoints,
+            seedMethod: review.seedMethod,
+            feedback: review.feedback ?? undefined,
+          };
+          await submitConsentedSideFeedback();
           await runFullAnalysis(sideReport);
         },
       });
@@ -832,6 +882,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
 // then ask for identity only at the moment the result becomes valuable.
 async function gateAnalysis(sideReport: Report): Promise<void> {
   if (!isAuthAvailable() || await currentUser()) {
+    await submitConsentedSideFeedback();
     await runFullAnalysis(sideReport);
     return;
   }
@@ -840,7 +891,14 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
     ? savePendingAnalysis({
         sex: selectedSex,
         front: { ...pending, canvas: el.photoCanvas },
-        side: { points: lastSide.points, faceDir: lastSide.faceDir, canvas: lastSide.photo },
+        side: {
+          points: lastSide.points,
+          faceDir: lastSide.faceDir,
+          canvas: lastSide.photo,
+          automaticPoints: lastSide.automaticPoints,
+          seedMethod: lastSide.seedMethod,
+          feedback: lastSide.feedback,
+        },
       })
     : false;
 
@@ -855,7 +913,9 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
   el.analysis.innerHTML = `<section class="analysis-gate">
     <span class="klabel">YOUR SCAN IS READY</span>
     <h2>Reveal your facial analysis</h2>
-    <p>Create a free account to see the score, measurements and personalised direction. Your face photos stay on this device.</p>
+    <p>Create a free account to see the score, measurements and personalised direction. ${lastSide?.feedback
+      ? "Your front photo stays on this device; the side feedback you approved is sent privately after sign-in."
+      : "Your face photos stay on this device."}</p>
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
     <button type="button" class="btn pri analysis-gate-open">Create account and analyse</button>
   </section>`;
@@ -872,6 +932,7 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
         // this continuation before the deferred auth listener gets a turn, so
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
+        await submitConsentedSideFeedback();
         await runFullAnalysis(sideReport);
       },
     });
@@ -927,14 +988,19 @@ async function resumePendingAfterAuth(): Promise<void> {
     points: saved.side.points,
     faceDir: saved.side.faceDir,
     photo: sidePhoto,
+    automaticPoints: saved.side.automaticPoints,
+    seedMethod: saved.side.seedMethod,
+    feedback: saved.side.feedback,
   };
   closeSide();
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  await submitConsentedSideFeedback();
   await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex));
 }
 
 function startSide(): void {
+  feedbackDeliveryNote = null;
   el.main.classList.add("hidden");
   openSideCapture({
     sex: selectedSex,
@@ -944,7 +1010,7 @@ function startSide(): void {
     // There is no "back to results" any more, because there are no results yet.
     // The only way out of this step is forward, or starting over.
     onBack: () => resetToUpload(),
-    onDone: async (sideReport, points, faceDir) => {
+    onDone: async (sideReport, points, faceDir, review) => {
       // Copy the profile out before the side screen is torn down — the results
       // panel shows it under the Side tab, and after closeSide() the canvas it
       // lives on is fair game.
@@ -957,7 +1023,14 @@ function startSide(): void {
         photo.getContext("2d")!.drawImage(shot, 0, 0);
       }
       closeSide();
-      lastSide = { points, faceDir, photo };
+      lastSide = {
+        points,
+        faceDir,
+        photo,
+        automaticPoints: review.automaticPoints,
+        seedMethod: review.seedMethod,
+        feedback: review.feedback ?? undefined,
+      };
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
       // The verified points, for the calibration harnesses — re-scoring the
       // profile under a different reference population needs the input, not
@@ -971,6 +1044,9 @@ function startSide(): void {
 function renderQualityChips(q: QualityCheck, autoNote = ""): void {
   const chips = q.issues.map((i) => `<span class="qchip warn">${i}</span>`);
   if (autoNote) chips.push(`<span class="qchip">${autoNote}</span>`);
+  if (feedbackDeliveryNote) {
+    chips.push(`<span class="qchip${feedbackDeliveryNote.ok ? "" : " warn"}">${feedbackDeliveryNote.message}</span>`);
+  }
   // Surfacing the correction is part of showing the math: the user can see
   // that an off-axis photo was accounted for rather than silently mismeasured.
   const off = Math.max(Math.abs(q.yawDeg), Math.abs(q.pitchDeg));

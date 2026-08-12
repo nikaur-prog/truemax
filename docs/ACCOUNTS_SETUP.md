@@ -6,10 +6,12 @@ post-scan modal and the dedicated `/auth` portal. The app always returns normal
 auth flows to `/`, the scan screen; password recovery alone lands on
 `/auth?mode=reset` long enough to accept a new password.
 
-Face photographs remain on the device. A reduced copy of a completed scan is
-usable locally for 30 minutes only when an email or OAuth redirect is needed.
-It is deleted as soon as analysis resumes, or on the next app open after it
-expires.
+Face photographs remain on the device by default. A reduced copy of a completed
+scan is usable locally for 30 minutes only when an email or OAuth redirect is
+needed, then deleted after analysis resumes or on the first app open after it
+expires. The sole upload exception is a side photo that the person separately
+chooses to share with its automatic and corrected landmark positions; see
+[`SIDE_CORRECTION_FEEDBACK.md`](SIDE_CORRECTION_FEEDBACK.md).
 
 ## Current verified state (12 August 2026)
 
@@ -123,6 +125,10 @@ Preview and Production:
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 ```
+
+The opt-in side-correction route additionally needs server-only
+`SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `CRON_SECRET`. These must never use a
+`VITE_` prefix; the exact setup is in `SIDE_CORRECTION_FEEDBACK.md`.
 
 `vercel.json` allows connections only to this exact Supabase project over HTTPS
 and WSS. Do not replace that allowlist with a wildcard.

@@ -82,6 +82,10 @@ walkthrough including the SQL.
       `SUPABASE_AUTH_PROVIDER_SETUP.md`.
 - [ ] Verify: “Sign in” appears top-right; create an account; delete it; confirm
       it is gone from Authentication → Users.
+- [~] Side-landmark review, manual correction and separate opt-in feedback are
+      built; the private Supabase table/bucket are live. Add the three
+      server-only Vercel variables and complete the consent/cleanup acceptance
+      tests in `SIDE_CORRECTION_FEEDBACK.md` before deploying the upload route.
 
 **Anon key only.** The `service_role` key bypasses row-level security and must
 never reach the browser. It belongs in server-side environment variables and
@@ -133,10 +137,12 @@ and Vercel configuration.
 - [ ] Write and publish one. Required because the app requests camera access,
       and required later by both app stores.
 
-Yours is unusually easy and unusually strong, because the honest version is
-short and true: images are processed on the device, nothing is uploaded, and the
-only thing that leaves the browser once accounts are on is the numeric report a
-signed-in user chooses to sync. Say exactly that.
+The honest version is still strong but must name the exception precisely:
+images are processed on the device by default. A side-profile photo leaves the
+browser only after a separate, optional consent to send the automatic and
+corrected landmark positions to TrueMax for product improvement. State the
+purpose, private Supabase processing, 90-day maximum retention and deletion
+path. The front photo is not included.
 
 ### 3.2 Terms — does not exist
 

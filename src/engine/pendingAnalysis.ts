@@ -1,14 +1,17 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { QualityCheck } from "./quality.ts";
 import type { SidePoints } from "./sideMetrics.ts";
+import type { SideFeedbackIntent, SideSeedMethod } from "./sideFeedbackPayload.ts";
+import { sideFeedbackIntentIssues } from "./sideFeedbackPayload.ts";
 import type { Sex } from "./types.ts";
 
 // OAuth and confirmation emails necessarily navigate away from the current
 // page. Preserve a reduced copy of the completed capture on this device so the
 // person does not lose two carefully framed photographs while making the
-// account that reveals the result. It is never uploaded, is accepted for only
-// thirty minutes, and is removed as soon as analysis resumes (or on the next
-// app open after it expires).
+// account that reveals the result. These browser copies are accepted for only
+// thirty minutes and removed as soon as analysis resumes (or on the next app
+// open after expiry). Nothing is uploaded unless the person separately opted
+// in to side-landmark feedback; in that case only the side copy is submitted.
 const KEY = "truemax:pending-analysis:v1";
 const MAX_AGE_MS = 30 * 60 * 1000;
 const MAX_STORED_CHARS = 4_500_000;
@@ -32,6 +35,9 @@ export interface PendingAnalysis {
     width: number;
     height: number;
     photo?: string;
+    automaticPoints?: SidePoints;
+    seedMethod?: SideSeedMethod;
+    feedback?: SideFeedbackIntent;
   };
 }
 
@@ -64,6 +70,9 @@ export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
         width: input.side.canvas?.width ?? 1,
         height: input.side.canvas?.height ?? 1,
         photo: sidePhoto ?? undefined,
+        automaticPoints: input.side.automaticPoints,
+        seedMethod: input.side.seedMethod,
+        feedback: input.side.feedback,
       },
     };
     const serialized = JSON.stringify(value);
@@ -153,7 +162,13 @@ function valid(value: Partial<PendingAnalysis>): value is PendingAnalysis {
     && (side.faceDir === 1 || side.faceDir === -1)
     && finiteSize(side.width, side.height)
     && !!side.points
-    && (!side.photo || jpeg(side.photo));
+    && (!side.photo || jpeg(side.photo))
+    && (!side.feedback || (
+      !!side.photo
+      && !!side.automaticPoints
+      && side.seedMethod === side.feedback.seedMethod
+      && sideFeedbackIntentIssues(side.feedback, side.width, side.height).length === 0
+    ));
 }
 
 function finiteSize(width: unknown, height: unknown): width is number {

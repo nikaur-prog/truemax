@@ -2,6 +2,8 @@ import type { Pt } from "../engine/geometry.ts";
 import { SIDE_POINTS } from "../engine/sideMetrics.ts";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.ts";
 import { detect } from "../engine/landmarker.ts";
+import { cloneSidePoints } from "../engine/sideFeedbackPayload.ts";
+import type { SideSeedMethod } from "../engine/sideFeedbackPayload.ts";
 
 // Drag-to-verify landmark editor for the side profile. MediaPipe can't place
 // true-profile landmarks reliably, so the app seeds a best guess from the
@@ -10,7 +12,15 @@ import { detect } from "../engine/landmarker.ts";
 export interface VerifyHandle {
   points: SidePoints;
   faceDir: number; // +1 subject faces image-right, -1 image-left
+  setEditable(editable: boolean): void;
+  reset(points: SidePoints): void;
   destroy(): void;
+}
+
+export interface SideSeed {
+  points: SidePoints;
+  faceDir: number;
+  method: SideSeedMethod;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,9 +481,13 @@ function sanitizeSeed(
 // catches any single point that came back somewhere impossible.
 export function seedSidePoints(
   canvas: HTMLCanvasElement,
-): { points: SidePoints; faceDir: number } {
-  const seed = seedFromLandmarks(canvas) ?? seedFromSilhouette(canvas);
-  return sanitizeSeed(seed, canvas.width, canvas.height);
+): SideSeed {
+  const mesh = seedFromLandmarks(canvas);
+  const seed = mesh ?? seedFromSilhouette(canvas);
+  return {
+    ...sanitizeSeed(seed, canvas.width, canvas.height),
+    method: mesh ? "mesh" : "silhouette",
+  };
 }
 
 // Fallback: trace the profile edge against the background, then place points at
@@ -605,7 +619,7 @@ export function mountVerifier(
   seed: { points: SidePoints; faceDir: number },
   onChange: (p: SidePoints) => void,
 ): VerifyHandle {
-  const points: SidePoints = { ...seed.points };
+  const points = cloneSidePoints(seed.points);
   host.innerHTML = "";
   host.classList.add("verify-layer");
 
@@ -668,6 +682,7 @@ export function mountVerifier(
     host.appendChild(dump);
   }
 
+  let editable = false;
   let dragging: SidePointId | null = null;
   const toPhoto = (clientX: number, clientY: number): Pt => {
     const r = host.getBoundingClientRect();
@@ -678,6 +693,7 @@ export function mountVerifier(
   };
 
   const down = (e: PointerEvent) => {
+    if (!editable) return;
     const target = (e.target as HTMLElement).closest<HTMLElement>(".vpoint");
     if (!target) return;
     dragging = target.dataset.id as SidePointId;
@@ -709,9 +725,28 @@ export function mountVerifier(
   host.addEventListener("pointerup", up);
   host.addEventListener("pointercancel", up);
 
+  const setEditable = (next: boolean) => {
+    editable = next;
+    host.classList.toggle("is-editing", next);
+    for (const handle of handles.values()) {
+      handle.classList.toggle("locked", !next);
+      handle.setAttribute("aria-disabled", next ? "false" : "true");
+      handle.tabIndex = next ? 0 : -1;
+    }
+    if (!next) up();
+  };
+  setEditable(false);
+
   return {
     points,
     faceDir: seed.faceDir,
+    setEditable,
+    reset(next) {
+      const copy = cloneSidePoints(next);
+      for (const { id } of SIDE_POINTS) points[id] = copy[id];
+      place();
+      onChange(points);
+    },
     destroy() {
       host.removeEventListener("pointerdown", down);
       host.removeEventListener("pointermove", move);

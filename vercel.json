@@ -4,6 +4,9 @@
     { "source": "/quick", "destination": "/quick.html" },
     { "source": "/calib", "destination": "/calib.html" }
   ],
+  "crons": [
+    { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

@@ -100,7 +100,7 @@ Add more pages only when Search Console data or genuine original material justif
 The scanner remains first. Add the following without inserting an interstitial or forcing a marketing-page detour:
 
 1. A descriptive heading or visible lede: “Private face analysis from your front and side photos.”
-2. One short proof line: “Measure facial proportions, symmetry, and structure using 478 landmarks. Your photos stay on this device.”
+2. One short proof line: “Measure facial proportions, symmetry, and structure using 478 landmarks. Photos stay on your device by default.”
 3. The existing scan controls.
 4. Below the main experience: How it works, What you receive, Privacy, Methodology, and FAQs.
 5. A real `<footer>` with crawlable `<a href>` links to the supporting pages.

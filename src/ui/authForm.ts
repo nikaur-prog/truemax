@@ -43,8 +43,8 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       ? "Create your account"
       : "Welcome back";
   const lede = analysis
-    ? "Create a free account to reveal your results. Your face photos stay on this device; only your account and membership use Supabase."
-    : "Your face photos stay on this device. Your account keeps your membership attached to you across browsers.";
+    ? "Create a free account to reveal your results. Photos stay on this device by default; a side photo is sent only if you separately chose to share landmark feedback."
+    : "Photos stay on this device by default. Your account keeps your membership attached to you across browsers.";
 
   root.innerHTML = `
     <h2 id="auth-title">${title}</h2>
