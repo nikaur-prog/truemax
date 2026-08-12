@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">TrueMax mark on light</title>
+  <desc id="desc">A measured face made from a centre axis and two mirrored contours.</desc>
+  <rect x="2" y="2" width="124" height="124" rx="28" fill="#F4F3EF" stroke="#DEDCD4" stroke-width="4"/>
+  <path d="M34 31h60M64 31v68" stroke="#0E7A68" stroke-width="10" stroke-linecap="round"/>
+  <path d="M46 47c-10 8-12 25-6 38 4 8 10 14 18 18M82 47c10 8 12 25 6 38-4 8-10 14-18 18" stroke="#0E7A68" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="5" fill="#0E7A68"/>
+</svg>
