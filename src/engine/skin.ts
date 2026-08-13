@@ -42,6 +42,24 @@ export interface SkinStats {
   // Fraction of usable skin pixels found. Low values mean heavy occlusion —
   // hair, a beard, glasses, a mask — and the stats above should not be trusted.
   coverage: number;
+  // The consumption of the line above. Coverage was computed and then read by
+  // nobody, which meant every consumer trusted blotchiness measured off a
+  // beard exactly as much as blotchiness measured off skin. False when the
+  // usable area is too small for the statistics to mean anything; consumers
+  // must treat the numbers as absent, not as approximate.
+  reliable: boolean;
+}
+
+// Below this fraction of the face, the "skin" statistics are mostly measuring
+// whatever is covering the skin. A clean-shaven, unobstructed face samples
+// around 0.25-0.35 of its bounding box after the eye/brow/lip holes are cut;
+// heavy beard, hair across the face, or a mask drops it well under a tenth.
+export const SKIN_COVERAGE_MIN = 0.08;
+
+// Exported so the rule is testable without a canvas: analyzeSkin only runs in
+// a browser, but whether a given coverage is trustworthy is pure arithmetic.
+export function skinReliable(coverage: number): boolean {
+  return coverage >= SKIN_COVERAGE_MIN;
 }
 
 const SAMPLE_W = 220; // face resampled to a fixed width: texture must not depend on megapixels
@@ -273,13 +291,15 @@ export function analyzeSkin(
   const cheek = patch([50, 280, 205, 425], rad);
   const undereyeRatio = cheek > 0 && under > 0 ? under / cheek : 1;
 
+  const coverage = +(keepL.length / (sw * sh)).toFixed(4);
   return {
     toneEvenness: +toneEvenness.toFixed(5),
     rednessSpread: +rednessSpread.toFixed(4),
     chromaSpread: +chromaSpread.toFixed(4),
     texture: +texture.toFixed(4),
     undereyeRatio: +undereyeRatio.toFixed(4),
-    coverage: +(keepL.length / (sw * sh)).toFixed(4),
+    coverage,
+    reliable: skinReliable(coverage),
   };
 }
 
