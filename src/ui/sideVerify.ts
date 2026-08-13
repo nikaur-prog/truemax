@@ -208,12 +208,19 @@ function seedFromLandmarks(
   const h = canvas.height;
   const P = (i: number): Pt => ({ x: lm[i].x * w, y: lm[i].y * h });
 
-  // Which way the face points, straight from the geometry: the nose tip sits
-  // ahead of the head's own centre, on the side the face is turned toward. No
-  // sign convention to get wrong and no silhouette to trace.
+  // Which way the face points. The centroid guess — nose tip versus the mesh's
+  // own centre — flips on exactly the photographs this screen exists for: on a
+  // hard profile MediaPipe hallucinates the far side of the face, and those
+  // invented points can drag the centroid past the nose. That flip is what put
+  // a tester's thirteen dots on the empty side of the frame, mirrored around
+  // his face. The silhouette's facing comes from actual shape (nose
+  // protrusion, edge character) and does not have that failure, so when a
+  // usable mask exists its verdict wins and the centroid is only the fallback
+  // for photographs with no traceable outline.
   let cx = 0;
   for (const p of lm) cx += p.x / lm.length;
-  const faceDir = lm[1].x >= cx ? 1 : -1;
+  const centroidDir = lm[1].x >= cx ? 1 : -1;
+  const faceDir = silhouetteGeometry(canvas)?.faceDir ?? centroidDir;
 
   // Near side of the head, by depth.
   const near = (a: number, b: number) => ((lm[a].z ?? 0) <= (lm[b].z ?? 0) ? a : b);
@@ -362,12 +369,41 @@ function silhouetteGeometry(canvas: HTMLCanvasElement): SilhouetteGeometry | nul
   };
   const wanderLeft = wander("l");
   const wanderRight = wander("r");
+
+  // Second facing vote: protrusion. In the nose band — roughly 40-60% of head
+  // height — one edge sticks out past that side's own typical position, and it
+  // is the side the face points. This survives the case that breaks wander:
+  // hair, a hood edge, or a busy background making the BACK edge the jagged
+  // one. Each side is compared to its own median so a head that simply sits
+  // off-centre in frame does not vote.
+  const edges = { l: [] as number[], r: [] as number[] };
+  for (let y = top; y < chin; y++) {
+    const span = rowSpan(y);
+    if (!span) continue;
+    edges.l.push(span[0]);
+    edges.r.push(span[1]);
+  }
+  const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] ?? 0;
+  const mL = median(edges.l);
+  const mR = median(edges.r);
+  let protrusion = 0; // >0 face points right, <0 left
+  for (let y = top + Math.round(headH * 0.38); y < top + Math.round(headH * 0.62); y++) {
+    const span = rowSpan(y);
+    if (!span) continue;
+    protrusion += Math.max(0, span[1] - mR) - Math.max(0, mL - span[0]);
+  }
+  // The protrusion vote wins when it is decisive — a clear nose is the least
+  // ambiguous shape a profile has. Wander is the tiebreak for soft cases.
+  const faceDir = Math.abs(protrusion) > headH * 0.5
+    ? (protrusion > 0 ? 1 : -1)
+    : (wanderRight >= wanderLeft ? 1 : -1);
+
   return {
     mask: m,
     top,
     chin,
     headH,
-    faceDir: wanderRight >= wanderLeft ? 1 : -1,
+    faceDir,
     rowSpan,
     wanderLeft,
     wanderRight,

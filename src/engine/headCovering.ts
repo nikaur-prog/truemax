@@ -92,8 +92,14 @@ export function classifyCoveringMask(data: Uint8Array, width: number, height: nu
     y1: y0 + fh * 0.08,
   }, new Set([CLOTHES, ACCESSORY]));
   const sideCategories = new Set([CLOTHES]);
-  const sideY0 = y0 + fh * 0.05;
-  const sideY1 = y0 + fh * 0.8;
+  // Temple band only. This used to reach down to 80% of face height, which is
+  // beside the jaw — and a hood resting on the SHOULDERS put enough fabric
+  // there to read as worn. A tester with his hood down was told it was ruining
+  // his skin reading. Fabric that matters is fabric beside the temples and
+  // ears, which is where a hood actually sits when it is up; anything level
+  // with the jaw or below is a collar, a hood on shoulders, or a shirt.
+  const sideY0 = y0 + fh * 0.02;
+  const sideY1 = y0 + fh * 0.45;
   const left = ratioIn(data, width, height, {
     x0: x0 - fw * 0.35,
     x1: x0 + fw * 0.08,
@@ -111,7 +117,7 @@ export function classifyCoveringMask(data: Uint8Array, width: number, height: nu
   return {
     available: true,
     hatLikely: topCoverRatio >= 0.08,
-    hoodLikely: sideCoverRatio >= 0.14,
+    hoodLikely: sideCoverRatio >= 0.18,
     topCoverRatio: +topCoverRatio.toFixed(4),
     sideCoverRatio: +sideCoverRatio.toFixed(4),
   };

@@ -336,7 +336,16 @@ function boxBlur3(lum: Float32Array, W: number, H: number): Float32Array {
 // ---------------------------------------------------------------------------
 
 // Below this yaw the detector is still seeing a broadly front-on face.
-const PROFILE_YAW = 55;
+//
+// 55 was the first number here, and live testing showed why it could not work:
+// the yaw estimate comes from the same half-occluded mesh the gate is waiting
+// on, and it under-reads the true turn more the further someone turns. Testers
+// standing in genuine full profile were being reported in the low forties and
+// held detection, so the gate flickered between "keep turning" and a loss it
+// then reset — the glitching people felt. 42 is above anything a front-on or
+// three-quarter face reports, and the verification screen after the shutter is
+// where placement accuracy is actually enforced.
+const PROFILE_YAW = 42;
 // Consecutive frames with no detection before that counts as "turned away".
 //
 // Losing the face used to pass the gate on its own and on the first frame, and
@@ -346,7 +355,10 @@ const PROFILE_YAW = 55;
 // frame, walking out of the light. Requiring the loss to persist, and to have
 // been preceded by a face that was already turning, means the only way to pass
 // is the one we actually want.
-const LOST_FRAMES = 6;
+// Four rather than six: at ~30fps this is still an eighth of a second of
+// sustained loss — plenty to reject a blink of occlusion — and it shaves the
+// gap in which a re-found face resets the run and restarts the wait.
+const LOST_FRAMES = 4;
 
 // Recent detection history, so "the face went away" can be told apart from
 // "there was never a face". Reset whenever a side capture starts.
