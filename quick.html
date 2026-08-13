@@ -28,6 +28,9 @@
       <!-- Capture -->
       <section id="q-capture">
         <div class="q-frame" id="q-frame">
+          <!-- Behind the video, visible only until the camera opens. A page
+               built to be filmed should not open on a blank grey box. -->
+          <canvas id="q-silhouette"></canvas>
           <video id="q-video" playsinline muted></video>
           <canvas id="q-guide"></canvas>
           <div class="q-hud">

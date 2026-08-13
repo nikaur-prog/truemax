@@ -9,6 +9,9 @@ import { isSupported, startCamera } from "./ui/camera.ts";
 import type { CameraHandle } from "./ui/camera.ts";
 import { rankShort } from "./ui/templates.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
+import { drawQuickSilhouette } from "./ui/quickSilhouette.ts";
+import { openSexChooser } from "./ui/sexChooser.ts";
+import { verdictForPercentile } from "./engine/analysisMode.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.ts";
@@ -55,6 +58,7 @@ const el = {
   shot: document.getElementById("q-shot") as HTMLCanvasElement,
   dots: document.getElementById("q-dots") as HTMLCanvasElement,
   cards: document.getElementById("q-cards")!,
+  silhouette: document.getElementById("q-silhouette") as HTMLCanvasElement,
 };
 
 // Stage timings. Long enough to read on camera, short enough that nobody
@@ -146,7 +150,35 @@ async function openCamera(): Promise<void> {
   el.shoot.disabled = true;
 }
 
-el.shoot.onclick = async () => {
+// The reference population, asked once, before anything is captured.
+//
+// The main app asks at the start of a scan for a measured reason: the choice
+// moves the score by a median of 0.70 points, and inferring it from face shape
+// was 58.8% accurate against a 54.1% base rate. /quick used to skip the
+// question and quietly default to men, which meant a woman filming this page
+// got a men's percentile unless she noticed a small label afterwards.
+//
+// Asked BEFORE the camera opens, not after the photo, so it never lands in the
+// middle of the clip someone is recording.
+function withSex(next: () => void): void {
+  if (storedSex()) {
+    next();
+    return;
+  }
+  openSexChooser((sex) => {
+    storeSex(sex);
+    paintSilhouette();
+    next();
+  });
+}
+
+function paintSilhouette(): void {
+  drawQuickSilhouette(el.silhouette, storedSex() ?? "male");
+}
+paintSilhouette();
+window.addEventListener("resize", paintSilhouette);
+
+el.shoot.onclick = () => withSex(async () => {
   if (!cam) {
     await openCamera();
     return;
@@ -155,9 +187,9 @@ el.shoot.onclick = async () => {
   const shot = cam.capture();
   stopCamera();
   if (shot) await run(shot);
-};
+});
 
-el.pick.onclick = () => el.file.click();
+el.pick.onclick = () => withSex(() => el.file.click());
 el.file.onchange = async () => {
   const f = el.file.files?.[0];
   el.file.value = "";
@@ -267,7 +299,26 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   const num = (target: number, cls = "") =>
     `<b class="q-num ${cls}" data-target="${target.toFixed(1)}" contenteditable="true"
         inputmode="decimal" spellcheck="false">0.0</b>`;
+  // The verdict cut of the same result. One word, then the same measurements
+  // underneath as a short strip of units — because a word on its own is a claim
+  // and a word above the numbers it came from is a read. The toggle is on the
+  // card, not in settings, since this page is used standing up with a camera in
+  // one hand.
+  const verdict = verdictForPercentile(r.overallPercentile, r.sex);
+  const dimorphism = r.sex === "female" ? "FEMININITY" : "MASCULINITY";
+  const micro: Array<[string, number]> = [
+    ["FACE", r.overallPercentile],
+    ["ANGULARITY", Math.max(1, Math.min(99, Math.round((r.pillars.Angularity ?? 5) * 10)))],
+    [dimorphism, Math.max(1, Math.min(99, Math.round((r.pillars.Dimorphism ?? 5) * 10)))],
+    ["HARMONY", Math.max(1, Math.min(99, Math.round((r.pillars.Harmony ?? 5) * 10)))],
+  ];
+
   el.cards.innerHTML = `
+    <div class="q-modes" role="group" aria-label="How to show the result">
+      <button type="button" class="q-mode on" data-qmode="score">Score</button>
+      <button type="button" class="q-mode" data-qmode="verdict">Verdict</button>
+    </div>
+
     <div class="q-hero">
       <div class="q-headline">
         <button class="q-klabel q-switch" id="q-sex" type="button"
@@ -275,6 +326,22 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         <div class="q-score"><span class="q-num q-score-num" data-target="${r.overall.toFixed(1)}"
           contenteditable="true" inputmode="decimal" spellcheck="false">0.0</span><small>/10</small></div>
         <span class="q-rank">${rankShort(r.overallPercentile)}</span>
+      </div>
+    </div>
+
+    <div class="q-verdict hidden" id="q-verdict">
+      <span class="q-klabel">VERDICT</span>
+      <b class="q-verdict-word ${verdict.tone}">${verdict.word}</b>
+      <div class="q-units">
+        ${micro
+          .map(
+            ([label, value]) => `<div class="q-unit">
+              <span>${label}</span>
+              <div class="q-unit-bar"><i data-w="${value}" style="width:0%"></i></div>
+              <b>${value}</b>
+            </div>`,
+          )
+          .join("")}
       </div>
     </div>
 
@@ -302,6 +369,26 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   [...el.cards.children].forEach((c, i) => (c as HTMLElement).style.setProperty("--i", String(i)));
 
   wireEditing();
+
+  // Toggling swaps two blocks that are both already rendered. Re-rendering the
+  // card would restart the count-up animation and, on this page, throw away any
+  // number a creator had hand-edited.
+  for (const b of el.cards.querySelectorAll<HTMLButtonElement>(".q-mode")) {
+    b.onclick = () => {
+      const verdictMode = b.dataset.qmode === "verdict";
+      for (const other of el.cards.querySelectorAll<HTMLElement>(".q-mode")) {
+        other.classList.toggle("on", other === b);
+      }
+      el.cards.querySelector(".q-hero")?.classList.toggle("hidden", verdictMode);
+      el.cards.querySelector(".q-grid")?.classList.toggle("hidden", verdictMode);
+      el.cards.querySelector("#q-verdict")?.classList.toggle("hidden", !verdictMode);
+      if (verdictMode) {
+        el.cards
+          .querySelectorAll<HTMLElement>(".q-unit-bar i")
+          .forEach((i) => (i.style.width = `${i.dataset.w}%`));
+      }
+    };
+  }
 
   if (animate) void playSequence(r, photo);
   else {

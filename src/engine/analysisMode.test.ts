@@ -17,26 +17,57 @@ const report = (over: Partial<Report> = {}): Report =>
     ...over,
   }) as Report;
 
-test("the verdict ladder has a floor at Chopped and no rung below it", () => {
-  // The bottom of the scale is the one place this product could do real harm,
-  // and the boundary is worth a test rather than a comment: a zero percentile
-  // must land on the lowest DEFINED rung, never on something worse.
-  for (const pct of [0, 1, 5, 19.9]) {
-    assert.equal(verdictFor(report({ overallPercentile: pct })).word, "Chopped", `${pct}`);
+test("the ladder has a defined floor and nothing below it", () => {
+  // The bottom of the scale is the one place this product could do real harm.
+  for (const pct of [0, 1, 5, 11.9]) {
+    assert.equal(verdictFor(report({ overallPercentile: pct })).word, "You're cooked", `${pct}`);
   }
 });
 
 test("each rung starts exactly where it says it does", () => {
   const at = (pct: number) => verdictFor(report({ overallPercentile: pct })).word;
-  assert.equal(at(19.9), "Chopped");
-  assert.equal(at(20), "Aight");
-  assert.equal(at(49.9), "Aight");
-  assert.equal(at(50), "Fine");
-  assert.equal(at(79.9), "Fine");
-  assert.equal(at(80), "Mogger");
-  assert.equal(at(94.9), "Mogger");
-  assert.equal(at(95), "TrueMax");
-  assert.equal(at(100), "TrueMax");
+  assert.equal(at(11.9), "You're cooked");
+  assert.equal(at(12), "Chopped");
+  assert.equal(at(25.9), "Chopped");
+  assert.equal(at(26), "Mildly chopped");
+  assert.equal(at(40), "Mid");
+  assert.equal(at(52), "Aight");
+  assert.ok(["Good looking", "Attractive"].includes(at(65)));
+  assert.ok(["Mogger", "You and Marlon need to be stopped"].includes(at(82)));
+  assert.ok(["Looksmaxxing final boss", "True Adam"].includes(at(100)));
+});
+
+test("the top rungs speak to the reference population", () => {
+  const at = (pct: number, sex: "male" | "female") =>
+    verdictFor(report({ overallPercentile: pct, sex })).word;
+  assert.ok(["She-mogger", "Fine shyt"].includes(at(85, "female")));
+  assert.ok(["Certified baddie", "True Eve"].includes(at(97, "female")));
+  // A woman must never be handed the men's word, and the reverse.
+  assert.ok(!["Mogger", "True Adam"].includes(at(85, "female")));
+  assert.ok(!["She-mogger", "Certified baddie"].includes(at(97, "male")));
+});
+
+test("one face always gets one verdict", () => {
+  // The alternates are derived from the percentile, never randomised. A verdict
+  // that changes when you press the button again is not a measurement.
+  for (const pct of [83, 85.5, 96, 99.9]) {
+    const first = verdictFor(report({ overallPercentile: pct })).word;
+    for (let i = 0; i < 20; i++) {
+      assert.equal(verdictFor(report({ overallPercentile: pct })).word, first, `${pct}`);
+    }
+  }
+});
+
+test("no rung claims to measure body weight", () => {
+  // This engine measures a face. A word about body fat would be a fabrication
+  // dressed as a measurement, whichever way it was meant.
+  const banned = /whale|fat|obese|lard/i;
+  for (const sex of ["male", "female"] as const) {
+    for (let pct = 0; pct <= 100; pct += 0.5) {
+      const v = verdictFor(report({ overallPercentile: pct, sex }));
+      assert.ok(!banned.test(v.word), `${sex} ${pct}: ${v.word}`);
+    }
+  }
 });
 
 test("no verdict word dehumanises the person reading it", () => {
@@ -75,7 +106,7 @@ test("every mode reads the same underlying score", () => {
   // moves together. If these ever disagree, the app is showing one face two
   // different answers.
   const strong = report({ overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
-  assert.equal(verdictFor(strong).word, "Mogger");
+  assert.ok(["Mogger", "You and Marlon need to be stopped"].includes(verdictFor(strong).word));
   assert.equal(basicScores(strong)[0].value, 91);
 });
 
