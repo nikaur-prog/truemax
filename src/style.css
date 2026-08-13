@@ -2226,6 +2226,17 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .prod-head p { margin: 0 0 26px; max-width: 480px; color: var(--mut); font-size: 13.5px; line-height: 1.6; }
 .prod-row { margin-bottom: 18px; }
 .prod-row h2 { font: 600 10.5px var(--mono); letter-spacing: .22em; color: var(--mut); margin: 0 0 9px; }
+.prod-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+/* One picker per row, taking all three at once — the slots used to own a file
+   input each, which meant three trips through the photo picker per row. */
+.prod-pick {
+  margin-bottom: 9px; padding: 6px 13px; border: 1px solid var(--acc); border-radius: 11px;
+  color: var(--acc); font-size: 12.5px; cursor: pointer; white-space: nowrap;
+  transition: background .18s, color .18s;
+}
+.prod-pick:hover { background: var(--acc); color: #06110e; }
+.prod-row-note { margin: 7px 0 0; font: 11px var(--sans); color: var(--mut); }
+.prod-add span { display: block; margin-bottom: 3px; font-size: 19px; line-height: 1; }
 .prod-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .prod-slot { min-height: 128px; }
 .prod-add {

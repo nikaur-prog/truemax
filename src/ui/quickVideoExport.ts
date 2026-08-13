@@ -88,6 +88,11 @@ export async function downloadQuickVideo(
 // Development-only render hook used by the visual regression preview. It
 // exercises the exact production compositor without invoking WebCodecs or a
 // download, and is tree-shaken from the production quick page call path.
+// `scale` renders the same composition at a larger pixel size — the producer
+// asks for 1.5 so the analysis segment is drawn natively at 1080x1920 instead
+// of being upscaled from 720p. Text and hairlines are the whole content of
+// this segment, and upscaling them is exactly what a platform re-encode then
+// turns to mush.
 export function renderQuickVideoFrame(
   canvas: HTMLCanvasElement,
   photo: HTMLCanvasElement,
@@ -96,10 +101,11 @@ export function renderQuickVideoFrame(
   scores: QuickExportScores,
   t: number,
   variant: QuickVariant = "breakdown",
+  scale = 1,
 ): void {
-  canvas.width = W;
-  canvas.height = H;
-  drawFrame(canvas, photo, landmarks, sex, scores, t, variant);
+  canvas.width = Math.round(W * scale);
+  canvas.height = Math.round(H * scale);
+  drawFrame(canvas, photo, landmarks, sex, scores, t, variant, scale);
 }
 
 function drawFrame(
@@ -110,9 +116,13 @@ function drawFrame(
   scores: QuickExportScores,
   t: number,
   variant: QuickVariant = "breakdown",
+  scale = 1,
 ): void {
   const ctx = canvas.getContext("2d")!;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // Everything below is authored in 720x1280 coordinates; the transform is the
+  // only thing that knows about scale, so there is one layout rather than two.
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.imageSmoothingQuality = "high";
   ctx.fillStyle = "#050606";
   ctx.fillRect(0, 0, W, H);
   if (variant === "verdict") {

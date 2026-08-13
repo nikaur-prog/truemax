@@ -39,7 +39,15 @@ export interface ProducerContext {
 const W = 1080;
 const H = 1920;
 const FPS = 30;
-const BITRATE = 12_000_000;
+// 16 Mbps at 1080x1920.
+//
+// Well above what TikTok and Reels will keep — both re-encode on upload — and
+// that is the point: the platform's encoder is the last stage, so whatever
+// softness we ship gets compounded rather than corrected. Headroom going in is
+// the only lever we have over what comes out. It costs file size on a video
+// that is uploaded once and discarded, which is the cheapest possible thing to
+// spend.
+const BITRATE = 16_000_000;
 
 type Transition = "cut" | "dip" | "flash";
 
@@ -75,16 +83,28 @@ export function openProducer(ctx: ProducerContext): void {
         Everything is built on this device; your clips never leave the browser.</p>
       </header>
       <section class="prod-row">
-        <h2>BEFORE</h2>
+        <div class="prod-row-head">
+          <h2>BEFORE</h2>
+          <label class="prod-pick">Add clips
+            <input type="file" accept="image/*,video/*" multiple data-pick="before" hidden>
+          </label>
+        </div>
         <div class="prod-slots" data-row="before"></div>
+        <p class="prod-row-note" data-note="before">Pick up to three at once · one is enough</p>
       </section>
       <section class="prod-row prod-mid">
         <h2>THEN</h2>
         <div class="prod-analysis"><b>Your analysis reel</b><span>${quickVideoDuration("breakdown").toFixed(1)}s · rendered in</span></div>
       </section>
       <section class="prod-row">
-        <h2>AFTER</h2>
+        <div class="prod-row-head">
+          <h2>AFTER</h2>
+          <label class="prod-pick">Add clips
+            <input type="file" accept="image/*,video/*" multiple data-pick="after" hidden>
+          </label>
+        </div>
         <div class="prod-slots" data-row="after"></div>
+        <p class="prod-row-note" data-note="after">Pick up to three at once · one is enough</p>
       </section>
       <div class="prod-opts">
         <div class="prod-opt">
@@ -113,14 +133,66 @@ export function openProducer(ctx: ProducerContext): void {
   overlay.querySelector(".hist-close")!.addEventListener("click", closeProducer);
 
   const slotsOf = (row: "before" | "after") => (row === "before" ? before : after);
+  const cells: Record<"before" | "after", HTMLElement[]> = { before: [], after: [] };
+  const redrawRow = (row: "before" | "after") => {
+    cells[row].forEach((cell, i) => renderSlot(cell, slotsOf(row), i, row, () => clipLen, () => redrawRow(row)));
+    const note = overlay?.querySelector<HTMLElement>(`[data-note="${row}"]`);
+    const used = slotsOf(row).filter(Boolean).length;
+    if (note) {
+      note.textContent = used
+        ? `${used} of 3 · ${used < 3 ? "add more or leave it here" : "full"}`
+        : "Pick up to three at once · one is enough";
+    }
+  };
   for (const row of ["before", "after"] as const) {
     const host = overlay.querySelector<HTMLElement>(`.prod-slots[data-row="${row}"]`)!;
     for (let i = 0; i < 3; i++) {
       const cell = document.createElement("div");
       cell.className = "prod-slot";
       host.appendChild(cell);
-      renderSlot(cell, slotsOf(row), i, row, () => clipLen);
+      cells[row].push(cell);
     }
+    redrawRow(row);
+  }
+
+  // One picker per row, taking all three at once.
+  //
+  // The slots each owned a single-file input, which meant three separate trips
+  // through the photo picker to fill a row — six for a before-and-after. The
+  // row-level input is `multiple` and fills every free slot in order, so the
+  // whole thing is two visits to the camera roll. Anything past the three
+  // spare slots is dropped with a line saying so rather than silently.
+  for (const input of overlay.querySelectorAll<HTMLInputElement>("input[data-pick]")) {
+    input.addEventListener("change", async () => {
+      const row = input.dataset.pick as "before" | "after";
+      const slots = slotsOf(row);
+      const chosen = [...(input.files ?? [])];
+      // Reset immediately: picking the same file twice in a row fires no change
+      // event otherwise, which reads as the picker being broken.
+      input.value = "";
+      if (!chosen.length) return;
+      const free = slots.reduce<number[]>((acc, clip, i) => (clip ? acc : [...acc, i]), []);
+      const note = overlay?.querySelector<HTMLElement>(`[data-note="${row}"]`);
+      const skipped = Math.max(0, chosen.length - free.length);
+      let failed = 0;
+      for (const [n, file] of chosen.slice(0, free.length).entries()) {
+        try {
+          slots[free[n]] = await loadClip(file);
+        } catch {
+          failed++;
+        }
+      }
+      // Redraw FIRST, then report — redrawRow rewrites this line with the count,
+      // so anything said before it is overwritten and the person never learns
+      // their fourth pick was dropped.
+      redrawRow(row);
+      if (note && (skipped || failed)) {
+        note.textContent = [
+          skipped ? `${skipped} skipped — three is the most per side.` : "",
+          failed ? `${failed} file${failed > 1 ? "s" : ""} could not be read.` : "",
+        ].filter(Boolean).join(" ");
+      }
+    });
   }
 
   for (const seg of overlay.querySelectorAll<HTMLElement>(".prod-seg")) {
@@ -185,25 +257,18 @@ function renderSlot(
   index: number,
   row: "before" | "after",
   clipLen: () => number,
+  redrawRow: () => void,
 ): void {
-  const rerender = () => renderSlot(cell, slots, index, row, clipLen);
+  const rerender = () => renderSlot(cell, slots, index, row, clipLen, redrawRow);
   (cell as unknown as { __rerender?: () => void }).__rerender = rerender;
   const clip = slots[index];
   if (!clip) {
-    cell.innerHTML = `<button type="button" class="prod-add">+ Clip ${index + 1}</button>
-      <input type="file" accept="image/*,video/*" hidden>`;
-    const input = cell.querySelector("input")!;
-    cell.querySelector(".prod-add")!.addEventListener("click", () => input.click());
-    input.addEventListener("change", async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      try {
-        slots[index] = await loadClip(file);
-      } catch {
-        cell.querySelector(".prod-add")!.textContent = "Could not read that file";
-        return;
-      }
-      rerender();
+    // An empty slot is a target, not a second way in: the row's own picker
+    // fills these, and clicking one opens that same picker.
+    cell.innerHTML = `<button type="button" class="prod-add" data-open="${row}">
+      <span>+</span>Clip ${index + 1}</button>`;
+    cell.querySelector(".prod-add")!.addEventListener("click", () => {
+      cell.ownerDocument.querySelector<HTMLInputElement>(`input[data-pick="${row}"]`)?.click();
     });
     return;
   }
@@ -226,8 +291,11 @@ function renderSlot(
   drawThumb(cell.querySelector("canvas")!, clip);
   cell.querySelector(".prod-rm")!.addEventListener("click", () => {
     URL.revokeObjectURL(clip.url);
-    slots[index] = null;
-    rerender();
+    // Close the gap rather than leaving a hole: a row of [clip, empty, clip]
+    // would render as a cut to nothing in the middle of the reel.
+    slots.splice(index, 1);
+    slots.push(null);
+    redrawRow();
   });
   const range = cell.querySelector<HTMLInputElement>(".prod-trim input");
   if (range) {
@@ -342,7 +410,15 @@ async function buildVideo(
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
-  const ctx2d = canvas.getContext("2d")!;
+  // alpha:false lets the compositor skip per-pixel blending against a
+  // transparent backdrop on every one of ~400 frames; the frame is always
+  // fully painted anyway.
+  const ctx2d = canvas.getContext("2d", { alpha: false })!;
+  // Phone footage is usually larger than the frame and every clip is scaled;
+  // the default smoothing is the browser's cheapest filter and shows as
+  // stair-stepping on hair and jaw edges once the platform re-encodes.
+  ctx2d.imageSmoothingEnabled = true;
+  ctx2d.imageSmoothingQuality = "high";
   const format = new Mp4OutputFormat({ fastStart: "in-memory" });
   const codec = await getFirstEncodableVideoCodec(
     format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
@@ -356,11 +432,12 @@ async function buildVideo(
   output.setMetadataTags({ title: "TrueMax transformation", artist: "TrueMax" });
   await output.start();
 
-  // The analysis compositor draws at its native 720×1280; it is scaled up at
-  // composite time rather than re-parameterised, because a 1.5× upscale of
-  // vector-drawn frames survives platform compression while a second layout
-  // system would drift from the one the plain export uses.
+  // The analysis segment is re-rendered through the export's own compositor at
+  // 1.5x, so it is drawn natively at this canvas's 1080x1920 rather than
+  // upscaled from 720p. Same layout code, same numbers — only the transform
+  // differs — so the reel and the producer can never disagree about one face.
   const analysisCanvas = document.createElement("canvas");
+  const ANALYSIS_SCALE = W / 720;
 
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
@@ -376,8 +453,9 @@ async function buildVideo(
     ctx2d.fillStyle = "#050606";
     ctx2d.fillRect(0, 0, W, H);
     if (seg.kind === "analysis") {
-      renderQuickVideoFrame(analysisCanvas, ctx.photo, ctx.landmarks, ctx.sex, ctx.scores, local, "breakdown");
-      ctx2d.imageSmoothingQuality = "high";
+      renderQuickVideoFrame(
+        analysisCanvas, ctx.photo, ctx.landmarks, ctx.sex, ctx.scores, local, "breakdown", ANALYSIS_SCALE,
+      );
       ctx2d.drawImage(analysisCanvas, 0, 0, W, H);
     } else {
       const clip = seg.clip!;
