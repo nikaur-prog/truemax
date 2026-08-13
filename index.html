@@ -86,6 +86,10 @@
           <button class="btn pri shutter" id="btn-camera">Use camera</button>
           <button class="btn gho" id="btn-upload">Upload a photo</button>
         </div>
+        <!-- Filled in by script, and only on a device that actually has a
+             keyboard and a pointer. Telling a phone to press Cmd-V is worse
+             than saying nothing. -->
+        <p class="paste-hint" id="paste-hint" hidden></p>
         <!-- Only while the camera is live. Backing out of an open camera had no
              exit before this: the only ways out were to take a photo you did
              not want or to reload the page. -->

@@ -14,6 +14,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { renderResults, setMaxAccess } from "./ui/results.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
+import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.js";
 import { analyzeSide } from "./engine/scoring.js";
@@ -58,6 +59,8 @@ import {
 } from "./ui/membershipBrand.js";
 import type { MembershipBrand } from "./ui/membershipBrand.js";
 import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
+import { loadOnboardingProfile, onboardingComplete } from "./engine/onboarding.js";
+import { openSettings } from "./ui/settings.js";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -307,6 +310,29 @@ el.fileInput.addEventListener("change", () => {
   if (file) handleFile(file);
 });
 el.btnUpload.addEventListener("click", () => ensureSex(() => el.fileInput.click()));
+
+// Paste or drag a photo anywhere on the page rather than going through the
+// picker. Same reasoning as /quick: the photo has usually just been cropped or
+// screenshotted and is already on the clipboard. Routed through ensureSex so a
+// pasted first photo still chooses its reference population, and held off while
+// a scan is already running so a stray Cmd-V cannot restart one mid-animation.
+enablePhotoPaste({
+  // Only on the capture screen. Once the scan is running or the results are up,
+  // a stray Cmd-V should do nothing rather than throw away the analysis on
+  // screen and start again.
+  busy: () => el.upload.classList.contains("hidden"),
+  dropZone: el.ovalFrame,
+  onImage: (file) => ensureSex(() => handleFile(file)),
+});
+
+// Only shown where the gesture exists.
+if (pasteHintApplies()) {
+  const hint = document.getElementById("paste-hint");
+  if (hint) {
+    hint.innerHTML = "…or paste a photo with <kbd>" + (navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl") + "</kbd><kbd>V</kbd>, or drag one in";
+    hint.hidden = false;
+  }
+}
 el.ovalFrame.addEventListener("dragover", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.add("dragover");
@@ -330,12 +356,39 @@ el.ovalFrame.addEventListener("drop", (e) => {
 // one — scan your face — which is also the only screen a TikTok click needs.
 // The public project settings are present in production; a build without auth
 // configuration still leaves this control in its disabled guest state.
+// The quiz, made compulsory.
+//
+// It always existed and always asked for a name and a date of birth; what it
+// never did was insist. Somebody could sign in, close it, and use the app as an
+// anonymous account the greeting could not address and the plan chooser could
+// not safely price — which is why the greeting was reduced to guessing at email
+// addresses in the first place.
+//
+// Date of birth is the reason this is a gate rather than a nudge. Every other
+// answer has a defensible default; an unknown age does not, because the two
+// available fallbacks are offering an adult subscription to a thirteen-year-old
+// or withholding it from an adult.
+//
+// Failures open: if the profile cannot be loaded the app continues rather than
+// locking somebody out of their own scan over a dropped request.
+async function ensureOnboarded(user: User): Promise<void> {
+  let profile;
+  try {
+    profile = await loadOnboardingProfile(user);
+  } catch {
+    return;
+  }
+  if (onboardingComplete(profile)) return;
+  await openTrialFunnel(user, undefined, { required: true });
+}
+
 document.getElementById("logo-home")?.addEventListener("click", async () => {
   const user = await currentUser();
   if (!user) {
     await refreshHomeBrand(null);
     return;
   }
+  await ensureOnboarded(user);
   if (cam) await closeCamera();
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
@@ -345,6 +398,7 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
     onScan: () => resetToUpload(),
     name: displayName(user),
     membership: brand === "max" ? "max" : "member",
+    onSettings: () => void openSettings(user),
   });
 });
 
@@ -399,25 +453,24 @@ window.addEventListener(MEMBERSHIP_BRAND_EVENT, (event) => {
   paintHomeBrand(brand);
 });
 
-// First name for the greeting. The name the person actually typed into
-// onboarding wins — it lives in user_metadata, written by the quiz — because
-// greeting somebody by a guess parsed out of their email address when they have
-// told you their name is worse than not greeting them at all ("xnikau.robertson@"
-// would read as "Xnikau" forever). The email parse stays as the fallback for
-// accounts that signed in but never finished the quiz.
+// First name for the greeting, and only ever the name the person gave us.
+//
+// This used to parse one out of the email address, which produced "Xnikau" from
+// "xnikau.robertson@" and would have produced worse from a Gmail handle. There
+// is no fallback now, and there does not need to be: the quiz is compulsory and
+// asks for the name before anything else, so a signed-in account that reaches
+// the dashboard has one. If it somehow does not, the greeting reads "Welcome."
+// and that is a better sentence than a wrong name.
 function displayName(user: User): string | null {
   const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
   for (const key of ["first_name", "full_name", "name"]) {
     const value = meta[key];
     if (typeof value === "string" && value.trim()) {
       const first = value.trim().split(/\s+/)[0];
-      if (first.length >= 2 && first.length <= 20) return first;
+      if (first.length >= 1 && first.length <= 20) return first;
     }
   }
-  const local = (user.email ?? "").split("@")[0];
-  const first = local.split(/[._\-+0-9]+/).filter(Boolean)[0];
-  if (!first || first.length < 2 || first.length > 20) return null;
-  return first[0].toUpperCase() + first.slice(1).toLowerCase();
+  return null;
 }
 
 // ---- camera ----
@@ -1230,6 +1283,10 @@ if (isAuthAvailable()) {
   readPendingAnalysis();
   onAuthChange((user) => {
     void refreshHomeBrand(user);
+    // A new account has answered nothing yet. Asking here — rather than at the
+    // first moment the app needs a name or an age — means the questions arrive
+    // as part of signing up instead of interrupting a scan.
+    if (user) void ensureOnboarded(user);
     // Give an in-page password flow the first chance to continue with its
     // full-resolution canvases. OAuth and email-confirmation returns have no
     // in-page callback, so the saved scan resumes on the next navigation.

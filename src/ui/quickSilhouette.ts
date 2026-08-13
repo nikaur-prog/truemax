@@ -36,57 +36,71 @@ export function drawQuickSilhouette(canvas: HTMLCanvasElement, sex: Sex): void {
 
   g.save();
   g.translate(cx, cy);
-  g.strokeStyle = "rgba(255,255,255,0.22)";
-  g.lineWidth = Math.max(1.5, u * 0.018);
   g.lineCap = "round";
   g.lineJoin = "round";
 
-  // Shoulders, behind everything, cropped by the frame.
-  g.beginPath();
-  g.moveTo(-u * 1.15, u * 1.5);
-  g.bezierCurveTo(-u * 1.0, u * 0.86, -u * 0.42, u * 0.74, 0, u * 0.74);
-  g.bezierCurveTo(u * 0.42, u * 0.74, u * 1.0, u * 0.86, u * 1.15, u * 1.5);
-  g.stroke();
+  // Filled, not outlined. The previous version drew every feature as a separate
+  // stroked bezier — jaw, hairline, two side-locks, two eye arcs, a mouth — and
+  // at low opacity over a dark frame that reads as a tangle of loose wire
+  // rather than a person. A solid mass with the features knocked out of it is
+  // the same silhouette every "no photo yet" placeholder uses, and it is what
+  // the side-capture guide already does on the other screen.
+  const skin = "rgba(255,255,255,0.13)";
 
-  // Head. The female outline is a narrower jaw and a softer chin — the same
-  // dimorphism the engine measures, drawn rather than asserted.
-  const jaw = sex === "female" ? 0.62 : 0.72;
-  const chin = sex === "female" ? 0.94 : 0.9;
+  // Shoulders: one soft mound, cropped by the bottom of the frame.
+  g.fillStyle = skin;
   g.beginPath();
-  g.moveTo(0, -u * 0.92);
-  g.bezierCurveTo(u * 0.62, -u * 0.92, u * 0.7, -u * 0.28, u * jaw, u * 0.06);
-  g.bezierCurveTo(u * (jaw - 0.06), u * 0.5, u * 0.34, u * chin, 0, u * chin);
-  g.bezierCurveTo(-u * 0.34, u * chin, -u * (jaw - 0.06), u * 0.5, -u * jaw, u * 0.06);
-  g.bezierCurveTo(-u * 0.7, -u * 0.28, -u * 0.62, -u * 0.92, 0, -u * 0.92);
-  g.stroke();
+  g.moveTo(-u * 1.25, u * 1.7);
+  g.bezierCurveTo(-u * 1.1, u * 0.82, -u * 0.5, u * 0.66, 0, u * 0.66);
+  g.bezierCurveTo(u * 0.5, u * 0.66, u * 1.1, u * 0.82, u * 1.25, u * 1.7);
+  g.closePath();
+  g.fill();
 
-  // Hair: a short crop, or a longer fall past the jaw.
+  // Head. The female outline carries a narrower jaw and a softer chin — the
+  // same dimorphism the engine measures, drawn rather than asserted.
+  const jaw = sex === "female" ? 0.6 : 0.7;
+  const chin = sex === "female" ? 0.92 : 0.88;
+  g.beginPath();
+  g.moveTo(0, -u * 0.95);
+  g.bezierCurveTo(u * 0.63, -u * 0.95, u * 0.72, -u * 0.26, u * jaw, u * 0.08);
+  g.bezierCurveTo(u * (jaw - 0.05), u * 0.52, u * 0.33, u * chin, 0, u * chin);
+  g.bezierCurveTo(-u * 0.33, u * chin, -u * (jaw - 0.05), u * 0.52, -u * jaw, u * 0.08);
+  g.bezierCurveTo(-u * 0.72, -u * 0.26, -u * 0.63, -u * 0.95, 0, -u * 0.95);
+  g.closePath();
+  g.fill();
+
+  // Hair sits on top of the head as one more filled shape: a rounded cap, or a
+  // longer fall that widens past the jaw.
   g.beginPath();
   if (sex === "female") {
-    g.moveTo(-u * 0.72, -u * 0.2);
-    g.bezierCurveTo(-u * 0.92, -u * 0.62, -u * 0.6, -u * 1.06, 0, -u * 1.06);
-    g.bezierCurveTo(u * 0.6, -u * 1.06, u * 0.92, -u * 0.62, u * 0.72, -u * 0.2);
-    g.moveTo(-u * 0.78, -u * 0.34);
-    g.lineTo(-u * 0.68, u * 0.62);
-    g.moveTo(u * 0.78, -u * 0.34);
-    g.lineTo(u * 0.68, u * 0.62);
+    g.moveTo(-u * 0.7, u * 0.62);
+    g.bezierCurveTo(-u * 1.02, u * 0.1, -u * 1.0, -u * 1.18, 0, -u * 1.18);
+    g.bezierCurveTo(u * 1.0, -u * 1.18, u * 1.02, u * 0.1, u * 0.7, u * 0.62);
+    g.bezierCurveTo(u * 0.86, -u * 0.1, u * 0.8, -u * 0.62, 0, -u * 0.62);
+    g.bezierCurveTo(-u * 0.8, -u * 0.62, -u * 0.86, -u * 0.1, -u * 0.7, u * 0.62);
   } else {
-    g.moveTo(-u * 0.64, -u * 0.52);
-    g.bezierCurveTo(-u * 0.72, -u * 1.0, u * 0.72, -u * 1.0, u * 0.64, -u * 0.52);
+    g.moveTo(-u * 0.7, -u * 0.44);
+    g.bezierCurveTo(-u * 0.78, -u * 1.16, u * 0.78, -u * 1.16, u * 0.7, -u * 0.44);
+    g.bezierCurveTo(u * 0.5, -u * 0.76, -u * 0.5, -u * 0.76, -u * 0.7, -u * 0.44);
   }
-  g.stroke();
+  g.closePath();
+  g.fill();
 
-  // Eyes — closed, curved upward. A smiling arc reads as friendly at any size,
-  // where two dots read as a target.
+  // Features knocked back out of the mass, so they read at any size without
+  // adding more line weight to the drawing.
+  g.globalCompositeOperation = "destination-out";
+  g.strokeStyle = "rgba(0,0,0,1)";
+  g.lineWidth = Math.max(2.4, u * 0.055);
+
+  // Closed, upward-curved eyes. A smiling arc reads as friendly; two dots read
+  // as a target, on a page whose whole subject is being looked at.
   for (const side of [-1, 1]) {
     g.beginPath();
-    g.arc(side * u * 0.3, -u * 0.16, u * 0.13, Math.PI * 1.15, Math.PI * 1.85);
+    g.arc(side * u * 0.29, -u * 0.14, u * 0.135, Math.PI * 1.16, Math.PI * 1.84);
     g.stroke();
   }
-
-  // Smile.
   g.beginPath();
-  g.arc(0, u * 0.3, u * 0.26, Math.PI * 0.18, Math.PI * 0.82);
+  g.arc(0, u * 0.26, u * 0.27, Math.PI * 0.16, Math.PI * 0.84);
   g.stroke();
 
   g.restore();

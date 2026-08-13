@@ -154,7 +154,13 @@ body {
 .engine-status.error { color: var(--warm); }
 
 /* ---------- two-pane results ---------- */
-#v-main { display: grid; grid-template-columns: 44% 1fr; gap: 34px; max-width: 1080px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
+/* Widened from 1080px, and the photo column narrowed from 44% to 38%. Both
+   changes push width into the right-hand column, which is where the reading
+   happens — the gate copy, the score breakdown and the celebrity rows were all
+   wrapping at around 46 characters inside a column that had room to spare while
+   the page had empty gutters on both sides. Height is untouched: this is a
+   column-width change, not a bigger card. */
+#v-main { display: grid; grid-template-columns: 38% 1fr; gap: 34px; max-width: 1240px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
 .pane-photo { position: sticky; top: 78px; }
 .face-frame { position: relative; border-radius: 22px; overflow: hidden; background: #101113; box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); line-height: 0; }
 .zoomable { transition: transform 0.34s cubic-bezier(0.32, 0, 0.15, 1); transform-origin: center; }
@@ -406,6 +412,34 @@ body.funnel-open { overflow: hidden; }
 .plan-cta:disabled { color: #888b87; background: #d8dad6; cursor: not-allowed; }
 .plan-card > small { margin-top: 10px; color: var(--mut); text-align: center; font-size: 10px; }
 .featured > small { color: rgba(255,255,255,.52); }
+/* Settings: the quiz's answers, afterwards. Reuses the funnel's shell so the
+   two read as the same surface — the place your answers live, whether you are
+   giving them or revising them. */
+.settings-shell { width: min(760px, 100%); grid-template-rows: auto 1fr auto auto; }
+.settings-body { overflow-y: auto; }
+.set-group { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.set-group:first-of-type { margin-top: 18px; padding-top: 0; border-top: 0; }
+.set-group h3 { margin: 0 0 4px; font: 500 17px/1.3 var(--serif); }
+.set-hint, .set-group > .set-hint { margin: 0 0 14px; color: var(--mut); font-size: 12px; line-height: 1.5; }
+.set-locked {
+  display: grid; gap: 3px; margin-top: 14px; padding: 13px 15px;
+  border: 1px dashed var(--line); border-radius: 14px; background: rgba(0, 0, 0, .015);
+}
+.set-locked > span { font: 9.5px var(--mono); letter-spacing: .12em; color: var(--mut); text-transform: uppercase; }
+.set-locked > b { font: 400 16px var(--serif); }
+.set-locked > small { margin-top: 4px; color: var(--mut); font-size: 11px; line-height: 1.5; }
+.set-tone {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px;
+  font-size: 12.5px; color: var(--mut);
+}
+.dash-settings {
+  display: grid; place-items: center; width: 34px; height: 34px; margin-left: auto; padding: 0;
+  border: 1px solid var(--line); border-radius: 50%; background: none; color: var(--mut);
+  cursor: pointer; transition: color .2s, border-color .2s, transform .35s;
+}
+.dash-settings:hover { color: var(--ink); border-color: var(--ink); transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .dash-settings:hover { transform: none; } }
+
 /* The offer's entrance. The only moment the product asks for money, so it
    arrives like a result being revealed rather than a form being served: the
    shell rises and sharpens, then each plan slides in from its own side, the
@@ -1537,7 +1571,11 @@ body.auth-modal-open { overflow: hidden; }
    modal never strands somebody on a blank page; the captured scan stays ready. */
 .analysis-gate { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 28px; }
 .analysis-gate h2 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4vw, 38px); line-height: 1.08; margin: 3px 0 13px; }
-.analysis-gate > p { color: var(--mut); font-size: 14px; line-height: 1.65; max-width: 46ch; margin-bottom: 20px; }
+.analysis-gate { padding: 30px 34px; }
+/* 46ch was holding the paragraph to three short lines inside a card that is now
+   considerably wider. 62ch is still inside the comfortable measure for reading
+   and lets the copy use the card it has. */
+.analysis-gate > p { color: var(--mut); font-size: 14px; line-height: 1.65; max-width: 62ch; margin-bottom: 20px; }
 .analysis-gate .analysis-gate-warn { color: var(--warm); font-size: 12px; }
 .analysis-gate-open { width: 100%; }
 
@@ -1782,3 +1820,15 @@ body.auth-modal-open { overflow: hidden; }
   .toneask-card { padding: 22px 18px 18px; border-radius: 18px; }
   .toneask-card h2 { font-size: 23px; }
 }
+
+/* Paste and drop -----------------------------------------------------------
+   The photo somebody wants scanned has usually just been cropped or
+   screenshotted, so it is already on the clipboard. The hint is written by
+   script and only on a device with a real keyboard, because telling a phone to
+   press Cmd-V is worse than saying nothing at all. */
+.paste-hint { margin: 10px 0 0; text-align: center; color: var(--mut); font-size: 11.5px; letter-spacing: .01em; }
+.paste-hint kbd {
+  padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+  background: rgba(255,255,255,.6); font: 10.5px var(--mono); color: var(--ink);
+}
+.paste-hot { outline: 2px dashed var(--acc); outline-offset: 4px; }
