@@ -88,7 +88,11 @@ export type DeltaReading = "noise" | "tooSoon" | "worthNoting";
 // "two days means lighting, two weeks means real" without reference to the
 // spread would be exactly the kind of invention that was stripped out of the
 // blur gate and the population curve.
-const NOISE_SD = 1.32;
+// 0.87, not the measured 1.32: scores now pass through the 0.66 measurement-
+// noise shrinkage in scoring.ts, which compresses the same-face spread by the
+// same factor (0.66 x 1.32 = 0.87). Leaving this at 1.32 would have called
+// genuine, now-compressed progress "noise".
+const NOISE_SD = 0.87;
 
 // Below this, a face has not changed shape. Body composition and skin move over
 // weeks; nothing structural moves over a long weekend.

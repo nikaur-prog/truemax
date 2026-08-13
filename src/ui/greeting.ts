@@ -103,7 +103,7 @@ export function subline(ctx: GreetingCtx): string {
   const own = [
     "Measure your face, watch it over time, and see exactly where you land.",
     "The number moves slowly. That is what makes a move worth reading.",
-    "Two photos of the same face differ by about 1.3 points, so watch the trend, not the reading.",
+    "Two photos of the same face differ by about 0.9 points, so watch the trend, not the reading.",
     "Bone structure is the part you cannot change. Nearly everything else, you can.",
     "Measured, not guessed. Every number here comes with the maths behind it.",
     "Consistency beats intensity. One scan a week for a year beats seven this month.",
