@@ -10,6 +10,7 @@ import type { CameraHandle } from "./ui/camera.js";
 import { rankShort } from "./ui/templates.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
+import { track } from "./engine/track.js";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
@@ -177,6 +178,7 @@ function withSex(next: () => void): void {
 function paintSilhouette(): void {
   drawQuickSilhouette(el.silhouette, storedSex() ?? "male");
 }
+track("quick-visit");
 paintSilhouette();
 window.addEventListener("resize", paintSilhouette);
 
@@ -264,6 +266,7 @@ async function run(src: HTMLCanvasElement): Promise<void> {
   // man as female while testing this page, and at 58.8% on held-out faces
   // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
   last = { lm, w: src.width, h: src.height, photo: src };
+  track("quick-scan-done");
   show(storedSex() ?? "male", true);
 }
 
@@ -549,6 +552,7 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       variant,
     );
     if (btn) btn.textContent = "MP4 downloaded";
+    track("quick-video-downloaded");
   } catch (error) {
     console.error(error);
     if (btn) btn.textContent = "MP4 unavailable here";

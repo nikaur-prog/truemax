@@ -18,6 +18,7 @@ import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcer
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
+import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.js";
@@ -968,6 +969,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
 // ---------------- improvements ----------------
 function showImprove(): void {
   if (!ctx) return;
+  track("plan-opened");
   const { report: r, delta } = ctx;
   setZoom(null);
   const profile = loadProfile();
@@ -1252,6 +1254,7 @@ function wireUnlock(): void {
   // never picks its own price.
   const single = document.getElementById("btn-single-scan") as HTMLButtonElement | null;
   single?.addEventListener("click", async () => {
+    track("single-scan-started");
     single.disabled = true;
     single.textContent = "Opening secure Checkout…";
     const result = await startScanCreditCheckout();

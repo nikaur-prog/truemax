@@ -62,6 +62,7 @@ import type { MembershipBrand } from "./ui/membershipBrand.js";
 import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
 import { flushPendingProfile, loadOnboardingProfile, onboardingComplete } from "./engine/onboarding.js";
 import { openSettings } from "./ui/settings.js";
+import { track } from "./engine/track.js";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -103,6 +104,8 @@ async function refreshMaxAccess(): Promise<void> {
     setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
+
+track("visit");
 
 if (import.meta.env.DEV) {
   const preview = new URLSearchParams(location.search).get("preview");
@@ -805,6 +808,7 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   // render front-only; the interactive flow always supplies a side report.
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "FRONT CAPTURED";
+  track("scan-front-done");
   el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
   drawCalm(el.overlayCanvas, landmarks, width, height);
   startSide();
@@ -1048,6 +1052,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
       renderResults({ ...ctxArgs, report: merged, delta: null });
     },
   };
+  track("results-shown");
   renderResults(ctxArgs);
 
   // The plan renders locked and unlocks in place if this comes back positive.
@@ -1124,6 +1129,7 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
   } catch {
     // A preview that cannot be computed just is not shown; the gate still works.
   }
+  track("gate-shown");
   el.analysis.innerHTML = `<div class="lockwrap">
     ${preview}
     <section class="analysis-gate${preview ? " over-preview" : ""}">
@@ -1250,6 +1256,9 @@ function startSide(): void {
         photo.getContext("2d")!.drawImage(shot, 0, 0);
       }
       closeSide();
+      // Counted here and not in the redo path, so adjusting the points on the
+      // same profile cannot count one person's side scan twice.
+      track("scan-side-done");
       lastSide = {
         points,
         faceDir,
