@@ -61,10 +61,14 @@ export interface FollowUp {
 const DAY = 86_400_000;
 
 // Below this, a difference is the instrument rather than the face. Two photos
-// of one unchanged face differ by about 1.3 points, so anything smaller is
-// noise and reporting it as progress would be the same lie as reporting it as
-// decline. This is the single most important number in the file.
-export const NOISE = 1.3;
+// of one unchanged face differed by about 1.3 points on the raw scale; scores
+// now pass through the 0.66 measurement-noise shrinkage in scoring.ts, which
+// compresses that spread to ~0.9. Anything smaller is noise, and reporting it
+// as progress would be the same lie as reporting it as decline. This is the
+// single most important number in the file, and it must move in step with
+// SHRINK — a floor above the real spread hides progress, one below it invents
+// progress.
+export const NOISE = 0.9;
 
 // How long a routine gets before "no change" becomes a finding rather than
 // impatience. Skin turns over in roughly six weeks and body composition shows

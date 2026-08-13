@@ -26,8 +26,10 @@ test("a move bigger than the noise floor is called real", () => {
 
 test("a move smaller than the noise floor is never called progress", () => {
   // The lie this product exists not to tell. Anything inside the floor gets
-  // reported as no information, in both directions.
-  for (const delta of [-1.29, -0.6, 0, 0.6, 1.29]) {
+  // reported as no information, in both directions. Written relative to NOISE
+  // rather than as literals, so the floor can move with the shrinkage factor
+  // without this test silently testing the wrong boundary.
+  for (const delta of [-(NOISE - 0.01), -0.6 * NOISE, 0, 0.6 * NOISE, NOISE - 0.01]) {
     const kind = followUp([at(0, 5), at(30, 5 + delta)]).kind;
     assert.equal(kind, "holding", `${delta}`);
   }

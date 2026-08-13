@@ -224,6 +224,41 @@ function tailZ(z: number, q: number[], last: number): number {
   return probit(loP) - (q[0] - z) * Math.max(0.2, slope);
 }
 
+// ---------------------------------------------------------------------------
+// Measurement-noise shrinkage.
+//
+// A single capture is a NOISY reading of a face, and this scale's noise is
+// measured: two photographs of the same unchanged person differ in overall
+// score with an SD of 1.32 points, so one photograph carries a noise SD of
+// 1.32/sqrt(2) = 0.93 points, or 0.72 sigma in z units at 1.3 points per sigma.
+//
+// That noise is not neutral. The scoring penalises deviation from ideal in
+// BOTH directions, so noise can only push a score down — a webcam capture of a
+// good-looking face reads as a worse face, systematically. Live testing showed
+// exactly that: a room of ordinary, decent-looking people all landing mid-3s
+// to low-4s, which is not what a median-anchored scale should say about a
+// median room.
+//
+// The statistically correct estimate of a true z from one noisy reading
+// shrinks it toward the population centre by the reliability ratio
+//
+//   k = var(true) / (var(true) + var(noise)) = 1 / (1 + 0.72^2) = 0.66
+//
+// which is regression to the mean, applied on purpose. The median is
+// untouched (0.66 x 0 = 0). Both tails compress symmetrically: a raw 3.4
+// becomes ~4.1, and a raw 8.0 becomes ~7.0 — the same honesty in both
+// directions, because a single webcam photo can no more prove "top 1%" than
+// it can prove "bottom 10%". Percentiles shrink toward 50 by the same factor
+// through phi(), so the score and the percentile keep telling one story.
+//
+// What this deliberately does NOT touch: the per-metric evidence rows, which
+// stay raw for the same reason they ignore the display floor — they are the
+// evidence the plan ranks from, and evidence should stay sharp. And the
+// TREND across scans still accumulates precision the single reading lacks,
+// which is the honest version of "scan weekly": more readings, less shrink
+// between where you started and where you are.
+export const SHRINK = 0.66;
+
 function normalizeAgg(
   z: number,
   sex: Sex,
@@ -232,7 +267,7 @@ function normalizeAgg(
 ): number {
   raw[key] = z;
   const q = AGG_NORM[sex]?.[key];
-  if (!q || q.length < 3) return z;
+  if (!q || q.length < 3) return SHRINK * z;
   // Where does this face sit in the reference population? Interpolate its
   // position in the quantile table, then convert that percentile back to a
   // z. Deliberately NOT a mean/SD rescale: the aggregate has heavy tails, and
@@ -251,7 +286,7 @@ function normalizeAgg(
   // bin. The top two quantiles of a 117-person reference sit very close
   // together, so using that bin as the scale made the extrapolation explode:
   // a face slightly past the maximum would have shot to 9.9.
-  if (z >= q[last] || z <= q[0]) return tailZ(z, q, last);
+  if (z >= q[last] || z <= q[0]) return SHRINK * tailZ(z, q, last);
   let pct: number;
   {
     let i = 0;
@@ -259,7 +294,7 @@ function normalizeAgg(
     const span = q[i + 1] - q[i] || 1e-9;
     pct = (i + (z - q[i]) / span) / last;
   }
-  return probit(clamp(pct, 0.001, 0.999));
+  return SHRINK * probit(clamp(pct, 0.001, 0.999));
 }
 
 // A metric only influences the score in proportion to how reproducibly it

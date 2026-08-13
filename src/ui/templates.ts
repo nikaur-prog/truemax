@@ -164,7 +164,7 @@ export function topPctText(pct: number): string {
 // ---------------------------------------------------------------------------
 // Reading a rescan.
 //
-// The measured spread between two photographs of one person is 1.32 points, and
+// The spread between two photographs of one person is 0.87 points post-shrinkage, and
 // between two different people it is 1.20. That is a problem for weekly
 // tracking and it is the one place the problem turns into the product: an app
 // that says "that is noise, ignore it" while its competitors say "you dropped
@@ -387,6 +387,6 @@ export function percentileLine(pct: number, sex: Sex): string {
 // is equally true at every score.
 export function overviewCaveat(): string {
   return `One photograph, scored on bone proportion and soft tissue against a reference
-    population. Two photos of the same face differ by about 1.3 points, so a single
+    population. Two photos of the same face differ by about 0.9 points, so a single
     scan is one reading rather than a verdict.`;
 }

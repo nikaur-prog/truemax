@@ -7,6 +7,7 @@ import type { VerifyHandle } from "./sideVerify.js";
 import {
   cloneSidePoints,
   createSideFeedbackIntent,
+  movedSidePointIds,
 } from "../engine/sideFeedbackPayload.js";
 import type {
   SideFeedbackIntent,
@@ -394,49 +395,57 @@ function mountVerify(
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
   drawGuides(e.lines, seed.points, w, h);
 
+  // Whether the person told us the placement was wrong, and what they said to
+  // "send it to our team". Answered at most once, at the moment of the
+  // complaint — not re-asked at confirm.
+  let flaggedWrong = false;
+  let consentAnswer: boolean | null = null;
+
   const showReviewActions = () => {
-    verifier?.setEditable(false);
+    // Editable from the first frame. The old flow parked the points behind an
+    // "Edit point placement" button, which meant the natural gesture — grab
+    // the wrong dot and drag it — did nothing until you found the mode switch.
+    // A control that looks draggable must drag.
+    verifier?.setEditable(true);
     e.cap.textContent = "REVIEW LANDMARKS";
-    // The heading is graded by how well the seed actually landed.
-    //
-    // Presenting a guess with the same confidence as a measurement is what makes
-    // a wrong seed infuriating rather than merely annoying: somebody who was
-    // told "these are estimated, check them" and finds one off has been dealt
-    // with honestly, and somebody shown thirteen tidy rings on a wall has been
-    // misled by software. The engine cannot yet place the five points behind
-    // the face reliably — there is no landmark for a jaw corner — so the copy
-    // says which ones to look at rather than pretending they are all equal.
     const low = (seed.confidence ?? 1) < 0.7;
     e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
       <p class="side-sub">${low
-        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position rather than a result. Choose <b>Edit point placement</b> and drag them onto the features they name."
-        : "TrueMax has estimated the thirteen profile landmarks. The front of the face is measured; the five behind it — jaw corner, ear, and the neck point — are estimated from an average head, so they are the ones worth looking at. Drag any that sit off the feature."}</p>
-      <p class="side-review-note">Nothing leaves this device unless you separately choose to share it after confirming.${low ? "" : " Corrections you share are what teach the estimate to land closer next time."}</p>`;
+        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names — the hollow centre shows the pixel underneath."
+        : "The front of the face is measured; the five behind it — jaw corner, ear, and the neck point — are estimated from an average head, so they are the ones worth checking. Drag any ring straight onto the feature it names."}</p>
+      <p class="side-review-note">Nothing leaves this device unless you separately choose to share it.</p>`;
     e.actions.innerHTML = `
-      <button class="btn gho" id="side-back">Retake profile</button>
-      <button class="btn gho" id="side-edit">Edit point placement</button>
-      <button class="btn pri" id="side-go">Points look right</button>`;
-    document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
-    document.getElementById("side-edit")!.onclick = () => showEditActions();
-    document.getElementById("side-go")!.onclick = () => void confirmPlacement();
-  };
-
-  const showEditActions = () => {
-    verifier?.setEditable(true);
-    e.cap.textContent = "EDIT LANDMARKS";
-    e.panelCopy.innerHTML = `<h2 class="side-title">Correct only what is wrong</h2>
-      <p class="side-sub">Drag a ring onto the exact feature named when you touch it. The hollow centre lets you see the pixel underneath. Confirm when the placement matches the photo.</p>
-      <p class="side-review-note">You can reset every point to TrueMax's automatic placement at any time.</p>`;
-    e.actions.innerHTML = `
-      <button class="btn gho" id="side-reset">Reset automatic</button>
-      <button class="btn gho" id="side-back">Retake profile</button>
-      <button class="btn pri" id="side-go">Confirm placement</button>`;
+      <button class="side-reset-glyph" id="side-reset" type="button" aria-label="Reset points to the automatic placement" title="Reset to automatic placement">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
+        </svg>
+      </button>
+      <button class="btn gho" id="side-back">Retake picture</button>
+      <button class="btn gho" id="side-wrong">Points are wrong</button>
+      <button class="btn pri" id="side-go">Confirm</button>`;
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
       drawGuides(e.lines, automaticPoints, w, h);
     };
     document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
     document.getElementById("side-go")!.onclick = () => void confirmPlacement();
+    document.getElementById("side-wrong")!.onclick = async () => {
+      // The complaint is the moment to ask, because the complaint is the
+      // evidence. What is deliberately NOT here is any mention of an account:
+      // being asked to sign up before you have even confirmed your points is
+      // the moment an app starts feeling like a funnel, so the send waits
+      // until after Confirm, when sign-in happens anyway.
+      flaggedWrong = true;
+      consentAnswer = await askSideFeedbackConsent();
+      const wrongButton = document.getElementById("side-wrong");
+      wrongButton?.setAttribute("disabled", "true");
+      if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks — noted" : "Noted";
+      e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
+        <p class="side-sub">${consentAnswer
+          ? "Thank you — that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
+          : "No problem — nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
+        <p class="side-review-note">The circular arrow under the photo resets every point to the automatic placement.</p>`;
+    };
   };
 
   const confirmPlacement = async () => {
@@ -458,7 +467,19 @@ function mountVerify(
     try {
       const correctedPoints = cloneSidePoints(verifier.points);
       const report = analyzeSide(verifier.points, verifier.faceDir, ctx.sex);
-      const consented = await askSideFeedbackConsent();
+
+      // Consent, asked only when there is something to learn.
+      //
+      //   Flagged wrong          — already asked, at the complaint.
+      //   Edited without a flag  — they fixed something and did not say so;
+      //                            ask now, framed around the edit.
+      //   Confirmed untouched    — the seed was right and there is nothing to
+      //                            teach. Asking would be pure friction.
+      let consented = consentAnswer ?? false;
+      if (!flaggedWrong && consentAnswer === null) {
+        const moved = movedSidePointIds(automaticPoints, correctedPoints);
+        if (moved.length > 0) consented = await askSideFeedbackConsent(true);
+      }
       const feedback = createSideFeedbackIntent(
         consented,
         crypto.randomUUID(),
@@ -485,14 +506,16 @@ function mountVerify(
   showReviewActions();
 }
 
-function askSideFeedbackConsent(): Promise<boolean> {
+function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "side-feedback-backdrop";
     backdrop.innerHTML = `<section class="side-feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="side-feedback-title" aria-describedby="side-feedback-copy">
       <span class="klabel">OPTIONAL · YOUR CHOICE</span>
-      <h2 id="side-feedback-title">Help improve TrueMax?</h2>
-      <p id="side-feedback-copy">With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans.</p>
+      <h2 id="side-feedback-title">${afterEdit ? "We noticed you adjusted the points" : "Help improve TrueMax?"}</h2>
+      <p id="side-feedback-copy">${afterEdit
+        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them — corrections like yours are exactly what teaches the placement to land right next time."
+        : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
       <div class="side-feedback-actions">
         <button type="button" class="btn gho" data-choice="no">No, keep it on this device</button>

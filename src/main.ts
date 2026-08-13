@@ -3,7 +3,7 @@ import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js"
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
 import type { QualityCheck } from "./engine/quality.js";
-import { analyze } from "./engine/scoring.js";
+import { analyze, REGION_NAMES } from "./engine/scoring.js";
 import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.js";
 import { extractShape, shapeSubset } from "./engine/shape.js";
 import { compareAndStore, readAllHistory, readHistory } from "./engine/history.js";
@@ -1085,15 +1085,40 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
     ? "<b>Both views captured.</b> Sign up or log in to run the analysis."
     : "<b>Both views captured.</b> Sign in with an existing account to continue.";
   el.barFill.style.width = "100%";
-  el.analysis.innerHTML = `<section class="analysis-gate">
-    <span class="klabel">YOUR SCAN IS READY</span>
-    <h2>Create an account to analyse your face</h2>
-    <p>In order to be able to analyze your face, you must create an account. Sign up or log in to continue. ${lastSide?.feedback
-      ? "Your front photo stays on this device; the side feedback you approved is sent privately after sign-in."
-      : "Your face photos stay on this device."}</p>
+  // The result exists before the account does. The analysis is pure, on-device
+  // arithmetic, so it is computed here and shown BLURRED behind the gate: the
+  // person sees the shape of their own finished result — the big number, their
+  // region scores, all unreadable — instead of a wall claiming a result that,
+  // for all they know, might not exist. "Sign up to see what is already there"
+  // and "sign up and then we will run it" are different promises, and only the
+  // first one is the acquisition flow this screen was meant to be.
+  let preview = "";
+  try {
+    if (pending) {
+      const front = analyze(pending.landmarks, pending.width, pending.height, selectedSex);
+      const merged = sideReport ? mergeReports(front, sideReport) : front;
+      preview = `<div class="lockblur gate-preview" aria-hidden="true" inert>
+        <div class="gate-prev-score">${merged.overall.toFixed(1)}<small>/10</small></div>
+        <div class="gate-prev-grid">${merged.regions
+          .slice(0, 8)
+          .map((g) => `<div class="gate-prev-cell"><span>${REGION_NAMES[g.region]}</span><b>${g.score.toFixed(1)}</b></div>`)
+          .join("")}</div>
+      </div>`;
+    }
+  } catch {
+    // A preview that cannot be computed just is not shown; the gate still works.
+  }
+  el.analysis.innerHTML = `<div class="lockwrap">
+    ${preview}
+    <section class="analysis-gate${preview ? " over-preview" : ""}">
+    <span class="klabel">RESULTS ARE READY</span>
+    <h2>Create an account to see your analysis</h2>
+    <p>Your result is computed and sitting behind this blur — it never left this device. Sign up or log in to open it. ${lastSide?.feedback
+      ? "The side feedback you approved is sent privately after sign-in."
+      : ""}</p>
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
-    <button type="button" class="btn pri analysis-gate-open">Create account and analyse</button>
-  </section>`;
+    <button type="button" class="btn pri analysis-gate-open">Create account and see my results</button>
+  </section></div>`;
 
   // Under the button, never above it. The demo is there to make the wait worth
   // it, not to compete with the thing being asked for.
