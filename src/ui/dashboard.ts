@@ -1,5 +1,5 @@
 import { readAllHistory } from "../engine/history.js";
-import { followUp } from "../engine/followUp.js";
+import { followUp, regionNote } from "../engine/followUp.js";
 import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
@@ -69,10 +69,18 @@ function followUpCard(scans: StoredScan[]): string {
   const points = scans.map((s) => ({ at: Date.parse(s.date), overall: s.overall }));
   const read = followUp(points);
   if (read.kind === "too-soon") return "";
+  // Where the change (or the stall) is actually located. The overall can sit
+  // flat while one region climbs and another slips; naming the movers is the
+  // difference between reading the average and reading the face.
+  const regions = regionNote(
+    scans.map((s) => ({ at: Date.parse(s.date), scores: s.regions })),
+    REGION_LABEL,
+  );
   return `<div class="maxread dash-anim ${read.kind}" style="--d:210ms">
     <span class="maxread-who">MAX</span>
     <b>${escapeHtml(read.headline)}</b>
     <p>${escapeHtml(read.body)}</p>
+    ${regions ? `<p class="maxread-regions">${escapeHtml(regions)}</p>` : ""}
     ${read.suggestChange ? `<button class="linkish" id="dash-replan">Rebuild my plan around something else →</button>` : ""}
   </div>`;
 }

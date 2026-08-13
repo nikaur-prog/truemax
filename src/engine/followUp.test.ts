@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { NOISE, concernCleared, followUp } from "./followUp.js";
+import { NOISE, REGION_NOISE, concernCleared, followUp, regionNote, regionShifts } from "./followUp.js";
 import type { ScanPoint } from "./followUp.js";
 
 const DAY = 86_400_000;
@@ -133,4 +133,59 @@ test("the same history always produces the same words", () => {
 test("the goal is named when there is one, and not invented when there isn't", () => {
   assert.match(followUp([at(0, 5), at(70, 7)], "Jawline").body, /jawline/i);
   assert.ok(!/your\s+on/i.test(followUp([at(0, 5), at(70, 7)]).body));
+});
+
+// --- the region-by-region read ---------------------------------------------
+
+const rp = (days: number, scores: Record<string, number>) => ({ at: T0 + days * DAY, scores });
+const LABELS = { jaw: "Jaw", eyes: "Eyes", midface: "Midface" };
+
+test("a region past the floor is named; one inside it is not", () => {
+  const shifts = regionShifts([
+    rp(0, { jaw: 4.0, eyes: 6.0 }),
+    rp(30, { jaw: 4.0 + REGION_NOISE + 0.2, eyes: 6.0 + REGION_NOISE - 0.4 }),
+  ]);
+  assert.equal(shifts.length, 1);
+  assert.equal(shifts[0].region, "jaw");
+});
+
+test("the region floor is wider than the overall floor", () => {
+  // A region averages fewer measurements than the overall, so it cannot be
+  // less noisy. A floor below NOISE would invent feature-level progress out
+  // of readings we already call noise at the whole-face level.
+  assert.ok(REGION_NOISE > NOISE);
+});
+
+test("regions too close together in time say nothing", () => {
+  const shifts = regionShifts([rp(0, { jaw: 4.0 }), rp(3, { jaw: 6.5 })]);
+  assert.equal(shifts.length, 0);
+});
+
+test("a region missing from either end is skipped, not zero-filled", () => {
+  const shifts = regionShifts([rp(0, { jaw: 4.0 }), rp(30, { eyes: 6.0 })]);
+  assert.equal(shifts.length, 0);
+});
+
+test("movers sort by magnitude, mixed directions get both named", () => {
+  const note = regionNote(
+    [rp(0, { jaw: 4.0, midface: 6.5, eyes: 5.0 }), rp(40, { jaw: 5.8, midface: 5.0, eyes: 5.2 })],
+    LABELS,
+  );
+  assert.ok(note);
+  assert.match(note!, /jaw up 1\.8/);
+  assert.match(note!, /midface down 1\.5/);
+});
+
+test("nothing past the floor means no sentence at all", () => {
+  const note = regionNote(
+    [rp(0, { jaw: 5.0, eyes: 5.0 }), rp(40, { jaw: 5.3, eyes: 4.9 })],
+    LABELS,
+  );
+  assert.equal(note, null);
+});
+
+test("the region note is deterministic", () => {
+  const history = [rp(0, { jaw: 4.0 }), rp(40, { jaw: 6.0 })];
+  const first = regionNote(history, LABELS);
+  for (let i = 0; i < 5; i++) assert.equal(regionNote(history, LABELS), first);
 });

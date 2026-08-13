@@ -1921,6 +1921,14 @@ body.auth-modal-open { overflow: hidden; }
 .maxread.stalled .maxread-who, .maxread.slipping .maxread-who { color: var(--warm, #c07a4a); }
 .maxread > b { display: block; margin: 5px 0 6px; font: 400 17px/1.25 var(--serif); }
 .maxread > p { margin: 0; color: var(--mut); font-size: 13px; line-height: 1.6; }
+/* The region-by-region line: quieter and set off from the verdict paragraph,
+   because it is the footnote naming where the change lives, not a second
+   verdict competing with the first. */
+.maxread > p.maxread-regions {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 12.5px;
+}
 .maxread .linkish { margin-top: 11px; font-size: 12.5px; }
 
 /* Reset-to-automatic on the side verifier: the circular arrow, sitting to the

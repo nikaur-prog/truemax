@@ -152,6 +152,78 @@ export function followUp(history: ScanPoint[], goalLabel?: string): FollowUp {
   };
 }
 
+// Which regions actually moved — the sentence under the verdict that says
+// where a change came from, or where a stall is hiding one.
+//
+// The overall can sit flat while a jaw climbs and a midface slips, and an app
+// that only reads the average would call that "no change" — which is false in
+// the way that matters most to somebody working on exactly one feature. Same
+// rules as the overall read: first versus latest, a noise floor, and silence
+// when there is nothing above it.
+
+export interface RegionPoint {
+  at: number;
+  scores: Partial<Record<string, number>>;
+}
+
+// The per-region noise floor. There is no measured retest spread per region
+// yet, so this is bounded from below by arithmetic rather than data: a region
+// averages a handful of metrics where the overall averages all of them, so a
+// region reading cannot be LESS noisy than the overall's 0.9. 1.3 — the raw
+// photo-to-photo spread the overall showed before shrinkage — is the
+// conservative stand-in until the calibration set pins the real figure.
+// Setting it too high hides real region moves; too low invents them, and on a
+// sentence that names a specific feature, inventing is the worse failure.
+export const REGION_NOISE = 1.3;
+
+export interface RegionShift {
+  region: string;
+  change: number;
+}
+
+// First-vs-latest change per region, largest magnitude first, only shifts past
+// the noise floor. Regions missing from either end are skipped rather than
+// zero-filled — a region that was not measured did not "hold steady".
+export function regionShifts(history: RegionPoint[]): RegionShift[] {
+  const scans = [...history].sort((a, b) => a.at - b.at);
+  const first = scans[0];
+  const last = scans[scans.length - 1];
+  if (scans.length < 2 || !first || !last) return [];
+  if (daysBetween(first.at, last.at) < MIN_DAYS) return [];
+  const shifts: RegionShift[] = [];
+  for (const [region, then] of Object.entries(first.scores)) {
+    const now = last.scores[region];
+    if (typeof then !== "number" || typeof now !== "number") continue;
+    const change = now - then;
+    if (Math.abs(change) >= REGION_NOISE) shifts.push({ region, change });
+  }
+  return shifts.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+}
+
+// The sentence itself. Deterministic for the same reason the verdict is: a
+// line that names your jaw has to say the same thing tomorrow. Returns null
+// when nothing cleared the floor — no sentence beats a filler sentence.
+export function regionNote(
+  history: RegionPoint[],
+  labels: Record<string, string>,
+): string | null {
+  const shifts = regionShifts(history);
+  if (!shifts.length) return null;
+  const name = (r: string) => (labels[r] ?? r).toLowerCase();
+  const signed = (v: number) => `${v > 0 ? "up" : "down"} ${Math.abs(v).toFixed(1)}`;
+  const up = shifts.filter((s) => s.change > 0);
+  const down = shifts.filter((s) => s.change < 0);
+  const list = (xs: RegionShift[]) =>
+    xs.map((s) => `${name(s.region)} ${signed(s.change)}`).join(", ");
+  if (up.length && down.length) {
+    return `Region by region: ${list(up)}; ${list(down)}. The average hides both.`;
+  }
+  if (up.length) {
+    return `The move is coming from specific features: ${list(up)}. The rest is inside measurement noise.`;
+  }
+  return `One place is doing the moving: ${list(down)}. The rest is inside measurement noise.`;
+}
+
 // A concern the person told us they had, which has since resolved.
 //
 // Separate from the score because it is a different kind of fact: the overall
