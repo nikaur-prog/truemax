@@ -3,6 +3,8 @@ import type { Report, Sex } from "../engine/types.js";
 import { sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
+import { mountSideReference } from "./sideReference.js";
+import type { ReferenceHandle } from "./sideReference.js";
 import type { VerifyHandle } from "./sideVerify.js";
 import {
   cloneSidePoints,
@@ -61,6 +63,7 @@ interface SidePlacementSeed {
 }
 
 let verifier: VerifyHandle | null = null;
+let reference: ReferenceHandle | null = null;
 let sideCam: CameraHandle | null = null;
 let auto: AutoCapture | null = null;
 let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -98,6 +101,9 @@ export function openSideCapture(ctx: SideCtx): void {
   const e = el();
   verifier?.destroy();
   verifier = null;
+  // Or the guide badge stays pinned over the live camera preview.
+  reference?.destroy();
+  reference = null;
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
@@ -330,6 +336,8 @@ export function close(): void {
   stopSideCamera();
   verifier?.destroy();
   verifier = null;
+  reference?.destroy();
+  reference = null;
   el().section.classList.add("hidden");
 }
 
@@ -393,6 +401,11 @@ function mountVerify(
 
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
+  // The reference diagram, in the corner of the photo. Mounted with the seed's
+  // own facing so it points the same way the subject does — a guide facing the
+  // wrong way is harder to read than none.
+  reference?.destroy();
+  reference = mountSideReference(e.frame, seed.faceDir);
   drawGuides(e.lines, seed.points, w, h);
 
   // Whether the person told us the placement was wrong, and what they said to
