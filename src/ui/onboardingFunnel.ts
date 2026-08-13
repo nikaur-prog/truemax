@@ -135,7 +135,12 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
   const drawOffer = () => {
     if (!host) return;
     const adult = profileIsAdult(profile);
-    host.innerHTML = `<div class="trial-shell trial-offer" role="dialog" aria-modal="true" aria-labelledby="trial-title">
+    // The .offer-enter classes drive the reveal: the shell rises, then the two
+    // plans slide in from their own sides with the Max card landing a beat
+    // later. This is the one moment in the product where money is asked for,
+    // and it should arrive like a result, not like a form. Pure CSS, and the
+    // global reduced-motion rule collapses all of it to a plain appearance.
+    host.innerHTML = `<div class="trial-shell trial-offer offer-enter" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <div class="trial-offer-head">
         <div class="max-guide" aria-hidden="true">
@@ -148,11 +153,11 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
       </div>
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
-          <div class="plan-top"><span>STARTER</span><b>$6.99<small> USD / month</small></b></div>
+          <div class="plan-top"><span>STARTER</span><b>$7.99<small> USD / month</small></b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
           <ul><li>One additional scan in the trial</li><li>One included scan each week after</li><li>Personal pathway and progress tracking</li><li>Available at every age</li></ul>
           <button class="btn plan-cta" type="button" data-checkout="starter">Start 7-day free trial</button>
-          <small>Then $6.99/month. Cancel anytime.</small>
+          <small>Then $7.99/month. Cancel anytime.</small>
         </article>
         <article class="plan-card max${adult ? " featured" : " locked"}" data-plan="max">
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}

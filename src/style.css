@@ -406,6 +406,29 @@ body.funnel-open { overflow: hidden; }
 .plan-cta:disabled { color: #888b87; background: #d8dad6; cursor: not-allowed; }
 .plan-card > small { margin-top: 10px; color: var(--mut); text-align: center; font-size: 10px; }
 .featured > small { color: rgba(255,255,255,.52); }
+/* The offer's entrance. The only moment the product asks for money, so it
+   arrives like a result being revealed rather than a form being served: the
+   shell rises and sharpens, then each plan slides in from its own side, the
+   Max card a beat later so the eye lands on it last and stays there. Pure CSS;
+   the global reduced-motion rule at the top of this file flattens everything
+   to an instant appearance. */
+/* "backwards", never "both": a forwards fill would keep the animation's
+   transform pinned after it finishes, silently killing the .plan-card:hover
+   lift. Backwards covers the stagger delay, then gets out of the way. */
+.offer-enter { animation: offer-shell .5s cubic-bezier(.2, .9, .25, 1) backwards; }
+.offer-enter .trial-offer-head { animation: offer-rise .55s .15s cubic-bezier(.2, .9, .25, 1) backwards; }
+.offer-enter .plan-card.starter { animation: offer-from-left .6s .3s cubic-bezier(.2, .9, .25, 1) backwards; }
+.offer-enter .plan-card.max { animation: offer-from-right .6s .45s cubic-bezier(.2, .9, .25, 1) backwards; }
+.offer-enter .plan-ribbon { animation: offer-pop .4s .95s cubic-bezier(.3, 1.6, .5, 1) backwards; }
+.offer-enter .trial-status, .offer-enter .trial-decline, .offer-enter .trial-legal {
+  animation: offer-rise .5s .75s ease-out backwards;
+}
+@keyframes offer-shell { from { opacity: 0; transform: translateY(26px) scale(.97); filter: blur(6px); } }
+@keyframes offer-rise { from { opacity: 0; transform: translateY(14px); } }
+@keyframes offer-from-left { from { opacity: 0; transform: translateX(-36px); } }
+@keyframes offer-from-right { from { opacity: 0; transform: translateX(36px); } }
+@keyframes offer-pop { from { opacity: 0; transform: scale(.6); } }
+
 .trial-offer > .trial-status { margin-top: 12px; padding: 0; text-align: center; }
 .trial-decline { justify-self: center; border: 0; background: none; color: var(--mut); font: 12px var(--sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 7px; }
 .trial-legal { margin: 3px auto 0; max-width: 700px; text-align: center; color: var(--mut); font-size: 9.5px; line-height: 1.4; }
