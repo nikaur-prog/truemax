@@ -1585,3 +1585,26 @@ body.auth-modal-open { overflow: hidden; }
   .legal-table td { display: block; border: 0; padding: 0 0 4px; }
   .legal-table td:first-child { font-weight: 600; }
 }
+
+/* ---------------------------------------------------------------------------
+   Tier lock on the plan
+   --------------------------------------------------------------------------- */
+
+/* A locked lever is quieter, not damaged. It keeps the title, the tag, the
+   score and the measurement — everything a free account is entitled to — and
+   only the method is missing. No blur, no padlock over unreadable text: the
+   sentence in there is a real sentence and it says what is behind the wall. */
+.imp.locked { border-style: dashed; }
+.imp.locked > p { color: var(--mut); }
+.imp.locked > b::after {
+  content: "MAX";
+  font-family: var(--mono); font-size: 8px; letter-spacing: 0.14em;
+  color: var(--acc); background: var(--acc-soft);
+  border-radius: 99px; padding: 3px 7px; margin-left: 8px;
+  vertical-align: 2px; white-space: nowrap;
+}
+
+.upsell { border: 1px solid var(--line); }
+.upsell-list { margin: 4px 0 14px; padding-left: 18px; }
+.upsell-list li { font-size: 13.5px; line-height: 1.6; margin-bottom: 9px; color: var(--mut); }
+.upsell-list li b { color: var(--ink); font-weight: 600; }

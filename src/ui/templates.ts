@@ -226,6 +226,28 @@ const neutralCopy = (kind: string) => (m: ScoredMetric, sex: Sex) =>
     m.def.fixability * 100,
   )}% of that gap that moves without surgery moves with ${kind}. You asked me to keep those recommendations out, so the number is here and the advice isn't.`;
 
+// What a free or Starter plan sees in place of the method.
+//
+// Deliberately NOT `neutral`, which says "you asked me to keep those
+// recommendations out" — true when someone has muted a channel, a lie when the
+// reason is that they have not paid. A paywall that misrepresents itself as the
+// user's own choice is the kind of small dishonesty this product is supposed to
+// be the opposite of.
+//
+// What it withholds is the METHOD, never the measurement. The number, the gap,
+// the population average and how much of that gap is even movable are all still
+// here, because those are the things somebody came for and the things we claim
+// to be honest about. What costs money is being told exactly what to do about
+// it — which is the one part a person could get elsewhere, and the one part
+// that takes real work to write well.
+export function lockedCopy(m: ScoredMetric, sex: Sex): string {
+  const movable = Math.round(m.def.fixability * 100);
+  return `${m.def.name} measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(
+    m,
+    sex,
+  )}, and about ${movable}% of that gap moves without surgery. The measurement is yours either way. The specific routine that moves it is part of Max.`;
+}
+
 const LEVERS: Record<string, Lever> = {
   gonialProxy: {
     channel: "diet",

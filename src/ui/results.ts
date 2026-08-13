@@ -12,7 +12,7 @@ import { animateMeasurement, transitionMeasurement } from "./measureOverlay.ts";
 import type { OverlayFade } from "./measureOverlay.ts";
 import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.ts";
 import { renderShareCard, shareCard } from "./shareCard.ts";
-import { deltaReadingCopy, overviewCaveat, fmt, leverFor, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
+import { deltaReadingCopy, overviewCaveat, fmt, leverFor, lockedCopy, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.ts";
 import { stopTypewriter, typewrite } from "./typewriter.ts";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.ts";
 import { openQuiz } from "./goalsQuiz.ts";
@@ -29,6 +29,9 @@ interface Ctx {
   zoomable: HTMLElement;
   overlay: HTMLCanvasElement;
   onNewPhoto: () => void;
+  // Opens the plan chooser. Absent on a build with no billing configured, in
+  // which case the upgrade button simply is not rendered rather than dead.
+  onUpgrade?: () => void;
   onContinue?: () => void;
   onSideProfile?: () => void;
   onSexChange?: (sex: Sex) => void;
@@ -969,8 +972,18 @@ function showImprove(): void {
           const lever = leverFor(m);
           const why = goalsTouching(m.def.id, profile);
           const muted = !profile.advice[lever.channel];
-          return `<div class="imp"><b>${lever.title}<em>${REGION_NAMES[m.def.region].toUpperCase()} · ${m.score.toFixed(1)} · ${lever.tag}</em></b>
-          <p>${muted ? lever.neutral(m, r.sex) : lever.body(m, r.sex)}</p>
+          // Three states, and the order matters. A muted channel wins over the
+          // paywall: someone who asked us to leave diet alone must not be sold
+          // diet advice, and telling them "upgrade to hear it" would be doing
+          // exactly that.
+          const copy = muted
+            ? lever.neutral(m, r.sex)
+            : maxAccess
+              ? lever.body(m, r.sex)
+              : lockedCopy(m, r.sex);
+          const locked = !muted && !maxAccess;
+          return `<div class="imp${locked ? " locked" : ""}"><b>${lever.title}<em>${REGION_NAMES[m.def.region].toUpperCase()} · ${m.score.toFixed(1)} · ${lever.tag}</em></b>
+          <p>${copy}</p>
           ${why.length ? `<span class="because">Because you chose ${why.map((g) => g.label.toLowerCase()).join(" + ")}</span>` : ""}
           <span class="why">MOVES ${m.def.pillar.toUpperCase()} →</span></div>`;
         })
@@ -982,13 +995,15 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
-      ${recsHTML(profile)}
+      ${maxAccess ? recsHTML(profile) : upsell()}
       <div class="navrow"><button class="btn gho" id="btn-back">Back to results</button>
         <button class="btn pri" id="btn-again">Scan another face</button></div>
     </div>`;
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
+  const upgrade = document.getElementById("btn-upgrade");
+  if (upgrade) upgrade.onclick = () => ctx?.onUpgrade?.();
   const edit = document.getElementById("goal-edit");
   if (edit) edit.onclick = () => openQuiz(() => showImprove(), "all");
 
@@ -996,6 +1011,46 @@ function showImprove(): void {
   // moment prose is about to be written, and the first moment they have the
   // numbers in front of them to answer with.
   if (!profile.postDone) openQuiz(() => showImprove(), "post");
+}
+
+// Whether this account has Max. Module state rather than a Ctx field because it
+// arrives LATE: the entitlement is a network read, and blocking the results
+// screen on it would hold a finished analysis hostage to a round trip. So the
+// plan renders locked, and unlocks in place if the read comes back positive.
+//
+// Defaulting to false is the safe direction — a failed read shows the paywall
+// rather than giving the paid product away, and the person can retry.
+let maxAccess = false;
+
+export function setMaxAccess(value: boolean): void {
+  if (value === maxAccess) return;
+  maxAccess = value;
+  // Only re-render if the plan is the thing currently on screen. Rebuilding a
+  // tab nobody is looking at would throw away their scroll position on the one
+  // they are.
+  const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
+  if (open?.dataset.id === "improve") showImprove();
+}
+
+// What replaces the recommendations for a free or Starter account.
+//
+// It names what is behind the wall rather than teasing it. A blurred list of
+// real product names with a lock over it is the pattern every competitor uses,
+// and it is a worse experience than a straight sentence: it invites you to
+// squint at something you cannot read, and it implies the value is in the
+// secrecy rather than in the work.
+function upsell(): string {
+  return `<div class="recs upsell">
+    <h4>WHAT MAX ADDS</h4>
+    <p class="recs-note">Your measurements, your scores, your ranking and your progress over time are yours on every plan, and always will be. What Max adds is the part that takes work to get right: the specific routine for your face, not a generic list.</p>
+    <ul class="upsell-list">
+      <li><b>The method, not just the target.</b> Exactly what to do about each measurement above, in order, personalised to what you said you want.</li>
+      <li><b>Products worth buying, and the ones that aren't.</b> Over-the-counter only, ranked by how good the evidence actually is — including where the evidence for something popular is weak.</li>
+      <li><b>Follow-up.</b> Max tracks what you are using, checks whether your numbers moved, and changes the plan when they don't.</li>
+    </ul>
+    <p class="recs-note">Nothing in Max is a prescription, a supplement or a procedure, and it never will be. A pharmacist or doctor knows your situation and we don't.</p>
+    <div class="navrow"><button class="btn pri" id="btn-upgrade">See Max · 7 days free</button></div>
+  </div>`;
 }
 
 // Recommendations: what to actually do, drawn only from things sold over a
