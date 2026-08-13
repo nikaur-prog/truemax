@@ -105,7 +105,10 @@ and Vercel configuration.
       the app-store stage.)
 - [x] Audit the connected Stripe account. It currently contains no products,
       prices or webhook endpoints.
-- [x] Confirm the USD catalog: Starter $6.99/month, Max $11.99/month, member
+- [x] Confirm the USD catalog: Starter $7.99/month (raised from $6.99 on
+      2026-08-13 — the Stripe Starter price object must say $7.99 too, or the
+      checkout will charge a number the offer screen never showed), Max
+      $11.99/month, member
       scan $2.99 and non-member scan $5.99. **Trial is 7 days** — this was
       recorded as an unresolved 7-vs-30 conflict, but nothing actually
       implements 30: `api/create-checkout-session.ts` sets

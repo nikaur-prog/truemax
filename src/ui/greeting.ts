@@ -18,6 +18,9 @@ import { QUOTES } from "./quotes.js";
 export interface GreetingCtx {
   name: string | null;
   streak: Streak;
+  // Local hour, 0-23. A parameter rather than new Date() inside, so tests can
+  // ask what 3am says without waiting until 3am.
+  hour?: number;
 }
 
 // A counter that advances once per visit to the dashboard, so coming back gives
@@ -42,10 +45,24 @@ function pick<T>(pool: T[], salt: number): T {
   return pool[(visit * 7 + salt) % pool.length];
 }
 
+// What the clock says, before anything else does. These read as a person
+// noticing the time of day, which is the cheapest personalisation there is and
+// the one every app skips. The odd hours get the personality — "Up late, eh?"
+// at 11pm lands precisely because software is not supposed to notice.
+function timeOfDay(hour: number, who: string): string[] {
+  if (hour >= 2 && hour < 5) return [`Midnight owl${who}.`, `Can't sleep${who}?`];
+  if (hour >= 5 && hour < 7) return [`Early bird${who}.`, `Up before the sun${who}.`];
+  if (hour >= 7 && hour < 12) return [`Good morning${who}.`, `Morning${who}.`];
+  if (hour >= 12 && hour < 17) return [`Good afternoon${who}.`, `Afternoon${who}.`];
+  if (hour >= 17 && hour < 22) return [`Good evening${who}.`, `Evening${who}.`];
+  return [`Up late, eh${who}?`, `Late one${who}.`];
+}
+
 export function headline(ctx: GreetingCtx): string {
   const { name, streak } = ctx;
   const who = name ? `, ${name}` : "";
-  const pool: string[] = [];
+  const hour = ctx.hour ?? new Date().getHours();
+  const pool: string[] = [...timeOfDay(hour, who)];
 
   if (streak.alive && streak.weeks >= 4) {
     pool.push(`${streak.weeks} weeks straight${who}.`);

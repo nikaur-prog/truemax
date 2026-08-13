@@ -343,7 +343,7 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
   const brand = await refreshHomeBrand(user);
   openDashboard({
     onScan: () => resetToUpload(),
-    name: displayName(user.email),
+    name: displayName(user),
     membership: brand === "max" ? "max" : "member",
   });
 });
@@ -399,11 +399,22 @@ window.addEventListener(MEMBERSHIP_BRAND_EVENT, (event) => {
   paintHomeBrand(brand);
 });
 
-// First name from an email address, for the greeting. "nikau.robertson@" gives
-// "Nikau". Anything that does not look like a name is dropped rather than
-// guessed at — the greeting reads fine without one.
-function displayName(email: string | undefined): string | null {
-  const local = (email ?? "").split("@")[0];
+// First name for the greeting. The name the person actually typed into
+// onboarding wins — it lives in user_metadata, written by the quiz — because
+// greeting somebody by a guess parsed out of their email address when they have
+// told you their name is worse than not greeting them at all ("xnikau.robertson@"
+// would read as "Xnikau" forever). The email parse stays as the fallback for
+// accounts that signed in but never finished the quiz.
+function displayName(user: User): string | null {
+  const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+  for (const key of ["first_name", "full_name", "name"]) {
+    const value = meta[key];
+    if (typeof value === "string" && value.trim()) {
+      const first = value.trim().split(/\s+/)[0];
+      if (first.length >= 2 && first.length <= 20) return first;
+    }
+  }
+  const local = (user.email ?? "").split("@")[0];
   const first = local.split(/[._\-+0-9]+/).filter(Boolean)[0];
   if (!first || first.length < 2 || first.length > 20) return null;
   return first[0].toUpperCase() + first.slice(1).toLowerCase();
