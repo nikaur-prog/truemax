@@ -23,6 +23,13 @@ const H = 1280;
 const FPS = 30;
 const DURATION: Record<QuickVariant, number> = { breakdown: 5.5, verdict: 4 };
 
+// The producer re-renders the analysis segment frame by frame through
+// renderQuickVideoFrame rather than decoding an MP4 back in, so it needs to
+// know where the animation ends without duplicating the number.
+export function quickVideoDuration(variant: QuickVariant): number {
+  return DURATION[variant];
+}
+
 export interface QuickExportScores {
   overall: number;
   percentile: number;
