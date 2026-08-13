@@ -570,6 +570,14 @@ body.funnel-open { overflow: hidden; }
 .pot .n { font-family: var(--serif); font-weight: 300; font-size: 40px; }
 .pot .n.p { color: var(--acc); }
 .pot .arr { color: var(--mut); font-size: 18px; }
+/* The translation. A 7 on a PSL-shaped scale reads as "slightly above average"
+   to anyone who has not internalised the curve; "Top 2%" is the same fact in
+   the units people actually feel. */
+.pot-pct {
+  align-self: center; flex: none; padding: 4px 10px; border-radius: 99px;
+  background: rgba(12, 135, 111, .12); color: var(--acc);
+  font: 600 11px/1 var(--sans); letter-spacing: .04em; white-space: nowrap;
+}
 .pot p { font-size: 11.5px; color: var(--mut); line-height: 1.5; max-width: 280px; }
 .imp { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-bottom: 11px; }
 .imp b { font-size: 13.5px; font-weight: 600; display: block; margin-bottom: 5px; }

@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { phi, REGION_NAMES } from "../engine/scoring.js";
+import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring.js";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
@@ -1001,8 +1001,17 @@ function showImprove(): void {
       </div>`
     : "";
 
+  // Whether this account is past its free allowance — decided up front because
+  // it changes what goes INTO the plan body, not just what covers it.
+  const gated = depth === "rating";
+
+  // The percentile translation sits beside the ceiling everywhere the ceiling
+  // appears. On a PSL-shaped scale a 7 reads as "a bit above average" to
+  // anyone who has not internalised the curve, when it is actually rarer than
+  // one face in twenty — the percentage is the number that lands.
+  const potPct = rankShort(aggregateScoreToPercentile(r.potential));
   const planBody = `<div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
-        <div class="n p">${r.potential.toFixed(1)}</div>
+        <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
       ${quietNote}
@@ -1035,7 +1044,8 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
-      ${maxAccess ? recsHTML(profile) : upsell()}`;
+      ${recsHTML(profile)}
+      ${maxAccess || gated ? "" : upsell()}`;
 
   // Past the free allowance, the plan is the sell — and the sell leads with the
   // one number that keeps people here: the ceiling. The potential is stated
@@ -1045,7 +1055,6 @@ function showImprove(): void {
   // behind the blur is the pathway TO it — every step already written, from
   // this person's own measurements, which is why the structure shows through:
   // the volume of finished work is the product.
-  const gated = depth === "rating";
   body().innerHTML = `
     <div class="reveal">
       ${gated
@@ -1053,8 +1062,8 @@ function showImprove(): void {
             <div class="lockblur" aria-hidden="true" inert>${planBody}</div>
             <div class="lockcard">
               <span class="lockcard-eyebrow">YOUR PATHWAY</span>
-              <h4>Max reckons your ceiling is ${r.potential.toFixed(1)}.</h4>
-              <p>You measured ${r.overall.toFixed(1)}. The route between those two numbers is already written below — step by step, from your own measurements, nothing generic. Unlock it to read it.</p>
+              <h4>Max reckons your ceiling is ${r.potential.toFixed(1)} — ${rankShort(aggregateScoreToPercentile(r.potential)).toLowerCase()}.</h4>
+              <p>You measured ${r.overall.toFixed(1)}. On this scale most people never see a 7 — the translation is the point. The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
             </div>
           </div>`
@@ -1249,9 +1258,9 @@ function upsell(): string {
     <h4>WHAT MAX ADDS</h4>
     <p class="recs-note">Your measurements, your scores, your ranking and your progress over time are yours on every plan, and always will be. What Max adds is the part that takes work to get right: the specific routine for your face, not a generic list.</p>
     <ul class="upsell-list">
-      <li><b>The method, not just the target.</b> Exactly what to do about each measurement above, in order, personalised to what you said you want.</li>
-      <li><b>Products worth buying, and the ones that aren't.</b> Over-the-counter only, ranked by how good the evidence actually is — including where the evidence for something popular is weak.</li>
-      <li><b>Follow-up.</b> Max tracks what you are using, checks whether your numbers moved, and changes the plan when they don't.</li>
+      <li><b>The method, not just the target.</b> The overview above says what to improve. Max writes how — for your face, in order, shaped by what you said you want.</li>
+      <li><b>Follow-up that reads your numbers.</b> Max checks whether what you are doing actually moved a measurement, says so either way, and rebuilds the plan when eight weeks of a routine has moved nothing.</li>
+      <li><b>Your wishlist, kept honest.</b> Max keeps the list of what you are using, edits it with you, and is allowed to tell you something on it is not earning its place.</li>
     </ul>
     <p class="recs-note">Nothing in Max is a prescription, a supplement or a procedure, and it never will be. A pharmacist or doctor knows your situation and we don't.</p>
     <div class="navrow"><button class="btn pri" id="btn-upgrade">See Max · 7 days free</button></div>
