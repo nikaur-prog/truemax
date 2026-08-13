@@ -68,18 +68,43 @@ function usableUrl(value: string | undefined): string | null {
   }
 }
 
+// The key needs the same protection, for the same reason and with a different
+// failure. A stale or half-pasted VITE_SUPABASE_ANON_KEY also beats the working
+// default under `||`, and the error it produces — "Invalid API key" on the first
+// request rather than a throw at construction — points at Supabase rather than
+// at the variable, which is a worse trail to follow than the URL one.
+//
+// Deliberately not format-sniffing. Supabase has already changed key formats
+// once (JWT `eyJ…` to `sb_publishable_…`) and a client that rejects the next
+// format is a self-inflicted outage. A length floor catches what actually goes
+// wrong — blank, whitespace, a truncated paste, a leftover placeholder — and
+// never argues with a real key.
+const MIN_KEY_LENGTH = 20;
+
+function usableKey(value: string | undefined): string | null {
+  const key = value?.trim();
+  return key && key.length >= MIN_KEY_LENGTH ? key : null;
+}
+
 function authEnv(): AuthEnv | null {
   const env = import.meta.env;
-  const configured = env.VITE_SUPABASE_URL?.trim();
-  const url = usableUrl(configured);
-  if (configured && !url) {
+  const configuredUrl = env.VITE_SUPABASE_URL?.trim();
+  const url = usableUrl(configuredUrl);
+  if (configuredUrl && !url) {
     console.error(
       "[auth] VITE_SUPABASE_URL is not a valid URL, falling back to the built-in project.",
-      JSON.stringify(configured),
+      JSON.stringify(configuredUrl),
     );
   }
-  const key = env.VITE_SUPABASE_ANON_KEY?.trim() || DEFAULT_KEY;
-  return { url: url ?? DEFAULT_URL, key };
+  const configuredKey = env.VITE_SUPABASE_ANON_KEY?.trim();
+  const key = usableKey(configuredKey);
+  if (configuredKey && !key) {
+    // Length only. The key itself is never logged.
+    console.error(
+      `[auth] VITE_SUPABASE_ANON_KEY is too short to be a key (${configuredKey.length} chars), falling back to the built-in key.`,
+    );
+  }
+  return { url: url ?? DEFAULT_URL, key: key ?? DEFAULT_KEY };
 }
 
 export function isAuthAvailable(): boolean {

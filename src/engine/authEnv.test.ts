@@ -48,3 +48,30 @@ test("every unusable shape falls back instead of overriding", () => {
     assert.equal(resolve(bad), DEFAULT_URL, JSON.stringify(bad));
   }
 });
+
+// The key guard. Same failure mode as the URL — a non-empty wrong value beating
+// a working default — but a worse error trail: "Invalid API key" arrives on the
+// first request and points at Supabase rather than at the variable.
+const MIN_KEY_LENGTH = 20;
+const DEFAULT_KEY = "sb_publishable_XLs-l72FzRD5C_QzP9xlkA_vMahWmgw";
+function usableKey(value: string | undefined): string | null {
+  const key = value?.trim();
+  return key && key.length >= MIN_KEY_LENGTH ? key : null;
+}
+const resolveKey = (configured?: string) => usableKey(configured) ?? DEFAULT_KEY;
+
+test("a real key of either Supabase format is used as given", () => {
+  // Deliberately not format-sniffed: Supabase has already changed key formats
+  // once, and a client that rejects the next one is a self-inflicted outage.
+  const publishable = "sb_publishable_ABCDEFGHIJKLMNOPQRSTUV";
+  const legacyJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
+  assert.equal(resolveKey(publishable), publishable);
+  assert.equal(resolveKey(legacyJwt), legacyJwt);
+  assert.equal(resolveKey(`  ${publishable}  `), publishable);
+});
+
+test("a blank or truncated key falls back instead of overriding", () => {
+  for (const bad of ["", "   ", "your-anon-key", "sb_publishable_", "eyJhbGci"]) {
+    assert.equal(resolveKey(bad), DEFAULT_KEY, JSON.stringify(bad));
+  }
+});
