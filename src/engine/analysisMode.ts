@@ -140,9 +140,16 @@ const LADDER: Array<{ min: number; word: string; tone: Verdict["tone"]; line: (s
 ];
 
 export function verdictFor(report: Report): Verdict {
-  const pct = report.overallPercentile;
+  return verdictForPercentile(report.overallPercentile, report.sex);
+}
+
+// The percentile is the whole input. Exported separately because the MP4
+// exporter has a percentile and no Report, and the alternative — a second copy
+// of the bands over in the renderer — is precisely the drift this module exists
+// to prevent. One ladder, one set of thresholds, every surface.
+export function verdictForPercentile(percentile: number, sex: Sex = "male"): Verdict {
   // Walk down so the highest qualifying rung wins, and the array stays readable
   // in ascending order.
-  const rung = [...LADDER].reverse().find((r) => pct >= r.min) ?? LADDER[0];
-  return { word: rung.word, line: rung.line(report.sex), tone: rung.tone };
+  const rung = [...LADDER].reverse().find((r) => percentile >= r.min) ?? LADDER[0];
+  return { word: rung.word, line: rung.line(sex), tone: rung.tone };
 }
