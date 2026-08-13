@@ -45,11 +45,41 @@ interface AuthEnv {
 const DEFAULT_URL = "https://ruvgkrlfmixfnmnzqgap.supabase.co";
 const DEFAULT_KEY = "sb_publishable_XLs-l72FzRD5C_QzP9xlkA_vMahWmgw";
 
+// A configured value only wins if it is actually usable.
+//
+// `env.VITE_SUPABASE_URL || DEFAULT_URL` looks safe and is not: `||` only falls
+// back on an EMPTY value, so anything non-empty overrides the working default —
+// including a project ref with no scheme, a URL with a stray space, or a
+// placeholder somebody pasted while setting up Vercel. The Supabase client then
+// throws `Invalid supabaseUrl` on construction, which is thrown inside a promise
+// during a click handler, so it surfaces as an unhandled rejection and every
+// sign-in path dies with no message pointing at the cause. That is exactly the
+// failure this shipped with.
+//
+// A misconfigured override is now ignored in favour of the known-good default,
+// and says so loudly. Wrong-but-present should never beat right.
+function usableUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 function authEnv(): AuthEnv | null {
   const env = import.meta.env;
-  const url = env.VITE_SUPABASE_URL || DEFAULT_URL;
-  const key = env.VITE_SUPABASE_ANON_KEY || DEFAULT_KEY;
-  return url && key ? { url, key } : null;
+  const configured = env.VITE_SUPABASE_URL?.trim();
+  const url = usableUrl(configured);
+  if (configured && !url) {
+    console.error(
+      "[auth] VITE_SUPABASE_URL is not a valid URL, falling back to the built-in project.",
+      JSON.stringify(configured),
+    );
+  }
+  const key = env.VITE_SUPABASE_ANON_KEY?.trim() || DEFAULT_KEY;
+  return { url: url ?? DEFAULT_URL, key };
 }
 
 export function isAuthAvailable(): boolean {
