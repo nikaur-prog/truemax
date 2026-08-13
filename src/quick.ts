@@ -12,6 +12,7 @@ import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.ts";
+import type { QuickVariant } from "./ui/quickVideoExport.ts";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -291,7 +292,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
     <div class="q-actions">
       <button class="btn pri" id="q-download">Download image</button>
-      <button class="btn pri" id="q-video-download">Download MP4</button>
+      <button class="btn pri" id="q-video-download">Breakdown MP4</button>
+      <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>`;
 
@@ -309,7 +311,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
   document.getElementById("q-sex")!.onclick = () => show(r.sex === "male" ? "female" : "male");
   document.getElementById("q-download")!.onclick = () => void downloadCard();
-  document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r);
+  document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
+  document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
   document.getElementById("q-again")!.onclick = () => {
     // Reset the stage, or the next scan starts already open with last scan's
     // landmarks still painted over the new photo.
@@ -399,17 +402,30 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
   };
 }
 
-async function downloadVideo(r: Report): Promise<void> {
+// Two cuts of the same scan. The breakdown explains the product; the verdict
+// travels further. Which one is being built only changes the renderer and the
+// button label — the footage, the landmarks and the scores are identical, so
+// the two files can never tell a different story about one face.
+async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
   if (!last) return;
-  const btn = document.getElementById("q-video-download") as HTMLButtonElement | null;
+  const id = variant === "verdict" ? "q-verdict-download" : "q-video-download";
+  const idle = variant === "verdict" ? "Verdict MP4" : "Breakdown MP4";
+  const btn = document.getElementById(id) as HTMLButtonElement | null;
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Building video…";
   }
   try {
-    await downloadQuickVideo(last.photo, last.lm, r.sex, editedExportScores(r), (progress) => {
-      if (btn) btn.textContent = `Building MP4 · ${Math.round(progress * 100)}%`;
-    });
+    await downloadQuickVideo(
+      last.photo,
+      last.lm,
+      r.sex,
+      editedExportScores(r),
+      (progress) => {
+        if (btn) btn.textContent = `Building · ${Math.round(progress * 100)}%`;
+      },
+      variant,
+    );
     if (btn) btn.textContent = "MP4 downloaded";
   } catch (error) {
     console.error(error);
@@ -418,7 +434,7 @@ async function downloadVideo(r: Report): Promise<void> {
     if (btn) {
       window.setTimeout(() => {
         btn.disabled = false;
-        btn.textContent = "Download MP4";
+        btn.textContent = idle;
       }, 1600);
     }
   }

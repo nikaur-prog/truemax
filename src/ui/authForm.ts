@@ -156,15 +156,30 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
 
   // Provider configuration lives in Supabase, so these buttons become active
   // automatically the moment Google/Apple credentials are enabled—no redeploy.
+  //
+  // The early return here used to be `if (!availability) return`, which failed
+  // OPEN: socialAvailability() returns null on any fetch failure, and the null
+  // left every provider button enabled and clickable. That is how a live-looking
+  // "Continue with Apple" appeared on a project where Apple is not configured —
+  // pressing it could only ever produce an error, and the error blamed the
+  // person's connection.
+  //
+  // Unknown now means unavailable. A button that cannot work should not look
+  // like one that can, and this self-heals the moment the settings read
+  // succeeds. The two states are worded differently on purpose, because "we
+  // have not set this up" and "we could not check" are different problems and
+  // only one of them is the user's to wait out.
   void socialAvailability().then((availability) => {
-    if (!availability) return;
     for (const button of root.querySelectorAll<HTMLButtonElement>("[data-provider]")) {
       const provider = button.dataset.provider as "google" | "apple";
-      if (availability[provider]) continue;
+      if (availability?.[provider]) continue;
+      const name = provider === "google" ? "Google" : "Apple";
       button.disabled = true;
-      button.title = `${provider === "google" ? "Google" : "Apple"} sign-in is awaiting provider setup`;
+      button.title = availability
+        ? `${name} sign-in is awaiting provider setup`
+        : `${name} sign-in could not be checked. Use email below.`;
       button.setAttribute("aria-label", button.title);
-      button.innerHTML = `${socialLabel(provider)}<small>Coming soon</small>`;
+      button.innerHTML = `${socialLabel(provider)}<small>${availability ? "Coming soon" : "Unavailable"}</small>`;
     }
   });
 }

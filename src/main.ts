@@ -13,6 +13,7 @@ import { readOrientation } from "./engine/exif.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
 import { renderResults, setMaxAccess } from "./ui/results.ts";
+import { mountGateDemo } from "./ui/gateDemo.ts";
 import { mergeReports } from "./engine/scoring.ts";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
 import { analyzeSide } from "./engine/scoring.ts";
@@ -59,6 +60,10 @@ import type { MembershipBrand } from "./ui/membershipBrand.ts";
 import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.ts";
 
 const MAX_IMAGE_DIM = 1280;
+
+// Torn down whenever the gate is replaced, so a stale reel cannot keep painting
+// into a canvas that is no longer on the page.
+let gateDemo: { stop(): void } | null = null;
 
 // Read the entitlement and tell the results screen. Never throws: a billing
 // read that fails leaves the plan locked, which is the safe direction — it
@@ -1013,6 +1018,12 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
     <button type="button" class="btn pri analysis-gate-open">Create account and analyse</button>
   </section>`;
+
+  // Under the button, never above it. The demo is there to make the wait worth
+  // it, not to compete with the thing being asked for.
+  gateDemo?.stop();
+  const gateSection = el.analysis.querySelector<HTMLElement>(".analysis-gate");
+  if (gateSection) gateDemo = mountGateDemo(gateSection);
 
   const openGate = async () => {
     await openAccount({

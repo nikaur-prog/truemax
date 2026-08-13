@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { basicScores, verdictFor } from "./analysisMode.ts";
+import { basicScores, verdictFor, verdictForPercentile } from "./analysisMode.ts";
 import type { Report } from "./types.ts";
 
 const report = (over: Partial<Report> = {}): Report =>
@@ -77,4 +77,18 @@ test("every mode reads the same underlying score", () => {
   const strong = report({ overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
   assert.equal(verdictFor(strong).word, "Mogger");
   assert.equal(basicScores(strong)[0].value, 91);
+});
+
+test("the percentile entry point agrees with the report entry point", () => {
+  // The MP4 exporter renders from a percentile and has no Report. It used to
+  // carry its own copy of the bands, which is how a reel and the app end up
+  // calling the same face two different things. Both now come through here, and
+  // this asserts they cannot separate.
+  for (let pct = 0; pct <= 100; pct += 0.5) {
+    assert.equal(
+      verdictForPercentile(pct).word,
+      verdictFor(report({ overallPercentile: pct })).word,
+      `${pct}`,
+    );
+  }
 });

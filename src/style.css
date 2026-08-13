@@ -1682,3 +1682,40 @@ body.auth-modal-open { overflow: hidden; }
   .ms-btn { display: flex; align-items: baseline; gap: 8px; }
   .ms-btn b { margin-bottom: 0; }
 }
+
+/* ---------------------------------------------------------------------------
+   Live demo under the account gate
+   --------------------------------------------------------------------------- */
+
+/* Fixed height, one row, and it sits UNDER the call to action. The gate is the
+   moment somebody is asked for an email before they see anything they earned,
+   so the engine running on a face they recognise is worth more than another
+   paragraph promising it works. But a demo that outgrows the button it sits
+   under has stopped helping the button. Hence a strip, not a panel. */
+.gatedemo {
+  margin-top: 22px; padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.gatedemo-head { margin-bottom: 12px; }
+.gatedemo-head p { font-size: 12.5px; line-height: 1.5; color: var(--mut); margin-top: 5px; }
+.gatedemo-row { display: flex; align-items: center; gap: 14px; }
+.gatedemo-stage {
+  flex: none; width: 84px; height: 84px; border-radius: 16px;
+  overflow: hidden; background: var(--soft);
+}
+.gatedemo-canvas { width: 100%; height: 100%; display: block; }
+.gatedemo-read { min-width: 0; }
+/* Reserved height so a short name and a long one do not resize the strip as
+   the reel cycles — that reflow is exactly the "uneven blotch" failure. */
+.gatedemo-name {
+  display: block; font-size: 14.5px; font-weight: 600; line-height: 1.3;
+  min-height: 1.3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gatedemo-score {
+  display: block; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.13em; color: var(--acc); margin-top: 5px; min-height: 1.2em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gatedemo { display: none; }
+}

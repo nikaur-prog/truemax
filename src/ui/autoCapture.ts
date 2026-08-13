@@ -158,8 +158,51 @@ function tick(remaining: number): void {
   beep(remaining >= 2 ? 440 : 660, 100, 0.055);
 }
 
-// A higher, longer tone the moment the photo is taken, so "it fired" is
-// unmistakably different from "it is still counting".
+// An actual camera shutter, not another beep.
+//
+// This was a 1040Hz sine, and a sine is the one thing a shutter is not: a
+// mechanical shutter is broadband noise — a snap, not a pitch. On the side
+// capture the person is turned away from the screen and the sound is the entire
+// feedback channel, so "the photo was taken" has to be unmistakable from "the
+// countdown is still running". Two beeps and a third beep is a countdown that
+// stopped. Two beeps and a CLICK is a photograph.
+//
+// Built as two short filtered noise bursts a few milliseconds apart, which is
+// what an SLR mirror actually does — up, then down. Nobody consciously hears
+// the two halves; they hear a camera.
 function shutter(): void {
-  beep(1040, 160, 0.07);
+  noiseClick(0, 0.055, 2600);
+  noiseClick(0.045, 0.04, 1800);
+}
+
+function noiseClick(delay: number, gain: number, cutoff: number): void {
+  const a = ctx();
+  if (!a) return;
+  try {
+    const t = a.currentTime + delay;
+    const len = Math.floor(a.sampleRate * 0.05);
+    const buffer = a.createBuffer(1, len, a.sampleRate);
+    const data = buffer.getChannelData(0);
+    // White noise, decaying fast. The steep envelope is what makes it read as a
+    // mechanism rather than as static.
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 6;
+    }
+    const src = a.createBufferSource();
+    src.buffer = buffer;
+    // Band-passed so it sits where a small mechanism sits, instead of hissing
+    // across the whole spectrum.
+    const filter = a.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = cutoff;
+    filter.Q.value = 0.8;
+    const vol = a.createGain();
+    vol.gain.setValueAtTime(gain, t);
+    vol.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(filter).connect(vol).connect(a.destination);
+    src.start(t);
+    src.stop(t + 0.06);
+  } catch {
+    /* audio is a courtesy, never a requirement */
+  }
 }

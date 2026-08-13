@@ -1,6 +1,18 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.ts";
 import { rankShort } from "./templates.ts";
+import { verdictForPercentile } from "../engine/analysisMode.ts";
+
+// Which cut to render.
+//
+//   breakdown — the eight-region analysis. Explains the product.
+//   verdict   — one word, held on screen. Explains nothing, travels further.
+//
+// Both are the same footage of the same face, scanned by the same engine and
+// composited by the same code. The verdict cut is shorter because a word does
+// not need five seconds, and because the thing people re-post is the reaction,
+// not the table.
+export type QuickVariant = "breakdown" | "verdict";
 
 // A real 720×1280, 30fps export. The previous renderer called a 540×960,
 // 10fps file “720p”; no easing curve can make ten distinct images per second
@@ -9,8 +21,7 @@ import { rankShort } from "./templates.ts";
 const W = 720;
 const H = 1280;
 const FPS = 30;
-const DURATION = 5.5;
-const FRAME_COUNT = FPS * DURATION;
+const DURATION: Record<QuickVariant, number> = { breakdown: 5.5, verdict: 4 };
 
 export interface QuickExportScores {
   overall: number;
@@ -24,7 +35,9 @@ export async function downloadQuickVideo(
   sex: Sex,
   scores: QuickExportScores,
   onProgress?: (progress: number) => void,
+  variant: QuickVariant = "breakdown",
 ): Promise<void> {
+  const frameCount = Math.round(FPS * DURATION[variant]);
   const { Output, BufferTarget, Mp4OutputFormat, CanvasSource, QUALITY_HIGH, getFirstEncodableVideoCodec } =
     await import("mediabunny");
   const canvas = document.createElement("canvas");
@@ -44,22 +57,22 @@ export async function downloadQuickVideo(
     bitrate: 6_000_000,
     keyFrameInterval: 2,
   });
-  output.addVideoTrack(source, { frameRate: FPS, maximumPacketCount: FRAME_COUNT + 4 });
+  output.addVideoTrack(source, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
   output.setMetadataTags({ title: "TrueMax face analysis", artist: "TrueMax" });
   await output.start();
 
-  for (let frame = 0; frame < FRAME_COUNT; frame++) {
+  for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
-    drawFrame(canvas, photo, landmarks, sex, scores, t);
+    drawFrame(canvas, photo, landmarks, sex, scores, t, variant);
     await source.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
-    if (frame % 6 === 0) onProgress?.(frame / FRAME_COUNT);
+    if (frame % 6 === 0) onProgress?.(frame / frameCount);
   }
   await output.finalize();
   if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
   const url = URL.createObjectURL(new Blob([target.buffer], { type: format.mimeType }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `truemax-tiktok-${Date.now()}.mp4`;
+  a.download = `truemax-${variant}-${Date.now()}.mp4`;
   a.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   onProgress?.(1);
@@ -75,10 +88,11 @@ export function renderQuickVideoFrame(
   sex: Sex,
   scores: QuickExportScores,
   t: number,
+  variant: QuickVariant = "breakdown",
 ): void {
   canvas.width = W;
   canvas.height = H;
-  drawFrame(canvas, photo, landmarks, sex, scores, t);
+  drawFrame(canvas, photo, landmarks, sex, scores, t, variant);
 }
 
 function drawFrame(
@@ -88,11 +102,16 @@ function drawFrame(
   sex: Sex,
   scores: QuickExportScores,
   t: number,
+  variant: QuickVariant = "breakdown",
 ): void {
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#050606";
   ctx.fillRect(0, 0, W, H);
+  if (variant === "verdict") {
+    drawVerdictFrame(ctx, photo, landmarks, scores, t);
+    return;
+  }
 
   ctx.font = "600 18px Inter, Arial, sans-serif";
   ctx.letterSpacing = "5px";
@@ -278,3 +297,96 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 const smoother = (n: number) => n * n * n * (n * (n * 6 - 15) + 10);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+// ---------------------------------------------------------------------------
+// The verdict cut.
+//
+// Same face, same scan, one word. Four seconds, and the whole thing is built
+// around the moment the word lands: the scan runs, the frame settles, and then
+// the verdict cuts in at speed with a bar underneath showing where it sits.
+//
+// Nothing is dressed up and nothing is softened. The word comes from
+// engine/analysisMode.ts, which reads the same percentile as every other
+// surface — so a reel and the app can never disagree about the same face.
+// ---------------------------------------------------------------------------
+function drawVerdictFrame(
+  ctx: CanvasRenderingContext2D,
+  photo: HTMLCanvasElement,
+  landmarks: NormalizedLandmark[],
+  scores: QuickExportScores,
+  t: number,
+): void {
+  ctx.font = "600 18px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "5px";
+  ctx.fillStyle = "#f5f5f1";
+  ctx.fillText("TRUE", 48, 58);
+  const trueW = ctx.measureText("TRUE").width;
+  ctx.fillStyle = "#0c876f";
+  ctx.fillText("MAX", 48 + trueW, 58);
+  ctx.letterSpacing = "0px";
+
+  // The photograph holds most of the frame the whole way through — it only
+  // lifts enough to seat the word. A verdict over a thumbnail is a graphic; a
+  // verdict over a face is a reaction.
+  const settle = smoother(clamp01((t - 1.5) / 0.7));
+  const px = 34;
+  const py = lerp(96, 84, settle);
+  const pw = W - 68;
+  const ph = lerp(1120, 780, settle);
+  const crop = faceCrop(photo, landmarks, pw / ph, lerp(0.74, 0.66, settle));
+  roundedImage(ctx, photo, crop, px, py, pw, ph, 30);
+
+  if (t < 2.2) {
+    if (t < 1.35) drawScanLine(ctx, px, py, pw, ph, t);
+    const reveal = clamp01((t - 0.8) / 0.55);
+    if (reveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, reveal * (1 - settle));
+  }
+
+  const verdict = verdictForPercentile(scores.percentile);
+  const bright = verdict.tone === "high" || verdict.tone === "peak";
+  // A hard, fast entrance rather than a fade. The joke is the cut.
+  const punch = clamp01((t - 2.25) / 0.22);
+  if (punch <= 0) return;
+  const eased = 1 - (1 - punch) ** 3;
+
+  ctx.save();
+  ctx.globalAlpha = eased;
+  const wordY = py + ph + 108;
+
+  ctx.font = "500 13px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "4px";
+  ctx.fillStyle = "#747b77";
+  ctx.textAlign = "center";
+  ctx.fillText("VERDICT", W / 2, wordY - 62);
+
+  // Overshoot slightly and settle back, so the word arrives with weight.
+  const scale = 1 + (1 - eased) * 0.14;
+  ctx.translate(W / 2, wordY);
+  ctx.scale(scale, scale);
+  ctx.font = "300 92px Fraunces, Georgia, serif";
+  ctx.letterSpacing = "-2px";
+  ctx.fillStyle = bright ? "#8ff3e0" : "#f7f7f2";
+  ctx.fillText(verdict.word, 0, 0);
+  ctx.restore();
+
+  // The bar is the honesty. A one-word verdict on its own is a claim; the same
+  // word above a marked scale is a measurement someone can argue with.
+  const barAlpha = smoother(clamp01((t - 2.75) / 0.5));
+  if (barAlpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = barAlpha;
+  const barY = wordY + 62;
+  const barW = pw;
+  ctx.fillStyle = "#222725";
+  ctx.fillRect(px, barY, barW, 4);
+  const fill = barW * clamp01(scores.percentile / 100) * smoother(clamp01((t - 2.85) / 0.7));
+  ctx.fillStyle = "#0c876f";
+  ctx.fillRect(px, barY, fill, 4);
+  ctx.font = "500 15px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "1px";
+  ctx.fillStyle = "#8b918d";
+  ctx.textAlign = "center";
+  ctx.fillText(`${rankShort(scores.percentile)} · MEASURED, NOT GUESSED`, W / 2, barY + 34);
+  ctx.textAlign = "left";
+  ctx.restore();
+}

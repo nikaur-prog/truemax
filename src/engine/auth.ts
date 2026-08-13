@@ -97,13 +97,22 @@ export async function socialAvailability(): Promise<SocialAvailability | null> {
     const response = await fetch(`${env.url}/auth/v1/settings`, {
       headers: { apikey: env.key },
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.error("[auth] provider settings read failed", response.status, response.statusText);
+      return null;
+    }
     const settings = await response.json() as { external?: Partial<SocialAvailability> };
     return {
       google: settings.external?.google === true,
       apple: settings.external?.apple === true,
     };
-  } catch {
+  } catch (error) {
+    // Logged rather than swallowed. This one call decides whether the social
+    // buttons work, and a silent null here presents as "sign-in is broken" with
+    // nothing anywhere to say why — the usual causes are a CSP that does not
+    // allow the project host and a project URL typo, and both are invisible
+    // without this line.
+    console.error("[auth] could not reach provider settings", error);
     return null;
   }
 }
@@ -168,9 +177,13 @@ export async function signInWithProvider(provider: SocialProvider): Promise<Auth
       provider,
       options: { redirectTo: authRedirects().scan },
     });
-    if (error) return { ok: false, message: friendly(error.message) };
+    if (error) {
+      console.error("[auth] signInWithOAuth rejected", provider, error);
+      return { ok: false, message: friendly(error.message) };
+    }
     return { ok: true, redirecting: true };
-  } catch {
+  } catch (error) {
+    console.error("[auth] signInWithOAuth threw", provider, error);
     return { ok: false, message: "Could not start social sign-in. Try again." };
   }
 }
