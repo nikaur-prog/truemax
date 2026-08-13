@@ -886,10 +886,19 @@ export function mountVerifier(
     magnifier.classList.remove("show");
   };
 
+  // Long-pressing a landmark is the drag gesture. Chrome on Android reads the
+  // same press as "select this image" and raises its Search/Translate/Save
+  // sheet directly over the point being moved; the CSS above suppresses the
+  // selection, and this suppresses the menu for the cases where a browser
+  // raises it anyway (a stylus, a right-click on desktop, or a long press that
+  // lands on the frame rather than the canvas).
+  const blockMenu = (e: Event) => e.preventDefault();
+
   host.addEventListener("pointerdown", down);
   host.addEventListener("pointermove", move);
   host.addEventListener("pointerup", up);
   host.addEventListener("pointercancel", up);
+  host.addEventListener("contextmenu", blockMenu);
 
   const setEditable = (next: boolean) => {
     editable = next;
@@ -914,6 +923,7 @@ export function mountVerifier(
       onChange(points);
     },
     destroy() {
+      host.removeEventListener("contextmenu", blockMenu);
       host.removeEventListener("pointerdown", down);
       host.removeEventListener("pointermove", move);
       host.removeEventListener("pointerup", up);

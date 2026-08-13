@@ -60,7 +60,7 @@ import {
 } from "./ui/membershipBrand.js";
 import type { MembershipBrand } from "./ui/membershipBrand.js";
 import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
-import { loadOnboardingProfile, onboardingComplete } from "./engine/onboarding.js";
+import { flushPendingProfile, loadOnboardingProfile, onboardingComplete } from "./engine/onboarding.js";
 import { openSettings } from "./ui/settings.js";
 
 const MAX_IMAGE_DIM = 1280;
@@ -384,6 +384,10 @@ el.ovalFrame.addEventListener("drop", (e) => {
 // Failures open: if the profile cannot be loaded the app continues rather than
 // locking somebody out of their own scan over a dropped request.
 async function ensureOnboarded(user: User): Promise<void> {
+  // Answers that could not be sent last time — a phone that dropped its
+  // connection mid-quiz — go up first, silently. Somebody who has already
+  // answered must never be asked twice because their network blipped.
+  await flushPendingProfile(user).catch(() => undefined);
   let profile;
   try {
     profile = await loadOnboardingProfile(user);

@@ -139,7 +139,54 @@ export function validateOnboardingStep(profile: OnboardingProfile, step: number)
   return null;
 }
 
+// A profile that could not be sent, kept so the answers are never lost to a
+// dropped connection. Retried on the next load; the person is not asked again.
+const PENDING_KEY = "truemax.pendingProfile";
+
+export function queueOnboardingProfile(profile: OnboardingProfile): void {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(profile));
+  } catch {
+    /* storage full or disabled: the in-memory copy still finishes this session */
+  }
+}
+
+// Called on sign-in. Silent by design — this is housekeeping, and a person who
+// has already answered the quiz should never see it mentioned again.
+export async function flushPendingProfile(user: User): Promise<void> {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(PENDING_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  try {
+    const result = await saveOnboardingProfile(user, JSON.parse(raw) as OnboardingProfile);
+    if (result.ok) localStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* still offline: it keeps until next time */
+  }
+}
+
 export async function saveOnboardingProfile(
+  user: User,
+  profile: OnboardingProfile,
+  attempts = 3,
+): Promise<SaveProfileResult> {
+  // Retried, because the failure this hit in testing was a phone on one bar of
+  // 4G — "TypeError: Load failed" is Safari's words for a fetch that never left
+  // the handset, and it is exactly the kind of failure that succeeds on the
+  // second try a second later.
+  for (let attempt = 1; attempt < attempts; attempt++) {
+    const result = await attemptSave(user, profile);
+    if (result.ok) return result;
+    await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+  }
+  return attemptSave(user, profile);
+}
+
+async function attemptSave(
   user: User,
   profile: OnboardingProfile,
 ): Promise<SaveProfileResult> {
