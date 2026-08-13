@@ -44,6 +44,49 @@ export function saveAnalysisMode(mode: AnalysisMode): void {
 }
 
 // ---------------------------------------------------------------------------
+// How hard the verdict is allowed to hit.
+//
+// The verdict words are the audience's own vocabulary, and for most of this
+// audience being called chopped by a face app is the joke they came for. For
+// some of it, it is not, and there is no way to tell which from a photograph.
+// So it is asked — once, the first time somebody chooses the verdict mode,
+// wherever they choose it from.
+//
+// This is not only kindness. Someone who was asked and said "give it to me
+// straight" has consented to the wording, which is the difference between a
+// joke they opted into and an insult a product handed them unprompted. That
+// distinction is the whole defence when an app-store reviewer or an angry
+// parent reads the word "chopped" on a thirteen-year-old's screen.
+//
+// The NUMBER never changes. Both tones read the same percentile and the same
+// measurements; only the label on it differs. A "supportive" mode that quietly
+// inflated the score would be the same lie as a harsh one that deflated it.
+// ---------------------------------------------------------------------------
+
+export type VerdictTone = "blunt" | "kind";
+
+const TONE_KEY = "truemax.verdictTone";
+
+// null means never asked. The caller uses that to decide whether to put the
+// question up, so "asked and chose blunt" and "never asked" stay distinct.
+export function loadVerdictTone(): VerdictTone | null {
+  try {
+    const raw = localStorage.getItem(TONE_KEY);
+    return raw === "blunt" || raw === "kind" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveVerdictTone(tone: VerdictTone): void {
+  try {
+    localStorage.setItem(TONE_KEY, tone);
+  } catch {
+    /* storage disabled: the app still works, it just asks again next visit */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Basic mode: a few headline numbers out of 100.
 //
 // Out of 100 because that is the scale this audience already reads — Umax and
@@ -126,42 +169,81 @@ export interface Verdict {
 const LADDER: Array<{
   min: number;
   words: Record<Sex, string[]>;
+  // The same band, in plain English. Every rung carries one, including the good
+  // ones — not because a compliment needs softening, but because the dialog
+  // promises "no slang", and "Fine shyt" is slang whether or not it is a nice
+  // thing to be called. Someone who asked for it civil asked for it civil all
+  // the way up.
+  kind: Record<Sex, string[]>;
   tone: Verdict["tone"];
   line: string;
 }> = [
   {
     min: 0,
     words: { male: ["You're cooked"], female: ["You're cooked"] },
+    kind: { male: ["Starting point", "Early days"], female: ["Starting point", "Early days"] },
     tone: "low",
     line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
   },
   {
     min: 12,
     words: { male: ["Chopped"], female: ["Chopped"] },
+    kind: {
+      male: ["Plenty to work with", "Lots of upside"],
+      female: ["Plenty to work with", "Lots of upside"],
+    },
     tone: "low",
     line: "Bottom fifth. The gap is real, and most of it is the part that moves without surgery.",
   },
   {
     min: 26,
-    words: { male: ["Mildly chopped"], female: ["Mildly chopped"] },
+    words: { male: ["Mildly chopped", "Rough"], female: ["Mildly chopped", "Rough"] },
+    kind: { male: ["Coming along", "On the way up"], female: ["Coming along", "On the way up"] },
     tone: "low",
     line: "Below the middle. One or two numbers are doing the damage rather than all of them.",
   },
   {
+    // The widest band in practice, so it carries the most alternates — this is
+    // the rung most people will actually land on and screenshot.
     min: 40,
-    words: { male: ["Mid"], female: ["Mid"] },
+    // Every one of these is a joke about being GENERIC, which is the honest
+    // reading of the fortieth-to-fifty-second percentile — and the reason the
+    // rung lands as banter rather than an insult. None of them says anything is
+    // wrong with the face, because nothing is.
+    words: {
+      male: ["Mid", "NPC", "Background character", "Stock photo", "Default settings"],
+      female: ["Mid", "Girl next door", "NPC", "Stock photo", "Default settings", "Background character"],
+    },
+    kind: {
+      male: ["Right in the middle", "Middle of the pack", "Bang on average"],
+      female: ["Right in the middle", "Middle of the pack", "Bang on average"],
+    },
     tone: "mid",
     line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
   },
   {
     min: 52,
-    words: { male: ["Aight"], female: ["Aight"] },
+    words: {
+      male: ["Aight", "Decent", "Solid", "Alright", "Not bad"],
+      female: ["Aight", "Cute", "Solid", "Alright", "Not bad"],
+    },
+    kind: {
+      male: ["Good base", "Solid footing", "Comfortably above average"],
+      female: ["Good base", "Solid footing", "Comfortably above average"],
+    },
     tone: "mid",
     line: "Just above the middle. Nothing is wrong; nothing is carrying you either.",
   },
   {
     min: 65,
-    words: { male: ["Good looking", "Attractive"], female: ["Good looking", "Attractive"] },
+    words: {
+      male: ["Good looking", "Attractive", "Sharp"],
+      female: ["Good looking", "Attractive", "Striking"],
+    },
+    kind: {
+      male: ["Good looking", "Handsome", "Well put together"],
+      female: ["Good looking", "Lovely", "Well put together"],
+    },
     tone: "high",
     line: "Top third. Measurably ahead of two out of three faces in the reference set.",
   },
@@ -170,6 +252,10 @@ const LADDER: Array<{
     words: {
       male: ["Mogger", "Marlon level"],
       female: ["She-mogger", "Fine shyt"],
+    },
+    kind: {
+      male: ["Striking", "Turns heads", "Exceptional"],
+      female: ["Striking", "Turns heads", "Exceptional"],
     },
     tone: "high",
     line: "Top fifth. Four out of five faces in the reference set measure below this.",
@@ -180,6 +266,13 @@ const LADDER: Array<{
       male: ["Looksmaxxing final boss"],
       female: ["Certified baddie"],
     },
+    // No word repeats across rungs, in either tone. Two people a fifteen-point
+    // percentile apart reading the same label is the ladder failing at the one
+    // job it has.
+    kind: {
+      male: ["Remarkable", "Genuinely rare"],
+      female: ["Remarkable", "Genuinely rare"],
+    },
     tone: "peak",
     line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
   },
@@ -187,27 +280,32 @@ const LADDER: Array<{
     // The top one per cent, and deliberately its own rung rather than an
     // alternate of the one below. A ceiling that lands every twentieth scan is
     // not a ceiling — it is just the top band with a second name, and it makes
-    // the rung under it worth less. Roughly a 8.0+ headline score.
+    // the rung under it worth less. Roughly an 8.0+ headline score.
     min: 99,
     words: { male: ["True Adam"], female: ["True Eve"] },
+    kind: { male: ["One in a hundred"], female: ["One in a hundred"] },
     tone: "peak",
     line: "Top one per cent. There is nothing above this — the scale ends here.",
   },
 ];
 
-export function verdictFor(report: Report): Verdict {
-  return verdictForPercentile(report.overallPercentile, report.sex);
+export function verdictFor(report: Report, tone?: VerdictTone): Verdict {
+  return verdictForPercentile(report.overallPercentile, report.sex, tone);
 }
 
 // The percentile is the whole input. Exported separately because the MP4
 // exporter has a percentile and no Report, and the alternative — a second copy
 // of the bands over in the renderer — is precisely the drift this module exists
 // to prevent. One ladder, one set of thresholds, every surface.
-export function verdictForPercentile(percentile: number, sex: Sex = "male"): Verdict {
+export function verdictForPercentile(
+  percentile: number,
+  sex: Sex = "male",
+  tone: VerdictTone = "blunt",
+): Verdict {
   // Walk down so the highest qualifying rung wins, and the array stays readable
   // in ascending order.
   const rung = [...LADDER].reverse().find((r) => percentile >= r.min) ?? LADDER[0];
-  const words = rung.words[sex];
+  const words = tone === "kind" ? rung.kind[sex] : rung.words[sex];
   // Derived from the percentile, never random. Pressing the button again must
   // not change your verdict; a result that moves when you re-roll it is not a
   // measurement and nobody believes it twice.

@@ -11,7 +11,8 @@ import { rankShort } from "./ui/templates.ts";
 import { storeSex, storedSex } from "./engine/sexPref.ts";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.ts";
 import { openSexChooser } from "./ui/sexChooser.ts";
-import { verdictForPercentile } from "./engine/analysisMode.ts";
+import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.ts";
+import { askVerdictTone } from "./ui/tonePrompt.ts";
 import { drawLandmarksAnimated } from "./ui/overlay.ts";
 import type { Report, Sex } from "./engine/types.ts";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.ts";
@@ -304,7 +305,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   // and a word above the numbers it came from is a read. The toggle is on the
   // card, not in settings, since this page is used standing up with a camera in
   // one hand.
-  const verdict = verdictForPercentile(r.overallPercentile, r.sex);
+  const verdict = verdictForPercentile(r.overallPercentile, r.sex, loadVerdictTone() ?? "blunt");
   const dimorphism = r.sex === "female" ? "FEMININITY" : "MASCULINITY";
   const micro: Array<[string, number]> = [
     ["FACE", r.overallPercentile],
@@ -374,8 +375,17 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   // card would restart the count-up animation and, on this page, throw away any
   // number a creator had hand-edited.
   for (const b of el.cards.querySelectorAll<HTMLButtonElement>(".q-mode")) {
-    b.onclick = () => {
+    b.onclick = async () => {
       const verdictMode = b.dataset.qmode === "verdict";
+      // Asked the first time the verdict is chosen, wherever it is chosen from.
+      // Re-rendering afterwards so the word reflects the answer they just gave
+      // rather than the default they never picked.
+      if (verdictMode && loadVerdictTone() === null) {
+        await askVerdictTone();
+        render(r, photo);
+        (el.cards.querySelector('.q-mode[data-qmode="verdict"]') as HTMLButtonElement | null)?.click();
+        return;
+      }
       for (const other of el.cards.querySelectorAll<HTMLElement>(".q-mode")) {
         other.classList.toggle("on", other === b);
       }
