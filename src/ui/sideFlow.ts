@@ -54,6 +54,9 @@ interface SidePlacementSeed {
   faceDir: number;
   automaticPoints?: SidePoints;
   method?: SideSeedMethod;
+  // Absent when re-opening an already-corrected placement, which by definition
+  // no longer needs the "we guessed this" framing.
+  confidence?: number;
 }
 
 let verifier: VerifyHandle | null = null;
@@ -394,9 +397,21 @@ function mountVerify(
   const showReviewActions = () => {
     verifier?.setEditable(false);
     e.cap.textContent = "REVIEW LANDMARKS";
-    e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
-      <p class="side-sub">TrueMax has estimated the thirteen profile landmarks. If every ring sits on the named feature, confirm them. If one is wrong, choose <b>Edit point placement</b> and drag only the points that need correcting.</p>
-      <p class="side-review-note">Nothing leaves this device unless you separately choose to share it after confirming.</p>`;
+    // The heading is graded by how well the seed actually landed.
+    //
+    // Presenting a guess with the same confidence as a measurement is what makes
+    // a wrong seed infuriating rather than merely annoying: somebody who was
+    // told "these are estimated, check them" and finds one off has been dealt
+    // with honestly, and somebody shown thirteen tidy rings on a wall has been
+    // misled by software. The engine cannot yet place the five points behind
+    // the face reliably — there is no landmark for a jaw corner — so the copy
+    // says which ones to look at rather than pretending they are all equal.
+    const low = (seed.confidence ?? 1) < 0.7;
+    e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
+      <p class="side-sub">${low
+        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position rather than a result. Choose <b>Edit point placement</b> and drag them onto the features they name."
+        : "TrueMax has estimated the thirteen profile landmarks. The front of the face is measured; the five behind it — jaw corner, ear, and the neck point — are estimated from an average head, so they are the ones worth looking at. Drag any that sit off the feature."}</p>
+      <p class="side-review-note">Nothing leaves this device unless you separately choose to share it after confirming.${low ? "" : " Corrections you share are what teach the estimate to land closer next time."}</p>`;
     e.actions.innerHTML = `
       <button class="btn gho" id="side-back">Retake profile</button>
       <button class="btn gho" id="side-edit">Edit point placement</button>

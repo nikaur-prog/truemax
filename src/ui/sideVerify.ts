@@ -22,6 +22,11 @@ export interface SideSeed {
   points: SidePoints;
   faceDir: number;
   method: SideSeedMethod;
+  // 0-1. The fraction of the thirteen points that landed on the head rather
+  // than in the room behind it. Exposed so the verifier can say "check these"
+  // loudly when the seed is a guess and quietly when it is not, instead of
+  // presenting every seed with the same false confidence.
+  confidence: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -574,12 +579,55 @@ function sanitizeSeed(
 export function seedSidePoints(
   canvas: HTMLCanvasElement,
 ): SideSeed {
+  // Both paths, then the better one — rather than "mesh if it returned
+  // anything". A mesh that latched onto a doorway and a silhouette that traced
+  // a bright wall both return a full, confident-looking set of thirteen points,
+  // and the only difference visible from here is whether those points are on a
+  // head. So ask that question directly instead of trusting the source.
   const mesh = seedFromLandmarks(canvas);
-  const seed = mesh ?? seedFromSilhouette(canvas);
+  const silhouette = seedFromSilhouette(canvas);
+  const meshScore = mesh ? onHeadFraction(mesh.points, canvas) : -1;
+  const silhouetteScore = onHeadFraction(silhouette.points, canvas);
+
+  // Ties go to the mesh: where both are equally plausible the mesh is measuring
+  // named anatomy and the trace is measuring an outline.
+  const useMesh = mesh !== null && meshScore >= silhouetteScore;
+  const seed = useMesh ? mesh! : silhouette;
   return {
     ...sanitizeSeed(seed, canvas.width, canvas.height),
-    method: mesh ? "mesh" : "silhouette",
+    method: useMesh ? "mesh" : "silhouette",
+    confidence: Math.max(0, useMesh ? meshScore : silhouetteScore),
   };
+}
+
+// How much of a seed actually sits on the person.
+//
+// The failure this exists for is the one in the screenshots: thirteen points in
+// a tidy vertical line down the empty left of the frame, a body-length away
+// from the face. Every individual point looked reasonable, the set looked
+// deliberate, and not one of them was on the head.
+//
+// Scored against the foreground mask rather than against the face, because the
+// mask is the one thing available on a true profile — where MediaPipe's mesh is
+// least trustworthy and the template is doing most of the work. Returns 0 when
+// there is no usable mask, which makes it a tie-breaker that abstains rather
+// than one that guesses.
+export function onHeadFraction(points: SidePoints, canvas: HTMLCanvasElement): number {
+  const g = silhouetteGeometry(canvas);
+  if (!g) return 0;
+  const ids = Object.keys(points) as SidePointId[];
+  let on = 0;
+  for (const id of ids) {
+    const p = points[id];
+    const span = g.rowSpan(Math.round(p.y));
+    // A small tolerance either side: several of the thirteen are meant to sit
+    // just off the traced edge — the ear canal is inside the head, the neck
+    // point is on its boundary — so demanding a strict interior hit would
+    // punish a correct seed.
+    const pad = canvas.width * 0.02;
+    if (span && p.x >= span[0] - pad && p.x <= span[1] + pad) on++;
+  }
+  return on / ids.length;
 }
 
 // Fallback: trace the profile edge against the background, then place points at
