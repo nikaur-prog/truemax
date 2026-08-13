@@ -32,22 +32,7 @@ const CHECKED = [
   "CRON_SECRET",
 ] as const;
 
-// The routes that crash all share exactly two things this one does not: they
-// import ./_shared.ts, and through it they import `stripe` and
-// `@supabase/supabase-js`. Loading those here DYNAMICALLY, inside the handler
-// and inside a try, converts what is otherwise an uncatchable boot failure —
-// which the platform reports only as FUNCTION_INVOCATION_FAILED, with no
-// message — into a string we can read over HTTP.
-async function probe(specifier: string): Promise<string> {
-  try {
-    const mod = await import(specifier);
-    return `ok (${Object.keys(mod).length} exports)`;
-  } catch (error) {
-    return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  }
-}
-
-export async function GET(request: Request): Promise<Response> {
+export function GET(): Response {
   const env: Record<string, boolean> = {};
   for (const name of CHECKED) {
     // SUPABASE_SERVICE_ROLE_KEY is the legacy name _shared.ts still falls back
@@ -55,18 +40,13 @@ export async function GET(request: Request): Promise<Response> {
     const legacy = name === "SUPABASE_SECRET_KEY" ? process.env.SUPABASE_SERVICE_ROLE_KEY : undefined;
     env[name] = Boolean(process.env[name] || legacy);
   }
-  // Off by default, so the ordinary health check stays a cheap static answer
-  // and does not drag two large packages into every ping.
-  const deps = new URL(request.url).searchParams.has("deps")
-    ? {
-        stripe: await probe("stripe"),
-        supabase: await probe("@supabase/supabase-js"),
-        shared: await probe("./_shared.ts"),
-      }
-    : undefined;
-
+  // The ?deps=1 probe that used to live here has moved to /api/probe, because
+  // it loaded modules through a variable specifier and a variable specifier is
+  // invisible to the analyser that decides what ships in the lambda. It was
+  // reporting absences it had caused itself. This route goes back to being the
+  // one thing it can answer honestly with no imports at all.
   return Response.json(
-    { ok: true, node: process.version, env, deps },
+    { ok: true, node: process.version, env },
     { status: 200, headers: { "Cache-Control": "no-store" } },
   );
 }
