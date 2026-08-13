@@ -1608,3 +1608,77 @@ body.auth-modal-open { overflow: hidden; }
 .upsell-list { margin: 4px 0 14px; padding-left: 18px; }
 .upsell-list li { font-size: 13.5px; line-height: 1.6; margin-bottom: 9px; color: var(--mut); }
 .upsell-list li b { color: var(--ink); font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   Analysis depth: Verdict and Basic
+   --------------------------------------------------------------------------- */
+
+/* One word, sized so it is the whole screen. This is the mode people open in
+   front of their friends and screenshot, so the layout is built around being
+   photographed rather than read. */
+.verdict {
+  background: var(--card); border: 1px solid var(--line); border-radius: 22px;
+  padding: 44px 26px 34px; text-align: center; margin-bottom: 16px;
+}
+.verdict-label {
+  display: block; font-family: var(--mono); font-size: 9px;
+  letter-spacing: 0.22em; color: var(--mut); margin-bottom: 14px;
+}
+.verdict-word {
+  display: block; font-family: var(--serif); font-weight: 300;
+  font-size: clamp(44px, 13vw, 76px); line-height: 1; letter-spacing: -0.02em;
+}
+.verdict-line {
+  font-size: 14px; line-height: 1.6; color: var(--mut);
+  max-width: 34ch; margin: 16px auto 0;
+}
+/* The tone shifts the ground, never the text colour — a verdict printed in red
+   reads as an error message about a person. */
+.verdict.low { background: var(--soft); }
+.verdict.high .verdict-word, .verdict.peak .verdict-word { color: var(--acc); }
+.verdict.peak { background: var(--acc-soft); border-color: transparent; }
+
+.basic-lead {
+  background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+  padding: 24px 22px; margin-bottom: 10px;
+}
+.basic-lead b {
+  display: block; font-family: var(--serif); font-weight: 400;
+  font-size: 54px; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.basic-lead small { font-size: 20px; color: var(--mut); }
+.basic-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.basic-cell {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px 14px 12px; position: relative; overflow: hidden;
+}
+.basic-cell span {
+  display: block; font-family: var(--mono); font-size: 8.5px;
+  letter-spacing: 0.13em; color: var(--mut); margin-bottom: 6px;
+}
+.basic-cell b { font-family: var(--serif); font-weight: 400; font-size: 27px; font-variant-numeric: tabular-nums; }
+.basic-cell i {
+  position: absolute; left: 0; bottom: 0; height: 2.5px;
+  background: var(--acc); transition: width 0.9s cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+.basic-note { font-size: 12.5px; line-height: 1.6; color: var(--mut); margin: 14px 2px 0; }
+
+/* Present in every mode, so changing your mind is never a trip into settings. */
+.modeswitch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 22px; }
+.ms-btn {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 11px 12px; text-align: left; cursor: pointer; font-family: var(--sans);
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.ms-btn:hover { border-color: #c9c7c0; }
+.ms-btn b { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 3px; }
+.ms-btn span { display: block; font-size: 10.5px; line-height: 1.4; color: var(--mut); }
+.ms-btn.on { background: var(--ink); border-color: var(--ink); }
+.ms-btn.on b { color: #fff; }
+.ms-btn.on span { color: rgba(255, 255, 255, 0.62); }
+
+@media (max-width: 560px) {
+  .modeswitch { grid-template-columns: 1fr; }
+  .ms-btn { display: flex; align-items: baseline; gap: 8px; }
+  .ms-btn b { margin-bottom: 0; }
+}
