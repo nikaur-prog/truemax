@@ -1,4 +1,4 @@
-import { currentAccessToken, getSupabaseClient } from "./auth.ts";
+import { currentAccessToken, getSupabaseClient } from "./auth.js";
 
 export type EntitlementTier = "free" | "starter" | "max";
 export type PaidTier = Exclude<EntitlementTier, "free">;

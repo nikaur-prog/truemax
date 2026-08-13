@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateScoreToPercentile } from "./scoring.ts";
+import { aggregateScoreToPercentile } from "./scoring.js";
 
 test("headline midpoint stays anchored at the population median", () => {
   assert.equal(aggregateScoreToPercentile(5), 50);

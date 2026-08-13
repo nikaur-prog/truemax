@@ -1,6 +1,6 @@
-import { currentAccessToken } from "./auth.ts";
-import type { SidePoints } from "./sideMetrics.ts";
-import type { SideFeedbackIntent, SideFeedbackMetadata } from "./sideFeedbackPayload.ts";
+import { currentAccessToken } from "./auth.js";
+import type { SidePoints } from "./sideMetrics.js";
+import type { SideFeedbackIntent, SideFeedbackMetadata } from "./sideFeedbackPayload.js";
 
 export interface SideFeedbackSubmitResult {
   ok: boolean;

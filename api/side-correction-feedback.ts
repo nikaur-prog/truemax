@@ -3,9 +3,9 @@ import {
   movedSidePointIds,
   normalizedSidePoints,
   sideFeedbackMetadataIssues,
-} from "../src/engine/sideFeedbackPayload.ts";
-import type { SideFeedbackMetadata } from "../src/engine/sideFeedbackPayload.ts";
-import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.ts";
+} from "../src/engine/sideFeedbackPayload.js";
+import type { SideFeedbackMetadata } from "../src/engine/sideFeedbackPayload.js";
+import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 
 const BUCKET = "side-correction-feedback";
 const MAX_BODY_BYTES = 2_500_000;

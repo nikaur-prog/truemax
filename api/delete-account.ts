@@ -1,4 +1,4 @@
-import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.ts";
+import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 
 interface BillingIdentity {
   stripe_subscription_id: string | null;

@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { RegionId } from "../engine/types.ts";
+import type { RegionId } from "../engine/types.js";
 
 // Landmarks that light up (and drive the zoom target) per region tab.
 export const REGION_LANDMARKS: Record<RegionId, number[]> = {

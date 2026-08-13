@@ -1,5 +1,5 @@
-import type { Streak } from "../engine/streak.ts";
-import { QUOTES } from "./quotes.ts";
+import type { Streak } from "../engine/streak.js";
+import { QUOTES } from "./quotes.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard's headline and its line underneath.

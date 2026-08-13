@@ -1,5 +1,5 @@
-import { loadVerdictTone, saveVerdictTone } from "../engine/analysisMode.ts";
-import type { VerdictTone } from "../engine/analysisMode.ts";
+import { loadVerdictTone, saveVerdictTone } from "../engine/analysisMode.js";
+import type { VerdictTone } from "../engine/analysisMode.js";
 
 // ---------------------------------------------------------------------------
 // "How do you want this said?"

@@ -1,4 +1,4 @@
-import type { Report } from "../engine/types.ts";
+import type { Report } from "../engine/types.js";
 
 // Shareable result card. This is the distribution mechanic: a screenshot
 // people post without being asked. Rendered to canvas so it can be saved or

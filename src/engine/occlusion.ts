@@ -1,6 +1,6 @@
 import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { Pt } from "./geometry.ts";
+import type { Pt } from "./geometry.js";
 
 // ---------------------------------------------------------------------------
 // Glasses.

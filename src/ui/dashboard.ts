@@ -1,14 +1,14 @@
-import { readAllHistory } from "../engine/history.ts";
-import type { StoredScan } from "../engine/history.ts";
-import { computeStreak } from "../engine/streak.ts";
-import { headline, nextVisit, subline } from "./greeting.ts";
-import { loadPhotos } from "../engine/photoStore.ts";
-import { openHistory } from "./historyView.ts";
-import { REEL } from "./demoReelData.ts";
-import { applyShim } from "./demoReelShim.ts";
-import { mountDemoReel } from "./demoReel.ts";
-import { brandClass, logoMarkup } from "./membershipBrand.ts";
-import type { MembershipBrand } from "./membershipBrand.ts";
+import { readAllHistory } from "../engine/history.js";
+import type { StoredScan } from "../engine/history.js";
+import { computeStreak } from "../engine/streak.js";
+import { headline, nextVisit, subline } from "./greeting.js";
+import { loadPhotos } from "../engine/photoStore.js";
+import { openHistory } from "./historyView.js";
+import { REEL } from "./demoReelData.js";
+import { applyShim } from "./demoReelShim.js";
+import { mountDemoReel } from "./demoReel.js";
+import { brandClass, logoMarkup } from "./membershipBrand.js";
+import type { MembershipBrand } from "./membershipBrand.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.

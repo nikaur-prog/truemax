@@ -1,6 +1,6 @@
-import { readAllHistory } from "../engine/history.ts";
-import type { StoredScan } from "../engine/history.ts";
-import { clearAllPhotos } from "../engine/photoStore.ts";
+import { readAllHistory } from "../engine/history.js";
+import type { StoredScan } from "../engine/history.js";
+import { clearAllPhotos } from "../engine/photoStore.js";
 
 // ---------------------------------------------------------------------------
 // The history view: every scan taken on this device, as a trend.

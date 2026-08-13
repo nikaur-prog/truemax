@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { LM } from "./geometry.ts";
+import { LM } from "./geometry.js";
 
 // Where are the eyes actually pointed?
 //

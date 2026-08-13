@@ -1,5 +1,5 @@
-import { declaredSkin, skinAnswered } from "./goals.ts";
-import type { AdviceChannel, Profile } from "./goals.ts";
+import { declaredSkin, skinAnswered } from "./goals.js";
+import type { AdviceChannel, Profile } from "./goals.js";
 
 // ---------------------------------------------------------------------------
 // Recommendations.

@@ -1,6 +1,6 @@
-import type { Geom, Pt } from "./geometry.ts";
-import { LM, MIRROR_PAIRS, dist, mid, angleAt, lineTiltDeg } from "./geometry.ts";
-import type { MetricDef } from "./types.ts";
+import type { Geom, Pt } from "./geometry.js";
+import { LM, MIRROR_PAIRS, dist, mid, angleAt, lineTiltDeg } from "./geometry.js";
+import type { MetricDef } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Metric computers. Every distance is normalized by the inter-eye distance

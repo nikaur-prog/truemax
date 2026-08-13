@@ -1,5 +1,5 @@
-import { mountDemoReel } from "./demoReel.ts";
-import type { ReelHandle } from "./demoReel.ts";
+import { mountDemoReel } from "./demoReel.js";
+import type { ReelHandle } from "./demoReel.js";
 
 // ---------------------------------------------------------------------------
 // The live demo strip under the account gate.

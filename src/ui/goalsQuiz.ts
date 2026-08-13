@@ -1,6 +1,6 @@
-import { GOALS, QUIET_TOPICS, SKIN_CONCERNS, loadProfile, saveProfile } from "../engine/goals.ts";
-import type { AdviceChannel, Profile } from "../engine/goals.ts";
-import type { RegionId } from "../engine/types.ts";
+import { GOALS, QUIET_TOPICS, SKIN_CONCERNS, loadProfile, saveProfile } from "../engine/goals.js";
+import type { AdviceChannel, Profile } from "../engine/goals.js";
+import type { RegionId } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
 // The quiz, split by moment.

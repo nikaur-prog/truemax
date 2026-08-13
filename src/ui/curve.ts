@@ -1,5 +1,5 @@
-import { AGG_NORM } from "../engine/aggNorm.ts";
-import type { Sex } from "../engine/types.ts";
+import { AGG_NORM } from "../engine/aggNorm.js";
+import type { Sex } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
 // Population curve.

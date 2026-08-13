@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authRedirects } from "../src/engine/auth.ts";
+import { authRedirects } from "../src/engine/auth.js";
 
 test("ordinary auth returns to the scan while password recovery uses the portal", () => {
   const redirects = authRedirects("https://www.truemax.app/some/path");

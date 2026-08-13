@@ -1,9 +1,9 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { QualityCheck } from "./quality.ts";
-import type { SidePoints } from "./sideMetrics.ts";
-import type { SideFeedbackIntent, SideSeedMethod } from "./sideFeedbackPayload.ts";
-import { sideFeedbackIntentIssues } from "./sideFeedbackPayload.ts";
-import type { Sex } from "./types.ts";
+import type { QualityCheck } from "./quality.js";
+import type { SidePoints } from "./sideMetrics.js";
+import type { SideFeedbackIntent, SideSeedMethod } from "./sideFeedbackPayload.js";
+import { sideFeedbackIntentIssues } from "./sideFeedbackPayload.js";
+import type { Sex } from "./types.js";
 
 // OAuth and confirmation emails necessarily navigate away from the current
 // page. Preserve a reduced copy of the completed capture on this device so the

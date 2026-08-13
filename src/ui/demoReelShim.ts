@@ -1,4 +1,4 @@
-import type { ReelFace } from "./demoReelData.ts";
+import type { ReelFace } from "./demoReelData.js";
 
 // ---------------------------------------------------------------------------
 // Display scores for the landing reel.

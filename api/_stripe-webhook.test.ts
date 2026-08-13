@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { entitlementFromSubscription } from "./stripe-webhook.ts";
+import { entitlementFromSubscription } from "./stripe-webhook.js";
 
 function subscription(overrides: Record<string, unknown> = {}) {
   return {

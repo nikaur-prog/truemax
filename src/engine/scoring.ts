@@ -1,11 +1,11 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { buildGeometry } from "./geometry.ts";
-import { METRICS, computeRawMetrics } from "./metrics.ts";
-import { AGG_NORM } from "./aggNorm.ts";
-import { reliabilityOf } from "./reliability.ts";
-import { extractShape, shapeZScore } from "./shape.ts";
-import { SIDE_METRICS, computeSideMetrics, sidePointIntegrityIssues } from "./sideMetrics.ts";
-import type { SidePoints } from "./sideMetrics.ts";
+import { buildGeometry } from "./geometry.js";
+import { METRICS, computeRawMetrics } from "./metrics.js";
+import { AGG_NORM } from "./aggNorm.js";
+import { reliabilityOf } from "./reliability.js";
+import { extractShape, shapeZScore } from "./shape.js";
+import { SIDE_METRICS, computeSideMetrics, sidePointIntegrityIssues } from "./sideMetrics.js";
+import type { SidePoints } from "./sideMetrics.js";
 import type {
   MetricDef,
   PillarId,
@@ -14,7 +14,7 @@ import type {
   Report,
   ScoredMetric,
   Sex,
-} from "./types.ts";
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Percentile-anchored scoring. 5.0 = 50th percentile, and the score scale is

@@ -1,4 +1,4 @@
-import type { Report, Sex } from "./types.ts";
+import type { Report, Sex } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // How much of the analysis a person wants to see.

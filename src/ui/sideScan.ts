@@ -1,4 +1,4 @@
-import type { SidePoints, SidePointId } from "../engine/sideMetrics.ts";
+import type { SidePoints, SidePointId } from "../engine/sideMetrics.js";
 
 // ---------------------------------------------------------------------------
 // The side-scan reveal.

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { FACE_LANDMARK_COUNT, LM, landmarkIntegrityIssues } from "./geometry.ts";
-import type { Geom, Pt } from "./geometry.ts";
-import { measureCanthalTilts } from "./metrics.ts";
-import { EXPERIMENTAL_SIDE_METRIC_IDS, SIDE_METRICS, sidePointIntegrityIssues } from "./sideMetrics.ts";
-import type { SidePoints } from "./sideMetrics.ts";
+import { FACE_LANDMARK_COUNT, LM, landmarkIntegrityIssues } from "./geometry.js";
+import type { Geom, Pt } from "./geometry.js";
+import { measureCanthalTilts } from "./metrics.js";
+import { EXPERIMENTAL_SIDE_METRIC_IDS, SIDE_METRICS, sidePointIntegrityIssues } from "./sideMetrics.js";
+import type { SidePoints } from "./sideMetrics.js";
 
 function rotate(p: Pt, deg: number): Pt {
   const t = (deg * Math.PI) / 180;

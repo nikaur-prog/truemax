@@ -1,7 +1,7 @@
-import type { RegionScore, ScoredMetric, Sex } from "../engine/types.ts";
-import { REGION_NAMES } from "../engine/scoring.ts";
-import type { AdviceChannel } from "../engine/goals.ts";
-import type { ScanDelta } from "../engine/history.ts";
+import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
+import { REGION_NAMES } from "../engine/scoring.js";
+import type { AdviceChannel } from "../engine/goals.js";
+import type { ScanDelta } from "../engine/history.js";
 
 // Deterministic explanation engine. No LLM, no randomness: banded templates
 // with the actual computed numbers interpolated in. Every sentence must

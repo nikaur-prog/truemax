@@ -1,4 +1,4 @@
-import { getSupabaseAdmin, json, safeMessage } from "./_shared.ts";
+import { getSupabaseAdmin, json, safeMessage } from "./_shared.js";
 
 const BUCKET = "side-correction-feedback";
 

@@ -1,5 +1,5 @@
-import { SIDE_POINTS } from "./sideMetrics.ts";
-import type { SidePointId, SidePoints } from "./sideMetrics.ts";
+import { SIDE_POINTS } from "./sideMetrics.js";
+import type { SidePointId, SidePoints } from "./sideMetrics.js";
 
 export const SIDE_FEEDBACK_CONSENT_VERSION = "side-landmark-feedback-v1";
 export const SIDE_FEEDBACK_RETENTION_DAYS = 90;

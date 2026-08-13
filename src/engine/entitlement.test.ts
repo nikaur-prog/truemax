@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasMaxAccess, hasPaidAccess } from "./entitlement.ts";
-import type { Entitlement } from "./entitlement.ts";
+import { hasMaxAccess, hasPaidAccess } from "./entitlement.js";
+import type { Entitlement } from "./entitlement.js";
 
 // The gate between "measured your face for free" and "paid for the method".
 // Worth testing directly: every branch below is either giving away the paid

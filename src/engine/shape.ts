@@ -1,8 +1,8 @@
 import { FaceLandmarker } from "@mediapipe/tasks-vision";
-import type { Pt } from "./geometry.ts";
-import type { Geom } from "./geometry.ts";
-import type { Sex } from "./types.ts";
-import { SHAPE_MODEL } from "./shapeModel.ts";
+import type { Pt } from "./geometry.js";
+import type { Geom } from "./geometry.js";
+import type { Sex } from "./types.js";
+import { SHAPE_MODEL } from "./shapeModel.js";
 
 // ---------------------------------------------------------------------------
 // Shape descriptors.

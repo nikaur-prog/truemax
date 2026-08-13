@@ -1,7 +1,7 @@
-import { detectVideo, setRunningMode } from "../engine/landmarker.ts";
-import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.ts";
-import { detectOcclusion } from "../engine/occlusion.ts";
-import type { FrameCheck, Viewport } from "../engine/captureGuide.ts";
+import { detectVideo, setRunningMode } from "../engine/landmarker.js";
+import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.js";
+import { detectOcclusion } from "../engine/occlusion.js";
+import type { FrameCheck, Viewport } from "../engine/captureGuide.js";
 
 // Live camera capture. The preview starts on the landing screen so the first
 // thing someone sees is their own face already being tracked — the guidance is

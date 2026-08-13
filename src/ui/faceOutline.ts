@@ -1,7 +1,7 @@
 import { FaceLandmarker } from "@mediapipe/tasks-vision";
-import { SHAPE_MODEL } from "../engine/shapeModel.ts";
-import { shapeSubset } from "../engine/shape.ts";
-import type { Sex } from "../engine/types.ts";
+import { SHAPE_MODEL } from "../engine/shapeModel.js";
+import { shapeSubset } from "../engine/shape.js";
+import type { Sex } from "../engine/types.js";
 
 // The idle outline in the capture frame is not decoration: it is the actual
 // Procrustes mean shape of our male or female reference population. Switching

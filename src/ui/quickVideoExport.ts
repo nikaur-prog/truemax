@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { Sex } from "../engine/types.ts";
-import { rankShort } from "./templates.ts";
-import { verdictForPercentile } from "../engine/analysisMode.ts";
+import type { Sex } from "../engine/types.js";
+import { rankShort } from "./templates.js";
+import { verdictForPercentile } from "../engine/analysisMode.js";
 
 // Which cut to render.
 //

@@ -1,4 +1,4 @@
-import type { RegionId, Report, Sex } from "./types.ts";
+import type { RegionId, Report, Sex } from "./types.js";
 
 // Device-local scan history (localStorage) — powers week-over-week deltas and
 // the history view with no accounts and no backend. A capped log of scans is

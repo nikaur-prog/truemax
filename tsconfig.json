@@ -6,7 +6,10 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    // allowImportingTsExtensions is gone because nothing imports a ".ts"
+    // specifier any more. Turning it off does NOT enforce that — bundler
+    // resolution accepts the extension either way, which I checked rather than
+    // assumed — so the actual guard is importSpecifiers.test.ts.
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,

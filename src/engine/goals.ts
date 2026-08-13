@@ -1,4 +1,4 @@
-import type { RegionId } from "./types.ts";
+import type { RegionId } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // The pre-quiz: what someone wants out of this, and what they want left alone.

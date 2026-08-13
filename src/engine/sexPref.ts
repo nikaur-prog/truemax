@@ -1,4 +1,4 @@
-import type { Sex } from "./types.ts";
+import type { Sex } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Which reference population a face is scored against.

@@ -1,10 +1,10 @@
-import type { Pt } from "../engine/geometry.ts";
-import { SIDE_POINTS } from "../engine/sideMetrics.ts";
-import type { SidePointId, SidePoints } from "../engine/sideMetrics.ts";
-import { detect } from "../engine/landmarker.ts";
-import { cloneSidePoints } from "../engine/sideFeedbackPayload.ts";
-import type { SideSeedMethod } from "../engine/sideFeedbackPayload.ts";
-import type { SideSilhouetteCheck } from "../engine/photoEligibility.ts";
+import type { Pt } from "../engine/geometry.js";
+import { SIDE_POINTS } from "../engine/sideMetrics.js";
+import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
+import { detect } from "../engine/landmarker.js";
+import { cloneSidePoints } from "../engine/sideFeedbackPayload.js";
+import type { SideSeedMethod } from "../engine/sideFeedbackPayload.js";
+import type { SideSilhouetteCheck } from "../engine/photoEligibility.js";
 
 // Drag-to-verify landmark editor for the side profile. MediaPipe's visible-side
 // mesh is the primary seed; a background-independent silhouette estimate is a

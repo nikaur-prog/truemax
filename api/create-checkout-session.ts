@@ -1,5 +1,5 @@
-import { isAdult } from "../src/engine/age.ts";
-import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.ts";
+import { isAdult } from "../src/engine/age.js";
+import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 
 type PaidTier = "starter" | "max";
 
