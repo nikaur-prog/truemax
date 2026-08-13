@@ -1001,9 +1001,7 @@ function showImprove(): void {
       </div>`
     : "";
 
-  body().innerHTML = `
-    <div class="reveal">
-      <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
+  const planBody = `<div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
@@ -1037,10 +1035,34 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
-      ${maxAccess ? recsHTML(profile) : upsell()}
+      ${maxAccess ? recsHTML(profile) : upsell()}`;
+
+  // Past the free allowance, the plan is the sell — and the sell leads with the
+  // one number that keeps people here: the ceiling. The potential is stated
+  // plainly on the card, not blurred, because it is a real measurement (the
+  // engine recomputes the score from the fixable metrics alone) and a stated
+  // ceiling is a reason to subscribe where a blurred one is a taunt. What sits
+  // behind the blur is the pathway TO it — every step already written, from
+  // this person's own measurements, which is why the structure shows through:
+  // the volume of finished work is the product.
+  const gated = depth === "rating";
+  body().innerHTML = `
+    <div class="reveal">
+      ${gated
+        ? `<div class="lockwrap">
+            <div class="lockblur" aria-hidden="true" inert>${planBody}</div>
+            <div class="lockcard">
+              <span class="lockcard-eyebrow">YOUR PATHWAY</span>
+              <h4>Max reckons your ceiling is ${r.potential.toFixed(1)}.</h4>
+              <p>You measured ${r.overall.toFixed(1)}. The route between those two numbers is already written below — step by step, from your own measurements, nothing generic. Unlock it to read it.</p>
+              <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
+            </div>
+          </div>`
+        : planBody}
       <div class="navrow"><button class="btn gho" id="btn-back">Back to results</button>
         <button class="btn pri" id="btn-again">Scan another face</button></div>
     </div>`;
+  wireUnlock();
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
@@ -1052,7 +1074,7 @@ function showImprove(): void {
   // First time someone reaches their plan, ask what to leave alone — the
   // moment prose is about to be written, and the first moment they have the
   // numbers in front of them to answer with.
-  if (!profile.postDone) openQuiz(() => showImprove(), "post");
+  if (!profile.postDone && !gated) openQuiz(() => showImprove(), "post");
 }
 
 // ---------------------------------------------------------------------------
