@@ -12,7 +12,7 @@ import {
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { startTrialCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
-import { maxStickerMarkup } from "./maxCharacter.js";
+import { maxStickerMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { METRICS } from "../engine/metrics.js";
 import { SIDE_METRICS } from "../engine/sideMetrics.js";
 
@@ -244,6 +244,7 @@ export async function openTrialFunnel(
     // saying something. Once per screen: a character who repeats his
     // introduction stops being charming somewhere around the third time.
     window.setTimeout(() => host?.querySelector(".max-say")?.classList.add("show"), 760);
+    wireMaxInteractions(host.querySelector<HTMLElement>(".max-stage"));
 
     // The stat counts up rather than appearing. A number that ticks reads as
     // something being measured; the same number sitting still reads as a claim.

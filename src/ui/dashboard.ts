@@ -1,5 +1,7 @@
 import { readAllHistory } from "../engine/history.js";
 import { followUp, regionNote } from "../engine/followUp.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import type { MaxMood } from "./maxCharacter.js";
 import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
@@ -64,6 +66,19 @@ export function isDashboardOpen(): boolean {
 //
 // Hidden entirely on a first visit. "One scan is not a trend" is true and worth
 // saying once the person has scanned; on an empty dashboard it is a lecture.
+// Max's face on the dashboard is decided by the reading, never by the desire to
+// be encouraging. "working" earns the excited face; a stall or a slip gets the
+// concerned one, because a character who beams while telling you two months
+// produced nothing is the tell that the words are decoration.
+const MOOD_FOR: Record<string, MaxMood> = {
+  working: "excited",
+  maintaining: "excited",
+  holding: "thinking",
+  stalled: "concerned",
+  slipping: "concerned",
+  "too-soon": "thinking",
+};
+
 function followUpCard(scans: StoredScan[]): string {
   if (scans.length < 2) return "";
   const points = scans.map((s) => ({ at: Date.parse(s.date), overall: s.overall }));
@@ -77,6 +92,7 @@ function followUpCard(scans: StoredScan[]): string {
     REGION_LABEL,
   );
   return `<div class="maxread dash-anim ${read.kind}" style="--d:210ms">
+    <div class="maxread-face">${maxCharacterMarkup({ mood: MOOD_FOR[read.kind] ?? "happy" })}</div>
     <span class="maxread-who">MAX</span>
     <b>${escapeHtml(read.headline)}</b>
     <p>${escapeHtml(read.body)}</p>
@@ -186,6 +202,7 @@ export function openDashboard(opts: {
     row.onclick = () => openHistory();
   }
   wireScanHovers(overlay);
+  wireMaxInteractions(overlay.querySelector<HTMLElement>(".maxread-face"));
 
   // The scan card's dropdown runs the real reel — the same engine output the
   // landing plays — rather than describing the steps in words. Mounted lazily
