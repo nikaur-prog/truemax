@@ -17,6 +17,7 @@ import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
+import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
@@ -729,10 +730,38 @@ function countUp(el: HTMLElement, target: number, decimals: number, delay: numbe
 }
 
 // ---------------- region ----------------
+// A real, unreadable version of the panel behind the wall. Built from this
+// person's actual metric names and scores rather than lorem, so the blur is
+// showing them their own analysis rather than a decorative placeholder — the
+// count of rows is true, and that is the honest part of the pitch.
+function regionPreviewHTML(r: RegionScore, id: RegionId): string {
+  return `<div class="deck"><div class="dcard">
+    <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
+    ${r.metrics
+      .map(
+        (m) => `<div class="metric">
+          <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+        </div>`,
+      )
+      .join("")}
+  </div></div>`;
+}
+
 function showRegion(id: RegionId): void {
   if (!ctx) return;
   const r = ctx.report.regions.find((x) => x.region === id)!;
   setZoom(id);
+
+  // The region tabs ARE the in-depth analysis — every individual measurement,
+  // what it read, and what it did to the score. Free accounts past their
+  // allowance see the shape of it behind a blur rather than an empty page,
+  // because the amount of work in there is the thing being sold and hiding it
+  // entirely sells nothing.
+  if (depth === "rating") {
+    body().innerHTML = `<div class="reveal">${locked(regionPreviewHTML(r, id))}</div>`;
+    wireUnlock();
+    return;
+  }
 
   // Wrapped because this is the one call in the render path that reaches into
   // a separate dataset, and it runs BEFORE the panel's innerHTML is assigned —
@@ -1126,6 +1155,13 @@ function wireModeSwitcher(): void {
 // rather than giving the paid product away, and the person can retry.
 let maxAccess = false;
 
+// What this account can currently see. Defaults to "rating" — the safe
+// direction, same reasoning as maxAccess: a failed entitlement read shows a
+// wall to a paying customer, who can retry, rather than handing the paid
+// product to everyone during an outage.
+let depth: Depth = "rating";
+let scansLeft = 0;
+
 export function setMaxAccess(value: boolean): void {
   if (value === maxAccess) return;
   maxAccess = value;
@@ -1134,6 +1170,49 @@ export function setMaxAccess(value: boolean): void {
   // they are.
   const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
   if (open?.dataset.id === "improve") showImprove();
+}
+
+// Arrives late, like maxAccess, because the entitlement is a network read and
+// blocking a finished analysis on a round trip would hold the result hostage.
+// The screen renders locked and unlocks in place.
+export function setDepth(next: Depth, remainingFreeScans = 0): void {
+  scansLeft = remainingFreeScans;
+  if (next === depth) return;
+  depth = next;
+  const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
+  if (open) select(open.dataset.id || "overall");
+}
+
+// Wraps in-depth content in a blur with an unlock card over it.
+//
+// Blurring rather than removing, deliberately, and only HERE — not over the
+// score. The number and the ranking are free forever, because "we show the
+// actual math" cannot be true on a screen that hides the math. What is behind
+// this is the breakdown: which measurement produced that number, and how far it
+// could move. Showing its shape while withholding its content is honest about
+// what is being sold — the volume of work is the product, and it is real.
+//
+// The blurred layer is inert: pointer-events off, aria-hidden, and not
+// focusable, so nothing behind the wall is reachable by keyboard or a screen
+// reader. A paywall you can tab through is not a paywall.
+function locked(content: string): string {
+  const left = scansLeft > 0
+    ? `<p class="lockcard-note">${scansLeft} free in-depth ${scansLeft === 1 ? "scan" : "scans"} left on this account.</p>`
+    : "";
+  return `<div class="lockwrap">
+    <div class="lockblur" aria-hidden="true" inert>${content}</div>
+    <div class="lockcard">
+      <span class="lockcard-eyebrow">IN-DEPTH ANALYSIS</span>
+      <h4>Every measurement behind your score</h4>
+      <p>Your score and your ranking are free on every plan, and always will be. This is the part underneath: all thirty-one measurements, what each one did to the number, and how far it can actually move.</p>
+      ${left}
+      <div class="navrow"><button class="btn pri" id="btn-unlock">Unlock in-depth · 7 days free</button></div>
+    </div>
+  </div>`;
+}
+
+function wireUnlock(): void {
+  document.getElementById("btn-unlock")?.addEventListener("click", () => ctx?.onUpgrade?.());
 }
 
 // What replaces the recommendations for a free or Starter account.

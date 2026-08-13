@@ -1832,3 +1832,35 @@ body.auth-modal-open { overflow: hidden; }
   background: rgba(255,255,255,.6); font: 10.5px var(--mono); color: var(--ink);
 }
 .paste-hot { outline: 2px dashed var(--acc); outline-offset: 4px; }
+
+/* The in-depth paywall ------------------------------------------------------
+   Blurring rather than removing, and only over the breakdown — never over the
+   score or the ranking, which are free forever. "We show the actual math"
+   cannot be true on a screen that hides the math, so what is behind this wall
+   is the analysis underneath the number, not the number.
+
+   The blurred layer is inert and aria-hidden: a paywall you can tab through or
+   read with a screen reader is not a paywall, and select-none stops the obvious
+   copy-paste. */
+.lockwrap { position: relative; }
+.lockblur {
+  filter: blur(7px) saturate(.7); opacity: .55; pointer-events: none;
+  user-select: none; -webkit-user-select: none;
+  /* Enough of it to read the shape, not so much that the card floats in space. */
+  max-height: 520px; overflow: hidden;
+}
+.lockwrap::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 190px;
+  background: linear-gradient(transparent, var(--bg)); pointer-events: none;
+}
+.lockcard {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(430px, calc(100% - 24px)); padding: 26px 26px 22px; z-index: 1;
+  border: 1px solid var(--line); border-radius: 20px; background: var(--card);
+  box-shadow: 0 24px 70px rgba(20, 21, 24, .18); text-align: center;
+}
+.lockcard-eyebrow { font: 9px var(--mono); letter-spacing: .16em; color: var(--acc); }
+.lockcard h4 { margin: 9px 0 10px; font: 300 24px/1.15 var(--serif); }
+.lockcard > p { margin: 0 0 14px; color: var(--mut); font-size: 13px; line-height: 1.6; }
+.lockcard-note { margin: 0 0 14px; color: var(--acc); font-size: 12px; font-weight: 500; }
+.lockcard .navrow { margin: 0; }
