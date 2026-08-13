@@ -133,26 +133,44 @@ test("the percentile entry point agrees with the report entry point", () => {
 // Tone
 // ---------------------------------------------------------------------------
 
-test("kind mode softens the bands that sting and leaves the rest alone", () => {
+test("kind mode softens every band that stings", () => {
   const at = (pct: number, tone: VerdictTone) =>
     verdictForPercentile(pct, "male", tone).word;
-  // Bottom five rungs get a softer word.
   for (const pct of [5, 18, 30, 45, 58]) {
     assert.notEqual(at(pct, "kind"), at(pct, "blunt"), `${pct}`);
   }
-  // The top four are already good news; softening them would be talking down
-  // to somebody who just got a good result.
-  for (const pct of [70, 88, 96, 99.5]) {
-    assert.equal(at(pct, "kind"), at(pct, "blunt"), `${pct}`);
-  }
 });
 
-test("kind mode never uses the harsh vocabulary", () => {
-  const banned = /cooked|chopped|npc|rough|background character/i;
+test("kind mode never uses slang, at any height on the ladder", () => {
+  // The dialog promises "no slang, nothing designed to sting", and that promise
+  // does not stop being made once the result is good news. "Fine shyt" is a
+  // compliment and it is still slang; somebody who asked for plain English
+  // asked for it all the way up.
+  const banned =
+    /cooked|chopped|npc|rough|background character|mogger|shyt|baddie|final boss|true adam|true eve|aight/i;
   for (const sex of ["male", "female"] as const) {
     for (let pct = 0; pct <= 100; pct += 0.5) {
       const word = verdictForPercentile(pct, sex, "kind").word;
       assert.ok(!banned.test(word), `${sex} ${pct}: ${word}`);
+    }
+  }
+});
+
+test("no word is ever reused by two different rungs", () => {
+  // Two people fifteen percentiles apart reading the same label is the ladder
+  // failing at the only job it has.
+  for (const tone of ["blunt", "kind"] as const) {
+    for (const sex of ["male", "female"] as const) {
+      const seen = new Map<string, string>();
+      for (let pct = 0; pct <= 100; pct += 0.5) {
+        const v = verdictForPercentile(pct, sex, tone);
+        const previous = seen.get(v.word);
+        assert.ok(
+          previous === undefined || previous === v.line,
+          `${tone}/${sex}: "${v.word}" appears on two rungs`,
+        );
+        seen.set(v.word, v.line);
+      }
     }
   }
 });

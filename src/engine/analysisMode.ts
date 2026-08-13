@@ -169,31 +169,36 @@ export interface Verdict {
 const LADDER: Array<{
   min: number;
   words: Record<Sex, string[]>;
-  // The same band, said without the sting. Only the bottom five rungs need one:
-  // the top four are already good news and softening them would be talking down
-  // to somebody who just got a good result.
-  kind?: Record<Sex, string[]>;
+  // The same band, in plain English. Every rung carries one, including the good
+  // ones — not because a compliment needs softening, but because the dialog
+  // promises "no slang", and "Fine shyt" is slang whether or not it is a nice
+  // thing to be called. Someone who asked for it civil asked for it civil all
+  // the way up.
+  kind: Record<Sex, string[]>;
   tone: Verdict["tone"];
   line: string;
 }> = [
   {
     min: 0,
     words: { male: ["You're cooked"], female: ["You're cooked"] },
-    kind: { male: ["Starting point"], female: ["Starting point"] },
+    kind: { male: ["Starting point", "Early days"], female: ["Starting point", "Early days"] },
     tone: "low",
     line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
   },
   {
     min: 12,
     words: { male: ["Chopped"], female: ["Chopped"] },
-    kind: { male: ["Plenty to work with"], female: ["Plenty to work with"] },
+    kind: {
+      male: ["Plenty to work with", "Lots of upside"],
+      female: ["Plenty to work with", "Lots of upside"],
+    },
     tone: "low",
     line: "Bottom fifth. The gap is real, and most of it is the part that moves without surgery.",
   },
   {
     min: 26,
     words: { male: ["Mildly chopped", "Rough"], female: ["Mildly chopped", "Rough"] },
-    kind: { male: ["Coming along"], female: ["Coming along"] },
+    kind: { male: ["Coming along", "On the way up"], female: ["Coming along", "On the way up"] },
     tone: "low",
     line: "Below the middle. One or two numbers are doing the damage rather than all of them.",
   },
@@ -201,15 +206,31 @@ const LADDER: Array<{
     // The widest band in practice, so it carries the most alternates — this is
     // the rung most people will actually land on and screenshot.
     min: 40,
-    words: { male: ["Mid", "NPC", "Background character"], female: ["Mid", "Girl next door"] },
-    kind: { male: ["Right in the middle"], female: ["Right in the middle"] },
+    // Every one of these is a joke about being GENERIC, which is the honest
+    // reading of the fortieth-to-fifty-second percentile — and the reason the
+    // rung lands as banter rather than an insult. None of them says anything is
+    // wrong with the face, because nothing is.
+    words: {
+      male: ["Mid", "NPC", "Background character", "Stock photo", "Default settings"],
+      female: ["Mid", "Girl next door", "NPC", "Stock photo", "Default settings", "Background character"],
+    },
+    kind: {
+      male: ["Right in the middle", "Middle of the pack", "Bang on average"],
+      female: ["Right in the middle", "Middle of the pack", "Bang on average"],
+    },
     tone: "mid",
     line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
   },
   {
     min: 52,
-    words: { male: ["Aight", "Decent", "Solid"], female: ["Aight", "Cute", "Solid"] },
-    kind: { male: ["Good base"], female: ["Good base"] },
+    words: {
+      male: ["Aight", "Decent", "Solid", "Alright", "Not bad"],
+      female: ["Aight", "Cute", "Solid", "Alright", "Not bad"],
+    },
+    kind: {
+      male: ["Good base", "Solid footing", "Comfortably above average"],
+      female: ["Good base", "Solid footing", "Comfortably above average"],
+    },
     tone: "mid",
     line: "Just above the middle. Nothing is wrong; nothing is carrying you either.",
   },
@@ -218,6 +239,10 @@ const LADDER: Array<{
     words: {
       male: ["Good looking", "Attractive", "Sharp"],
       female: ["Good looking", "Attractive", "Striking"],
+    },
+    kind: {
+      male: ["Good looking", "Handsome", "Well put together"],
+      female: ["Good looking", "Lovely", "Well put together"],
     },
     tone: "high",
     line: "Top third. Measurably ahead of two out of three faces in the reference set.",
@@ -228,6 +253,10 @@ const LADDER: Array<{
       male: ["Mogger", "Marlon level"],
       female: ["She-mogger", "Fine shyt"],
     },
+    kind: {
+      male: ["Striking", "Turns heads", "Exceptional"],
+      female: ["Striking", "Turns heads", "Exceptional"],
+    },
     tone: "high",
     line: "Top fifth. Four out of five faces in the reference set measure below this.",
   },
@@ -236,6 +265,13 @@ const LADDER: Array<{
     words: {
       male: ["Looksmaxxing final boss"],
       female: ["Certified baddie"],
+    },
+    // No word repeats across rungs, in either tone. Two people a fifteen-point
+    // percentile apart reading the same label is the ladder failing at the one
+    // job it has.
+    kind: {
+      male: ["Remarkable", "Genuinely rare"],
+      female: ["Remarkable", "Genuinely rare"],
     },
     tone: "peak",
     line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
@@ -247,6 +283,7 @@ const LADDER: Array<{
     // the rung under it worth less. Roughly an 8.0+ headline score.
     min: 99,
     words: { male: ["True Adam"], female: ["True Eve"] },
+    kind: { male: ["One in a hundred"], female: ["One in a hundred"] },
     tone: "peak",
     line: "Top one per cent. There is nothing above this — the scale ends here.",
   },
@@ -268,9 +305,7 @@ export function verdictForPercentile(
   // Walk down so the highest qualifying rung wins, and the array stays readable
   // in ascending order.
   const rung = [...LADDER].reverse().find((r) => percentile >= r.min) ?? LADDER[0];
-  // Kind mode falls through to the blunt words wherever no softer version
-  // exists, which is every rung that was already good news.
-  const words = (tone === "kind" ? rung.kind?.[sex] : undefined) ?? rung.words[sex];
+  const words = tone === "kind" ? rung.kind[sex] : rung.words[sex];
   // Derived from the percentile, never random. Pressing the button again must
   // not change your verdict; a result that moves when you re-roll it is not a
   // measurement and nobody believes it twice.
