@@ -106,36 +106,92 @@ export interface Verdict {
   tone: "low" | "mid" | "high" | "peak";
 }
 
-const LADDER: Array<{ min: number; word: string; tone: Verdict["tone"]; line: (s: Sex) => string }> = [
+// Eight rungs, and where the words differ by reference population they differ,
+// because "she-mogger" and "mogger" are not the same joke and neither is a
+// translation of the other.
+//
+// Several rungs carry two words and alternate between them. That is the whole
+// reason this mode gets re-run and re-screenshotted: two friends landing on the
+// same band should not get the same line. The choice is derived from the
+// percentile rather than randomised, so one face always gets one answer — a
+// verdict that changes when you press the button again is a verdict nobody
+// believes.
+//
+// There is still no rung below "You're cooked", and there is deliberately no
+// "whale". Two independent reasons and either one is sufficient: this engine
+// measures a FACE and cannot see body fat, so the word would be a fabrication
+// dressed as a measurement; and a weight insult aimed at a thirteen-year-old is
+// the one thing in this product that could do real damage. Everything else that
+// was asked for is here.
+const LADDER: Array<{
+  min: number;
+  words: Record<Sex, string[]>;
+  tone: Verdict["tone"];
+  line: string;
+}> = [
   {
     min: 0,
-    word: "Chopped",
+    words: { male: ["You're cooked"], female: ["You're cooked"] },
     tone: "low",
-    line: () => "Bottom fifth of the reference set. Most of what is dragging it is grooming and body fat, and both move.",
+    line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
   },
   {
-    min: 20,
-    word: "Aight",
+    min: 12,
+    words: { male: ["Chopped"], female: ["Chopped"] },
+    tone: "low",
+    line: "Bottom fifth. The gap is real, and most of it is the part that moves without surgery.",
+  },
+  {
+    min: 26,
+    words: { male: ["Mildly chopped"], female: ["Mildly chopped"] },
+    tone: "low",
+    line: "Below the middle. One or two numbers are doing the damage rather than all of them.",
+  },
+  {
+    min: 40,
+    words: { male: ["Mid"], female: ["Mid"] },
     tone: "mid",
-    line: () => "Below the middle, but nowhere near the bottom. Ordinary, which is where most faces live.",
+    line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
   },
   {
-    min: 50,
-    word: "Fine",
+    min: 52,
+    words: { male: ["Aight"], female: ["Aight"] },
     tone: "mid",
-    line: () => "Above average. Nothing here is holding you back; the gap to the next rung is mostly upkeep.",
+    line: "Just above the middle. Nothing is wrong; nothing is carrying you either.",
   },
   {
-    min: 80,
-    word: "Mogger",
+    min: 65,
+    words: { male: ["Good looking", "Attractive"], female: ["Good looking", "Attractive"] },
     tone: "high",
-    line: () => "Top fifth. You are measurably ahead of four out of five faces in the reference set.",
+    line: "Top third. Measurably ahead of two out of three faces in the reference set.",
+  },
+  {
+    min: 82,
+    words: {
+      male: ["Mogger", "Marlon level"],
+      female: ["She-mogger", "Fine shyt"],
+    },
+    tone: "high",
+    line: "Top fifth. Four out of five faces in the reference set measure below this.",
   },
   {
     min: 95,
-    word: "TrueMax",
+    words: {
+      male: ["Looksmaxxing final boss"],
+      female: ["Certified baddie"],
+    },
     tone: "peak",
-    line: () => "Top five per cent. This is the end of the scale — there is no rung above it.",
+    line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
+  },
+  {
+    // The top one per cent, and deliberately its own rung rather than an
+    // alternate of the one below. A ceiling that lands every twentieth scan is
+    // not a ceiling — it is just the top band with a second name, and it makes
+    // the rung under it worth less. Roughly a 8.0+ headline score.
+    min: 99,
+    words: { male: ["True Adam"], female: ["True Eve"] },
+    tone: "peak",
+    line: "Top one per cent. There is nothing above this — the scale ends here.",
   },
 ];
 
@@ -151,5 +207,10 @@ export function verdictForPercentile(percentile: number, sex: Sex = "male"): Ver
   // Walk down so the highest qualifying rung wins, and the array stays readable
   // in ascending order.
   const rung = [...LADDER].reverse().find((r) => percentile >= r.min) ?? LADDER[0];
-  return { word: rung.word, line: rung.line(sex), tone: rung.tone };
+  const words = rung.words[sex];
+  // Derived from the percentile, never random. Pressing the button again must
+  // not change your verdict; a result that moves when you re-roll it is not a
+  // measurement and nobody believes it twice.
+  const pick = words[Math.abs(Math.round(percentile * 10)) % words.length];
+  return { word: pick, line: rung.line, tone: rung.tone };
 }
