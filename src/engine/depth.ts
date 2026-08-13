@@ -34,6 +34,9 @@ export interface AccessInput {
   // How many scans this account has run in total. Local history is the source:
   // the count is not a billing fact and does not need to survive a device wipe.
   scanCount: number;
+  // Purchased one-time credits, from the server. A credit is one full-depth
+  // scan without a subscription; while any remain, the gate stays open.
+  credits?: number;
 }
 
 function live(entitlement: Entitlement | null): boolean {
@@ -51,13 +54,16 @@ export function tierOf(entitlement: Entitlement | null): EntitlementTier {
 // Note the ORDER: a paid tier is checked before the trial allowance, so an
 // account that subscribed during its trial is served by its subscription and
 // cannot be downgraded by having scanned three times.
-export function depthFor({ entitlement, scanCount }: AccessInput): Depth {
+export function depthFor({ entitlement, scanCount, credits = 0 }: AccessInput): Depth {
   const tier = tierOf(entitlement);
   if (tier === "max") return "plan";
   if (tier === "starter") return "depth";
   // The free allowance. Scans are zero-indexed from the account's history, so
   // "has run fewer than two" is the first and second scan.
   if (scanCount < TRIAL_SCANS) return "depth";
+  // A purchased credit is exactly one more scan of the same depth the
+  // allowance gave. It does not touch the plan tier — that is Max's.
+  if (credits > 0) return "depth";
   return "rating";
 }
 

@@ -11,6 +11,7 @@ import {
 } from "../engine/onboarding.js";
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { startTrialCheckout } from "../engine/entitlement.js";
+import { track } from "../engine/track.js";
 
 type PlanTier = "starter" | "max";
 
@@ -158,6 +159,7 @@ export async function openTrialFunnel(
 
   const drawOffer = () => {
     if (!host) return;
+    track("offer-shown");
     const adult = profileIsAdult(profile);
     // The .offer-enter classes drive the reveal: the shell rises, then the two
     // plans slide in from their own sides with the Max card landing a beat
@@ -235,6 +237,7 @@ export async function openTrialFunnel(
         busy = true;
         const status = host?.querySelector<HTMLElement>(".trial-status");
         for (const item of host?.querySelectorAll<HTMLButtonElement>("[data-checkout]") || []) item.disabled = true;
+        track("checkout-started");
         button.textContent = "Opening secure Checkout…";
         const result = await startTrialCheckout(button.dataset.checkout as PlanTier);
         if (!result.ok && host) {

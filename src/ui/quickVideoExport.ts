@@ -23,6 +23,13 @@ const H = 1280;
 const FPS = 30;
 const DURATION: Record<QuickVariant, number> = { breakdown: 5.5, verdict: 4 };
 
+// The producer re-renders the analysis segment frame by frame through
+// renderQuickVideoFrame rather than decoding an MP4 back in, so it needs to
+// know where the animation ends without duplicating the number.
+export function quickVideoDuration(variant: QuickVariant): number {
+  return DURATION[variant];
+}
+
 export interface QuickExportScores {
   overall: number;
   percentile: number;
@@ -110,8 +117,10 @@ function drawFrame(
   ctx.fillRect(0, 0, W, H);
   if (variant === "verdict") {
     drawVerdictFrame(ctx, photo, landmarks, scores, t);
+    drawWatermark(ctx);
     return;
   }
+  drawWatermark(ctx);
 
   ctx.font = "600 18px Inter, Arial, sans-serif";
   ctx.letterSpacing = "5px";
@@ -198,6 +207,29 @@ function drawFrame(
     ctx.fillStyle = "#0c876f";
     ctx.fillRect(x + 16, y + 66, (cw - 32) * clamp01(region.score / 10) * stagger, 3);
   });
+  ctx.restore();
+}
+
+// The way back. A reel that travels without its address is an ad for a
+// product nobody can find, so the address sits on every frame — screenshots,
+// trims and re-uploads all carry it. Steady rather than animated, and dim
+// enough to read as a signature instead of a banner; both variants keep the
+// bottom 40px of the frame clear of content, so nothing ever sits under it.
+function drawWatermark(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.font = "500 16px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "2px";
+  ctx.textAlign = "left";
+  const name = "truemax";
+  const tld = ".app";
+  const total = ctx.measureText(name).width + ctx.measureText(tld).width;
+  const x = (W - total) / 2;
+  const y = H - 22;
+  ctx.globalAlpha = 0.62;
+  ctx.fillStyle = "#f5f5f1";
+  ctx.fillText(name, x, y);
+  ctx.fillStyle = "#0c876f";
+  ctx.fillText(tld, x + ctx.measureText(name).width, y);
   ctx.restore();
 }
 

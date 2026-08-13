@@ -1921,6 +1921,14 @@ body.auth-modal-open { overflow: hidden; }
 .maxread.stalled .maxread-who, .maxread.slipping .maxread-who { color: var(--warm, #c07a4a); }
 .maxread > b { display: block; margin: 5px 0 6px; font: 400 17px/1.25 var(--serif); }
 .maxread > p { margin: 0; color: var(--mut); font-size: 13px; line-height: 1.6; }
+/* The region-by-region line: quieter and set off from the verdict paragraph,
+   because it is the footnote naming where the change lives, not a second
+   verdict competing with the first. */
+.maxread > p.maxread-regions {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 12.5px;
+}
 .maxread .linkish { margin-top: 11px; font-size: 12.5px; }
 
 /* Reset-to-automatic on the side verifier: the circular arrow, sitting to the
@@ -2036,3 +2044,80 @@ body.auth-modal-open { overflow: hidden; }
 body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; overscroll-behavior: none; }
 .trial-overlay { overscroll-behavior: contain; }
 .trial-body, .settings-body, .sref-card { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.lock-single { display: block; margin: 10px auto 0; font-size: 11.5px; }
+
+/* --- the TikTok producer ---------------------------------------------------
+   Before clips, the analysis, after clips. A full-screen sheet like the
+   history and celeb overlays, dark like the reel it produces, so the thumbnails
+   read as footage rather than form fields. */
+.q-produce-offer {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 0 28px 22px; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+}
+.q-produce-offer span { flex: 1 1 240px; font-size: 13px; color: var(--mut); line-height: 1.5; }
+.prod {
+  position: fixed; inset: 0; z-index: 90; overflow-y: auto;
+  background: var(--bg); overscroll-behavior: contain;
+}
+.prod-inner { position: relative; max-width: 680px; margin: 0 auto; padding: 46px 22px 80px; }
+.prod-head h1 { font: 400 30px/1.15 var(--serif); margin: 0 0 10px; }
+.prod-head p { margin: 0 0 26px; max-width: 480px; color: var(--mut); font-size: 13.5px; line-height: 1.6; }
+.prod-row { margin-bottom: 18px; }
+.prod-row h2 { font: 600 10.5px var(--mono); letter-spacing: .22em; color: var(--mut); margin: 0 0 9px; }
+.prod-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.prod-slot { min-height: 128px; }
+.prod-add {
+  width: 100%; height: 128px; border: 1.5px dashed var(--line); border-radius: 14px;
+  background: none; color: var(--mut); font-size: 13px; cursor: pointer;
+}
+.prod-add:hover { border-color: var(--acc); color: var(--acc); }
+.prod-thumb { position: relative; height: 128px; border-radius: 14px; overflow: hidden; background: #0a0c0b; }
+.prod-thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+.prod-dur {
+  position: absolute; left: 7px; bottom: 6px; padding: 2px 7px; border-radius: 8px;
+  background: rgba(0,0,0,.62); color: #eef0ec; font: 600 10px var(--mono); letter-spacing: .08em;
+}
+.prod-rm {
+  position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; border: 0; border-radius: 50%;
+  background: rgba(0,0,0,.62); color: #eef0ec; font-size: 11px; cursor: pointer; line-height: 1;
+}
+.prod-trim { display: block; margin-top: 7px; }
+.prod-trim input { width: 100%; accent-color: var(--acc); }
+.prod-trim span { display: block; font: 500 10.5px var(--mono); letter-spacing: .06em; color: var(--mut); }
+.prod-mid .prod-analysis {
+  display: flex; align-items: baseline; gap: 10px; padding: 13px 16px;
+  border: 1px solid var(--acc); border-radius: 14px; background: var(--card);
+}
+.prod-analysis b { font: 400 15px var(--serif); }
+.prod-analysis span { font: 500 10.5px var(--mono); letter-spacing: .08em; color: var(--mut); }
+.prod-opts { display: flex; gap: 26px; flex-wrap: wrap; margin: 24px 0 6px; }
+.prod-opt > span { display: block; font: 600 10.5px var(--mono); letter-spacing: .18em; color: var(--mut); margin-bottom: 8px; }
+.prod-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.prod-seg button {
+  padding: 8px 15px; border: 0; background: none; color: var(--mut); font-size: 13px; cursor: pointer;
+}
+.prod-seg button + button { border-left: 1px solid var(--line); }
+.prod-seg button.on { background: var(--acc); color: #06110e; }
+.prod-note { margin: 14px 0 18px; max-width: 460px; color: var(--mut); font-size: 12.5px; line-height: 1.55; }
+.prod-build { width: 100%; max-width: 340px; }
+.prod-msg { min-height: 18px; margin: 10px 0 0; color: var(--warm, #c07a4a); font-size: 12.5px; }
+.prod-caption { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line); }
+.prod-caption h2 { font: 400 21px var(--serif); margin: 0 0 16px; }
+.prod-caption .prod-opt { margin-bottom: 14px; }
+.prod-input {
+  display: block; width: 100%; max-width: 420px; margin: 0 0 12px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: inherit;
+  font-size: 16px; /* under 16px, iOS zooms the page on focus */
+}
+.prod-cap-out { margin-top: 14px; }
+.prod-cap-out pre {
+  margin: 0 0 12px; padding: 15px 17px; max-width: 480px; white-space: pre-wrap;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+  font: 13px/1.65 inherit; font-family: inherit;
+}
+@media (max-width: 560px) {
+  .prod-slots { gap: 7px; }
+  .prod-add, .prod-thumb, .prod-slot { min-height: 106px; height: auto; }
+  .prod-add, .prod-thumb { height: 106px; }
+}

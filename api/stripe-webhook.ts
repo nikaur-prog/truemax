@@ -72,6 +72,21 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      // Scan-credit purchases are payments with a purpose marker the server
+      // stamped at Checkout creation. Payment status is checked because a
+      // completed session with delayed payment methods can still be unpaid,
+      // and a credit granted on an unpaid session is a free scan.
+      if (session.metadata?.purpose === "scan_credit" && session.payment_status === "paid") {
+        const userId = session.metadata.supabase_user_id;
+        if (userId) {
+          const { error } = await getSupabaseAdmin().rpc("grant_scan_credit", { p_user_id: userId });
+          if (error) throw new Error(`Scan credit grant failed: ${error.message}`);
+        }
+      }
+    }
+
     if (event.type === "checkout.session.expired") {
       const session = event.data.object;
       const userId = session.metadata?.supabase_user_id;

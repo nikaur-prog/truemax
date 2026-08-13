@@ -1,0 +1,45 @@
+// ---------------------------------------------------------------------------
+// Client side of the funnel counter. One function, fire-and-forget.
+//
+// sendBeacon where it exists, because half of these events fire on pages the
+// person is in the middle of leaving, and a fetch can be cancelled by the
+// navigation that the event is reporting. Deduplicated per event per page
+// load: funnels count people reaching a stage, not renders of it.
+//
+// Nothing here identifies anyone — see api/track.ts for what the server side
+// refuses to store, which is the actual guarantee.
+// ---------------------------------------------------------------------------
+
+export type FunnelEvent =
+  | "visit"
+  | "scan-front-done"
+  | "scan-side-done"
+  | "gate-shown"
+  | "account-created"
+  | "results-shown"
+  | "plan-opened"
+  | "offer-shown"
+  | "checkout-started"
+  | "single-scan-started"
+  | "quick-visit"
+  | "quick-scan-done"
+  | "quick-video-downloaded";
+
+const sent = new Set<FunnelEvent>();
+
+export function track(event: FunnelEvent): void {
+  if (sent.has(event)) return;
+  sent.add(event);
+  try {
+    const body = JSON.stringify({ event });
+    if (navigator.sendBeacon?.("/api/track", new Blob([body], { type: "application/json" }))) return;
+    void fetch("/api/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    /* analytics must never break the app */
+  }
+}

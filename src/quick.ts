@@ -10,6 +10,7 @@ import type { CameraHandle } from "./ui/camera.js";
 import { rankShort } from "./ui/templates.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
+import { track } from "./engine/track.js";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
@@ -18,6 +19,7 @@ import { drawLandmarksAnimated } from "./ui/overlay.js";
 import type { Report, Sex } from "./engine/types.js";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
+import { openProducer } from "./ui/quickProducer.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -177,6 +179,7 @@ function withSex(next: () => void): void {
 function paintSilhouette(): void {
   drawQuickSilhouette(el.silhouette, storedSex() ?? "male");
 }
+track("quick-visit");
 paintSilhouette();
 window.addEventListener("resize", paintSilhouette);
 
@@ -264,6 +267,7 @@ async function run(src: HTMLCanvasElement): Promise<void> {
   // man as female while testing this page, and at 58.8% on held-out faces
   // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
   last = { lm, w: src.width, h: src.height, photo: src };
+  track("quick-scan-done");
   show(storedSex() ?? "male", true);
 }
 
@@ -549,6 +553,8 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       variant,
     );
     if (btn) btn.textContent = "MP4 downloaded";
+    track("quick-video-downloaded");
+    offerProducer(r);
   } catch (error) {
     console.error(error);
     if (btn) btn.textContent = "MP4 unavailable here";
@@ -560,6 +566,25 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       }, 1600);
     }
   }
+}
+
+// Offered after a reel is built rather than as a fourth button up front: the
+// producer needs footage the person has to go and choose, so the moment they
+// have just watched their own analysis render is the moment the ask lands.
+// Inserted once; a new scan re-renders the card and clears it naturally.
+function offerProducer(r: Report): void {
+  if (!last || document.getElementById("q-produce")) return;
+  const actions = el.cards.querySelector(".q-actions");
+  if (!actions) return;
+  const bar = document.createElement("div");
+  bar.className = "q-produce-offer";
+  bar.innerHTML = `<span>Would you like to make a TikTok out of it? Before clips, your analysis, after clips — one video.</span>
+    <button class="btn pri" id="q-produce">Make a TikTok →</button>`;
+  actions.insertAdjacentElement("afterend", bar);
+  (bar.querySelector("#q-produce") as HTMLButtonElement).onclick = () => {
+    if (!last) return;
+    openProducer({ photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) });
+  };
 }
 
 // Download the card as a PNG. The stage is the whole reveal (photo + cards), so

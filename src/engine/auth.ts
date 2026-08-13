@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/supabase-js";
+import { track } from "./track.js";
 
 // ---------------------------------------------------------------------------
 // Accounts, on Supabase.
@@ -183,6 +184,9 @@ export async function signUp(email: string, password: string): Promise<AuthResul
       options: { emailRedirectTo: authRedirects().scan },
     });
     if (error) return { ok: false, message: friendly(error.message) };
+    // Counted at sign-up success, confirmed or not — the account exists either
+    // way, and this is the only spot both outcomes pass through.
+    track("account-created");
     return { ok: true, needsConfirmation: !data.session };
   } catch (error) {
     console.error("TrueMax signup client failure", error);
