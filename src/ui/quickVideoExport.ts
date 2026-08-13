@@ -309,6 +309,59 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 // engine/analysisMode.ts, which reads the same percentile as every other
 // surface — so a reel and the app can never disagree about the same face.
 // ---------------------------------------------------------------------------
+// Largest size at which the verdict still fits, wrapping onto a second line
+// before it shrinks.
+//
+// The size was hard-coded at 92px, set against "Mogger" and never rechecked.
+// The ladder now reaches "Comfortably above average" — twenty-five characters,
+// nearly three frame-widths at that size, which is how "Background character"
+// came to run off both edges and through the label above it.
+//
+// Shrinking alone is the wrong fix: fitting the longest rung on one line means
+// about 42px, and a verdict that small stops being the punchline of the clip.
+// Two lines at a big size reads better than one line at a small one, so this
+// wraps first and only then steps the size down.
+//
+// Stepping rather than solving, because letter-spacing and font fallback make
+// the relationship between size and width not quite linear, and a measured
+// answer beats a clever one.
+export function fitVerdict(
+  ctx: CanvasRenderingContext2D,
+  word: string,
+  maxWidth: number,
+  start: number,
+  overshoot = 1,
+): { size: number; lines: string[] } {
+  const previous = ctx.font;
+  const spacing = ctx.letterSpacing;
+  ctx.letterSpacing = "-2px";
+  const words = word.split(" ");
+
+  const wrap = (size: number): string[] | null => {
+    ctx.font = `300 ${size}px Fraunces, Georgia, serif`;
+    const fits = (text: string) => ctx.measureText(text).width * overshoot <= maxWidth;
+    if (fits(word)) return [word];
+    if (words.length < 2) return null;
+    // Only ever two lines. Three lines of a one-word verdict is a paragraph.
+    for (let split = 1; split < words.length; split++) {
+      const top = words.slice(0, split).join(" ");
+      const bottom = words.slice(split).join(" ");
+      if (fits(top) && fits(bottom)) return [top, bottom];
+    }
+    return null;
+  };
+
+  let size = start;
+  let lines = wrap(size);
+  while (!lines && size > 34) {
+    size -= 2;
+    lines = wrap(size);
+  }
+  ctx.font = previous;
+  ctx.letterSpacing = spacing;
+  return { size, lines: lines ?? [word] };
+}
+
 function drawVerdictFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
@@ -357,16 +410,25 @@ function drawVerdictFrame(
   ctx.letterSpacing = "4px";
   ctx.fillStyle = "#747b77";
   ctx.textAlign = "center";
-  ctx.fillText("VERDICT", W / 2, wordY - 62);
-
   // Overshoot slightly and settle back, so the word arrives with weight.
   const scale = 1 + (1 - eased) * 0.14;
+  // 92px was set against "Mogger" and never rechecked. "Background character"
+  // is nineteen characters and ran off both edges of a 720px frame, straight
+  // through the label above it. The size is now derived from the longest word
+  // the ladder can actually produce, measured at the peak of the overshoot —
+  // sizing to the settled width would still clip on the frame where it lands.
+  const { size, lines } = fitVerdict(ctx, verdict.word, pw, 92, scale);
+  const step = size * 0.94;
+  // A two-line verdict grows downward from the label, so the label sits above
+  // the first line rather than above the block, and the bar clears the last.
+  ctx.fillText("VERDICT", W / 2, wordY - size * 0.9);
+
   ctx.translate(W / 2, wordY);
   ctx.scale(scale, scale);
-  ctx.font = "300 92px Fraunces, Georgia, serif";
+  ctx.font = `300 ${size}px Fraunces, Georgia, serif`;
   ctx.letterSpacing = "-2px";
   ctx.fillStyle = bright ? "#8ff3e0" : "#f7f7f2";
-  ctx.fillText(verdict.word, 0, 0);
+  lines.forEach((line, i) => ctx.fillText(line, 0, i * step));
   ctx.restore();
 
   // The bar is the honesty. A one-word verdict on its own is a claim; the same
@@ -375,7 +437,7 @@ function drawVerdictFrame(
   if (barAlpha <= 0) return;
   ctx.save();
   ctx.globalAlpha = barAlpha;
-  const barY = wordY + 62;
+  const barY = wordY + (lines.length - 1) * step + 62;
   const barW = pw;
   ctx.fillStyle = "#222725";
   ctx.fillRect(px, barY, barW, 4);

@@ -14,6 +14,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { renderResults, setMaxAccess } from "./ui/results.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
+import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.js";
 import { analyzeSide } from "./engine/scoring.js";
@@ -309,6 +310,29 @@ el.fileInput.addEventListener("change", () => {
   if (file) handleFile(file);
 });
 el.btnUpload.addEventListener("click", () => ensureSex(() => el.fileInput.click()));
+
+// Paste or drag a photo anywhere on the page rather than going through the
+// picker. Same reasoning as /quick: the photo has usually just been cropped or
+// screenshotted and is already on the clipboard. Routed through ensureSex so a
+// pasted first photo still chooses its reference population, and held off while
+// a scan is already running so a stray Cmd-V cannot restart one mid-animation.
+enablePhotoPaste({
+  // Only on the capture screen. Once the scan is running or the results are up,
+  // a stray Cmd-V should do nothing rather than throw away the analysis on
+  // screen and start again.
+  busy: () => el.upload.classList.contains("hidden"),
+  dropZone: el.ovalFrame,
+  onImage: (file) => ensureSex(() => handleFile(file)),
+});
+
+// Only shown where the gesture exists.
+if (pasteHintApplies()) {
+  const hint = document.getElementById("paste-hint");
+  if (hint) {
+    hint.innerHTML = "…or paste a photo with <kbd>" + (navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl") + "</kbd><kbd>V</kbd>, or drag one in";
+    hint.hidden = false;
+  }
+}
 el.ovalFrame.addEventListener("dragover", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.add("dragover");

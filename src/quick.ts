@@ -9,6 +9,7 @@ import { isSupported, startCamera } from "./ui/camera.js";
 import type { CameraHandle } from "./ui/camera.js";
 import { rankShort } from "./ui/templates.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
+import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
@@ -195,6 +196,30 @@ el.file.onchange = async () => {
   const f = el.file.files?.[0];
   el.file.value = "";
   if (!f) return;
+  await useFile(f);
+};
+
+// Paste or drag straight onto the page. The photo somebody wants scanned has
+// almost always just been looked at, so it is already on the clipboard; sending
+// them to save it and find it again in a picker is three steps back to where
+// they started. Goes through withSex so a pasted first photo still picks a
+// reference population rather than silently defaulting.
+enablePhotoPaste({
+  busy: () => el.stage.classList.contains("scanning"),
+  dropZone: el.frame,
+  onImage: (file) => withSex(() => void useFile(file)),
+});
+
+// Only shown where the gesture exists.
+if (pasteHintApplies()) {
+  const hint = document.getElementById("q-paste-hint");
+  if (hint) {
+    hint.innerHTML = "…or paste a photo with <kbd>" + (navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl") + "</kbd><kbd>V</kbd>, or drag one in";
+    hint.hidden = false;
+  }
+}
+
+async function useFile(f: File): Promise<void> {
   stopCamera();
   const img = await loadImage(f);
   const s = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
@@ -203,7 +228,7 @@ el.file.onchange = async () => {
   c.height = Math.round(img.naturalHeight * s);
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
   await run(c);
-};
+}
 
 function stopCamera(): void {
   if (!cam) return;
