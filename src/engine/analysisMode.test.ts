@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { basicScores, verdictFor, verdictForPercentile } from "./analysisMode.ts";
+import type { VerdictTone } from "./analysisMode.ts";
 import type { Report } from "./types.ts";
 
 const report = (over: Partial<Report> = {}): Report =>
@@ -29,10 +30,10 @@ test("each rung starts exactly where it says it does", () => {
   assert.equal(at(11.9), "You're cooked");
   assert.equal(at(12), "Chopped");
   assert.equal(at(25.9), "Chopped");
-  assert.equal(at(26), "Mildly chopped");
-  assert.equal(at(40), "Mid");
-  assert.equal(at(52), "Aight");
-  assert.ok(["Good looking", "Attractive"].includes(at(65)));
+  assert.ok(["Mildly chopped", "Rough"].includes(at(26)));
+  assert.ok(["Mid", "NPC", "Background character"].includes(at(40)));
+  assert.ok(["Aight", "Decent", "Solid"].includes(at(52)));
+  assert.ok(["Good looking", "Attractive", "Sharp"].includes(at(65)));
   assert.ok(["Mogger", "Marlon level"].includes(at(82)));
   assert.equal(at(95), "Looksmaxxing final boss");
   assert.equal(at(98.9), "Looksmaxxing final boss");
@@ -126,4 +127,48 @@ test("the percentile entry point agrees with the report entry point", () => {
       `${pct}`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// Tone
+// ---------------------------------------------------------------------------
+
+test("kind mode softens the bands that sting and leaves the rest alone", () => {
+  const at = (pct: number, tone: VerdictTone) =>
+    verdictForPercentile(pct, "male", tone).word;
+  // Bottom five rungs get a softer word.
+  for (const pct of [5, 18, 30, 45, 58]) {
+    assert.notEqual(at(pct, "kind"), at(pct, "blunt"), `${pct}`);
+  }
+  // The top four are already good news; softening them would be talking down
+  // to somebody who just got a good result.
+  for (const pct of [70, 88, 96, 99.5]) {
+    assert.equal(at(pct, "kind"), at(pct, "blunt"), `${pct}`);
+  }
+});
+
+test("kind mode never uses the harsh vocabulary", () => {
+  const banned = /cooked|chopped|npc|rough|background character/i;
+  for (const sex of ["male", "female"] as const) {
+    for (let pct = 0; pct <= 100; pct += 0.5) {
+      const word = verdictForPercentile(pct, sex, "kind").word;
+      assert.ok(!banned.test(word), `${sex} ${pct}: ${word}`);
+    }
+  }
+});
+
+test("tone changes the label and never the measurement", () => {
+  // The whole feature rests on this. A supportive mode that quietly inflated
+  // the score would be the same lie as a harsh one that deflated it.
+  for (let pct = 0; pct <= 100; pct += 2.5) {
+    const blunt = verdictForPercentile(pct, "male", "blunt");
+    const kind = verdictForPercentile(pct, "male", "kind");
+    assert.equal(blunt.tone, kind.tone, `tone band at ${pct}`);
+    assert.equal(blunt.line, kind.line, `explanation at ${pct}`);
+  }
+});
+
+test("blunt is the default, so an unasked caller gets the real ladder", () => {
+  assert.equal(verdictForPercentile(5).word, "You're cooked");
+  assert.equal(verdictForPercentile(5, "male").word, "You're cooked");
 });

@@ -18,7 +18,8 @@ import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcer
 import { openQuiz } from "./goalsQuiz.ts";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
 import { GOALS } from "../engine/goals.ts";
-import { ANALYSIS_MODES, basicScores, loadAnalysisMode, saveAnalysisMode, verdictFor } from "../engine/analysisMode.ts";
+import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.ts";
+import { askVerdictTone } from "./tonePrompt.ts";
 import type { AnalysisMode } from "../engine/analysisMode.ts";
 
 interface Ctx {
@@ -1059,7 +1060,7 @@ function showShallow(mode: AnalysisMode): void {
 }
 
 function verdictHTML(): string {
-  const v = verdictFor(ctx!.report);
+  const v = verdictFor(ctx!.report, loadVerdictTone() ?? "blunt");
   return `<div class="verdict ${v.tone}">
     <span class="verdict-label">VERDICT</span>
     <b class="verdict-word">${v.word}</b>
@@ -1104,8 +1105,12 @@ function modeSwitcher(current: AnalysisMode): string {
 
 function wireModeSwitcher(): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>(".ms-btn")) {
-    b.onclick = () => {
+    b.onclick = async () => {
       const mode = b.dataset.mode as AnalysisMode;
+      // The question belongs to the mode, not to the place it was chosen. A
+      // person who picked full analysis in the quiz and switches here months
+      // later has still never been asked.
+      if (mode === "verdict" && loadVerdictTone() === null) await askVerdictTone();
       saveAnalysisMode(mode);
       showOverall();
     };
