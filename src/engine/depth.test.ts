@@ -78,3 +78,13 @@ test("the remaining-scan count only speaks to free accounts", () => {
   // scans on a paid screen reads as a downgrade notice.
   assert.equal(freeScansLeft({ entitlement: ent("starter"), scanCount: 0 }), 0);
 });
+
+test("a purchased credit opens depth past the allowance, and only depth", () => {
+  // The non-subscription road through the gate. Credits never grant the plan
+  // tier — that is Max's — and a member's depth comes from the membership, so
+  // credits change nothing for them.
+  assert.equal(depthFor({ entitlement: null, scanCount: 5, credits: 1 }), "depth");
+  assert.equal(depthFor({ entitlement: null, scanCount: 5, credits: 0 }), "rating");
+  assert.notEqual(depthFor({ entitlement: null, scanCount: 5, credits: 99 }), "plan");
+  assert.equal(depthFor({ entitlement: ent("max"), scanCount: 5, credits: 1 }), "plan");
+});

@@ -103,3 +103,33 @@ export function consumeCheckoutResult(): CheckoutResult | null {
   history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   return value;
 }
+
+// ---------------------------------------------------------------------------
+// One-time scan credits: the non-subscription way through the depth gate.
+// The balance lives server-side and moves only through SECURITY DEFINER
+// functions, so nothing here can invent a credit — only read and spend.
+// ---------------------------------------------------------------------------
+
+export async function loadScanCredits(): Promise<number> {
+  const client = await getSupabaseClient();
+  const { data, error } = await client
+    .from("scan_credits")
+    .select("balance")
+    .maybeSingle<{ balance: number }>();
+  if (error) throw new Error(error.message);
+  return data?.balance ?? 0;
+}
+
+export function startScanCreditCheckout(): Promise<BillingResult> {
+  return billingRedirect("/api/create-checkout-session", { purchase: "scan" });
+}
+
+// Returns the remaining balance, or -1 when there was nothing to spend. Fire
+// and forget from the scan path — a consumption that fails to record is a free
+// scan, which is the survivable direction of that error.
+export async function consumeScanCredit(): Promise<number> {
+  const client = await getSupabaseClient();
+  const { data, error } = await client.rpc("consume_scan_credit");
+  if (error) throw new Error(error.message);
+  return typeof data === "number" ? data : -1;
+}

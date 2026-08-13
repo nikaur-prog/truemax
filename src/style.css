@@ -2036,3 +2036,4 @@ body.auth-modal-open { overflow: hidden; }
 body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; overscroll-behavior: none; }
 .trial-overlay { overscroll-behavior: contain; }
 .trial-body, .settings-body, .sref-card { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.lock-single { display: block; margin: 10px auto 0; font-size: 11.5px; }

@@ -47,7 +47,44 @@ export async function POST(request: Request): Promise<Response> {
     if (!user) return json({ error: "Sign in before starting checkout." }, 401);
     userId = user.id;
 
-    const body = await request.json().catch(() => null) as { tier?: unknown } | null;
+    const body = await request.json().catch(() => null) as { tier?: unknown; purchase?: unknown } | null;
+
+    // One-time scan credit — a payment, not a subscription, so none of the
+    // trial machinery below applies to it. Members pay the member price; the
+    // test is a LIVE subscription rather than "has ever paid", because a
+    // cancelled member is a non-member and pricing that flatters them is a
+    // discount nobody agreed to fund.
+    if (body?.purchase === "scan") {
+      const { data: ent } = await getSupabaseAdmin()
+        .from("entitlements")
+        .select("stripe_customer_id,status,tier")
+        .eq("user_id", user.id)
+        .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
+      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
+      const scanPrice = process.env[member ? "STRIPE_MEMBER_SCAN_PRICE_ID" : "STRIPE_SCAN_PRICE_ID"] || null;
+      if (!scanPrice) return json({ error: "Single scans are still being connected." }, 503);
+      const session = await getStripe().checkout.sessions.create(
+        {
+          mode: "payment",
+          expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+          line_items: [{ price: scanPrice, quantity: 1 }],
+          success_url: `${origin}/?purchase=scan-success`,
+          cancel_url: `${origin}/?purchase=scan-cancelled`,
+          client_reference_id: user.id,
+          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
+          metadata: { supabase_user_id: user.id, purpose: "scan_credit" },
+          custom_text: {
+            submit: { message: "One in-depth scan, added to your account the moment payment completes. No subscription." },
+          },
+        },
+        request.headers.get("x-idempotency-key")
+          ? { idempotencyKey: request.headers.get("x-idempotency-key") as string }
+          : undefined,
+      );
+      if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+      return json({ url: session.url });
+    }
+
     if (!isPaidTier(body?.tier)) return json({ error: "Choose Starter or Max to continue." }, 400);
     const tier = body.tier;
     const priceId = configuredPrice(tier);

@@ -17,6 +17,7 @@ import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
+import { startScanCreditCheckout } from "../engine/entitlement.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.js";
@@ -1065,6 +1066,7 @@ function showImprove(): void {
               <h4>Max reckons your ceiling is ${r.potential.toFixed(1)} — ${rankShort(aggregateScoreToPercentile(r.potential)).toLowerCase()}.</h4>
               <p>You measured ${r.overall.toFixed(1)}. On this scale most people never see a 7 — the translation is the point. The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
+              <button class="linkish lock-single" id="btn-single-scan">Or one scan on its own — $5.99, $2.99 for members</button>
             </div>
           </div>`
         : planBody}
@@ -1238,12 +1240,26 @@ function locked(content: string): string {
       <p>Your score and your ranking are free on every plan, and always will be. This is the part underneath: all thirty-one measurements, what each one did to the number, and how far it can actually move.</p>
       ${left}
       <div class="navrow"><button class="btn pri" id="btn-unlock">Unlock in-depth · 7 days free</button></div>
+      <button class="linkish lock-single" id="btn-single-scan">Just this once — buy one scan ($5.99, or $2.99 for members)</button>
     </div>
   </div>`;
 }
 
 function wireUnlock(): void {
   document.getElementById("btn-unlock")?.addEventListener("click", () => ctx?.onUpgrade?.());
+  // The non-subscription road through the same gate. One price per person, two
+  // prices on the label, and the server decides which applies — the client
+  // never picks its own price.
+  const single = document.getElementById("btn-single-scan") as HTMLButtonElement | null;
+  single?.addEventListener("click", async () => {
+    single.disabled = true;
+    single.textContent = "Opening secure Checkout…";
+    const result = await startScanCreditCheckout();
+    if (!result.ok) {
+      single.disabled = false;
+      single.textContent = result.message || "Single scans are not available yet.";
+    }
+  });
 }
 
 // What replaces the recommendations for a free or Starter account.
