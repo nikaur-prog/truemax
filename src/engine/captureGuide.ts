@@ -108,6 +108,43 @@ export const FRONT_SMILE_OK = 0.42;
 // percentiles built to survive it.
 export const PHOTO_DARK = 38; // mean luma, 0-255
 export const PHOTO_BRIGHT = 235;
+
+// ---------------------------------------------------------------------------
+// Is there enough light on this face?
+//
+// The old answer was "is the mean luma of the face above 38", and that question
+// has a skin tone in it. A well-lit dark-skinned face measures a mean in the
+// forties and fifties; a well-lit pale one measures well over a hundred. A
+// fixed mean threshold therefore tells some people to turn a light on in a room
+// that is already bright, and it tells them so on the basis of their
+// complexion. It was reported from a real session in clear light, which is how
+// it came to be looked at, and it would have kept happening.
+//
+// Exposure and pigment separate cleanly if you stop averaging.
+//
+//   lumaHigh — the 95th percentile. On any adequately lit face SOMETHING is
+//   bright: the forehead, the nose bridge, a specular highlight. That holds at
+//   every skin tone. On a genuinely underexposed face nothing is.
+//
+//   darkShare — the share crushed below 16, where detail is gone and no amount
+//   of processing brings it back. Real underexposure clips; dark skin in good
+//   light does not.
+//
+// So "too dark" means the brightest part of the face is still dim, or most of
+// the face has no recoverable detail left. Both are statements about the
+// photograph. Neither is a statement about the person in it.
+export const FACE_HIGHLIGHT_MIN = 62; // 95th percentile floor
+export const FACE_CRUSHED_MAX = 0.45; // share below luma 16
+export const FACE_BLOWN_MAX = 0.3; // share above luma 250
+
+export function lightOk(stats: FrameStats): boolean {
+  if (stats.lumaHigh < FACE_HIGHLIGHT_MIN) return false;
+  if (stats.darkShare > FACE_CRUSHED_MAX) return false;
+  // Overexposure is still worth blocking, and it has no pigment problem: a
+  // blown-out face has lost the geometry the whole measurement depends on,
+  // whoever it belongs to.
+  return stats.luma <= PHOTO_BRIGHT;
+}
 // Sharpness. Measured on the FACE CROP, not the whole scene.
 //
 // This used to be the mean absolute Laplacian of the crop, gated at 9. That
@@ -159,6 +196,12 @@ const GAZE_OK = 0.22;
 
 export interface FrameStats {
   luma: number;
+  // The 95th percentile of luma across the sampled region, and the share of it
+  // crushed to near-black. Together these answer "is this underexposed" without
+  // asking "is this face pale", which is the question a mean luma threshold was
+  // accidentally asking. See lightOk below.
+  lumaHigh: number;
+  darkShare: number;
   // 0..1. Higher is sharper. Brightness- and contrast-invariant by
   // construction: it is a ratio of the same quantity measured twice.
   sharpness: number;
@@ -173,10 +216,26 @@ function statsFromPixels(d: Uint8ClampedArray, width: number, height: number): F
     sum += v;
   }
   const luma = sum / Math.max(1, width * height);
+  // A 256-bin histogram is enough for a percentile on a 160x160 sample and
+  // costs one more pass, where sorting 25,600 floats every frame would not be.
+  const hist = new Uint32Array(256);
+  let dark = 0;
+  for (let p = 0; p < lum.length; p++) {
+    const v = lum[p] | 0;
+    hist[v < 0 ? 0 : v > 255 ? 255 : v]++;
+    if (v < 16) dark++;
+  }
+  let seen = 0;
+  const target = lum.length * 0.95;
+  let lumaHigh = 255;
+  for (let v = 0; v < 256; v++) {
+    seen += hist[v];
+    if (seen >= target) { lumaHigh = v; break; }
+  }
   const d0 = meanNeighbourDiff(lum, width, height);
   const d1 = meanNeighbourDiff(boxBlur3(lum, width, height), width, height);
   const sharpness = d0 <= 1e-6 ? 0 : Math.max(0, (d0 - d1) / d0);
-  return { luma, sharpness };
+  return { luma, lumaHigh, darkShare: dark / Math.max(1, lum.length), sharpness };
 }
 
 // Sample the face region for exposure and focus. Deliberately cheap: a small
@@ -309,7 +368,7 @@ export function checkSideFrame(
     centered: true,
     level: true,
     straight: true,
-    light: stats.luma >= PHOTO_DARK && stats.luma <= PHOTO_BRIGHT,
+    light: lightOk(stats),
     sharp: stats.sharpness >= PHOTO_SHARP_WARN,
     neutral: true,
     gaze: true,
@@ -368,7 +427,7 @@ export function checkSideFrame(
     add((-pose.pitch - SIDE_PITCH_DOWN) / SIDE_PITCH_DOWN, "Lift your chin", "The jaw corner and the line under your chin have to be visible");
     add((pose.pitch - SIDE_PITCH_UP) / SIDE_PITCH_UP, "Chin down a little", "Too far up flattens the jaw angle");
   }
-  add((PHOTO_DARK - stats.luma) / PHOTO_DARK, "Too dark", "Face a window or turn a light on");
+  add((FACE_HIGHLIGHT_MIN - stats.lumaHigh) / FACE_HIGHLIGHT_MIN, "Too dark", "Face a window or turn a light on");
   add((stats.luma - PHOTO_BRIGHT) / PHOTO_BRIGHT, "Too bright", "Move out of direct light");
   add(
     (PHOTO_SHARP_BLOCK - stats.sharpness) / PHOTO_SHARP_BLOCK,
@@ -463,7 +522,7 @@ export function checkFrame(
   gates.centered = Math.abs(cxOff) < 0.1 && Math.abs(cyOff) < 0.12;
   gates.level = Math.abs(q.pitchDeg) <= FRONT_PITCH_OK;
   gates.straight = Math.abs(q.yawDeg) <= FRONT_YAW_OK && Math.abs(q.rollDeg) <= FRONT_ROLL_OK;
-  gates.light = stats.luma >= PHOTO_DARK && stats.luma <= PHOTO_BRIGHT;
+  gates.light = lightOk(stats);
   gates.sharp = stats.sharpness >= PHOTO_SHARP_WARN;
   gates.neutral = q.smileScore <= FRONT_SMILE_OK;
   // A blink loses the irises for a frame or two. Holding the last verdict
@@ -484,7 +543,7 @@ export function checkFrame(
   add((w - TARGET_MAX) / TARGET_MAX, "Move back a little", "You're too close to the lens");
   add((Math.abs(cxOff) - 0.1) / 0.1, cxOff > 0 ? "Move left" : "Move right", "Center your face");
   add((Math.abs(cyOff) - 0.12) / 0.12, cyOff > 0 ? "Move up" : "Move down", "Center your face");
-  add((PHOTO_DARK - stats.luma) / PHOTO_DARK, "Too dark", "Face a window or turn a light on");
+  add((FACE_HIGHLIGHT_MIN - stats.lumaHigh) / FACE_HIGHLIGHT_MIN, "Too dark", "Face a window or turn a light on");
   add((stats.luma - PHOTO_BRIGHT) / PHOTO_BRIGHT, "Too bright", "Move out of direct light");
   add((-q.pitchDeg - FRONT_PITCH_OK) / FRONT_PITCH_OK, "Lower the camera", "It's above your eye line, looking down");
   add((q.pitchDeg - FRONT_PITCH_OK) / FRONT_PITCH_OK, "Raise the camera", "It's below your eye line, looking up");

@@ -1,4 +1,5 @@
 import { readAllHistory } from "../engine/history.js";
+import { followUp } from "../engine/followUp.js";
 import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
@@ -53,6 +54,29 @@ export function isDashboardOpen(): boolean {
   return overlay !== null;
 }
 
+// Max's reading of the run so far, on the screen a returning user actually
+// lands on.
+//
+// It sits under the greeting rather than inside a tab because the whole value
+// is that nobody has to go looking for it: an app that will tell you your
+// routine has not worked, but only if you navigate to the right panel and ask,
+// is not doing the thing that makes it worth paying for.
+//
+// Hidden entirely on a first visit. "One scan is not a trend" is true and worth
+// saying once the person has scanned; on an empty dashboard it is a lecture.
+function followUpCard(scans: StoredScan[]): string {
+  if (scans.length < 2) return "";
+  const points = scans.map((s) => ({ at: Date.parse(s.date), overall: s.overall }));
+  const read = followUp(points);
+  if (read.kind === "too-soon") return "";
+  return `<div class="maxread dash-anim ${read.kind}" style="--d:210ms">
+    <span class="maxread-who">MAX</span>
+    <b>${escapeHtml(read.headline)}</b>
+    <p>${escapeHtml(read.body)}</p>
+    ${read.suggestChange ? `<button class="linkish" id="dash-replan">Rebuild my plan around something else →</button>` : ""}
+  </div>`;
+}
+
 export function openDashboard(opts: {
   onScan: () => void;
   name?: string | null;
@@ -87,6 +111,7 @@ export function openDashboard(opts: {
         <h1 class="dash-anim" style="--d:70ms">${escapeHtml(headline(ctx))}</h1>
         <p class="dash-anim" style="--d:170ms">${escapeHtml(subline(ctx))}</p>
         ${streakChip(streak)}
+        ${followUpCard(scans)}
       </header>
 
       <div class="dash-actions">
@@ -146,6 +171,8 @@ export function openDashboard(opts: {
   // The dashboard stays open behind it: settings is a panel over your own
   // screen, not a place you get sent to and have to navigate back from.
   overlay.querySelector("#dash-settings")?.addEventListener("click", () => opts.onSettings?.());
+  // Rebuilding the plan means revisiting the goals, which is what the quiz is.
+  overlay.querySelector("#dash-replan")?.addEventListener("click", () => opts.onSettings?.());
   overlay.querySelector("#dash-history")?.addEventListener("click", () => openHistory());
   for (const row of overlay.querySelectorAll<HTMLElement>(".dash-scan-row")) {
     row.onclick = () => openHistory();

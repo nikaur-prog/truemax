@@ -26,7 +26,7 @@ const quality = (overrides: Partial<QualityCheck> = {}): QualityCheck => ({
   ...overrides,
 });
 
-const stats: FrameStats = { luma: 128, sharpness: 0.45 };
+const stats: FrameStats = { luma: 128, lumaHigh: 190, darkShare: 0.01, sharpness: 0.45 };
 const occlusion: Occlusion = {
   bridge: 1,
   glasses: false,
