@@ -45,11 +45,66 @@ interface AuthEnv {
 const DEFAULT_URL = "https://ruvgkrlfmixfnmnzqgap.supabase.co";
 const DEFAULT_KEY = "sb_publishable_XLs-l72FzRD5C_QzP9xlkA_vMahWmgw";
 
+// A configured value only wins if it is actually usable.
+//
+// `env.VITE_SUPABASE_URL || DEFAULT_URL` looks safe and is not: `||` only falls
+// back on an EMPTY value, so anything non-empty overrides the working default —
+// including a project ref with no scheme, a URL with a stray space, or a
+// placeholder somebody pasted while setting up Vercel. The Supabase client then
+// throws `Invalid supabaseUrl` on construction, which is thrown inside a promise
+// during a click handler, so it surfaces as an unhandled rejection and every
+// sign-in path dies with no message pointing at the cause. That is exactly the
+// failure this shipped with.
+//
+// A misconfigured override is now ignored in favour of the known-good default,
+// and says so loudly. Wrong-but-present should never beat right.
+function usableUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+// The key needs the same protection, for the same reason and with a different
+// failure. A stale or half-pasted VITE_SUPABASE_ANON_KEY also beats the working
+// default under `||`, and the error it produces — "Invalid API key" on the first
+// request rather than a throw at construction — points at Supabase rather than
+// at the variable, which is a worse trail to follow than the URL one.
+//
+// Deliberately not format-sniffing. Supabase has already changed key formats
+// once (JWT `eyJ…` to `sb_publishable_…`) and a client that rejects the next
+// format is a self-inflicted outage. A length floor catches what actually goes
+// wrong — blank, whitespace, a truncated paste, a leftover placeholder — and
+// never argues with a real key.
+const MIN_KEY_LENGTH = 20;
+
+function usableKey(value: string | undefined): string | null {
+  const key = value?.trim();
+  return key && key.length >= MIN_KEY_LENGTH ? key : null;
+}
+
 function authEnv(): AuthEnv | null {
   const env = import.meta.env;
-  const url = env.VITE_SUPABASE_URL || DEFAULT_URL;
-  const key = env.VITE_SUPABASE_ANON_KEY || DEFAULT_KEY;
-  return url && key ? { url, key } : null;
+  const configuredUrl = env.VITE_SUPABASE_URL?.trim();
+  const url = usableUrl(configuredUrl);
+  if (configuredUrl && !url) {
+    console.error(
+      "[auth] VITE_SUPABASE_URL is not a valid URL, falling back to the built-in project.",
+      JSON.stringify(configuredUrl),
+    );
+  }
+  const configuredKey = env.VITE_SUPABASE_ANON_KEY?.trim();
+  const key = usableKey(configuredKey);
+  if (configuredKey && !key) {
+    // Length only. The key itself is never logged.
+    console.error(
+      `[auth] VITE_SUPABASE_ANON_KEY is too short to be a key (${configuredKey.length} chars), falling back to the built-in key.`,
+    );
+  }
+  return { url: url ?? DEFAULT_URL, key: key ?? DEFAULT_KEY };
 }
 
 export function isAuthAvailable(): boolean {
