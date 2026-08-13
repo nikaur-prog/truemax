@@ -1915,8 +1915,14 @@ body.auth-modal-open { overflow: hidden; }
 
    The stalled and slipping states get a warmer edge than the rest, because the
    whole point is that they read differently from congratulation. */
+/* Max sits in the corner of his own card, wearing the face the reading earned.
+   Small on purpose: the sentence is the product, he is the messenger. */
+.maxread-face {
+  position: absolute; top: -14px; right: 12px; width: 58px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 .maxread {
-  position: relative; margin: 18px 0 0; padding: 16px 18px 15px 20px; max-width: 620px;
+  position: relative; margin: 18px 0 0; padding: 16px 78px 15px 20px; max-width: 620px;
   border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 4px 16px 16px 4px;
   background: var(--card); text-align: left;
 }
@@ -1934,6 +1940,10 @@ body.auth-modal-open { overflow: hidden; }
   font-size: 12.5px;
 }
 .maxread .linkish { margin-top: 11px; font-size: 12.5px; }
+@media (max-width: 560px) {
+  .maxread-face { width: 46px; right: 8px; }
+  .maxread { padding-right: 58px; }
+}
 
 /* Reset-to-automatic on the side verifier: the circular arrow, sitting to the
    left of the action row under the photo. A glyph rather than a word because
@@ -2044,6 +2054,49 @@ body.auth-modal-open { overflow: hidden; }
 .plan-card.open { border-color: var(--acc); }
 .plan-card.max.open { border-color: #4bf5c5; }
 
+/* Moods. Every expression part is drawn once in the SVG; a mood class on the
+   root shows one set and hides the rest, so changing Max's face is a class
+   swap rather than a re-render — and any surface that mounts him gets the
+   whole range for free. `.mx-alt` is the off-by-default state, so an unknown
+   mood degrades to the neutral happy face rather than to a blank head. */
+.mx-alt { display: none; }
+.mx-mood-excited .mx-eye-stars,
+.mx-mood-thinking .mx-brows-thinking,
+.mx-mood-thinking .mx-mouth-flat,
+.mx-mood-concerned .mx-brows-concerned,
+.mx-mood-concerned .mx-mouth-down { display: block; }
+.mx-mood-excited .mx-pupils,
+.mx-mood-excited .mx-lid,
+.mx-mood-thinking .mx-brows-happy,
+.mx-mood-thinking .mx-mouth-open,
+.mx-mood-concerned .mx-brows-happy,
+.mx-mood-concerned .mx-mouth-open { display: none; }
+/* Excited bounces harder and waves on a loop; concerned slows right down. A
+   character whose body language contradicts his face is worse than one with
+   no body language at all. */
+.mx-mood-excited .mx-bob { animation-duration: 1.5s; }
+.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out infinite; }
+.mx-mood-concerned .mx-bob { animation-duration: 5s; }
+.mx-mood-thinking .mx-pupils { animation: mx-ponder 4s ease-in-out infinite; }
+@keyframes mx-ponder { 0%, 100% { transform: translate(-2px, -2.4px); } 50% { transform: translate(-3px, -1px); } }
+
+/* Poke. A hop with real squash-and-stretch, plus a flash of the sparks — the
+   cheapest aliveness there is, and the reason people tap the bird. */
+.mx-svg.poked .mx-bob { animation: mx-hop .62s cubic-bezier(.28,1.5,.4,1); }
+.max-sticker.poked { animation: mx-sticker-pop .5s cubic-bezier(.3,1.6,.45,1); }
+.max-sticker.poked .mx-spark { animation: mx-twinkle .5s ease-in-out; }
+@keyframes mx-hop {
+  0% { transform: translateY(0) scale(1, 1); }
+  22% { transform: translateY(2px) scale(1.09, .9); }
+  55% { transform: translateY(-15px) scale(.94, 1.08); }
+  78% { transform: translateY(1px) scale(1.06, .94); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+@keyframes mx-sticker-pop { 45% { transform: rotate(-4deg) scale(1.07); } }
+.max-sticker { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.mx-antenna-glint { animation: mx-glint 3.8s ease-in-out infinite; }
+@keyframes mx-glint { 0%, 100% { opacity: .75; } 50% { opacity: .25; } }
+
 /* The one statistic on the offer screen. Big accent number, quiet sentence
    under it — the shape every subscription page uses, carrying a fact we can
    actually stand behind rather than an invented outcome claim. */
@@ -2079,7 +2132,9 @@ body.auth-modal-open { overflow: hidden; }
 .max-sticker-sparks { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); pointer-events: none; }
 .mx-spark { opacity: 0; transform-origin: center; animation: mx-twinkle 2.6s ease-in-out infinite; animation-delay: calc(var(--si) * .55s); }
 .mx-svg { display: block; width: 100%; height: auto; }
-/* The whole character breathes and leans. */
+/* The whole character breathes and leans — and squashes a touch at the bottom
+   of the cycle, because a rigid body that only translates reads as a sticker
+   being moved rather than as something alive. */
 .mx-bob { transform-origin: 75px 150px; animation: mx-bob 3.4s ease-in-out infinite; }
 /* The arm rests, then waves in bursts. `.waving` restarts it on demand. */
 .mx-arm { transform-origin: 104px 108px; animation: mx-wave-idle 6s ease-in-out infinite; }
@@ -2092,7 +2147,11 @@ body.auth-modal-open { overflow: hidden; }
 .mx-pulse { animation: mx-pulse 2.2s ease-in-out infinite; }
 .mx-shadow { animation: mx-shadow 3.4s ease-in-out infinite; }
 @keyframes mx-land { from { opacity: 0; transform: translateY(-38px) rotate(-16deg) scale(.86); } }
-@keyframes mx-bob { 50% { transform: translateY(-5px) rotate(1.6deg); } }
+@keyframes mx-bob {
+  0%, 100% { transform: translateY(0) rotate(0) scale(1, 1); }
+  30% { transform: translateY(-5px) rotate(1.6deg) scale(.985, 1.015); }
+  70% { transform: translateY(-2px) rotate(-1deg) scale(1.01, .99); }
+}
 @keyframes mx-antenna { 50% { transform: rotate(-9deg); } }
 @keyframes mx-shadow { 50% { transform: scaleX(.93); opacity: .7; } }
 @keyframes mx-pulse { 50% { opacity: .35; } }
