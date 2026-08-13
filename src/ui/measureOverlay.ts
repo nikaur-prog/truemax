@@ -1,6 +1,6 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { LM } from "../engine/geometry.ts";
-import type { ScoredMetric } from "../engine/types.ts";
+import { LM } from "../engine/geometry.js";
+import type { ScoredMetric } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
 // Measurement overlays: draw the actual measurement on the face.

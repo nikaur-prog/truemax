@@ -1,63 +1,63 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts";
-import { detectStable } from "./engine/consensus.ts";
-import { assessQuality } from "./engine/quality.ts";
-import type { QualityCheck } from "./engine/quality.ts";
-import { analyze } from "./engine/scoring.ts";
-import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.ts";
-import { extractShape, shapeSubset } from "./engine/shape.ts";
-import { compareAndStore, readAllHistory, readHistory } from "./engine/history.ts";
-import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.ts";
-import { toCelebEntry } from "./engine/celebs.ts";
-import { readOrientation } from "./engine/exif.ts";
-import type { Report, Sex } from "./engine/types.ts";
-import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.ts";
-import { renderResults, setMaxAccess } from "./ui/results.ts";
-import { mountGateDemo } from "./ui/gateDemo.ts";
-import { mergeReports } from "./engine/scoring.ts";
-import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.ts";
-import { analyzeSide } from "./engine/scoring.ts";
-import type { SidePoints } from "./engine/sideMetrics.ts";
-import { submitSideCorrectionFeedback } from "./engine/sideFeedback.ts";
-import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.ts";
-import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.ts";
-import { mountDemoReel } from "./ui/demoReel.ts";
-import { hasHistory, openHistory } from "./ui/historyView.ts";
-import { mountAccountButton, openAccount } from "./ui/authModal.ts";
-import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.ts";
-import { hasMaxAccess, loadEntitlement } from "./engine/entitlement.ts";
+import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
+import { detectStable } from "./engine/consensus.js";
+import { assessQuality } from "./engine/quality.js";
+import type { QualityCheck } from "./engine/quality.js";
+import { analyze } from "./engine/scoring.js";
+import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.js";
+import { extractShape, shapeSubset } from "./engine/shape.js";
+import { compareAndStore, readAllHistory, readHistory } from "./engine/history.js";
+import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
+import { toCelebEntry } from "./engine/celebs.js";
+import { readOrientation } from "./engine/exif.js";
+import type { Report, Sex } from "./engine/types.js";
+import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
+import { renderResults, setMaxAccess } from "./ui/results.js";
+import { mountGateDemo } from "./ui/gateDemo.js";
+import { mergeReports } from "./engine/scoring.js";
+import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.js";
+import { analyzeSide } from "./engine/scoring.js";
+import type { SidePoints } from "./engine/sideMetrics.js";
+import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
+import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
+import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
+import { mountDemoReel } from "./ui/demoReel.js";
+import { hasHistory, openHistory } from "./ui/historyView.js";
+import { mountAccountButton, openAccount } from "./ui/authModal.js";
+import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
+import { hasMaxAccess, loadEntitlement } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
-import { revealSideScan } from "./ui/sideScan.ts";
-import { openSexChooser } from "./ui/sexChooser.ts";
-import { createAutoCapture } from "./ui/autoCapture.ts";
-import type { AutoCapture } from "./ui/autoCapture.ts";
-import { openDashboard } from "./ui/dashboard.ts";
-import { mountFaceOutline } from "./ui/faceOutline.ts";
-import type { CameraHandle } from "./ui/camera.ts";
-import { stillFrameStats } from "./engine/captureGuide.ts";
-import type { FrameCheck } from "./engine/captureGuide.ts";
-import { estimateGaze } from "./engine/gaze.ts";
-import { openQuiz } from "./ui/goalsQuiz.ts";
-import { analyzeSkin } from "./engine/skin.ts";
-import { storeSex, storedSex } from "./engine/sexPref.ts";
-import { detectOcclusion } from "./engine/occlusion.ts";
-import { frontPhotoRejection, landmarkBox } from "./engine/photoEligibility.ts";
-import { headCoveringRejection } from "./engine/photoEligibility.ts";
-import { detectHeadCovering } from "./engine/headCovering.ts";
-import { REGION_LANDMARKS } from "./ui/regions.ts";
+import { revealSideScan } from "./ui/sideScan.js";
+import { openSexChooser } from "./ui/sexChooser.js";
+import { createAutoCapture } from "./ui/autoCapture.js";
+import type { AutoCapture } from "./ui/autoCapture.js";
+import { openDashboard } from "./ui/dashboard.js";
+import { mountFaceOutline } from "./ui/faceOutline.js";
+import type { CameraHandle } from "./ui/camera.js";
+import { stillFrameStats } from "./engine/captureGuide.js";
+import type { FrameCheck } from "./engine/captureGuide.js";
+import { estimateGaze } from "./engine/gaze.js";
+import { openQuiz } from "./ui/goalsQuiz.js";
+import { analyzeSkin } from "./engine/skin.js";
+import { storeSex, storedSex } from "./engine/sexPref.js";
+import { detectOcclusion } from "./engine/occlusion.js";
+import { frontPhotoRejection, landmarkBox } from "./engine/photoEligibility.js";
+import { headCoveringRejection } from "./engine/photoEligibility.js";
+import { detectHeadCovering } from "./engine/headCovering.js";
+import { REGION_LANDMARKS } from "./ui/regions.js";
 import {
   clearPendingAnalysis,
   drawStoredPhoto,
   readPendingAnalysis,
   savePendingAnalysis,
-} from "./engine/pendingAnalysis.ts";
+} from "./engine/pendingAnalysis.js";
 import {
   brandClass,
   membershipBrand,
   MEMBERSHIP_BRAND_EVENT,
-} from "./ui/membershipBrand.ts";
-import type { MembershipBrand } from "./ui/membershipBrand.ts";
-import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.ts";
+} from "./ui/membershipBrand.js";
+import type { MembershipBrand } from "./ui/membershipBrand.js";
+import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
 
 const MAX_IMAGE_DIM = 1280;
 

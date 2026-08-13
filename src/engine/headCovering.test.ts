@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyCoveringMask } from "./headCovering.ts";
+import { classifyCoveringMask } from "./headCovering.js";
 
 const W = 100;
 const H = 100;

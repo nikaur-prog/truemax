@@ -1,7 +1,7 @@
-import type { Pt } from "../engine/geometry.ts";
-import type { SidePoints } from "../engine/sideMetrics.ts";
-import type { ScoredMetric } from "../engine/types.ts";
-import type { OverlayFade } from "./measureOverlay.ts";
+import type { Pt } from "../engine/geometry.js";
+import type { SidePoints } from "../engine/sideMetrics.js";
+import type { ScoredMetric } from "../engine/types.js";
+import type { OverlayFade } from "./measureOverlay.js";
 
 // ---------------------------------------------------------------------------
 // Side-profile measurement overlays — the profile's answer to measureOverlay.

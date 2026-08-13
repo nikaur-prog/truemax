@@ -4,19 +4,19 @@ import {
   isAuthAvailable,
   onAuthChange,
   signOut,
-} from "../engine/auth.ts";
+} from "../engine/auth.js";
 import {
   consumeCheckoutResult,
   hasPaidAccess,
   hasMaxAccess,
   loadEntitlement,
   openBillingPortal,
-} from "../engine/entitlement.ts";
+} from "../engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
-import { renderAuthForm } from "./authForm.ts";
-import type { AuthMode } from "./authForm.ts";
-import { announceMembershipBrand } from "./membershipBrand.ts";
-import { openTrialFunnel } from "./onboardingFunnel.ts";
+import { renderAuthForm } from "./authForm.js";
+import type { AuthMode } from "./authForm.js";
+import { announceMembershipBrand } from "./membershipBrand.js";
+import { openTrialFunnel } from "./onboardingFunnel.js";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.

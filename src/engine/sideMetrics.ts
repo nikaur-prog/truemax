@@ -1,6 +1,6 @@
-import type { Pt } from "./geometry.ts";
-import { angleAt, dist } from "./geometry.ts";
-import type { MetricDef } from "./types.ts";
+import type { Pt } from "./geometry.js";
+import { angleAt, dist } from "./geometry.js";
+import type { MetricDef } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Side-profile engine. MediaPipe cannot reliably auto-landmark a true 90°

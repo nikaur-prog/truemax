@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SIDE_POINTS } from "../src/engine/sideMetrics.ts";
+import { SIDE_POINTS } from "../src/engine/sideMetrics.js";
 import {
   SIDE_FEEDBACK_CONSENT_VERSION,
   createSideFeedbackIntent,
   movedSidePointIds,
-} from "../src/engine/sideFeedbackPayload.ts";
-import type { SidePoints } from "../src/engine/sideMetrics.ts";
-import { isJpeg, jpegDimensions, parseSideFeedbackMetadata } from "./side-correction-feedback.ts";
+} from "../src/engine/sideFeedbackPayload.js";
+import type { SidePoints } from "../src/engine/sideMetrics.js";
+import { isJpeg, jpegDimensions, parseSideFeedbackMetadata } from "./side-correction-feedback.js";
 
 function points(): SidePoints {
   return Object.fromEntries(SIDE_POINTS.map(({ id }, index) => [id, {

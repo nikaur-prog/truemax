@@ -1,6 +1,6 @@
 import type { User } from "@supabase/supabase-js";
-import { getSupabaseClient } from "./auth.ts";
-import { ageOnDate, isAdult } from "./age.ts";
+import { getSupabaseClient } from "./auth.js";
+import { ageOnDate, isAdult } from "./age.js";
 
 export const DISCOVERY_SOURCES = [
   ["tiktok", "TikTok"],

@@ -1,9 +1,9 @@
-import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts";
-import { detectStable } from "./engine/consensus.ts";
-import { assessQuality } from "./engine/quality.ts";
-import { analyze } from "./engine/scoring.ts";
-import { storedSex } from "./engine/sexPref.ts";
-import type { Sex } from "./engine/types.ts";
+import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
+import { detectStable } from "./engine/consensus.js";
+import { assessQuality } from "./engine/quality.js";
+import { analyze } from "./engine/scoring.js";
+import { storedSex } from "./engine/sexPref.js";
+import type { Sex } from "./engine/types.js";
 
 // ---------------------------------------------------------------------------
 // The calibration bench.

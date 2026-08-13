@@ -1,6 +1,6 @@
-import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.ts";
-import { renderAuthForm } from "./ui/authForm.ts";
-import type { AuthMode } from "./ui/authForm.ts";
+import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
+import { renderAuthForm } from "./ui/authForm.js";
+import type { AuthMode } from "./ui/authForm.js";
 
 const root = document.getElementById("auth-root") as HTMLElement;
 const params = new URLSearchParams(window.location.search);

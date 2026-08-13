@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { Occlusion } from "./occlusion.ts";
-import type { QualityCheck } from "./quality.ts";
-import type { HeadCoveringCheck } from "./headCovering.ts";
+import type { Occlusion } from "./occlusion.js";
+import type { QualityCheck } from "./quality.js";
+import type { HeadCoveringCheck } from "./headCovering.js";
 import {
   FRONT_PITCH_OK,
   FRONT_ROLL_OK,
@@ -10,8 +10,8 @@ import {
   PHOTO_BRIGHT,
   PHOTO_DARK,
   PHOTO_SHARP_BLOCK,
-} from "./captureGuide.ts";
-import type { FrameStats } from "./captureGuide.ts";
+} from "./captureGuide.js";
+import type { FrameStats } from "./captureGuide.js";
 
 // Upload validation is deliberately fail-closed. A file chooser used to bypass
 // every live-camera gate and send any detected face into scoring. That becomes

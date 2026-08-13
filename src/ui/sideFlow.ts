@@ -1,23 +1,23 @@
-import { analyzeSide } from "../engine/scoring.ts";
-import type { Report, Sex } from "../engine/types.ts";
-import { sidePointIntegrityIssues } from "../engine/sideMetrics.ts";
-import type { SidePoints } from "../engine/sideMetrics.ts";
-import { mountVerifier, seedSidePoints } from "./sideVerify.ts";
-import type { VerifyHandle } from "./sideVerify.ts";
+import { analyzeSide } from "../engine/scoring.js";
+import type { Report, Sex } from "../engine/types.js";
+import { sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import type { SidePoints } from "../engine/sideMetrics.js";
+import { mountVerifier, seedSidePoints } from "./sideVerify.js";
+import type { VerifyHandle } from "./sideVerify.js";
 import {
   cloneSidePoints,
   createSideFeedbackIntent,
-} from "../engine/sideFeedbackPayload.ts";
+} from "../engine/sideFeedbackPayload.js";
 import type {
   SideFeedbackIntent,
   SideSeedMethod,
-} from "../engine/sideFeedbackPayload.ts";
-import { startCamera } from "./camera.ts";
-import { setRunningMode } from "../engine/landmarker.ts";
-import { resetSideTracking } from "../engine/captureGuide.ts";
-import { createAutoCapture } from "./autoCapture.ts";
-import type { AutoCapture } from "./autoCapture.ts";
-import type { CameraHandle } from "./camera.ts";
+} from "../engine/sideFeedbackPayload.js";
+import { startCamera } from "./camera.js";
+import { setRunningMode } from "../engine/landmarker.js";
+import { resetSideTracking } from "../engine/captureGuide.js";
+import { createAutoCapture } from "./autoCapture.js";
+import type { AutoCapture } from "./autoCapture.js";
+import type { CameraHandle } from "./camera.js";
 
 // Side-profile capture flow: camera or upload → auto-seeded landmarks → user
 // verifies by dragging → side report.

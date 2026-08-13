@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   SKIN_CONCERN_CATALOG,
   TRIAL_DETECTABLE_SKIN_CONCERNS,
-} from "./skinConcernCatalog.ts";
+} from "./skinConcernCatalog.js";
 
 test("the visible-skin catalogue has unique ids and evidence gates", () => {
   const ids = SKIN_CONCERN_CATALOG.map((concern) => concern.id);

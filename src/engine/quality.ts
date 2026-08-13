@@ -1,5 +1,5 @@
 import type { FaceLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { landmarkIntegrityIssues } from "./geometry.ts";
+import { landmarkIntegrityIssues } from "./geometry.js";
 
 export interface QualityCheck {
   faceFound: boolean;

@@ -1,4 +1,4 @@
-import type { Sex } from "../engine/types.ts";
+import type { Sex } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
 // The reference-population chooser.

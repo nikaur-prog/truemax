@@ -1,7 +1,7 @@
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
-import { assessQuality } from "./quality.ts";
-import { estimateGaze } from "./gaze.ts";
-import type { Gaze } from "./gaze.ts";
+import { assessQuality } from "./quality.js";
+import { estimateGaze } from "./gaze.js";
+import type { Gaze } from "./gaze.js";
 
 // ---------------------------------------------------------------------------
 // Live capture guidance. The scan is only as good as the photo, so instead of

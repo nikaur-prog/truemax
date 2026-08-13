@@ -1,5 +1,5 @@
-import { METRICS } from "./metrics.ts";
-import type { RegionId, Report, ScoredMetric, Sex } from "./types.ts";
+import { METRICS } from "./metrics.js";
+import type { RegionId, Report, ScoredMetric, Sex } from "./types.js";
 
 // Celebrity / reference measurement DB. Populated as a byproduct of scanning
 // famous faces for content: run a scan, call window.__truemax.celebEntry("Name")

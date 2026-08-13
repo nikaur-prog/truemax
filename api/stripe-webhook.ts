@@ -1,4 +1,4 @@
-import { getStripe, getSupabaseAdmin, json, safeMessage } from "./_shared.ts";
+import { getStripe, getSupabaseAdmin, json, safeMessage } from "./_shared.js";
 
 type StripeClient = ReturnType<typeof getStripe>;
 type Subscription = Omit<Awaited<ReturnType<StripeClient["subscriptions"]["retrieve"]>>, "lastResponse">;

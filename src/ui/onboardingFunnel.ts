@@ -1,5 +1,5 @@
 import type { User } from "@supabase/supabase-js";
-import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.ts";
+import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.js";
 import {
   DISCOVERY_SOURCES,
   emptyOnboardingProfile,
@@ -7,9 +7,9 @@ import {
   profileIsAdult,
   saveOnboardingProfile,
   validateOnboardingStep,
-} from "../engine/onboarding.ts";
-import type { OnboardingProfile } from "../engine/onboarding.ts";
-import { startTrialCheckout } from "../engine/entitlement.ts";
+} from "../engine/onboarding.js";
+import type { OnboardingProfile } from "../engine/onboarding.js";
+import { startTrialCheckout } from "../engine/entitlement.js";
 
 type PlanTier = "starter" | "max";
 

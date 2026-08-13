@@ -1,4 +1,4 @@
-import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.ts";
+import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 
 interface ExistingEntitlement {
   stripe_customer_id: string | null;

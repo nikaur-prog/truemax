@@ -1,22 +1,22 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.ts";
-import { detectStable } from "./engine/consensus.ts";
-import { assessQuality } from "./engine/quality.ts";
-import { analyze } from "./engine/scoring.ts";
-import { aggregateScoreToPercentile } from "./engine/scoring.ts";
-import { REGION_NAMES } from "./engine/scoring.ts";
-import { isSupported, startCamera } from "./ui/camera.ts";
-import type { CameraHandle } from "./ui/camera.ts";
-import { rankShort } from "./ui/templates.ts";
-import { storeSex, storedSex } from "./engine/sexPref.ts";
-import { drawQuickSilhouette } from "./ui/quickSilhouette.ts";
-import { openSexChooser } from "./ui/sexChooser.ts";
-import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.ts";
-import { askVerdictTone } from "./ui/tonePrompt.ts";
-import { drawLandmarksAnimated } from "./ui/overlay.ts";
-import type { Report, Sex } from "./engine/types.ts";
-import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.ts";
-import type { QuickVariant } from "./ui/quickVideoExport.ts";
+import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
+import { detectStable } from "./engine/consensus.js";
+import { assessQuality } from "./engine/quality.js";
+import { analyze } from "./engine/scoring.js";
+import { aggregateScoreToPercentile } from "./engine/scoring.js";
+import { REGION_NAMES } from "./engine/scoring.js";
+import { isSupported, startCamera } from "./ui/camera.js";
+import type { CameraHandle } from "./ui/camera.js";
+import { rankShort } from "./ui/templates.js";
+import { storeSex, storedSex } from "./engine/sexPref.js";
+import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
+import { openSexChooser } from "./ui/sexChooser.js";
+import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
+import { askVerdictTone } from "./ui/tonePrompt.js";
+import { drawLandmarksAnimated } from "./ui/overlay.js";
+import type { Report, Sex } from "./engine/types.js";
+import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
+import type { QuickVariant } from "./ui/quickVideoExport.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.

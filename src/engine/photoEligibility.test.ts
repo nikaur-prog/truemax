@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { FrameStats } from "./captureGuide.ts";
-import type { Occlusion } from "./occlusion.ts";
+import type { FrameStats } from "./captureGuide.js";
+import type { Occlusion } from "./occlusion.js";
 import {
   frontPhotoRejection,
   headCoveringRejection,
   sidePhotoRejection,
   type SideSilhouetteCheck,
-} from "./photoEligibility.ts";
-import type { QualityCheck } from "./quality.ts";
+} from "./photoEligibility.js";
+import type { QualityCheck } from "./quality.js";
 
 const quality = (overrides: Partial<QualityCheck> = {}): QualityCheck => ({
   faceFound: true,

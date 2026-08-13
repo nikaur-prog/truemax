@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ageOnDate, isAdult } from "./age.ts";
+import { ageOnDate, isAdult } from "./age.js";
 
 const TODAY = new Date("2026-08-12T12:00:00Z");
 

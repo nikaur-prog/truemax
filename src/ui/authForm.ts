@@ -8,7 +8,7 @@ import {
   signUp,
   socialAvailability,
   updatePassword,
-} from "../engine/auth.ts";
+} from "../engine/auth.js";
 
 export type AuthMode = "link" | "password" | "signup" | "forgot" | "reset";
 

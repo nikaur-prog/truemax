@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { basicScores, verdictFor, verdictForPercentile } from "./analysisMode.ts";
-import type { VerdictTone } from "./analysisMode.ts";
-import type { Report } from "./types.ts";
+import { basicScores, verdictFor, verdictForPercentile } from "./analysisMode.js";
+import type { VerdictTone } from "./analysisMode.js";
+import type { Report } from "./types.js";
 
 const report = (over: Partial<Report> = {}): Report =>
   ({

@@ -1,6 +1,6 @@
 import type { FaceLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { detect } from "./landmarker.ts";
-import { FACE_LANDMARK_COUNT, landmarkIntegrityIssues } from "./geometry.ts";
+import { detect } from "./landmarker.js";
+import { FACE_LANDMARK_COUNT, landmarkIntegrityIssues } from "./geometry.js";
 
 // ---------------------------------------------------------------------------
 // Consensus landmarks.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { membershipBrand } from "../src/ui/membershipBrand.ts";
+import { membershipBrand } from "../src/ui/membershipBrand.js";
 
 test("a signed-out visitor always gets the disabled guest identity", () => {
   assert.equal(membershipBrand(false, false), "guest");

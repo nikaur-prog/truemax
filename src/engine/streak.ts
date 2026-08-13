@@ -1,4 +1,4 @@
-import type { StoredScan } from "./history.ts";
+import type { StoredScan } from "./history.js";
 
 // ---------------------------------------------------------------------------
 // Weekly scan streaks.
