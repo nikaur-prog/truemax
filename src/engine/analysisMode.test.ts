@@ -33,18 +33,22 @@ test("each rung starts exactly where it says it does", () => {
   assert.equal(at(40), "Mid");
   assert.equal(at(52), "Aight");
   assert.ok(["Good looking", "Attractive"].includes(at(65)));
-  assert.ok(["Mogger", "You and Marlon need to be stopped"].includes(at(82)));
-  assert.ok(["Looksmaxxing final boss", "True Adam"].includes(at(100)));
+  assert.ok(["Mogger", "Marlon level"].includes(at(82)));
+  assert.equal(at(95), "Looksmaxxing final boss");
+  assert.equal(at(98.9), "Looksmaxxing final boss");
+  assert.equal(at(99), "True Adam");
+  assert.equal(at(100), "True Adam");
 });
 
 test("the top rungs speak to the reference population", () => {
   const at = (pct: number, sex: "male" | "female") =>
     verdictFor(report({ overallPercentile: pct, sex })).word;
   assert.ok(["She-mogger", "Fine shyt"].includes(at(85, "female")));
-  assert.ok(["Certified baddie", "True Eve"].includes(at(97, "female")));
+  assert.equal(at(97, "female"), "Certified baddie");
+  assert.equal(at(99.5, "female"), "True Eve");
   // A woman must never be handed the men's word, and the reverse.
   assert.ok(!["Mogger", "True Adam"].includes(at(85, "female")));
-  assert.ok(!["She-mogger", "Certified baddie"].includes(at(97, "male")));
+  assert.ok(!["She-mogger", "Certified baddie", "True Eve"].includes(at(97, "male")));
 });
 
 test("one face always gets one verdict", () => {
@@ -106,7 +110,7 @@ test("every mode reads the same underlying score", () => {
   // moves together. If these ever disagree, the app is showing one face two
   // different answers.
   const strong = report({ overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
-  assert.ok(["Mogger", "You and Marlon need to be stopped"].includes(verdictFor(strong).word));
+  assert.ok(["Mogger", "Marlon level"].includes(verdictFor(strong).word));
   assert.equal(basicScores(strong)[0].value, 91);
 });
 

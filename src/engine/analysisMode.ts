@@ -168,7 +168,7 @@ const LADDER: Array<{
   {
     min: 82,
     words: {
-      male: ["Mogger", "You and Marlon need to be stopped"],
+      male: ["Mogger", "Marlon level"],
       female: ["She-mogger", "Fine shyt"],
     },
     tone: "high",
@@ -177,11 +177,21 @@ const LADDER: Array<{
   {
     min: 95,
     words: {
-      male: ["Looksmaxxing final boss", "True Adam"],
-      female: ["Certified baddie", "True Eve"],
+      male: ["Looksmaxxing final boss"],
+      female: ["Certified baddie"],
     },
     tone: "peak",
-    line: "Top five per cent. This is the end of the scale — there is no rung above it.",
+    line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
+  },
+  {
+    // The top one per cent, and deliberately its own rung rather than an
+    // alternate of the one below. A ceiling that lands every twentieth scan is
+    // not a ceiling — it is just the top band with a second name, and it makes
+    // the rung under it worth less. Roughly a 8.0+ headline score.
+    min: 99,
+    words: { male: ["True Adam"], female: ["True Eve"] },
+    tone: "peak",
+    line: "Top one per cent. There is nothing above this — the scale ends here.",
   },
 ];
 
