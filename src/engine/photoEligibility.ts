@@ -8,7 +8,7 @@ import {
   FRONT_SMILE_OK,
   FRONT_YAW_OK,
   PHOTO_BRIGHT,
-  PHOTO_DARK,
+  lightOk,
   PHOTO_SHARP_BLOCK,
 } from "./captureGuide.js";
 import type { FrameStats } from "./captureGuide.js";
@@ -123,7 +123,10 @@ export function frontPhotoRejection(
       detail: "Remove glasses and anything crossing the eyes or brows, then use a clear photo without a hat or hood.",
     };
   }
-  if (stats.luma < PHOTO_DARK) {
+  // Same exposure test the live guide uses, for the same reason: a mean-luma
+  // floor rejects well-lit dark-skinned faces, which is a photograph being
+  // refused on the basis of the complexion in it.
+  if (!lightOk(stats) && stats.luma <= PHOTO_BRIGHT) {
     return {
       title: "Sorry, the face is too dark to inspect accurately.",
       detail: "Use soft, even light from in front. Avoid a bright window behind you.",
@@ -161,7 +164,7 @@ export function sidePhotoRejection(
       detail: "Use the original image with the full head and neck visible—not a screenshot or thumbnail.",
     };
   }
-  if (stats.luma < PHOTO_DARK || stats.luma > PHOTO_BRIGHT) {
+  if (!lightOk(stats)) {
     return {
       title: "Sorry, the profile is not evenly lit enough.",
       detail: "Use soft light from the side of the camera so the brow, nose, lips, chin and jaw edge are all visible.",

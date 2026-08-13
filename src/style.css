@@ -1864,3 +1864,22 @@ body.auth-modal-open { overflow: hidden; }
 .lockcard > p { margin: 0 0 14px; color: var(--mut); font-size: 13px; line-height: 1.6; }
 .lockcard-note { margin: 0 0 14px; color: var(--acc); font-size: 12px; font-weight: 500; }
 .lockcard .navrow { margin: 0; }
+
+/* Max's reading of the run so far. Sits under the greeting on the dashboard
+   rather than inside a tab: an app that will tell you your routine has not
+   worked, but only if you go looking for it, is not doing the thing that makes
+   it worth paying for.
+
+   The stalled and slipping states get a warmer edge than the rest, because the
+   whole point is that they read differently from congratulation. */
+.maxread {
+  position: relative; margin: 18px 0 0; padding: 16px 18px 15px 20px; max-width: 620px;
+  border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 4px 16px 16px 4px;
+  background: var(--card); text-align: left;
+}
+.maxread.stalled, .maxread.slipping { border-left-color: var(--warm, #c07a4a); }
+.maxread-who { font: 8.5px var(--mono); letter-spacing: .2em; color: var(--acc); }
+.maxread.stalled .maxread-who, .maxread.slipping .maxread-who { color: var(--warm, #c07a4a); }
+.maxread > b { display: block; margin: 5px 0 6px; font: 400 17px/1.25 var(--serif); }
+.maxread > p { margin: 0; color: var(--mut); font-size: 13px; line-height: 1.6; }
+.maxread .linkish { margin-top: 11px; font-size: 12.5px; }

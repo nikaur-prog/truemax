@@ -1,0 +1,170 @@
+// ---------------------------------------------------------------------------
+// What Max says after the second scan, and the tenth.
+//
+// This is the thing the rest of the category cannot copy. Every face app will
+// tell you your potential; none of them come back six weeks later and say
+// whether you reached it. Telling somebody what to do is content. Telling them
+// whether it worked is a product, and it needs exactly one thing nobody else
+// collects: their own numbers over time.
+//
+// Three rules hold this together, and all three exist to stop it becoming the
+// flattering nonsense it would otherwise decay into.
+//
+// 1. IT READS MEASUREMENTS, NOT INTENTIONS. The input is the score history and
+//    what the person told us they were working on. Nothing here estimates,
+//    infers, or generates a number. If the jaw score did not move, the jaw
+//    score did not move, and no amount of encouragement changes the sentence.
+//
+// 2. IT IS ALLOWED TO SAY IT ISN'T WORKING. An app that only ever congratulates
+//    you is an app you stop believing, and then stop opening. "Two months, no
+//    measurable change, worth trying something else" is the most valuable
+//    sentence in here and the one every competitor is structurally unable to
+//    say, because they are selling the thing that isn't working.
+//
+// 3. IT NEVER PRESCRIBES. Max can say a routine has not moved a number and
+//    suggest changing approach. It cannot name a dose, a drug, or a procedure.
+//    "Two months, nothing moved, worth trying something different" is an
+//    observation about data. "Lower your dose" is medical advice from a face
+//    scanner, and the fact that it would often be correct is not the point.
+//
+// Deterministic templates, no model call. Same history, same words, every time
+// — because a follow-up that reworded itself on each open would read as
+// generated rather than observed, and the whole claim here is that it was
+// observed.
+// ---------------------------------------------------------------------------
+
+export interface ScanPoint {
+  // Milliseconds since epoch. Passed in rather than read from a clock so the
+  // whole module is pure and a test can walk six months in four lines.
+  at: number;
+  overall: number;
+}
+
+export type FollowUpKind =
+  | "too-soon"
+  | "working"
+  | "holding"
+  | "stalled"
+  | "slipping"
+  | "maintaining";
+
+export interface FollowUp {
+  kind: FollowUpKind;
+  headline: string;
+  body: string;
+  // True when the honest reading is "this approach has had long enough".
+  // Surfaced separately so the UI can offer to revisit the plan rather than
+  // burying the suggestion in a paragraph.
+  suggestChange: boolean;
+}
+
+const DAY = 86_400_000;
+
+// Below this, a difference is the instrument rather than the face. Two photos
+// of one unchanged face differ by about 1.3 points, so anything smaller is
+// noise and reporting it as progress would be the same lie as reporting it as
+// decline. This is the single most important number in the file.
+export const NOISE = 1.3;
+
+// How long a routine gets before "no change" becomes a finding rather than
+// impatience. Skin turns over in roughly six weeks and body composition shows
+// on a face over a similar span, so eight weeks is past the point where a
+// working approach should have shown something.
+const LONG_ENOUGH_DAYS = 56;
+const MIN_DAYS = 14;
+
+function daysBetween(a: number, b: number): number {
+  return Math.abs(b - a) / DAY;
+}
+
+// The comparison is first-versus-latest, not latest-versus-previous.
+//
+// Scan-to-scan deltas are dominated by noise at this instrument's precision, so
+// a run of six scans compared pairwise produces five coin flips and a story
+// that changes every week. Against the starting point, the noise is a fixed
+// cost paid once and everything above it is signal.
+export function followUp(history: ScanPoint[], goalLabel?: string): FollowUp {
+  const scans = [...history].sort((a, b) => a.at - b.at);
+  const first = scans[0];
+  const last = scans[scans.length - 1];
+  const goal = goalLabel ? ` on your ${goalLabel.toLowerCase()}` : "";
+
+  if (scans.length < 2 || !first || !last) {
+    return {
+      kind: "too-soon",
+      headline: "One scan is a number, not a trend.",
+      body: "Scan again in a couple of weeks and this becomes a measurement of change rather than a snapshot. That second reading is where this stops being a score and starts being progress.",
+      suggestChange: false,
+    };
+  }
+
+  const days = daysBetween(first.at, last.at);
+  const change = last.overall - first.overall;
+  const weeks = Math.max(1, Math.round(days / 7));
+
+  if (days < MIN_DAYS) {
+    return {
+      kind: "too-soon",
+      headline: "Too close together to read yet.",
+      body: `Both scans are inside ${Math.max(1, Math.round(days))} days of each other, and two photos of one unchanged face differ by about ${NOISE.toFixed(1)} points on their own. Give it a fortnight and the difference starts meaning something.`,
+      suggestChange: false,
+    };
+  }
+
+  if (change >= NOISE) {
+    return {
+      kind: "working",
+      headline: `Up ${change.toFixed(1)} in ${weeks} weeks. That is a real move.`,
+      body: `That is past the ${NOISE.toFixed(1)} points two photos of the same unchanged face differ by, so it is not the camera — something you are doing${goal} is showing up in the measurements. Keep the routine as it is; this is the part where people change things and lose the thread.`,
+      suggestChange: false,
+    };
+  }
+
+  if (change <= -NOISE) {
+    return {
+      kind: "slipping",
+      headline: `Down ${Math.abs(change).toFixed(1)} over ${weeks} weeks.`,
+      body: "Worth checking the boring explanations before the interesting ones: sleep, salt, alcohol and how recently you ate all move a face, and so does shooting in harder light than last time. If none of those apply, the routine is the next thing to look at.",
+      suggestChange: days >= LONG_ENOUGH_DAYS,
+    };
+  }
+
+  // Flat. What that means depends entirely on how long it has been flat for,
+  // and on whether flat was the goal.
+  if (days >= LONG_ENOUGH_DAYS) {
+    return {
+      kind: "stalled",
+      headline: `${weeks} weeks, and the number has not moved.`,
+      body: `Flat past two months is long enough to call. Nothing here is a failure${goal ? ` of yours${goal}` : ""} — it means this particular approach is not the lever for your face, and continuing it out of loyalty costs you the time a different one would have used. Worth rebuilding the plan around a different one.`,
+      suggestChange: true,
+    };
+  }
+
+  return {
+    kind: "holding",
+    headline: `Steady across ${weeks} weeks.`,
+    body: `The change is inside the ${NOISE.toFixed(1)} points two photos of the same face differ by, so there is nothing to read either way yet. Most of what moves a face takes six to eight weeks to show. Keep going and check again.`,
+    suggestChange: false,
+  };
+}
+
+// A concern the person told us they had, which has since resolved.
+//
+// Separate from the score because it is a different kind of fact: the overall
+// number can sit still while the one thing somebody actually cared about
+// clears up, and saying nothing about that is the app failing to notice the
+// only result that mattered to them.
+//
+// Note what the message does NOT do. It does not tell anyone to reduce, stop,
+// or maintain a product, because that is a dosing instruction and this is a
+// camera. It says the thing they were tracking has cleared, and that the
+// question of what to do next is one for a pharmacist — which is true, and
+// which is also the answer they would get from an honest person.
+export function concernCleared(label: string, weeks: number): FollowUp {
+  return {
+    kind: "maintaining",
+    headline: `Your ${label.toLowerCase()} has cleared.`,
+    body: `${weeks} weeks ago you told us this was the thing you wanted to work on, and the measurements no longer show it. Worth knowing what worked, because that is information about your face specifically rather than about faces in general. If you are using anything for it, a pharmacist is the right person to ask about what happens now — we measure, we do not prescribe.`,
+    suggestChange: false,
+  };
+}
