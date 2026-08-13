@@ -12,8 +12,31 @@ import {
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { startTrialCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
+import { maxStickerMarkup } from "./maxCharacter.js";
+import { METRICS } from "../engine/metrics.js";
+import { SIDE_METRICS } from "../engine/sideMetrics.js";
 
 type PlanTier = "starter" | "max";
+
+// The number on the offer screen.
+//
+// Every subscription page in this category leads with an outcome statistic —
+// "members are 4.2x more likely to reach their goal". We cannot write that
+// sentence, and not only because it would be tacky: an efficacy claim has to be
+// defensible under the Fair Trading Act and at App Store review, and inventing
+// one on a product whose entire pitch is "we show the actual math" would be the
+// single most expensive sentence in the app.
+//
+// So the slot holds a number that is true by construction and computed from the
+// engine rather than typed here, which means it cannot drift into a lie the way
+// the scan narration's "15 side proportions" did after the experimental metrics
+// were filtered out.
+//
+// When there IS outcome data — once scan histories are long enough — the honest
+// version of the Duolingo line becomes available and should replace this: the
+// median points gained by accounts that scanned N times versus once, measured
+// from our own numbers, stated with the sample size next to it. Not before.
+const MEASUREMENT_COUNT = METRICS.length + SIDE_METRICS.length;
 
 let host: HTMLDivElement | null = null;
 
@@ -169,19 +192,29 @@ export async function openTrialFunnel(
     host.innerHTML = `<div class="trial-shell trial-offer offer-enter" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <div class="trial-offer-head">
-        <div class="max-guide" aria-hidden="true">
-          <img src="/brand/max-avatar-v1.webp" alt="" width="640" height="640">
-          <span>MAX</span>
+        <div class="max-stage">
+          ${maxStickerMarkup()}
+          <div class="max-say" id="max-say">
+            <p><b>Hey — I'm Max.</b> I'm here to help you hit your glow-up goals.
+              I read your measurements every scan, lock you into the routine that
+              gets you there, and tell you straight whether it moved.</p>
+          </div>
         </div>
         <div><span class="trial-eyebrow">YOUR PATHWAY IS READY</span>
           <h2 id="trial-title">One more scan. Seven days to explore.</h2>
           <p>Your card is collected securely by Stripe. Cancel before the trial ends and you pay $0.</p></div>
       </div>
+      <div class="stat-band">
+        <b><i class="stat-num" data-to="${MEASUREMENT_COUNT}">0</i> measurements</b>
+        <span>re-taken the same way every scan. One scan is a score; a run of them
+          is the only thing that can tell you a change was real and not the camera.</span>
+      </div>
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
           <div class="plan-top"><span>STARTER</span><b>$7.99<small> USD / month</small></b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
-          <ul><li>One additional scan in the trial</li><li>One included scan each week after</li><li>Personal pathway and progress tracking</li><li>Available at every age</li></ul>
+          <div class="plan-feat"><ul><li>One additional scan in the trial</li><li>One included scan each week after</li><li>Personal pathway and progress tracking</li><li>Available at every age</li></ul></div>
+          <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="starter">Start 7-day free trial</button>
           <small>Then $7.99/month. Cancel anytime.</small>
         </article>
@@ -189,18 +222,13 @@ export async function openTrialFunnel(
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}
           <div class="plan-top"><span>TRUE<span>MAX</span></span><b>$11.99<small> USD / month</small></b></div>
           <p>Your highest-touch experience with Max alongside you.</p>
-          <ul><li>Everything in Starter</li><li>Max AI guidance</li><li>Deeper personalised coaching</li><li>One additional scan in the trial</li></ul>
+          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Max AI guidance</li><li>Deeper personalised coaching</li><li>One additional scan in the trial</li></ul></div>
+          <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="max" ${adult ? "" : "disabled"}>
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
           </button>
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
         </article>
-      </div>
-      <div class="max-pop" aria-hidden="true">
-        <img src="/brand/max-avatar-v1.webp" alt="" width="640" height="640">
-        <p><b>Hey — I'm Max.</b> I read your measurements every time you scan,
-          write the routine around what you told me you want, and tell you
-          straight whether it moved. Including when it didn't.</p>
       </div>
       <p class="trial-status" role="status"></p>
       <button class="trial-decline" type="button">No thank you — show me my analysis</button>
@@ -210,12 +238,31 @@ export async function openTrialFunnel(
     host.querySelector(".trial-close")?.addEventListener("click", close);
     host.querySelector(".trial-decline")?.addEventListener("click", close);
 
+    // Max lands, then speaks. He arrives on his sticker, waves, and the bubble
+    // types itself out a beat later — the greeting has to finish arriving before
+    // it is readable, or it reads as a flash of text rather than as somebody
+    // saying something. Once per screen: a character who repeats his
+    // introduction stops being charming somewhere around the third time.
+    window.setTimeout(() => host?.querySelector(".max-say")?.classList.add("show"), 760);
+
+    // The stat counts up rather than appearing. A number that ticks reads as
+    // something being measured; the same number sitting still reads as a claim.
+    const counter = host.querySelector<HTMLElement>(".stat-num");
+    if (counter && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const target = Number(counter.dataset.to) || 0;
+      const started = performance.now();
+      const tick = (now: number) => {
+        const p = Math.min(1, (now - started) / 900);
+        counter.textContent = String(Math.round(target * (1 - (1 - p) ** 3)));
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    } else if (counter) {
+      counter.textContent = String(counter.dataset.to);
+    }
+
     // Tapping a card opens what is actually in it, rather than making people
-    // read two feature lists at once. The Max card additionally brings Max in
-    // from the side to introduce himself — ONCE. He is a character, and a
-    // character who repeats his introduction every time you tap him stops being
-    // charming somewhere around the third tap.
-    let maxSpoken = false;
+    // read two feature lists at once.
     for (const card of host.querySelectorAll<HTMLElement>(".plan-card")) {
       card.addEventListener("click", (event) => {
         // Not when the tap was the buy button — that has its own job.
@@ -224,10 +271,15 @@ export async function openTrialFunnel(
         for (const other of host?.querySelectorAll<HTMLElement>(".plan-card") || []) {
           other.classList.toggle("open", other === card && opening);
         }
-        if (opening && card.dataset.plan === "max" && !maxSpoken) {
-          maxSpoken = true;
-          const bubble = host?.querySelector<HTMLElement>(".max-pop");
-          bubble?.classList.add("show");
+        // Max reacts to the card being opened rather than narrating it: one
+        // short wave, no new sentence. Cheap, and it makes the screen feel
+        // inhabited instead of animated-at.
+        if (opening) {
+          const arm = host?.querySelector<HTMLElement>(".mx-arm");
+          arm?.classList.remove("waving");
+          // Reflow, or re-adding the class in the same frame does nothing.
+          void arm?.offsetWidth;
+          arm?.classList.add("waving");
         }
       });
     }

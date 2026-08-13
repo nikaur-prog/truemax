@@ -51,6 +51,33 @@ const OUTLINE =
   "C41 96 43 98 46 99 C52 102 57 104 61 104 C67 102 71 98 72 92 " +
   "C75 82 76 70 76 62 C77 58 76 56 74 55 C74 40 66 22 46 20 Z";
 
+// A face inside the outline, because the outline alone was the problem.
+//
+// A ring floating on an empty silhouette gives nothing to compare against —
+// testers could see thirteen circles and still not know which one was wrong,
+// which is exactly the confusion this panel exists to end. Drawn features give
+// every point a neighbour: the brow-ridge ring sits above a drawn brow, the ear
+// notch sits inside a drawn ear, and a point in the wrong place now looks wrong
+// instead of merely looking like a dot.
+//
+// Deliberately generic — no age, no ethnicity read, no expression. This is a
+// ruler, not a portrait, and a reference head that looked like somebody in
+// particular would imply the measurements expect that face.
+const FACE = `
+  <path d="M74 40 C74 30 66 22 52 20 C46 19.4 40 21 37.5 25 C34 30 35.5 37 40 42
+           C46 38 56 33 66 34 C71 34.5 73 37 74 40 Z" class="sref-hair"/>
+  <path d="M52 44 q7 -3 12 1" class="sref-line"/>
+  <g class="sref-eye">
+    <path d="M50 52 q6 -4 11 1 q-5 4 -11 -1 z" class="sref-eye-white"/>
+    <circle cx="55" cy="53" r="2.1" class="sref-iris"/>
+  </g>
+  <path d="M33 66 q3 1.6 5 1" class="sref-line"/>
+  <path d="M40 79.5 q6 -1.6 10 0" class="sref-line"/>
+  <path d="M43 96 q4 1.6 7 0" class="sref-line" opacity=".55"/>
+  <path d="M69 55 q8 -1 8 8 q0 9 -7 9 q-5 0 -5 -8 q0 -8 4 -9 z" class="sref-ear"/>
+  <path d="M71 60 q3 1 2.4 5.4 q-.6 3.6 -3 3.2" class="sref-line"/>
+  <path d="M63 104 q7 -2 9 -9" class="sref-line" opacity=".5"/>`;
+
 function dots(scale: number, withLabels: boolean): string {
   return SIDE_POINTS.map(({ id, label }) => {
     const [x, y] = DIAGRAM[id];
@@ -78,7 +105,13 @@ function svg(withLabels: boolean, faceDir: number): string {
     ? `transform="translate(100 0) scale(-1 1)"`
     : "";
   return `<svg viewBox="${box}" class="sref-svg" aria-hidden="true">
+    ${withLabels ? `<defs><clipPath id="sref-head"><path d="${OUTLINE}"/></clipPath></defs>` : ""}
     <g ${flip}>
+      <path d="${OUTLINE}" class="sref-skin" />
+      ${/* Clipped to the head so a feature can never bleed past the silhouette:
+            the hair fill did exactly that, and a reference that spills outside
+            its own outline undermines the one thing it is there to teach. */ ""}
+      ${withLabels ? `<g clip-path="url(#sref-head)">${FACE}</g>` : ""}
       <path d="${OUTLINE}" class="sref-outline" />
       ${dots(1, false)}
     </g>

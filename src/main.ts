@@ -19,6 +19,11 @@ import { mergeReports } from "./engine/scoring.js";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.js";
 import { analyzeSide } from "./engine/scoring.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
+// The scan narration quotes these counts. Read from the arrays rather than
+// typed into the string: the side list said 15 for months after the
+// experimental metrics were filtered out and the real number became 10.
+import { SIDE_METRICS } from "./engine/sideMetrics.js";
+import { METRICS } from "./engine/metrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
@@ -695,10 +700,10 @@ function resetToUpload(): void {
 const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
   { text: "Detecting facial landmarks", view: "front" },
   { text: "Normalizing to interpupillary scale", view: "front" },
-  { text: "Measuring 31 front proportions", view: "front" },
+  { text: `Measuring ${METRICS.length} front proportions`, view: "front" },
   { text: "Checking bilateral symmetry", view: "front" },
   { text: "Reading the profile: chin, jaw, convexity", view: "side" },
-  { text: "Measuring 15 side proportions", view: "side" },
+  { text: `Measuring ${SIDE_METRICS.length} side proportions`, view: "side" },
   { text: "Comparing against population", view: "side" },
   { text: "Merging both views", view: "front" },
 ];
