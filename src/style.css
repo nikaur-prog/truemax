@@ -342,7 +342,7 @@ body.funnel-open { overflow: hidden; }
 .trial-field em { color: var(--mut); font-size: 10px; font-style: normal; font-weight: 450; }
 .trial-input {
   width: 100%; min-height: 52px; padding: 14px 15px; border: 1px solid var(--line); border-radius: 14px;
-  outline: none; background: rgba(255,255,255,.76); color: var(--ink); font: 15px/1.4 var(--sans);
+  outline: none; background: rgba(255,255,255,.76); color: var(--ink); font: 16px/1.4 var(--sans);
   transition: border-color .18s, box-shadow .18s, background .18s;
 }
 .trial-input:focus { border-color: var(--acc); background: #fff; box-shadow: 0 0 0 4px rgba(17,138,113,.09); }
@@ -1520,13 +1520,27 @@ body.auth-modal-open { overflow: hidden; }
 .acct-divider { display: flex; align-items: center; gap: 10px; color: var(--mut); margin: 15px 0; font-size: 11px; }
 .acct-divider::before, .acct-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .acct-form { display: flex; flex-direction: column; gap: 12px; }
-.acct-field { display: flex; flex-direction: column; gap: 5px; }
-.acct-field span { font-size: 11px; letter-spacing: 0.04em; color: var(--mut); text-transform: uppercase; }
+/* The sign-in fields were the cheapest-looking surface in the product, which
+   is unfortunate placement: they are the last screen between a finished scan
+   and a paying account. Matched to the quiz inputs — same height, radius,
+   focus ring and transition — so the two halves of onboarding stop looking
+   like they came from different apps.
+
+   16px on the font is not a style choice: below it, iOS Safari zooms the whole
+   page the moment a field is focused, which is most of the "everything moved"
+   feeling on a phone. */
+.acct-field { display: flex; flex-direction: column; gap: 7px; }
+.acct-field span { font-size: 11px; letter-spacing: 0.06em; color: var(--mut); text-transform: uppercase; font-weight: 600; }
 .acct-field input {
-  width: 100%; font-family: var(--sans); font-size: 15px; color: var(--ink);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px;
+  width: 100%; min-height: 52px; font-family: var(--sans); font-size: 16px; color: var(--ink);
+  background: rgba(255,255,255,.76); border: 1px solid var(--line); border-radius: 14px; padding: 14px 15px;
+  transition: border-color .18s, box-shadow .18s, background .18s;
 }
-.acct-field input:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+.acct-field input::placeholder { color: color-mix(in srgb, var(--mut) 70%, transparent); }
+.acct-field input:focus {
+  outline: none; border-color: var(--acc); background: #fff;
+  box-shadow: 0 0 0 4px rgba(17,138,113,.09);
+}
 .acct-msg { min-height: 0; font-size: 12.5px; line-height: 1.4; margin: 0; }
 .acct-msg.err { color: var(--warm); }
 .acct-msg.ok { color: var(--acc); }
@@ -1970,3 +1984,55 @@ body.auth-modal-open { overflow: hidden; }
 .sref-card .sref-dot { stroke-width: 2.4; }
 .sref-label { font: 5.5px var(--sans); fill: var(--ink); }
 .sref-card > p { margin: 6px auto 16px; max-width: 44ch; color: var(--mut); font-size: 12.5px; line-height: 1.6; }
+
+/* Offer-screen interaction -------------------------------------------------
+   Two plans is two feature lists to read at once, which is how people end up
+   reading neither. Tapping a card opens its own detail and closes the other. */
+.plan-card { cursor: pointer; }
+.plan-card ul {
+  display: grid; grid-template-rows: 0fr; gap: 0;
+  transition: grid-template-rows .34s cubic-bezier(.2,.9,.25,1), margin .34s, opacity .24s;
+  opacity: .55; overflow: hidden; margin: 3px 0 12px;
+}
+.plan-card ul > li { min-height: 0; }
+.plan-card.open ul { grid-template-rows: 1fr; gap: 8px; opacity: 1; margin: 3px 0 18px; }
+.plan-card:not(.open) ul > li:nth-child(n+3) { visibility: hidden; }
+.plan-card.open { border-color: var(--acc); }
+.plan-card.max.open { border-color: #4bf5c5; }
+.plan-card::after {
+  content: "Tap for what's included"; display: block; margin-top: -6px;
+  font: 9.5px var(--mono); letter-spacing: .1em; color: var(--mut); text-align: center;
+  transition: opacity .2s;
+}
+.plan-card.open::after { opacity: 0; }
+.featured::after { color: rgba(255,255,255,.5); }
+
+/* Max, arriving from the right the first time somebody opens his card. Once —
+   a character who repeats his introduction on every tap stops being charming
+   somewhere around the third one. */
+.max-pop {
+  display: grid; grid-template-columns: 62px 1fr; align-items: center; gap: 14px;
+  margin: 14px 0 0; padding: 13px 16px 13px 13px; opacity: 0;
+  border: 1px solid rgba(75,245,197,.4); border-radius: 18px;
+  background: linear-gradient(135deg, rgba(18,59,53,.9), rgba(7,28,34,.9));
+  transform: translateX(40px); pointer-events: none;
+}
+.max-pop.show {
+  animation: max-arrive .62s cubic-bezier(.2,1.25,.35,1) forwards;
+}
+.max-pop img { width: 100%; height: auto; filter: drop-shadow(0 8px 14px rgba(10,60,50,.4)); }
+.max-pop p { margin: 0; color: rgba(233,255,249,.82); font-size: 12.5px; line-height: 1.55; text-align: left; }
+.max-pop b { color: #8ff3e0; }
+@keyframes max-arrive { to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .max-pop.show { animation: none; opacity: 1; transform: none; }
+  .plan-card ul { transition: none; }
+}
+
+/* Mobile: the quiz shell scrolls INSIDE itself, and the page behind it does
+   not move at all. Without the fixed body the whole document slides under the
+   dialog on iOS whenever a scroll gesture reaches the end of the panel — which
+   is the "a lot of the screen was movable" feeling on a phone. */
+body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; overscroll-behavior: none; }
+.trial-overlay { overscroll-behavior: contain; }
+.trial-body, .settings-body, .sref-card { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }

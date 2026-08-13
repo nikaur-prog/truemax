@@ -2,6 +2,7 @@ import type { User } from "@supabase/supabase-js";
 import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.js";
 import {
   DISCOVERY_SOURCES,
+  queueOnboardingProfile,
   emptyOnboardingProfile,
   loadOnboardingProfile,
   profileIsAdult,
@@ -193,13 +194,41 @@ export async function openTrialFunnel(
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
         </article>
       </div>
+      <div class="max-pop" aria-hidden="true">
+        <img src="/brand/max-avatar-v1.webp" alt="" width="640" height="640">
+        <p><b>Hey — I'm Max.</b> I read your measurements every time you scan,
+          write the routine around what you told me you want, and tell you
+          straight whether it moved. Including when it didn't.</p>
+      </div>
       <p class="trial-status" role="status"></p>
-      <button class="trial-decline" type="button">Not now — keep my free analysis</button>
-      <p class="trial-legal">Subscriptions renew monthly until cancelled. Your plan and trial terms are shown again in secure Checkout.</p>
+      <button class="trial-decline" type="button">No thank you — show me my analysis</button>
+      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
     </div>`;
 
     host.querySelector(".trial-close")?.addEventListener("click", close);
     host.querySelector(".trial-decline")?.addEventListener("click", close);
+
+    // Tapping a card opens what is actually in it, rather than making people
+    // read two feature lists at once. The Max card additionally brings Max in
+    // from the side to introduce himself — ONCE. He is a character, and a
+    // character who repeats his introduction every time you tap him stops being
+    // charming somewhere around the third tap.
+    let maxSpoken = false;
+    for (const card of host.querySelectorAll<HTMLElement>(".plan-card")) {
+      card.addEventListener("click", (event) => {
+        // Not when the tap was the buy button — that has its own job.
+        if ((event.target as HTMLElement).closest("[data-checkout]")) return;
+        const opening = !card.classList.contains("open");
+        for (const other of host?.querySelectorAll<HTMLElement>(".plan-card") || []) {
+          other.classList.toggle("open", other === card && opening);
+        }
+        if (opening && card.dataset.plan === "max" && !maxSpoken) {
+          maxSpoken = true;
+          const bubble = host?.querySelector<HTMLElement>(".max-pop");
+          bubble?.classList.add("show");
+        }
+      });
+    }
     for (const button of host.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {
       button.addEventListener("click", async () => {
         if (busy || button.disabled) return;
@@ -225,20 +254,28 @@ export async function openTrialFunnel(
     readInputs(profile);
     busy = true;
     const next = host.querySelector<HTMLButtonElement>("#trial-next");
-    const status = host.querySelector<HTMLElement>(".trial-status");
     if (next) {
       next.disabled = true;
       next.textContent = "Saving your pathway…";
     }
     const result = preview ? { ok: true } : await saveOnboardingProfile(user, profile);
     busy = false;
-    if (!result.ok) {
-      if (next) {
-        next.disabled = false;
-        next.textContent = "See my trial options";
-      }
-      if (status) status.textContent = result.message || "Could not save your pathway.";
-      return;
+
+    // A failed write must NEVER strand somebody at the end of the quiz.
+    //
+    // This is what a tester hit: six screens answered, one bar of 4G, and the
+    // upsert came back "TypeError: Load failed" — Safari's words for a request
+    // that never left the handset. The button reset, the offer never appeared,
+    // and the whole funnel dead-ended on the last step with every answer still
+    // sitting in memory. A dropped packet was costing a signup.
+    //
+    // So the answers are queued locally and the flow continues. They go up on
+    // the next sign-in without asking again, and being unable to reach a
+    // database is not a reason to withhold the plans from somebody who just
+    // spent two minutes telling us about themselves.
+    if (!result.ok && !preview) {
+      queueOnboardingProfile(profile);
+      profile.completedAt = new Date().toISOString();
     }
 
     if (!preview) {
