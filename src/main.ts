@@ -12,7 +12,7 @@ import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
-import { renderResults, setMaxAccess } from "./ui/results.js";
+import { renderResults, setDepth, setMaxAccess } from "./ui/results.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -27,6 +27,7 @@ import { hasHistory, openHistory } from "./ui/historyView.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { hasMaxAccess, loadEntitlement } from "./engine/entitlement.js";
+import { depthFor, freeScansLeft } from "./engine/depth.js";
 import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.js";
 import { openSexChooser } from "./ui/sexChooser.js";
@@ -73,10 +74,21 @@ let gateDemo: { stop(): void } | null = null;
 // shows a paywall to a paying customer, who can retry, rather than handing the
 // paid product to everyone the moment Supabase has a bad minute.
 async function refreshMaxAccess(): Promise<void> {
+  // The scan count comes from local history rather than the account, because it
+  // is not a billing fact: it decides how much of the analysis to show, not
+  // what anyone is charged. Reading it from the device keeps a free allowance
+  // working before there is anything on the server to read.
+  const scanCount = readAllHistory().length;
   try {
-    setMaxAccess(hasMaxAccess(await loadEntitlement()));
+    const entitlement = await loadEntitlement();
+    setMaxAccess(hasMaxAccess(entitlement));
+    setDepth(depthFor({ entitlement, scanCount }), freeScansLeft({ entitlement, scanCount }));
   } catch {
+    // Both fail closed. A wall shown to a paying customer is recoverable — they
+    // retry — where the paid product handed to everybody during an outage is
+    // not.
     setMaxAccess(false);
+    setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
 
