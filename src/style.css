@@ -374,16 +374,9 @@ body.funnel-open { overflow: hidden; }
 
 .trial-shell.trial-offer { width: min(1080px, 100%); grid-template-rows: auto auto auto auto; padding: 26px clamp(24px, 4vw, 48px) 24px; overflow-y: auto; }
 .trial-offer > .trial-close { position: absolute; justify-self: end; z-index: 1; }
-.trial-offer-head { display: grid; grid-template-columns: 116px 1fr; align-items: center; gap: 26px; padding: 4px 44px 16px 0; }
+.trial-offer-head { display: grid; grid-template-columns: 150px 1fr; align-items: start; gap: 26px; padding: 4px 44px 16px 0; }
 .trial-offer h2 { font-size: clamp(31px, 4vw, 48px); }
 .trial-offer-head p { margin-bottom: 0; }
-.max-guide {
-  position: relative; width: 116px; height: 116px;
-  animation: max-float 3s ease-in-out infinite;
-}
-@keyframes max-float { 50% { transform: translateY(-6px) rotate(1deg); } }
-.max-guide > img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 13px 18px rgba(20,65,155,.25)); }
-.max-guide > span { position: absolute; left: 0; right: 0; bottom: -24px; text-align: center; font: 8px var(--mono); letter-spacing: .2em; color: var(--acc); }
 .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .plan-card {
   position: relative; display: flex; flex-direction: column; min-height: 360px; padding: clamp(21px, 2.6vw, 28px);
@@ -403,7 +396,6 @@ body.funnel-open { overflow: hidden; }
 .featured .plan-top small { color: rgba(255,255,255,.58); }
 .plan-card > p { margin: 11px 0 10px; color: var(--mut); font-size: 13px; line-height: 1.5; }
 .featured > p { color: rgba(255,255,255,.66); }
-.plan-card ul { display: grid; gap: 8px; margin: 3px 0 18px; padding: 0; list-style: none; }
 .plan-card li { position: relative; padding-left: 20px; font-size: 12.5px; line-height: 1.4; }
 .plan-card li::before { content: "✓"; position: absolute; left: 0; color: var(--acc); font-weight: 700; }
 .featured li::before { color: #4bf5c5; }
@@ -471,7 +463,12 @@ body.funnel-open { overflow: hidden; }
   .trial-overlay { padding: 0; place-items: stretch; background: var(--bg); }
   .trial-shell, .trial-shell.trial-offer {
     width: 100%; min-height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; box-shadow: none;
-    padding-left: max(0px, env(safe-area-inset-left)); padding-right: max(0px, env(safe-area-inset-right));
+    /* 18px of real gutter, plus whatever the notch/curve asks for on top. This
+       used to be max(0px, inset), which resolves to ZERO on every phone without
+       a cutout — so the offer screen ran headline and cards flush into both
+       edges. The shorthand above cannot be relied on here because these two
+       longhands override it. */
+    padding-left: max(18px, env(safe-area-inset-left)); padding-right: max(18px, env(safe-area-inset-right));
   }
   .trial-nav { padding: max(16px, env(safe-area-inset-top)) 18px 0; gap: 13px; }
   .trial-brand { font-size: 10px; }
@@ -483,17 +480,24 @@ body.funnel-open { overflow: hidden; }
   .trial-status { padding: 0 20px; }
   .trial-actions { padding: 13px 20px max(18px, env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(12px); }
   .trial-offer { padding-top: max(20px, env(safe-area-inset-top)) !important; padding-bottom: max(20px, env(safe-area-inset-bottom)) !important; }
-  .trial-offer-head { grid-template-columns: 76px 1fr; gap: 16px; padding: 6px 36px 20px 0; }
-  .max-guide { width: 76px; height: 76px; }
-  .max-guide > span { bottom: -19px; }
+  /* On a phone Max gets the full width and stands above the headline, because
+     side-by-side at this width leaves him the size of a favicon and his bubble
+     nowhere to live. */
+  .trial-offer-head { grid-template-columns: 1fr; gap: 14px; padding: 6px 0 20px; text-align: center; }
+  .trial-offer-head p { margin-left: auto; margin-right: auto; }
+  .max-sticker { width: 104px; }
+  .max-say { max-width: min(340px, 90vw); }
   .plan-grid { grid-template-columns: 1fr; }
-  .plan-card { min-height: 345px; border-radius: 20px; }
+  .plan-card { min-height: 0; border-radius: 20px; }
+  /* Full-width cards put the ribbon on the same line as the plan name; give the
+     ribboned card enough head room that the two never share a row. */
+  .plan-card.max { padding-top: 42px; }
   .plan-card:hover { transform: none; }
   .trial-offer h2 { font-size: clamp(28px, 8vw, 39px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .trial-overlay, .trial-shell, .trial-content, .max-guide { animation: none; }
+  .trial-overlay, .trial-shell, .trial-content { animation: none; }
 }
 
 .pillars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
@@ -1991,50 +1995,148 @@ body.auth-modal-open { overflow: hidden; }
 .sref-card .sref-outline { opacity: 1; stroke-width: 1.6; }
 .sref-card .sref-dot { stroke-width: 2.4; }
 .sref-label { font: 5.5px var(--sans); fill: var(--ink); }
+/* The head the points sit on. A ring floating on an empty outline gave nothing
+   to compare against — with a drawn brow, eye, nostril, lips and ear, a point in
+   the wrong place looks wrong instead of merely looking like a dot. Neutral
+   grey-green rather than any skin tone: this is a ruler, not a portrait. */
+.sref-skin { fill: color-mix(in srgb, var(--acc) 9%, #fff); stroke: none; }
+.sref-hair { fill: color-mix(in srgb, var(--acc) 26%, #fff); stroke: none; }
+.sref-ear { fill: color-mix(in srgb, var(--acc) 14%, #fff); stroke: color-mix(in srgb, var(--acc) 55%, transparent); stroke-width: .9; }
+.sref-line { fill: none; stroke: color-mix(in srgb, var(--acc) 62%, transparent); stroke-width: 1.1; stroke-linecap: round; }
+.sref-eye-white { fill: #fff; stroke: color-mix(in srgb, var(--acc) 62%, transparent); stroke-width: 1; }
+.sref-iris { fill: color-mix(in srgb, var(--acc) 82%, #000); }
 .sref-card > p { margin: 6px auto 16px; max-width: 44ch; color: var(--mut); font-size: 12.5px; line-height: 1.6; }
 
 /* Offer-screen interaction -------------------------------------------------
    Two plans is two feature lists to read at once, which is how people end up
    reading neither. Tapping a card opens its own detail and closes the other. */
 .plan-card { cursor: pointer; }
-.plan-card ul {
-  display: grid; grid-template-rows: 0fr; gap: 0;
-  transition: grid-template-rows .34s cubic-bezier(.2,.9,.25,1), margin .34s, opacity .24s;
-  opacity: .55; overflow: hidden; margin: 3px 0 12px;
+/* The collapse.
+   This used to be a `grid-template-rows: 0fr` trick on the <ul>. With several
+   <li> children that grid has SEVERAL implicit rows, and zeroing the template
+   only zeroes the first — the rest kept their height and painted straight
+   through each other, which is the stack of overlapping feature lines on the
+   phone. A wrapper with a max-height collapses the whole list as one box and
+   cannot smear, and `visibility` (not opacity) means the hidden lines are also
+   out of the accessibility tree while collapsed. */
+.plan-feat {
+  display: block; overflow: hidden; max-height: 0; visibility: hidden;
+  transition: max-height .36s cubic-bezier(.2,.9,.25,1), visibility 0s .36s, opacity .22s;
+  opacity: 0;
 }
-.plan-card ul > li { min-height: 0; }
-.plan-card.open ul { grid-template-rows: 1fr; gap: 8px; opacity: 1; margin: 3px 0 18px; }
-.plan-card:not(.open) ul > li:nth-child(n+3) { visibility: hidden; }
+.plan-card.open .plan-feat {
+  /* Generous ceiling: the animation only needs an upper bound, and a value
+     below the tallest real list would clip the last feature. */
+  max-height: 260px; visibility: visible; opacity: 1; transition-delay: 0s;
+}
+.plan-card ul { display: grid; gap: 8px; margin: 4px 0 14px; padding: 0; list-style: none; }
+/* The tap hint is its own element in flow, under the button, above the price
+   note — never a ::after with a negative margin sitting on top of the small
+   print, which is how "Tap for what's included" ended up overlapping
+   "Then $7.99/month. Cancel anytime." */
+.plan-hint {
+  display: block; margin: 9px 0 0; font: 9.5px var(--mono); letter-spacing: .1em;
+  color: var(--mut); text-align: center; transition: opacity .2s, max-height .3s;
+  max-height: 16px; overflow: hidden;
+}
+.plan-card.open .plan-hint { opacity: 0; max-height: 0; margin-top: 0; }
+.featured .plan-hint { color: rgba(255,255,255,.5); }
 .plan-card.open { border-color: var(--acc); }
 .plan-card.max.open { border-color: #4bf5c5; }
-.plan-card::after {
-  content: "Tap for what's included"; display: block; margin-top: -6px;
-  font: 9.5px var(--mono); letter-spacing: .1em; color: var(--mut); text-align: center;
-  transition: opacity .2s;
-}
-.plan-card.open::after { opacity: 0; }
-.featured::after { color: rgba(255,255,255,.5); }
 
-/* Max, arriving from the right the first time somebody opens his card. Once —
-   a character who repeats his introduction on every tap stops being charming
-   somewhere around the third one. */
-.max-pop {
-  display: grid; grid-template-columns: 62px 1fr; align-items: center; gap: 14px;
-  margin: 14px 0 0; padding: 13px 16px 13px 13px; opacity: 0;
-  border: 1px solid rgba(75,245,197,.4); border-radius: 18px;
-  background: linear-gradient(135deg, rgba(18,59,53,.9), rgba(7,28,34,.9));
-  transform: translateX(40px); pointer-events: none;
+/* The one statistic on the offer screen. Big accent number, quiet sentence
+   under it — the shape every subscription page uses, carrying a fact we can
+   actually stand behind rather than an invented outcome claim. */
+.stat-band {
+  margin: 0 0 16px; padding: 15px 18px; border-radius: 18px; text-align: center;
+  border: 1px solid color-mix(in srgb, var(--acc) 26%, transparent);
+  background: color-mix(in srgb, var(--acc) 7%, transparent);
+  animation: offer-rise .55s .2s cubic-bezier(.2,.9,.25,1) backwards;
 }
-.max-pop.show {
-  animation: max-arrive .62s cubic-bezier(.2,1.25,.35,1) forwards;
+.stat-band b { display: block; font: 300 clamp(23px, 5.4vw, 30px)/1.15 var(--serif); }
+.stat-num { font-style: normal; color: var(--acc); font-variant-numeric: tabular-nums; }
+.stat-band span { display: block; margin: 6px auto 0; max-width: 52ch; color: var(--mut); font-size: 12.5px; line-height: 1.55; }
+@keyframes offer-rise { from { opacity: 0; transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) { .stat-band { animation: none; } }
+
+/* --- Max, the character ----------------------------------------------------
+   He is drawn in code (ui/maxCharacter.ts) so he can be animated in parts
+   rather than played as a video: the body breathes, the arm waves, the eyes
+   blink and glance, the antenna trails the lean. All of it is CSS on named
+   groups — no timers, no canvas, no main-thread work — which is why an idling
+   character costs nothing here.
+
+   The motion is meant to feel alive rather than busy: everything is on its own
+   period so the loops never sync up into a mechanical beat, and the wave fires
+   in short bursts with long rests instead of running continuously. */
+.max-stage { position: relative; display: grid; justify-items: center; }
+.max-sticker {
+  position: relative; display: block; width: 116px; padding: 6px 10px 4px;
+  border-radius: 26px 26px 30px 30px; color: #ffd54a;
+  background: #fff; box-shadow: 0 14px 34px rgba(11,42,38,.16);
+  transform: rotate(-4deg); animation: mx-land .7s cubic-bezier(.2,1.3,.35,1) both;
 }
-.max-pop img { width: 100%; height: auto; filter: drop-shadow(0 8px 14px rgba(10,60,50,.4)); }
-.max-pop p { margin: 0; color: rgba(233,255,249,.82); font-size: 12.5px; line-height: 1.55; text-align: left; }
-.max-pop b { color: #8ff3e0; }
-@keyframes max-arrive { to { opacity: 1; transform: translateX(0); } }
+.max-sticker-sparks { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); pointer-events: none; }
+.mx-spark { opacity: 0; transform-origin: center; animation: mx-twinkle 2.6s ease-in-out infinite; animation-delay: calc(var(--si) * .55s); }
+.mx-svg { display: block; width: 100%; height: auto; }
+/* The whole character breathes and leans. */
+.mx-bob { transform-origin: 75px 150px; animation: mx-bob 3.4s ease-in-out infinite; }
+/* The arm rests, then waves in bursts. `.waving` restarts it on demand. */
+.mx-arm { transform-origin: 104px 108px; animation: mx-wave-idle 6s ease-in-out infinite; }
+.mx-arm.waving { animation: mx-wave .62s ease-in-out 3; }
+/* Lids are head-coloured ellipses that drop from the top of each eye. */
+.mx-lid { transform-origin: center top; transform: scaleY(0); animation: mx-blink 5.2s ease-in-out infinite; }
+.mx-lid:nth-of-type(2) { animation-delay: .04s; }
+.mx-pupils { animation: mx-glance 7.5s ease-in-out infinite; }
+.mx-antenna { transform-origin: 75px 24px; animation: mx-antenna 3.4s ease-in-out infinite; }
+.mx-pulse { animation: mx-pulse 2.2s ease-in-out infinite; }
+.mx-shadow { animation: mx-shadow 3.4s ease-in-out infinite; }
+@keyframes mx-land { from { opacity: 0; transform: translateY(-38px) rotate(-16deg) scale(.86); } }
+@keyframes mx-bob { 50% { transform: translateY(-5px) rotate(1.6deg); } }
+@keyframes mx-antenna { 50% { transform: rotate(-9deg); } }
+@keyframes mx-shadow { 50% { transform: scaleX(.93); opacity: .7; } }
+@keyframes mx-pulse { 50% { opacity: .35; } }
+@keyframes mx-wave { 25% { transform: rotate(-24deg); } 75% { transform: rotate(12deg); } }
+/* Long rest, one small wave: the idle version of the same motion. */
+@keyframes mx-wave-idle { 0%, 74%, 100% { transform: rotate(0); } 82% { transform: rotate(-18deg); } 90% { transform: rotate(8deg); } }
+@keyframes mx-blink { 0%, 92%, 100% { transform: scaleY(0); } 95%, 97% { transform: scaleY(1); } }
+@keyframes mx-glance { 0%, 62%, 100% { transform: translateX(0); } 70%, 80% { transform: translateX(-3.4px); } }
+@keyframes mx-twinkle { 0%, 100% { opacity: 0; transform: scale(.4); } 45% { opacity: 1; transform: scale(1); } }
+
+/* What he says, in a bubble with a tail pointing back at him — not a caption
+   under an avatar. It arrives after he lands, because a greeting that appears
+   before the character does reads as a flash of text rather than as somebody
+   speaking. */
+.max-say {
+  position: relative; max-width: 300px; margin: 16px 0 0; padding: 13px 16px;
+  border: 1px solid rgba(75,245,197,.42); border-radius: 18px;
+  background: linear-gradient(135deg, rgba(18,59,53,.94), rgba(7,28,34,.94));
+  opacity: 0; transform: translateY(-6px) scale(.94); transform-origin: top center;
+}
+/* A clipped triangle, not a rotated square. The rotated-square trick leaves its
+   lower half sitting on top of the bubble in a slightly different fill, which
+   reads as a floating diamond rather than as a tail. */
+.max-say::before {
+  content: ""; position: absolute; top: -9px; left: 50%; width: 20px; height: 10px;
+  margin-left: -10px; background: rgba(75,245,197,.42);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.max-say::after {
+  content: ""; position: absolute; top: -8px; left: 50%; width: 18px; height: 9px;
+  margin-left: -9px; background: #123b35;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.max-say.show { animation: mx-say .5s cubic-bezier(.2,1.3,.35,1) forwards; }
+.max-say p { margin: 0; color: rgba(233,255,249,.86); font-size: 12.5px; line-height: 1.55; text-align: left; }
+.max-say b { color: #8ff3e0; }
+@keyframes mx-say { to { opacity: 1; transform: translateY(0) scale(1); } }
+
 @media (prefers-reduced-motion: reduce) {
-  .max-pop.show { animation: none; opacity: 1; transform: none; }
-  .plan-card ul { transition: none; }
+  .max-sticker, .mx-bob, .mx-arm, .mx-lid, .mx-pupils, .mx-antenna, .mx-pulse,
+  .mx-shadow, .mx-spark, .max-say.show { animation: none; }
+  .mx-lid { transform: scaleY(0); }
+  .max-say { opacity: 1; transform: none; }
+  .plan-feat, .plan-hint { transition: none; }
 }
 
 /* Mobile: the quiz shell scrolls INSIDE itself, and the page behind it does
