@@ -18,6 +18,8 @@ import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcer
 import { openQuiz } from "./goalsQuiz.ts";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.ts";
 import { GOALS } from "../engine/goals.ts";
+import { ANALYSIS_MODES, basicScores, loadAnalysisMode, saveAnalysisMode, verdictFor } from "../engine/analysisMode.ts";
+import type { AnalysisMode } from "../engine/analysisMode.ts";
 
 interface Ctx {
   report: Report;
@@ -419,6 +421,14 @@ function showOverall(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
+  // Verdict and Basic are whole-screen answers, not sections of the full one.
+  // Someone who picked "one line" and then has to scroll past the population
+  // curve to reach it did not get what they asked for.
+  const mode = loadAnalysisMode();
+  if (mode !== "full") {
+    showShallow(mode);
+    return;
+  }
   // Two chips when there is a running average: "vs last scan" answers whether
   // it moved since Tuesday, "vs average" answers where the face usually lands —
   // the steadier of the two against a noisy instrument.
@@ -482,9 +492,11 @@ function showOverall(): void {
              <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
                <button class="btn gho" id="btn-share">Share card</button></div>`
       }
+      ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
 
+  wireModeSwitcher();
   const overview = body().querySelector<HTMLElement>(".overview-reveal");
   if (overview) animateOverview(overview);
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
@@ -1011,6 +1023,93 @@ function showImprove(): void {
   // moment prose is about to be written, and the first moment they have the
   // numbers in front of them to answer with.
   if (!profile.postDone) openQuiz(() => showImprove(), "post");
+}
+
+// ---------------------------------------------------------------------------
+// Verdict and Basic.
+//
+// Both render from the SAME report the full mode renders from. Neither computes
+// anything — see engine/analysisMode.ts. The depth switch changes how much is
+// said, never what is true.
+// ---------------------------------------------------------------------------
+function showShallow(mode: AnalysisMode): void {
+  if (!ctx) return;
+  const r = ctx.report;
+  const inner = mode === "verdict" ? verdictHTML() : basicHTML();
+
+  body().innerHTML = `<div class="reveal">
+    ${inner}
+    ${modeSwitcher(mode)}
+    <div class="navrow">
+      <button class="btn gho" id="btn-new">New photo</button>
+      <button class="btn pri" id="btn-share">Share card</button>
+    </div>
+    ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
+  </div>`;
+
+  wireModeSwitcher();
+  document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
+  document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
+  document.getElementById("btn-share")!.onclick = async () => {
+    if (!ctx) return;
+    const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
+    const card = await renderShareCard(r, photo);
+    await shareCard(card, r.overall);
+  };
+}
+
+function verdictHTML(): string {
+  const v = verdictFor(ctx!.report);
+  return `<div class="verdict ${v.tone}">
+    <span class="verdict-label">VERDICT</span>
+    <b class="verdict-word">${v.word}</b>
+    <p class="verdict-line">${v.line}</p>
+  </div>`;
+}
+
+function basicHTML(): string {
+  const scores = basicScores(ctx!.report);
+  const [lead, ...rest] = scores;
+  return `<div class="basic">
+    <div class="basic-lead">
+      <span class="klabel">OVERALL</span>
+      <b><span data-count="${lead.value}" data-decimals="0">0</span><small>/100</small></b>
+    </div>
+    <div class="basic-grid">
+      ${rest
+        .map(
+          (s) => `<div class="basic-cell">
+        <span>${s.label.toUpperCase()}</span>
+        <b>${s.value}</b>
+        <i style="width:${s.value}%"></i>
+      </div>`,
+        )
+        .join("")}
+    </div>
+    <p class="basic-note">Every number here is a percentile: where you sit against the reference population, not a mark out of a hundred. The full mode shows the ${ctx!.report.metrics.length} measurements these come from.</p>
+  </div>`;
+}
+
+// Present on every depth, including the full one, so changing your mind is
+// never a trip into settings.
+function modeSwitcher(current: AnalysisMode): string {
+  return `<div class="modeswitch" role="group" aria-label="How much detail to show">
+    ${ANALYSIS_MODES.map(
+      (m) => `<button type="button" class="ms-btn${m.id === current ? " on" : ""}" data-mode="${m.id}">
+        <b>${m.label}</b><span>${m.blurb}</span>
+      </button>`,
+    ).join("")}
+  </div>`;
+}
+
+function wireModeSwitcher(): void {
+  for (const b of document.querySelectorAll<HTMLButtonElement>(".ms-btn")) {
+    b.onclick = () => {
+      const mode = b.dataset.mode as AnalysisMode;
+      saveAnalysisMode(mode);
+      showOverall();
+    };
+  }
 }
 
 // Whether this account has Max. Module state rather than a Ctx field because it
