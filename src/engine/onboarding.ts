@@ -108,6 +108,19 @@ export function profileIsAdult(profile: OnboardingProfile): boolean {
   return isAdult(profile.dateOfBirth);
 }
 
+// A profile is only usable once it has been through the quiz. The three fields
+// checked here are the three the rest of the product actually reads: the name
+// the dashboard greets you by, the date of birth that decides which plan may be
+// offered, and the completion stamp that stops this asking again.
+//
+// The date of birth is the reason there is no "skip". Everything else could
+// have a sensible default; an unknown age cannot, because the fallback is
+// either offering an adult subscription to a thirteen-year-old or withholding
+// it from an adult, and both are wrong.
+export function onboardingComplete(profile: OnboardingProfile): boolean {
+  return Boolean(profile.completedAt) && Boolean(profile.firstName.trim()) && ageOnDate(profile.dateOfBirth) !== null;
+}
+
 export function validateOnboardingStep(profile: OnboardingProfile, step: number): string | null {
   if (step === 0) {
     if (!profile.firstName.trim() || !profile.lastName.trim()) return "Add your first and last name to continue.";
@@ -151,6 +164,13 @@ export async function saveOnboardingProfile(
     }, { onConflict: "user_id" });
     if (error) return { ok: false, message: error.message };
     profile.completedAt = new Date().toISOString();
+    // Mirror the name into the auth user so the greeting has it without a round
+    // trip to the profiles table on every page load. The table stays the source
+    // of truth; this is a cache, and a failure to write it is not a failure to
+    // save the profile — so it is deliberately not awaited into the result.
+    await client.auth
+      .updateUser({ data: { first_name: profile.firstName.trim(), last_name: profile.lastName.trim() } })
+      .catch(() => undefined);
     return { ok: true };
   } catch {
     return { ok: false, message: "Could not save your pathway. Check your connection and try again." };

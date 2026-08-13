@@ -80,7 +80,14 @@ function readInputs(profile: OnboardingProfile): void {
   }
 }
 
+// Set while the questions are compulsory — a first run, where the app cannot
+// greet you by name or decide which plan it is allowed to show you until they
+// are answered. Cleared the moment the answers are saved, so the OFFER is
+// always dismissible: the questions are required, the subscription never is.
+let locked = false;
+
 function close(): void {
+  if (locked) return;
   host?.remove();
   host = null;
   document.body.classList.remove("funnel-open");
@@ -96,7 +103,19 @@ interface FunnelPreview {
   offer: boolean;
 }
 
-export async function openTrialFunnel(user: User, preview?: FunnelPreview): Promise<void> {
+export interface FunnelOptions {
+  // No ✕, no Escape, no "Not now" — the quiz has to be finished before the
+  // rest of the app means anything. Only ever true on a first run.
+  required?: boolean;
+}
+
+export async function openTrialFunnel(
+  user: User,
+  preview?: FunnelPreview,
+  options: FunnelOptions = {},
+): Promise<void> {
+  locked = false;
+  const required = Boolean(options.required);
   close();
   host = document.createElement("div");
   host.className = "trial-overlay";
@@ -131,6 +150,10 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
   let step = 0;
   let busy = false;
   const total = 6;
+  // Only lock once the profile has loaded, so a network failure on the way in
+  // leaves the retry screen closable rather than trapping somebody in a dialog
+  // that cannot succeed.
+  locked = required && !preview;
 
   const drawOffer = () => {
     if (!host) return;
@@ -225,6 +248,10 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
       localGoals.postDone = true;
       saveProfile(localGoals);
     }
+    // The answers are in, so the lock comes off before the plans appear. The
+    // questions were compulsory; being sold to is not, and a paywall you cannot
+    // close is a different product to the one this is trying to be.
+    locked = false;
     drawOffer();
   };
 
@@ -267,7 +294,7 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
       <header class="trial-nav">
         <div class="trial-brand">TRUE<span>MAX</span></div>
         <div class="trial-progress" aria-label="Step ${step + 1} of ${total}">${progress(total, step)}</div>
-        <button class="trial-close" type="button" aria-label="Close">✕</button>
+        ${locked ? "" : `<button class="trial-close" type="button" aria-label="Close">✕</button>`}
       </header>
       <main class="trial-body">
         <span class="trial-eyebrow">${eyebrow} · ${step + 1} OF ${total}</span>
@@ -277,7 +304,7 @@ export async function openTrialFunnel(user: User, preview?: FunnelPreview): Prom
       </main>
       <p class="trial-status" role="status"></p>
       <footer class="trial-actions">
-        <button class="btn gho" id="trial-back" type="button">${step === 0 ? "Not now" : "Back"}</button>
+        <button class="btn gho" id="trial-back" type="button" ${locked && step === 0 ? "hidden" : ""}>${step === 0 ? "Not now" : "Back"}</button>
         <button class="btn pri" id="trial-next" type="button">${step === total - 1 ? "See my trial options" : "Continue"}</button>
       </footer>
     </div>`;
