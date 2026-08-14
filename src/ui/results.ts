@@ -29,6 +29,7 @@ import { openMaxChat } from "./maxChat.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
+import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
   report: Report;
@@ -1074,10 +1075,11 @@ function showImprove(): void {
       ${gated
         ? `<div class="lockwrap">
             <div class="lockblur" aria-hidden="true" inert>${planBody}</div>
-            <div class="lockcard">
-              <span class="lockcard-eyebrow">YOUR PATHWAY</span>
-              <h4>Max reckons your ceiling is ${r.potential.toFixed(1)} — ${rankShort(aggregateScoreToPercentile(r.potential)).toLowerCase()}.</h4>
-              <p>You measured ${r.overall.toFixed(1)}. On this scale most people never see a 7 — the translation is the point. The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
+            <div class="lockcard lockcard-ceiling">
+              <span class="lockcard-eyebrow">YOUR CEILING</span>
+              <h4>Our system reckons your potential is a good deal higher.</h4>
+              ${ceilingCtaMarkup({ overall: r.overall, potential: r.potential, photo: frontPhoto })}
+              <p>The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
               <button class="linkish lock-single" id="btn-single-scan">Or one scan on its own — $5.99, $2.99 for members</button>
             </div>
@@ -1088,6 +1090,10 @@ function showImprove(): void {
     </div>`;
   wireUnlock();
   wireAskMax();
+  // The canvases exist only once the card is in the document, and they are
+  // painted from the cached front capture rather than re-read from the live
+  // canvas, which by now may be showing the side profile.
+  paintCeilingCta(body(), frontPhoto);
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();

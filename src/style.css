@@ -2533,3 +2533,68 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 @media (prefers-reduced-motion: reduce) {
   .pane-photo .face-frame { transition: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   The ceiling, with a picture.
+
+   Two copies of the person's own capture stacked on top of each other. The
+   upper one is blurred and warmed and fades in and out, so the image drifts
+   between what was measured and what is not decided yet.
+
+   It is their photograph both times. Generating an "after" face is the one
+   thing this product will not do, and the caption under the frame says so.
+   --------------------------------------------------------------------------- */
+.ceil { margin: 4px 0 14px; }
+.ceil-faces {
+  position: relative; width: 132px; aspect-ratio: 1; margin: 0 auto 12px;
+  border-radius: 99px; overflow: hidden; background: var(--soft);
+  box-shadow: 0 6px 22px rgba(20, 21, 24, .16), 0 0 0 3px var(--card), 0 0 0 4px var(--acc-soft);
+}
+.ceil-face { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ceil-then {
+  /* Warmer, brighter and out of focus. Not a prediction: the blur IS the
+     statement, because the part of the gap that is up to them has not
+     happened yet. */
+  filter: blur(6px) saturate(1.18) brightness(1.1) contrast(.96);
+  opacity: 0; animation: ceil-drift 5.2s ease-in-out infinite;
+}
+@keyframes ceil-drift { 0%, 22% { opacity: 0; } 48%, 74% { opacity: 1; } 100% { opacity: 0; } }
+/* A slow highlight sweeping across the frame, timed to arrive with the blur. */
+.ceil-shine {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(114deg, transparent 34%, rgba(255, 255, 255, .42) 50%, transparent 66%);
+  transform: translateX(-120%); animation: ceil-shine 5.2s ease-in-out infinite;
+}
+@keyframes ceil-shine { 0%, 26% { transform: translateX(-120%); } 56%, 100% { transform: translateX(120%); } }
+.ceil-faces.nophoto { display: none; }
+
+.ceil-nums {
+  display: flex; align-items: baseline; justify-content: center; gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.ceil-n { font: 600 34px/1 var(--serif); color: var(--mut); }
+.ceil-n.hi { color: var(--acc); font-size: 46px; }
+.ceil-arrow { color: var(--acc); font-size: 19px; }
+.ceil-line { margin: 10px 0 8px; font-size: 13px; line-height: 1.6; color: var(--ink); }
+.ceil-line b { color: var(--acc); font-weight: 620; }
+.ceil-hon {
+  margin: 0; font-size: 11px; line-height: 1.5; color: var(--mut);
+}
+/* The ceiling card is much taller than the plain paywall card, and a card
+   centred on a 520px blur with 615px of content inside it hangs off the TOP,
+   taking the headline with it. Anchor this variant to the top of the wrap
+   instead of the middle, and give the wrap enough height to hold it. */
+.lockcard-ceiling { top: 0; transform: translate(-50%, 0); margin-top: 14px; max-height: none; }
+.lockwrap:has(.lockcard-ceiling) { min-height: 660px; }
+/* Browsers without :has() centre it as before, so it must still survive that:
+   scrolling inside the card is the fallback, not the plan. */
+@supports not selector(:has(*)) {
+  .lockcard-ceiling { top: 50%; transform: translate(-50%, -50%); max-height: 86vh; overflow-y: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still both states, just held rather than animated: the second image is the
+     entire point of the card and removing it would leave two numbers. */
+  .ceil-then { animation: none; opacity: .62; }
+  .ceil-shine { display: none; }
+}
