@@ -308,7 +308,14 @@ const OVAL_DEPTH_FRACTION = 0.607;
 // right. In the head's own axes the same three fixtures agree three to four
 // times more closely: the ear's vertical spread across them falls from 0.164 to
 // 0.037.
-const TEMPLATE: Record<SidePointId, [number, number]> = {
+// Exported so the reference diagram can be DRAWN from it rather than drawn by
+// hand. Three hand-authored attempts at this head all came out subtly wrong —
+// too narrow, wrong ear depth, a bite out of the skull — because a head is
+// mostly proportions and those are exactly what eyeballing gets wrong. These
+// numbers are measured from real profiles and are the same ones the seeder
+// places points with, so a diagram built from them cannot disagree with the
+// thing it is teaching.
+export const TEMPLATE: Record<SidePointId, [number, number]> = {
   trichion: [-0.159, 0.0],
   glabella: [-0.111, 0.194],
   nasion: [-0.136, 0.292],

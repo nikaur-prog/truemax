@@ -4,7 +4,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { FACE_LANDMARK_COUNT, LM, landmarkIntegrityIssues } from "./geometry.js";
 import type { Geom, Pt } from "./geometry.js";
 import { measureCanthalTilts } from "./metrics.js";
-import { EXPERIMENTAL_SIDE_METRIC_IDS, SIDE_METRICS, sidePointIntegrityIssues } from "./sideMetrics.js";
+import { EXPERIMENTAL_SIDE_METRIC_IDS, SIDE_METRICS, faceDirFromPoints, sidePointIntegrityIssues } from "./sideMetrics.js";
 import type { SidePoints } from "./sideMetrics.js";
 
 function rotate(p: Pt, deg: number): Pt {
@@ -86,4 +86,33 @@ test("unvalidated profile constructions cannot enter a user score", () => {
   for (const metric of SIDE_METRICS) {
     assert.equal(EXPERIMENTAL_SIDE_METRIC_IDS.has(metric.id), false, metric.id);
   }
+});
+
+test("the facing is read from the points, not asserted against them", () => {
+  // A tester's profile was seeded with every point in the right place but the
+  // facing detected backwards. That both blocked Confirm on a good photo and,
+  // worse, would have fed an inverted faceDir into analyzeSide — where it
+  // multiplies every projection and silently reports the profile the wrong way
+  // round. The points are the witness: the nose tip is in front of the ear,
+  // which is what "in front" means on a head.
+  const facingRight = validSide;
+  assert.equal(faceDirFromPoints(facingRight), 1);
+  const mirrored = Object.fromEntries(
+    Object.entries(facingRight).map(([k, v]) => [k, { x: 240 - v.x, y: v.y }]),
+  ) as typeof validSide;
+  assert.equal(faceDirFromPoints(mirrored), -1);
+  // And both directions pass integrity, since neither is anatomically wrong.
+  assert.deepEqual(sidePointIntegrityIssues(facingRight, 240, 360, faceDirFromPoints(facingRight)), []);
+  assert.deepEqual(sidePointIntegrityIssues(mirrored, 240, 360, faceDirFromPoints(mirrored)), []);
+});
+
+test("a genuinely collapsed profile is still rejected", () => {
+  // The replacement check has to keep catching the real failure: nose and ear
+  // landing on top of each other, which cannot be measured whichever way the
+  // head faces.
+  const collapsed = { ...validSide, tragion: { ...validSide.pronasale, x: validSide.pronasale.x + 2 } };
+  assert.match(
+    sidePointIntegrityIssues(collapsed, 240, 360, faceDirFromPoints(collapsed))[0] ?? "",
+    /too close together/,
+  );
 });

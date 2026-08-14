@@ -1,6 +1,6 @@
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
-import { sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import { faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
 import { mountSideReference } from "./sideReference.js";
@@ -465,7 +465,12 @@ function mountVerify(
     if (!verifier) return;
     const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
     if (confirmButton) confirmButton.disabled = true;
-    const issues = sidePointIntegrityIssues(verifier.points, w, h, verifier.faceDir);
+    // The facing comes from the confirmed points, not from the detector that
+    // seeded them. A tester's profile was seeded with the points in the right
+    // places but the facing detected backwards, which both blocked Confirm and
+    // would have inverted every projection measurement in the report.
+    const faceDir = faceDirFromPoints(verifier.points);
+    const issues = sidePointIntegrityIssues(verifier.points, w, h, faceDir);
     if (issues.length) {
       if (confirmButton) confirmButton.disabled = false;
       e.cap.textContent = "CHECK LANDMARKS";
@@ -479,7 +484,7 @@ function mountVerify(
     }
     try {
       const correctedPoints = cloneSidePoints(verifier.points);
-      const report = analyzeSide(verifier.points, verifier.faceDir, ctx.sex);
+      const report = analyzeSide(verifier.points, faceDir, ctx.sex);
 
       // Consent, asked only when there is something to learn.
       //
@@ -500,7 +505,7 @@ function mountVerify(
         seedMethod,
       );
       e.cap.textContent = "ANALYZED";
-      ctx.onDone(report, correctedPoints, verifier.faceDir, {
+      ctx.onDone(report, correctedPoints, faceDir, {
         automaticPoints,
         seedMethod,
         feedback,

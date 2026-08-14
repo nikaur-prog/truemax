@@ -58,10 +58,32 @@ export function sidePointIntegrityIssues(
   if (p.nasion.y >= p.subnasale.y) issues.push("Nose bridge must sit above the nose base");
   if (p.subnasale.y >= p.labialeInferius.y) issues.push("The lip points are out of vertical order");
   if (p.condylion.y >= p.gonion.y) issues.push("Jaw top must sit above the jaw corner");
-  if ((p.pronasale.x - p.tragion.x) * faceDir <= 0) {
-    issues.push("Nose tip must sit in front of the ear notch");
+  // Nose and ear must be meaningfully separated across the frame. What this
+  // must NOT do is check which SIDE the nose is on: that is the definition of
+  // which way the face points, so testing it against a separately-detected
+  // faceDir only ever asks whether the detector agreed with the points, and
+  // rejects a perfectly good profile when it did not. See faceDirFromPoints.
+  void faceDir;
+  if (Math.abs(p.pronasale.x - p.tragion.x) < faceH * 0.25) {
+    issues.push("Nose tip and ear notch are too close together to measure");
   }
   return issues.slice(0, 4);
+}
+
+// Which way the head faces, taken from the points themselves: +1 when the
+// subject faces image-right, -1 when image-left.
+//
+// The nose tip is in front of the ear. That is not a heuristic, it is what
+// "in front" means on a head, so once the points are verified they are a
+// better witness to the facing than any detector — and unlike the detector
+// they are the same data every downstream measurement uses.
+//
+// This matters far beyond a warning message. faceDir multiplies every
+// projection in this file, so a wrong sign does not fail loudly: it silently
+// reports every forward measurement backwards, and a scan with correct points
+// comes out with an inverted profile.
+export function faceDirFromPoints(p: SidePoints): number {
+  return p.pronasale.x >= p.tragion.x ? 1 : -1;
 }
 
 // Signed angle of a→b from vertical, positive = b is forward of a.
