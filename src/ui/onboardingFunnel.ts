@@ -12,7 +12,8 @@ import {
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { startTrialCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
-import { maxStickerMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { typewriteBlock } from "./typewriter.js";
 import { METRICS } from "../engine/metrics.js";
 import { SIDE_METRICS } from "../engine/sideMetrics.js";
 
@@ -221,16 +222,17 @@ export async function openTrialFunnel(
           </button>
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
           <!-- Max lives at the foot of his own plan, not at the top of the
-               screen. Up there he was decoration above a headline; here he is
-               standing next to the thing he is included in, and he pops up out
-               from behind the card the moment the offer settles. -->
+               screen. He starts fully hidden behind the card's bottom edge —
+               the card's overflow does the hiding — and pops up waist-deep
+               once the offer settles, waves, and says his piece from a white
+               bubble that types itself out. -->
           <div class="max-stage">
-            ${maxStickerMarkup()}
             <div class="max-say" id="max-say">
               <p><b>Hey! I'm Max.</b> I'm here to help you hit your glow-up goals.
                 I read your measurements every scan, lock you into the routine
                 that gets you there, and tell you straight whether it moved.</p>
             </div>
+            <span class="max-pop" aria-hidden="true">${maxCharacterMarkup()}</span>
           </div>
         </article>
       </div>
@@ -242,19 +244,30 @@ export async function openTrialFunnel(
     host.querySelector(".trial-close")?.addEventListener("click", close);
     host.querySelector(".trial-decline")?.addEventListener("click", close);
 
-    // Max lands, then speaks. He arrives on his sticker, waves, and the bubble
-    // types itself out a beat later — the greeting has to finish arriving before
-    // it is readable, or it reads as a flash of text rather than as somebody
-    // saying something. Once per screen: a character who repeats his
-    // introduction stops being charming somewhere around the third time.
+    // The sequence: the offer settles, Max pops up from behind the card's
+    // bottom edge, waves (and puts his arm down), and only THEN does the
+    // bubble appear and type itself out — a greeting that arrives before the
+    // character does reads as a flash of text, not as somebody speaking. Once
+    // per screen: a character who repeats his introduction stops being
+    // charming somewhere around the third time.
     window.setTimeout(() => {
-      host?.querySelector(".max-say")?.classList.add("show");
-      // The mouth runs while the greeting is being read, then stops. Roughly
-      // reading speed for that many words rather than a round number, so he
-      // does not stand there mouthing at nothing.
-      const svg = host?.querySelector(".max-stage .mx-svg");
-      svg?.classList.add("speaking");
-      window.setTimeout(() => svg?.classList.remove("speaking"), 5200);
+      const stage = host?.querySelector(".max-stage");
+      stage?.classList.add("up");
+      const svg = stage?.querySelector(".mx-svg");
+      const arm = stage?.querySelector(".mx-arm");
+      window.setTimeout(() => arm?.classList.add("waving"), 480);
+      window.setTimeout(() => {
+        const say = host?.querySelector(".max-say");
+        if (say instanceof HTMLElement) {
+          say.classList.add("show");
+          typewriteBlock(say);
+        }
+        // The mouth runs while the greeting types, then stops — roughly
+        // reading speed for that many words, so he does not stand there
+        // mouthing at nothing.
+        svg?.classList.add("speaking");
+        window.setTimeout(() => svg?.classList.remove("speaking"), 5200);
+      }, 900);
     }, 620);
     wireMaxInteractions(host.querySelector<HTMLElement>(".max-stage"));
 

@@ -374,8 +374,13 @@ body.funnel-open { overflow: hidden; }
 
 .trial-shell.trial-offer { width: min(1080px, 100%); grid-template-rows: auto auto auto auto; padding: 26px clamp(24px, 4vw, 48px) 24px; overflow-y: auto; }
 .trial-offer > .trial-close { position: absolute; justify-self: end; z-index: 1; }
-.trial-offer-head { display: grid; grid-template-columns: 150px 1fr; align-items: start; gap: 26px; padding: 4px 44px 16px 0; }
-.trial-offer h2 { font-size: clamp(31px, 4vw, 48px); }
+/* One column, full width. This was `grid-template-columns: 150px 1fr` — a
+   leftover from a layout that had Max on the right of the header — which
+   squeezed the eyebrow, a 48px headline and the Stripe note into 150 PIXELS
+   next to an empty 1fr column. On desktop every word of the headline wrapped
+   onto its own line. */
+.trial-offer-head { padding: 4px 44px 18px 0; }
+.trial-offer h2 { font-size: clamp(31px, 4vw, 48px); max-width: 22ch; text-wrap: balance; }
 .trial-offer-head p { margin-bottom: 0; }
 .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .plan-card {
@@ -399,7 +404,12 @@ body.funnel-open { overflow: hidden; }
 .plan-card li { position: relative; padding-left: 20px; font-size: 12.5px; line-height: 1.4; }
 .plan-card li::before { content: "✓"; position: absolute; left: 0; color: var(--acc); font-weight: 700; }
 .featured li::before { color: #4bf5c5; }
-.plan-cta { margin-top: auto; min-height: 48px; color: #fff; background: var(--ink); }
+/* flex: none matters more than it looks: the global .btn rule says `flex: 1`,
+   and inside a flex-column card whose grid row is stretched to match the
+   taller TrueMax card, `flex: 1` hands the Starter button every leftover
+   pixel. That was the enormous black slab where the Starter card's middle
+   should be. The button is a button again; the slack lives above it. */
+.plan-cta { flex: none; margin-top: auto; min-height: 48px; max-height: 56px; color: #fff; background: var(--ink); }
 .featured .plan-cta { color: #071e19; background: #4bf5c5; box-shadow: 0 0 26px rgba(75,245,197,.2); }
 .plan-cta:disabled { color: #888b87; background: #d8dad6; cursor: not-allowed; }
 .plan-card > small { margin-top: 10px; color: var(--mut); text-align: center; font-size: 10px; }
@@ -2053,6 +2063,14 @@ body.auth-modal-open { overflow: hidden; }
 .featured .plan-hint { color: rgba(255,255,255,.5); }
 .plan-card.open { border-color: var(--acc); }
 .plan-card.max.open { border-color: #4bf5c5; }
+/* Tap-to-expand is phone thinking. On a desktop grid the cards have the room,
+   and a pricing card whose middle is an empty void — hint floating at the top,
+   button pinned to the bottom, nothing between — reads as unfinished. Wide
+   screens get the feature lists open from the start and never show the hint. */
+@media (min-width: 851px) {
+  .plan-feat { max-height: none; visibility: visible; opacity: 1; }
+  .plan-hint { display: none; }
+}
 
 /* Moods. Every expression part is drawn once in the SVG; a mood class on the
    root shows one set and hides the rest, so changing Max's face is a class
@@ -2072,8 +2090,9 @@ body.auth-modal-open { overflow: hidden; }
 .mx-svg.speaking .mx-mouth-open,
 .mx-svg.speaking .mx-mouth-flat,
 .mx-svg.speaking .mx-mouth-down { display: none; }
-.mx-talk-shape { transform-origin: 75px 78px; animation: mx-talk .26s ease-in-out infinite; }
-.mx-talk-tongue { transform-origin: 75px 80px; animation: mx-talk .26s ease-in-out infinite; }
+/* Origin at the TOP of the mouth ellipse, so it opens downward like a jaw
+   rather than inflating from its centre. */
+.mx-talk-shape { transform-origin: 75px 82px; animation: mx-talk .26s ease-in-out infinite; }
 .mx-svg.speaking .mx-bob { animation-duration: 2.1s; }
 .mx-svg.speaking .mx-antenna { animation-duration: 2.1s; }
 @keyframes mx-talk {
@@ -2140,7 +2159,28 @@ body.auth-modal-open { overflow: hidden; }
    in short bursts with long rests instead of running continuously. */
 /* Max stands at the foot of his own plan card, popping up from behind the CTA
    as the offer settles rather than being parked above the headline. */
-.max-stage { position: relative; display: grid; justify-items: center; margin-top: 14px; }
+/* The stage at the foot of the TrueMax card: white speech bubble on the left,
+   Max on the right, POPPING OUT from behind the card's bottom edge. The trick
+   is the card's own `overflow: hidden`: Max's wrapper is pulled down past the
+   card padding with a negative margin, so the rounded bottom edge clips him at
+   the waist — he is genuinely standing behind the card, not printed on it. He
+   arrives by sliding up from fully-clipped, which is the hide-and-seek moment,
+   then waves and puts his arm down. */
+.max-stage {
+  position: relative; display: flex; align-items: flex-end; gap: 10px;
+  margin-top: 16px; min-height: 96px;
+}
+.max-pop {
+  position: relative; flex: none; width: 112px; display: block;
+  margin-bottom: calc(-1 * (clamp(21px, 2.6vw, 28px) + 40px));
+  transform: translateY(140px);
+}
+.max-stage.up .max-pop { animation: mx-pop-up .7s cubic-bezier(.26, 1.18, .4, 1) forwards; }
+@keyframes mx-pop-up {
+  from { transform: translateY(140px); }
+  72% { transform: translateY(-9px); }
+  to { transform: translateY(0); }
+}
 .max-sticker {
   position: relative; display: block; width: 104px; padding: 6px 10px 4px;
   border-radius: 26px 26px 30px 30px; color: #ffd54a;
@@ -2155,7 +2195,8 @@ body.auth-modal-open { overflow: hidden; }
    being moved rather than as something alive. */
 .mx-bob { transform-origin: 75px 150px; animation: mx-bob 3.4s ease-in-out infinite; }
 /* The arm rests, then waves in bursts. `.waving` restarts it on demand. */
-.mx-arm { transform-origin: 104px 108px; animation: mx-wave-idle 6s ease-in-out infinite; }
+/* Pivot at the new shoulder: the top of the hanging paddle arm. */
+.mx-arm { transform-origin: 118px 94px; animation: mx-wave-idle 6s ease-in-out infinite; }
 .mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 .mx-lid { transform-origin: center top; transform: scaleY(0); animation: mx-blink 5.2s ease-in-out infinite; }
@@ -2195,39 +2236,35 @@ body.auth-modal-open { overflow: hidden; }
 @keyframes mx-glance { 0%, 62%, 100% { transform: translateX(0); } 70%, 80% { transform: translateX(-3.4px); } }
 @keyframes mx-twinkle { 0%, 100% { opacity: 0; transform: scale(.4); } 45% { opacity: 1; transform: scale(1); } }
 
-/* What he says, in a bubble with a tail pointing back at him — not a caption
-   under an avatar. It arrives after he lands, because a greeting that appears
-   before the character does reads as a flash of text rather than as somebody
-   speaking. */
+/* What he says: an actual WHITE speech bubble, with a tail on its right edge
+   pointing at Max — not a caption and not a tinted panel of card chrome. White
+   on purpose: on the dark TrueMax card it is unmistakably speech. It appears
+   once he is up, and the text types itself out while his mouth runs. */
 .max-say {
-  position: relative; max-width: 320px; margin: 14px 0 0; padding: 13px 16px;
-  border: 1px solid rgba(75,245,197,.42); border-radius: 18px;
-  background: linear-gradient(135deg, rgba(18,59,53,.94), rgba(7,28,34,.94));
-  opacity: 0; transform: translateY(-6px) scale(.94); transform-origin: top center;
+  position: relative; flex: 1; min-width: 0; margin: 0 0 26px; padding: 12px 15px;
+  border-radius: 16px 16px 4px 16px;
+  background: #fff; color: var(--ink);
+  box-shadow: 0 12px 34px rgba(3, 22, 18, .4);
+  opacity: 0; transform: translateY(8px) scale(.95); transform-origin: bottom right;
 }
 /* A clipped triangle, not a rotated square. The rotated-square trick leaves its
-   lower half sitting on top of the bubble in a slightly different fill, which
-   reads as a floating diamond rather than as a tail. */
-.max-say::before {
-  content: ""; position: absolute; top: -9px; left: 50%; width: 20px; height: 10px;
-  margin-left: -10px; background: rgba(75,245,197,.42);
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
-}
+   inner half sitting on the bubble in a slightly different fill, which reads
+   as a floating diamond rather than as a tail. */
 .max-say::after {
-  content: ""; position: absolute; top: -8px; left: 50%; width: 18px; height: 9px;
-  margin-left: -9px; background: #123b35;
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  content: ""; position: absolute; right: -8px; bottom: 8px; width: 10px; height: 16px;
+  background: #fff; clip-path: polygon(0 0, 100% 100%, 0 100%);
 }
-.max-say.show { animation: mx-say .5s cubic-bezier(.2,1.3,.35,1) forwards; }
-.max-say p { margin: 0; color: rgba(233,255,249,.86); font-size: 12.5px; line-height: 1.55; text-align: left; }
-.max-say b { color: #8ff3e0; }
+.max-say.show { animation: mx-say .45s cubic-bezier(.2, 1.3, .35, 1) forwards; }
+.max-say p { margin: 0; color: var(--ink); font-size: 12.5px; line-height: 1.55; text-align: left; }
+.max-say b { color: var(--acc); }
 @keyframes mx-say { to { opacity: 1; transform: translateY(0) scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
   .max-sticker, .mx-bob, .mx-arm, .mx-lid, .mx-pupils, .mx-antenna, .mx-pulse,
-  .mx-shadow, .mx-spark, .max-say.show { animation: none; }
+  .mx-shadow, .mx-spark, .max-say.show, .max-stage.up .max-pop { animation: none; }
   .mx-lid { transform: scaleY(0); }
   .max-say { opacity: 1; transform: none; }
+  .max-pop { transform: none; }
   .plan-feat, .plan-hint { transition: none; }
 }
 

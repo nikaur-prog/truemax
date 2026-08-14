@@ -27,26 +27,28 @@
 //               away from mockery, which is why it is drawn here once and not
 //               improvised per surface.
 //
-// He is a scanner, so he looks like one: a round blue robot with a gold
-// antenna, drawn flat with bold outlines and soft top-light shading.
-// Deliberately NOT a 3D render — the flat cartoon reads at 40px, matches the
-// product's drawn silhouettes, and leaves room for expression without uncanny
-// territory.
+// The register he is drawn in is "device", not "children's television". The
+// first version had thick navy colouring-book outlines, googly white-sclera
+// eyes, blush marks, a gold antenna ball and a toy chest screen — every one of
+// those is a kids'-cartoon tell, and next to an $11.99 price it cheapened the
+// exact card he was there to sell. This version is a single strokeless
+// silhouette with product-render shading, a dark glass visor, and two soft
+// light-bar eyes: closer to EVE and Copilot than to Saturday morning. He stays
+// blue, because the mint version disappeared into the brand colour behind him,
+// and a mascot the same colour as the furniture is furniture.
 // ---------------------------------------------------------------------------
 
 export type MaxMood = "happy" | "excited" | "thinking" | "concerned";
 
 // Palette. Kept here rather than CSS variables because the character must look
 // the same on every surface he appears on, light card or dark takeover.
-// Blue, not mint. He reads as a device rather than as part of the interface —
-// the mint version disappeared into the brand colour behind him, and a mascot
-// the same colour as the furniture is furniture.
-const BLUE = "#5aa9ff";
-const BLUE_DEEP = "#2f7fe0";
-const NAVY = "#0a1f3d";
-const CREAM = "#f6fbff";
-const GOLD = "#ffd54a";
-const BLUSH = "#3f8fd8";
+const BODY_TOP = "#84b5fb";
+const BODY_MID = "#4f82e6";
+const BODY_DEEP = "#2b52a6";
+const GLASS_TOP = "#17294e";
+const GLASS_DEEP = "#0a1428";
+const LIGHT = "#e9f6ff";
+const MINT = "#4bf5c5";
 
 // A four-point star for the excited eyes, centred on (cx, cy).
 const star = (cx: number, cy: number, r: number) =>
@@ -57,110 +59,107 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
   const mood = options.mood ?? "happy";
   return `<svg viewBox="0 0 150 158" class="mx-svg mx-mood-${mood}" aria-hidden="true">
     <defs>
-      <!-- Top-light shading: the one concession to depth a flat cartoon needs.
-           Fixed ids are safe because every instance defines identical
+      <!-- Fixed ids are safe because every instance defines identical
            gradients — whichever copy the browser resolves, he looks the same. -->
-      <radialGradient id="mxg-head" cx="38%" cy="26%" r="85%">
-        <stop offset="0%" stop-color="#a9d4ff"/>
-        <stop offset="55%" stop-color="${BLUE}"/>
-        <stop offset="100%" stop-color="#2f7fe0"/>
-      </radialGradient>
       <linearGradient id="mxg-body" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${BLUE}"/>
-        <stop offset="100%" stop-color="${BLUE_DEEP}"/>
+        <stop offset="0%" stop-color="${BODY_TOP}"/>
+        <stop offset="55%" stop-color="${BODY_MID}"/>
+        <stop offset="100%" stop-color="${BODY_DEEP}"/>
       </linearGradient>
+      <linearGradient id="mxg-glass" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${GLASS_TOP}"/>
+        <stop offset="100%" stop-color="${GLASS_DEEP}"/>
+      </linearGradient>
+      <linearGradient id="mxg-eye" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="100%" stop-color="#b6dcff"/>
+      </linearGradient>
+      <!-- A step darker than the body: the paddles sit against the lower
+           body, and limbs the same colour as the torso are invisible limbs. -->
       <linearGradient id="mxg-limb" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#6fb6ff"/>
-        <stop offset="100%" stop-color="${BLUE_DEEP}"/>
+        <stop offset="0%" stop-color="${BODY_DEEP}"/>
+        <stop offset="100%" stop-color="#1e3c7d"/>
       </linearGradient>
     </defs>
     <g class="mx-bob">
-      <!-- shadow -->
-      <ellipse cx="75" cy="150" rx="34" ry="6" fill="rgba(10,31,61,.18)" class="mx-shadow"/>
-      <!-- left arm, resting against the body -->
-      <path d="M45 106 q-12 6 -10 18 q1 7 8 6 q7 -1 8 -9" fill="url(#mxg-limb)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
-      <!-- body -->
-      <path d="M50 96 h50 q7 0 7 8 v22 q0 16 -32 16 q-32 0 -32 -16 v-22 q0 -8 7 -8 z"
-        fill="url(#mxg-body)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
-      <!-- chest screen: the one place his scanner nature shows -->
-      <rect x="62" y="110" width="26" height="17" rx="6" fill="${NAVY}"/>
-      <path d="M66 118 l5 0 3 -4 3 7 3 -3 5 0" fill="none" stroke="${BLUE}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="mx-pulse"/>
-      <!-- feet -->
-      <path d="M58 141 q-2 8 4 8 q7 0 6 -7" fill="${BLUE_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
-      <path d="M92 141 q2 8 -4 8 q-7 0 -6 -7" fill="${BLUE_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
-      <!-- Waving arm, pivoting at the shoulder.
-           Drawn HANGING DOWN, which is the resting pose. The previous version
-           drew it already raised, so the wave keyframes returned him to an arm
-           held permanently in the air: he looked like he was signalling an
-           aircraft rather than saying hello. The raise is now entirely in the
-           animation, which means every path back to zero is an arm coming
-           down. -->
+      <!-- He hovers: a soft pool of shadow, no feet. Feet are a toddler
+           proportion; a small hover gap reads as hardware. -->
+      <ellipse cx="75" cy="151" rx="28" ry="4.5" fill="rgba(9,22,46,.28)" class="mx-shadow"/>
+      <!-- Left arm, resting: a small paddle angled outward-down, drawn to sit
+           OUTSIDE the silhouette. The first pass tucked both arms inside the
+           egg's outline, where a limb the same shape as the body simply
+           vanished, and the wave looked like a growth appearing from nowhere. -->
+      <path d="M34 92 C22 94 13 104 15 118 C16.5 127 26 129.5 31 122 C36 115 36 102 34 92 Z" fill="url(#mxg-limb)"/>
+      <!-- Waving arm. Drawn HANGING DOWN — the raise lives entirely in the
+           animation, so every path back to rest is an arm coming down, never
+           an arm left in the air. -->
       <g class="mx-arm${options.waving ? " waving" : ""}">
-        <path d="M104 108 q16 4 20 18 q2 8 -5 9 q-7 1 -10 -6 q-4 -10 -12 -13" fill="url(#mxg-limb)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
+        <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
       </g>
-      <!-- antenna -->
+      <!-- antenna: a thin stem and a lit mint tip, the one brand-coloured
+           point on him -->
       <g class="mx-antenna">
-        <line x1="75" y1="22" x2="75" y2="10" stroke="${NAVY}" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="75" cy="7" r="5.5" fill="${GOLD}" stroke="${NAVY}" stroke-width="3"/>
-        <circle cx="73.4" cy="5.4" r="1.5" fill="#fff2c4" class="mx-antenna-glint"/>
+        <line x1="75" y1="18" x2="75" y2="8" stroke="${BODY_DEEP}" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="75" cy="6.5" r="7" fill="${MINT}" opacity=".22" class="mx-pulse"/>
+        <circle cx="75" cy="6.5" r="3.4" fill="${MINT}"/>
+        <circle cx="74" cy="5.4" r="1" fill="#eafff8" class="mx-antenna-glint"/>
       </g>
-      <!-- head -->
-      <circle cx="75" cy="60" r="40" fill="url(#mxg-head)" stroke="${NAVY}" stroke-width="3.5"/>
-      <!-- specular sweep on the crown -->
-      <path d="M50 36 q10 -11 24 -9" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="4.5" stroke-linecap="round"/>
-      <!-- cheeks -->
-      <ellipse cx="46" cy="72" rx="6" ry="4.4" fill="${BLUSH}" opacity=".55"/>
-      <ellipse cx="104" cy="72" rx="6" ry="4.4" fill="${BLUSH}" opacity=".55"/>
-      <!-- eyes -->
+      <!-- the body: one continuous egg, no outline -->
+      <path d="M75 16 C104 16 126 42 126 84 C126 120 104 146 75 146 C46 146 24 120 24 84 C24 42 46 16 75 16 Z"
+        fill="url(#mxg-body)"/>
+      <!-- top-light specular and a grounded base shade -->
+      <ellipse cx="57" cy="34" rx="21" ry="12" fill="#ffffff" opacity=".32"/>
+      <path d="M30 106 C38 134 58 146 75 146 C46 146 30 124 30 106 Z" fill="${BODY_DEEP}" opacity=".5"/>
+      <!-- the visor: dark glass, where the whole face lives -->
+      <rect x="36" y="45" width="78" height="52" rx="24" fill="url(#mxg-glass)"/>
+      <rect x="36.8" y="45.8" width="76.4" height="50.4" rx="23.4" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="1.6"/>
+      <!-- a faint reflection across the glass -->
+      <path d="M44 52 q14 -6 30 -4" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="3.4" stroke-linecap="round"/>
+      <!-- eyes: two soft light bars -->
       <g class="mx-eyes">
-        <ellipse cx="59" cy="56" rx="10.5" ry="13" fill="${CREAM}" stroke="${NAVY}" stroke-width="3"/>
-        <ellipse cx="91" cy="56" rx="10.5" ry="13" fill="${CREAM}" stroke="${NAVY}" stroke-width="3"/>
         <g class="mx-pupils">
-          <circle cx="61" cy="58" r="4.6" fill="${NAVY}"/>
-          <circle cx="93" cy="58" r="4.6" fill="${NAVY}"/>
-          <circle cx="62.6" cy="56.2" r="1.6" fill="${CREAM}"/>
-          <circle cx="94.6" cy="56.2" r="1.6" fill="${CREAM}"/>
+          <rect x="53" y="57" width="11.5" height="22" rx="5.75" fill="url(#mxg-eye)"/>
+          <rect x="85.5" y="57" width="11.5" height="22" rx="5.75" fill="url(#mxg-eye)"/>
+          <circle cx="56.4" cy="61.4" r="1.7" fill="#ffffff"/>
+          <circle cx="88.9" cy="61.4" r="1.7" fill="#ffffff"/>
         </g>
-        <!-- excited: the pupils give way to stars -->
+        <!-- excited: the bars give way to stars -->
         <g class="mx-alt mx-eye-stars">
-          <path d="${star(60, 56.5, 6.5)}" fill="${GOLD}" stroke="${NAVY}" stroke-width="1.6" stroke-linejoin="round"/>
-          <path d="${star(92, 56.5, 6.5)}" fill="${GOLD}" stroke="${NAVY}" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="${star(58.8, 68, 8)}" fill="${LIGHT}"/>
+          <path d="${star(91.2, 68, 8)}" fill="${LIGHT}"/>
         </g>
-        <!-- lids: same fill as the head, scaled down from the top to blink -->
-        <ellipse cx="59" cy="56" rx="11.5" ry="14" fill="${BLUE}" class="mx-lid"/>
-        <ellipse cx="91" cy="56" rx="11.5" ry="14" fill="${BLUE}" class="mx-lid"/>
+        <!-- lids: glass-coloured, dropped from the top to blink -->
+        <rect x="51.5" y="55.5" width="14.5" height="25" rx="7" fill="${GLASS_TOP}" class="mx-lid"/>
+        <rect x="84" y="55.5" width="14.5" height="25" rx="7" fill="${GLASS_TOP}" class="mx-lid"/>
       </g>
-      <!-- brows, one set per mood -->
+      <!-- brows: thin light strokes on the glass, one set per mood -->
       <g class="mx-brows-happy">
-        <path d="M50 38 q8 -5 17 -3" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
-        <path d="M83 35 q9 -2 17 3" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
+        <path d="M52 52.5 q6 -3.4 13 -2.2" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M85 50.3 q7 -1.2 13 2.2" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
       <g class="mx-alt mx-brows-thinking">
-        <path d="M50 40 q8 -2 17 -1" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
-        <path d="M83 33 q9 -4 17 1" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
+        <path d="M52 53.5 q6 -1.2 13 -.6" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M85 49 q7 -2.6 13 .8" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
       <!-- Concerned, NOT angry. The inner ends of the brows go UP; a brow whose
            inner end drops is a scowl, and a scanner that scowls at somebody
            whose score slipped is the whole failure mode this product exists to
            avoid. He is worried with you, never disappointed in you. -->
       <g class="mx-alt mx-brows-concerned">
-        <path d="M50 41 q9 -5 17 -7" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
-        <path d="M83 34 q9 2 17 7" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
+        <path d="M52 54 q7 -3.4 13 -5" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M85 49 q6 1.6 13 5" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
-      <!-- mouths, one per mood -->
+      <!-- mouths, one per mood, minimal marks on the glass -->
       <g class="mx-mouth-open">
-        <path d="M63 76 q12 12 24 0 q-3 12 -12 12 q-9 0 -12 -12 z" fill="${NAVY}"/>
-        <path d="M70 84 q5 4 10 0 q-1 5 -5 5 q-4 0 -5 -5 z" fill="${BLUSH}"/>
+        <path d="M66 84.5 q9 7.5 18 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
       </g>
-      <path class="mx-alt mx-mouth-flat" d="M67 81 q8 2.5 16 0" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
-      <path class="mx-alt mx-mouth-down" d="M67 84 q8 -5 16 0" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
-      <!-- The talking mouth. Shown only while .speaking is on the root and
-           scaled vertically on a fast loop, which is how every 2D character
-           since Saturday morning television has "spoken": the shape does not
-           have to match the words, it only has to move with them. -->
+      <path class="mx-alt mx-mouth-flat" d="M67 87 q8 2 16 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
+      <path class="mx-alt mx-mouth-down" d="M67 89.5 q8 -4.5 16 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
+      <!-- The talking mouth: a small bar that opens and closes on a fast loop.
+           The shape does not have to match the words, it only has to move with
+           them. -->
       <g class="mx-alt mx-mouth-talk">
-        <ellipse cx="75" cy="80" rx="12" ry="9" fill="${NAVY}" class="mx-talk-shape"/>
-        <ellipse cx="75" cy="84" rx="5" ry="3.4" fill="${BLUSH}" class="mx-talk-tongue"/>
+        <ellipse cx="75" cy="86.5" rx="7.5" ry="5.5" fill="${LIGHT}" class="mx-talk-shape"/>
       </g>
     </g>
   </svg>`;
