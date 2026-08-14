@@ -2452,3 +2452,84 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .askmax-copy small { font-size: 11.5px; line-height: 1.4; color: var(--mut); }
 .askmax-go { margin-left: auto; flex: none; color: var(--acc); font-size: 18px; }
 @media (prefers-reduced-motion: reduce) { .askmax:hover { transform: none; } }
+
+/* ---------------------------------------------------------------------------
+   The score, directly under the photograph.
+
+   Exists because on a phone the results page is one column and the analysis
+   starts below the fold: the scan finished and the screen showed a face with
+   no number anywhere on it. Desktop already had the score beside the photo, so
+   the strip is a small-screen device and hides above the two-pane breakpoint.
+   --------------------------------------------------------------------------- */
+.scorestrip { display: none; }
+
+@media (max-width: 850px) {
+  .scorestrip {
+    display: block; margin-top: 14px; padding: 14px 16px;
+    border: 1px solid var(--line); border-radius: 16px; background: var(--card);
+    box-shadow: 0 2px 10px rgba(20, 21, 24, .05);
+  }
+  .ss-score { display: flex; align-items: baseline; gap: 10px; }
+  .ss-score b {
+    font-family: var(--serif); font-size: 42px; font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .ss-score b small { font-size: 15px; font-weight: 400; color: var(--mut); }
+  .ss-word {
+    margin-left: auto; padding: 5px 11px; border-radius: 99px;
+    background: var(--acc-soft); color: var(--acc);
+    font-size: 12.5px; font-weight: 620; letter-spacing: .01em;
+  }
+  .ss-rank { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--mut); }
+  .ss-more {
+    display: block; margin-top: 10px; font-family: var(--mono);
+    font-size: 9.5px; letter-spacing: .16em; color: var(--mut); opacity: .8;
+  }
+  .ss-more::after { content: " ↓"; }
+
+  /* The photograph sticks and shrinks. Sticky rather than fixed so it stays
+     inside the grid and cannot overlap the footer, and a max-height rather
+     than a transform so the strip underneath moves up with it instead of
+     leaving a hole where the photo used to be. */
+  .pane-photo {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--bg); padding-top: 8px;
+  }
+  /* 52vh, not 62. The whole point of the strip is that the score is on screen
+     when the scan finishes, and at 62vh the card's last two lines fell below
+     the fold on a 667px phone, which is the smallest screen still in wide use.
+     The number was visible and the ranking under it was not, which is the same
+     bug in a smaller form. */
+  .pane-photo .face-frame {
+    max-height: 52vh; transition: max-height .34s cubic-bezier(.32, 0, .15, 1);
+  }
+  .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
+
+  .pane-photo.shrunk .face-frame { max-height: 96px; }
+  /* Clipping a portrait to 96px from the top shows hair and background and no
+     face, which makes the shrunk state useless as a reminder of what is being
+     measured. Crop to the upper third instead, which is where a face sits in a
+     capture this flow has already framed and quality-checked. */
+  .pane-photo.shrunk .face-frame .zoomable canvas {
+    height: 96px; object-fit: cover; object-position: center 34%;
+  }
+  /* The mesh is drawn to the photo's full geometry, so once the photo is
+     cropped the two no longer line up. At this size the overlay is noise
+     anyway. */
+  .pane-photo.shrunk #overlay-canvas { display: none; }
+  /* Everything that describes the photograph goes with it. Keeping the caption
+     and the quality chips while the photo is a 96px sliver leaves more chrome
+     on screen than picture. */
+  .pane-photo.shrunk .photo-caption,
+  .pane-photo.shrunk .scan-status,
+  .pane-photo.shrunk .bar,
+  .pane-photo.shrunk .quality-chips { display: none; }
+  .pane-photo.shrunk .scorestrip { margin-top: 10px; padding: 10px 14px; }
+  .pane-photo.shrunk .ss-score b { font-size: 28px; }
+  .pane-photo.shrunk .ss-rank,
+  .pane-photo.shrunk .ss-more { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-photo .face-frame { transition: none; }
+}

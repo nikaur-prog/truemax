@@ -28,6 +28,7 @@ import { buildMaxContext } from "../engine/maxContext.js";
 import { openMaxChat } from "./maxChat.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
+import { renderScoreStrip } from "./scoreStrip.js";
 
 interface Ctx {
   report: Report;
@@ -69,6 +70,11 @@ export function renderResults(c: Ctx): void {
   shownPhoto = "front";
   frontPhoto = null;
   frontQualityHTML = document.getElementById("quality-chips")?.innerHTML ?? "";
+  // The score under the photograph, for the phone layout where the analysis
+  // column starts below the fold. Rendered here rather than inside showOverall
+  // because it belongs to the SCAN, not to the tab: switching to Proportions
+  // must not take the headline number off the screen.
+  renderScoreStrip(c.report);
   // A new scan starts from the calm whole-face state. Without this the first
   // tab change after re-scanning would animate out of the PREVIOUS photo's
   // region, which is a transition from somewhere the user never was.
