@@ -53,7 +53,10 @@ const Y_VERTEX = Math.round(Y_MENTON - 23 * PER_CM);
 // The drawing runs a little past the chin, because it includes a neck.
 const Y_BOTTOM = 182;
 
-const DIAGRAM = Object.fromEntries(
+// Exported for the coverage test, which checks the anatomy is in a possible
+// order — and, now that these are computed from the seeder's template rather
+// than typed here, checks that template too.
+export const REFERENCE_DIAGRAM = Object.fromEntries(
   (Object.entries(TEMPLATE) as Array<[SidePointId, [number, number]]>).map(([id, [u, v]]) => [
     id,
     [
@@ -62,6 +65,8 @@ const DIAGRAM = Object.fromEntries(
     ] as [number, number],
   ]),
 ) as Record<SidePointId, [number, number]>;
+
+const DIAGRAM = REFERENCE_DIAGRAM;
 
 // Horizontal centre of the head. The mirror pivots here and labels choose their
 // side from it, so both follow the drawing rather than being pinned to a number

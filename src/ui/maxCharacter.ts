@@ -27,7 +27,7 @@
 //               away from mockery, which is why it is drawn here once and not
 //               improvised per surface.
 //
-// He is a scanner, so he looks like one: a round mint robot with a gold
+// He is a scanner, so he looks like one: a round blue robot with a gold
 // antenna, drawn flat with bold outlines and soft top-light shading.
 // Deliberately NOT a 3D render — the flat cartoon reads at 40px, matches the
 // product's drawn silhouettes, and leaves room for expression without uncanny
@@ -38,12 +38,15 @@ export type MaxMood = "happy" | "excited" | "thinking" | "concerned";
 
 // Palette. Kept here rather than CSS variables because the character must look
 // the same on every surface he appears on, light card or dark takeover.
-const MINT = "#4bf5c5";
-const MINT_DEEP = "#23cf9e";
-const NAVY = "#0b2a26";
-const CREAM = "#f7fffc";
+// Blue, not mint. He reads as a device rather than as part of the interface —
+// the mint version disappeared into the brand colour behind him, and a mascot
+// the same colour as the furniture is furniture.
+const BLUE = "#5aa9ff";
+const BLUE_DEEP = "#2f7fe0";
+const NAVY = "#0a1f3d";
+const CREAM = "#f6fbff";
 const GOLD = "#ffd54a";
-const BLUSH = "#17ab84";
+const BLUSH = "#3f8fd8";
 
 // A four-point star for the excited eyes, centred on (cx, cy).
 const star = (cx: number, cy: number, r: number) =>
@@ -58,22 +61,22 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
            Fixed ids are safe because every instance defines identical
            gradients — whichever copy the browser resolves, he looks the same. -->
       <radialGradient id="mxg-head" cx="38%" cy="26%" r="85%">
-        <stop offset="0%" stop-color="#8ffadd"/>
-        <stop offset="55%" stop-color="${MINT}"/>
-        <stop offset="100%" stop-color="#2fdfab"/>
+        <stop offset="0%" stop-color="#a9d4ff"/>
+        <stop offset="55%" stop-color="${BLUE}"/>
+        <stop offset="100%" stop-color="#2f7fe0"/>
       </radialGradient>
       <linearGradient id="mxg-body" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${MINT}"/>
-        <stop offset="100%" stop-color="${MINT_DEEP}"/>
+        <stop offset="0%" stop-color="${BLUE}"/>
+        <stop offset="100%" stop-color="${BLUE_DEEP}"/>
       </linearGradient>
       <linearGradient id="mxg-limb" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#39e6b4"/>
-        <stop offset="100%" stop-color="${MINT_DEEP}"/>
+        <stop offset="0%" stop-color="#6fb6ff"/>
+        <stop offset="100%" stop-color="${BLUE_DEEP}"/>
       </linearGradient>
     </defs>
     <g class="mx-bob">
       <!-- shadow -->
-      <ellipse cx="75" cy="150" rx="34" ry="6" fill="rgba(9,42,36,.18)" class="mx-shadow"/>
+      <ellipse cx="75" cy="150" rx="34" ry="6" fill="rgba(10,31,61,.18)" class="mx-shadow"/>
       <!-- left arm, resting against the body -->
       <path d="M45 106 q-12 6 -10 18 q1 7 8 6 q7 -1 8 -9" fill="url(#mxg-limb)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
       <!-- body -->
@@ -81,10 +84,10 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
         fill="url(#mxg-body)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
       <!-- chest screen: the one place his scanner nature shows -->
       <rect x="62" y="110" width="26" height="17" rx="6" fill="${NAVY}"/>
-      <path d="M66 118 l5 0 3 -4 3 7 3 -3 5 0" fill="none" stroke="${MINT}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="mx-pulse"/>
+      <path d="M66 118 l5 0 3 -4 3 7 3 -3 5 0" fill="none" stroke="${BLUE}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="mx-pulse"/>
       <!-- feet -->
-      <path d="M58 141 q-2 8 4 8 q7 0 6 -7" fill="${MINT_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
-      <path d="M92 141 q2 8 -4 8 q-7 0 -6 -7" fill="${MINT_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
+      <path d="M58 141 q-2 8 4 8 q7 0 6 -7" fill="${BLUE_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
+      <path d="M92 141 q2 8 -4 8 q-7 0 -6 -7" fill="${BLUE_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
       <!-- waving arm: pivots at the shoulder -->
       <g class="mx-arm${options.waving ? " waving" : ""}">
         <path d="M104 108 q16 -4 20 -18 q2 -8 -5 -9 q-7 -1 -10 6 q-4 10 -12 13" fill="url(#mxg-limb)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
@@ -118,8 +121,8 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
           <path d="${star(92, 56.5, 6.5)}" fill="${GOLD}" stroke="${NAVY}" stroke-width="1.6" stroke-linejoin="round"/>
         </g>
         <!-- lids: same fill as the head, scaled down from the top to blink -->
-        <ellipse cx="59" cy="56" rx="11.5" ry="14" fill="${MINT}" class="mx-lid"/>
-        <ellipse cx="91" cy="56" rx="11.5" ry="14" fill="${MINT}" class="mx-lid"/>
+        <ellipse cx="59" cy="56" rx="11.5" ry="14" fill="${BLUE}" class="mx-lid"/>
+        <ellipse cx="91" cy="56" rx="11.5" ry="14" fill="${BLUE}" class="mx-lid"/>
       </g>
       <!-- brows, one set per mood -->
       <g class="mx-brows-happy">
@@ -145,6 +148,14 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       </g>
       <path class="mx-alt mx-mouth-flat" d="M67 81 q8 2.5 16 0" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
       <path class="mx-alt mx-mouth-down" d="M67 84 q8 -5 16 0" fill="none" stroke="${NAVY}" stroke-width="3.2" stroke-linecap="round"/>
+      <!-- The talking mouth. Shown only while .speaking is on the root and
+           scaled vertically on a fast loop, which is how every 2D character
+           since Saturday morning television has "spoken": the shape does not
+           have to match the words, it only has to move with them. -->
+      <g class="mx-alt mx-mouth-talk">
+        <ellipse cx="75" cy="80" rx="12" ry="9" fill="${NAVY}" class="mx-talk-shape"/>
+        <ellipse cx="75" cy="84" rx="5" ry="3.4" fill="${BLUSH}" class="mx-talk-tongue"/>
+      </g>
     </g>
   </svg>`;
 }
