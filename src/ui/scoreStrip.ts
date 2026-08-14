@@ -1,0 +1,162 @@
+import { percentileLine } from "./templates.js";
+import { verdictFor } from "../engine/analysisMode.js";
+import { loadVerdictTone } from "../engine/analysisMode.js";
+import type { Report } from "../engine/types.js";
+
+// ---------------------------------------------------------------------------
+// The numbers, directly under the photograph.
+//
+// On a phone the results page is one column: photograph first, analysis
+// underneath. So the moment the scan finished, the screen showed a face and
+// nothing else, and the score, the ranking and every measurement were below the
+// fold. People sat looking at their own photo waiting for a result that had
+// already been computed, and a good number of them never scrolled.
+//
+// This is the fix, and it is deliberately not "move the analysis up". The
+// analysis is long and belongs where it is. What belongs against the
+// photograph is the answer: one score, where it ranks, and the word for it.
+// Everything else stays a scroll away, which is now a scroll somebody takes
+// because they have a reason to.
+//
+// Two behaviours make it work on a small screen:
+//
+//   - the photograph SHRINKS once you start reading, because a face taking up
+//     two thirds of the viewport is worth exactly one look and then becomes an
+//     obstacle between the reader and the thing they came for;
+//   - it grows back at the top, because that is where somebody has scrolled up
+//     to look at the face again, which is the only reason to scroll up.
+//
+// The score itself counts up and the ranking types out. Both are pure
+// presentation over numbers computed before this module is called: nothing
+// here derives a figure, so the strip and the full analysis cannot disagree.
+// ---------------------------------------------------------------------------
+
+// How far down the page the shrink triggers, and how far back up it releases.
+// Two different numbers on purpose: a single threshold makes the photograph
+// flicker between sizes when somebody rests a thumb near it, because the
+// shrink itself changes the page height and can push the scroll position back
+// across the line it just crossed.
+const SHRINK_AT = 40;
+const GROW_AT = 12;
+
+let detach: (() => void) | null = null;
+
+export function clearScoreStrip(): void {
+  detach?.();
+  detach = null;
+  document.getElementById("scorestrip")?.remove();
+  document.querySelector(".pane-photo")?.classList.remove("shrunk");
+}
+
+export function renderScoreStrip(report: Report): void {
+  clearScoreStrip();
+  const pane = document.querySelector<HTMLElement>(".pane-photo");
+  if (!pane) return;
+
+  const verdict = verdictFor(report, loadVerdictTone() ?? "kind");
+  const strip = document.createElement("div");
+  strip.className = "scorestrip";
+  strip.id = "scorestrip";
+  strip.innerHTML = `
+    <div class="ss-score">
+      <b><span class="ss-n">0.0</span><small>/10</small></b>
+      <span class="ss-word">${verdict.word}</span>
+    </div>
+    <p class="ss-rank"></p>
+    <span class="ss-more" aria-hidden="true">Full breakdown below</span>`;
+
+  // After the quality chips, which describe the photograph, so the reading
+  // order stays "here is the photo, here is what was wrong with it, here is
+  // what it measured".
+  pane.appendChild(strip);
+
+  const number = strip.querySelector<HTMLElement>(".ss-n")!;
+  const rank = strip.querySelector<HTMLElement>(".ss-rank")!;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+  // percentileLine already contains the ranking; pairing it with rankShort
+  // printed "Top 39% of men · Top 39%", which is the same fact stated twice.
+  const rankText = percentileLine(report.overallPercentile, report.sex);
+  if (reduced) {
+    number.textContent = report.overall.toFixed(1);
+    rank.textContent = rankText;
+  } else {
+    countTo(number, report.overall, 760);
+    // The ranking starts typing as the count-up lands, so the two read as one
+    // movement rather than as two animations competing for the same eye.
+    typeInto(rank, rankText, 620);
+  }
+
+  detach = watchScroll(pane);
+}
+
+function countTo(el: HTMLElement, target: number, duration: number): void {
+  const start = performance.now();
+  const step = (now: number): void => {
+    if (!el.isConnected) return;
+    const p = Math.min(1, (now - start) / duration);
+    // Cubic ease-out: fast to roughly the right number, then settling, which
+    // is what makes a counter read as measurement rather than as a slot
+    // machine coming to rest.
+    el.textContent = (target * (1 - Math.pow(1 - p, 3))).toFixed(1);
+    if (p < 1) requestAnimationFrame(step);
+    else el.textContent = target.toFixed(1);
+  };
+  requestAnimationFrame(step);
+}
+
+function typeInto(el: HTMLElement, text: string, delay: number): void {
+  // The height is claimed before the first character so the strip does not
+  // grow a line partway through and shove the analysis under the reader.
+  el.textContent = text;
+  const height = el.offsetHeight;
+  el.style.minHeight = `${height}px`;
+  el.textContent = "";
+  window.setTimeout(() => {
+    if (!el.isConnected) return;
+    let i = 0;
+    const tick = window.setInterval(() => {
+      if (!el.isConnected) {
+        clearInterval(tick);
+        return;
+      }
+      el.textContent = text.slice(0, ++i);
+      if (i >= text.length) {
+        clearInterval(tick);
+        el.style.minHeight = "";
+      }
+    }, 16);
+  }, delay);
+}
+
+// The shrink. Returns its own teardown, so a re-render or a new scan cannot
+// leave a scroll listener behind pointing at a detached element.
+function watchScroll(pane: HTMLElement): () => void {
+  let shrunk = false;
+  let queued = false;
+
+  const measure = (): void => {
+    queued = false;
+    if (!pane.isConnected) return;
+    const y = window.scrollY;
+    if (!shrunk && y > SHRINK_AT) {
+      shrunk = true;
+      pane.classList.add("shrunk");
+    } else if (shrunk && y < GROW_AT) {
+      shrunk = false;
+      pane.classList.remove("shrunk");
+    }
+  };
+  const onScroll = (): void => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(measure);
+  };
+
+  window.addEventListener("scroll", onScroll, { passive: true });
+  measure();
+  return () => {
+    window.removeEventListener("scroll", onScroll);
+    pane.classList.remove("shrunk");
+  };
+}

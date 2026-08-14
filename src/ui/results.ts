@@ -24,6 +24,12 @@ import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
+import { buildMaxContext } from "../engine/maxContext.js";
+import { openMaxChat } from "./maxChat.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { readAllHistory } from "../engine/history.js";
+import { renderScoreStrip } from "./scoreStrip.js";
+import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
   report: Report;
@@ -65,6 +71,11 @@ export function renderResults(c: Ctx): void {
   shownPhoto = "front";
   frontPhoto = null;
   frontQualityHTML = document.getElementById("quality-chips")?.innerHTML ?? "";
+  // The score under the photograph, for the phone layout where the analysis
+  // column starts below the fold. Rendered here rather than inside showOverall
+  // because it belongs to the SCAN, not to the tab: switching to Proportions
+  // must not take the headline number off the screen.
+  renderScoreStrip(c.report);
   // A new scan starts from the calm whole-face state. Without this the first
   // tab change after re-scanning would animate out of the PREVIOUS photo's
   // region, which is a transition from somewhere the user never was.
@@ -1013,7 +1024,8 @@ function showImprove(): void {
   // anyone who has not internalised the curve, when it is actually rarer than
   // one face in twenty — the percentage is the number that lands.
   const potPct = rankShort(aggregateScoreToPercentile(r.potential));
-  const planBody = `<div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
+  const planBody = `${askMaxCard()}
+      <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
@@ -1063,10 +1075,11 @@ function showImprove(): void {
       ${gated
         ? `<div class="lockwrap">
             <div class="lockblur" aria-hidden="true" inert>${planBody}</div>
-            <div class="lockcard">
-              <span class="lockcard-eyebrow">YOUR PATHWAY</span>
-              <h4>Max reckons your ceiling is ${r.potential.toFixed(1)} — ${rankShort(aggregateScoreToPercentile(r.potential)).toLowerCase()}.</h4>
-              <p>You measured ${r.overall.toFixed(1)}. On this scale most people never see a 7 — the translation is the point. The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
+            <div class="lockcard lockcard-ceiling">
+              <span class="lockcard-eyebrow">YOUR CEILING</span>
+              <h4>Our system reckons your potential is a good deal higher.</h4>
+              ${ceilingCtaMarkup({ overall: r.overall, potential: r.potential, photo: frontPhoto })}
+              <p>The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
               <button class="linkish lock-single" id="btn-single-scan">Or one scan on its own — $5.99, $2.99 for members</button>
             </div>
@@ -1076,6 +1089,11 @@ function showImprove(): void {
         <button class="btn pri" id="btn-again">Scan another face</button></div>
     </div>`;
   wireUnlock();
+  wireAskMax();
+  // The canvases exist only once the card is in the document, and they are
+  // painted from the cached front capture rather than re-read from the live
+  // canvas, which by now may be showing the side profile.
+  paintCeilingCta(body(), frontPhoto);
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
@@ -1272,6 +1290,53 @@ function wireUnlock(): void {
 // and it is a worse experience than a straight sentence: it invites you to
 // squint at something you cannot read, and it implies the value is in the
 // secrecy rather than in the work.
+// ---------------------------------------------------------------------------
+// The way in to the chat.
+//
+// Sits at the top of the plan, because that is where somebody has just read
+// four paragraphs about their own face and has a question. A separate tab in
+// the row above would have been tidier and would have been opened by nobody:
+// the question exists at the moment the answer is being read, not before.
+//
+// Only for accounts that hold Max. Rendering it locked would put a chat window
+// behind a blur, which is a worse advertisement than the written plan already
+// sitting under one.
+// ---------------------------------------------------------------------------
+function askMaxCard(): string {
+  if (!maxAccess) return "";
+  return `<button type="button" class="askmax" id="btn-askmax">
+    <span class="askmax-face">${maxCharacterMarkup({ mood: "happy" })}</span>
+    <span class="askmax-copy">
+      <b>Ask Max about any of this</b>
+      <small>He has your numbers in front of him. He will not invent new ones.</small>
+    </span>
+    <span class="askmax-go" aria-hidden="true">→</span>
+  </button>`;
+}
+
+function wireAskMax(): void {
+  const button = document.getElementById("btn-askmax");
+  if (!button || !ctx) return;
+  wireMaxInteractions(button.querySelector(".askmax-face"));
+  button.onclick = () => {
+    if (!ctx) return;
+    track("max-chat-opened");
+    openMaxChat(
+      buildMaxContext({
+        report: ctx.report,
+        tone: loadVerdictTone() ?? "kind",
+        scans: readAllHistory().length,
+        // The ceiling only travels for accounts that can already see it, which
+        // is every account reaching here — but the argument is passed
+        // explicitly rather than assumed, so moving this card somewhere less
+        // gated cannot silently leak the paid figure into a prompt.
+        potential: maxAccess ? ctx.report.potential : undefined,
+        movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,
+      }),
+    );
+  };
+}
+
 function upsell(): string {
   return `<div class="recs upsell">
     <h4>WHAT MAX ADDS</h4>

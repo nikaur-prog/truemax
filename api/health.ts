@@ -30,6 +30,7 @@ const CHECKED = [
   "STRIPE_MAX_PRICE_ID",
   "TRUEMAX_APP_URL",
   "CRON_SECRET",
+  "ANTHROPIC_API_KEY",
 ] as const;
 
 export function GET(): Response {

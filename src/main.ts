@@ -13,6 +13,7 @@ import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { renderResults, setDepth, setMaxAccess } from "./ui/results.js";
+import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -702,6 +703,9 @@ function resetToUpload(): void {
   el.analysis.innerHTML = "";
   el.qualityChips.innerHTML = "";
   el.fileInput.value = "";
+  // Takes the scroll listener with it. A strip left behind would keep
+  // shrinking a photo pane that no longer holds a photograph.
+  clearScoreStrip();
 }
 
 // Two views go into the score, so the scan shows two views being measured. It
@@ -1368,6 +1372,12 @@ if (isAuthAvailable()) {
     // full-resolution canvases. OAuth and email-confirmation returns have no
     // in-page callback, so the saved scan resumes on the next navigation.
     if (user) setTimeout(() => void resumePendingAfterAuth(), 0);
+    // Consented side-landmark feedback that could not be sent earlier because
+    // there was no session yet. The consent flow runs BEFORE the account gate
+    // on a first scan, so the first attempt always lacked a token and the note
+    // read "could not be sent" to exactly the people whose corrections matter
+    // most. The photo and points are still held in lastSide; send them now.
+    if (user) void submitConsentedSideFeedback();
   });
 } else {
   paintHomeBrand("guest");
