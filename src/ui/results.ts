@@ -24,6 +24,10 @@ import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
+import { buildMaxContext } from "../engine/maxContext.js";
+import { openMaxChat } from "./maxChat.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { readAllHistory } from "../engine/history.js";
 
 interface Ctx {
   report: Report;
@@ -1013,7 +1017,8 @@ function showImprove(): void {
   // anyone who has not internalised the curve, when it is actually rarer than
   // one face in twenty — the percentage is the number that lands.
   const potPct = rankShort(aggregateScoreToPercentile(r.potential));
-  const planBody = `<div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
+  const planBody = `${askMaxCard()}
+      <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
@@ -1076,6 +1081,7 @@ function showImprove(): void {
         <button class="btn pri" id="btn-again">Scan another face</button></div>
     </div>`;
   wireUnlock();
+  wireAskMax();
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
@@ -1272,6 +1278,53 @@ function wireUnlock(): void {
 // and it is a worse experience than a straight sentence: it invites you to
 // squint at something you cannot read, and it implies the value is in the
 // secrecy rather than in the work.
+// ---------------------------------------------------------------------------
+// The way in to the chat.
+//
+// Sits at the top of the plan, because that is where somebody has just read
+// four paragraphs about their own face and has a question. A separate tab in
+// the row above would have been tidier and would have been opened by nobody:
+// the question exists at the moment the answer is being read, not before.
+//
+// Only for accounts that hold Max. Rendering it locked would put a chat window
+// behind a blur, which is a worse advertisement than the written plan already
+// sitting under one.
+// ---------------------------------------------------------------------------
+function askMaxCard(): string {
+  if (!maxAccess) return "";
+  return `<button type="button" class="askmax" id="btn-askmax">
+    <span class="askmax-face">${maxCharacterMarkup({ mood: "happy" })}</span>
+    <span class="askmax-copy">
+      <b>Ask Max about any of this</b>
+      <small>He has your numbers in front of him. He will not invent new ones.</small>
+    </span>
+    <span class="askmax-go" aria-hidden="true">→</span>
+  </button>`;
+}
+
+function wireAskMax(): void {
+  const button = document.getElementById("btn-askmax");
+  if (!button || !ctx) return;
+  wireMaxInteractions(button.querySelector(".askmax-face"));
+  button.onclick = () => {
+    if (!ctx) return;
+    track("max-chat-opened");
+    openMaxChat(
+      buildMaxContext({
+        report: ctx.report,
+        tone: loadVerdictTone() ?? "kind",
+        scans: readAllHistory().length,
+        // The ceiling only travels for accounts that can already see it, which
+        // is every account reaching here — but the argument is passed
+        // explicitly rather than assumed, so moving this card somewhere less
+        // gated cannot silently leak the paid figure into a prompt.
+        potential: maxAccess ? ctx.report.potential : undefined,
+        movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,
+      }),
+    );
+  };
+}
+
 function upsell(): string {
   return `<div class="recs upsell">
     <h4>WHAT MAX ADDS</h4>

@@ -88,9 +88,15 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       <!-- feet -->
       <path d="M58 141 q-2 8 4 8 q7 0 6 -7" fill="${BLUE_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
       <path d="M92 141 q2 8 -4 8 q-7 0 -6 -7" fill="${BLUE_DEEP}" stroke="${NAVY}" stroke-width="3.2" stroke-linejoin="round"/>
-      <!-- waving arm: pivots at the shoulder -->
+      <!-- Waving arm, pivoting at the shoulder.
+           Drawn HANGING DOWN, which is the resting pose. The previous version
+           drew it already raised, so the wave keyframes returned him to an arm
+           held permanently in the air: he looked like he was signalling an
+           aircraft rather than saying hello. The raise is now entirely in the
+           animation, which means every path back to zero is an arm coming
+           down. -->
       <g class="mx-arm${options.waving ? " waving" : ""}">
-        <path d="M104 108 q16 -4 20 -18 q2 -8 -5 -9 q-7 -1 -10 6 q-4 10 -12 13" fill="url(#mxg-limb)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
+        <path d="M104 108 q16 4 20 18 q2 8 -5 9 q-7 1 -10 -6 q-4 -10 -12 -13" fill="url(#mxg-limb)" stroke="${NAVY}" stroke-width="3.5" stroke-linejoin="round"/>
       </g>
       <!-- antenna -->
       <g class="mx-antenna">

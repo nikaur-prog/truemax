@@ -35,6 +35,7 @@ const EVENTS = new Set([
   "quick-visit",
   "quick-scan-done",
   "quick-video-downloaded",
+  "max-chat-opened",
 ]);
 
 export async function POST(request: Request): Promise<Response> {

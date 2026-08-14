@@ -23,7 +23,8 @@ export type FunnelEvent =
   | "single-scan-started"
   | "quick-visit"
   | "quick-scan-done"
-  | "quick-video-downloaded";
+  | "quick-video-downloaded"
+  | "max-chat-opened";
 
 const sent = new Set<FunnelEvent>();
 
