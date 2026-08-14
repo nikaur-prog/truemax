@@ -31,7 +31,7 @@ import { mountDemoReel } from "./ui/demoReel.js";
 import { hasHistory, openHistory } from "./ui/historyView.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
-import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadScanCredits } from "./engine/entitlement.js";
+import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
 import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.js";
@@ -86,19 +86,28 @@ async function refreshMaxAccess(): Promise<void> {
   // working before there is anything on the server to read.
   const scanCount = readAllHistory().length;
   try {
-    const [entitlement, credits] = await Promise.all([
+    // Credits and the staff flag each fall back to "no" on their own failure,
+    // so one unreachable table cannot take the whole entitlement read down with
+    // it — and both fail in the locked direction.
+    const [entitlement, credits, admin] = await Promise.all([
       loadEntitlement(),
       loadScanCredits().catch(() => 0),
+      loadIsAdmin().catch(() => false),
     ]);
-    setMaxAccess(hasMaxAccess(entitlement));
-    setDepth(depthFor({ entitlement, scanCount, credits }), freeScansLeft({ entitlement, scanCount }));
+    setMaxAccess(hasMaxAccess(entitlement) || admin);
+    setDepth(
+      depthFor({ entitlement, scanCount, credits, admin }),
+      freeScansLeft({ entitlement, scanCount }),
+    );
 
     // A credit is consumed by the scan it unlocked: free tier, past the
     // allowance, holding credits, looking at a full-depth result. Recorded
     // fire-and-forget — a spend that fails to record is a free scan, which is
     // the survivable direction of that error, where blocking a paid-for result
     // on the recording is not.
-    if (tierOf(entitlement) === "free" && scanCount > TRIAL_SCANS && credits > 0) {
+    // Staff excluded: a credit must not be spent on a scan the staff flag
+    // already opened.
+    if (!admin && tierOf(entitlement) === "free" && scanCount > TRIAL_SCANS && credits > 0) {
       void consumeScanCredit().catch(() => undefined);
     }
   } catch {
@@ -491,8 +500,9 @@ window.addEventListener(MEMBERSHIP_BRAND_EVENT, (event) => {
 
 // First name for the greeting, and only ever the name the person gave us.
 //
-// This used to parse one out of the email address, which produced "Xnikau" from
-// "xnikau.robertson@" and would have produced worse from a Gmail handle. There
+// This used to parse one out of the email address, which turned a real tester's
+// address into a capitalised fragment of their handle and would have produced
+// worse from a Gmail address with digits in it. There
 // is no fallback now, and there does not need to be: the quiz is compulsory and
 // asks for the name before anything else, so a signed-in account that reaches
 // the dashboard has one. If it somehow does not, the greeting reads "Welcome."

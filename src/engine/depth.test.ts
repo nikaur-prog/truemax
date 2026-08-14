@@ -88,3 +88,21 @@ test("a purchased credit opens depth past the allowance, and only depth", () => 
   assert.notEqual(depthFor({ entitlement: null, scanCount: 5, credits: 99 }), "plan");
   assert.equal(depthFor({ entitlement: ent("max"), scanCount: 5, credits: 1 }), "plan");
 });
+
+test("a staff account is never gated, and never spends anything to get there", () => {
+  // The owner and testers have to scan repeatedly to check the product. This is
+  // the only flag in the file that opens everything, so it is also the one that
+  // most needs pinning: it must come from the caller (a database row), default
+  // to closed, and not depend on tier or count.
+  assert.equal(depthFor({ entitlement: null, scanCount: 999, admin: true }), "plan");
+  assert.equal(depthFor({ entitlement: ent("max", "canceled"), scanCount: 999, admin: true }), "plan");
+  assert.equal(canSeePlan({ entitlement: null, scanCount: 999, admin: true }), true);
+});
+
+test("staff defaults to off, so a failed read locks rather than unlocks", () => {
+  // loadIsAdmin throws on a network failure and the caller passes false. Same
+  // direction as every other gate here: a wall a real user can retry past,
+  // never the paid product handed to everybody during an outage.
+  assert.equal(depthFor({ entitlement: null, scanCount: 999 }), "rating");
+  assert.equal(depthFor({ entitlement: null, scanCount: 999, admin: false }), "rating");
+});
