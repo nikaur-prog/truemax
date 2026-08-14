@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { SIDE_POINTS } from "./sideMetrics.js";
+import { REFERENCE_DIAGRAM } from "../ui/sideReference.js";
 
 // ---------------------------------------------------------------------------
 // The reference diagram has to keep telling the truth.
@@ -11,21 +11,25 @@ import { SIDE_POINTS } from "./sideMetrics.js";
 // still showing the old set. A guide that disagrees with the app teaches people
 // to drag correct points into wrong places, which is worse than no guide.
 //
-// Read as text rather than imported, because sideReference.ts builds SVG and
-// touches the DOM. What is checked is the data the drawing is built from.
+// The positions used to be a hand-written table and this test read them out of
+// the source as text. They are now COMPUTED from the seeder's average-head
+// template, so the real values are imported and checked directly — which is
+// both stronger and immune to the formatting of the file.
+//
+// Note what these checks now also cover: the template itself. If somebody
+// retunes the seeder and puts the ear in front of the nose, this fails.
 // ---------------------------------------------------------------------------
 
-const source = readFileSync("src/ui/sideReference.ts", "utf8");
-const diagram = source.slice(source.indexOf("const DIAGRAM"), source.indexOf("const OUTLINE"));
+const diagram = REFERENCE_DIAGRAM;
 
 test("every landmark the engine measures has a place in the diagram", () => {
   for (const { id } of SIDE_POINTS) {
-    assert.match(diagram, new RegExp(`\\b${id}\\s*:`), `${id} is missing from the reference diagram`);
+    assert.ok(diagram[id], `${id} is missing from the reference diagram`);
   }
 });
 
 test("the diagram invents no landmark the engine does not have", () => {
-  const drawn = [...diagram.matchAll(/^\s{2}(\w+):\s*\[/gm)].map((m) => m[1]);
+  const drawn = Object.keys(diagram);
   const known = new Set(SIDE_POINTS.map((p) => p.id as string));
   assert.equal(drawn.length, SIDE_POINTS.length, `drew ${drawn.length}, engine has ${SIDE_POINTS.length}`);
   for (const id of drawn) assert.ok(known.has(id), `${id} is drawn but not measured`);
@@ -36,9 +40,9 @@ test("the drawn anatomy is in the right order down the face", () => {
   // adjusting the diagram by eye could easily put the nose below the mouth,
   // and a reference with the anatomy out of order is actively misleading.
   const at = (id: string): [number, number] => {
-    const m = diagram.match(new RegExp(`\\b${id}\\s*:\\s*\\[(-?[\\d.]+),\\s*(-?[\\d.]+)\\]`));
-    assert.ok(m, `${id} has no coordinates`);
-    return [Number(m![1]), Number(m![2])];
+    const p = diagram[id as keyof typeof diagram];
+    assert.ok(p, `${id} has no coordinates`);
+    return p;
   };
   const y = (id: string) => at(id)[1];
   const x = (id: string) => at(id)[0];

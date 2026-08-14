@@ -192,14 +192,6 @@ export async function openTrialFunnel(
     host.innerHTML = `<div class="trial-shell trial-offer offer-enter" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <div class="trial-offer-head">
-        <div class="max-stage">
-          ${maxStickerMarkup()}
-          <div class="max-say" id="max-say">
-            <p><b>Hey — I'm Max.</b> I'm here to help you hit your glow-up goals.
-              I read your measurements every scan, lock you into the routine that
-              gets you there, and tell you straight whether it moved.</p>
-          </div>
-        </div>
         <div><span class="trial-eyebrow">YOUR PATHWAY IS READY</span>
           <h2 id="trial-title">One more scan. Seven days to explore.</h2>
           <p>Your card is collected securely by Stripe. Cancel before the trial ends and you pay $0.</p></div>
@@ -228,6 +220,18 @@ export async function openTrialFunnel(
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
           </button>
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
+          <!-- Max lives at the foot of his own plan, not at the top of the
+               screen. Up there he was decoration above a headline; here he is
+               standing next to the thing he is included in, and he pops up out
+               from behind the card the moment the offer settles. -->
+          <div class="max-stage">
+            ${maxStickerMarkup()}
+            <div class="max-say" id="max-say">
+              <p><b>Hey! I'm Max.</b> I'm here to help you hit your glow-up goals.
+                I read your measurements every scan, lock you into the routine
+                that gets you there, and tell you straight whether it moved.</p>
+            </div>
+          </div>
         </article>
       </div>
       <p class="trial-status" role="status"></p>
@@ -243,7 +247,15 @@ export async function openTrialFunnel(
     // it is readable, or it reads as a flash of text rather than as somebody
     // saying something. Once per screen: a character who repeats his
     // introduction stops being charming somewhere around the third time.
-    window.setTimeout(() => host?.querySelector(".max-say")?.classList.add("show"), 760);
+    window.setTimeout(() => {
+      host?.querySelector(".max-say")?.classList.add("show");
+      // The mouth runs while the greeting is being read, then stops. Roughly
+      // reading speed for that many words rather than a round number, so he
+      // does not stand there mouthing at nothing.
+      const svg = host?.querySelector(".max-stage .mx-svg");
+      svg?.classList.add("speaking");
+      window.setTimeout(() => svg?.classList.remove("speaking"), 5200);
+    }, 620);
     wireMaxInteractions(host.querySelector<HTMLElement>(".max-stage"));
 
     // The stat counts up rather than appearing. A number that ticks reads as
