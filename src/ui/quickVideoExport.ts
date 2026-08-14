@@ -2,6 +2,8 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
 import { verdictForPercentile } from "../engine/analysisMode.js";
+import { saveFile } from "./saveFile.js";
+import type { SaveOutcome } from "./saveFile.js";
 
 // Which cut to render.
 //
@@ -36,6 +38,8 @@ export interface QuickExportScores {
   regions: Array<{ name: string; score: number }>;
 }
 
+// Returns how the file left the device, so the button can say what happened —
+// "Saved" after a share sheet is a lie if the person cancelled it.
 export async function downloadQuickVideo(
   photo: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
@@ -43,7 +47,7 @@ export async function downloadQuickVideo(
   scores: QuickExportScores,
   onProgress?: (progress: number) => void,
   variant: QuickVariant = "breakdown",
-): Promise<void> {
+): Promise<SaveOutcome> {
   const frameCount = Math.round(FPS * DURATION[variant]);
   const { Output, BufferTarget, Mp4OutputFormat, CanvasSource, QUALITY_HIGH, getFirstEncodableVideoCodec } =
     await import("mediabunny");
@@ -76,13 +80,12 @@ export async function downloadQuickVideo(
   }
   await output.finalize();
   if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
-  const url = URL.createObjectURL(new Blob([target.buffer], { type: format.mimeType }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `truemax-${variant}-${Date.now()}.mp4`;
-  a.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  const outcome = await saveFile(
+    new Blob([target.buffer], { type: format.mimeType }),
+    `truemax-${variant}-${Date.now()}.mp4`,
+  );
   onProgress?.(1);
+  return outcome;
 }
 
 // Development-only render hook used by the visual regression preview. It

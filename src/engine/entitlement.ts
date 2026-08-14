@@ -120,6 +120,25 @@ export async function loadScanCredits(): Promise<number> {
   return data?.balance ?? 0;
 }
 
+// Is this account staff?
+//
+// One row, readable only by its owner, granted by hand in the SQL editor. The
+// alternative — an email allowlist in the client — would publish a personal
+// address in a public repository and still be a client-side check.
+//
+// Nothing here reads anyone else's data, because there is nothing to read:
+// scans never leave the device and the analytics table has no identity
+// columns. Staff means unlimited scan depth for yourself and nothing more.
+export async function loadIsAdmin(): Promise<boolean> {
+  const client = await getSupabaseClient();
+  const { data, error } = await client
+    .from("app_admins")
+    .select("user_id")
+    .maybeSingle<{ user_id: string }>();
+  if (error) throw new Error(error.message);
+  return Boolean(data);
+}
+
 export function startScanCreditCheckout(): Promise<BillingResult> {
   return billingRedirect("/api/create-checkout-session", { purchase: "scan" });
 }

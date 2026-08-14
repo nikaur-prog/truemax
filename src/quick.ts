@@ -20,6 +20,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { openProducer } from "./ui/quickProducer.js";
+import { canShareFiles, saveFile } from "./ui/saveFile.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -388,7 +389,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     </div>
 
     <div class="q-actions">
-      <button class="btn pri" id="q-download">Download image</button>
+      <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
       <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
       <button class="btn gho" id="q-again">New photo</button>
@@ -542,7 +543,7 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
     btn.textContent = "Building video…";
   }
   try {
-    await downloadQuickVideo(
+    const outcome = await downloadQuickVideo(
       last.photo,
       last.lm,
       r.sex,
@@ -552,9 +553,16 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       },
       variant,
     );
-    if (btn) btn.textContent = "MP4 downloaded";
-    track("quick-video-downloaded");
-    offerProducer(r);
+    // A dismissed share sheet is a "no", not a save: saying "downloaded" then
+    // would send somebody looking through their camera roll for a file that is
+    // not there.
+    if (outcome === "cancelled") {
+      if (btn) btn.textContent = "Not saved — tap to retry";
+    } else {
+      if (btn) btn.textContent = outcome === "shared" ? "Sent to your share sheet" : "MP4 downloaded";
+      track("quick-video-downloaded");
+      offerProducer(r);
+    }
   } catch (error) {
     console.error(error);
     if (btn) btn.textContent = "MP4 unavailable here";
@@ -563,7 +571,7 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       window.setTimeout(() => {
         btn.disabled = false;
         btn.textContent = idle;
-      }, 1600);
+      }, 2200);
     }
   }
 }
@@ -600,16 +608,15 @@ async function downloadCard(): Promise<void> {
     const { toPng } = await import("html-to-image");
     const bg = getComputedStyle(document.body).backgroundColor || "#f4f3ee";
     const url = await toPng(el.stage, { pixelRatio: 2, backgroundColor: bg, cacheBust: true });
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `truemax-scan-${Date.now()}.png`;
-    a.click();
+    // Same route as the videos: on a phone the share sheet puts this in the
+    // camera roll, where a still meant for a post actually needs to be.
+    await saveFile(await (await fetch(url)).blob(), `truemax-scan-${Date.now()}.png`);
   } catch {
     if (btn) btn.textContent = "Couldn't render";
   } finally {
     if (btn && btn.textContent !== "Couldn't render") {
       btn.disabled = false;
-      btn.textContent = "Download image";
+      btn.textContent = canShareFiles("image/png") ? "Save image" : "Download image";
     }
   }
 }

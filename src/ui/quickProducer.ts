@@ -3,6 +3,8 @@ import type { Sex } from "../engine/types.js";
 import type { QuickExportScores } from "./quickVideoExport.js";
 import { quickVideoDuration, renderQuickVideoFrame } from "./quickVideoExport.js";
 import { buildCaption } from "../engine/caption.js";
+import { canShareFiles, saveFile } from "./saveFile.js";
+import type { SaveOutcome } from "./saveFile.js";
 import type { Platform } from "../engine/caption.js";
 import { track } from "../engine/track.js";
 
@@ -126,6 +128,11 @@ export function openProducer(ctx: ProducerContext): void {
       <p class="prod-note">No music and no headline are burned in on purpose — sounds and
       text added natively in the app you post from reach further than baked-in ones.</p>
       <button class="btn pri prod-build" id="prod-build">Confirm — build the video</button>
+      <p class="prod-note">${
+        canShareFiles()
+          ? "It opens in your share sheet when it's ready — “Save Video” puts it in your camera roll."
+          : "It downloads when it's ready."
+      }</p>
       <p class="prod-msg" id="prod-msg" role="status"></p>
       <div class="prod-caption hidden" id="prod-caption"></div>
     </div>`;
@@ -226,12 +233,19 @@ export function openProducer(ctx: ProducerContext): void {
     buildBtn.disabled = true;
     msg.textContent = "";
     try {
-      await buildVideo(ctx, heads, tails, clipLen, transition, (p) => {
+      const outcome = await buildVideo(ctx, heads, tails, clipLen, transition, (p) => {
         buildBtn.textContent = `Building · ${Math.round(p * 100)}%`;
       });
-      track("quick-video-downloaded");
-      buildBtn.textContent = "Video downloaded";
-      showCaptionStep(overlay!.querySelector<HTMLElement>("#prod-caption")!, ctx);
+      // A dismissed share sheet is a decision, not a failure: the video is
+      // built and the button offers it again rather than claiming it saved.
+      if (outcome === "cancelled") {
+        buildBtn.textContent = "Save the video";
+        msg.textContent = "Not saved yet — tap again when you're ready.";
+      } else {
+        track("quick-video-downloaded");
+        buildBtn.textContent = outcome === "shared" ? "Sent to your share sheet" : "Video downloaded";
+        showCaptionStep(overlay!.querySelector<HTMLElement>("#prod-caption")!, ctx);
+      }
     } catch (error) {
       console.error(error);
       msg.textContent = "The video could not be built in this browser. A recent Chrome, Safari or Edge can.";
@@ -394,7 +408,7 @@ async function buildVideo(
   clipLen: number,
   transition: Transition,
   onProgress: (p: number) => void,
-): Promise<void> {
+): Promise<SaveOutcome> {
   const segDur = (clip: Clip) =>
     clip.kind === "image" ? clipLen : Math.max(0.6, Math.min(clipLen, clip.duration));
   const segments: Segment[] = [
@@ -475,13 +489,14 @@ async function buildVideo(
   }
   await output.finalize();
   if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
-  const url = URL.createObjectURL(new Blob([target.buffer], { type: format.mimeType }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `truemax-tiktok-${Date.now()}.mp4`;
-  a.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   onProgress(1);
+  // Straight to the share sheet on a phone, where "Save Video" puts it in the
+  // camera roll and the TikTok app is one tap further. This file exists to be
+  // posted from the device that made it.
+  return saveFile(
+    new Blob([target.buffer], { type: format.mimeType }),
+    `truemax-tiktok-${Date.now()}.mp4`,
+  );
 }
 
 // Transitions are drawn as overlays at segment edges, never by blending two

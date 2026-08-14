@@ -37,6 +37,11 @@ export interface AccessInput {
   // Purchased one-time credits, from the server. A credit is one full-depth
   // scan without a subscription; while any remain, the gate stays open.
   credits?: number;
+  // A staff account, read from the database (public.app_admins) — never from a
+  // list of emails in the bundle, which on a public repo would publish a
+  // personal address. Grants unlimited depth to that account and nothing else:
+  // there is no cross-account visibility anywhere in this product to grant.
+  admin?: boolean;
 }
 
 function live(entitlement: Entitlement | null): boolean {
@@ -54,7 +59,11 @@ export function tierOf(entitlement: Entitlement | null): EntitlementTier {
 // Note the ORDER: a paid tier is checked before the trial allowance, so an
 // account that subscribed during its trial is served by its subscription and
 // cannot be downgraded by having scanned three times.
-export function depthFor({ entitlement, scanCount, credits = 0 }: AccessInput): Depth {
+export function depthFor({ entitlement, scanCount, credits = 0, admin = false }: AccessInput): Depth {
+  // Staff first: the owner and testers have to be able to scan repeatedly to
+  // check the product, and an allowance that runs out mid-test is a reason to
+  // stop testing. Defaults to false, so a failed read locks rather than opens.
+  if (admin) return "plan";
   const tier = tierOf(entitlement);
   if (tier === "max") return "plan";
   if (tier === "starter") return "depth";
