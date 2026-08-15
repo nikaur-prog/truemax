@@ -2199,7 +2199,13 @@ body.auth-modal-open { overflow: hidden; }
 .mx-arm { transform-origin: 118px 94px; animation: mx-wave-idle 6s ease-in-out infinite; }
 .mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
-.mx-lid { transform-origin: center top; transform: scaleY(0); animation: mx-blink 5.2s ease-in-out infinite; }
+/* transform-box matters here: without it an SVG transform-origin resolves
+   against the VIEW-BOX, so "center top" was the top of his skull and every
+   blink sent the lid flying down through his face from the crown. The old
+   drawing hid that by painting the lid the same blue as the head; the glass
+   lid on a light crown made it a visible dark flicker. fill-box hinges the
+   lid at its own top edge, which is what an eyelid does. */
+.mx-lid { transform-box: fill-box; transform-origin: center top; transform: scaleY(0); animation: mx-blink 5.2s ease-in-out infinite; }
 .mx-lid:nth-of-type(2) { animation-delay: .04s; }
 .mx-pupils { animation: mx-glance 7.5s ease-in-out infinite; }
 .mx-antenna { transform-origin: 75px 24px; animation: mx-antenna 3.4s ease-in-out infinite; }
