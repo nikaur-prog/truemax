@@ -21,6 +21,8 @@ test("every mood carries every expression part, and picks one with a class", () 
     "mx-brows-sad",
     "mx-brows-mad",
     "mx-eye-stars",
+    "mx-thought",
+    "mx-arm-chin",
   ];
   for (const mood of MOODS) {
     const svg = maxCharacterMarkup({ mood });

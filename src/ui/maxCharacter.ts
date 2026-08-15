@@ -88,16 +88,16 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       <!-- He hovers: a soft pool of shadow, no feet. Feet are a toddler
            proportion; a small hover gap reads as hardware. -->
       <ellipse cx="75" cy="151" rx="28" ry="4.5" fill="rgba(9,22,46,.28)" class="mx-shadow"/>
-      <!-- Left arm, resting: a small paddle angled outward-down, drawn to sit
-           OUTSIDE the silhouette. The first pass tucked both arms inside the
-           egg's outline, where a limb the same shape as the body simply
-           vanished, and the wave looked like a growth appearing from nowhere. -->
-      <path d="M34 92 C22 94 13 104 15 118 C16.5 127 26 129.5 31 122 C36 115 36 102 34 92 Z" fill="url(#mxg-limb)"/>
-      <!-- Waving arm. Drawn HANGING DOWN — the raise lives entirely in the
-           animation, so every path back to rest is an arm coming down, never
-           an arm left in the air. -->
-      <g class="mx-arm${options.waving ? " waving" : ""}">
-        <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
+      <!-- thinking: a thought bubble with messenger dots, floating beside the
+           antenna. Part of the drawing rather than DOM around it, so every
+           surface that sets the mood gets it for free. -->
+      <g class="mx-alt mx-thought">
+        <circle cx="103" cy="34" r="3" fill="#ffffff" opacity=".85"/>
+        <circle cx="111" cy="24" r="4.4" fill="#ffffff" opacity=".92"/>
+        <rect x="103" y="1" width="46" height="25" rx="12.5" fill="#ffffff"/>
+        <circle cx="116" cy="13.5" r="3.1" fill="#8b93a4" class="mx-dot" style="--di:0"/>
+        <circle cx="126" cy="13.5" r="3.1" fill="#8b93a4" class="mx-dot" style="--di:1"/>
+        <circle cx="136" cy="13.5" r="3.1" fill="#8b93a4" class="mx-dot" style="--di:2"/>
       </g>
       <!-- antenna: a thin stem and a lit mint tip, the one brand-coloured
            point on him -->
@@ -140,9 +140,11 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
         <path d="M52 52.5 q6 -3.4 13 -2.2" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
         <path d="M85 50.3 q7 -1.2 13 2.2" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
+      <!-- One brow pressed low, the other arched high: the classic puzzling
+           face, and the asymmetry is the whole read. -->
       <g class="mx-alt mx-brows-thinking">
-        <path d="M52 53.5 q6 -1.2 13 -.6" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
-        <path d="M85 49 q7 -2.6 13 .8" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M52 55.5 q6 .8 13 1" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M85 46 q7 -4.2 13 -1.4" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
       <!-- Concerned, NOT angry. The inner ends of the brows go UP; a brow whose
            inner end drops is a scowl, and a scanner that scowls at somebody
@@ -184,6 +186,23 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       <g class="mx-alt mx-mouth-talk">
         <ellipse cx="75" cy="86.5" rx="7.5" ry="5.5" fill="${LIGHT}" class="mx-talk-shape"/>
       </g>
+      <!-- Arms LAST, so they paint in front of the body. SVG has no z-index:
+           drawn before the body, an arm raised to the sky swung behind the
+           silhouette and the celebration read as armless. In front, the rest
+           pose still works (the paddles sit on the body's edge) and the chin
+           hand can actually touch the chin. -->
+      <path class="mx-arm-rest" d="M34 92 C22 94 13 104 15 118 C16.5 127 26 129.5 31 122 C36 115 36 102 34 92 Z" fill="url(#mxg-limb)"/>
+      <!-- thinking: the left arm comes up and the hand rests on the chin -->
+      <g class="mx-alt mx-arm-chin">
+        <path d="M38 118 C28 116 24 108 28 101 C31 96 38 95 43 98 L52 103 C56 106 56 112 52 115 Z" fill="url(#mxg-limb)"/>
+        <ellipse cx="54" cy="99" rx="9.5" ry="8" fill="url(#mxg-limb)"/>
+      </g>
+      <!-- Waving arm. Drawn HANGING DOWN — the raise lives entirely in the
+           animation, so every path back to rest is an arm coming down, never
+           an arm left in the air. -->
+      <g class="mx-arm${options.waving ? " waving" : ""}">
+        <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
+      </g>
     </g>
   </svg>`;
 }
@@ -207,6 +226,21 @@ export function maxStickerMarkup(): string {
     <svg viewBox="0 0 144 112" class="max-sticker-sparks">${sparks}</svg>
     ${maxCharacterMarkup({ waving: true })}
   </span>`;
+}
+
+// The ecstatic moment: jump, arm to the sky, a full spin, land. Triggered by
+// code when something genuinely worth celebrating happens — a measured
+// improvement, a finished streak — and self-cleaning, so surfaces can call it
+// without owning any state.
+export function celebrateMax(stage: HTMLElement | null): void {
+  const svg = stage?.querySelector<SVGSVGElement>(".mx-svg");
+  if (!svg) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  svg.classList.remove("celebrating");
+  // Reflow, or re-adding the class in the same frame does nothing.
+  void (svg as unknown as HTMLElement).offsetWidth;
+  svg.classList.add("celebrating");
+  window.setTimeout(() => svg.classList.remove("celebrating"), 1600);
 }
 
 // The interactions that cannot be keyframes, because they answer the person
