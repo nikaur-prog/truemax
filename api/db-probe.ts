@@ -55,6 +55,7 @@ export async function GET(): Promise<Response> {
   const keyShape = key ? `${key.slice(0, 3)}…${key.length} chars` : "missing";
 
   let auth: string | number = "not attempted";
+  let authBody: string | null = null;
   try {
     // A bare PostgREST root request. It needs no table, so a 200 here proves
     // the URL resolves AND the key is accepted, separating those two failures
@@ -63,6 +64,13 @@ export async function GET(): Promise<Response> {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     });
     auth = response.status;
+    if (!response.ok) {
+      // The status alone cannot tell a wrong key from a revoked one from a
+      // key belonging to a DIFFERENT project — and the new opaque sb_secret_
+      // format carries no project inside it to check, unlike the legacy JWTs.
+      // Supabase says which in the body, so read it.
+      authBody = scrub((await response.text().catch(() => "")).slice(0, 200)) || "(empty body)";
+    }
   } catch (error) {
     auth = `fetch failed: ${scrub(safeMessage(error))}`;
   }
@@ -78,6 +86,7 @@ export async function GET(): Promise<Response> {
           ref,
           keyShape,
           auth,
+          authBody,
           table: "error",
           // PostgREST puts the useful part in code/details/hint as often as in
           // message, and the first version reported only message — which came
@@ -92,6 +101,6 @@ export async function GET(): Promise<Response> {
     }
     return json({ ok: true, ref, keyShape, auth, table: "ok" });
   } catch (error) {
-    return json({ ok: false, ref, keyShape, auth, table: "threw", message: scrub(safeMessage(error)) }, 503);
+    return json({ ok: false, ref, keyShape, auth, authBody, table: "threw", message: scrub(safeMessage(error)) }, 503);
   }
 }
