@@ -374,7 +374,41 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   e.drop.classList.add("hidden");
   e.cap.textContent = "VERIFY LANDMARKS";
 
-  mountVerify(e.canvas, seedSidePoints(e.canvas), ctx, "VERIFY LANDMARKS");
+  // Canonicalise the facing. A profile photograph mirrored horizontally has
+  // identical geometry — faces are measured bilaterally — so instead of
+  // rejecting a photo taken the "wrong" way, flip it. After this point every
+  // downstream surface (the verify screen, the reference guide, the template
+  // seeding, the analysis) deals with exactly one orientation, and the
+  // platform-dependent question of whether a front camera delivers mirrored
+  // or true frames stops mattering at all: whatever arrives, it leaves here
+  // facing image-right.
+  // Only on a seed the detector actually believes. Facing detection can read
+  // a marginal image backwards (a sepia sketch in testing did exactly that),
+  // and mirroring somebody's photo on a wrong guess is worse than leaving a
+  // left-facing photo alone — the analysis handles either direction; this
+  // flip exists for consistency, not correctness.
+  let seed = seedSidePoints(e.canvas);
+  if (seed.faceDir === -1 && (seed.method === "mesh" || seed.confidence >= 0.5)) {
+    const w2 = e.canvas.width;
+    const flipped = document.createElement("canvas");
+    flipped.width = w2;
+    flipped.height = e.canvas.height;
+    const g = flipped.getContext("2d")!;
+    g.translate(w2, 0);
+    g.scale(-1, 1);
+    g.drawImage(e.canvas, 0, 0);
+    e.canvas.getContext("2d")!.drawImage(flipped, 0, 0);
+    const mirror = (pts: SidePoints): SidePoints => {
+      const out = cloneSidePoints(pts);
+      for (const key of Object.keys(out) as Array<keyof SidePoints>) {
+        out[key] = { x: w2 - out[key].x, y: out[key].y };
+      }
+      return out;
+    };
+    seed = { ...seed, points: mirror(seed.points), faceDir: 1 };
+  }
+
+  mountVerify(e.canvas, seed, ctx, "VERIFY LANDMARKS");
 }
 
 // Shared by the first pass and by a later correction, so the two cannot drift
