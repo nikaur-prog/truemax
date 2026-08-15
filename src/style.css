@@ -2132,7 +2132,17 @@ body.auth-modal-open { overflow: hidden; }
 .mx-mood-sad .mx-brows-sad,
 .mx-mood-sad .mx-mouth-frown,
 .mx-mood-mad .mx-brows-mad,
-.mx-mood-mad .mx-mouth-grit { display: block; }
+.mx-mood-mad .mx-mouth-grit,
+.mx-mood-thinking .mx-thought,
+.mx-mood-thinking .mx-arm-chin { display: block; }
+/* Thinking swaps the resting arm for the hand on the chin, and the dots in
+   the thought bubble alternate like a messenger's typing indicator. */
+.mx-mood-thinking .mx-arm-rest { display: none; }
+.mx-thought .mx-dot { animation: mx-think-dot 1.15s ease-in-out infinite; animation-delay: calc(var(--di) * .17s); }
+@keyframes mx-think-dot {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2.5px); }
+}
 /* Speaking. The mouth flaps and the body gets busier for as long as there are
    words on screen — a character who delivers a speech bubble with a fixed grin
    is a picture next to some text, not somebody talking. */
@@ -2757,8 +2767,34 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   80% { transform: rotate(3deg) translateY(-2px); }
   100% { transform: rotate(0) translateY(0); }
 }
+/* The celebration: he jumps, throws the arm to the sky, spins around his own
+   axis while airborne — a 2D character spins by passing scaleX through zero —
+   and lands. One class, self-contained; celebrateMax() in maxCharacter.ts
+   adds and removes it. */
+.mx-svg.celebrating .mx-bob { animation: mx-celebrate 1.5s cubic-bezier(.3, .9, .4, 1) 1; }
+@keyframes mx-celebrate {
+  0% { transform: translateY(0) scaleX(1); }
+  22% { transform: translateY(-24px) scaleX(1); }
+  38% { transform: translateY(-28px) scaleX(0); }
+  54% { transform: translateY(-28px) scaleX(-1); }
+  70% { transform: translateY(-26px) scaleX(0); }
+  82% { transform: translateY(-22px) scaleX(1); }
+  100% { transform: translateY(0) scaleX(1); }
+}
+.mx-svg.celebrating .mx-arm { animation: mx-arm-sky 1.5s cubic-bezier(.3, .9, .4, 1) 1; }
+@keyframes mx-arm-sky {
+  0% { transform: rotate(0); }
+  /* -150, not -165: the arm paints in front of the body now, and at -165 it
+     crossed the visor's corner and read as poking himself in the eye. */
+  18%, 82% { transform: rotate(-150deg); }
+  100% { transform: rotate(0); }
+}
+.mx-svg.celebrating .mx-shadow { animation: mx-shadow-far 1.5s ease-in-out 1; }
+
 @media (prefers-reduced-motion: reduce) {
-  .mx-svg.mx-shock, .mx-svg.mx-rise { animation: none; }
+  .mx-svg.mx-shock, .mx-svg.mx-rise, .mx-svg.celebrating .mx-bob,
+  .mx-svg.celebrating .mx-arm, .mx-svg.celebrating .mx-shadow,
+  .mx-thought .mx-dot { animation: none; }
   .mx-svg.mx-down { transform: none; transition: none; }
 }
 
