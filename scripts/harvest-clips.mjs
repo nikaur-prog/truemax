@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join, basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ffmpegPath from "ffmpeg-static";
@@ -102,9 +102,11 @@ function probeFrame(file, seconds, dest) {
 // ---------------------------------------------------------------------------
 async function scoreFrames(frames) {
   const server = spawn("npx", ["vite", "--port", "4396", "--strictPort"], { cwd: ROOT, stdio: "ignore" });
-  const browser = await chromium.launch({
-    executablePath: process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium",
-  });
+  // The fixed path exists in the dev sandbox this was built in; on a normal
+  // machine Playwright manages its own browser (run `npx playwright install
+  // chromium` once). PW_CHROMIUM overrides either.
+  const fixed = process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium";
+  const browser = await chromium.launch(existsSync(fixed) ? { executablePath: fixed } : {});
   try {
     const page = await browser.newPage();
     // The dev server takes a few seconds to come up; retry rather than racing it.
