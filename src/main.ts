@@ -69,6 +69,7 @@ import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.j
 import { flushPendingProfile, loadOnboardingProfile, onboardingComplete } from "./engine/onboarding.js";
 import { openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
+import { markPlatform } from "./engine/platform.js";
 
 const MAX_IMAGE_DIM = 1280;
 
@@ -120,6 +121,7 @@ async function refreshMaxAccess(): Promise<void> {
   }
 }
 
+markPlatform();
 track("visit");
 
 if (import.meta.env.DEV) {

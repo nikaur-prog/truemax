@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#123b35"/>
+      <stop offset="65%" stop-color="#071c22"/>
+      <stop offset="100%" stop-color="#191b22"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <svg viewBox="0 0 150 158" x="212" y="180" width="600" height="632">
+    <defs>
+      <!-- Fixed ids are safe because every instance defines identical
+           gradients — whichever copy the browser resolves, he looks the same. -->
+      <linearGradient id="mxg-body" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#84b5fb"/>
+        <stop offset="55%" stop-color="#4f82e6"/>
+        <stop offset="100%" stop-color="#2b52a6"/>
+      </linearGradient>
+      <linearGradient id="mxg-glass" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#17294e"/>
+        <stop offset="100%" stop-color="#0a1428"/>
+      </linearGradient>
+      <linearGradient id="mxg-eye" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="100%" stop-color="#b6dcff"/>
+      </linearGradient>
+      <!-- A step darker than the body: the paddles sit against the lower
+           body, and limbs the same colour as the torso are invisible limbs. -->
+      <linearGradient id="mxg-limb" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#2b52a6"/>
+        <stop offset="100%" stop-color="#1e3c7d"/>
+      </linearGradient>
+    </defs>
+    <g class="mx-bob">
+      <!-- He hovers: a soft pool of shadow, no feet. Feet are a toddler
+           proportion; a small hover gap reads as hardware. -->
+      <ellipse cx="75" cy="151" rx="28" ry="4.5" fill="rgba(9,22,46,.28)" class="mx-shadow"/>
+      <!-- Left arm, resting: a small paddle angled outward-down, drawn to sit
+           OUTSIDE the silhouette. The first pass tucked both arms inside the
+           egg's outline, where a limb the same shape as the body simply
+           vanished, and the wave looked like a growth appearing from nowhere. -->
+      <path d="M34 92 C22 94 13 104 15 118 C16.5 127 26 129.5 31 122 C36 115 36 102 34 92 Z" fill="url(#mxg-limb)"/>
+      <!-- Waving arm. Drawn HANGING DOWN — the raise lives entirely in the
+           animation, so every path back to rest is an arm coming down, never
+           an arm left in the air. -->
+      <g class="mx-arm">
+        <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
+      </g>
+      <!-- antenna: a thin stem and a lit mint tip, the one brand-coloured
+           point on him -->
+      <g class="mx-antenna">
+        <line x1="75" y1="18" x2="75" y2="8" stroke="#2b52a6" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="75" cy="6.5" r="7" fill="#4bf5c5" opacity=".22" class="mx-pulse"/>
+        <circle cx="75" cy="6.5" r="3.4" fill="#4bf5c5"/>
+        <circle cx="74" cy="5.4" r="1" fill="#eafff8" class="mx-antenna-glint"/>
+      </g>
+      <!-- the body: one continuous egg, no outline -->
+      <path d="M75 16 C104 16 126 42 126 84 C126 120 104 146 75 146 C46 146 24 120 24 84 C24 42 46 16 75 16 Z"
+        fill="url(#mxg-body)"/>
+      <!-- top-light specular and a grounded base shade -->
+      <ellipse cx="57" cy="34" rx="21" ry="12" fill="#ffffff" opacity=".32"/>
+      <path d="M30 106 C38 134 58 146 75 146 C46 146 30 124 30 106 Z" fill="#2b52a6" opacity=".5"/>
+      <!-- the visor: dark glass, where the whole face lives -->
+      <rect x="36" y="45" width="78" height="52" rx="24" fill="url(#mxg-glass)"/>
+      <rect x="36.8" y="45.8" width="76.4" height="50.4" rx="23.4" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="1.6"/>
+      <!-- a faint reflection across the glass -->
+      <path d="M44 52 q14 -6 30 -4" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="3.4" stroke-linecap="round"/>
+      <!-- eyes: two soft light bars -->
+      <g class="mx-eyes">
+        <g class="mx-pupils">
+          <rect x="53" y="57" width="11.5" height="22" rx="5.75" fill="url(#mxg-eye)"/>
+          <rect x="85.5" y="57" width="11.5" height="22" rx="5.75" fill="url(#mxg-eye)"/>
+          <circle cx="56.4" cy="61.4" r="1.7" fill="#ffffff"/>
+          <circle cx="88.9" cy="61.4" r="1.7" fill="#ffffff"/>
+        </g>
+        <!-- excited: the bars give way to stars -->
+        
+        <!-- lids: glass-coloured, dropped from the top to blink -->
+        
+        
+      </g>
+      <!-- brows: thin light strokes on the glass, one set per mood -->
+      <g class="mx-brows-happy">
+        <path d="M52 52.5 q6 -3.4 13 -2.2" fill="none" stroke="#e9f6ff" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M85 50.3 q7 -1.2 13 2.2" fill="none" stroke="#e9f6ff" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+      </g>
+      
+      <!-- Concerned, NOT angry. The inner ends of the brows go UP; a brow whose
+           inner end drops is a scowl, and a scanner that scowls at somebody
+           whose score slipped is the whole failure mode this product exists to
+           avoid. He is worried with you, never disappointed in you. -->
+      
+      <!-- mouths, one per mood, minimal marks on the glass -->
+      <g class="mx-mouth-open">
+        <path d="M66 84.5 q9 7.5 18 0" fill="none" stroke="#e9f6ff" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      
+      
+      <!-- The talking mouth: a small bar that opens and closes on a fast loop.
+           The shape does not have to match the words, it only has to move with
+           them. -->
+      
+    </g>
+  </svg>
+</svg>
