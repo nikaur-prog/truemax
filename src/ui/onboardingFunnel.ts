@@ -181,6 +181,56 @@ export async function openTrialFunnel(
   // that cannot succeed.
   locked = required && !preview;
 
+  // The scripted demo conversation. One question, one answer, written here
+  // rather than generated: this is a demonstration of what the paid product
+  // FEELS like on the screen where the money is asked for, and a demonstration
+  // must be identical for everybody, cost nothing, and never surprise anyone.
+  // The question arrives from the person's side of the chat, Max visibly
+  // thinks about it — messenger dots, thinking face — and the answer types
+  // itself out while his mouth runs. Runs once; a demo that loops on a
+  // payment screen becomes a screensaver.
+  let demoRan = false;
+  const runMaxDemo = () => {
+    if (demoRan || !host) return;
+    demoRan = true;
+    const feed = host.querySelector<HTMLElement>(".max-feed");
+    const say = host.querySelector<HTMLElement>(".max-say");
+    const svg = host.querySelector<SVGSVGElement>(".max-stage .mx-svg");
+    if (!feed || !say || !svg) return;
+    // He may be lying on his side from a knock. The demo picks him back up:
+    // answering a question face-down would be committing to the bit too hard.
+    svg.classList.remove("mx-down", "mx-shock");
+
+    const ask = document.createElement("div");
+    ask.className = "max-ask";
+    ask.textContent = "Real talk, can you actually fix my jawline?";
+    feed.insertBefore(ask, say);
+    ask.classList.add("show");
+
+    window.setTimeout(() => {
+      if (!host) return;
+      // Thinking: dots in the bubble, thinking face on him. The pause is the
+      // point — an instant answer reads as a recording, a visible think reads
+      // as somebody working on YOUR question.
+      say.classList.add("pondering");
+      say.innerHTML = "<p><i></i><i></i><i></i></p>";
+      svg.classList.remove("mx-mood-happy");
+      svg.classList.add("mx-mood-thinking");
+
+      window.setTimeout(() => {
+        if (!host) return;
+        say.classList.remove("pondering");
+        svg.classList.remove("mx-mood-thinking");
+        svg.classList.add("mx-mood-happy");
+        say.innerHTML =
+          "<p><b>If it's soft tissue, yes.</b> Your scan tells me exactly which numbers are holding it back. I build your weekly routine around them, and every rescan I tell you straight whether it moved. If it stalls, I rebuild the plan.</p>";
+        typewriteBlock(say);
+        svg.classList.add("speaking");
+        window.setTimeout(() => svg.classList.remove("speaking"), 5600);
+      }, 2100);
+    }, 700);
+  };
+
   const drawOffer = () => {
     if (!host) return;
     track("offer-shown");
@@ -206,7 +256,7 @@ export async function openTrialFunnel(
         <article class="plan-card starter" data-plan="starter">
           <div class="plan-top"><span>STARTER</span><b>$7.99<small> USD / month</small></b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
-          <div class="plan-feat"><ul><li>One additional scan in the trial</li><li>One included scan each week after</li><li>Personal pathway and progress tracking</li><li>Available at every age</li></ul></div>
+          <div class="plan-feat"><ul><li>One scan a week</li><li>In-depth analysis of every measurement</li><li>Progress tracking scan to scan</li><li>Personalised recommendations</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="starter">Start 7-day free trial</button>
           <small>Then $7.99/month. Cancel anytime.</small>
@@ -215,7 +265,7 @@ export async function openTrialFunnel(
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}
           <div class="plan-top"><span>TRUE<span>MAX</span></span><b>$11.99<small> USD / month</small></b></div>
           <p>Your highest-touch experience with Max alongside you.</p>
-          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Max AI guidance</li><li>Deeper personalised coaching</li><li>One additional scan in the trial</li></ul></div>
+          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Max AI, comprehensive guidance</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="max" ${adult ? "" : "disabled"}>
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
@@ -226,14 +276,18 @@ export async function openTrialFunnel(
                the card's overflow does the hiding — and pops up waist-deep
                once the offer settles, waves, and says his piece from a white
                bubble that types itself out. -->
-          <div class="max-stage">
-            <div class="max-say" id="max-say">
-              <p><b>Hey! I'm Max.</b> I'm here to help you hit your glow-up goals.
-                I read your measurements every scan, lock you into the routine
-                that gets you there, and tell you straight whether it moved.</p>
+          ${adult
+            ? `<div class="max-stage">
+            <div class="max-feed">
+              <div class="max-say" id="max-say">
+                <p><b>Hey! I'm Max.</b> I'm here to help you hit your glow-up goals.
+                  I read your measurements every scan, lock you into the routine
+                  that gets you there, and tell you straight whether it moved.</p>
+              </div>
             </div>
             <span class="max-pop" aria-hidden="true">${maxCharacterMarkup()}</span>
-          </div>
+          </div>`
+            : ""}
         </article>
       </div>
       <p class="trial-status" role="status"></p>
@@ -267,9 +321,15 @@ export async function openTrialFunnel(
         // mouthing at nothing.
         svg?.classList.add("speaking");
         window.setTimeout(() => svg?.classList.remove("speaking"), 5200);
+        // Ten seconds after he says hello, the demo: a question pops in from
+        // the person's side and Max answers it, live on the payment screen.
+        window.setTimeout(() => runMaxDemo(), 10_000);
       }, 900);
     }, 620);
-    wireMaxInteractions(host.querySelector<HTMLElement>(".max-stage"));
+    // Knockable here: he is a toy on this screen. Tapping shocks him and tips
+    // him over; a flying bot with no legs stays down until the next tap
+    // flies him back up.
+    wireMaxInteractions(host.querySelector<HTMLElement>(".max-stage"), { knockable: true });
 
     // The stat counts up rather than appearing. A number that ticks reads as
     // something being measured; the same number sitting still reads as a claim.

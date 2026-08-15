@@ -186,18 +186,26 @@ export function maxStickerMarkup(): string {
   </span>`;
 }
 
-// The two interactions that cannot be keyframes, because they answer the
-// person rather than the clock:
+// The interactions that cannot be keyframes, because they answer the person
+// rather than the clock:
 //
 //   - the pupils follow the pointer (fine pointers only — on touch there is
 //     no hover, and pupils snapping to old tap positions read as a glitch);
-//   - poking him gets a happy hop, a wave, and a burst of sparks. A character
-//     you can poke and who reacts is the cheapest aliveness there is, and
-//     Duolingo has been dining on it for a decade.
+//   - poking him gets a happy hop and a wave. A character you can poke and
+//     who reacts is the cheapest aliveness there is, and Duolingo has been
+//     dining on it for a decade;
+//   - on knockable stages, the poke instead SHOCKS him and tips him over, and
+//     he stays down — he is a flying bot, he cannot right himself — until the
+//     next tap, which flies him back upright. Knockable is opt-in per stage,
+//     because on the surfaces where tapping him also opens the chat, a fall
+//     would fight the navigation.
 //
 // Listeners hang off the stage element and self-disarm once it leaves the
 // document, so a dismissed offer screen cannot leak a document-level handler.
-export function wireMaxInteractions(stage: HTMLElement | null): void {
+export function wireMaxInteractions(
+  stage: HTMLElement | null,
+  options: { knockable?: boolean } = {},
+): void {
   if (!stage) return;
   const svg = stage.querySelector<SVGSVGElement>(".mx-svg");
   if (!svg || (svg as unknown as { __mxWired?: boolean } & SVGSVGElement).__mxWired) return;
@@ -227,6 +235,28 @@ export function wireMaxInteractions(stage: HTMLElement | null): void {
 
   stage.addEventListener("click", () => {
     if (reduced) return;
+
+    if (options.knockable) {
+      // Down? This tap is the rescue: he flies back upright.
+      if (svg.classList.contains("mx-down")) {
+        svg.classList.remove("mx-down");
+        svg.classList.add("mx-rise");
+        window.setTimeout(() => svg.classList.remove("mx-rise"), 700);
+        return;
+      }
+      if (svg.classList.contains("mx-shock") || svg.classList.contains("mx-rise")) return;
+      // Up? The tap shocks him — wide eyes, small o of a mouth — and then
+      // tips him over. Two beats, not one: the shock is what makes the fall
+      // read as a reaction rather than as a layout bug.
+      svg.classList.add("mx-shock");
+      window.setTimeout(() => {
+        if (!svg.isConnected) return;
+        svg.classList.remove("mx-shock");
+        svg.classList.add("mx-down");
+      }, 420);
+      return;
+    }
+
     const sticker = stage.querySelector(".max-sticker") ?? stage;
     for (const el of [svg, sticker]) {
       el.classList.remove("poked");
