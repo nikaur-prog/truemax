@@ -276,6 +276,7 @@ export async function openTrialFunnel(
                the card's overflow does the hiding — and pops up waist-deep
                once the offer settles, waves, and says his piece from a white
                bubble that types itself out. -->
+<<<<<<< HEAD
           ${adult
             ? `<div class="max-stage">
             <div class="max-feed">
@@ -288,6 +289,16 @@ export async function openTrialFunnel(
             <span class="max-pop" aria-hidden="true">${maxCharacterMarkup()}</span>
           </div>`
             : ""}
+=======
+          <div class="max-stage">
+            <div class="max-say" id="max-say">
+              <p><b>Hey! I'm Max.</b> I'm here to help you hit your glow-up goals.
+                I read your measurements every scan, lock you into the routine
+                that gets you there, and tell you straight whether it moved.</p>
+            </div>
+            <span class="max-pop" aria-hidden="true">${maxCharacterMarkup()}</span>
+          </div>
+>>>>>>> origin/main
         </article>
       </div>
       <p class="trial-status" role="status"></p>
@@ -321,9 +332,12 @@ export async function openTrialFunnel(
         // mouthing at nothing.
         svg?.classList.add("speaking");
         window.setTimeout(() => svg?.classList.remove("speaking"), 5200);
+<<<<<<< HEAD
         // Ten seconds after he says hello, the demo: a question pops in from
         // the person's side and Max answers it, live on the payment screen.
         window.setTimeout(() => runMaxDemo(), 10_000);
+=======
+>>>>>>> origin/main
       }, 900);
     }, 620);
     // Knockable here: he is a toy on this screen. Tapping shocks him and tips
