@@ -2128,14 +2128,20 @@ body.auth-modal-open { overflow: hidden; }
 .mx-mood-thinking .mx-brows-thinking,
 .mx-mood-thinking .mx-mouth-flat,
 .mx-mood-concerned .mx-brows-concerned,
-.mx-mood-concerned .mx-mouth-down { display: block; }
+.mx-mood-concerned .mx-mouth-down,
+.mx-mood-sad .mx-brows-sad,
+.mx-mood-sad .mx-mouth-frown,
+.mx-mood-mad .mx-brows-mad,
+.mx-mood-mad .mx-mouth-grit { display: block; }
 /* Speaking. The mouth flaps and the body gets busier for as long as there are
    words on screen — a character who delivers a speech bubble with a fixed grin
    is a picture next to some text, not somebody talking. */
 .mx-svg.speaking .mx-mouth-talk { display: block; }
 .mx-svg.speaking .mx-mouth-open,
 .mx-svg.speaking .mx-mouth-flat,
-.mx-svg.speaking .mx-mouth-down { display: none; }
+.mx-svg.speaking .mx-mouth-down,
+.mx-svg.speaking .mx-mouth-frown,
+.mx-svg.speaking .mx-mouth-grit { display: none; }
 /* Origin at the TOP of the mouth ellipse, so it opens downward like a jaw
    rather than inflating from its centre. */
 .mx-talk-shape { transform-origin: 75px 82px; animation: mx-talk .26s ease-in-out infinite; }
@@ -2151,7 +2157,31 @@ body.auth-modal-open { overflow: hidden; }
 .mx-mood-thinking .mx-brows-happy,
 .mx-mood-thinking .mx-mouth-open,
 .mx-mood-concerned .mx-brows-happy,
-.mx-mood-concerned .mx-mouth-open { display: none; }
+.mx-mood-concerned .mx-mouth-open,
+.mx-mood-sad .mx-mouth-open,
+.mx-mood-sad .mx-brows-happy,
+.mx-mood-mad .mx-mouth-open,
+.mx-mood-mad .mx-brows-happy { display: none; }
+/* Body language per mood. Sad breathes slowly and hangs a little lower; mad
+   vibrates; excited HOVERS — he is a flying bot, and lifting off is what
+   excitement looks like on something with no legs. The shadow pulls in and
+   fades as he rises, which is what actually sells the altitude. */
+.mx-mood-sad .mx-bob { animation-duration: 6s; }
+.mx-mood-mad .mx-bob { animation: mx-fume .34s ease-in-out infinite; }
+@keyframes mx-fume {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(1.6px) rotate(.6deg); }
+}
+.mx-mood-excited .mx-bob { animation: mx-hover 1.5s ease-in-out infinite; }
+@keyframes mx-hover {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-11px) scale(1.01, .99); }
+}
+.mx-mood-excited .mx-shadow { animation: mx-shadow-far 1.5s ease-in-out infinite; }
+@keyframes mx-shadow-far {
+  0%, 100% { transform: scaleX(1); opacity: 1; }
+  50% { transform: scaleX(.7); opacity: .45; }
+}
 /* Excited bounces harder and waves on a loop; concerned slows right down. A
    character whose body language contradicts his face is worse than one with
    no body language at all. */
@@ -2259,7 +2289,7 @@ body.auth-modal-open { overflow: hidden; }
 .mx-pupils { animation: mx-glance 7.5s ease-in-out infinite; }
 .mx-antenna { transform-origin: 75px 24px; animation: mx-antenna 3.4s ease-in-out infinite; }
 .mx-pulse { animation: mx-pulse 2.2s ease-in-out infinite; }
-.mx-shadow { animation: mx-shadow 3.4s ease-in-out infinite; }
+.mx-shadow { transform-box: fill-box; transform-origin: center; animation: mx-shadow 3.4s ease-in-out infinite; }
 /* Up from behind the button, not down from above it. */
 @keyframes mx-land { from { opacity: 0; transform: translateY(34px) rotate(9deg) scale(.8); } }
 @keyframes mx-bob {

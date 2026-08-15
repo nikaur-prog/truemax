@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { maxCharacterMarkup, maxStickerMarkup } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 
-const MOODS: MaxMood[] = ["happy", "excited", "thinking", "concerned"];
+const MOODS: MaxMood[] = ["happy", "excited", "thinking", "concerned", "sad", "mad"];
 
 test("every mood carries every expression part, and picks one with a class", () => {
   // The whole point of the rig: one drawing, four faces, switched by class.
@@ -16,6 +16,10 @@ test("every mood carries every expression part, and picks one with a class", () 
     "mx-mouth-open",
     "mx-mouth-flat",
     "mx-mouth-down",
+    "mx-mouth-frown",
+    "mx-mouth-grit",
+    "mx-brows-sad",
+    "mx-brows-mad",
     "mx-eye-stars",
   ];
   for (const mood of MOODS) {
