@@ -69,7 +69,13 @@ function sceneStarts(file) {
   try {
     const r = spawnSyncFfmpeg([
       "-i", file,
-      "-vf", "select='gt(scene,0.3)',showinfo",
+      // Scene detection runs on a TINY, low-frame-rate copy. Decoding a
+      // three-hour 1080p podcast at full resolution takes the better part of
+      // an hour and looks like a hang; at 240px and 6fps the same pass is
+      // minutes, and a scene CUT is just as visible in a thumbnail as it is
+      // in the full frame. -an skips audio decoding entirely.
+      "-vf", "scale=240:-2,fps=6,select='gt(scene,0.3)',showinfo",
+      "-an", "-sn",
       "-f", "null", "-",
     ]);
     err = r;
@@ -209,8 +215,9 @@ console.log(`${videos.length} video(s) in ${inDir}`);
 const allCandidates = [];
 for (const v of videos) {
   const file = join(inDir, v);
+  process.stdout.write(`  ${v}: finding scenes...`);
   const segments = sceneStarts(file);
-  console.log(`  ${v}: ${segments.length} candidate scene(s)`);
+  process.stdout.write(`\r  ${v}: ${segments.length} candidate(s)${" ".repeat(20)}\n`);
   for (const [i, seg] of segments.entries()) {
     const png = join(outDir, `.probe-${basename(v, extname(v))}-${i}.jpg`);
     const mid = seg.start + CLIP_SECONDS / 2;
