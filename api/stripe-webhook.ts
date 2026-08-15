@@ -57,7 +57,11 @@ async function fromCheckout(session: CheckoutSession): Promise<EntitlementUpdate
 
 export async function POST(request: Request): Promise<Response> {
   const signature = request.headers.get("stripe-signature");
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  // SIGNING_SECRET is the name the secret was actually stored under in Vercel
+  // — it is what the Stripe dashboard calls the value, so it is the name a
+  // person copying it over naturally reaches for. Accepting both beats a
+  // checkout that stays dead over a naming quibble.
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.SIGNING_SECRET;
   if (!signature || !webhookSecret) return json({ error: "Webhook is not configured." }, 400);
 
   const rawBody = await request.text();

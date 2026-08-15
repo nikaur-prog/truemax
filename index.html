@@ -183,12 +183,25 @@
             <div class="side-live hidden" id="side-live">
               <video id="side-video" playsinline muted></video>
               <canvas id="side-guide"></canvas>
+              <!-- One direction only. The mannequin starts square on, then
+                   turns to ITS right, which on a mirrored selfie preview is
+                   the way the person sees their own reflection turn when they
+                   turn right. A single arc sweeping that way, rather than the
+                   old pair of arrows offering both. -->
               <div class="side-turn-cue" id="side-turn-cue" aria-hidden="true">
-                <svg viewBox="0 0 180 150" role="presentation">
-                  <path class="turn-head" d="M88 35c24 0 38 18 38 40 0 15-7 24-18 31v20H70v-20C59 99 53 89 53 75c0-22 13-40 35-40Z"/>
-                  <path class="turn-arrow" d="M31 77c8-27 30-44 57-44m-57 44 2-19m-2 19 18-5M149 77c-8-27-30-44-57-44m57 44-2-19m2 19-18-5"/>
+                <svg viewBox="0 0 180 160" role="presentation">
+                  <!-- The arc travels OVER the head, right to left, which is
+                       the way a head turning to its own right sweeps on a
+                       mirrored selfie preview. Arrowhead at the far end so the
+                       direction is unmissable. -->
+                  <path class="turn-arc" d="M146 78A58 58 0 0 0 34 78"/>
+                  <path class="turn-tip" d="M34 78l-6-15m6 15 15-5"/>
+                  <g class="turn-mannequin">
+                    <path class="turn-head" d="M90 44c24 0 40 19 40 42 0 16-8 26-19 33v18H69v-18C58 112 50 102 50 86c0-23 16-42 40-42Z"/>
+                    <circle class="turn-nose" cx="90" cy="86" r="5.5"/>
+                  </g>
                 </svg>
-                <span>Turn fully left or right</span>
+                <span class="turn-word">Turn to your <b>right</b></span>
               </div>
               <div class="cam-hud">
                 <div class="cam-hint" id="side-hint">

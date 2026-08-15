@@ -1059,9 +1059,55 @@ body.funnel-open { overflow: hidden; }
 .side-turn-cue.hidden { display: grid !important; opacity: 0; transform: scale(.96); }
 .side-turn-cue svg { width: min(44%, 180px); overflow: visible; filter: drop-shadow(0 5px 16px rgba(0,0,0,.5)); }
 .side-turn-cue .turn-head { fill: rgba(12,14,16,.2); stroke: rgba(255,255,255,.9); stroke-width: 2.2; }
-.side-turn-cue .turn-arrow { fill: none; stroke: #fff; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; animation: side-turn 1.4s ease-in-out infinite alternate; transform-origin: center; }
+.side-turn-cue .turn-nose { fill: #fff; }
+/* The mannequin demonstrates the move rather than describing it: square on,
+   hold, then turn, hold, and repeat. squash on the X axis is what sells a head
+   rotating in 2D — the face narrows as it turns away, exactly as a real one
+   does — and the nose sliding across sells which WAY it is turning. */
+.side-turn-cue .turn-mannequin {
+  transform-box: fill-box; transform-origin: center;
+  animation: side-demo 3.4s ease-in-out infinite;
+}
+@keyframes side-demo {
+  0%, 22% { transform: scaleX(1); }
+  48%, 74% { transform: scaleX(.5); }
+  100% { transform: scaleX(1); }
+}
+/* The nose slides to the LEFT of the head as it turns, which is what the
+   person sees their own reflection do when they turn to their right. The head
+   narrowing alone is ambiguous; the nose is what names the direction. */
+.side-turn-cue .turn-nose {
+  transform-box: fill-box; transform-origin: center;
+  animation: side-nose 3.4s ease-in-out infinite;
+}
+@keyframes side-nose {
+  0%, 22% { transform: translateX(0); }
+  48%, 74% { transform: translateX(-46px); }
+  100% { transform: translateX(0); }
+}
+/* The arc sweeps the same way the head goes, and only that way. */
+.side-turn-cue .turn-arc, .side-turn-cue .turn-tip {
+  fill: none; stroke: #4bf5c5; stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round;
+}
+.side-turn-cue .turn-arc {
+  stroke-dasharray: 150; stroke-dashoffset: 150;
+  animation: side-sweep 3.4s ease-in-out infinite;
+}
+@keyframes side-sweep {
+  0%, 18% { stroke-dashoffset: 150; opacity: .35; }
+  46%, 76% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 150; opacity: .35; }
+}
+.side-turn-cue .turn-tip { animation: side-tip 3.4s ease-in-out infinite; }
+@keyframes side-tip { 0%, 34% { opacity: 0; } 48%, 76% { opacity: 1; } 100% { opacity: 0; } }
 .side-turn-cue span { font-size: 13px; font-weight: 600; letter-spacing: .01em; background: rgba(12,14,16,.48); backdrop-filter: blur(9px); border-radius: 99px; padding: 7px 12px; }
-@keyframes side-turn { from { transform: translateX(-5px); opacity: .72; } to { transform: translateX(5px); opacity: 1; } }
+.side-turn-cue .turn-word b { color: #4bf5c5; }
+@media (prefers-reduced-motion: reduce) {
+  .side-turn-cue .turn-mannequin, .side-turn-cue .turn-arc,
+  .side-turn-cue .turn-tip, .side-turn-cue .turn-nose { animation: none; }
+  .side-turn-cue .turn-arc { stroke-dashoffset: 0; opacity: 1; }
+  .side-turn-cue .turn-tip { opacity: 1; }
+}
 .side-live .cam-hud::before, .side-live .cam-hud::after {
   content: ""; position: absolute; left: 0; right: 0; height: 92px; pointer-events: none;
 }

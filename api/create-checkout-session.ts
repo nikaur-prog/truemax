@@ -23,8 +23,15 @@ function isPaidTier(value: unknown): value is PaidTier {
   return value === "starter" || value === "max";
 }
 
+// Each price answers to two names: the one the code was written against and
+// the one the values were actually stored under in Vercel. Renaming deployed
+// environment variables to satisfy the code is exactly the kind of manual step
+// that keeps a checkout dead for days; the code can just look in both places.
 function configuredPrice(tier: PaidTier): string | null {
-  return process.env[tier === "starter" ? "STRIPE_STARTER_PRICE_ID" : "STRIPE_MAX_PRICE_ID"] || null;
+  if (tier === "starter") {
+    return process.env.STRIPE_STARTER_PRICE_ID || process.env.STRIPE_PRICE_STARTER_MONTHLY || null;
+  }
+  return process.env.STRIPE_MAX_PRICE_ID || process.env.STRIPE_PRICE_MAX_MONTHLY || null;
 }
 
 async function releaseReservation(userId: string, reservationId: string): Promise<void> {
@@ -61,7 +68,9 @@ export async function POST(request: Request): Promise<Response> {
         .eq("user_id", user.id)
         .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
       const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
-      const scanPrice = process.env[member ? "STRIPE_MEMBER_SCAN_PRICE_ID" : "STRIPE_SCAN_PRICE_ID"] || null;
+      const scanPrice = member
+        ? process.env.STRIPE_MEMBER_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER || null
+        : process.env.STRIPE_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_STANDARD || null;
       if (!scanPrice) return json({ error: "Single scans are still being connected." }, 503);
       const session = await getStripe().checkout.sessions.create(
         {
