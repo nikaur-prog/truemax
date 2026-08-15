@@ -1131,6 +1131,14 @@ function showShallow(mode: AnalysisMode): void {
   </div>`;
 
   wireModeSwitcher();
+  // The headline counts up here too. It used to render a literal "0" and wait
+  // for an animation that only ever ran in full mode, so Basic — now the
+  // default depth — showed every user a score of zero.
+  const lead = body().querySelector<HTMLElement>(".basic-n");
+  if (lead) {
+    const target = Number(lead.dataset.count);
+    if (Number.isFinite(target)) countUp(lead, target, 0, 60);
+  }
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
   document.getElementById("btn-share")!.onclick = async () => {
@@ -1156,7 +1164,7 @@ function basicHTML(): string {
   return `<div class="basic">
     <div class="basic-lead">
       <span class="klabel">OVERALL</span>
-      <b><span data-count="${lead.value}" data-decimals="0">0</span><small>/100</small></b>
+      <b><span class="basic-n" data-count="${lead.value}" data-decimals="0">${lead.value}</span><small>/100</small></b>
     </div>
     <div class="basic-grid">
       ${rest
