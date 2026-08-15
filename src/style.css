@@ -2764,3 +2764,19 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .max-ask.show { animation: none; opacity: 1; transform: none; }
   .max-say.pondering i { animation: none; opacity: .5; }
 }
+
+/* ---------------------------------------------------------------------------
+   The wrapped native app sells nothing.
+
+   Apple requires in-app digital subscriptions to go through In-App Purchase,
+   and outside the US storefront an app may not even link to a web checkout.
+   Until IAP is implemented the native build hides every purchase surface; a
+   subscription bought on the web works in the app regardless, because
+   entitlements are read from the server and know nothing about platforms.
+   .native-app is stamped on <html> at boot by engine/platform.ts.
+   --------------------------------------------------------------------------- */
+.native-app #btn-unlock,
+.native-app #btn-single-scan,
+.native-app #btn-upgrade,
+.native-app .lock-single,
+.native-app .upsell .navrow { display: none !important; }

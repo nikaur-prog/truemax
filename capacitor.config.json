@@ -1,0 +1,12 @@
+{
+  "appId": "app.truemax",
+  "appName": "TrueMax",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#f4f3ef"
+  },
+  "android": {
+    "backgroundColor": "#f4f3ef"
+  }
+}

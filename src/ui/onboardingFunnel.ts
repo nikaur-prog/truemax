@@ -14,6 +14,7 @@ import { startTrialCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { typewriteBlock } from "./typewriter.js";
+import { isNativeApp } from "../engine/platform.js";
 import { METRICS } from "../engine/metrics.js";
 import { SIDE_METRICS } from "../engine/sideMetrics.js";
 
@@ -233,6 +234,15 @@ export async function openTrialFunnel(
 
   const drawOffer = () => {
     if (!host) return;
+    // Inside the wrapped native app there is no offer screen at all. Apple
+    // requires in-app digital subscriptions to go through In-App Purchase,
+    // and outside the US an app may not even link to a web checkout — so
+    // until IAP exists, the native build simply never sells. The pathway
+    // questions above still ran; only the sell is skipped.
+    if (isNativeApp()) {
+      close();
+      return;
+    }
     track("offer-shown");
     const adult = profileIsAdult(profile);
     // The .offer-enter classes drive the reveal: the shell rises, then the two
