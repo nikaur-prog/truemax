@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "tsx --test api/_*.test.ts src/engine/*.test.ts src/ui/*.test.ts",
     "preview": "vite preview",
-    "postinstall": "node scripts/copy-wasm.mjs"
+    "postinstall": "node scripts/copy-wasm.mjs",
+    "harvest": "node scripts/harvest-clips.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
