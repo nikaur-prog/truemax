@@ -19,11 +19,10 @@
 // fine.
 // ---------------------------------------------------------------------------
 
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join, basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import ffmpegPath from "ffmpeg-static";
 import { chromium } from "playwright";
 
 const ROOT = resolve(fileURLToPath(import.meta.url), "../..");
@@ -47,11 +46,37 @@ const inDir = resolve(inDirArg);
 const outDir = resolve(outDirArg);
 mkdirSync(outDir, { recursive: true });
 
+// ---------------------------------------------------------------------------
+// Finding ffmpeg.
+//
+// The bundled ffmpeg-static is convenient and fragile: it downloads a binary
+// in a postinstall step, and any TLS interception on the machine — a VPN,
+// antivirus, a corporate proxy — fails that download with an issuer-cert
+// error and takes the whole npm install down with it. A system ffmpeg works
+// exactly as well, so try the bundle, then the PATH, and only give up (with
+// the one-line fix) if neither is there.
+// ---------------------------------------------------------------------------
+async function resolveFfmpeg() {
+  try {
+    const mod = await import("ffmpeg-static");
+    const bundled = mod.default;
+    if (bundled && existsSync(bundled)) return bundled;
+  } catch {
+    // Not installed, or its postinstall download never completed.
+  }
+  const found = spawnSync("which", ["ffmpeg"], { encoding: "utf8" }).stdout.trim();
+  if (found) return found;
+  console.error("ffmpeg not found.");
+  console.error("Install it once with:  brew install ffmpeg");
+  console.error("(the bundled ffmpeg-static download failed, which is usually a VPN or antivirus intercepting TLS)");
+  process.exit(1);
+}
+const ffmpegPath = await resolveFfmpeg();
+
 const ff = (args) =>
   execFileSync(ffmpegPath, args, { encoding: "utf8", stdio: "pipe", maxBuffer: 64e6 });
 
 // Run ffmpeg and hand back its stderr whether it succeeds or fails.
-import { spawnSync } from "node:child_process";
 const spawnSyncFfmpeg = (args) => {
   const r = spawnSync(ffmpegPath, args, { encoding: "utf8", maxBuffer: 64e6 });
   return String(r.stderr || "");
