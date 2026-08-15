@@ -34,12 +34,19 @@ const CHECKED = [
 ] as const;
 
 export function GET(): Response {
+  // Alternate names the server code also accepts. The report answers "will
+  // the feature work", not "is this exact string in the dashboard" — a value
+  // stored under its accepted fallback name must not read as missing.
+  const FALLBACK: Record<string, string> = {
+    SUPABASE_SECRET_KEY: "SUPABASE_SERVICE_ROLE_KEY",
+    STRIPE_WEBHOOK_SECRET: "SIGNING_SECRET",
+    STRIPE_STARTER_PRICE_ID: "STRIPE_PRICE_STARTER_MONTHLY",
+    STRIPE_MAX_PRICE_ID: "STRIPE_PRICE_MAX_MONTHLY",
+  };
   const env: Record<string, boolean> = {};
   for (const name of CHECKED) {
-    // SUPABASE_SERVICE_ROLE_KEY is the legacy name _shared.ts still falls back
-    // to, so a project configured under the old name must not read as missing.
-    const legacy = name === "SUPABASE_SECRET_KEY" ? process.env.SUPABASE_SERVICE_ROLE_KEY : undefined;
-    env[name] = Boolean(process.env[name] || legacy);
+    const fallback = FALLBACK[name] ? process.env[FALLBACK[name]] : undefined;
+    env[name] = Boolean(process.env[name] || fallback);
   }
   // The ?deps=1 probe that used to live here has moved to /api/probe, because
   // it loaded modules through a variable specifier and a variable specifier is

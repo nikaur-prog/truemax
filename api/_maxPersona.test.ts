@@ -77,6 +77,18 @@ test("Max is told not to use em dashes", () => {
   assert.ok(/Never use em dashes/.test(buildSystemPrompt(ctx())));
 });
 
+test("the nutrition stance is honest and complete", () => {
+  const prompt = buildSystemPrompt(ctx());
+  // Steer away from ultra-processed food and heavily processed seed oils...
+  assert.ok(/highly processed, easily oxidised seed oils/.test(prompt));
+  // ...without pretending the seed-oil-specific claim is settled science.
+  assert.ok(/debated and not settled/.test(prompt));
+  // Training covers the easy high-burn work, not just lifting.
+  assert.ok(/zone 2 steady-state cardio/.test(prompt));
+  // And nothing recommendable comes in a bottle.
+  assert.ok(/ever comes in a bottle/.test(prompt));
+});
+
 // ---------------------------------------------------------------------------
 // The cache split. Worth a test because the saving depends on the shared block
 // being byte-identical between two accounts, and the easiest way to lose that
