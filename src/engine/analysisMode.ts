@@ -23,7 +23,12 @@ export const ANALYSIS_MODES: Array<{ id: AnalysisMode; label: string; blurb: str
 ];
 
 const KEY = "truemax.analysisMode";
-const DEFAULT: AnalysisMode = "full";
+// Basic, not full. Full is the honest maximum and the reason to trust the
+// product, but forty-one measurements is not a first impression — it is a
+// reference manual handed to somebody who wanted a number. Basic answers the
+// question that was asked, and both other depths are one tap away on the same
+// screen.
+const DEFAULT: AnalysisMode = "basic";
 
 export function loadAnalysisMode(): AnalysisMode {
   try {
@@ -111,12 +116,17 @@ export function basicScores(report: Report): BasicScore[] {
   // measurement backwards, and calling it "dimorphism" to dodge that is jargon
   // in a mode whose whole point is not being jargon.
   const dimorphism = report.sex === "female" ? "Femininity" : "Masculinity";
+  // Seven entries: the headline plus six panels. Six because five left the
+  // grid with a hole in it, and because symmetry is the metric this audience
+  // asks about most after the jaw — it belongs in the short list, not three
+  // taps deep in the full breakdown.
   return [
     { label: "Overall", value: Math.round(report.overallPercentile) },
     { label: "Sharpness", value: pillarPct(report, "Angularity") },
     { label: dimorphism, value: pillarPct(report, "Dimorphism") },
     { label: "Eyes", value: pct("eyes", 50) },
     { label: "Jaw", value: pct("jaw", 50) },
+    { label: "Symmetry", value: pct("symmetry", 50) },
     { label: "Harmony", value: pillarPct(report, "Harmony") },
   ];
 }

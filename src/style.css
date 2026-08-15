@@ -2061,6 +2061,9 @@ body.auth-modal-open { overflow: hidden; }
 .sref-card .sref-outline { opacity: 1; stroke-width: 1.6; }
 .sref-card .sref-dot { stroke-width: 2.4; }
 .sref-label { font: 5.5px var(--sans); fill: var(--ink); }
+/* The thread from a dot to its word. Faint on purpose: it has to be followable
+   without competing with the face it is drawn over. */
+.sref-leader { fill: none; stroke: color-mix(in srgb, var(--acc) 45%, transparent); stroke-width: .5; }
 /* The head the points sit on. A ring floating on an empty outline gave nothing
    to compare against — with a drawn brow, eye, nostril, lips and ear, a point in
    the wrong place looks wrong instead of merely looking like a dot. Neutral
@@ -2622,11 +2625,25 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   /* The photograph sticks and shrinks. Sticky rather than fixed so it stays
      inside the grid and cannot overlap the footer, and a max-height rather
      than a transform so the strip underneath moves up with it instead of
-     leaving a hole where the photo used to be. */
+     leaving a hole where the photo used to be.
+     Flex, so the order below can put the answer directly under the picture. */
   .pane-photo {
     position: sticky; top: 0; z-index: 5;
+    display: flex; flex-direction: column;
     background: var(--bg); padding-top: 8px;
   }
+  /* Reading order on a phone: the small print about HOW it was measured goes
+     above the photo, the photo, then the score. What somebody opened the app
+     for is the score, so nothing sits between it and the picture. */
+  .pane-photo .quality-chips { order: -3; margin: 0 0 6px; }
+  .pane-photo .viewtoggle { order: -2; margin: 0 0 8px; }
+  .pane-photo .face-frame { order: 0; }
+  .pane-photo .scorestrip { order: 1; }
+  .pane-photo .photo-caption { order: 2; }
+  .pane-photo .scan-status { order: 3; }
+  .pane-photo .bar { order: 4; }
+  /* Smaller: this is provenance, not the headline. */
+  .pane-photo .quality-chips .chip { font-size: 10px; padding: 4px 8px; }
   /* 52vh, not 62. The whole point of the strip is that the score is on screen
      when the scan finishes, and at 62vh the card's last two lines fell below
      the fold on a 667px phone, which is the smallest screen still in wide use.
@@ -2638,6 +2655,19 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
 
   .pane-photo.shrunk .face-frame { max-height: 96px; }
+  /* The shrink used to snap because these were display:none — four elements
+     leaving the flow in one frame, mid-transition, while the sticky pane was
+     also resizing. Collapsing them on the same curve as the photo makes it
+     one movement instead of a jump. */
+  .pane-photo .photo-caption,
+  .pane-photo .scan-status,
+  .pane-photo .bar {
+    overflow: hidden; max-height: 40px; opacity: 1;
+    transition: max-height .34s cubic-bezier(.32, 0, .15, 1), opacity .2s ease, margin .34s ease;
+  }
+  .pane-photo.shrunk .photo-caption,
+  .pane-photo.shrunk .scan-status,
+  .pane-photo.shrunk .bar { max-height: 0; opacity: 0; margin-top: 0; margin-bottom: 0; }
   /* Clipping a portrait to 96px from the top shows hair and background and no
      face, which makes the shrunk state useless as a reminder of what is being
      measured. Crop to the upper third instead, which is where a face sits in a
@@ -2649,13 +2679,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      cropped the two no longer line up. At this size the overlay is noise
      anyway. */
   .pane-photo.shrunk #overlay-canvas { display: none; }
-  /* Everything that describes the photograph goes with it. Keeping the caption
-     and the quality chips while the photo is a 96px sliver leaves more chrome
-     on screen than picture. */
-  .pane-photo.shrunk .photo-caption,
-  .pane-photo.shrunk .scan-status,
-  .pane-photo.shrunk .bar,
-  .pane-photo.shrunk .quality-chips { display: none; }
+  /* The chips stay visible above the photo even when shrunk: they are one
+     small line, they explain what the number is measured against, and hiding
+     them was never what made room. */
   .pane-photo.shrunk .scorestrip { margin-top: 10px; padding: 10px 14px; }
   .pane-photo.shrunk .ss-score b { font-size: 28px; }
   .pane-photo.shrunk .ss-rank,

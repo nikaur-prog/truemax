@@ -26,6 +26,13 @@ export type FunnelEvent =
   | "quick-video-downloaded"
   | "max-chat-opened";
 
+// Not "/api/track": uBlock, AdGuard and Brave block that URL pattern by
+// default, so a large share of a young mobile audience recorded nothing at
+// all — and the failure is silent, so every number drawn from it reads low
+// and every conclusion from those numbers is wrong. One letter matches no
+// filter rule.
+const ENDPOINT = "/api/e";
+
 const sent = new Set<FunnelEvent>();
 
 export function track(event: FunnelEvent): void {
@@ -33,8 +40,8 @@ export function track(event: FunnelEvent): void {
   sent.add(event);
   try {
     const body = JSON.stringify({ event });
-    if (navigator.sendBeacon?.("/api/track", new Blob([body], { type: "application/json" }))) return;
-    void fetch("/api/track", {
+    if (navigator.sendBeacon?.(ENDPOINT, new Blob([body], { type: "application/json" }))) return;
+    void fetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,

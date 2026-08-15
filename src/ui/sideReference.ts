@@ -167,6 +167,71 @@ function dots(scale: number, withLabels: boolean): string {
   }).join("");
 }
 
+
+// ---------------------------------------------------------------------------
+// Placing the labels so they can be read.
+//
+// The first version printed each label at its own point's height. Around the
+// nose and mouth the landmarks are a few units apart — nose tip, nose base,
+// upper lip, lower lip — so at 5.5px the words simply stacked on top of one
+// another and the guide became unreadable exactly where it is needed most.
+//
+// Two rules fix it, and they are the same two any anatomical diagram uses.
+// Labels are pushed apart vertically until each has room, then the whole
+// column is re-centred so the block does not drift off the head. And they are
+// aligned in a column per side rather than floating at each point's own x, so
+// a leader line can run from the dot to its word without crossing another.
+// ---------------------------------------------------------------------------
+
+// Comfortable line spacing for a 5.5px face, in viewBox units.
+const LABEL_GAP = 8;
+// How far outside the head the two label columns sit.
+const LABEL_MARGIN = 16;
+
+function labelLayer(faceDir: number): string {
+  const rows = SIDE_POINTS.map(({ id, label }) => {
+    const [x, y] = DIAGRAM[id];
+    // Everything below works in RENDERED coordinates, after the mirror, or a
+    // label placed by the unflipped x lands on the wrong side of the face.
+    const dx = faceDir > 0 ? MID * 2 - x : x;
+    return { label, dx, y, ly: y, left: false };
+  });
+
+  // Two columns, both OUTSIDE the head. The previous version split on a line
+  // through the middle of the face, which put the ear and jaw labels on top of
+  // the drawing they were meant to annotate. Which side a point belongs to is
+  // simply which side of the head's centre it sits on.
+  const minX = Math.min(...rows.map((r) => r.dx));
+  const maxX = Math.max(...rows.map((r) => r.dx));
+  const centre = (minX + maxX) / 2;
+  for (const r of rows) r.left = r.dx < centre;
+  const leftColumn = minX - LABEL_MARGIN;
+  const rightColumn = maxX + LABEL_MARGIN;
+
+  let out = "";
+  for (const left of [true, false]) {
+    const side = rows.filter((r) => r.left === left).sort((a, b) => a.y - b.y);
+    if (!side.length) continue;
+    // Push apart until every label has a clear line...
+    for (let i = 1; i < side.length; i++) {
+      if (side[i].ly - side[i - 1].ly < LABEL_GAP) side[i].ly = side[i - 1].ly + LABEL_GAP;
+    }
+    // ...then shift the column back so it stays centred on the features it
+    // describes instead of sliding toward the chin.
+    const drift = (side[0].ly - side[0].y + (side[side.length - 1].ly - side[side.length - 1].y)) / 2;
+    for (const r of side) r.ly -= drift;
+
+    const column = left ? leftColumn : rightColumn;
+    for (const r of side) {
+      const from = left ? r.dx - 2.5 : r.dx + 2.5;
+      out += `<path d="M${from.toFixed(1)} ${r.y.toFixed(1)} L${column.toFixed(1)} ${r.ly.toFixed(1)}" class="sref-leader"/>`;
+      out += `<text x="${(left ? column - 2 : column + 2).toFixed(1)}" y="${(r.ly + 1.8).toFixed(1)}"
+        text-anchor="${left ? "end" : "start"}" class="sref-label">${r.label}</text>`;
+    }
+  }
+  return out;
+}
+
 function svg(withLabels: boolean, faceDir: number): string {
   // Wider viewBox when labelled, so the text has somewhere to live.
   const box = withLabels
@@ -188,15 +253,7 @@ function svg(withLabels: boolean, faceDir: number): string {
       <path d="${OUTLINE}" class="sref-outline" />
       ${dots(1, false)}
     </g>
-    ${withLabels
-      ? `<g class="sref-labels">${SIDE_POINTS.map(({ id, label }) => {
-          const [x, y] = DIAGRAM[id];
-          const dx = faceDir > 0 ? MID * 2 - x : x;
-          const front = faceDir > 0 ? dx > MID * 2 - LABEL_SPLIT : dx < LABEL_SPLIT;
-          return `<text x="${front ? dx - 6 : dx + 6}" y="${y + 1.4}"
-            text-anchor="${front ? "end" : "start"}" class="sref-label">${label}</text>`;
-        }).join("")}</g>`
-      : ""}
+    ${withLabels ? `<g class="sref-labels">${labelLayer(faceDir)}</g>` : ""}
   </svg>`;
 }
 
