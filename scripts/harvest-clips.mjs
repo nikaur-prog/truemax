@@ -32,6 +32,10 @@ const CLIP_SECONDS = 2;
 // A scene has to run at least this long to yield a stable 2-second cut; a
 // faster cut is usually a montage frame that looks terrible frozen mid-motion.
 const MIN_SCENE = 1.2;
+// How densely to sample inside a single continuous take, and how many samples
+// any one scene may contribute before it starts crowding out the rest.
+const SAMPLE_EVERY = 6;
+const SAMPLES_PER_SCENE = 8;
 
 const [, , inDirArg, outDirArg, ...rest] = process.argv;
 if (!inDirArg || !outDirArg) {
@@ -77,13 +81,23 @@ function sceneStarts(file) {
   const durMatch = err.match(/Duration: (\d+):(\d+):([\d.]+)/);
   const duration = durMatch ? Number(durMatch[1]) * 3600 + Number(durMatch[2]) * 60 + Number(durMatch[3]) : 0;
   times.push(duration);
-  // Candidate segments: one per scene, starting a beat after the cut so the
-  // clip does not open on the transition frame itself.
+  // Candidates, sampled WITHIN each scene rather than once per scene. A
+  // talking-head interview is often one continuous shot with no cuts at all,
+  // and one-clip-per-scene turned a ten-minute video into a single candidate.
+  // Sampling every few seconds inside a long take is where the usable frames
+  // actually are.
   const segments = [];
   for (let i = 0; i < times.length - 1; i++) {
-    const len = times[i + 1] - times[i];
+    const sceneStart = times[i];
+    const len = times[i + 1] - sceneStart;
     if (len < Math.max(MIN_SCENE, CLIP_SECONDS + 0.3)) continue;
-    segments.push({ start: times[i] + 0.15, sceneLength: Math.round(len * 10) / 10 });
+    const usable = len - CLIP_SECONDS - 0.3;
+    const picks = Math.max(1, Math.min(SAMPLES_PER_SCENE, Math.floor(usable / SAMPLE_EVERY) + 1));
+    for (let k = 0; k < picks; k++) {
+      // Spread the samples across the scene rather than bunching at the start.
+      const offset = picks === 1 ? 0.15 : 0.15 + (usable * k) / (picks - 1 || 1);
+      segments.push({ start: sceneStart + offset, sceneLength: Math.round(len * 10) / 10 });
+    }
   }
   return segments;
 }
@@ -177,7 +191,17 @@ function cutClip(file, start, dest) {
 
 const videos = readdirSync(inDir).filter((f) => VIDEO_EXT.has(extname(f).toLowerCase()));
 if (!videos.length) {
-  console.error(`no videos found in ${inDir}`);
+  const present = readdirSync(inDir);
+  console.error(`No videos found in ${inDir}`);
+  if (!present.length) {
+    console.error("The folder is empty. If yt-dlp was meant to fill it, its download failed —");
+    console.error("run the yt-dlp command on its own and read the error it prints.");
+  } else {
+    console.error(`The folder holds ${present.length} file(s), none with a video extension:`);
+    for (const f of present.slice(0, 10)) console.error(`  ${f}`);
+    console.error(`Recognised extensions: ${[...VIDEO_EXT].join(" ")}`);
+    console.error("A .part or .ytdl file means the download was interrupted.");
+  }
   process.exit(1);
 }
 console.log(`${videos.length} video(s) in ${inDir}`);
@@ -228,5 +252,20 @@ for (const c of allCandidates) {
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
 console.log(`\n${manifest.length} clip(s) → ${outDir}/manifest.json`);
 if (!manifest.length) {
-  console.log("Nothing kept. Loosen with --per-video, or check the footage actually holds a large frontal face.");
+  // A silent zero is the least useful thing this could print. Say which test
+  // did the rejecting, because each one points at a different fix.
+  const why = { noFace: 0, several: 0, small: 0, turned: 0 };
+  for (const c of scored) {
+    const s2 = c.score;
+    if (!s2 || !s2.face) why.noFace++;
+    else if (s2.faces !== 1) why.several++;
+    else if (s2.size < 0.04) why.small++;
+    else why.turned++;
+  }
+  console.log(`Nothing kept, out of ${scored.length} candidate frame(s):`);
+  console.log(`  ${why.noFace} had no detectable face`);
+  console.log(`  ${why.several} had more than one face`);
+  console.log(`  ${why.small} had a face too small in frame (needs ~20% of width)`);
+  console.log(`  ${why.turned} were turned too far from the camera`);
+  console.log("Close-up interview or red-carpet footage works best; wide stage shots rarely pass.");
 }
