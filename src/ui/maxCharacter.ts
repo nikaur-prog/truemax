@@ -19,8 +19,11 @@
 // not a re-render, and a new surface gets the whole expression range for free:
 //
 //   happy       the default: raised brows, open smile
-//   excited     star eyes, for a measured improvement worth celebrating
+//   excited     star eyes and a hover-lift, for a result worth celebrating
 //   thinking    flat mouth, one raised brow, eyes up-left — reading the data
+//   sad         drooping brows and a full frown
+//   mad         scowl and gritted teeth — slapstick only, never aimed at a
+//               person's numbers
 //   concerned   tilted brows, small frown — a number moved the wrong way.
 //               Concerned, never disappointed IN the person: he is worried
 //               with you, not about you. The mouth is a millimetre of curve
@@ -38,7 +41,7 @@
 // and a mascot the same colour as the furniture is furniture.
 // ---------------------------------------------------------------------------
 
-export type MaxMood = "happy" | "excited" | "thinking" | "concerned";
+export type MaxMood = "happy" | "excited" | "thinking" | "concerned" | "sad" | "mad";
 
 // Palette. Kept here rather than CSS variables because the character must look
 // the same on every surface he appears on, light card or dark takeover.
@@ -149,12 +152,32 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
         <path d="M52 54 q7 -3.4 13 -5" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
         <path d="M85 49 q6 1.6 13 5" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
+      <!-- Sad: the concerned brows, further. Inner ends high, outer ends
+           drooping — grief geometry, not anger. -->
+      <g class="mx-alt mx-brows-sad">
+        <path d="M52 57 q6 -7 13 -10" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M85 47 q7 3 13 10" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
+      </g>
+      <!-- Mad: the one face concerned was explicitly built NOT to be — inner
+           ends down. It exists for slapstick and for being knocked about,
+           and is never pointed at a person's own numbers. -->
+      <g class="mx-alt mx-brows-mad">
+        <path d="M52 48 q7 3 13 8" fill="none" stroke="${LIGHT}" stroke-opacity=".8" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M85 56 q6 -5 13 -8" fill="none" stroke="${LIGHT}" stroke-opacity=".8" stroke-width="2.6" stroke-linecap="round"/>
+      </g>
       <!-- mouths, one per mood, minimal marks on the glass -->
       <g class="mx-mouth-open">
         <path d="M66 84.5 q9 7.5 18 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
       </g>
       <path class="mx-alt mx-mouth-flat" d="M67 87 q8 2 16 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
       <path class="mx-alt mx-mouth-down" d="M67 89.5 q8 -4.5 16 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
+      <!-- the full frown, for sad -->
+      <path class="mx-alt mx-mouth-frown" d="M66 91 q9 -8 18 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
+      <!-- gritted, for mad: a tense line with teeth ticks -->
+      <g class="mx-alt mx-mouth-grit">
+        <path d="M66 88 q9 2 18 0" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
+        <path d="M71 87.6 v2.4 M75 88.6 v2.4 M79 87.8 v2.4" fill="none" stroke="${GLASS_DEEP}" stroke-width="1.4" stroke-linecap="round"/>
+      </g>
       <!-- The talking mouth: a small bar that opens and closes on a fast loop.
            The shape does not have to match the words, it only has to move with
            them. -->
