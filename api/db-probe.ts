@@ -76,7 +76,7 @@ export async function GET(): Promise<Response> {
   }
 
   try {
-    const { error } = await getSupabaseAdmin()
+    const { error, count } = await getSupabaseAdmin()
       .from("funnel_events")
       .select("event", { count: "exact", head: true });
     if (error) {
@@ -99,7 +99,10 @@ export async function GET(): Promise<Response> {
         503,
       );
     }
-    return json({ ok: true, ref, keyShape, auth, table: "ok" });
+        // The row count makes the WRITE path checkable from outside: post a
+    // tracked event, watch this move. Reading proving healthy is not the same
+    // as the webhook being able to write an entitlement.
+    return json({ ok: true, ref, keyShape, auth, table: "ok", rows: count ?? null });
   } catch (error) {
     return json({ ok: false, ref, keyShape, auth, authBody, table: "threw", message: scrub(safeMessage(error)) }, 503);
   }
