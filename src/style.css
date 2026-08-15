@@ -2171,9 +2171,12 @@ body.auth-modal-open { overflow: hidden; }
   margin-top: 16px; min-height: 96px;
 }
 .max-pop {
-  position: relative; flex: none; width: 112px; display: block;
-  margin-bottom: calc(-1 * (clamp(21px, 2.6vw, 28px) + 40px));
-  transform: translateY(140px);
+  position: relative; flex: none; width: 124px; display: block;
+  /* Hide less of him than the first pass did: at +40 the card edge sat above
+     his eyes, and a dark visor against the dark card bottom simply vanished.
+     At +24 the edge crosses his chest, so the face always reads. */
+  margin-bottom: calc(-1 * (clamp(21px, 2.6vw, 28px) + 24px));
+  transform: translateY(160px);
 }
 .max-stage.up .max-pop { animation: mx-pop-up .7s cubic-bezier(.26, 1.18, .4, 1) forwards; }
 @keyframes mx-pop-up {
@@ -2640,4 +2643,78 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      entire point of the card and removing it would leave two numbers. */
   .ceil-then { animation: none; opacity: .62; }
   .ceil-shine { display: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Knocking Max over.
+
+   He is a flying bot with no legs, so once he is tipped he cannot right
+   himself: he lies there until the next tap flies him back up. The shock
+   comes first — eyes stretched wide, a small o of a mouth — because a fall
+   with no reaction before it reads as a rendering bug, not slapstick.
+   --------------------------------------------------------------------------- */
+.mx-svg.mx-shock { animation: mx-jolt .42s ease-in-out; }
+@keyframes mx-jolt {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px) rotate(-2deg); }
+  45% { transform: translateX(3px) rotate(2deg); }
+  70% { transform: translateX(-2px) rotate(-1deg); }
+}
+.mx-svg.mx-shock .mx-eyes { transform: scale(1.06, 1.22); transform-box: fill-box; transform-origin: center; }
+.mx-svg.mx-shock .mx-mouth-open,
+.mx-svg.mx-shock .mx-mouth-flat,
+.mx-svg.mx-shock .mx-mouth-down { display: none; }
+.mx-svg.mx-shock .mx-mouth-talk { display: block; }
+.mx-svg.mx-shock .mx-talk-shape { animation: none; transform: scale(.7); }
+
+.mx-svg.mx-down { transform: rotate(98deg) translateY(4px); transition: transform .5s cubic-bezier(.4, 1.6, .6, 1); }
+/* His idle life pauses while he is down: a knocked-over robot that keeps
+   breathing and glancing around undermines the bit. */
+.mx-svg.mx-down .mx-bob { animation-play-state: paused; }
+.mx-svg.mx-down .mx-shadow { opacity: 0; }
+.mx-svg.mx-down .mx-lid { animation-play-state: paused; }
+
+.mx-svg.mx-rise { animation: mx-flyup .65s cubic-bezier(.3, 1.4, .45, 1); }
+@keyframes mx-flyup {
+  0% { transform: rotate(98deg) translateY(4px); }
+  55% { transform: rotate(-8deg) translateY(-12px); }
+  80% { transform: rotate(3deg) translateY(-2px); }
+  100% { transform: rotate(0) translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mx-svg.mx-shock, .mx-svg.mx-rise { animation: none; }
+  .mx-svg.mx-down { transform: none; transition: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   The demo conversation on the offer card.
+
+   Ten seconds after Max introduces himself, a question pops in from the right
+   — the person's side of a chat — and Max visibly THINKS about it (the same
+   three dots a messenger shows, plus his thinking face) before the answer
+   types itself out. Scripted, not generated: this is a demonstration of what
+   the paid product feels like, on the screen where the money is asked for.
+   --------------------------------------------------------------------------- */
+.max-feed { display: flex; flex-direction: column; align-items: stretch; gap: 8px; flex: 1; min-width: 0; margin-bottom: 26px; }
+.max-feed .max-say { flex: none; margin: 0; }
+.max-ask {
+  align-self: flex-end; max-width: 85%; padding: 9px 13px;
+  border-radius: 15px 15px 4px 15px; background: #0f2f28; color: #d8fff3;
+  font-size: 12.5px; line-height: 1.5;
+  border: 1px solid rgba(75, 245, 197, .3);
+  opacity: 0; transform: translateY(8px) scale(.95); transform-origin: bottom right;
+}
+.max-ask.show { animation: mx-say .4s cubic-bezier(.2, 1.3, .35, 1) forwards; }
+/* Max thinking: the bubble holds three pulsing dots while his face does the
+   pondering. */
+.max-say.pondering p { display: flex; gap: 5px; padding: 3px 0; }
+.max-say.pondering i {
+  width: 6px; height: 6px; border-radius: 99px; background: var(--mut);
+  animation: mc-dot 1.1s ease-in-out infinite;
+}
+.max-say.pondering i:nth-child(2) { animation-delay: .16s; }
+.max-say.pondering i:nth-child(3) { animation-delay: .32s; }
+@media (prefers-reduced-motion: reduce) {
+  .max-ask.show { animation: none; opacity: 1; transform: none; }
+  .max-say.pondering i { animation: none; opacity: .5; }
 }
