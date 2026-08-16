@@ -8,6 +8,7 @@ import {
   startScanCreditCheckout,
 } from "../engine/entitlement.js";
 import { TRIAL_SCANS, tierOf } from "../engine/depth.js";
+import { SCAN_PRICE_MEMBER, isMemberPricing, scanPrice, setMemberPricing } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,8 @@ export async function ensureScanAllowed(proceed: () => void): Promise<void> {
   // neither a scan nor a gate, staring at a button that did nothing.
   const token = await currentAccessToken().catch(() => null);
   if (!token) {
+    // Signed out is not a member, so the standard price is the honest quote.
+    setMemberPricing(false);
     openScanGate(next);
     return;
   }
@@ -106,22 +109,28 @@ export async function ensureScanAllowed(proceed: () => void): Promise<void> {
   // common case. Each fails toward "no", which fails toward the gate. The
   // timeout is the same defence as above: a stalled read resolves to the
   // locked answer rather than hanging the button forever.
-  const [admin, credits] = await Promise.all([
+  //
+  // All three at once rather than the entitlement only when it is needed: the
+  // gate has to know whether this is a member before it can quote a price, so
+  // the read happens on every path anyway.
+  const [admin, credits, entitlement] = await Promise.all([
     withTimeout(loadIsAdmin(), false),
     withTimeout(loadScanCredits(), 0),
+    withTimeout(loadEntitlement(), null),
   ]);
+  const member = tierOf(entitlement) !== "free";
+  setMemberPricing(member);
+
   if (admin) {
     proceed();
     return;
   }
   if (credits > 0) {
-    // The credit pays for skipping the wait — except for a free-tier account
+    // The credit pays for skipping the wait, except for a free-tier account
     // past its trial, where the depth gate on the results screen already
     // spends one credit per full-depth scan. Spending it here too would
     // charge that account twice for one scan.
-    const entitlement = await withTimeout(loadEntitlement(), null);
-    const alsoSpentByDepthGate =
-      tierOf(entitlement) === "free" && readAllHistory().length >= TRIAL_SCANS;
+    const alsoSpentByDepthGate = !member && readAllHistory().length >= TRIAL_SCANS;
     if (!alsoSpentByDepthGate) void consumeScanCredit().catch(() => undefined);
     proceed();
     return;
@@ -150,21 +159,27 @@ function remaining(nextAt: number): string {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
+// Reads who this is from the shared pricing state rather than taking it as an
+// argument, so the price on the button and the note under it cannot disagree
+// with each other or with the same price quoted on the results screen. Every
+// caller sets that state before opening.
 function openScanGate(nextAt: number): void {
   if (host) return;
   track("scan-gate-shown");
+  const member = isMemberPricing();
 
   host = document.createElement("div");
   host.className = "scangate";
   host.innerHTML = `
     <div class="scangate-sheet" role="dialog" aria-modal="true" aria-label="Weekly scan limit">
-      <b class="sg-title">That was your free scan for this week</b>
-      <p class="sg-sub">One free scan a week, because a face does not change by Thursday. Scanning daily measures your lighting, not your progress — the weekly delta is the honest one.</p>
+      <b class="sg-title">You've used your free scan this week</b>
+      <p class="sg-sub">You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.</p>
       <div class="sg-timer">
-        <span class="klabel">NEXT FREE SCAN IN</span>
+        <span class="klabel">YOUR NEXT FREE SCAN</span>
         <b id="sg-count">–</b>
       </div>
-      <button class="btn pri" id="sg-buy">Scan now — $5.99, $2.99 for members</button>
+      <button class="btn pri" id="sg-buy">Scan now for ${scanPrice()}</button>
+      ${member ? "" : `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`}
       <button class="btn gho" id="sg-wait">I'll wait</button>
       <p class="sg-err" id="sg-err" hidden></p>
     </div>`;

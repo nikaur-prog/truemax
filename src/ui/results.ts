@@ -18,6 +18,7 @@ import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcer
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
+import { scanPrice } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
@@ -1214,7 +1215,7 @@ function showImprove(): void {
               ${ceilingCtaMarkup({ overall: r.overall, potential: r.potential, photo: frontPhoto })}
               <p>The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
-              <button class="linkish lock-single" id="btn-single-scan">Or one scan on its own — $5.99, $2.99 for members</button>
+              <button class="linkish lock-single" id="btn-single-scan">Or buy just this one scan for ${scanPrice()}</button>
             </div>
           </div>`
         : planBody}
@@ -1451,7 +1452,7 @@ function locked(content: string): string {
       <p>Your score and your ranking are free on every plan, and always will be. This is the part underneath: all thirty-one measurements, what each one did to the number, and how far it can actually move.</p>
       ${left}
       <div class="navrow"><button class="btn pri" id="btn-unlock">Unlock in-depth · 7 days free</button></div>
-      <button class="linkish lock-single" id="btn-single-scan">Just this once — buy one scan ($5.99, or $2.99 for members)</button>
+      <button class="linkish lock-single" id="btn-single-scan">Just this once, buy one scan for ${scanPrice()}</button>
     </div>
   </div>`;
 }
