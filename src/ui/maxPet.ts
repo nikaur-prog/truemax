@@ -27,7 +27,10 @@ export function mountMaxPet(chatContext: MaxChatContext): void {
   host.type = "button";
   host.className = "maxpet";
   host.setAttribute("aria-label", "Chat with Max");
-  host.innerHTML = maxCharacterMarkup({ mood: "happy" });
+  // Waving is opt-in, and this is the one place that earns it: he is arriving.
+  // The CSS runs it twice and then leaves the arm down for good, so the
+  // greeting is an event rather than the idle loop it used to be.
+  host.innerHTML = maxCharacterMarkup({ mood: "happy", waving: true });
   document.body.appendChild(host);
 
   // He waits a beat, then peeks. Arriving with the page would make him

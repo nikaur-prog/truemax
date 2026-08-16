@@ -2311,7 +2311,7 @@ body.auth-modal-open { overflow: hidden; }
    character whose body language contradicts his face is worse than one with
    no body language at all. */
 .mx-mood-excited .mx-bob { animation-duration: 1.5s; }
-.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out infinite; }
+.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out 3; }
 .mx-mood-concerned .mx-bob { animation-duration: 5s; }
 .mx-mood-thinking .mx-pupils { animation: mx-ponder 4s ease-in-out infinite; }
 @keyframes mx-ponder { 0%, 100% { transform: translate(-2px, -2.4px); } 50% { transform: translate(-3px, -1px); } }
@@ -2400,8 +2400,16 @@ body.auth-modal-open { overflow: hidden; }
 .mx-bob { transform-origin: 75px 150px; animation: mx-bob 3.4s ease-in-out infinite; }
 /* The arm rests, then waves in bursts. `.waving` restarts it on demand. */
 /* Pivot at the new shoulder: the top of the hanging paddle arm. */
-.mx-arm { transform-origin: 118px 94px; animation: mx-wave-idle 6s ease-in-out infinite; }
-.mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
+/* At rest the arm hangs. It used to twitch every six seconds forever, which
+   the comment above already called a tic and then shipped anyway: an idle
+   loop reads as a glitch precisely because nothing caused it. A greeting that
+   happens twice is a greeting; the same motion on a timer is a stuck sprite.
+
+   So he waves on arrival, twice, and then puts his hand down for good. After
+   that the wave is a RESPONSE — hover him and he waves back once. */
+.mx-arm { transform-origin: 118px 94px; }
+.mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 2; }
+.mx-svg:hover .mx-arm { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves
    against the VIEW-BOX, so "center top" was the top of his skull and every

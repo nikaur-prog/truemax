@@ -169,6 +169,14 @@ async function ask(
   form.classList.add("busy");
 
   const face = document.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
+  // He thinks while you wait. The character has always had the pose — flat
+  // mouth, raised brow, eyes up-left, a thought bubble of messenger dots — but
+  // nothing ever switched him into it, so the only sign anything was happening
+  // was three dots in the transcript. A face that keeps smiling through a
+  // four-second wait reads as frozen.
+  face?.classList.remove("mx-mood-happy");
+  face?.classList.add("mx-mood-thinking");
+
   const controller = new AbortController();
   inFlight = controller;
 
@@ -198,6 +206,10 @@ async function ask(
 
     bubble.classList.remove("thinking");
     bubble.textContent = "";
+    // Out of the thought and into the answer, on the first token rather than
+    // on the request completing, so the pose changes when the typing starts.
+    face?.classList.remove("mx-mood-thinking");
+    face?.classList.add("mx-mood-happy");
     face?.classList.add("speaking");
     const said = await drain(response.body, bubble, log);
     transcript.push({ role: "assistant", content: said });
@@ -208,6 +220,11 @@ async function ask(
     }
   } finally {
     face?.classList.remove("speaking");
+    // Every exit, not just the successful one. A failed or aborted request
+    // that left the thinking class on would strand him mid-thought with a
+    // thought bubble over an error message, and nothing would ever clear it.
+    face?.classList.remove("mx-mood-thinking");
+    face?.classList.add("mx-mood-happy");
     form.classList.remove("busy");
     if (inFlight === controller) inFlight = null;
   }
