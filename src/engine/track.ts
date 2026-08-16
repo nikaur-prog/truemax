@@ -24,7 +24,9 @@ export type FunnelEvent =
   | "quick-visit"
   | "quick-scan-done"
   | "quick-video-downloaded"
-  | "max-chat-opened";
+  | "max-chat-opened"
+  | "scan-gate-shown"
+  | "scan-gate-buy";
 
 // Not "/api/track": uBlock, AdGuard and Brave block that URL pattern by
 // default, so a large share of a young mobile audience recorded nothing at

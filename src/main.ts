@@ -15,6 +15,7 @@ import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
+import { ensureScanAllowed, recordScanRun } from "./ui/scanGate.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -354,7 +355,7 @@ el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
   if (file) handleFile(file);
 });
-el.btnUpload.addEventListener("click", () => ensureSex(() => el.fileInput.click()));
+el.btnUpload.addEventListener("click", () => void ensureScanAllowed(() => ensureSex(() => el.fileInput.click())));
 
 // Paste or drag a photo anywhere on the page rather than going through the
 // picker. Same reasoning as /quick: the photo has usually just been cropped or
@@ -367,7 +368,7 @@ enablePhotoPaste({
   // screen and start again.
   busy: () => el.upload.classList.contains("hidden"),
   dropZone: el.ovalFrame,
-  onImage: (file) => ensureSex(() => handleFile(file)),
+  onImage: (file) => void ensureScanAllowed(() => ensureSex(() => handleFile(file))),
 });
 
 // Only shown where the gesture exists.
@@ -660,7 +661,9 @@ async function closeCamera(): Promise<void> {
 
 el.btnCamera.addEventListener("click", async () => {
   if (!cam) {
-    ensureSex(() => void openCamera());
+    // Gate first, questions second: being asked your reference population and
+    // THEN told to wait until Thursday is the wrong order of bad news.
+    void ensureScanAllowed(() => ensureSex(() => void openCamera()));
     return;
   }
   if (!lastCheck?.ready) return;
@@ -959,6 +962,9 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
   const delta = compareAndStore(report);
+  // The weekly free-scan clock starts when an analysis finishes, not when a
+  // photo is chosen — an abandoned capture must not cost the week's scan.
+  recordScanRun();
 
   // Keep a thumbnail of each view against this scan, keyed by the log entry's
   // own date so the two cannot drift. Thumbnails only — see engine/photoStore.
@@ -990,6 +996,10 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     landmarks,
     photoW: width,
     photoH: height,
+    // How far off level the front capture was, for the honesty note on the
+    // Basic grid: a corrected pose is still the first suspect when a
+    // pose-sensitive region reads far below everything else.
+    offAxisDeg: Math.max(Math.abs(quality.yawDeg), Math.abs(quality.pitchDeg)),
     analysis: el.analysis,
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
