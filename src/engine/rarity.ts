@@ -96,6 +96,31 @@ export function rarityPhrase(pct: number): string {
   return Math.abs(100 / n - rest) < 0.01 ? `1 in ${n}` : `${rest}% of`;
 }
 
+// The compact form, for a grid cell rather than a sentence.
+//
+// Fraction or percentage is not a house-style choice, it is per-value, because
+// the two forms fail in opposite places. "Top 10%" is punchy and "Top 45%" is
+// limp — a percentage gets weaker as it approaches the middle, until it is
+// saying nothing. A fraction stays concrete all the way down ("1 in 2" is just
+// true), but only where it divides exactly: "1 in 7" quietly claims 14.3% when
+// the number on screen beside it says 15%.
+//
+// So the fraction is used where it is faithful and the percentage everywhere
+// else, which puts the visceral form on precisely the values worth being
+// visceral about — 1 in 4, 1 in 5, 1 in 10, 1 in 20.
+//
+// Below the median it stays a percentage regardless. "1 in 3" there would need
+// a "lower" hung off it to avoid reading as an achievement, and a grid cell has
+// no room for the qualifier that stops it being a lie.
+export function rarityShort(pct: number): string {
+  const shown = statedPct(pct);
+  if (shown >= 99) return "Top 1%";
+  if (shown < 50) return `Ahead of ${shown}%`;
+  const rest = 100 - shown;
+  const n = oneInN(pct);
+  return Math.abs(100 / n - rest) < 0.01 ? `1 in ${n}` : `Top ${rest}%`;
+}
+
 // The one line that does the most work in the product.
 //
 // Symmetric on purpose. Above the median it reads "1 in 8 measure this high",

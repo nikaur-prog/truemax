@@ -30,7 +30,7 @@ import { askVerdictTone } from "./tonePrompt.js";
 import { scaleTrigger, showScalePrimer, wireScaleNote } from "./scaleNote.js";
 // Aliased: this module already has a rarityLine for a REGION row, which says a
 // different thing ("across the jaw") than the headline one.
-import { rarityLine as scaleRarityLine } from "../engine/rarity.js";
+import { rarityLine as scaleRarityLine, rarityShort } from "../engine/rarity.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
 import { maxCharacterMarkup } from "./maxCharacter.js";
@@ -359,8 +359,9 @@ function sideBasicHTML(report: Report): string {
   const lead = statedPct(report.overallPercentile);
   return `<div class="basic">
     <div class="basic-lead">
-      <span class="klabel">SIDE PROFILE</span>
+      <span class="klabel">SIDE PROFILE ${scaleTrigger()}</span>
       <b><span class="basic-n" data-count="${lead}" data-decimals="0">${lead}</span><small>/100</small></b>
+      <em class="basic-rarity">${scaleRarityLine(lead)}</em>
     </div>
     <div class="basic-grid">
       ${regions
@@ -369,6 +370,7 @@ function sideBasicHTML(report: Report): string {
         <span>${REGION_NAMES[r.region].toUpperCase()}</span>
         <b>${statedPct(r.percentile)}</b>
         <i style="width:${statedPct(r.percentile)}%"></i>
+        <em>${rarityShort(r.percentile)}</em>
       </div>`,
         )
         .join("")}
@@ -1408,7 +1410,7 @@ function basicHTML(): string {
         <span>${s.label.toUpperCase()}</span>
         <b>${s.value}</b>
         <i style="width:${s.value}%"></i>
-        <em>${rankShort(s.value)}</em>
+        <em>${rarityShort(s.value)}</em>
       </div>`,
         )
         .join("")}

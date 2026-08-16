@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LADDER, SPREAD, oneInN, rarityLine, scoreAtPercentile, spreadLine } from "./rarity.js";
+import { LADDER, SPREAD, oneInN, rarityLine, rarityShort, scoreAtPercentile, spreadLine } from "./rarity.js";
 import { aggregateScoreToPercentile } from "./scoring.js";
 
 test("scoreAtPercentile inverts the display curve", () => {
@@ -71,6 +71,39 @@ test("the ladder stops claiming counts where the sample runs out", () => {
   for (const rung of LADDER.slice(0, -1)) {
     assert.ok(!rung.capped, `${rung.score} should not be capped`);
   }
+});
+
+test("the compact form uses a fraction only where it lands exactly", () => {
+  // The punchy form on the values worth being punchy about...
+  assert.equal(rarityShort(78), "1 in 5"); // top 20%
+  assert.equal(rarityShort(90), "1 in 10");
+  assert.equal(rarityShort(76), "1 in 4"); // top 25%
+  // ...and the percentage where a fraction would misstate it. "1 in 7" claims
+  // 14.3% while the number printed beside it says 15%.
+  assert.equal(rarityShort(85), "Top 15%");
+  assert.equal(rarityShort(62), "Top 40%");
+});
+
+test("the compact form never dresses a below-median score as an achievement", () => {
+  // "1 in 3" in a grid cell reads as a distinction. Below the median the cell
+  // has no room for the qualifier that would stop it being one, so it stays a
+  // percentage — the same wording rankShort has always used down there.
+  for (const pct of [5, 18, 30, 44, 47]) {
+    assert.match(rarityShort(pct), /^Ahead of \d+%$/, `${pct} gave ${rarityShort(pct)}`);
+  }
+});
+
+test("the median edge is decided by the stated percentile, not the raw one", () => {
+  // 49 rounds to a stated 50, so it IS the median on screen and "1 in 2" is the
+  // honest reading of it. Splitting on the raw value instead would print
+  // "Ahead of 50%" beside a number the same screen just rounded to 50.
+  assert.equal(rarityShort(49), "1 in 2");
+  assert.equal(rarityShort(47), "Ahead of 45%");
+});
+
+test("the compact form stops at the resolution cap like everything else", () => {
+  assert.equal(rarityShort(99.6), "Top 1%");
+  assert.equal(rarityShort(100), "Top 1%");
 });
 
 test("the spread line names the right population", () => {
