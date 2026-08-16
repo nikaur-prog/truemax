@@ -146,9 +146,45 @@ body {
 .drop b { display: block; font-size: 15px; font-weight: 600; margin-bottom: 5px; }
 .drop span { font-size: 12.5px; color: var(--mut); }
 
-.hints { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; margin-top: 30px; }
-.hints div { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--mut); }
-.hints i { width: 4px; height: 4px; border-radius: 99px; background: var(--acc); }
+/* Capture tips: contained pills rather than loose centred text. Four short
+   instructions floating unattached in the middle of a page read as leftover
+   copy; the same four inside bordered chips read as a checklist. */
+.hints { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 26px; }
+.hints div {
+  display: flex; gap: 7px; align-items: center;
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: 99px;
+  background: var(--card); font-size: 12px; color: var(--mut);
+}
+.hints i { width: 4px; height: 4px; border-radius: 99px; background: var(--acc); flex: none; }
+
+/* ---------------------------------------------------------------------------
+   The proof band.
+
+   Three claims the rest of this category cannot make, given room to be read.
+   Deliberately no download counts, no star ratings and no press logos: the
+   page argues that we show the actual maths, and fabricated social proof on
+   that page would undo the argument faster than it could ever help.
+   --------------------------------------------------------------------------- */
+.proof {
+  display: grid; gap: 14px; margin: 34px auto 0; max-width: 1000px;
+  /* min(230px, 100%) rather than a bare 230px. auto-fit computes its track
+     count against the container, and this container is wider than a phone
+     viewport, so a bare minimum produced two 230px columns inside 430px of
+     screen and pushed the third card off the right edge. Capping the minimum
+     at the available width forces a single column when that is all that
+     fits. */
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  text-align: left;
+}
+.proof-item {
+  padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--card);
+}
+.proof-item b {
+  display: block; font-size: 14px; font-weight: 620; line-height: 1.35;
+  margin-bottom: 6px;
+}
+.proof-item p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--mut); }
 .engine-status { font-family: var(--mono); font-size: 11.5px; color: var(--mut); margin-top: 26px; min-height: 18px; }
 .engine-status.ready { color: var(--acc); }
 .engine-status.error { color: var(--warm); }
