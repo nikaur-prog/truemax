@@ -39,6 +39,7 @@ import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
 import { mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
+import { JAW_POSE_WARN_DEG } from "../engine/quality.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
@@ -1482,7 +1483,10 @@ function basicHTML(): string {
 // SCORE is untouched — modes present, they never recompute.
 function poseCaveat(): string {
   const off = ctx?.offAxisDeg ?? 0;
-  if (off < 6) return "";
+  // The same threshold the capture screen nags at. It was a 6 written here and
+  // nothing at all at capture, so the app knew the jaw was compromised and only
+  // said so once the scan had been spent.
+  if (off < JAW_POSE_WARN_DEG) return "";
   return `<p class="basic-note pose-warn">This capture was ${off.toFixed(0)}° off level. Jaw and chin are the numbers a tilted head drags first, so before trusting a low one there, retake with the camera at eye level and your head straight.</p>`;
 }
 
