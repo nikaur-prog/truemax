@@ -21,7 +21,7 @@ import { startScanCreditCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
-import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor } from "../engine/analysisMode.js";
+import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor, verdictForPercentile } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
@@ -60,6 +60,11 @@ interface Ctx {
   // jumped somewhere else after I confirmed them".
   sidePoints?: SidePoints;
   onRedoSide?: () => void;
+  // How far off level the front capture was, in degrees. The pose is corrected
+  // before measurement, but the correction has residual error and the jaw and
+  // chin take most of it — so beyond a few degrees the Basic grid says so
+  // rather than presenting a dragged-down number with full confidence.
+  offAxisDeg?: number;
 }
 
 let ctx: Ctx | null = null;
@@ -294,8 +299,68 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
 function showSide(): void {
   if (!ctx?.sideReport) return;
   calmSide();
+  // The depth toggle applies to the profile too. Somebody who chose "one line"
+  // for the front did not choose "fifteen measurements" for the side; the
+  // preference is about them, not about which photograph is on screen.
+  const mode = loadAnalysisMode();
+  if (mode !== "full") {
+    showSideShallow(mode, ctx.sideReport);
+    return;
+  }
   renderSideInto(body(), ctx.sideReport);
   wireSideMeasurementTaps(ctx.sideReport);
+}
+
+// Verdict and Basic for the profile, mirroring the front's shallow modes. Same
+// ladder, same grid markup, side numbers — presentation only, nothing here
+// computes a score.
+function showSideShallow(mode: AnalysisMode, report: Report): void {
+  const inner = mode === "verdict" ? sideVerdictHTML(report) : sideBasicHTML(report);
+  body().innerHTML = `<div class="reveal">
+    ${inner}
+    ${modeSwitcher(mode)}
+    ${sideNav()}
+  </div>`;
+  wireModeSwitcher(showSide);
+  wireSideNav();
+  const lead = body().querySelector<HTMLElement>(".basic-n");
+  if (lead) {
+    const target = Number(lead.dataset.count);
+    if (Number.isFinite(target)) countUp(lead, target, 0, 60);
+  }
+}
+
+function sideVerdictHTML(report: Report): string {
+  const v = verdictForPercentile(report.overallPercentile, report.sex, loadVerdictTone() ?? "blunt");
+  return `<div class="verdict ${v.tone}">
+    <span class="verdict-label">SIDE PROFILE VERDICT</span>
+    <b class="verdict-word">${v.word}</b>
+    <p class="verdict-line">${v.line}</p>
+  </div>`;
+}
+
+function sideBasicHTML(report: Report): string {
+  const regions = report.regions.filter((r) => r.metrics.length);
+  const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
+  const lead = Math.round(report.overallPercentile);
+  return `<div class="basic">
+    <div class="basic-lead">
+      <span class="klabel">SIDE PROFILE</span>
+      <b><span class="basic-n" data-count="${lead}" data-decimals="0">${lead}</span><small>/100</small></b>
+    </div>
+    <div class="basic-grid">
+      ${regions
+        .map(
+          (r) => `<div class="basic-cell">
+        <span>${REGION_NAMES[r.region].toUpperCase()}</span>
+        <b>${Math.round(r.percentile)}</b>
+        <i style="width:${Math.round(r.percentile)}%"></i>
+      </div>`,
+        )
+        .join("")}
+    </div>
+    <p class="basic-note">Percentiles against the ${report.sex} reference set, measured from the profile alone. The full mode shows the ${measured} measurements these come from.</p>
+  </div>`;
 }
 
 // One region of the profile, reached from the side-specific tab row. Same shape
@@ -573,10 +638,12 @@ function renderSideInto(host: HTMLElement, report: Report): void {
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
       ${regions.map((r) => sideRegionDeck(r, report)).join("")}
+      ${modeSwitcher("full")}
       ${sideNav()}
     </div>`;
 
   revealBars();
+  wireModeSwitcher(showSide);
   wireSideNav();
 }
 
@@ -1244,7 +1311,21 @@ function basicHTML(): string {
         .join("")}
     </div>
     <p class="basic-note">Every number here is a percentile: where you sit against the reference population, not a mark out of a hundred. The full mode shows the ${ctx!.report.metrics.length} measurements these come from.</p>
+    ${poseCaveat()}
   </div>`;
+}
+
+// The honesty note under the Basic grid when the capture was visibly off
+// level. The engine corrects pose before measuring, but the correction is not
+// perfect and the residual lands hardest on the jaw and chin: a tucked or
+// tilted head genuinely narrows the measured jaw : cheek ratio and folds the
+// gonial region. Basic mode's whole job is a number with no context, so a
+// number taken from a tilted photo owes the reader this one sentence. The
+// SCORE is untouched — modes present, they never recompute.
+function poseCaveat(): string {
+  const off = ctx?.offAxisDeg ?? 0;
+  if (off < 6) return "";
+  return `<p class="basic-note pose-warn">This capture was ${off.toFixed(0)}° off level. Jaw and chin are the numbers a tilted head drags first, so before trusting a low one there, retake with the camera at eye level and your head straight.</p>`;
 }
 
 // Present on every depth, including the full one, so changing your mind is
@@ -1259,7 +1340,7 @@ function modeSwitcher(current: AnalysisMode): string {
   </div>`;
 }
 
-function wireModeSwitcher(): void {
+function wireModeSwitcher(rerender: () => void = showOverall): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>(".ms-btn")) {
     b.onclick = async () => {
       const mode = b.dataset.mode as AnalysisMode;
@@ -1268,7 +1349,7 @@ function wireModeSwitcher(): void {
       // later has still never been asked.
       if (mode === "verdict" && loadVerdictTone() === null) await askVerdictTone();
       saveAnalysisMode(mode);
-      showOverall();
+      rerender();
     };
   }
 }
@@ -1288,7 +1369,9 @@ let maxAccess = false;
 let adultUser = false;
 
 export function setAdult(value: boolean): void {
+  if (value === adultUser) return;
   adultUser = value;
+  syncMaxSurfaces();
 }
 
 // What this account can currently see. Defaults to "rating" — the safe
@@ -1301,11 +1384,36 @@ let scansLeft = 0;
 export function setMaxAccess(value: boolean): void {
   if (value === maxAccess) return;
   maxAccess = value;
-  // Only re-render if the plan is the thing currently on screen. Rebuilding a
-  // tab nobody is looking at would throw away their scroll position on the one
-  // they are.
-  const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
+  syncMaxSurfaces();
+}
+
+// Both flags arrive from network reads AFTER the screen is usually up — the
+// entitlement and the profile are round trips, and a finished analysis is not
+// held hostage to either. So every surface that keys on them has to be
+// re-checked when one lands, not only at render time. Missing one is exactly
+// the bug this fixes: a plan holder whose entitlement resolved a second after
+// renderResults got the tab named "Overall" and no pet at all, because the
+// mount decision had already been taken with the flag still false.
+function syncMaxSurfaces(): void {
+  if (!ctx) return;
+  if (maxAccess && adultUser) {
+    const cc = chatContext();
+    if (cc) mountMaxPet(cc);
+  } else {
+    unmountMaxPet();
+  }
+  // The tab label, renamed in place. Only in the front tab row — the side
+  // row has no overall tab to rename.
+  if (tabView === "front") {
+    const tab = ctx.analysis.querySelector<HTMLButtonElement>('.rtab[data-id="overall"]');
+    if (tab) tab.textContent = maxAccess && adultUser ? "Max’s analysis" : "Overall";
+  }
+  // Re-render the open tab if it is one whose content keys on the flags: the
+  // overview carries Max's analysis, the plan carries the CTA card and the
+  // upsell. Region tabs are left alone to preserve scroll position.
+  const open = ctx.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
   if (open?.dataset.id === "improve") showImprove();
+  else if (open?.dataset.id === "overall") showOverall();
 }
 
 // Arrives late, like maxAccess, because the entitlement is a network read and

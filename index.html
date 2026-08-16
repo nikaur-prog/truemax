@@ -195,17 +195,20 @@
             <div class="side-live hidden" id="side-live">
               <video id="side-video" playsinline muted></video>
               <canvas id="side-guide"></canvas>
-              <!-- One direction only. The mannequin starts square on, then
-                   turns to ITS right, which on a mirrored selfie preview is
-                   the way the person sees their own reflection turn when they
-                   turn right. A single arc sweeping that way, rather than the
-                   old pair of arrows offering both. -->
+              <!-- One direction only, and the words must agree with the arc.
+                   The preview is MIRRORED (scaleX(-1) on #side-video), so a
+                   head the viewer sees swing toward screen-left is the viewer
+                   turning their own head LEFT — mirrors preserve your own
+                   sense of left and right, that is what makes them mirrors.
+                   The arc sweeps toward screen-left, so the word is left.
+                   A single arc rather than the old pair of arrows offering
+                   both directions. -->
               <div class="side-turn-cue" id="side-turn-cue" aria-hidden="true">
                 <svg viewBox="0 0 180 160" role="presentation">
-                  <!-- The arc travels OVER the head, right to left, which is
-                       the way a head turning to its own right sweeps on a
-                       mirrored selfie preview. Arrowhead at the far end so the
-                       direction is unmissable. -->
+                  <!-- The arc travels OVER the head toward screen-left, which
+                       on the mirrored preview is the way the picture moves
+                       when you turn your head to your left. Arrowhead at the
+                       far end so the direction is unmissable. -->
                   <path class="turn-arc" d="M146 78A58 58 0 0 0 34 78"/>
                   <path class="turn-tip" d="M34 78l-6-15m6 15 15-5"/>
                   <g class="turn-mannequin">
@@ -213,7 +216,7 @@
                     <circle class="turn-nose" cx="90" cy="86" r="5.5"/>
                   </g>
                 </svg>
-                <span class="turn-word">Turn to your <b>right</b></span>
+                <span class="turn-word">Turn your head to the <b>left</b></span>
               </div>
               <div class="cam-hud">
                 <div class="cam-hint" id="side-hint">

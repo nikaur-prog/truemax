@@ -2657,6 +2657,41 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxan-track { color: var(--mut); }
 .maxan-invite { color: var(--acc); font-size: 12.5px; }
 
+/* The off-level warning under the Basic grid. Warm, not red: it is a caveat
+   about the photograph, not an error in the analysis. */
+.basic-note.pose-warn { color: var(--warm, #c07a4a); }
+
+/* ---------------------------------------------------------------------------
+   The weekly scan gate: a countdown to the next free scan, with the one-time
+   credit checkout as the way to skip the wait.
+   --------------------------------------------------------------------------- */
+.scangate {
+  position: fixed; inset: 0; z-index: 95; display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ink) 38%, transparent);
+  backdrop-filter: blur(3px); animation: mc-fade .18s ease-out;
+}
+.scangate-sheet {
+  display: flex; flex-direction: column; gap: 12px;
+  width: min(400px, 100%); padding: 22px 22px 18px;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 22px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .18);
+  text-align: center; font-family: var(--sans);
+}
+.sg-title { font-size: 18px; font-weight: 650; }
+.sg-sub { margin: 0; font-size: 13px; line-height: 1.55; color: var(--mut); }
+.sg-timer {
+  display: flex; flex-direction: column; gap: 4px; padding: 14px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--bg);
+}
+.sg-timer b {
+  font-family: var(--serif); font-size: 30px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sg-err { margin: 0; font-size: 12.5px; color: var(--warm, #c07a4a); }
+@media (prefers-reduced-motion: reduce) { .scangate { animation: none; } }
+
 /* ---------------------------------------------------------------------------
    The score, directly under the photograph.
 
@@ -2939,5 +2974,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .native-app #btn-unlock,
 .native-app #btn-single-scan,
 .native-app #btn-upgrade,
+.native-app #sg-buy,
 .native-app .lock-single,
 .native-app .upsell .navrow { display: none !important; }

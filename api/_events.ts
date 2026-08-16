@@ -36,6 +36,9 @@ const EVENTS = new Set([
   "quick-scan-done",
   "quick-video-downloaded",
   "max-chat-opened",
+  // The weekly scan gate: how often it is hit, and how often it converts.
+  "scan-gate-shown",
+  "scan-gate-buy",
 ]);
 
 export async function handleEvent(request: Request): Promise<Response> {
