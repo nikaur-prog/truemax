@@ -1,6 +1,7 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
 import { REGION_NAMES } from "../engine/scoring.js";
 import { statedPct } from "../engine/precision.js";
+import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
 import type { ScanDelta } from "../engine/history.js";
 
@@ -144,10 +145,14 @@ export function rarityN(pct: number): number {
 // 1-in-110 is about the top 0.9%, so "the top 1%" is the finest band this
 // reference can honestly express. Anything narrower — 0.1%, 0.01% — is a
 // decimal place invented from a sample that cannot see it.
-export function rarityText(pct: number): string {
-  const n = Math.round(1 / Math.max(0.001, 1 - pct / 100));
-  return n <= REFERENCE_N ? `1 in ${Math.max(2, n)}` : "the top 1%";
-}
+//
+// The rule itself now lives in engine/rarity.ts, because the basic grid and
+// the scale explainer need the same phrase and two implementations of it had
+// already drifted: this one read the raw percentile while everything around it
+// read the stated one, so a face at 87.6 was "1 in 8" here and "top 10%" in
+// the chip beside it. Kept as a named export because four call sites read
+// better for it.
+export const rarityText = rarityPhrase;
 
 // The headline chip.
 //

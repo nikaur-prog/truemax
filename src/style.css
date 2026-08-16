@@ -3240,3 +3240,82 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .native-app #sg-buy,
 .native-app .lock-single,
 .native-app .upsell .navrow { display: none !important; }
+
+/* The scale explainer and the first-run primer -------------------------------
+   Both wear the same card as the tone prompt, because they are the same kind
+   of object: the product stopping to say one thing plainly before the reader
+   carries on. The primer differs only in that it cannot be dismissed by
+   tapping past it — see ui/scaleNote.ts for why. */
+.scalenote {
+  position: fixed; inset: 0; z-index: 62;
+  display: grid; place-items: center; padding: 20px;
+  background: rgba(12, 14, 13, 0.55); backdrop-filter: blur(6px);
+  overflow-y: auto;
+}
+.scalenote-card {
+  position: relative;
+  background: var(--card); border-radius: 22px; padding: 28px 26px 22px;
+  max-width: 460px; width: 100%;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+}
+.scalenote-card h2 {
+  font-family: var(--serif); font-weight: 300; font-size: 27px;
+  letter-spacing: -0.01em; margin: 10px 0 12px; text-wrap: balance;
+}
+.scalenote-card > p { font-size: 13.5px; line-height: 1.62; color: var(--mut); margin-bottom: 14px; }
+.scalenote-card > p b { color: var(--ink); font-weight: 600; }
+.scalenote-x {
+  position: absolute; top: 12px; right: 14px;
+  background: none; border: 0; cursor: pointer;
+  font-size: 24px; line-height: 1; color: var(--mut); padding: 4px 8px;
+}
+.scalenote-x:hover { color: var(--ink); }
+.scalenote-foot { font-size: 11.5px; line-height: 1.6; color: var(--mut); margin-top: 12px; }
+.primer-go { width: 100%; margin-top: 16px; }
+
+/* The rarity ladder. Tabular figures and a fixed-width score column so the
+   rungs read as a column of numbers rather than as prose — the whole point is
+   that the eye runs down it and sees the steps getting bigger. */
+.scale-ladder {
+  display: grid; gap: 1px; margin: 16px 0 4px;
+  background: var(--line); border: 1px solid var(--line); border-radius: 13px; overflow: hidden;
+}
+.scale-rung {
+  display: flex; align-items: baseline; gap: 12px;
+  background: var(--card); padding: 9px 14px;
+}
+.scale-rung b {
+  font-family: var(--serif); font-weight: 400; font-size: 20px;
+  font-variant-numeric: tabular-nums; min-width: 34px; color: var(--ink);
+}
+.scale-rung span { font-size: 12.5px; color: var(--mut); }
+.scale-rung:last-child span { color: var(--acc); }
+
+/* The "?" beside a headline number. Sits in the kicker rather than beside the
+   digits so it never competes with the score for attention. */
+.scale-q {
+  display: inline-grid; place-items: center; vertical-align: middle;
+  width: 15px; height: 15px; margin-left: 5px; padding: 0;
+  border: 1px solid var(--line); border-radius: 99px; background: none;
+  cursor: pointer; font-family: var(--sans); font-size: 10px; font-weight: 700;
+  line-height: 1; color: var(--mut); letter-spacing: 0;
+}
+.scale-q:hover { border-color: var(--acc); color: var(--acc); background: var(--acc-soft); }
+
+/* Rarity under a bare number. This is the fix for the one thing every
+   offended tester reacted to: a figure on a ten-point scale with nothing
+   beside it to say whether it is good. */
+.basic-rarity {
+  display: block; font-style: normal; font-size: 12px;
+  color: var(--mut); margin-top: 3px;
+}
+.basic-cell em {
+  display: block; font-style: normal;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--mut); margin-top: 3px;
+}
+
+@media (max-width: 480px) {
+  .scalenote-card { padding: 22px 18px 18px; border-radius: 18px; }
+  .scalenote-card h2 { font-size: 23px; }
+}

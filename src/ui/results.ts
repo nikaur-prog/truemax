@@ -27,6 +27,10 @@ import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor, verdictForPercentile } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
+import { scaleTrigger, showScalePrimer, wireScaleNote } from "./scaleNote.js";
+// Aliased: this module already has a rarityLine for a REGION row, which says a
+// different thing ("across the jaw") than the headline one.
+import { rarityLine as scaleRarityLine } from "../engine/rarity.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
 import { maxCharacterMarkup } from "./maxCharacter.js";
@@ -75,6 +79,12 @@ let ctx: Ctx | null = null;
 
 export function renderResults(c: Ctx): void {
   ctx = c;
+  // The curve is taught before the first number is ever shown. Fire-and-forget
+  // rather than awaited: the panel behind it renders as normal and the primer
+  // covers it, so a storage failure or a dismissed dialog can never leave
+  // somebody staring at an empty results screen.
+  void showScalePrimer(c.report.sex);
+  wireScaleNote(() => ctx?.report.sex ?? "male");
   // A previous report may have been left on its side photograph. main.ts has
   // already painted the new front capture; reset the cached state so this scan
   // cannot restore the previous person's canvas or stale quality chips.
@@ -1387,8 +1397,9 @@ function basicHTML(): string {
   const [lead, ...rest] = scores;
   return `<div class="basic">
     <div class="basic-lead">
-      <span class="klabel">OVERALL</span>
+      <span class="klabel">OVERALL ${scaleTrigger()}</span>
       <b><span class="basic-n" data-count="${lead.value}" data-decimals="0">${lead.value}</span><small>/100</small></b>
+      <em class="basic-rarity">${scaleRarityLine(lead.value)}</em>
     </div>
     <div class="basic-grid">
       ${rest
@@ -1397,6 +1408,7 @@ function basicHTML(): string {
         <span>${s.label.toUpperCase()}</span>
         <b>${s.value}</b>
         <i style="width:${s.value}%"></i>
+        <em>${rankShort(s.value)}</em>
       </div>`,
         )
         .join("")}
