@@ -198,17 +198,24 @@ body {
    page argues that we show the actual maths, and fabricated social proof on
    that page would undo the argument faster than it could ever help.
    --------------------------------------------------------------------------- */
+/* Explicit breakpoints rather than auto-fit, and that is the second attempt.
+   repeat(auto-fit, minmax(min(230px, 100%), 1fr)) looks like it should collapse
+   to one column on a narrow screen, and does not: a percentage inside minmax()
+   resolves against the grid container's inline size, which is still being
+   computed from the content, so it is treated as indefinite and the minimum
+   falls back to the flat 230px. The section then sized itself to its tracks —
+   498px inside a 430px viewport — and overflowed the page.
+
+   Column counts stated outright cannot do that. */
 .proof {
-  display: grid; gap: 14px; margin: 34px auto 0; max-width: 1000px;
-  /* min(230px, 100%) rather than a bare 230px. auto-fit computes its track
-     count against the container, and this container is wider than a phone
-     viewport, so a bare minimum produced two 230px columns inside 430px of
-     screen and pushed the third card off the right edge. Capping the minimum
-     at the available width forces a single column when that is all that
-     fits. */
-  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  display: grid; gap: 14px; margin: 34px auto 0;
+  width: 100%; max-width: 1000px; box-sizing: border-box;
+  grid-template-columns: 1fr;
   text-align: left;
 }
+@media (min-width: 660px) { .proof { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1040px) { .proof { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.proof-item { min-width: 0; }
 .proof-item {
   padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px;
   background: var(--card);
