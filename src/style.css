@@ -2588,6 +2588,75 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .askmax-go { margin-left: auto; flex: none; color: var(--acc); font-size: 18px; }
 @media (prefers-reduced-motion: reduce) { .askmax:hover { transform: none; } }
 
+/* The CTA form of the card, for people who do not hold Max yet. Same card,
+   plus a speech bubble he talks through on hover. The bubble hangs above the
+   card and is allowed to spill over whatever sits up there: a speech bubble
+   that politely stays inside its own box reads as a tooltip, not as him
+   speaking. */
+.askmax-cta { position: relative; overflow: visible; }
+.askmax-bubble {
+  position: absolute; left: 14px; bottom: calc(100% - 4px); z-index: 6;
+  max-width: min(300px, 88%); width: max-content;
+  padding: 9px 13px; border-radius: 14px; border-bottom-left-radius: 4px;
+  background: #fff; border: 1px solid var(--line); color: var(--ink);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .12);
+  font: 400 13.5px/1.45 var(--sans); text-align: left;
+  opacity: 0; transform: translateY(7px) scale(.92); transform-origin: 18px 100%;
+  pointer-events: none;
+  transition: opacity .16s ease, transform .22s cubic-bezier(.3, 1.4, .4, 1);
+}
+.askmax-bubble::after {
+  content: ""; position: absolute; left: 15px; top: 100%;
+  border: 6px solid transparent; border-top-color: #fff;
+  filter: drop-shadow(0 1px 0 var(--line));
+}
+.askmax-bubble:empty { visibility: hidden; }
+.askmax-bubble.show { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .askmax-bubble { transition: opacity .16s ease; transform: none; } }
+
+/* ---------------------------------------------------------------------------
+   Max the pet.
+
+   For accounts that hold the plan there is no card: Max himself peeks out of
+   the right edge of the screen, leaning in like he is checking whether you
+   are done reading. Tapping him opens the chat; while it is open he slips
+   away (.out) so he is not standing beside his own dialog.
+   --------------------------------------------------------------------------- */
+.maxpet {
+  position: fixed; right: 0; bottom: 112px; z-index: 80;
+  width: 76px; padding: 0; margin: 0; border: none; background: none;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, .16));
+  transform: translateX(105%);
+  transition: transform .5s cubic-bezier(.3, 1.3, .4, 1);
+}
+/* Half in, half out, with a lean: the hide-and-seek pose. Hover and he leans
+   further out to meet you. */
+.maxpet.peeking { transform: translateX(50%) rotate(-16deg); }
+.maxpet.peeking:hover, .maxpet.peeking:focus-visible { transform: translateX(26%) rotate(-7deg); }
+.maxpet.out, .maxpet.out:hover { transform: translateX(105%); }
+.maxpet:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) { .maxpet { transition: none; } }
+
+/* ---------------------------------------------------------------------------
+   Max's analysis, at the top of the overview, for accounts that hold him.
+   Same visual family as the card, but it is a read, not a button — his pose
+   changes per scan and the text is composed from the scan's own numbers.
+   --------------------------------------------------------------------------- */
+.maxan {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 15px 16px; margin-bottom: 16px;
+  border: 1px solid var(--line); border-radius: 16px;
+  background: linear-gradient(135deg, var(--acc-soft), var(--card) 70%);
+}
+.maxan-face { width: 58px; flex: none; }
+.maxan-body { min-width: 0; }
+.maxan-body .klabel { margin-bottom: 4px; }
+.maxan-body p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.62; }
+.maxan-body p b { font-weight: 620; }
+.maxan-track { color: var(--mut); }
+.maxan-invite { color: var(--acc); font-size: 12.5px; }
+
 /* ---------------------------------------------------------------------------
    The score, directly under the photograph.
 

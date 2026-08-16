@@ -12,8 +12,9 @@ import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
-import { renderResults, setDepth, setMaxAccess } from "./ui/results.js";
+import { renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
+import { unmountMaxPet } from "./ui/maxPet.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -66,7 +67,7 @@ import {
 } from "./ui/membershipBrand.js";
 import type { MembershipBrand } from "./ui/membershipBrand.js";
 import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
-import { flushPendingProfile, loadOnboardingProfile, onboardingComplete } from "./engine/onboarding.js";
+import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, profileIsAdult } from "./engine/onboarding.js";
 import { openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
 import { markPlatform } from "./engine/platform.js";
@@ -426,6 +427,10 @@ async function ensureOnboarded(user: User): Promise<void> {
   } catch {
     return;
   }
+  // The one place the date of birth is already in hand. Every 18+ Max surface
+  // on the results screen keys off this; the default is false, so a profile
+  // that never loads behaves like a minor rather than like an adult.
+  setAdult(profileIsAdult(profile));
   if (onboardingComplete(profile)) return;
   await openTrialFunnel(user, undefined, { required: true });
 }
@@ -706,8 +711,10 @@ function resetToUpload(): void {
   el.qualityChips.innerHTML = "";
   el.fileInput.value = "";
   // Takes the scroll listener with it. A strip left behind would keep
-  // shrinking a photo pane that no longer holds a photograph.
+  // shrinking a photo pane that no longer holds a photograph. The pet goes
+  // with it: he belongs to a result, not to the upload screen.
   clearScoreStrip();
+  unmountMaxPet();
 }
 
 // Two views go into the score, so the scan shows two views being measured. It
