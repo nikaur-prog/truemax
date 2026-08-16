@@ -80,12 +80,17 @@ async function billingRedirect(path: string, payload?: unknown): Promise<Billing
   }
 }
 
-export function startTrialCheckout(tier: PaidTier): Promise<BillingResult> {
-  return billingRedirect("/api/create-checkout-session", { tier });
+// Billing period rides alongside the tier rather than replacing it: an annual
+// Max subscriber is on tier "max" like everybody else, and only the Stripe
+// price differs. See api/create-checkout-session.ts for why that matters.
+export type Billing = "monthly" | "annual";
+
+export function startTrialCheckout(tier: PaidTier, billing: Billing = "monthly"): Promise<BillingResult> {
+  return billingRedirect("/api/create-checkout-session", { tier, billing });
 }
 
-export function startMaxCheckout(): Promise<BillingResult> {
-  return startTrialCheckout("max");
+export function startMaxCheckout(billing: Billing = "monthly"): Promise<BillingResult> {
+  return startTrialCheckout("max", billing);
 }
 
 export function openBillingPortal(): Promise<BillingResult> {
