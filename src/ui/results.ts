@@ -244,8 +244,25 @@ function setZoom(region: RegionId | null): void {
     const z = zoomFor(region, ctx.landmarks);
     ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
     ctx.zoomable.style.transform = `scale(${z.scale})`;
+    // The same point, handed to the shrunk layout as a crop.
+    //
+    // Once the pane collapses to a 96px strip the canvas is cropped by
+    // object-fit, and that crop was pinned to "center 34%" — the upper third,
+    // chosen so the strip showed a face rather than hair. Fixed, though, so it
+    // showed the FOREHEAD whatever region was selected: tap Eyes, tap Jaw, tap
+    // Chin, same forehead. The transform above still ran underneath it and was
+    // simply not what you were looking at.
+    //
+    // Only read while shrunk (see the custom properties in style.css), so the
+    // full-size pane keeps its centred framing and goes on being driven by the
+    // transform alone.
+    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
+    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
   } else {
     ctx.zoomable.style.transform = "none";
+    // Back to the framing that shows a whole face in a strip.
+    ctx.zoomable.style.removeProperty("--crop-x");
+    ctx.zoomable.style.removeProperty("--crop-y");
   }
 
   const from = shownRegion ? REGION_LANDMARKS[shownRegion] : undefined;

@@ -3046,9 +3046,26 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   /* Clipping a portrait to 96px from the top shows hair and background and no
      face, which makes the shrunk state useless as a reminder of what is being
      measured. Crop to the upper third instead, which is where a face sits in a
-     capture this flow has already framed and quality-checked. */
+     capture this flow has already framed and quality-checked.
+
+     The crop FOLLOWS the selected region rather than sitting on the upper
+     third forever. Pinned, it showed the forehead whether you had tapped Eyes,
+     Jaw or Chin — the strip is the only picture on screen once the pane
+     collapses, so a fixed crop makes it a decoration instead of a reminder of
+     what is being measured. ui/results.ts sets --crop-x/--crop-y from the same
+     point the full-size zoom uses, and the fallbacks are the old framing, so
+     the calm whole-face state is unchanged.
+
+     Transitioned on the same curve as the shrink, because tabbing through
+     features while collapsed is exactly when this is read, and a crop that
+     jumps between regions reads as the photo glitching. */
   .pane-photo.shrunk .face-frame .zoomable canvas {
-    height: 96px; object-fit: cover; object-position: center 34%;
+    height: 96px; object-fit: cover;
+    object-position: var(--crop-x, center) var(--crop-y, 34%);
+    transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pane-photo.shrunk .face-frame .zoomable canvas { transition: none; }
   }
   /* The mesh is drawn to the photo's full geometry, so once the photo is
      cropped the two no longer line up. At this size the overlay is noise
