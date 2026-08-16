@@ -2704,6 +2704,65 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 }
 
 /* ---------------------------------------------------------------------------
+   The brand page.
+
+   Built for a phone held one-handed while editing a reel, not for a brand
+   manual nobody opens. Every asset is a real <img>, because a long press on
+   an image is the fastest way onto a camera roll and from there into CapCut.
+   --------------------------------------------------------------------------- */
+.brand-lede { font-size: 15px; line-height: 1.65; }
+.brand-tip {
+  margin: 20px 0 28px; padding: 14px 16px;
+  border: 1px solid var(--line); border-left: 3px solid var(--acc);
+  border-radius: 14px; background: var(--acc-soft);
+}
+.brand-tip b { font-size: 13.5px; }
+.brand-tip p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; }
+
+.brand-grid {
+  display: grid; gap: 14px; margin: 16px 0 30px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.brand-item { margin: 0; }
+.brand-swatch {
+  display: flex; align-items: center; justify-content: center;
+  padding: 22px; border: 1px solid var(--line); border-radius: 14px;
+  min-height: 128px;
+}
+.brand-swatch.on-light { background: #F4F3EF; }
+.brand-swatch.on-dark { background: #141518; }
+.brand-swatch img { max-width: 100%; height: auto; display: block; }
+.brand-swatch img.brand-square { width: 96px; }
+.brand-item figcaption { margin-top: 9px; }
+.brand-item figcaption b { display: block; font-size: 13px; font-weight: 620; }
+.brand-dl { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; }
+.brand-dl a {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+  color: var(--acc); text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
+}
+.brand-dl a:hover { border-bottom-color: var(--acc); }
+
+.brand-colours {
+  display: grid; gap: 10px; margin: 16px 0 30px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.brand-colour {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border: 1px solid var(--line); border-radius: 12px;
+}
+.brand-colour i {
+  width: 26px; height: 26px; border-radius: 7px; flex: none;
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.brand-colour b { font-size: 12.5px; font-weight: 600; }
+.brand-colour code {
+  margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--mut);
+}
+.brand-pack { margin: 26px 0 34px; }
+.brand-pack .btn { display: inline-block; text-decoration: none; }
+
+/* ---------------------------------------------------------------------------
    The weekly scan gate: a countdown to the next free scan, with the one-time
    credit checkout as the way to skip the wait.
    --------------------------------------------------------------------------- */
