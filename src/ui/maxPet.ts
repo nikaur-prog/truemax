@@ -1,4 +1,4 @@
-import { maxCharacterMarkup } from "./maxCharacter.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { openMaxChat, isMaxChatOpen } from "./maxChat.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 
@@ -27,12 +27,30 @@ export function mountMaxPet(chatContext: MaxChatContext): void {
   host.type = "button";
   host.className = "maxpet";
   host.setAttribute("aria-label", "Chat with Max");
-  host.innerHTML = maxCharacterMarkup({ mood: "happy" });
+  // Waving is opt-in, and this is the one place that earns it: he is arriving.
+  // The CSS runs it twice and then leaves the arm down for good, so the
+  // greeting is an event rather than the idle loop it used to be.
+  host.innerHTML = maxCharacterMarkup({ mood: "happy", waving: true });
   document.body.appendChild(host);
 
+  // His eyes follow the pointer. Already built for the character wherever it
+  // appears; he just never had it, which is why he read as a sticker rather
+  // than as something aware of you — and it matters far more now that he can
+  // be picked up and put down anywhere.
+  wireMaxInteractions(host);
+
+  // Back to wherever he was left, on whichever side of the screen that was.
+  const spot = loadSpot();
+  if (spot) applySpot(host, spot);
+  wireDrag(host);
+
   // He waits a beat, then peeks. Arriving with the page would make him
-  // furniture; arriving after it makes him a discovery.
-  window.setTimeout(() => host?.classList.add("peeking"), 1200);
+  // furniture; arriving after it makes him a discovery. Skipped when he was
+  // left standing in open space: peeking is an edge behaviour, and playing
+  // hide-and-seek with the middle of the screen is just a twitch.
+  if (spot?.kind !== "loose") {
+    window.setTimeout(() => host?.classList.add("peeking"), 1200);
+  }
 
   host.addEventListener("click", () => {
     if (isMaxChatOpen()) return;
@@ -61,4 +79,186 @@ export function unmountMaxPet(): void {
   host?.remove();
   host = null;
   context = null;
+}
+
+// ---------------------------------------------------------------------------
+// Picking him up.
+//
+// He starts tucked into the right edge because that is where a thumb is, and
+// that is exactly why he cannot STAY there: on a phone he sits over the right
+// half of the results column, which is where the numbers are. Rather than
+// pick a side and be wrong for the left-handed half of the world, he moves.
+//
+// Two resting states, and the difference is the whole feel of it:
+//
+//   tucked  — hooked into the left or right edge at whatever height you left
+//             him, still doing the half-out peek. This is home.
+//   loose   — standing anywhere on the screen, full-bodied, no peek.
+//
+// Drop him near an edge and he hooks back in; drop him in open space and he
+// stays. Nothing is modal and nothing is a setting: the gesture is the whole
+// interface.
+//
+// Kept in this module rather than as a generic drag helper because the tuck
+// rule is specific to him — it is the difference between a character with a
+// hiding place and a floating button somebody can lose behind the fold.
+// ---------------------------------------------------------------------------
+
+type Spot =
+  | { kind: "tucked"; side: "left" | "right"; y: number }
+  | { kind: "loose"; x: number; y: number };
+
+const SPOT_KEY = "truemax.maxSpot";
+
+// How close to an edge counts as tucking him back in. Generous, because the
+// gesture people actually make is a shove toward the side rather than a
+// careful landing, and a near miss that leaves him floating reads as the tuck
+// being broken rather than as their aim being off.
+const DOCK_ZONE = 76;
+
+// Movement that separates a drag from a tap. Below this he opens the chat, so
+// a slightly shaky press still does what it looks like it does.
+const DRAG_SLOP = 6;
+
+function loadSpot(): Spot | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SPOT_KEY) ?? "null") as Spot | null;
+    if (raw?.kind === "tucked" && (raw.side === "left" || raw.side === "right")) return raw;
+    if (raw?.kind === "loose" && Number.isFinite(raw.x) && Number.isFinite(raw.y)) return raw;
+  } catch {
+    /* unparseable or storage disabled: he goes back to his default corner */
+  }
+  return null;
+}
+
+function saveSpot(spot: Spot): void {
+  try {
+    localStorage.setItem(SPOT_KEY, JSON.stringify(spot));
+  } catch {
+    /* storage disabled: he still moves, he just forgets between visits */
+  }
+}
+
+// Clamped on the way OUT rather than on the way in, because the window he was
+// left in is not the window he is being restored into: a phone rotated to
+// landscape, or a desktop window dragged narrow, would otherwise restore him
+// off-screen with no way to get him back.
+function applySpot(el: HTMLButtonElement, spot: Spot): void {
+  const maxY = Math.max(0, window.innerHeight - el.offsetHeight - 8);
+  const y = Math.min(Math.max(8, spot.y), maxY);
+
+  el.style.top = `${y}px`;
+  el.style.bottom = "auto";
+
+  if (spot.kind === "tucked") {
+    el.classList.remove("loose");
+    el.classList.toggle("left", spot.side === "left");
+    el.style.left = spot.side === "left" ? "0px" : "auto";
+    el.style.right = spot.side === "left" ? "auto" : "0px";
+    return;
+  }
+
+  const maxX = Math.max(0, window.innerWidth - el.offsetWidth - 8);
+  el.classList.add("loose");
+  el.classList.remove("left");
+  el.style.left = `${Math.min(Math.max(8, spot.x), maxX)}px`;
+  el.style.right = "auto";
+}
+
+function wireDrag(el: HTMLButtonElement): void {
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+  let dragging = false;
+
+  el.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 && event.pointerType === "mouse") return;
+    const box = el.getBoundingClientRect();
+    startX = event.clientX;
+    startY = event.clientY;
+    originX = box.left;
+    originY = box.top;
+    dragging = false;
+    el.setPointerCapture(event.pointerId);
+  });
+
+  el.addEventListener("pointermove", (event) => {
+    if (!el.hasPointerCapture(event.pointerId)) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!dragging && Math.hypot(dx, dy) < DRAG_SLOP) return;
+
+    if (!dragging) {
+      dragging = true;
+      // The peek pose is a transform, and a transform fights absolute
+      // positioning: he would drift by half his own width the moment he was
+      // picked up. Dragging strips the pose and gives it back on release.
+      el.classList.add("dragging");
+    }
+    // Follows the finger exactly, with no transition — a lerp here reads as
+    // lag, not as smoothing, because the reference point is the finger itself.
+    el.style.left = `${originX + dx}px`;
+    el.style.right = "auto";
+    el.style.top = `${originY + dy}px`;
+    el.style.bottom = "auto";
+  });
+
+  const settle = (event: PointerEvent) => {
+    if (!el.hasPointerCapture(event.pointerId)) return;
+    el.releasePointerCapture(event.pointerId);
+    if (!dragging) return;
+    el.classList.remove("dragging");
+
+    const box = el.getBoundingClientRect();
+    const nearLeft = box.left <= DOCK_ZONE;
+    const nearRight = window.innerWidth - box.right <= DOCK_ZONE;
+
+    // Ties go to the closer edge, which only matters on a window narrow enough
+    // for both zones to overlap — a phone held in portrait, i.e. most of them.
+    const spot: Spot =
+      nearLeft || nearRight
+        ? {
+            kind: "tucked",
+            side:
+              nearLeft && nearRight
+                ? box.left <= window.innerWidth - box.right
+                  ? "left"
+                  : "right"
+                : nearLeft
+                  ? "left"
+                  : "right",
+            y: box.top,
+          }
+        : { kind: "loose", x: box.left, y: box.top };
+
+    applySpot(el, spot);
+    saveSpot(spot);
+    // Flagged here rather than in a second pointerup listener: this one runs
+    // first and clears `dragging`, so anything downstream reading that flag
+    // would always see false and let the click through.
+    el.classList.add("just-dragged");
+    window.setTimeout(() => el.classList.remove("just-dragged"), 0);
+    dragging = false;
+  };
+
+  el.addEventListener("pointerup", settle);
+  el.addEventListener("pointercancel", settle);
+
+  // A drag that ends on him must not also open the chat. Capture phase so this
+  // runs before the click handler that mounts with him.
+  el.addEventListener(
+    "click",
+    (event) => {
+      if (!el.classList.contains("just-dragged")) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    },
+    true,
+  );
+  // He should not be left hanging off a resized window.
+  window.addEventListener("resize", () => {
+    const spot = loadSpot();
+    if (spot) applySpot(el, spot);
+  });
 }

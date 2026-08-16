@@ -85,24 +85,35 @@ export function nextFreeScanAt(): number | null {
 // The single entry point: call with what should happen if scanning is allowed.
 // Free window open → proceed. In the window: staff proceed, a held credit
 // proceeds and is spent, everyone else sees the countdown.
-export async function ensureScanAllowed(proceed: () => void): Promise<void> {
+export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
   const next = nextFreeScanAt();
   if (!next) {
     proceed();
-    return;
+    return true;
   }
 
-  // Signed out means there is no staff flag and no credit balance to read, so
-  // the reads below would be two round trips that can only come back empty.
-  // Checked first because those trips can also HANG — an unreachable Supabase
-  // does not reject promptly — and a hang here would leave the person with
-  // neither a scan nor a gate, staring at a button that did nothing.
+  // Signed out passes, and the gate is applied again after they sign in.
+  //
+  // The limit belongs to an ACCOUNT, but the only thing this device can see
+  // before sign-in is its own localStorage, which says nothing about who is
+  // holding the phone. Gating on it stopped whoever borrowed the laptop, and
+  // stopped anybody who scanned once before ever making an account — the exact
+  // person the funnel is trying to convert.
+  //
+  // It also produced a dialog that argued with itself: the countdown offered
+  // to sell a scan while the line under the button read "Sign in before
+  // opening billing", because entitlement.ts refuses checkout without a token.
+  // A paywall that cannot take payment is not a paywall.
+  //
+  // So capture is allowed to run to the end, where the sign-in wall already
+  // stands (see engine/pendingAnalysis.ts — the capture is preserved across
+  // the OAuth round trip precisely because the account is what reveals the
+  // result). main.ts calls this again on the resume path, with a token in
+  // hand, which is the first moment the question can honestly be asked.
   const token = await currentAccessToken().catch(() => null);
   if (!token) {
-    // Signed out is not a member, so the standard price is the honest quote.
-    setMemberPricing(false);
-    openScanGate(next);
-    return;
+    proceed();
+    return true;
   }
 
   // Only reached inside the cooldown, so these network reads never delay the
@@ -123,7 +134,7 @@ export async function ensureScanAllowed(proceed: () => void): Promise<void> {
 
   if (admin) {
     proceed();
-    return;
+    return true;
   }
   if (credits > 0) {
     // The credit pays for skipping the wait, except for a free-tier account
@@ -133,9 +144,10 @@ export async function ensureScanAllowed(proceed: () => void): Promise<void> {
     const alsoSpentByDepthGate = !member && readAllHistory().length >= TRIAL_SCANS;
     if (!alsoSpentByDepthGate) void consumeScanCredit().catch(() => undefined);
     proceed();
-    return;
+    return true;
   }
   openScanGate(next);
+  return false;
 }
 
 let host: HTMLElement | null = null;

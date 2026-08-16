@@ -2311,7 +2311,7 @@ body.auth-modal-open { overflow: hidden; }
    character whose body language contradicts his face is worse than one with
    no body language at all. */
 .mx-mood-excited .mx-bob { animation-duration: 1.5s; }
-.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out infinite; }
+.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out 3; }
 .mx-mood-concerned .mx-bob { animation-duration: 5s; }
 .mx-mood-thinking .mx-pupils { animation: mx-ponder 4s ease-in-out infinite; }
 @keyframes mx-ponder { 0%, 100% { transform: translate(-2px, -2.4px); } 50% { transform: translate(-3px, -1px); } }
@@ -2400,8 +2400,16 @@ body.auth-modal-open { overflow: hidden; }
 .mx-bob { transform-origin: 75px 150px; animation: mx-bob 3.4s ease-in-out infinite; }
 /* The arm rests, then waves in bursts. `.waving` restarts it on demand. */
 /* Pivot at the new shoulder: the top of the hanging paddle arm. */
-.mx-arm { transform-origin: 118px 94px; animation: mx-wave-idle 6s ease-in-out infinite; }
-.mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
+/* At rest the arm hangs. It used to twitch every six seconds forever, which
+   the comment above already called a tic and then shipped anyway: an idle
+   loop reads as a glitch precisely because nothing caused it. A greeting that
+   happens twice is a greeting; the same motion on a timer is a stuck sprite.
+
+   So he waves on arrival, twice, and then puts his hand down for good. After
+   that the wave is a RESPONSE — hover him and he waves back once. */
+.mx-arm { transform-origin: 118px 94px; }
+.mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 2; }
+.mx-svg:hover .mx-arm { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves
    against the VIEW-BOX, so "center top" was the top of his skull and every
@@ -3038,9 +3046,26 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   /* Clipping a portrait to 96px from the top shows hair and background and no
      face, which makes the shrunk state useless as a reminder of what is being
      measured. Crop to the upper third instead, which is where a face sits in a
-     capture this flow has already framed and quality-checked. */
+     capture this flow has already framed and quality-checked.
+
+     The crop FOLLOWS the selected region rather than sitting on the upper
+     third forever. Pinned, it showed the forehead whether you had tapped Eyes,
+     Jaw or Chin — the strip is the only picture on screen once the pane
+     collapses, so a fixed crop makes it a decoration instead of a reminder of
+     what is being measured. ui/results.ts sets --crop-x/--crop-y from the same
+     point the full-size zoom uses, and the fallbacks are the old framing, so
+     the calm whole-face state is unchanged.
+
+     Transitioned on the same curve as the shrink, because tabbing through
+     features while collapsed is exactly when this is read, and a crop that
+     jumps between regions reads as the photo glitching. */
   .pane-photo.shrunk .face-frame .zoomable canvas {
-    height: 96px; object-fit: cover; object-position: center 34%;
+    height: 96px; object-fit: cover;
+    object-position: var(--crop-x, center) var(--crop-y, 34%);
+    transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pane-photo.shrunk .face-frame .zoomable canvas { transition: none; }
   }
   /* The mesh is drawn to the photo's full geometry, so once the photo is
      cropped the two no longer line up. At this size the overlay is noise
@@ -3240,3 +3265,106 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .native-app #sg-buy,
 .native-app .lock-single,
 .native-app .upsell .navrow { display: none !important; }
+
+/* The scale explainer and the first-run primer -------------------------------
+   Both wear the same card as the tone prompt, because they are the same kind
+   of object: the product stopping to say one thing plainly before the reader
+   carries on. The primer differs only in that it cannot be dismissed by
+   tapping past it — see ui/scaleNote.ts for why. */
+.scalenote {
+  position: fixed; inset: 0; z-index: 62;
+  display: grid; place-items: center; padding: 20px;
+  background: rgba(12, 14, 13, 0.55); backdrop-filter: blur(6px);
+  overflow-y: auto;
+}
+.scalenote-card {
+  position: relative;
+  background: var(--card); border-radius: 22px; padding: 28px 26px 22px;
+  max-width: 460px; width: 100%;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+}
+.scalenote-card h2 {
+  font-family: var(--serif); font-weight: 300; font-size: 27px;
+  letter-spacing: -0.01em; margin: 10px 0 12px; text-wrap: balance;
+}
+.scalenote-card > p { font-size: 13.5px; line-height: 1.62; color: var(--mut); margin-bottom: 14px; }
+.scalenote-card > p b { color: var(--ink); font-weight: 600; }
+.scalenote-x {
+  position: absolute; top: 12px; right: 14px;
+  background: none; border: 0; cursor: pointer;
+  font-size: 24px; line-height: 1; color: var(--mut); padding: 4px 8px;
+}
+.scalenote-x:hover { color: var(--ink); }
+.scalenote-foot { font-size: 11.5px; line-height: 1.6; color: var(--mut); margin-top: 12px; }
+.primer-go { width: 100%; margin-top: 16px; }
+
+/* The rarity ladder. Tabular figures and a fixed-width score column so the
+   rungs read as a column of numbers rather than as prose — the whole point is
+   that the eye runs down it and sees the steps getting bigger. */
+.scale-ladder {
+  display: grid; gap: 1px; margin: 16px 0 4px;
+  background: var(--line); border: 1px solid var(--line); border-radius: 13px; overflow: hidden;
+}
+.scale-rung {
+  display: flex; align-items: baseline; gap: 12px;
+  background: var(--card); padding: 9px 14px;
+}
+.scale-rung b {
+  font-family: var(--serif); font-weight: 400; font-size: 20px;
+  font-variant-numeric: tabular-nums; min-width: 34px; color: var(--ink);
+}
+.scale-rung span { font-size: 12.5px; color: var(--mut); }
+.scale-rung:last-child span { color: var(--acc); }
+
+/* The "?" beside a headline number. Sits in the kicker rather than beside the
+   digits so it never competes with the score for attention. */
+.scale-q {
+  display: inline-grid; place-items: center; vertical-align: middle;
+  width: 15px; height: 15px; margin-left: 5px; padding: 0;
+  border: 1px solid var(--line); border-radius: 99px; background: none;
+  cursor: pointer; font-family: var(--sans); font-size: 10px; font-weight: 700;
+  line-height: 1; color: var(--mut); letter-spacing: 0;
+}
+.scale-q:hover { border-color: var(--acc); color: var(--acc); background: var(--acc-soft); }
+
+/* Rarity under a bare number. This is the fix for the one thing every
+   offended tester reacted to: a figure on a ten-point scale with nothing
+   beside it to say whether it is good. */
+.basic-rarity {
+  display: block; font-style: normal; font-size: 12px;
+  color: var(--mut); margin-top: 3px;
+}
+.basic-cell em {
+  display: block; font-style: normal;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--mut); margin-top: 3px;
+}
+
+@media (max-width: 480px) {
+  .scalenote-card { padding: 22px 18px 18px; border-radius: 18px; }
+  .scalenote-card h2 { font-size: 23px; }
+}
+
+/* Max, picked up and put down ------------------------------------------------
+   The peek is a transform, and a transform fights the absolute positioning a
+   drag needs — left alone he jumps half his own width the moment you grab him.
+   So dragging strips the pose, and the resting states put it back on the side
+   he was actually left on. */
+.maxpet.dragging {
+  transform: none;
+  transition: none;
+  cursor: grabbing;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .26));
+}
+/* Tucked into the LEFT edge: the same hide-and-seek pose, mirrored. Without
+   the flip he peeks out backwards, facing off the screen. */
+.maxpet.left { transform: translateX(-105%) scaleX(-1); }
+.maxpet.left.peeking { transform: translateX(-50%) scaleX(-1) rotate(16deg); }
+.maxpet.left.peeking:hover, .maxpet.left.peeking:focus-visible {
+  transform: translateX(-26%) scaleX(-1) rotate(7deg);
+}
+.maxpet.left.out, .maxpet.left.out:hover { transform: translateX(-105%) scaleX(-1); }
+/* Standing in open space: all of him, no peek, no lean. He is not hiding any
+   more, so the hiding pose would be a lie about where he is. */
+.maxpet.loose, .maxpet.loose:hover, .maxpet.loose.peeking { transform: none; }
+.maxpet.loose.out { transform: scale(.6); opacity: 0; pointer-events: none; }

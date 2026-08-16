@@ -27,6 +27,10 @@ import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
 import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor, verdictForPercentile } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
+import { scaleTrigger, showScalePrimer, wireScaleNote } from "./scaleNote.js";
+// Aliased: this module already has a rarityLine for a REGION row, which says a
+// different thing ("across the jaw") than the headline one.
+import { rarityLine as scaleRarityLine, rarityShort } from "../engine/rarity.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
 import { maxCharacterMarkup } from "./maxCharacter.js";
@@ -34,6 +38,7 @@ import type { MaxMood } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
 import { mountMaxPet, unmountMaxPet } from "./maxPet.js";
+import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
@@ -75,6 +80,13 @@ let ctx: Ctx | null = null;
 
 export function renderResults(c: Ctx): void {
   ctx = c;
+  // The curve is taught before the first number is ever shown. Fire-and-forget
+  // rather than awaited: the panel behind it renders as normal and the primer
+  // covers it, so a storage failure or a dismissed dialog can never leave
+  // somebody staring at an empty results screen.
+  void showScalePrimer(c.report.sex);
+  wireScaleNote(() => ctx?.report.sex ?? "male");
+  wireMaxAsk();
   // A previous report may have been left on its side photograph. main.ts has
   // already painted the new front capture; reset the cached state so this scan
   // cannot restore the previous person's canvas or stale quality chips.
@@ -232,8 +244,25 @@ function setZoom(region: RegionId | null): void {
     const z = zoomFor(region, ctx.landmarks);
     ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
     ctx.zoomable.style.transform = `scale(${z.scale})`;
+    // The same point, handed to the shrunk layout as a crop.
+    //
+    // Once the pane collapses to a 96px strip the canvas is cropped by
+    // object-fit, and that crop was pinned to "center 34%" — the upper third,
+    // chosen so the strip showed a face rather than hair. Fixed, though, so it
+    // showed the FOREHEAD whatever region was selected: tap Eyes, tap Jaw, tap
+    // Chin, same forehead. The transform above still ran underneath it and was
+    // simply not what you were looking at.
+    //
+    // Only read while shrunk (see the custom properties in style.css), so the
+    // full-size pane keeps its centred framing and goes on being driven by the
+    // transform alone.
+    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
+    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
   } else {
     ctx.zoomable.style.transform = "none";
+    // Back to the framing that shows a whole face in a strip.
+    ctx.zoomable.style.removeProperty("--crop-x");
+    ctx.zoomable.style.removeProperty("--crop-y");
   }
 
   const from = shownRegion ? REGION_LANDMARKS[shownRegion] : undefined;
@@ -349,8 +378,9 @@ function sideBasicHTML(report: Report): string {
   const lead = statedPct(report.overallPercentile);
   return `<div class="basic">
     <div class="basic-lead">
-      <span class="klabel">SIDE PROFILE</span>
+      <span class="klabel">SIDE PROFILE ${scaleTrigger()}</span>
       <b><span class="basic-n" data-count="${lead}" data-decimals="0">${lead}</span><small>/100</small></b>
+      <em class="basic-rarity">${scaleRarityLine(lead)}</em>
     </div>
     <div class="basic-grid">
       ${regions
@@ -359,6 +389,7 @@ function sideBasicHTML(report: Report): string {
         <span>${REGION_NAMES[r.region].toUpperCase()}</span>
         <b>${statedPct(r.percentile)}</b>
         <i style="width:${statedPct(r.percentile)}%"></i>
+        <em>${rarityShort(r.percentile)}</em>
       </div>`,
         )
         .join("")}
@@ -902,9 +933,42 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
       <span class="klabel">MAX'S READ</span>
       <p><b>${good}</b> ${improve}</p>
       <p class="maxan-track">${tracking}</p>
-      <p class="maxan-invite">Want different products in the plan, or a different target? Tap me in the corner and tell me — we will rebuild it together.</p>
+      <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
+      <!-- Looks like the thing it starts, rather than describing it.
+           "Tap me in the corner" asked the reader to find a separate control
+           and trust that it was worth finding; a box with a cursor in it needs
+           no instructions. It is a BUTTON wearing a text field: typing here
+           would strand a half-written question in a panel that re-renders on
+           every tab change, so the first press hands off to the real chat
+           input with the question still unstarted. -->
+      ${
+        maxAccess && adultUser
+          ? `<button type="button" class="maxan-ask" data-max-ask>
+        <span>Ask Max about your scan…</span>
+        <b>Send</b>
+      </button>`
+          : ""
+      }
     </div>
   </div>`;
+}
+
+// The second way into the chat, the first being Max himself.
+//
+// Delegated and bound once for the life of the page: the analysis panel is
+// rebuilt on every tab and depth change, so wiring this per render would stack
+// a listener each time somebody looked at their jaw.
+let maxAskBound = false;
+
+function wireMaxAsk(): void {
+  if (maxAskBound) return;
+  maxAskBound = true;
+  document.addEventListener("click", (event) => {
+    const hit = (event.target as HTMLElement | null)?.closest?.("[data-max-ask]");
+    if (!hit) return;
+    const cc = chatContext();
+    if (cc) openMaxChat(cc);
+  });
 }
 
 function animateOverview(root: HTMLElement): void {
@@ -1387,8 +1451,9 @@ function basicHTML(): string {
   const [lead, ...rest] = scores;
   return `<div class="basic">
     <div class="basic-lead">
-      <span class="klabel">OVERALL</span>
+      <span class="klabel">OVERALL ${scaleTrigger()}</span>
       <b><span class="basic-n" data-count="${lead.value}" data-decimals="0">${lead.value}</span><small>/100</small></b>
+      <em class="basic-rarity">${scaleRarityLine(lead.value)}</em>
     </div>
     <div class="basic-grid">
       ${rest
@@ -1397,6 +1462,7 @@ function basicHTML(): string {
         <span>${s.label.toUpperCase()}</span>
         <b>${s.value}</b>
         <i style="width:${s.value}%"></i>
+        <em>${rarityShort(s.value)}</em>
       </div>`,
         )
         .join("")}
