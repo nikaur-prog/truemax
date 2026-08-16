@@ -1,5 +1,6 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
 import { REGION_NAMES } from "../engine/scoring.js";
+import { statedPct } from "../engine/precision.js";
 import type { AdviceChannel } from "../engine/goals.js";
 import type { ScanDelta } from "../engine/history.js";
 
@@ -156,9 +157,9 @@ export function rarityText(pct: number): string {
 // "Ahead of 0.9%". Under the median the honest phrasing is the one the curve
 // already uses.
 export function topPctText(pct: number): string {
-  if (pct < 50) return pct < 1 ? "Ahead of <1%" : `Ahead of ${Math.round(pct)}%`;
-  const rest = 100 - pct;
-  return rest < 1 ? "Top 1%" : `Top ${Math.round(rest * 10) / 10}%`;
+  if (pct < 50) return pct < 1 ? "Ahead of <1%" : `Ahead of ${statedPct(pct)}%`;
+  const rest = 100 - statedPct(pct);
+  return rest < 1 ? "Top 1%" : `Top ${rest}%`;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,18 +361,18 @@ export function leverFor(m: ScoredMetric): Lever {
 // face, one of them was arithmetically wrong, and a side view at the very
 // bottom of the reference set came out as "Bottom 0%".
 export function rankShort(pct: number): string {
-  const rest = Math.round((100 - pct) * 10) / 10;
-  return rest > 50 ? `Ahead of ${Math.round(pct * 10) / 10}%` : `Top ${rest}%`;
+  const shown = statedPct(pct);
+  const rest = 100 - shown;
+  return rest > 50 ? `Ahead of ${shown}%` : `Top ${rest}%`;
 }
 
 export function percentileLine(pct: number, sex: Sex): string {
-  const rest = Math.round((100 - pct) * 10) / 10;
+  const shown = statedPct(pct);
+  const rest = 100 - shown;
   const group = sex === "male" ? "men" : "women";
   // Below the median, "top X%" is a strained way to say it, so say the true
   // thing instead — it is the same number and it does not sound like spin.
-  return rest > 50
-    ? `Ahead of ${Math.round(pct * 10) / 10}% of ${group}`
-    : `Top ${rest}% of ${group}`;
+  return rest > 50 ? `Ahead of ${shown}% of ${group}` : `Top ${rest}% of ${group}`;
 }
 
 // The overview's one caveat, stated the same way for everyone.

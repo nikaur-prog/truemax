@@ -40,6 +40,14 @@ export interface MetricDef {
   // (body fat, debloat, grooming, posture). Drives current → potential.
   fixability: number;
   dist: { male: SexDist; female: SexDist };
+  // Hard anatomical bounds, outside which the number is not a face — it is a
+  // misplaced landmark. Only set where geometry or anatomy gives a defensible
+  // limit; deliberately far wider than the reference spread, so this catches
+  // impossible values and never an unusual one. See scoreMetric.
+  plausible?: [number, number];
+  // The landmarks this measurement is built from, so an implausible value can
+  // name what to re-check rather than saying "something is wrong".
+  points?: string[];
 }
 
 export interface ScoredMetric {
@@ -51,6 +59,10 @@ export interface ScoredMetric {
   markerPct: number; // Φ(z) · 100 — position of the raw value in the population, for range bars
   score: number; // 0–10, 5.0 = population median
   idealRange: [number, number]; // display range for UI bars
+  // The value fell outside anatomical possibility, so it is a placement error
+  // rather than a face. Excluded from every aggregate and shown as needing a
+  // re-check instead of as a bad number.
+  implausible?: boolean;
 }
 
 export interface RegionScore {
