@@ -28,6 +28,12 @@ const CHECKED = [
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_STARTER_PRICE_ID",
   "STRIPE_MAX_PRICE_ID",
+  // The yearly plan. Listed so "is the yearly price connected yet" is a
+  // question the health endpoint answers, rather than one you find out from a
+  // customer hitting a dead button. Its absence is not fatal — checkout falls
+  // back to a clear "not connected" message — so this reports false without
+  // failing the check.
+  "STRIPE_MAX_ANNUAL_PRICE_ID",
   "TRUEMAX_APP_URL",
   "CRON_SECRET",
   "ANTHROPIC_API_KEY",
@@ -42,6 +48,7 @@ export function GET(): Response {
     STRIPE_WEBHOOK_SECRET: "SIGNING_SECRET",
     STRIPE_STARTER_PRICE_ID: "STRIPE_PRICE_STARTER_MONTHLY",
     STRIPE_MAX_PRICE_ID: "STRIPE_PRICE_MAX_MONTHLY",
+    STRIPE_MAX_ANNUAL_PRICE_ID: "STRIPE_PRICE_MAX_ANNUAL",
   };
   const env: Record<string, boolean> = {};
   for (const name of CHECKED) {
