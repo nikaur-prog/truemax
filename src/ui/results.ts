@@ -38,6 +38,7 @@ import type { MaxMood } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
 import { mountMaxPet, unmountMaxPet } from "./maxPet.js";
+import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
@@ -85,6 +86,7 @@ export function renderResults(c: Ctx): void {
   // somebody staring at an empty results screen.
   void showScalePrimer(c.report.sex);
   wireScaleNote(() => ctx?.report.sex ?? "male");
+  wireMaxAsk();
   // A previous report may have been left on its side photograph. main.ts has
   // already painted the new front capture; reset the cached state so this scan
   // cannot restore the previous person's canvas or stale quality chips.
@@ -914,9 +916,42 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
       <span class="klabel">MAX'S READ</span>
       <p><b>${good}</b> ${improve}</p>
       <p class="maxan-track">${tracking}</p>
-      <p class="maxan-invite">Want different products in the plan, or a different target? Tap me in the corner and tell me — we will rebuild it together.</p>
+      <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
+      <!-- Looks like the thing it starts, rather than describing it.
+           "Tap me in the corner" asked the reader to find a separate control
+           and trust that it was worth finding; a box with a cursor in it needs
+           no instructions. It is a BUTTON wearing a text field: typing here
+           would strand a half-written question in a panel that re-renders on
+           every tab change, so the first press hands off to the real chat
+           input with the question still unstarted. -->
+      ${
+        maxAccess && adultUser
+          ? `<button type="button" class="maxan-ask" data-max-ask>
+        <span>Ask Max about your scan…</span>
+        <b>Send</b>
+      </button>`
+          : ""
+      }
     </div>
   </div>`;
+}
+
+// The second way into the chat, the first being Max himself.
+//
+// Delegated and bound once for the life of the page: the analysis panel is
+// rebuilt on every tab and depth change, so wiring this per render would stack
+// a listener each time somebody looked at their jaw.
+let maxAskBound = false;
+
+function wireMaxAsk(): void {
+  if (maxAskBound) return;
+  maxAskBound = true;
+  document.addEventListener("click", (event) => {
+    const hit = (event.target as HTMLElement | null)?.closest?.("[data-max-ask]");
+    if (!hit) return;
+    const cc = chatContext();
+    if (cc) openMaxChat(cc);
+  });
 }
 
 function animateOverview(root: HTMLElement): void {

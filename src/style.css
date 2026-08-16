@@ -3327,3 +3327,27 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .scalenote-card { padding: 22px 18px 18px; border-radius: 18px; }
   .scalenote-card h2 { font-size: 23px; }
 }
+
+/* Max, picked up and put down ------------------------------------------------
+   The peek is a transform, and a transform fights the absolute positioning a
+   drag needs — left alone he jumps half his own width the moment you grab him.
+   So dragging strips the pose, and the resting states put it back on the side
+   he was actually left on. */
+.maxpet.dragging {
+  transform: none;
+  transition: none;
+  cursor: grabbing;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .26));
+}
+/* Tucked into the LEFT edge: the same hide-and-seek pose, mirrored. Without
+   the flip he peeks out backwards, facing off the screen. */
+.maxpet.left { transform: translateX(-105%) scaleX(-1); }
+.maxpet.left.peeking { transform: translateX(-50%) scaleX(-1) rotate(16deg); }
+.maxpet.left.peeking:hover, .maxpet.left.peeking:focus-visible {
+  transform: translateX(-26%) scaleX(-1) rotate(7deg);
+}
+.maxpet.left.out, .maxpet.left.out:hover { transform: translateX(-105%) scaleX(-1); }
+/* Standing in open space: all of him, no peek, no lean. He is not hiding any
+   more, so the hiding pose would be a lie about where he is. */
+.maxpet.loose, .maxpet.loose:hover, .maxpet.loose.peeking { transform: none; }
+.maxpet.loose.out { transform: scale(.6); opacity: 0; pointer-events: none; }
