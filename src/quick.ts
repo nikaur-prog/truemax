@@ -18,6 +18,7 @@ import { askVerdictTone } from "./ui/tonePrompt.js";
 import { drawLandmarksAnimated } from "./ui/overlay.js";
 import type { Report, Sex } from "./engine/types.js";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
+import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
@@ -64,6 +65,9 @@ const el = {
   dots: document.getElementById("q-dots") as HTMLCanvasElement,
   cards: document.getElementById("q-cards")!,
   silhouette: document.getElementById("q-silhouette") as HTMLCanvasElement,
+  lib: document.getElementById("q-lib")!,
+  libStrip: document.getElementById("q-lib-strip")!,
+  libClear: document.getElementById("q-lib-clear")!,
 };
 
 // Stage timings. Long enough to read on camera, short enough that nobody
@@ -181,6 +185,14 @@ function paintSilhouette(): void {
   drawQuickSilhouette(el.silhouette, storedSex() ?? "male");
 }
 track("quick-visit");
+
+// The strip is populated before anything else happens, so a producer opening
+// the page mid-session sees their faces immediately rather than after a scan.
+void refreshLibrary();
+el.libClear.onclick = async () => {
+  await clearFaces();
+  await refreshLibrary();
+};
 paintSilhouette();
 window.addEventListener("resize", paintSilhouette);
 
@@ -275,6 +287,67 @@ async function run(src: HTMLCanvasElement): Promise<void> {
 // The last analysed photo, kept so switching reference population re-scores it
 // rather than making someone shoot again.
 let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
+
+// ---------------------------------------------------------------------------
+// The saved-face strip.
+//
+// Filming a set of clips means coming back to the same handful of faces over
+// and over, and the slow part was never the scan — it was finding the
+// photograph again and waiting through detection. A saved face carries its
+// landmarks, so loading one skips the model entirely and scores instantly.
+//
+// Everything stays in IndexedDB on this device. See engine/faceLibrary.ts for
+// why that is a requirement rather than a convenience.
+// ---------------------------------------------------------------------------
+async function refreshLibrary(): Promise<void> {
+  const faces = await listFaces();
+  el.lib.classList.toggle("hidden", faces.length === 0);
+  if (!faces.length) {
+    el.libStrip.innerHTML = "";
+    return;
+  }
+  el.libStrip.innerHTML = faces
+    .map(
+      (f) => `<div class="q-lib-item">
+        <button type="button" class="q-lib-load" data-id="${f.id}" title="Load ${escapeHtml(f.label)}">
+          <img src="${f.photo}" alt="${escapeHtml(f.label)}" loading="lazy" />
+          <b>${f.score.toFixed(1)}</b>
+        </button>
+        <button type="button" class="q-lib-del" data-del="${f.id}" aria-label="Remove ${escapeHtml(f.label)}">&times;</button>
+      </div>`,
+    )
+    .join("");
+
+  for (const button of el.libStrip.querySelectorAll<HTMLButtonElement>("[data-id]")) {
+    button.onclick = async () => {
+      const face = faces.find((f) => f.id === button.dataset.id);
+      if (!face) return;
+      const canvas = await faceToCanvas(face);
+      // A corrupt entry costs that one face, not the page. Drop it so the
+      // strip cannot keep offering something that will never load.
+      if (!canvas) {
+        await deleteFace(face.id);
+        await refreshLibrary();
+        return;
+      }
+      last = { lm: face.landmarks, w: face.width, h: face.height, photo: canvas };
+      show(storedSex() ?? "male", true);
+    };
+  }
+  for (const button of el.libStrip.querySelectorAll<HTMLButtonElement>("[data-del]")) {
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      await deleteFace(button.dataset.del!);
+      await refreshLibrary();
+    };
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+  })[c] as string);
+}
 
 function show(sex: Sex, animate = false): void {
   if (!last) return;
@@ -392,6 +465,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
       <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
+      <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>`;
 
@@ -440,6 +514,30 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-download")!.onclick = () => void downloadCard();
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
+  const saveBtn = document.getElementById("q-save-face") as HTMLButtonElement | null;
+  if (saveBtn) {
+    saveBtn.onclick = async () => {
+      if (!last) return;
+      saveBtn.disabled = true;
+      // Named from the score rather than prompting. A dialog in the middle of
+      // a filming session is one more thing to dismiss, and the picture in the
+      // strip is what somebody actually recognises a face by.
+      const saved = await saveFace({
+        label: `${r.overall.toFixed(1)} · ${r.sex === "male" ? "M" : "F"}`,
+        photo: last.photo.toDataURL("image/jpeg", 0.9),
+        width: last.w,
+        height: last.h,
+        landmarks: last.lm,
+        score: r.overall,
+      });
+      saveBtn.textContent = saved ? "Saved" : "Could not save";
+      await refreshLibrary();
+      window.setTimeout(() => {
+        saveBtn.textContent = "Save to library";
+        saveBtn.disabled = false;
+      }, 1600);
+    };
+  }
   document.getElementById("q-again")!.onclick = () => {
     // Reset the stage, or the next scan starts already open with last scan's
     // landmarks still painted over the new photo.
@@ -449,6 +547,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     el.capture.classList.remove("hidden");
     el.shoot.textContent = "Use camera";
     el.shoot.disabled = false;
+    void refreshLibrary();
   };
 }
 
