@@ -23,13 +23,33 @@ function isPaidTier(value: unknown): value is PaidTier {
   return value === "starter" || value === "max";
 }
 
+// Billing period is NOT a tier.
+//
+// An annual Max subscriber is on tier "max", the same as a monthly one, and
+// gets exactly the same product. Only the Stripe price differs. Modelling the
+// year as its own tier would mean every entitlement check, every gate and the
+// webhook all needing to learn a fourth name for a thing that is not new —
+// and the first one anybody forgot would lock a paying customer out.
+export type Billing = "monthly" | "annual";
+
+function isBilling(value: unknown): value is Billing {
+  return value === "monthly" || value === "annual";
+}
+
 // Each price answers to two names: the one the code was written against and
 // the one the values were actually stored under in Vercel. Renaming deployed
 // environment variables to satisfy the code is exactly the kind of manual step
 // that keeps a checkout dead for days; the code can just look in both places.
-function configuredPrice(tier: PaidTier): string | null {
+function configuredPrice(tier: PaidTier, billing: Billing): string | null {
   if (tier === "starter") {
     return process.env.STRIPE_STARTER_PRICE_ID || process.env.STRIPE_PRICE_STARTER_MONTHLY || null;
+  }
+  if (billing === "annual") {
+    // No monthly fallback on purpose. If the annual price is not configured,
+    // the honest failure is "the yearly plan is not connected yet" — silently
+    // charging somebody monthly when they chose and expected to be charged for
+    // a year is the one outcome worse than a broken button.
+    return process.env.STRIPE_MAX_ANNUAL_PRICE_ID || process.env.STRIPE_PRICE_MAX_ANNUAL || null;
   }
   return process.env.STRIPE_MAX_PRICE_ID || process.env.STRIPE_PRICE_MAX_MONTHLY || null;
 }
@@ -54,7 +74,8 @@ export async function POST(request: Request): Promise<Response> {
     if (!user) return json({ error: "Sign in before starting checkout." }, 401);
     userId = user.id;
 
-    const body = await request.json().catch(() => null) as { tier?: unknown; purchase?: unknown } | null;
+    const body = await request.json().catch(() => null) as
+      { tier?: unknown; purchase?: unknown; billing?: unknown } | null;
 
     // One-time scan credit — a payment, not a subscription, so none of the
     // trial machinery below applies to it. Members pay the member price; the
@@ -96,8 +117,21 @@ export async function POST(request: Request): Promise<Response> {
 
     if (!isPaidTier(body?.tier)) return json({ error: "Choose Starter or Max to continue." }, 400);
     const tier = body.tier;
-    const priceId = configuredPrice(tier);
-    if (!priceId) return json({ error: `${tier === "starter" ? "Starter" : "Max"} checkout is still being connected.` }, 503);
+    // Unrecognised or absent billing falls back to monthly, which is the
+    // cheaper commitment. An unreadable field must never be the reason
+    // somebody is billed for a year.
+    const billing: Billing = isBilling(body?.billing) ? body.billing : "monthly";
+    const priceId = configuredPrice(tier, billing);
+    if (!priceId) {
+      return json(
+        {
+          error: billing === "annual"
+            ? "The yearly plan is still being connected. Monthly is available now."
+            : `${tier === "starter" ? "Starter" : "Max"} checkout is still being connected.`,
+        },
+        503,
+      );
+    }
 
     const admin = getSupabaseAdmin();
     const [
@@ -181,6 +215,7 @@ export async function POST(request: Request): Promise<Response> {
         metadata: {
           supabase_user_id: user.id,
           tier,
+          billing,
           trial_reservation_id: reservationId,
         },
         subscription_data: {
@@ -188,12 +223,19 @@ export async function POST(request: Request): Promise<Response> {
           metadata: {
             supabase_user_id: user.id,
             tier,
+            billing,
             trial_reservation_id: reservationId,
           },
         },
         custom_text: {
           submit: {
-            message: `${planName} is free for 7 days, then renews monthly until cancelled. Cancel before the trial ends to pay $0.`,
+            // The renewal period has to be the real one. This line said
+            // "renews monthly" unconditionally, which on a yearly plan is a
+            // false statement about what somebody is agreeing to, printed on
+            // the button they agree with.
+            message: `${planName} is free for 7 days, then renews ${
+              billing === "annual" ? "yearly" : "monthly"
+            } until cancelled. Cancel before the trial ends to pay $0.`,
           },
         },
       },

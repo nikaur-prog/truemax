@@ -42,6 +42,37 @@ const MEASUREMENT_COUNT = METRICS.length + SIDE_METRICS.length;
 
 let host: HTMLDivElement | null = null;
 
+// ---------------------------------------------------------------------------
+// Monthly or yearly.
+//
+// Governs the Max card only — Starter has no yearly price — and it defaults to
+// monthly, which is the smaller commitment. The saving is stated as a real
+// figure rather than a percentage badge, because "$54 less" is a number
+// somebody can check against the two prices on screen and a "-37%" is not.
+//
+// The weekly equivalent is shown deliberately. Every competitor in this
+// category prices weekly, which makes their number look small while extracting
+// more over a year: the leader charges $3.99 a week, with no monthly or yearly
+// option at all, which is about $207 a year. Monthly TrueMax is $2.77 a week
+// and the yearly is $1.73. Saying so is not a trick, it is the same comparison
+// the reader would make if they did the arithmetic, done for them.
+// ---------------------------------------------------------------------------
+export const MAX_MONTHLY = 11.99;
+export const MAX_ANNUAL = 89.99;
+
+function billingToggle(): string {
+  const weekly = (yearTotal: number) => (yearTotal / 52).toFixed(2);
+  return `<div class="billtoggle" data-billing="monthly">
+    <button type="button" class="bt-opt on" data-set="monthly">
+      <b>Monthly</b><span>$${MAX_MONTHLY.toFixed(2)} · $${weekly(MAX_MONTHLY * 12)}/week</span>
+    </button>
+    <button type="button" class="bt-opt" data-set="annual">
+      <b>Yearly</b><span>$${MAX_ANNUAL.toFixed(2)} · $${weekly(MAX_ANNUAL)}/week</span>
+      <i class="bt-save">Save $${(MAX_MONTHLY * 12 - MAX_ANNUAL).toFixed(2)}</i>
+    </button>
+  </div>`;
+}
+
 const esc = (value: string): string => value.replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;",
   "<": "&lt;",
@@ -262,6 +293,7 @@ export async function openTrialFunnel(
         <span>re-taken the same way every scan. One scan is a score; a run of them
           is the only thing that can tell you a change was real and not the camera.</span>
       </div>
+      ${adult ? billingToggle() : ""}
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
           <div class="plan-top"><span>STARTER</span><b>$7.99<small> USD / month</small></b></div>
@@ -379,6 +411,41 @@ export async function openTrialFunnel(
         }
       });
     }
+    // Switching the period rewrites the Max card in place. The price, the
+    // renewal sentence and the button all have to move together: a card
+    // reading "$11.99 / month" under a selected Yearly toggle is the kind of
+    // mismatch somebody notices only after they have been charged.
+    const bill = host.querySelector<HTMLElement>(".billtoggle");
+    if (bill) {
+      for (const opt of bill.querySelectorAll<HTMLButtonElement>(".bt-opt")) {
+        opt.addEventListener("click", () => {
+          const mode = opt.dataset.set === "annual" ? "annual" : "monthly";
+          bill.dataset.billing = mode;
+          for (const other of bill.querySelectorAll(".bt-opt")) {
+            other.classList.toggle("on", other === opt);
+          }
+          const card = host?.querySelector<HTMLElement>('.plan-card[data-plan="max"]');
+          if (!card) return;
+          const price = card.querySelector<HTMLElement>(".plan-top b");
+          // :scope > small, not just small. The price itself contains a
+          // <small> for the "USD / month" suffix, so a bare selector matches
+          // that one and the renewal sentence underneath never changes —
+          // leaving "Then $11.99/month" sitting under a $89.99 yearly price.
+          const note = card.querySelector<HTMLElement>(":scope > small");
+          if (price) {
+            price.innerHTML = mode === "annual"
+              ? `$${MAX_ANNUAL.toFixed(2)}<small> USD / year</small>`
+              : `$${MAX_MONTHLY.toFixed(2)}<small> USD / month</small>`;
+          }
+          if (note && adult) {
+            note.textContent = mode === "annual"
+              ? `Then $${MAX_ANNUAL.toFixed(2)}/year. Cancel anytime.`
+              : `Then $${MAX_MONTHLY.toFixed(2)}/month. Cancel anytime.`;
+          }
+        });
+      }
+    }
+
     for (const button of host.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {
       button.addEventListener("click", async () => {
         if (busy || button.disabled) return;
@@ -387,7 +454,16 @@ export async function openTrialFunnel(
         for (const item of host?.querySelectorAll<HTMLButtonElement>("[data-checkout]") || []) item.disabled = true;
         track("checkout-started");
         button.textContent = "Opening secure Checkout…";
-        const result = await startTrialCheckout(button.dataset.checkout as PlanTier);
+        // Starter has no yearly price, so the toggle only governs Max. Sending
+        // billing: "annual" for Starter would resolve to the monthly price
+        // anyway, but asking for something that does not exist is how a wrong
+        // charge happens later when somebody adds the price and forgets this.
+        const wantsAnnual = host?.querySelector<HTMLElement>(".billtoggle")?.dataset.billing === "annual";
+        const chosen = button.dataset.checkout as PlanTier;
+        const result = await startTrialCheckout(
+          chosen,
+          chosen === "max" && wantsAnnual ? "annual" : "monthly",
+        );
         if (!result.ok && host) {
           busy = false;
           for (const item of host.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {

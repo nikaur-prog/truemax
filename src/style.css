@@ -2710,6 +2710,34 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    manual nobody opens. Every asset is a real <img>, because a long press on
    an image is the fastest way onto a camera roll and from there into CapCut.
    --------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   Monthly / yearly switch on the offer screen.
+   --------------------------------------------------------------------------- */
+.billtoggle {
+  display: flex; gap: 8px; max-width: 460px; margin: 0 auto 18px;
+  padding: 5px; border-radius: 16px; background: var(--bg);
+  border: 1px solid var(--line);
+}
+.bt-opt {
+  flex: 1 1 0; position: relative; padding: 10px 8px;
+  border: 1px solid transparent; border-radius: 12px; background: none;
+  font-family: var(--sans); color: var(--mut); cursor: pointer; text-align: center;
+  transition: background .16s ease, color .16s ease, border-color .16s ease;
+}
+.bt-opt b { display: block; font-size: 13.5px; font-weight: 620; }
+.bt-opt span { display: block; margin-top: 2px; font-size: 11px; }
+.bt-opt.on {
+  background: var(--card); color: var(--ink);
+  border-color: var(--line); box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+}
+.bt-save {
+  position: absolute; top: -9px; right: 6px;
+  padding: 2px 7px; border-radius: 99px;
+  background: var(--acc); color: #fff;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .04em; font-style: normal;
+}
+@media (prefers-reduced-motion: reduce) { .bt-opt { transition: none; } }
+
 .brand-lede { font-size: 15px; line-height: 1.65; }
 
 /* The one asset most people came for, given its own room above everything
