@@ -216,6 +216,42 @@ body {
 @media (min-width: 660px) { .proof { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 1040px) { .proof { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .proof-item { min-width: 0; }
+
+/* ---------------------------------------------------------------------------
+   The loop, after the proof band.
+
+   Numbered because these genuinely are a sequence — measure, plan, rescan —
+   which is the one case where numbered markers carry information rather than
+   decorate. Step three is the differentiator and reads as the payoff, so it
+   is styled no louder than the other two and left to land on its own.
+   --------------------------------------------------------------------------- */
+.journey { width: 100%; max-width: 1000px; margin: 40px auto 0; text-align: left; }
+.journey-title {
+  font-family: var(--serif); font-size: 26px; font-weight: 500;
+  text-align: center; margin: 0 0 22px; text-wrap: balance;
+}
+.journey-steps {
+  display: grid; gap: 14px; margin: 0; padding: 0; list-style: none;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 860px) { .journey-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.journey-steps li {
+  position: relative; min-width: 0;
+  padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--card);
+}
+.journey-n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; margin-bottom: 10px;
+  border-radius: 99px; background: var(--acc-soft); color: var(--acc);
+  font-family: var(--mono); font-size: 11px;
+}
+.journey-steps b { display: block; font-size: 14.5px; font-weight: 620; line-height: 1.35; margin-bottom: 6px; }
+.journey-steps p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--mut); }
+.journey-foot {
+  margin: 16px 0 0; text-align: center; font-size: 12.5px; line-height: 1.6;
+  color: var(--mut);
+}
 .proof-item {
   padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px;
   background: var(--card);
