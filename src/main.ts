@@ -1231,6 +1231,19 @@ async function resumePendingAfterAuth(): Promise<void> {
   if (resumePendingStarted) return;
   const saved = readPendingAnalysis();
   if (!saved || !await currentUser()) return;
+
+  // The weekly gate is asked HERE, because this is the first point where there
+  // is an account to ask about. scanGate.ts lets signed-out capture run to the
+  // end for that reason, so without this check the limit would be bypassed by
+  // simply signing out before scanning.
+  //
+  // Asked before anything is torn down: a blocked resume leaves the upload
+  // screen exactly as it was and the capture still in storage, so buying a
+  // credit and coming back finishes the scan rather than restarting it.
+  // ensureScanAllowed spends a held credit when it passes, so the answer is
+  // also the payment.
+  if (!(await ensureScanAllowed(() => undefined))) return;
+
   resumePendingStarted = true;
 
   const frontOk = await drawStoredPhoto(
