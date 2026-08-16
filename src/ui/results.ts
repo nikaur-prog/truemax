@@ -25,10 +25,11 @@ import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAna
 import { askVerdictTone } from "./tonePrompt.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
-import { openMaxChat } from "./maxChat.js";
-import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { maxCharacterMarkup } from "./maxCharacter.js";
+import type { MaxMood } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
+import { mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
@@ -76,6 +77,16 @@ export function renderResults(c: Ctx): void {
   // because it belongs to the SCAN, not to the tab: switching to Proportions
   // must not take the headline number off the screen.
   renderScoreStrip(c.report);
+
+  // Plan holders get Max himself, peeking from the edge of the screen with
+  // this scan's numbers in hand. Everybody else gets the card (askMaxCard),
+  // and under-18s get neither — the standing rule for every Max surface.
+  if (maxAccess && adultUser) {
+    const cc = chatContext();
+    if (cc) mountMaxPet(cc);
+  } else {
+    unmountMaxPet();
+  }
   // A new scan starts from the calm whole-face state. Without this the first
   // tab change after re-scanning would animate out of the PREVIOUS photo's
   // region, which is a transition from somewhere the user never was.
@@ -137,7 +148,7 @@ function buildTabs(view: "front" | "side"): void {
     }
     return;
   }
-  mk("Overall", "overall");
+  mk(maxAccess && adultUser ? "Max’s analysis" : "Overall", "overall");
   for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
   mk("Plan →", "improve");
 }
@@ -460,6 +471,7 @@ function showOverall(): void {
 
   body().innerHTML = `
     <div class="reveal overview-reveal">
+      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta) : ""}
       <div class="score-head">
         <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
@@ -682,6 +694,60 @@ function celebCard(matches: ReturnType<typeof regionMatches>): string {
         <div class="nm">${m.name}<span>${m.metricName}</span></div></div>`,
     )
     .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Max's analysis: the overview, in his voice, for accounts that hold him.
+//
+// Every sentence is composed from numbers the engine already computed — best
+// region, weakest fixable lever, the delta against the last scan — never
+// generated. A model call per scan would cost money on every result and could
+// invent a figure; a template over real numbers is instant, free, and can
+// only say true things. The model stays in the chat, where the follow-up
+// questions live.
+//
+// The pose varies per scan: derived from the report so the same scan always
+// shows the same Max, but the next scan shows a different one. A character
+// who strikes the same pose every time is a logo.
+// ---------------------------------------------------------------------------
+const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
+  { mood: "happy", waving: true },
+  { mood: "excited" },
+  { mood: "thinking" },
+  { mood: "happy" },
+];
+
+function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
+  const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
+
+  const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
+  const best = regions[0];
+  const fixables = r.metrics
+    .filter((m) => m.def.fixability >= 0.3)
+    .sort((a, b) => a.zEff - b.zEff);
+  const weakest = fixables[0];
+
+  // Phrased so it survives a plural region name: "Eyes is carrying you" is
+  // the kind of line that reads generated, and this one must not.
+  const good = best
+    ? `Best thing on the scan: ${REGION_NAMES[best.region].toLowerCase()}, top ${Math.max(1, 100 - Math.round(best.percentile))}% of the reference set.`
+    : "";
+  const improve = weakest
+    ? `The one I would attack first: ${weakest.def.name.toLowerCase()} (${fmt(weakest)}). ${leverFor(weakest).title} is the lever, and it moves without surgery.`
+    : "";
+  const tracking = delta
+    ? deltaReadingCopy(delta)
+    : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
+
+  return `<div class="maxan">
+    <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
+    <div class="maxan-body">
+      <span class="klabel">MAX'S READ</span>
+      <p><b>${good}</b> ${improve}</p>
+      <p class="maxan-track">${tracking}</p>
+      <p class="maxan-invite">Want different products in the plan, or a different target? Tap me in the corner and tell me — we will rebuild it together.</p>
+    </div>
+  </div>`;
 }
 
 function animateOverview(root: HTMLElement): void {
@@ -1024,8 +1090,7 @@ function showImprove(): void {
   // anyone who has not internalised the curve, when it is actually rarer than
   // one face in twenty — the percentage is the number that lands.
   const potPct = rankShort(aggregateScoreToPercentile(r.potential));
-  const planBody = `${askMaxCard()}
-      <div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
+  const planBody = `<div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
@@ -1072,6 +1137,7 @@ function showImprove(): void {
   // the volume of finished work is the product.
   body().innerHTML = `
     <div class="reveal">
+      ${askMaxCard()}
       ${gated
         ? `<div class="lockwrap">
             <div class="lockblur" aria-hidden="true" inert>${planBody}</div>
@@ -1216,6 +1282,15 @@ function wireModeSwitcher(): void {
 // rather than giving the paid product away, and the person can retry.
 let maxAccess = false;
 
+// Whether the signed-in person is an adult. Defaults to FALSE, which is the
+// only safe direction: every Max surface on this screen is 18+, and an age we
+// could not read must behave like an age that is too young.
+let adultUser = false;
+
+export function setAdult(value: boolean): void {
+  adultUser = value;
+}
+
 // What this account can currently see. Defaults to "rating" — the safe
 // direction, same reasoning as maxAccess: a failed entitlement read shows a
 // wall to a paying customer, who can retry, rather than handing the paid
@@ -1310,13 +1385,31 @@ function wireUnlock(): void {
 // behind a blur, which is a worse advertisement than the written plan already
 // sitting under one.
 // ---------------------------------------------------------------------------
+// The lines he offers when somebody lingers on him. Rotated in order rather
+// than picked at random, so a person who hovers three times hears three
+// different things instead of the same one twice.
+const ASK_LINES = [
+  "I can help you.",
+  "Let's turn this into a plan.",
+  "Let's start attacking your goals.",
+  "What does your dream glow up look like?",
+  "What are you trying to achieve this year?",
+];
+let askLine = 0;
+
 function askMaxCard(): string {
-  if (!maxAccess) return "";
-  return `<button type="button" class="askmax" id="btn-askmax">
+  // 18+ only, in any form: this is the standing rule for every Max surface.
+  if (!adultUser) return "";
+  // Plan holders do not get an advertisement — they get Max himself, peeking
+  // from the edge of the screen (see maxPet.ts). The card is for the person
+  // who has not bought yet: the character IS the pitch.
+  if (maxAccess) return "";
+  return `<button type="button" class="askmax askmax-cta" id="btn-askmax">
+    <span class="askmax-bubble" id="askmax-bubble" aria-hidden="true"></span>
     <span class="askmax-face">${maxCharacterMarkup({ mood: "happy" })}</span>
     <span class="askmax-copy">
-      <b>Ask Max about any of this</b>
-      <small>He has your numbers in front of him. He will not invent new ones.</small>
+      <b>Meet Max, your personal coach</b>
+      <small>Part of the Max plan. He reads your numbers and turns them into your plan.</small>
     </span>
     <span class="askmax-go" aria-hidden="true">→</span>
   </button>`;
@@ -1325,24 +1418,56 @@ function askMaxCard(): string {
 function wireAskMax(): void {
   const button = document.getElementById("btn-askmax");
   if (!button || !ctx) return;
-  wireMaxInteractions(button.querySelector(".askmax-face"));
+  const bubble = document.getElementById("askmax-bubble");
+  const svg = button.querySelector<SVGSVGElement>(".mx-svg");
+
+  const speak = (): void => {
+    if (!bubble || !svg) return;
+    bubble.textContent = ASK_LINES[askLine++ % ASK_LINES.length];
+    bubble.classList.add("show");
+    // A happy little wave with the line, and the mouth moves while the bubble
+    // is up — he is saying it, not captioned by it.
+    const arm = svg.querySelector(".mx-arm");
+    arm?.classList.remove("waving");
+    void (arm as SVGGElement | null)?.getBBox?.();
+    arm?.classList.add("waving");
+    svg.classList.add("speaking");
+    window.setTimeout(() => {
+      svg.classList.remove("speaking");
+      bubble.classList.remove("show");
+    }, 2400);
+  };
+
+  // Fine pointers get the wave on hover. Touch has no hover, so the first tap
+  // speaks and the second goes to the offer — the same two beats, one gesture
+  // apart.
+  let spokeAt = 0;
+  if (window.matchMedia("(pointer: fine)").matches) {
+    button.addEventListener("pointerenter", speak);
+  }
   button.onclick = () => {
     if (!ctx) return;
-    track("max-chat-opened");
-    openMaxChat(
-      buildMaxContext({
-        report: ctx.report,
-        tone: loadVerdictTone() ?? "kind",
-        scans: readAllHistory().length,
-        // The ceiling only travels for accounts that can already see it, which
-        // is every account reaching here — but the argument is passed
-        // explicitly rather than assumed, so moving this card somewhere less
-        // gated cannot silently leak the paid figure into a prompt.
-        potential: maxAccess ? ctx.report.potential : undefined,
-        movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,
-      }),
-    );
+    if (!window.matchMedia("(pointer: fine)").matches && Date.now() - spokeAt > 2600) {
+      spokeAt = Date.now();
+      speak();
+      return;
+    }
+    track("offer-shown");
+    ctx.onUpgrade?.();
   };
+}
+
+// The chat context for THIS scan, built once per call so the pet and any
+// future surface agree about what Max can see.
+function chatContext() {
+  if (!ctx) return null;
+  return buildMaxContext({
+    report: ctx.report,
+    tone: loadVerdictTone() ?? "kind",
+    scans: readAllHistory().length,
+    potential: maxAccess ? ctx.report.potential : undefined,
+    movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,
+  });
 }
 
 function upsell(): string {

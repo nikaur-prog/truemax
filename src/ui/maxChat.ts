@@ -61,13 +61,16 @@ function greeting(context: MaxChatContext | null): string {
 }
 
 const SUGGESTIONS = [
+  "Create a plan for me.",
   "What should I do first?",
-  "Why is that number low?",
   "What can I actually change?",
   "How long until it moves?",
 ];
 
-export function openMaxChat(context: MaxChatContext | null): void {
+export function openMaxChat(
+  context: MaxChatContext | null,
+  options: { greeting?: string } = {},
+): void {
   if (host) return;
   transcript = [];
 
@@ -98,7 +101,7 @@ export function openMaxChat(context: MaxChatContext | null): void {
   const form = host.querySelector<HTMLFormElement>(".maxchat-composer")!;
   const input = form.querySelector<HTMLInputElement>("input")!;
 
-  say(log, greeting(context));
+  say(log, options.greeting ?? greeting(context));
   for (const s of SUGGESTIONS) {
     const chip = document.createElement("button");
     chip.type = "button";
@@ -216,18 +219,35 @@ function fail(bubble: HTMLElement, message: string): void {
   bubble.textContent = message;
 }
 
+// Max is told to write plain sentences for a plain bubble, but a model under
+// instruction still occasionally reaches for markdown. The bubble renders
+// textContent, where **bold** is four characters of asterisk noise around the
+// word it meant to stress, so whatever slips through is stripped rather than
+// shown. Runs over the whole buffer every frame — it is a handful of regexes
+// on a few hundred characters, and re-running it means a marker split across
+// two network chunks still disappears the moment its second half lands.
+function scrub(raw: string): string {
+  return raw
+    .replace(/\*\*|__|`/g, "")
+    .replace(/\*([^*\n]{1,80})\*/g, "$1")
+    .replace(/^#{1,4}\s+/gm, "")
+    .replace(/^(\s*)[*•]\s+/gm, "$1- ");
+}
+
 // Read the stream into a buffer, and let a steady clock move characters from
 // the buffer onto the screen. The two rates are independent on purpose: the
 // network delivers in clumps, the reader wants an even pace, and the gap
 // between them is what the buffer is for.
+//
+// The clock runs for everybody, reduced motion included. The pacing is not a
+// motion effect, it is what lets a person follow the answer as it is said —
+// dumping the whole reply at once is exactly the bug this exists to fix.
 async function drain(body: ReadableStream<Uint8Array>, bubble: HTMLElement, log: HTMLElement): Promise<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffered = "";
   let shown = 0;
   let done = false;
-
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
   const pump = (async () => {
     for (;;) {
@@ -239,16 +259,6 @@ async function drain(body: ReadableStream<Uint8Array>, bubble: HTMLElement, log:
     done = true;
   })();
 
-  if (reduced) {
-    // Somebody who asked for less motion gets the whole answer the moment it
-    // finishes. The pacing is an effect, and effects are the thing that setting
-    // turns off.
-    await pump;
-    bubble.textContent = buffered;
-    log.scrollTop = log.scrollHeight;
-    return buffered;
-  }
-
   await new Promise<void>((resolve) => {
     let last = performance.now();
     // Fractional characters are CARRIED between frames rather than floored
@@ -257,13 +267,24 @@ async function drain(body: ReadableStream<Uint8Array>, bubble: HTMLElement, log:
     // the text crawls out at roughly half the rate this constant asks for.
     let carry = 0;
     const step = (now: number): void => {
-      carry += ((now - last) / 1000) * DRAIN_CPS;
+      const text = scrub(buffered);
+      // Scrubbing can shorten the buffer after the fact — a lone * becomes a
+      // pair when its twin arrives and both vanish — so the cursor is clamped
+      // rather than trusted.
+      shown = Math.min(shown, text.length);
+      // Reading pace by default. When a big backlog appears at once — a proxy
+      // buffered the stream, or the tab was hidden and frames stopped — speed
+      // up in proportion so the replay takes a second or two, not a minute,
+      // while still visibly typing.
+      const backlog = text.length - shown;
+      const cps = DRAIN_CPS + (backlog > 360 ? (backlog - 360) * 1.4 : 0);
+      carry += ((now - last) / 1000) * cps;
       last = now;
       const take = Math.floor(carry);
       if (take > 0) {
         carry -= take;
-        shown = Math.min(buffered.length, shown + take);
-        bubble.textContent = buffered.slice(0, shown);
+        shown = Math.min(text.length, shown + take);
+        bubble.textContent = text.slice(0, shown);
         // Only follow the text down if the reader has not scrolled up to
         // re-read something. Yanking them back to the bottom mid-sentence is
         // the most annoying thing a chat window can do.
@@ -273,14 +294,15 @@ async function drain(body: ReadableStream<Uint8Array>, bubble: HTMLElement, log:
       // Caught up with a stream that has not finished. Drop the carry rather
       // than letting it bank during the wait, or a network stall of two
       // seconds would be followed by a hundred characters appearing at once.
-      if (shown >= buffered.length) carry = 0;
-      if (done && shown >= buffered.length) resolve();
+      if (shown >= text.length) carry = 0;
+      if (done && shown >= text.length) resolve();
       else requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   });
 
   await pump;
-  bubble.textContent = buffered;
-  return buffered;
+  const said = scrub(buffered);
+  bubble.textContent = said;
+  return said;
 }

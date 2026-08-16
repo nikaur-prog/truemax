@@ -177,7 +177,14 @@ export async function POST(request: Request): Promise<Response> {
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
+        // no-transform is what actually makes this a stream in production.
+        // Without it the CDN compresses the response, and compression buffers:
+        // every chunk sits in the compressor until the model finishes, and the
+        // whole answer lands on the client at once — which on screen looks
+        // like a long silence and then a wall of text. X-Accel-Buffering says
+        // the same thing to any nginx-style proxy in between.
+        "Cache-Control": "no-store, no-transform",
+        "X-Accel-Buffering": "no",
         "X-Max-Remaining": String(typeof remaining === "number" ? remaining : MAX_DAILY_MESSAGES),
       },
     });
