@@ -36,6 +36,9 @@ export default defineConfig({
         // anything and by an app-store reviewer following a bare URL.
         privacy: resolve(import.meta.dirname, "privacy.html"),
         terms: resolve(import.meta.dirname, "terms.html"),
+        // The logo pack has been sitting in public/brand since launch with
+        // nothing linking to it. This is the page that hands it over.
+        brand: resolve(import.meta.dirname, "brand.html"),
       },
     },
   },
