@@ -27,7 +27,12 @@
 
 const DB_NAME = "truemax";
 const STORE = "scanPhotos";
-const DB_VERSION = 1;
+// MUST match engine/faceLibrary.ts, which shares this database. Opening an
+// IndexedDB that already sits at a higher version throws VersionError, so if
+// these two ever disagree, whichever module opens second silently loses its
+// feature — thumbnails vanish, or the face library does, depending on load
+// order. Bumped to 2 when the library was added.
+const DB_VERSION = 2;
 
 // Long edge of the stored thumbnail, in pixels.
 const THUMB = 320;
@@ -48,7 +53,13 @@ function open(): Promise<IDBDatabase | null> {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
+        // Both stores, because either module can be the one that triggers the
+        // upgrade depending on which page loaded. Creating only your own store
+        // leaves the other module opening a database at the right version with
+        // its store missing, which fails in a much more confusing way than a
+        // version mismatch does.
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+        if (!db.objectStoreNames.contains("faceLibrary")) db.createObjectStore("faceLibrary");
       };
       req.onsuccess = () => resolve(req.result);
       // Private browsing, disabled storage, quota refusal. All of these mean

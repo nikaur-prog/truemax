@@ -146,6 +146,39 @@ body {
 .drop b { display: block; font-size: 15px; font-weight: 600; margin-bottom: 5px; }
 .drop span { font-size: 12.5px; color: var(--mut); }
 
+/* ---------------------------------------------------------------------------
+   The saved-face strip on /quick.
+
+   A horizontal rail rather than a grid: a filming session accumulates faces
+   and the newest is the one wanted, so scrolling sideways from the front beats
+   a block that grows downward and pushes the camera off screen.
+   --------------------------------------------------------------------------- */
+.q-lib { margin: 18px auto 0; max-width: 560px; text-align: left; }
+.q-lib-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.q-lib-head .linkish { font-size: 11.5px; }
+.q-lib-strip {
+  display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain;
+  padding-bottom: 6px; scrollbar-width: thin;
+}
+.q-lib-item { position: relative; flex: none; }
+.q-lib-load {
+  display: block; padding: 0; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); cursor: pointer; overflow: hidden; line-height: 0;
+}
+.q-lib-load img { width: 64px; height: 78px; object-fit: cover; display: block; }
+.q-lib-load b {
+  display: block; padding: 3px 0; font-size: 11px; line-height: 1.2;
+  text-align: center; color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.q-lib-load:hover { border-color: var(--acc); }
+.q-lib-del {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px;
+  border-radius: 99px; border: 1px solid var(--line); background: var(--card);
+  color: var(--mut); font-size: 13px; line-height: 1; cursor: pointer; padding: 0;
+}
+.q-lib-del:hover { color: var(--warm, #c07a4a); border-color: var(--warm, #c07a4a); }
+.q-lib-note { margin: 6px 0 0; font-size: 11px; color: var(--mut); }
+
 /* Capture tips: contained pills rather than loose centred text. Four short
    instructions floating unattached in the middle of a page read as leftover
    copy; the same four inside bordered chips read as a checklist. */

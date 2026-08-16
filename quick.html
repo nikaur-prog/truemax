@@ -47,6 +47,19 @@
         </div>
         <p class="paste-hint" id="q-paste-hint" hidden></p>
         <input type="file" id="q-file" accept="image/*" hidden />
+        <!-- Faces kept from previous sessions, so a take can be re-shot
+             without finding and re-uploading the photograph again. Stays
+             hidden until there is something in it — an empty strip on the
+             capture screen is a permanent reminder of a feature you have not
+             used. Filled by src/quick.ts. -->
+        <section class="q-lib hidden" id="q-lib">
+          <div class="q-lib-head">
+            <span class="q-klabel">SAVED FACES</span>
+            <button type="button" class="linkish" id="q-lib-clear">Clear all</button>
+          </div>
+          <div class="q-lib-strip" id="q-lib-strip"></div>
+          <p class="q-lib-note">Kept on this device only, never uploaded. Tap one to load it without re-scanning.</p>
+        </section>
         <p class="engine-status" id="q-engine">Loading analysis engine…</p>
       </section>
 
