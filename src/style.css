@@ -2711,6 +2711,27 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    an image is the fastest way onto a camera roll and from there into CapCut.
    --------------------------------------------------------------------------- */
 .brand-lede { font-size: 15px; line-height: 1.65; }
+
+/* The one asset most people came for, given its own room above everything
+   else. Two shots side by side: the file, and the circle the platforms will
+   crop it to, so the safe-radius decision is visible rather than claimed. */
+.brand-hero {
+  display: grid; gap: 20px; align-items: center; margin: 22px 0 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 720px) { .brand-hero { grid-template-columns: 300px minmax(0, 1fr); } }
+.brand-hero-shot { display: flex; gap: 12px; align-items: center; }
+.brand-hero-shot img {
+  width: 50%; max-width: 150px; height: auto; border-radius: 20px; display: block;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .14);
+}
+.brand-hero-shot img.brand-hero-circle { border-radius: 50%; box-shadow: none; }
+.brand-hero-copy h2 { margin: 4px 0 8px; }
+.brand-hero-copy p { font-size: 13.5px; line-height: 1.65; margin: 0 0 10px; }
+.brand-hero-how { color: var(--mut); }
+.brand-hero-copy .btn { display: inline-block; text-decoration: none; margin-top: 4px; }
+.brand-rule { border: none; border-top: 1px solid var(--line); margin: 30px 0 18px; }
+.brand-rest { font-size: 13px; color: var(--mut); margin: 0 0 18px; }
 .brand-tip {
   margin: 20px 0 28px; padding: 14px 16px;
   border: 1px solid var(--line); border-left: 3px solid var(--acc);
