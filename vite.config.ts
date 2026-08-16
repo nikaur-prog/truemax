@@ -2,6 +2,16 @@ import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
 export default defineConfig({
+  // The build a browser is actually running, stamped into the bundle and shown
+  // in the footer. Twice now a fix has been reported as missing when it was
+  // deployed and the browser was holding an older bundle, and there was no way
+  // to tell those two cases apart except by reading minified JavaScript off
+  // production. Seven characters in the footer answers it from a screenshot.
+  define: {
+    __BUILD__: JSON.stringify(
+      (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7) || "dev",
+    ),
+  },
   build: {
     target: "es2020",
     rollupOptions: {

@@ -11,3 +11,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// The short commit this bundle was built from, substituted by vite.config.ts
+// at build time. "dev" when built outside Vercel.
+declare const __BUILD__: string;

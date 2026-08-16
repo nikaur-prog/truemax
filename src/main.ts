@@ -132,6 +132,11 @@ async function refreshMaxAccess(): Promise<void> {
 }
 
 markPlatform();
+// Which build this browser is running, in the footer. Diagnostic only, and it
+// exists because "the fix is not showing" and "the fix is not deployed" look
+// identical from a screenshot otherwise.
+const stamp = document.getElementById("build-stamp");
+if (stamp) stamp.textContent = __BUILD__;
 track("visit");
 
 if (import.meta.env.DEV) {
