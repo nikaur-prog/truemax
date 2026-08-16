@@ -16,6 +16,7 @@ import { renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { ensureScanAllowed, recordScanRun } from "./ui/scanGate.js";
+import { setMemberPricing } from "./engine/scanPricing.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -99,6 +100,9 @@ async function refreshMaxAccess(): Promise<void> {
       loadIsAdmin().catch(() => false),
     ]);
     setMaxAccess(hasMaxAccess(entitlement) || admin);
+    // Which of the two scan prices this account is quoted, everywhere it is
+    // quoted. A live subscription of any tier is a member.
+    setMemberPricing(tierOf(entitlement) !== "free");
     setDepth(
       depthFor({ entitlement, scanCount, credits, admin }),
       freeScansLeft({ entitlement, scanCount }),
@@ -119,6 +123,10 @@ async function refreshMaxAccess(): Promise<void> {
     // retry — where the paid product handed to everybody during an outage is
     // not.
     setMaxAccess(false);
+    // The standard price, for the same reason: quoting the member price to
+    // somebody we could not confirm is a member sets up a charge that does not
+    // match what they were shown.
+    setMemberPricing(false);
     setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
