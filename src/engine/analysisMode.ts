@@ -1,4 +1,5 @@
 import type { Report, Sex } from "./types.js";
+import { statedPct } from "./precision.js";
 
 // ---------------------------------------------------------------------------
 // How much of the analysis a person wants to see.
@@ -107,9 +108,12 @@ export interface BasicScore {
 }
 
 export function basicScores(report: Report): BasicScore[] {
+  // Stated to the nearest five, like every other percentile on screen. See
+  // statedPct in ui/templates.ts: a hundred-person reference set cannot
+  // resolve a single point, and this grid is the most-read surface in the app.
   const pct = (key: string, fallback: number): number => {
     const region = report.regions.find((r) => r.region === key);
-    return Math.round(region ? region.percentile : fallback);
+    return statedPct(region ? region.percentile : fallback);
   };
   // Dimorphism is the one pillar whose NAME depends on the reference
   // population. Calling a woman's score "masculinity" would be describing the
@@ -121,7 +125,7 @@ export function basicScores(report: Report): BasicScore[] {
   // asks about most after the jaw — it belongs in the short list, not three
   // taps deep in the full breakdown.
   return [
-    { label: "Overall", value: Math.round(report.overallPercentile) },
+    { label: "Overall", value: statedPct(report.overallPercentile) },
     { label: "Sharpness", value: pillarPct(report, "Angularity") },
     { label: dimorphism, value: pillarPct(report, "Dimorphism") },
     { label: "Eyes", value: pct("eyes", 50) },
@@ -135,7 +139,7 @@ export function basicScores(report: Report): BasicScore[] {
 // on the same scale the rest of the app uses rather than inventing one.
 function pillarPct(report: Report, pillar: "Harmony" | "Angularity" | "Dimorphism" | "Features"): number {
   const score = report.pillars[pillar] ?? 5;
-  return Math.max(1, Math.min(99, Math.round(score * 10)));
+  return statedPct(score * 10);
 }
 
 // ---------------------------------------------------------------------------

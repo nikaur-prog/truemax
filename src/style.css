@@ -2662,6 +2662,48 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .basic-note.pose-warn { color: var(--warm, #c07a4a); }
 
 /* ---------------------------------------------------------------------------
+   Measurements excluded for being anatomically impossible.
+
+   Warm rather than red throughout: nothing has gone wrong with the person's
+   face or with the analysis, a landmark is simply in the wrong place, and the
+   fix takes ten seconds. Styled as a note, not an error state.
+   --------------------------------------------------------------------------- */
+.impbanner {
+  margin: 14px 0; padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--warm, #c07a4a) 40%, var(--line));
+  border-left-width: 3px; border-radius: 14px;
+  background: color-mix(in srgb, var(--warm, #c07a4a) 6%, var(--card));
+}
+.impbanner b { display: block; font-size: 14px; font-weight: 620; margin-bottom: 4px; }
+.impbanner p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--mut); }
+.impbanner .linkish { font-size: 12.5px; }
+
+.metric.implausible .mrow b { color: var(--mut); }
+.mscore-skip {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  color: var(--warm, #c07a4a);
+}
+.mimplausible {
+  margin: 6px 0 0; font-size: 12px; line-height: 1.5;
+  color: var(--warm, #c07a4a);
+}
+
+/* Measured but unscored: reliability below the floor. Quiet, not alarming —
+   nothing is broken, the measurement simply earns no weight. */
+.indtag {
+  margin-left: 7px; padding: 1px 6px; border-radius: 99px;
+  border: 1px solid var(--line); background: var(--bg);
+  font-family: var(--mono); font-size: 9px; letter-spacing: .06em;
+  font-weight: 400; color: var(--mut); vertical-align: 1px;
+}
+.metric.indicative .mrow b { color: var(--mut); }
+.metric.indicative .rangebar { opacity: .55; }
+.indnote {
+  margin: 10px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--mut);
+  padding-top: 9px; border-top: 1px dashed var(--line);
+}
+
+/* ---------------------------------------------------------------------------
    The weekly scan gate: a countdown to the next free scan, with the one-time
    credit checkout as the way to skip the wait.
    --------------------------------------------------------------------------- */

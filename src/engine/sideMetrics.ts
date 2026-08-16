@@ -158,6 +158,28 @@ export function computeSideMetrics(p: SidePoints, faceDir: number): Record<strin
 
 const S = (def: MetricDef) => def;
 
+// ---------------------------------------------------------------------------
+// On the `plausible` bounds below, and on which metrics do not have them.
+//
+// Seven of these carry hard anatomical or geometric limits. They exist because
+// the thirteen side points are placed by hand, and a misplaced point does not
+// produce an unusual measurement — it produces an impossible one, which the
+// engine then scores as an extreme face. A live scan measured a ramus the same
+// length as the mandibular body and was told its jaw was 2 out of 10.
+//
+// The bounds sit far outside the reference spread on purpose. They are not a
+// second opinion about what a good face is; they only answer "could a human
+// head produce this number at all". Every one is justified in its own comment
+// from anatomy or from the construction's own geometry.
+//
+// The rest are deliberately unguarded: submentalCervical, chinProjection,
+// nasalProjection, upperLipELine, lowerLipELine, foreheadSlope and
+// midfaceRatioSide are custom constructions whose own norms are, by the note
+// above, a centre of gravity from five profiles of one person. Inventing a
+// limit for a quantity whose ordinary range nobody has measured would be
+// guessing twice and calling it a check.
+// ---------------------------------------------------------------------------
+
 // Reference distributions seeded from published cephalometric norms
 // (Legan–Burstone, Ricketts, Arnett). Side view is measured on real anatomy
 // rather than a mesh approximation, so these track literature more closely
@@ -204,12 +226,24 @@ const ALL_SIDE_METRICS: MetricDef[] = [
     view: "side", region: "jaw", pillar: "Angularity", weight: 1.4,
     direction: "band", fixability: 0.15,
     dist: { male: { mean: 125, sd: 7, ideal: 119 }, female: { mean: 126, sd: 7, ideal: 122 } },
+    // Mandibular angle. Square jaws reach the high 90s, very obtuse ones the
+    // mid 140s. Outside 90–155 the vertex is not on the jaw corner.
+    plausible: [90, 155],
+    points: ["gonion", "condylion", "menton"],
   }),
   S({
     id: "ramusMandible", name: "Ramus : mandible ratio", unit: "", decimals: 2,
     view: "side", region: "jaw", pillar: "Harmony", weight: 0.9,
     direction: "band", fixability: 0,
     dist: { male: { mean: 0.72, sd: 0.08, ideal: 0.75 }, female: { mean: 0.72, sd: 0.08, ideal: 0.73 } },
+    // The ramus is always the shorter arm: roughly 50mm of ramus against 80mm
+    // of mandibular body, so real faces sit near 0.5–0.8. At 0.95 the two arms
+    // are nearly equal, which no mandible is — it means gonion has been placed
+    // down the neck or forward along the jawline, lengthening the top arm and
+    // shortening the bottom one at the same time. This is the exact failure
+    // that put a 1.00 on a live scan and dragged a whole jaw score with it.
+    plausible: [0.35, 0.95],
+    points: ["gonion", "condylion", "menton"],
   }),
   S({
     id: "submentalCervical", name: "Submental cervical angle", unit: "°", decimals: 1,
@@ -243,24 +277,36 @@ const ALL_SIDE_METRICS: MetricDef[] = [
     view: "side", region: "proportions", pillar: "Harmony", weight: 1.2,
     direction: "band", fixability: 0,
     dist: { male: { mean: 167, sd: 5, ideal: 170 }, female: { mean: 166, sd: 5, ideal: 169 } },
+    // Glabella–subnasale–pogonion. Strongly convex profiles reach the low 150s
+    // and concave ones approach straight; the construction cannot exceed 180.
+    plausible: [140, 180],
+    points: ["glabella", "subnasale", "pogonion"],
   }),
   S({
     id: "totalFacialConvexity", name: "Total facial convexity", unit: "°", decimals: 1,
     view: "side", region: "proportions", pillar: "Harmony", weight: 0.9,
     direction: "band", fixability: 0,
     dist: { male: { mean: 138, sd: 6, ideal: 140 }, female: { mean: 137, sd: 6, ideal: 139 } },
+    plausible: [105, 175],
+    points: ["glabella", "pronasale", "pogonion"],
   }),
   S({
     id: "nasofrontalAngle", name: "Nasofrontal angle", unit: "°", decimals: 1,
     view: "side", region: "nose", pillar: "Features", weight: 1.0,
     direction: "band", fixability: 0,
     dist: { male: { mean: 133, sd: 7, ideal: 130 }, female: { mean: 136, sd: 7, ideal: 134 } },
+    // Deep-set brow to shallow nasion spans roughly 110–160 in real profiles.
+    plausible: [95, 170],
+    points: ["nasion", "glabella", "pronasale"],
   }),
   S({
     id: "nasolabialAngle", name: "Nasolabial angle", unit: "°", decimals: 1,
     view: "side", region: "nose", pillar: "Features", weight: 1.0,
     direction: "band", fixability: 0,
     dist: { male: { mean: 97, sd: 8, ideal: 95 }, female: { mean: 103, sd: 8, ideal: 103 } },
+    // A markedly downturned tip sits near 70, a strongly upturned one near 130.
+    plausible: [55, 145],
+    points: ["subnasale", "pronasale", "labialeSuperius"],
   }),
   S({
     id: "nasalProjection", name: "Nasal projection", unit: "%", decimals: 1,
@@ -285,6 +331,11 @@ const ALL_SIDE_METRICS: MetricDef[] = [
     view: "side", region: "proportions", pillar: "Harmony", weight: 0.9,
     direction: "band", fixability: 0.15,
     dist: { male: { mean: 0.66, sd: 0.05, ideal: 0.67 }, female: { mean: 0.65, sd: 0.05, ideal: 0.65 } },
+    // subnasale→menton over nasion→menton. Subnasale lies between the other
+    // two, so the ratio is a proper fraction by construction: at or above 1 the
+    // points are out of order, not the face unusual.
+    plausible: [0.35, 0.9],
+    points: ["subnasale", "menton", "nasion"],
   }),
   S({
     id: "foreheadSlope", name: "Forehead slope", unit: "°", decimals: 1,

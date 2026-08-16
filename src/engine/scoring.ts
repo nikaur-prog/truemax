@@ -147,6 +147,23 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
   const d = def.dist[sex];
   const z = (value - d.mean) / d.sd;
 
+  // Anatomically impossible readings are placement errors, not faces.
+  //
+  // The side view is thirteen points a person drags into position by hand, and
+  // it is the only input in this engine somebody can get wrong. When a point
+  // lands in the wrong place the measurement built on it does not become
+  // unusual, it becomes impossible: a ramus the same length as the mandibular
+  // body, a gonial angle no jaw has. Scoring that as an extreme face is the
+  // engine reporting a number it should be rejecting, and it lands as "your
+  // jaw is 2/10" when the truth is "the jaw corner is in the wrong place".
+  //
+  // So it is excluded from every aggregate (see effWeight) and the UI is told
+  // which points to re-check. Bounds are far outside the reference spread and
+  // are only set where anatomy or geometry gives a defensible limit.
+  const implausible = def.plausible
+    ? value < def.plausible[0] || value > def.plausible[1] || !Number.isFinite(value)
+    : !Number.isFinite(value);
+
   let zEff: number;
   switch (def.direction) {
     case "higher":
@@ -187,6 +204,7 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
     markerPct: Math.round(phi(z) * 1000) / 10,
     score: zToScore(zEff),
     idealRange,
+    ...(implausible ? { implausible: true } : {}),
   };
 }
 
@@ -300,6 +318,11 @@ function normalizeAgg(
 // A metric only influences the score in proportion to how reproducibly it
 // measures the same face across different photos (see reliability.ts).
 function effWeight(m: ScoredMetric): number {
+  // An impossible reading carries no weight anywhere. Zero rather than reduced:
+  // there is no partial credit in "that landmark is in the wrong place", and a
+  // reduced weight would still drag the aggregate toward a number nobody
+  // measured.
+  if (m.implausible) return 0;
   return m.def.weight * reliabilityOf(m.def.id);
 }
 

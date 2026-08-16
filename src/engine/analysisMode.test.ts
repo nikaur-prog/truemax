@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { basicScores, verdictFor, verdictForPercentile } from "./analysisMode.js";
 import type { VerdictTone } from "./analysisMode.js";
 import type { Report } from "./types.js";
+import { statedPct } from "./precision.js";
 
 const report = (over: Partial<Report> = {}): Report =>
   ({
@@ -110,9 +111,27 @@ test("every mode reads the same underlying score", () => {
   // The invariant the whole feature rests on: change the report, and every mode
   // moves together. If these ever disagree, the app is showing one face two
   // different answers.
+  //
+  // Basic states percentiles to the nearest five (see engine/precision.ts), so
+  // the check is that it reports the SAME number at the stated resolution —
+  // not that it reports a different one.
   const strong = report({ overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
   assert.ok(["Mogger", "Marlon level"].includes(verdictFor(strong).word));
-  assert.equal(basicScores(strong)[0].value, 91);
+  assert.equal(basicScores(strong)[0].value, statedPct(91));
+  assert.ok(Math.abs(basicScores(strong)[0].value - 91) <= 2.5, "stating must not move the number");
+});
+
+test("stating a percentile coarsely never reorders two faces", () => {
+  // Coarse is fine; wrong is not. A rounding that could report the better face
+  // as the worse one would be a different answer, not a rounder one.
+  for (let a = 0; a <= 100; a += 1) {
+    for (const gap of [6, 11, 20]) {
+      const b = Math.min(100, a + gap);
+      const sa = basicScores(report({ overallPercentile: a }))[0].value;
+      const sb = basicScores(report({ overallPercentile: b }))[0].value;
+      assert.ok(sb >= sa, `stating inverted ${a} and ${b}`);
+    }
+  }
 });
 
 test("the percentile entry point agrees with the report entry point", () => {

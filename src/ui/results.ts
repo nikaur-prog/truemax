@@ -3,6 +3,7 @@ import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
+import { SIDE_POINTS } from "../engine/sideMetrics.js";
 import { hasHistory, openHistory } from "./historyView.js";
 import { regionMatches } from "../engine/celebs.js";
 import { curveLegend, curveSVG } from "./curve.js";
@@ -19,6 +20,8 @@ import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
+import { REFERENCE_N, statedPct } from "../engine/precision.js";
+import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
@@ -343,7 +346,7 @@ function sideVerdictHTML(report: Report): string {
 function sideBasicHTML(report: Report): string {
   const regions = report.regions.filter((r) => r.metrics.length);
   const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
-  const lead = Math.round(report.overallPercentile);
+  const lead = statedPct(report.overallPercentile);
   return `<div class="basic">
     <div class="basic-lead">
       <span class="klabel">SIDE PROFILE</span>
@@ -354,8 +357,8 @@ function sideBasicHTML(report: Report): string {
         .map(
           (r) => `<div class="basic-cell">
         <span>${REGION_NAMES[r.region].toUpperCase()}</span>
-        <b>${Math.round(r.percentile)}</b>
-        <i style="width:${Math.round(r.percentile)}%"></i>
+        <b>${statedPct(r.percentile)}</b>
+        <i style="width:${statedPct(r.percentile)}%"></i>
       </div>`,
         )
         .join("")}
@@ -635,6 +638,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
         <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
       </div>
       ${provenance(measured)}
+      ${implausibleBanner(report)}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
@@ -694,6 +698,7 @@ function wireSideNav(): void {
     if (b) b.onclick = fn;
   };
   on("sn-redo", () => ctx?.onRedoSide?.());
+  on("imp-redo", () => ctx?.onRedoSide?.());
   on("sn-retake", () => ctx?.onSideProfile?.());
   on("sn-plan", () => select("improve"));
   on("sn-history", () => openHistory());
@@ -727,9 +732,17 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
       <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
       ${r.metrics
         .map(
-          (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
-        <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-        <div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+          (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}${m.implausible ? " implausible" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
+        <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}${
+          m.implausible
+            ? `<span class="mscore mscore-skip">not scored</span>`
+            : `<span class="mscore">${m.score.toFixed(1)}</span>`
+        }</span></div>
+        ${
+          m.implausible
+            ? `<p class="mimplausible">No head measures this. Re-check ${pointLabels(m)} and this will score.</p>`
+            : `<div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div>`
+        }</div>`,
         )
         .join("")}
       ${
@@ -743,6 +756,82 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
       ${celebCard(matches)}
     </div>
   </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Measurements that are shown but do not count.
+//
+// reliability.ts scores every metric on how much of its variance is real
+// signal rather than photo-to-photo noise, and scoring multiplies each weight
+// by that number — so a metric at 0.00 moves nothing. Ten of them are in that
+// state, including fWHR, which is the single most talked-about number in this
+// corner of the internet.
+//
+// The file has always said those are "displayed, flagged as indicative". The
+// display was real; the flag was never built, so for months the app showed a
+// fWHR percentile in the same type, with the same bar, as a measurement that
+// actually moved the score. On a product whose entire pitch is showing the
+// working, silently mixing decorative numbers into real ones is the worst
+// available bug. This is that promised flag.
+// ---------------------------------------------------------------------------
+function isIndicative(m: ScoredMetric): boolean {
+  return reliabilityOf(m.def.id) < RELIABLE_MIN;
+}
+
+// One sentence per region rather than a tooltip per row, because "not scored"
+// on its own raises a question the person then has to go looking for.
+function indicativeNote(metrics: ScoredMetric[]): string {
+  const skipped = metrics.filter(isIndicative);
+  if (!skipped.length) return "";
+  const names = skipped.map((m) => m.def.name.toLowerCase());
+  const list = names.length === 1
+    ? names[0]
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `<p class="indnote">${
+    names.length === 1 ? `${list} is measured but not scored` : `${list} are measured but not scored`
+  }. We tested each measurement across many photos of the same people, and ${
+    names.length === 1 ? "this one moves" : "these move"
+  } as much between two photos of one face as between two different faces. So ${
+    names.length === 1 ? "it is shown" : "they are shown"
+  } for interest and given no weight. Showing you the number and hiding that would be the dishonest option.</p>`;
+}
+
+function indicativeTag(m: ScoredMetric): string {
+  if (!isIndicative(m)) return "";
+  return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people — so it is shown and not scored.">not scored</span>`;
+}
+
+// Told at the top of the profile, not left to be discovered halfway down a
+// measurement list. An excluded measurement is the one case where the fix is
+// free and takes ten seconds, so the offer to re-verify goes with it.
+function implausibleBanner(report: Report): string {
+  const bad = report.regions.flatMap((r) => r.metrics).filter((m) => m.implausible);
+  if (!bad.length) return "";
+  const points = [...new Set(bad.flatMap((m) => m.def.points ?? []))]
+    .map((id) => SIDE_POINTS.find((p) => p.id === id)?.label.toLowerCase())
+    .filter(Boolean);
+  const redo = ctx?.onRedoSide
+    ? ` <button class="linkish" id="imp-redo">Re-check the points</button>`
+    : "";
+  return `<div class="impbanner">
+    <b>${bad.length} measurement${bad.length === 1 ? "" : "s"} left out of your score</b>
+    <p>${bad.map((m) => m.def.name).join(", ")} came back outside what a human head can measure, which means a landmark is in the wrong place rather than your profile being unusual. ${
+      points.length ? `Worth checking: ${points.join(", ")}.` : ""
+    } Nothing here counted against you.${redo}</p>
+  </div>`;
+}
+
+// The landmarks behind an implausible measurement, in the words the verify
+// screen used when the person placed them. "Re-check the jaw corner" is a
+// thing somebody can act on; "ramusMandible out of range" is not.
+function pointLabels(m: ScoredMetric): string {
+  const ids = m.def.points ?? [];
+  const names = ids
+    .map((id) => SIDE_POINTS.find((p) => p.id === id)?.label.toLowerCase())
+    .filter(Boolean) as string[];
+  if (!names.length) return "the points on this measurement";
+  if (names.length === 1) return `the ${names[0]}`;
+  return `the ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 // One renderer for the comparison card, so the front regions and the profile
@@ -931,11 +1020,12 @@ function showRegion(id: RegionId): void {
           <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
-              (m, i) => `<div class="metric tappable" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
-            <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+              (m, i) => `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+            <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
             )
             .join("")}
+          ${indicativeNote(r.metrics)}
           ${
             // The overlay is the credibility feature and it was invisible: a
             // 9px glyph at 55% opacity is not an affordance. Say it in words.
@@ -1312,6 +1402,7 @@ function basicHTML(): string {
         .join("")}
     </div>
     <p class="basic-note">Every number here is a percentile: where you sit against the reference population, not a mark out of a hundred. The full mode shows the ${ctx!.report.metrics.length} measurements these come from.</p>
+    <p class="basic-note">Stated to the nearest 5, and that is deliberate. The reference set is about ${REFERENCE_N} people per sex, which can place you in a band but cannot tell 43 from 44. Anyone quoting you a decimal place off a sample this size is making it up.</p>
     ${poseCaveat()}
   </div>`;
 }
