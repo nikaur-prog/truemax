@@ -16,7 +16,12 @@
 // and this file needs editing.
 // ---------------------------------------------------------------------------
 
-export const SCAN_PRICE_STANDARD = "$6.99";
+// These two must match the Stripe prices the checkout resolves, and the pair
+// is chosen rather than arbitrary: $2.99 is half of $5.99, so "members pay
+// half" is literally true, and two extra scans ($11.98) cost the same as a
+// month of Max ($11.99), which is an argument the product can make in one
+// line without inventing anything.
+export const SCAN_PRICE_STANDARD = "$5.99";
 export const SCAN_PRICE_MEMBER = "$2.99";
 
 // Whether this account holds a live subscription of any tier. Defaults to
