@@ -2,7 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "./geometry.js";
 import { METRICS, computeRawMetrics } from "./metrics.js";
 import { AGG_NORM } from "./aggNorm.js";
-import { reliabilityOf } from "./reliability.js";
+import { RELIABLE_MIN, reliabilityOf } from "./reliability.js";
 import { extractShape, shapeZScore } from "./shape.js";
 import { SIDE_METRICS, computeSideMetrics, sidePointIntegrityIssues } from "./sideMetrics.js";
 import type { SidePoints } from "./sideMetrics.js";
@@ -243,39 +243,56 @@ function tailZ(z: number, q: number[], last: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Measurement-noise shrinkage.
+// Measurement-noise shrinkage: RETIRED, and this is why.
 //
-// A single capture is a NOISY reading of a face, and this scale's noise is
-// measured: two photographs of the same unchanged person differ in overall
-// score with an SD of 1.32 points, so one photograph carries a noise SD of
-// 1.32/sqrt(2) = 0.93 points, or 0.72 sigma in z units at 1.3 points per sigma.
+// It compressed every aggregate toward the median by a factor of 0.66, derived
+// as the reliability ratio k = var(true)/(var(true)+var(noise)) from a measured
+// single-photo noise of 0.72 sigma. The statistics were sound. The consequence
+// was not, and the consequence is what shipped:
 //
-// That noise is not neutral. The scoring penalises deviation from ideal in
-// BOTH directions, so noise can only push a score down — a webcam capture of a
-// good-looking face reads as a worse face, systematically. Live testing showed
-// exactly that: a room of ordinary, decent-looking people all landing mid-3s
-// to low-4s, which is not what a median-anchored scale should say about a
-// median room.
+//   reference percentile   score it could produce
+//   50th                   5.00
+//   90th                   6.10
+//   95th                   6.41
+//   99th                   7.00
+//   99.9th                 7.65
 //
-// The statistically correct estimate of a true z from one noisy reading
-// shrinks it toward the population centre by the reliability ratio
+// The entire top one per cent of faces was squeezed into 0.65 points. Four
+// photographs of visibly, increasingly good-looking men scored 4.5, 4.2, 4.3 and
+// 4.3 — a 0.3-point band with the ordering wrong. A scale that cannot separate
+// the people its audience most wants separated is not being conservative, it is
+// being useless, and it reads to a viewer as the instrument being invented.
 //
-//   k = var(true) / (var(true) + var(noise)) = 1 / (1 + 0.72^2) = 0.66
+// It also silently broke the product's own arithmetic. Every piece of copy here
+// describes MEASURED POSITION — "5.0 is the exact middle face", "8.0 is about 1
+// in 100" — and aggregateScoreToPercentile inverts the raw 5 + 1.3z curve. The
+// forward path applied the shrink; the inverse never undid it. The two
+// disagreed by the shrink factor, so an 8.0 was advertised as 1 in 91 while
+// actually requiring the 99.976th percentile, about 1 in 4,242. Nobody could
+// reach the number the education screen promised was reachable.
 //
-// which is regression to the mean, applied on purpose. The median is
-// untouched (0.66 x 0 = 0). Both tails compress symmetrically: a raw 3.4
-// becomes ~4.1, and a raw 8.0 becomes ~7.0 — the same honesty in both
-// directions, because a single webcam photo can no more prove "top 1%" than
-// it can prove "bottom 10%". Percentiles shrink toward 50 by the same factor
-// through phi(), so the score and the percentile keep telling one story.
+// The honest reading of the original problem is that shrinkage was the wrong
+// instrument for it. The symptom that motivated it — "a room of ordinary,
+// decent-looking people all landing mid-3s to low-4s" — is a CENTRING error:
+// everybody too low. Shrinking toward the median does lift the bottom, but only
+// as a side effect of crushing everything, and it pays for that lift by
+// destroying the top. A mean shift wants the reference re-centred, not the
+// spread compressed.
 //
-// What this deliberately does NOT touch: the per-metric evidence rows, which
-// stay raw for the same reason they ignore the display floor — they are the
-// evidence the plan ranks from, and evidence should stay sharp. And the
-// TREND across scans still accumulates precision the single reading lacks,
-// which is the honest version of "scan weekly": more readings, less shrink
-// between where you started and where you are.
-export const SHRINK = 0.66;
+// The measurement noise is real and is still disclosed, in the three places it
+// was always disclosed and where a reader can actually see it:
+//
+//   - PHOTO_VARIANCE (+/-1.2) and varianceLine(), printed in the primer and
+//     under the score: "one photograph is not a verdict"
+//   - effWeight(), which already multiplies each metric by its measured
+//     reliability, so noisy metrics move the number less
+//   - the rescan delta copy, which says outright when a change is smaller than
+//     the instrument can resolve
+//
+// Three visible admissions of noise are worth more than a fourth invisible one
+// that quietly rewrites the scale. So the score is measured position again, and
+// 5 + SCORE_SCALE * z means what every sentence in the product says it means.
+export const SHRINK = 1;
 
 function normalizeAgg(
   z: number,
@@ -314,6 +331,36 @@ function normalizeAgg(
   }
   return SHRINK * probit(clamp(pct, 0.001, 0.999));
 }
+
+// How much of a region's score is signal rather than noise.
+//
+// Weighted by the same declared weights the aggregate uses, so this answers the
+// question actually being asked: of the evidence that PRODUCED this number, how
+// much of it holds still between two photographs of one face.
+//
+// The nose is the case that forced this. All three of its metrics measure below
+// 0.15 and nasalIndex is exactly 0.00 — two photographs of one person disagree
+// about it as much as two different people do — and yet a nose score appeared on
+// a headline card with the same weight and typography as proportions, whose
+// metrics average 0.61. effWeight already keeps that out of the overall number.
+// Nothing kept it away from the reader, who has no way to tell the two apart.
+export function regionReliability(ms: ScoredMetric[]): number {
+  let num = 0;
+  let den = 0;
+  for (const m of ms) {
+    if (m.implausible) continue;
+    const w = m.def.weight;
+    num += w * reliabilityOf(m.def.id);
+    den += w;
+  }
+  return den > 0 ? num / den : 0;
+}
+
+// Below this, a region's score is presented as indicative rather than as a
+// number. Set at the product-wide RELIABLE_MIN rather than the stricter bar the
+// reel uses: a card can carry a caveat right next to it and can be tapped for
+// the detail underneath, which is exactly what a published video cannot do.
+export const REGION_RELIABLE_MIN = RELIABLE_MIN;
 
 // A metric only influences the score in proportion to how reproducibly it
 // measures the same face across different photos (see reliability.ts).
@@ -379,6 +426,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
       percentile: Math.round(phi(rz) * 1000) / 10,
       z: rz,
       metrics: ms,
+      reliability: regionReliability(ms),
     };
   });
 
@@ -562,6 +610,7 @@ export function mergeReports(front: Report, side: Report): Report {
       percentile: Math.round(phi(rz) * 1000) / 10,
       z: rz,
       metrics: [...f.metrics, ...r.metrics],
+      reliability: regionReliability([...f.metrics, ...r.metrics]),
     });
   }
 

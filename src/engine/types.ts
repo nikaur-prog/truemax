@@ -72,6 +72,18 @@ export interface RegionScore {
   // Normalised region aggregate, same distinction as Report.overallZ.
   z: number;
   metrics: ScoredMetric[];
+  /**
+   * How much of this region's score is signal rather than photo-to-photo noise:
+   * the weighted mean of its metrics' measured reliabilities, 0 to 1.
+   *
+   * It exists because some regions are built almost entirely from measurements
+   * the repo has already established are noise. Every nose metric scores under
+   * 0.15 — nasalIndex is 0.00, meaning two photographs of one person disagree
+   * about it as much as two different people do — yet the nose still printed a
+   * confident score on a headline card. effWeight already stops that reaching
+   * the OVERALL number; nothing stopped it reaching the reader.
+   */
+  reliability: number;
 }
 
 export interface ViewScore {

@@ -1,97 +1,106 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SHRINK, aggregateScoreToPercentile, phi } from "./scoring.js";
+import { aggregateScoreToPercentile } from "./scoring.js";
 import { NOISE } from "./followUp.js";
 
 // ---------------------------------------------------------------------------
-// Measurement-noise shrinkage.
+// The scale's range, and the arithmetic that has to agree with the copy.
 //
-// A single capture is a noisy reading, and the noise on this scale is measured:
-// two photographs of one unchanged face differ with an SD of 1.32 points, so a
-// single reading carries ~0.72 sigma of noise. Crucially that noise is not
-// neutral — scoring penalises deviation from ideal in BOTH directions, so noise
-// can only push a score DOWN. Live testing found the consequence: a room of
-// ordinary, decent-looking people all landing mid-3s, which is not what a
-// median-anchored scale should say about a median room.
+// This file used to pin the properties of a 0.66 measurement-noise shrinkage.
+// That shrinkage has been retired and the reasoning is written out in full in
+// scoring.ts; the short version is that it compressed the entire top one per
+// cent of faces into 0.65 points and silently contradicted every sentence the
+// product prints about what a score means.
 //
-// The fix is the textbook estimate of a true value from one noisy reading:
-// shrink toward the population centre by var(true)/(var(true)+var(noise)).
-// These tests pin the properties that make it honest rather than flattering.
+// What replaces it is the property the product actually promises: the score is
+// MEASURED POSITION. "5.0 is the exact middle face" and "8.0 is about 1 in 100"
+// are claims a reader can check, so the tests check them too — and pin the
+// round trip, because the original defect was that the forward and inverse
+// paths disagreed and nothing noticed for months.
 // ---------------------------------------------------------------------------
 
-// The display path, inverted: what percentile does this score claim to be.
-const pct = (score: number) => aggregateScoreToPercentile(score);
+// Where a face at this population percentile displays, found by inverting the
+// display curve rather than reimplementing it — so the test cannot drift away
+// from the thing it is testing.
+const scoreAtPct = (target: number): number => {
+  let lo = 0.5;
+  let hi = 9.9;
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    if (aggregateScoreToPercentile(mid) < target) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+};
 
-test("the median is exactly untouched", () => {
-  // Shrinking toward the centre must not MOVE the centre. 5.0 stays the 50th
-  // percentile, which is the anchor the whole scale is defined by.
-  assert.ok(Math.abs(pct(5.0) - 50) < 1.5, `5.0 reads as ${pct(5.0)}`);
+test("the median is exactly 5.0", () => {
+  assert.equal(aggregateScoreToPercentile(5.0), 50);
 });
 
-test("the scale stays monotonic after shrinking", () => {
-  // A higher score must always mean a higher percentile. A shrink applied in
-  // the wrong place — after the soft floor instead of before it — could fold
-  // the curve back on itself, and nothing else here would notice.
+test("the scale is monotonic", () => {
   let previous = -1;
-  for (let s = 3.3; s <= 9.5; s += 0.1) {
-    const p = pct(s);
-    assert.ok(p >= previous, `${s.toFixed(1)} -> ${p} went backwards from ${previous}`);
+  for (let s = 3.3; s <= 9.9; s += 0.1) {
+    const p = aggregateScoreToPercentile(Math.round(s * 10) / 10);
+    assert.ok(p >= previous, `score ${s.toFixed(1)} gave ${p}, below the previous ${previous}`);
     previous = p;
   }
 });
 
-test("both tails compress toward the middle, not just the bottom", () => {
-  // The honesty condition, and the answer to "does this pull attractive people
-  // down too". Yes — symmetrically, and on purpose. A single webcam photo can
-  // no more prove "top 1%" than it can prove "bottom 10%", so a scale that
-  // lifted the floor and left the ceiling alone would not be a noise
-  // correction, it would be grade inflation wearing one.
+test("the top of the scale is reachable", () => {
+  // The failure this file exists to prevent from returning. Under the retired
+  // shrinkage a face at the 99th percentile could score at most 7.00 and the
+  // whole top one per cent lived inside 0.65 points — four photographs of
+  // visibly, increasingly good-looking men came back 4.5, 4.2, 4.3, 4.3.
   //
-  // Walks the FORWARD path a real face takes — true population percentile, to
-  // shrunk z, to displayed score — rather than the display inverse, which maps
-  // score to percentile after the shrink and so cannot see it.
-  const probit = (p: number): number => {
-    let lo = -6;
-    let hi = 6;
-    for (let i = 0; i < 80; i++) {
-      const mid = (lo + hi) / 2;
-      if (phi(mid) < p) lo = mid;
-      else hi = mid;
-    }
-    return (lo + hi) / 2;
-  };
-  const scoreAtDisplayPct = (target: number): number => {
-    let lo = 0.5;
-    let hi = 9.9;
-    for (let i = 0; i < 80; i++) {
-      const mid = (lo + hi) / 2;
-      if (aggregateScoreToPercentile(mid) < target) lo = mid;
-      else hi = mid;
-    }
-    return (lo + hi) / 2;
-  };
-  // Where a face at true population percentile P now displays.
-  const scoreAtTruePct = (p: number) => scoreAtDisplayPct(phi(SHRINK * probit(p / 100)) * 100);
+  // 8.0 is the number the education screen names as roughly one in a hundred,
+  // so the 99th percentile has to land on it.
+  const top = scoreAtPct(99);
+  assert.ok(top > 7.8 && top < 8.3, `99th percentile scores ${top.toFixed(2)}, expected ~8.0`);
 
-  // Pre-shrinkage these were 8.02 and 3.61 — one point above and 1.4 below the
-  // median. Both ends must now sit closer to 5.0.
-  const top = scoreAtTruePct(99);
-  const bottom = scoreAtTruePct(2);
-  assert.ok(top < 7.6, `99th percentile scores ${top.toFixed(2)}, ceiling did not come down`);
-  assert.ok(bottom > 3.7, `2nd percentile scores ${bottom.toFixed(2)}, floor did not come up`);
-
-  // Symmetric: neither end may move dramatically further than the other, which
-  // is what would betray a one-sided thumb on the scale.
-  const up = bottom - 3.61;
-  const down = 8.02 - top;
-  assert.ok(Math.min(up, down) > 0.15, `moved ${up.toFixed(2)} up / ${down.toFixed(2)} down`);
+  // And the range has to be usable across its whole length, not just at the
+  // top: a scale where p90 and p99 are neighbours cannot separate the people
+  // this product is for.
+  const p90 = scoreAtPct(90);
+  const p50 = scoreAtPct(50);
+  assert.ok(top - p90 > 1.0, `p90 ${p90.toFixed(2)} and p99 ${top.toFixed(2)} are too close`);
+  assert.ok(p90 - p50 > 1.2, `p50 ${p50.toFixed(2)} and p90 ${p90.toFixed(2)} are too close`);
 });
 
-test("the noise floor moved in step with the shrink", () => {
-  // The one coupling that would silently break everything: shrinking scores
-  // compresses the same-face spread by the same factor, so a follow-up floor
-  // left at the old 1.3 would call genuine progress "noise" forever. 1.32 x
-  // 0.66 = 0.87, and NOISE is 0.9.
-  assert.ok(NOISE < 1.0, `${NOISE} is the pre-shrinkage floor`);
-  assert.ok(NOISE > 0.7, `${NOISE} is below the real spread and would invent progress`);
+test("score and percentile agree in both directions", () => {
+  // The original defect, and the one worth a dedicated test: the forward path
+  // applied the shrink and the inverse did not undo it, so the two disagreed by
+  // a constant factor. An 8.0 was advertised as 1 in 91 while actually
+  // requiring about 1 in 4,242 — a promise the engine could not keep, printed
+  // on the screen whose entire job is explaining what the number means.
+  for (const p of [10, 25, 50, 75, 90, 95, 99]) {
+    const score = scoreAtPct(p);
+    const back = aggregateScoreToPercentile(Math.round(score * 10) / 10);
+    assert.ok(
+      Math.abs(back - p) < 1.5,
+      `p${p} -> score ${score.toFixed(2)} -> p${back.toFixed(1)}: the round trip does not close`,
+    );
+  }
+});
+
+test("the rarity ladder matches what the engine can actually produce", () => {
+  // The education screen prints these rungs. Each one must be a percentile a
+  // face can genuinely reach, or the screen is teaching a scale that does not
+  // exist.
+  const eight = aggregateScoreToPercentile(8.0);
+  assert.ok(eight > 97.5 && eight < 99.5, `8.0 reports p${eight}, expected ~99`);
+  const seven = aggregateScoreToPercentile(7.0);
+  assert.ok(seven > 92 && seven < 96, `7.0 reports p${seven}, expected ~94`);
+});
+
+test("the noise floor tracks the display spread", () => {
+  // The coupling that would silently break everything. Two photographs of one
+  // unchanged face differ by about 1.3 points on the displayed scale, so a
+  // follow-up floor below that INVENTS progress — it would cheerfully report a
+  // one-point jump between two photographs of a face that did not change.
+  //
+  // While the shrinkage was in place the displayed spread was ~0.87 and this
+  // was 0.9, which was correct then and is wrong now. It has to move in step
+  // with the scale in both directions, and this test is what makes that true.
+  assert.ok(NOISE >= 1.2, `${NOISE} is below the real same-face spread and would invent progress`);
+  assert.ok(NOISE < 1.6, `${NOISE} is above the real spread and would hide genuine progress`);
 });

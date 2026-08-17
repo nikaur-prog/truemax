@@ -4,7 +4,7 @@ import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
 import { analyze } from "./engine/scoring.js";
 import { aggregateScoreToPercentile } from "./engine/scoring.js";
-import { REGION_NAMES } from "./engine/scoring.js";
+import { REGION_NAMES, REGION_RELIABLE_MIN } from "./engine/scoring.js";
 import { isSupported, startCamera } from "./ui/camera.js";
 import type { CameraHandle } from "./ui/camera.js";
 import { rankShort } from "./ui/templates.js";
@@ -200,16 +200,27 @@ async function openCamera(): Promise<void> {
 //
 // Asked BEFORE the camera opens, not after the photo, so it never lands in the
 // middle of the clip someone is recording.
+// Asked EVERY scan here, unlike the main app.
+//
+// The main app remembers, correctly: it scans one person repeatedly and their
+// sex does not change between Tuesday and Thursday. /quick is the opposite tool
+// — it scans a different stranger every time — so a remembered answer means
+// every face after the first is silently scored against whichever population
+// happened to be chosen weeks ago.
+//
+// That is not a small error. Switching population moves the score by a median
+// of 0.70 points, 2.10 at the 90th percentile and 4.50 at worst, which is
+// larger than the entire within-person noise band the rest of the engine works
+// so hard to account for. A remembered answer is a wrong answer most of the
+// time on a tool built for scanning other people.
+//
+// The previous choice is pre-selected, so the common case is still one tap.
 function withSex(next: () => void): void {
-  if (storedSex()) {
-    next();
-    return;
-  }
   openSexChooser((sex) => {
     storeSex(sex);
     paintSilhouette();
     next();
-  });
+  }, storedSex() ?? undefined);
 }
 
 function paintSilhouette(): void {
@@ -585,10 +596,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     <div class="q-grid">
       ${regions
         .map(
-          (g) => `<div class="q-cell">
+          (g) => `<div class="q-cell${g.reliability < REGION_RELIABLE_MIN ? " q-cell-weak" : ""}">
             <span>${REGION_NAMES[g.region]}</span>
             ${num(g.score)}
             <div class="q-bar"><i data-w="${Math.max(2, Math.min(100, g.score * 10))}" style="width:0%"></i></div>
+            ${g.reliability < REGION_RELIABLE_MIN ? `<em class="q-cell-note">indicative</em>` : ""}
           </div>`,
         )
         .join("")}
@@ -598,14 +610,29 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
          without a name. Asked for here rather than in a prompt() at click time:
          a modal that appears after you have committed to a sixty-second render
          is a modal you dismiss by accident. -->
+    <!-- Labelled above rather than explained inside.
+
+         Both of these carried their entire meaning in a placeholder longer than
+         the box that held it, so they read as "Name for the rundow" and
+         "Earlier score for a t" — and a placeholder is the wrong place for the
+         only explanation anyway, because it vanishes the moment somebody types
+         into the field it was explaining. -->
     <div class="q-namerow">
-      <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
-             placeholder="Name for the rundown — e.g. LeBron James" autocomplete="off" />
+      <label class="q-namefield">
+        <span>Whose face is this?</span>
+        <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
+               placeholder="LeBron James" autocomplete="off" />
+        <small>Used in the rundown's opening line.</small>
+      </label>
       <!-- Turns the score card into a before/after. Left empty the card shows
            now-versus-potential, which is the FIRST card in a glow-up video;
            filled in it shows before-versus-now, which is the last one. -->
-      <input id="q-card-before" class="q-input" type="number" min="0" max="10" step="0.1"
-             placeholder="Earlier score for a before/after card — optional" autocomplete="off" />
+      <label class="q-namefield">
+        <span>Their earlier score <i>(optional)</i></span>
+        <input id="q-card-before" class="q-input" type="number" min="0" max="10" step="0.1"
+               placeholder="4.5" autocomplete="off" />
+        <small>Makes the card a before/after. Empty shows now vs potential.</small>
+      </label>
     </div>
 
     <div class="q-actions">

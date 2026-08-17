@@ -60,15 +60,21 @@ export interface FollowUp {
 
 const DAY = 86_400_000;
 
-// Below this, a difference is the instrument rather than the face. Two photos
-// of one unchanged face differed by about 1.3 points on the raw scale; scores
-// now pass through the 0.66 measurement-noise shrinkage in scoring.ts, which
-// compresses that spread to ~0.9. Anything smaller is noise, and reporting it
-// as progress would be the same lie as reporting it as decline. This is the
-// single most important number in the file, and it must move in step with
-// SHRINK — a floor above the real spread hides progress, one below it invents
-// progress.
-export const NOISE = 0.9;
+// Below this, a difference is the instrument rather than the face.
+//
+// Two photographs of one unchanged face differ by about 1.3 points. This sat at
+// 0.9 for exactly as long as scores passed through the 0.66 shrinkage, which
+// compressed that spread to ~0.87 — the floor tracked the scale, correctly.
+//
+// The shrinkage has been retired (see scoring.ts), so the displayed spread is
+// the raw 1.3 again and the floor has to come back with it. Leaving it at 0.9
+// would be the dangerous direction of this error: a floor BELOW the real spread
+// invents progress, cheerfully reporting a 1.0-point jump between two photos of
+// a face that did not change. A floor above it merely hides slow progress.
+//
+// This is the single most important number in the file and it must move in step
+// with the display scale, in both directions.
+export const NOISE = 1.3;
 
 // How long a routine gets before "no change" becomes a finding rather than
 // impatience. Skin turns over in roughly six weeks and body composition shows
@@ -166,15 +172,23 @@ export interface RegionPoint {
   scores: Partial<Record<string, number>>;
 }
 
-// The per-region noise floor. There is no measured retest spread per region
-// yet, so this is bounded from below by arithmetic rather than data: a region
-// averages a handful of metrics where the overall averages all of them, so a
-// region reading cannot be LESS noisy than the overall's 0.9. 1.3 — the raw
-// photo-to-photo spread the overall showed before shrinkage — is the
-// conservative stand-in until the calibration set pins the real figure.
-// Setting it too high hides real region moves; too low invents them, and on a
-// sentence that names a specific feature, inventing is the worse failure.
-export const REGION_NOISE = 1.3;
+// The per-region noise floor. There is still no measured retest spread per
+// region, so this is bounded from below by arithmetic rather than data: a
+// region averages a handful of metrics where the overall averages all of them,
+// so a region reading cannot be LESS noisy than the overall's, and a test pins
+// that ordering.
+//
+// It sat at 1.3 while the overall floor was 0.9 — the raw pre-shrinkage spread,
+// used as a conservative stand-in. Retiring the shrinkage moved the overall
+// floor to that same 1.3, which would have made a region exactly as trustworthy
+// as the whole face. It is not: fewer measurements, more noise.
+//
+// 1.8 keeps the gap roughly proportional to what it was. Averaging four
+// correlated metrics instead of thirty implies a wider ratio still, but a floor
+// set too high only hides slow region progress, while one set too low INVENTS
+// it — and on a sentence that names somebody's jaw specifically, inventing is
+// much the worse failure. Provisional until the calibration set pins it.
+export const REGION_NOISE = 1.8;
 
 export interface RegionShift {
   region: string;
