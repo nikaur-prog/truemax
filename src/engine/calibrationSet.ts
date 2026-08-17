@@ -60,25 +60,44 @@ function save(faces: RatedFace[]): void {
 }
 
 /**
- * Pulls the measurement out of a finished report.
+ * Pulls the measurements out of one or more finished reports.
  *
  * Reads report.metrics rather than recomputing, so what gets stored is exactly
  * what was scored — including the exclusions. An unmeasurable metric is left
  * OUT of the object rather than written as null, because that is the shape the
  * corpus already uses for a metric that postdates a face, and one absence
  * mechanism is better than two.
+ *
+ * Takes several reports because a calibration face can carry a front scan, a
+ * side scan, or both, and they arrive as separate reports. There is no view
+ * filter: a metric id is unique across views, so merging is a plain overwrite
+ * and the absent view simply contributes nothing. That is the same shape as a
+ * metric that postdates the face, which is why it needs no special case at the
+ * far end — a corpus row is a bag of whatever was measurable.
  */
-export function measurementsOf(report: Report): Record<string, number> {
+export function measurementsOf(...reports: Report[]): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const m of report.metrics) {
-    if (m.def.view !== "front") continue;
-    if (!Number.isFinite(m.value)) continue;
-    out[m.def.id] = m.value;
+  for (const report of reports) {
+    for (const m of report.metrics) {
+      if (!Number.isFinite(m.value)) continue;
+      out[m.def.id] = m.value;
+    }
   }
   return out;
 }
 
-export function addRatedFace(report: Report, rating: number, label?: string): RatedFace[] {
+export function addRatedFace(
+  report: Report,
+  rating: number,
+  label?: string,
+  // The side scan, when the operator supplied one. Its metrics are merged into
+  // the same row: one face, one human rating, everything that could be measured
+  // about it. Kept separate from `report` because the headline `scored` figure
+  // has to stay the front score — that is the number the corpus is fitted
+  // against, and quietly averaging in a side score would move the thing being
+  // measured rather than adding to it.
+  side?: Report,
+): RatedFace[] {
   const faces = loadCalibrationSet();
   const sexPrefix = report.sex === "male" ? "m" : "w";
   const n = faces.filter((f) => f.sex === report.sex).length + 1;
@@ -88,7 +107,7 @@ export function addRatedFace(report: Report, rating: number, label?: string): Ra
     rating,
     scored: report.overall,
     ...(label ? { label } : {}),
-    measurements: measurementsOf(report),
+    measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
   save(faces);
   return faces;
@@ -126,10 +145,25 @@ export function corpusJSON(faces: RatedFace[]): string {
   )}\n`;
 }
 
-/** Which front metrics no face in the set carries yet. */
-export function missingCoverage(faces: RatedFace[]): string[] {
-  const front = METRICS.filter((m) => m.view === "front");
-  return front.filter((m) => !faces.some((f) => m.id in f.measurements)).map((m) => m.id);
+/**
+ * Which metrics no face in the set carries yet, for one view.
+ *
+ * Reported per view rather than pooled, because "no face carries this" means
+ * something different for each: a missing front metric means the metric is new,
+ * while a missing side metric usually just means nobody has placed the thirteen
+ * points on that face yet. Pooling them would let a full front corpus hide an
+ * empty side one behind a single reassuring count.
+ */
+export function missingCoverage(faces: RatedFace[], view: "front" | "side" = "front"): string[] {
+  return METRICS.filter((m) => m.view === view)
+    .filter((m) => !faces.some((f) => m.id in f.measurements))
+    .map((m) => m.id);
+}
+
+/** How many faces in the set carry any side measurement at all. */
+export function sideCount(faces: RatedFace[]): number {
+  const side = METRICS.filter((m) => m.view === "side");
+  return faces.filter((f) => side.some((m) => m.id in f.measurements)).length;
 }
 
 /**

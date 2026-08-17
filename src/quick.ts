@@ -13,6 +13,7 @@ import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { track } from "./engine/track.js";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
 import { openSexChooser } from "./ui/sexChooser.js";
+import { openSideCapture, close as closeSideFlow } from "./ui/sideFlow.js";
 import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
 import { askVerdictTone } from "./ui/tonePrompt.js";
 import { drawLandmarksAnimated } from "./ui/overlay.js";
@@ -28,6 +29,7 @@ import {
   corpusJSON,
   loadCalibrationSet,
   missingCoverage,
+  sideCount,
   removeRatedFace,
   setHealth,
 } from "./engine/calibrationSet.js";
@@ -591,6 +593,92 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
 // Calibrate: rate the face, then meet the disagreement.
 // ---------------------------------------------------------------------------
 
+// The face currently being assembled. A calibration face is one person, and a
+// person has two views — but requiring both would mean no side data until every
+// face had one, and requiring neither is not a face. So both slots are
+// optional, at least one is required, and the pair is committed together.
+let pendingFront: Report | null = null;
+let pendingSide: Report | null = null;
+
+function clearPending(): void {
+  pendingFront = null;
+  pendingSide = null;
+}
+
+/**
+ * The two slots, side by side, then Analyse.
+ *
+ * Front and side are shown together rather than in sequence because they are
+ * two views of one face, not two steps of one process — and because the
+ * operator usually knows which of the two they actually have. A sequence would
+ * make the side feel mandatory and the front feel like a gate.
+ */
+function renderFaceSlots(): void {
+  el.calStep.textContent = "This face";
+  const slot = (
+    id: string,
+    name: string,
+    got: Report | null,
+    note: string,
+  ) => `
+    <button type="button" class="q-slot${got ? " got" : ""}" id="${id}">
+      <span class="q-slot-name">${name}</span>
+      <span class="q-slot-state">${got ? "Captured" : "Add"}</span>
+      <span class="q-slot-note">${got ? "Tap to replace" : note}</span>
+    </button>`;
+
+  el.calBody.innerHTML = `
+    <div class="q-slots">
+      ${slot("q-slot-front", "Front", pendingFront, "Camera or upload")}
+      ${slot("q-slot-side", "Side", pendingSide, "Upload, then check 13 points")}
+    </div>
+    <button type="button" class="btn pri q-slot-go" id="q-slot-go"
+      ${pendingFront || pendingSide ? "" : "disabled"}>Analyse</button>
+    <p class="q-cal-hint">Either view on its own is worth having — a front-only
+    face still carries every front metric. Both together is what lets a side
+    measurement ever be checked against a human rating.</p>
+    <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
+
+  document.getElementById("q-slot-front")!.onclick = () => {
+    el.cal.classList.add("hidden");
+    el.capture.classList.remove("hidden");
+  };
+
+  document.getElementById("q-slot-side")!.onclick = () => withSex(() => {
+    el.cal.classList.add("hidden");
+    openSideCapture({
+      sex: storedSex() ?? "male",
+      // Upload only. The live profile camera coaches a turn the operator cannot
+      // see, which is the right flow for scanning yourself and the wrong one for
+      // working through a folder of photographs.
+      method: "upload",
+      onDone: (report) => {
+        closeSideFlow();
+        pendingSide = report;
+        el.cal.classList.remove("hidden");
+        renderFaceSlots();
+      },
+      onBack: () => {
+        closeSideFlow();
+        el.cal.classList.remove("hidden");
+        renderFaceSlots();
+      },
+    });
+  });
+
+  document.getElementById("q-slot-go")!.onclick = () => {
+    // Front is the primary when present: `scored` has to stay the front score,
+    // since that is the figure the corpus is fitted against.
+    const primary = pendingFront ?? pendingSide;
+    if (primary) renderRatingStep(primary);
+  };
+
+  document.getElementById("q-slot-back")!.onclick = () => {
+    clearPending();
+    renderCalibrationSet();
+  };
+}
+
 function renderRatingStep(r: Report): void {
   el.calStep.textContent = "Your rating";
   el.calBody.innerHTML = `
@@ -620,14 +708,21 @@ function renderRatingStep(r: Report): void {
       num.focus();
       return;
     }
-    addRatedFace(r, Math.round(rating * 10) / 10, label.value.trim() || undefined);
-    renderVerdictStep(r, Math.round(rating * 10) / 10);
+    addRatedFace(
+      r,
+      Math.round(rating * 10) / 10,
+      label.value.trim() || undefined,
+      pendingSide ?? undefined,
+    );
+    const held = pendingSide;
+    clearPending();
+    renderVerdictStep(r, Math.round(rating * 10) / 10, held !== null);
   };
   document.getElementById("q-cal-save")!.onclick = commit;
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
-function renderVerdictStep(r: Report, rating: number): void {
+function renderVerdictStep(r: Report, rating: number, withSide = false): void {
   const gap = r.overall - rating;
   // Named rather than left as a number. "−2.3" is a figure; "the engine is
   // two points below you on this face" is the thing worth acting on, and the
@@ -642,15 +737,18 @@ function renderVerdictStep(r: Report, rating: number): void {
         <div class="q-cal-gap">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</div>
         <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
       </div>
-      <p class="q-cal-said">It ${verdict}.</p>
+      <p class="q-cal-said">It ${verdict}.${
+        withSide ? " Front and side both stored." : ""
+      }</p>
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
         <button class="btn gho" id="q-cal-list">See the set</button>
       </div>
     </div>`;
   document.getElementById("q-cal-next")!.onclick = () => {
-    el.cal.classList.add("hidden");
-    el.capture.classList.remove("hidden");
+    resetSexAsk();
+    clearPending();
+    renderFaceSlots();
   };
   document.getElementById("q-cal-list")!.onclick = () => renderCalibrationSet();
 }
@@ -663,6 +761,8 @@ function renderCalibrationSet(): void {
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
   const health = (["male", "female"] as const).map((sex) => setHealth(faces, sex));
   const missing = missingCoverage(faces);
+  const sides = sideCount(faces);
+  const missingSide = missingCoverage(faces, "side");
 
   el.calBody.innerHTML = `
     <div class="q-cal-set">
@@ -683,6 +783,18 @@ function renderCalibrationSet(): void {
              those stay on a prior until one does.</p>`
           : ""
       }
+      <p class="q-cal-missing">${
+        sides === 0
+          ? `No face carries a side profile yet, so all ${missingSide.length} side
+             measurements are still on a prior. Add one from the Side slot.`
+          : `${sides} of ${faces.length} carr${sides === 1 ? "ies" : "y"} a side profile${
+              missingSide.length
+                ? `, ${missingSide.length} side measurement${
+                    missingSide.length === 1 ? "" : "s"
+                  } still uncovered`
+                : " — every side measurement is covered"
+            }.`
+      }</p>
       ${
         faces.length
           ? `<div class="q-cal-rows">
@@ -715,8 +827,8 @@ function renderCalibrationSet(): void {
 
   document.getElementById("q-cal-add")!.onclick = () => {
     resetSexAsk();
-    el.cal.classList.add("hidden");
-    el.capture.classList.remove("hidden");
+    clearPending();
+    renderFaceSlots();
   };
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-drop]")) {
     button.onclick = () => { removeRatedFace(button.dataset.drop!); renderCalibrationSet(); };
@@ -775,7 +887,10 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     el.result.classList.add("hidden");
     el.capture.classList.add("hidden");
     el.cal.classList.remove("hidden");
-    renderRatingStep(r);
+    // Into the slot, not straight to the rating — the operator may still want
+    // to add a side before committing the face.
+    pendingFront = r;
+    renderFaceSlots();
     return;
   }
 
