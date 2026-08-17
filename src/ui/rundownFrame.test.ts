@@ -102,3 +102,41 @@ test("beats that measure nothing draw nothing", () => {
   const timeline = buildTimeline([{ kind: "hook", line: "How attractive is LeBron James?" }]);
   assert.equal(drawProgress(timeline.beats[0], 0.5), 0);
 });
+
+// ---------------------------------------------------------------------------
+// The frame has to hold the measurement it is framing.
+//
+// From a rundown of the cap photograph: the chin-width beat cropped to the chin
+// band, the chin-width span runs the whole width of the jaw, and the line left
+// the right edge of the frame with its label outside the picture entirely. A
+// viewer sees a measurement running off screen, which reads as a broken
+// instrument rather than as a badly chosen crop.
+// ---------------------------------------------------------------------------
+test("a crop is widened to contain the measurement drawn into it", () => {
+  // A span as wide as the whole face, in a band whose close-up floor is
+  // narrower than that — which is the exact case that shipped broken.
+  const wide = { x0: 0.3, y0: 0.66, x1: 0.7, y1: 0.72 };
+  const tight = regionCrop(PHOTO, FACE, "chin", ASPECT);
+  const held = regionCrop(PHOTO, FACE, "chin", ASPECT, wide);
+
+  assert.ok(held.w > tight.w, `crop not widened: ${tight.w} -> ${held.w}`);
+  assert.ok(held.x <= wide.x0 * PHOTO.width, "measurement starts left of the frame");
+  assert.ok(
+    held.x + held.w >= wide.x1 * PHOTO.width,
+    `measurement runs off the right: frame ends ${held.x + held.w}, span ends ${wide.x1 * PHOTO.width}`,
+  );
+  assert.ok(held.y <= wide.y0 * PHOTO.height && held.y + held.h >= wide.y1 * PHOTO.height);
+  // And it must still be a photograph, not the void.
+  assert.ok(held.x >= 0 && held.y >= 0);
+  assert.ok(held.x + held.w <= PHOTO.width + 1e-6 && held.y + held.h <= PHOTO.height + 1e-6);
+});
+
+test("a measurement that already fits does not move the camera", () => {
+  // The expansion is per-beat and must cost nothing on the beats that do not
+  // need it — widening every crop is the fix that was tried and reverted,
+  // because it collapses every band to the same clamped frame.
+  const small = { x0: 0.45, y0: 0.7, x1: 0.55, y1: 0.74 };
+  const tight = regionCrop(PHOTO, FACE, "chin", ASPECT);
+  const held = regionCrop(PHOTO, FACE, "chin", ASPECT, small);
+  assert.equal(held.w.toFixed(3), tight.w.toFixed(3));
+});

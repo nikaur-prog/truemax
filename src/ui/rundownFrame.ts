@@ -2,7 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
 import { beatAt, typedFraction } from "../engine/rundownTimeline.js";
-import { drawMeasurement } from "./measureOverlay.js";
+import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
 
 // ---------------------------------------------------------------------------
 // The rundown, one frame at a time.
@@ -133,6 +133,11 @@ export function regionCrop(
   landmarks: NormalizedLandmark[],
   region: RegionId | undefined,
   aspect: number,
+  /**
+   * The normalized box the beat's measurement will be drawn into, when there is
+   * one. The crop is widened to contain it — see the MUST-CONTAIN block below.
+   */
+  mustContain?: { x0: number; y0: number; x1: number; y1: number },
 ): Crop {
   const box = faceBox(landmarks);
   const faceW = Math.max(1, (box.x1 - box.x0) * photo.width);
@@ -178,8 +183,46 @@ export function regionCrop(
     sw = sh * aspect;
   }
 
-  const cx = ((box.x0 + box.x1) / 2) * photo.width;
-  const cy = (box.y0 + (box.y1 - box.y0) * ((top + bottom) / 2)) * photo.height;
+  let cx = ((box.x0 + box.x1) / 2) * photo.width;
+  let cy = (box.y0 + (box.y1 - box.y0) * ((top + bottom) / 2)) * photo.height;
+
+  // MUST-CONTAIN: the frame has to hold the measurement it is framing.
+  //
+  // Everything above chooses a crop from the REGION — a band of the face and a
+  // floor on how tight it may get. That is the right way to decide where the
+  // camera looks, and it is a guess about how much it needs to see. The two
+  // disagreed in the obvious way: a chin-width span runs the whole width of the
+  // jaw, the close-up floor is nine tenths of the face width, and the line ran
+  // off the right edge with its label outside the picture entirely.
+  //
+  // Widening here rather than raising the floor, because raising the floor is
+  // the fix that was already tried and reverted. A floor big enough for the
+  // widest measurement forces a 9:16 crop taller than the face on EVERY beat,
+  // every lower band then clamps against the bottom of the photograph, and eyes,
+  // lips and chin all render the identical frame. The camera stops moving. A
+  // per-beat expansion costs nothing on the beats that do not need it.
+  if (mustContain) {
+    const pad = 0.16; // room for the label chip, which sits outside the span
+    const needW = (mustContain.x1 - mustContain.x0) * photo.width * (1 + pad * 2);
+    const needH = (mustContain.y1 - mustContain.y0) * photo.height * (1 + pad * 2);
+    if (needW > sw || needH > sh) {
+      sw = Math.max(sw, needW, needH * aspect);
+      sh = sw / aspect;
+    }
+    // Recentre on the union of the band and the measurement, so growing the box
+    // does not leave the thing being drawn against one edge of it.
+    cx = (((mustContain.x0 + mustContain.x1) / 2) * photo.width + cx) / 2;
+    cy = (((mustContain.y0 + mustContain.y1) / 2) * photo.height + cy) / 2;
+    if (sw > photo.width) {
+      sw = photo.width;
+      sh = sw / aspect;
+    }
+    if (sh > photo.height) {
+      sh = photo.height;
+      sw = sh * aspect;
+    }
+  }
+
   return {
     x: Math.max(0, Math.min(photo.width - sw, cx - sw / 2)),
     y: Math.max(0, Math.min(photo.height - sh, cy - sh / 2)),
@@ -210,12 +253,40 @@ export function cropAt(
   timeline: RundownTimeline,
   t: number,
   aspect: number,
+  /**
+   * The scored metrics, so a beat's crop can be widened to hold the measurement
+   * it is about to draw. Optional: without it the framing falls back to the
+   * region bands alone, which is what it did before and is still usable.
+   */
+  metrics?: Map<string, ScoredMetric>,
 ): Crop {
+  // The union of every measurement named in a beat, since a sentence may name
+  // more than one and the frame has to hold all of them at once.
+  const bounds = (b: TimedBeat) => {
+    if (!metrics) return undefined;
+    const ids = b.beat.metricIds ?? (b.beat.metricId ? [b.beat.metricId] : []);
+    let out: { x0: number; y0: number; x1: number; y1: number } | undefined;
+    for (const id of ids) {
+      const m = metrics.get(id);
+      const box = m && measurementBounds(m, landmarks);
+      if (!box) continue;
+      out = out
+        ? {
+            x0: Math.min(out.x0, box.x0),
+            y0: Math.min(out.y0, box.y0),
+            x1: Math.max(out.x1, box.x1),
+            y1: Math.max(out.y1, box.y1),
+          }
+        : box;
+    }
+    return out;
+  };
+
   const index = timeline.beats.findIndex((b) => t >= b.start && t < b.start + b.duration);
   const current = timeline.beats[index] ?? timeline.beats[timeline.beats.length - 1];
   if (!current) return regionCrop(photo, landmarks, undefined, aspect);
 
-  const here = regionCrop(photo, landmarks, current.beat.region, aspect);
+  const here = regionCrop(photo, landmarks, current.beat.region, aspect, bounds(current));
   const next = timeline.beats[index + 1];
   if (!next) return here;
 
@@ -225,7 +296,7 @@ export function cropAt(
   const end = current.start + current.duration;
   const from = Math.max(current.start, end - MOVE);
   if (t < from) return here;
-  const there = regionCrop(photo, landmarks, next.beat.region, aspect);
+  const there = regionCrop(photo, landmarks, next.beat.region, aspect, bounds(next));
   return lerpCrop(here, there, smoother(clamp01((t - from) / (end - from))));
 }
 
@@ -267,7 +338,7 @@ export function drawRundownFrame(
   // The photograph is the frame. Full bleed rather than a card, because the
   // subject of a rundown is the face and every pixel spent on chrome is a pixel
   // not spent on the thing being measured.
-  const crop = cropAt(photo, landmarks, input.timeline, t, W / H);
+  const crop = cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics);
   ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
 
   // Everything except the measurement goes dark. A uniform scrim rather than a

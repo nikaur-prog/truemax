@@ -5,6 +5,7 @@ import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
 import { reliabilityOf } from "./reliability.js";
 import { SPREAD, rarityShort, spreadLine } from "./rarity.js";
+import { PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
 
 // ---------------------------------------------------------------------------
 // The celebrity breakdown, as an ordered list of beats.
@@ -64,6 +65,17 @@ export interface Beat {
   spoken?: string;
   /** For a metric beat: what the renderer should draw. */
   metricId?: string;
+  /**
+   * Every metric named in this beat, when the sentence names more than one.
+   *
+   * A beat used to be one measurement, so metricId was enough. Now that
+   * strengths are grouped — "a compact midface, high-set cheekbones and good
+   * width-to-height" is one sentence — the renderer needs the whole set to hold
+   * a shot while several are named, instead of cutting once per metric and
+   * running out of sentence. metricId stays as the first of them so nothing
+   * that only reads one has to change.
+   */
+  metricIds?: string[];
   region?: RegionId;
   /** Whether this reads as a strength. Drives the overlay colour. */
   positive?: boolean;
@@ -152,121 +164,6 @@ const REEL_RELIABLE_MIN = 0.35;
 // that — which side of the mean the face actually sits — while zEff carries
 // whether that is good, and the two are not the same for a band metric where
 // both extremes are penalised.
-// Every frame takes a PREDICATE ("is excellent", "sits higher than ideal")
-// rather than an adjective, because the good and bad cases need different
-// parts of speech otherwise. An earlier version mixed the two and produced
-// "Notice the a nose : mouth width further from ideal" — an article and a verb
-// out of place, in the one sentence on screen.
-//
-// Six rather than three, because three frames over ten beats means every frame
-// is heard three times and the pattern is audible by the fourth. Six is heard
-// twice, which reads as a person with habits rather than a template.
-//
-// The full name is used sparingly on purpose: hearing "Marlon Lundgren-Garcia"
-// five times in ninety seconds is the station-announcement problem again.
-const FRAMES = [
-  (subject: string, name: string, predicate: string) => `${subject}'s ${name} ${predicate}.`,
-  (_subject: string, name: string, predicate: string) => `The ${name} ${predicate}.`,
-  (_subject: string, name: string, predicate: string) => `Notice the ${name} — it ${predicate}.`,
-  (_subject: string, name: string, predicate: string) => `Look at the ${name}: it ${predicate}.`,
-  (_subject: string, name: string, predicate: string) => `Then the ${name}, which ${predicate}.`,
-  (_subject: string, name: string, predicate: string) => `On the ${name} — it ${predicate}.`,
-];
-
-// A measured value a voice can say.
-//
-// Trailing zeros and four decimal places are for a table. Read aloud, "zero
-// point three eight zero" is noise where "zero point three eight" is a number,
-// and an angle wants none of it at all.
-function fmtValue(v: number): string {
-  const a = Math.abs(v);
-  if (a >= 100) return v.toFixed(0);
-  if (a >= 10) return v.toFixed(1).replace(/\.0$/, "");
-  return v.toFixed(2).replace(/0$/, "").replace(/\.$/, "");
-}
-
-// A metric name a voice can say.
-//
-// The engine's names are written to sit in a results table next to a number,
-// where "(frontal)" disambiguates the front measurement from the side one and
-// "fWHR" is the term the literature uses. Read aloud, the parenthetical is
-// noise and the acronym comes out as four letters. The screen keeps the exact
-// label; this is only what goes to the synthesiser.
-function spokenName(name: string): string {
-  return name
-    .toLowerCase()
-    // "(frontal)", "(est.)", "(fwhr)" — all disambiguators for a reader.
-    .replace(/\s*\([^)]*\)/g, "")
-    // "nose : mouth width" -> "nose to mouth width"
-    .replace(/\s*:\s*/g, " to ")
-    // "width-to-height" survives as-is, but a trailing hyphen would not.
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function qualify(
-  m: ScoredMetric,
-  index: number,
-  sex: Sex,
-): { line: (subject: string) => string; spoken: (subject: string) => string; positive: boolean } {
-  const good = m.zEff;
-  const name = m.def.name.toLowerCase();
-  const positive = good >= 0;
-  const strength = Math.abs(good);
-
-  // A standout gets its NUMBER said, not just its adjective.
-  //
-  // "Notice the chin-to-philtrum ratio, it is excellent" is a claim. "Chin to
-  // philtrum of 3.94, against an ideal of 3.39 — excellent" is the same claim
-  // with its evidence attached, and it is the difference between a face app
-  // and somebody who measured something. It is reserved for standouts because
-  // eleven numbers in ninety seconds is a spreadsheet being read aloud; one or
-  // two, on the features that actually carry the face, is a case being made.
-  // The midpoint of the display band is the ideal the bar is drawn around, so
-  // it is the one the viewer is looking at while this is said.
-  const ideal = (m.idealRange[0] + m.idealRange[1]) / 2;
-  const figures = Number.isFinite(m.value) && Number.isFinite(ideal)
-    ? `${fmtValue(m.value)}, against an ideal of ${fmtValue(ideal)}`
-    : null;
-
-  // Alternates within a band rather than repeating one word, keyed off the
-  // metric's position in the running order so the same face always narrates
-  // identically — a rundown that reworded itself between two renders of one
-  // scan would look like the measurement had changed.
-  const pick = <T,>(options: T[]): T => options[index % options.length];
-
-  let predicate: string;
-  if (good >= 1.2) predicate = figures ? `of ${figures} — excellent` : "is excellent";
-  else if (good >= 0.5) predicate = pick(["is good", "is a strength here", "holds up well"]);
-  else if (strength < 0.5) predicate = pick(["is about average", "sits mid-pack", "lands near the middle"]);
-  else {
-    // Below the mean and worth naming: say WHICH WAY, not just "weak". "Weak
-    // gonial angularity" tells a viewer nothing they can picture; "sits flatter
-    // than ideal" tells them where to look and which direction it is off.
-    //
-    // The raw z carries the side of the mean; zEff carries whether that is
-    // good. For a band metric both extremes are penalised, so the two disagree
-    // and only z knows which extreme this face is on.
-    const way =
-      directionFor(m.def, sex) === "band"
-        ? m.z > 0
-          ? "sits above the ideal band"
-          : "sits below the ideal band"
-        : m.z > 0
-          ? "reads higher than ideal"
-          : "reads lower than ideal";
-    predicate = good > -1.2 ? way.replace(/^(sits|reads) /, "$1 slightly ") : way;
-  }
-
-  const frame = FRAMES[index % FRAMES.length];
-  const said = spokenName(m.def.name);
-  return {
-    line: (subject: string) => frame(subject, name, predicate),
-    spoken: (subject: string) => frame(subject, said, predicate),
-    positive,
-  };
-}
-
 // Get a mixed tone by CHOOSING a balanced set, not by reordering one.
 //
 // An earlier version sorted the chosen metrics down the face and then zipped
@@ -298,6 +195,128 @@ function selectBalanced(candidates: ScoredMetric[], limit: number): ScoredMetric
   return picked;
 }
 
+// The metric names the engine holds are written to sit in a results table next
+// to a number, where "(frontal)" disambiguates the front measurement from the
+// side one and "fWHR" is the term the literature uses. None of them reach the
+// microphone any more — the clauses in reelPhrases.ts are written for a voice
+// from the start, which is why the sanitiser that used to live here is gone
+// rather than merely unused.
+
+// The clause for one measurement, with its figure inside it.
+//
+// Everything interesting about this now lives in reelPhrases.ts — see the
+// header there for why a sentence assembled from the metric's own name can
+// never be worth listening to. What is left here is picking the strength or the
+// weakness reading, and working out which SIDE of the ideal the face is on so
+// the weakness reading is the right one of the two.
+function clauseFor(m: ScoredMetric, sex: Sex): string {
+  const phrase = PHRASES[m.def.id];
+  const v = figureOf(m);
+  if (m.zEff > 0) return phrase.good(v);
+  // Which side of the IDEAL, not which side of the mean. The two are not the
+  // same: on a higher-is-better metric the ideal sits above the population
+  // mean, so a face can be above average and still short of it, and reading
+  // that out as "too high" is backwards. The ideal range is the exact answer
+  // and every scored metric carries it; z is only the fallback for a metric
+  // whose range did not survive.
+  const [lo, hi] = m.idealRange ?? [];
+  const high =
+    Number.isFinite(hi) && Number.isFinite(lo)
+      ? m.value > (hi as number)
+      : directionFor(m.def, sex) === "lower"
+        ? m.z > 0
+        : m.z > 0;
+  return phrase.bad(v, high);
+}
+
+/** "a, b and c" — an Oxford-less list, because it is being spoken. */
+function listOf(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+type GroupKind = "positive" | "negative" | "side" | "side-negative";
+
+// The openers carry the STRUCTURE of the read: strengths, then a turn, then the
+// flaws, with the profile as its own act. The turn is the thing the old
+// one-metric-per-beat shape had no room for — alternating good and bad by
+// magnitude means a viewer is never waiting for anything, because there is
+// nothing left to arrive.
+//
+// Every opener ends where a clause can follow it, and the clauses in
+// reelPhrases.ts all begin mid-sentence and lower case for exactly that reason.
+// The list is cycled by position rather than picked at random: the fault the
+// last version shipped was three consecutive sentences opening "There is also",
+// and a fixed cycle cannot produce that where a random pick eventually will.
+const OPENERS: Record<GroupKind, (subject: string, pronoun: string) => string[]> = {
+  positive: (subject, p) => [
+    `${subject} has`,
+    `${capitalize(p)} also has`,
+    `On top of that, ${p} has`,
+    `Then there's`,
+    `And ${p} has`,
+  ],
+  negative: (_s, p) => [
+    `Now the flaws. ${capitalize(p)} has`,
+    "There's also",
+    `And ${p} has`,
+    "Then there's",
+  ],
+  side: (_s, p) => [`From the side, ${p} has`, "In profile there's", `And ${p} has`],
+  "side-negative": (_s, p) => ["The profile isn't perfect —", "There's also", `And ${p} has`],
+};
+
+// One measurement to a sentence.
+//
+// Two was tried, on the reasoning that grouping is what stops a rundown reading
+// as a list. It is not — LENGTH is. Back when a clause was "excellent canthal
+// tilt", ten of them in a row was a list and grouping them into threes was the
+// only available fix. Now that a clause carries a figure, a place to look and a
+// consequence, it is twenty words on its own, and two of them joined by "and"
+// is a sentence a listener loses halfway through:
+//
+//   "...a canthal tilt of 6.4 degrees, so the outer corner of the eye sits well
+//   above the inner — that's the hunter-eye look and brows running at 4.1
+//   degrees — straight and low rather than arched, which is the masculine set."
+//
+// One clause, one shot, one thing to look at. The variety that grouping was
+// covering for now comes from the clauses themselves being different sentences
+// rather than the same sentence with the nouns swapped.
+const CLAUSES_PER_SENTENCE = 1;
+
+function groupedBeats(ms: ScoredMetric[], sex: Sex, subject: string, kind: GroupKind): Beat[] {
+  if (!ms.length) return [];
+  const pronoun = sex === "female" ? "she" : "he";
+  const openers = OPENERS[kind](subject, pronoun);
+
+  const beats: Beat[] = [];
+  for (let i = 0, n = 0; i < ms.length; i += CLAUSES_PER_SENTENCE, n++) {
+    const chunk = ms.slice(i, i + CLAUSES_PER_SENTENCE);
+    // The first opener is the one that names the section — "Now the flaws", the
+    // subject's own name — so it is never reused; the rest cycle behind it.
+    // Cycling rather than clamping, because clamping to the last entry is what
+    // produced three consecutive sentences opening "There is also".
+    const opener = n === 0 ? openers[0] : openers[1 + ((n - 1) % (openers.length - 1))];
+    const positive = kind === "positive" || kind === "side";
+    beats.push({
+      kind: "metric",
+      line: `${opener} ${listOf(chunk.map((m) => clauseFor(m, sex)))}.`,
+      metricId: chunk[0].def.id,
+      region: chunk[0].def.region as Beat["region"],
+      positive,
+      badge: `${chunk[0].value.toFixed(chunk[0].def.decimals)}${chunk[0].def.unit}`,
+      // Every metric in the sentence, so the renderer can hold the shot while
+      // more than one measurement is named rather than cutting per metric and
+      // running out of sentence.
+      metricIds: chunk.map((m) => m.def.id),
+    });
+  }
+  return beats;
+}
+
+const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
 export function buildReelScript(report: Report, options: ReelScriptOptions): Beat[] {
   const limit = options.metricBeats ?? 10;
   const name = options.name;
@@ -326,11 +345,18 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   // video has none of that: it is downloaded, posted, and argued with in a
   // comment section months later with no chip anywhere near it. Something
   // barely past meaningless does not belong in one.
+  //
+  // And the last gate is language. A metric with no hand-written clause in
+  // reelPhrases.ts does not get a sentence, because the alternative — building
+  // one out of the metric's own column heading — is what produced "upper face
+  // proportion below the ideal band", and a line nobody can picture is worse
+  // than a line that was never said.
   const candidates = report.metrics.filter(
     (m) =>
       !m.implausible &&
       Math.abs(m.zEff) >= NOTABLE_Z &&
-      reliabilityOf(m.def.id) >= REEL_RELIABLE_MIN,
+      reliabilityOf(m.def.id) >= REEL_RELIABLE_MIN &&
+      hasPhrase(m.def.id),
   );
 
   // Selection is by interest AND tone balance; the running order is by anatomy.
@@ -339,18 +365,31 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     (a, b) => REGION_ORDER.indexOf(a.def.region) - REGION_ORDER.indexOf(b.def.region),
   );
 
-  const metricBeats: Beat[] = byRegion.map((m, i) => {
-    const q = qualify(m, i, report.sex);
-    return {
-      kind: "metric" as const,
-      line: q.line(name),
-      spoken: q.spoken(name),
-      metricId: m.def.id,
-      region: m.def.region,
-      positive: q.positive,
-      badge: `${m.value.toFixed(m.def.decimals)}${m.def.unit}`,
-    };
-  });
+  // Strengths together, then the turn, then the flaws — and several features
+  // per sentence rather than one.
+  //
+  // The old shape was one metric, one sentence, ten times, alternating good and
+  // bad by magnitude. That is a list, and a list never builds: there is no
+  // point in it where a viewer is waiting for the next thing. The reference is
+  // how the format is actually read aloud by the people who do it well — "a
+  // compact midface, high-set cheekbones, good width-to-height and mouth-to-nose
+  // proportions" is four measurements in one breath, and then a clean pivot
+  // into what is wrong.
+  //
+  // Grouping is by REGION, because that is the unit a viewer can picture. Three
+  // features of a midface is a sentence about a midface; three features drawn
+  // from three regions is the list again with commas instead of full stops.
+  const positives = byRegion.filter((m) => m.zEff > 0);
+  const negatives = byRegion.filter((m) => m.zEff <= 0);
+
+  const metricBeats: Beat[] = [
+    // Front strengths, grouped. Side is held back for its own section — it is
+    // a different photograph and naming it gives the rundown a second act.
+    ...groupedBeats(positives.filter((m) => m.def.view !== "side"), report.sex, name, "positive"),
+    ...groupedBeats(negatives.filter((m) => m.def.view !== "side"), report.sex, name, "negative"),
+    ...groupedBeats(positives.filter((m) => m.def.view === "side"), report.sex, name, "side"),
+    ...groupedBeats(negatives.filter((m) => m.def.view === "side"), report.sex, name, "side-negative"),
+  ];
 
   const pct = statedPct(report.overallPercentile);
   const beats: Beat[] = [
@@ -364,9 +403,27 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // of unbroken narration at the exact moment a viewer is most likely to be
     // watching, and the renderer had nothing to cut on. Split, the number lands
     // alone, then the curve arrives as its own reveal.
+    // The ask goes BEFORE the number, not after.
+    //
+    // The number is the only thing a viewer is waiting for, so it is the only
+    // moment the ask is free. Put it afterwards and it arrives at the exact
+    // instant they have what they came for and their thumb is already moving.
+    {
+      kind: "cta",
+      line: options.cta ?? "Before the rating — get yours at truemax.app.",
+    },
+    // Verdict and number in one line. A number is an argument, a name is a
+    // conclusion, and split across two beats the conclusion lands after the
+    // viewer has already decided what they think of the number.
+    //
+    // "The verdict:" rather than a sentence around the word, because the ladder
+    // holds nouns AND clauses — "Mogger", "True Adam", "You're cooked" — and no
+    // one sentence frame fits all three. It was shipping "Marlon has mogger".
+    // Colon, name, full stop: works for every rung and reads harder than a
+    // sentence would.
     {
       kind: "score",
-      line: `${name} measures ${report.overall.toFixed(1)} out of 10.`,
+      line: `The verdict: ${verdictFor(report).word}. ${name} measures ${report.overall.toFixed(1)} out of 10.`,
       badge: `${pct}th percentile`,
     },
     {
@@ -378,20 +435,17 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       kind: "score",
       line: `${spreadLine(report.sex)} ${SPREAD.median.toFixed(1)} is the exact middle.`,
     },
-    // The verdict, and it is the beat the format was missing.
+    // The ceiling, as a NUMBER.
     //
-    // A number is an argument; a name is a conclusion, and a conclusion is what
-    // gets quoted in a comment section. Every competitor in this niche ends on
-    // one. Ending on a percentile instead is ending on the working.
-    //
-    // It is the SAME ladder the app shows — analysisMode owns the bands, and a
-    // second copy here is exactly the drift that module exists to prevent, so
-    // this asks rather than restates. Which also means a video and the app can
-    // never disagree about what a face is called.
+    // The tier ladder is the wrong shape for this one slot. Named rungs work
+    // for where somebody IS — it is a label for a thing that already exists —
+    // but as a ceiling a name is discouraging, because the top rung is defined
+    // as almost nobody and a viewer knows they are not about to become the one.
+    // A number one point above the one they just heard is a target. The same
+    // ceiling as a name is a door with somebody else's name on it.
     {
       kind: "score",
-      line: `Verdict: ${verdictFor(report).word.toLowerCase()}.`,
-      badge: verdictFor(report).word,
+      line: `Ceiling: ${report.potential.toFixed(1)}. That's what the same bone structure measures with everything soft fixed.`,
     },
   ];
 
@@ -409,10 +463,9 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     beats.push({ kind: "context", line: options.note.trim() });
   }
 
-  beats.push({
-    kind: "cta",
-    line: options.cta ?? "Want yours measured the same way? truemax.app",
-  });
+  // Ends on a question rather than a statement. The rundowns that collect
+  // comments all close by asking for the next subject, and it costs one line.
+  beats.push({ kind: "cta", line: "Who should we measure next?" });
 
   return beats;
 }
