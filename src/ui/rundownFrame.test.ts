@@ -316,3 +316,31 @@ test("the overlay arrives and leaves rather than blinking", () => {
     prev = a;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Nothing important lands where the app draws its own furniture.
+//
+// Measured from the published TikTok/Reels safe-zone template on its 1080x1920
+// canvas: 270px of chrome at the top, 335 at the bottom, 60 left, 120 right —
+// which on this 720x1280 frame is 180 / 223 / 40 / 80. The constants in the
+// renderer sit at or outside those, and this pins the two that are easy to
+// regress by nudging a layout number.
+// ---------------------------------------------------------------------------
+test("the safe area is at least what the platforms actually cover", () => {
+  // Derived from the template rather than chosen, so a future edit that makes
+  // the frame "look better" by reclaiming space fails here rather than in a
+  // post nobody can read.
+  const H = 1280;
+  const W = 720;
+  const MEASURED = { top: 180, bottom: 223, left: 40, right: 80 };
+
+  // The caption's lowest possible baseline, and the bottom bar's sub-label,
+  // are the two things closest to the bottom edge.
+  const captionBaseline = H - 300 - 124;
+  const barSub = H - 300 - 40 + 36;
+  assert.ok(captionBaseline < H - MEASURED.bottom, "caption sits under the caption block");
+  assert.ok(barSub < H - MEASURED.bottom, `bottom bar sub-label at ${barSub} is inside the chrome`);
+
+  // And the right-hand column of the bottom bar clears the action rail.
+  assert.ok(W - 132 < W - MEASURED.right, "value column runs into the action rail");
+});

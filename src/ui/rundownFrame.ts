@@ -99,7 +99,24 @@ const BAND: Record<RegionId, [number, number]> = {
 // rather than reasoned about — TikTok's caption block runs to roughly 20% and
 // Instagram's to roughly 18%, so this clears both with a little margin for the
 // taller phones where the safe area grows.
+// Measured from the published TikTok/Reels safe-zone template, on its own
+// 1080x1920 canvas, and divided by 1.5 for this frame's 720x1280:
+//
+//   top     270px -> 180   the handle, the "following/for you" tabs, the search
+//   bottom  335px -> 223   caption block, sound title, progress bar
+//   left     60px ->  40   thumb rest
+//   right   120px ->  80   the action rail, from about a third down
+//
+// SAFE_BOTTOM stays at 300 rather than dropping to the measured 223. The
+// template is the minimum that is not COVERED; a caption sitting one pixel
+// above a sound title is legible and still looks cramped, and taller phones
+// grow that zone. The extra 77px is breathing room, deliberately spent.
+//
+// SAFE_RIGHT likewise sits at 132 against a measured 80 — the action rail is
+// wider on the newer layout and its icons carry labels.
+const SAFE_TOP = 180;
 const SAFE_BOTTOM = 300;
+const SAFE_LEFT = 48;
 // The right-hand action rail. Only the bottom bar is wide enough to reach it.
 const SAFE_RIGHT = 132;
 
@@ -857,7 +874,10 @@ function drawCurve(
   const right = W * 0.88;
   const span = right - left;
   const baseline = H * 0.52;
-  const peak = H * 0.2;
+  // Clear of the top zone, where TikTok puts the search and the tabs. At 0.2 the
+  // peak sat at 256 and was already clear, but expressing it against SAFE_TOP
+  // means it stays clear if either number moves.
+  const peak = Math.max(SAFE_TOP + 40, H * 0.2);
 
   // z for a percentile, by the Beasley-Springer-Moro-ish rational approximation
   // that precision.ts already trusts elsewhere. Only used for placement, so
@@ -1358,12 +1378,12 @@ function drawBottomBar(
   ctx.letterSpacing = "0px";
   ctx.fillStyle = "#f5f5f1";
   const title = metric ? metric.def.name : titleFor(beat, input.name);
-  ctx.fillText(clip(ctx, title, W * 0.56), 48, y);
+  ctx.fillText(clip(ctx, title, W * 0.56), SAFE_LEFT, y);
 
   ctx.font = "500 14px Inter, Arial, sans-serif";
   ctx.letterSpacing = "3px";
   ctx.fillStyle = "#7f8682";
-  ctx.fillText(metric ? "SCORE" : "TRUEMAX", 48, y + 26);
+  ctx.fillText(metric ? "SCORE" : "TRUEMAX", SAFE_LEFT, y + 26);
 
   // The number, right-aligned, with the qualitative band under it. The band is
   // the part a viewer repeats out loud, so it is never omitted — a bare 9.5
