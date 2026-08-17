@@ -3506,3 +3506,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxpet-tip-actions button.on:hover { filter: brightness(1.07); color: #fff; }
 
 @keyframes mxt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* The side chosen last time, on a screen that asks every scan. A hint about
+   where the last answer went, not a default — the reason it is being asked
+   again is that this is a different face. */
+.sexpick-side.was::after {
+  content: "LAST TIME";
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: 2px; opacity: .55; font-weight: 600;
+}
+.sexpick-side { position: relative; }

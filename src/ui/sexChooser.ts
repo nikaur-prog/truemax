@@ -16,23 +16,26 @@ import type { Sex } from "../engine/types.js";
 
 let el: HTMLDivElement | null = null;
 
-export function openSexChooser(onPick: (sex: Sex) => void): void {
+// `preselect` marks the previous answer when this is asked repeatedly, as it is
+// on /quick. It is a hint, not a default that can be tabbed past: the whole
+// point of asking again is that the last answer was about a different person.
+export function openSexChooser(onPick: (sex: Sex) => void, preselect?: Sex): void {
   close();
   el = document.createElement("div");
   el.className = "sexpick";
   el.innerHTML = `
     <div class="sexpick-head">
-      <h2>Who should we score you against?</h2>
-      <p>Every percentile is measured against this group, and it moves the number a lot. Pick one to start.</p>
+      <h2>Who should we score this face against?</h2>
+      <p>Every percentile is measured against this group, and it moves the number a lot — by 0.7 points typically and up to 4.5 at worst. Pick one to start.</p>
     </div>
     <div class="sexpick-split">
-      <button class="sexpick-side man" data-sex="male">
+      <button class="sexpick-side man${preselect === "male" ? " was" : ""}" data-sex="male">
         <span class="sexpick-glow"></span>
         <span class="sexpick-ic">♂</span>
         <b>Man</b>
         <span class="sexpick-sub">Scored against men</span>
       </button>
-      <button class="sexpick-side woman" data-sex="female">
+      <button class="sexpick-side woman${preselect === "female" ? " was" : ""}" data-sex="female">
         <span class="sexpick-glow"></span>
         <span class="sexpick-ic">♀</span>
         <b>Woman</b>

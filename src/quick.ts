@@ -200,16 +200,27 @@ async function openCamera(): Promise<void> {
 //
 // Asked BEFORE the camera opens, not after the photo, so it never lands in the
 // middle of the clip someone is recording.
+// Asked EVERY scan here, unlike the main app.
+//
+// The main app remembers, correctly: it scans one person repeatedly and their
+// sex does not change between Tuesday and Thursday. /quick is the opposite tool
+// — it scans a different stranger every time — so a remembered answer means
+// every face after the first is silently scored against whichever population
+// happened to be chosen weeks ago.
+//
+// That is not a small error. Switching population moves the score by a median
+// of 0.70 points, 2.10 at the 90th percentile and 4.50 at worst, which is
+// larger than the entire within-person noise band the rest of the engine works
+// so hard to account for. A remembered answer is a wrong answer most of the
+// time on a tool built for scanning other people.
+//
+// The previous choice is pre-selected, so the common case is still one tap.
 function withSex(next: () => void): void {
-  if (storedSex()) {
-    next();
-    return;
-  }
   openSexChooser((sex) => {
     storeSex(sex);
     paintSilhouette();
     next();
-  });
+  }, storedSex() ?? undefined);
 }
 
 function paintSilhouette(): void {

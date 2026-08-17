@@ -44,14 +44,23 @@ function report(metrics: ScoredMetric[]): Report {
   } as unknown as Report;
 }
 
+// Every metric here clears REEL_RELIABLE_MIN, which is now part of what the
+// script builder tests. The fixture previously used gonialProxy (0.25),
+// nasalIndex (0.00) and chinHeightRatio (0.03) — all correctly excluded from a
+// published video now, which left this fixture with no jaw, nose or chin beat
+// and no way to assert an ordering that walks down the face.
+//
+// Swapping them for the reliable metric in each region keeps the test about
+// what it is about: the running order. It is worth noting that the nose has no
+// replacement — every nose metric measures noise — so a rundown simply has
+// nothing trustworthy to say about a nose, and the fixture reflects that.
 const SPREAD_OF_METRICS = [
   metric("canthalTilt", "eyes", 1.6),
-  metric("eyeAspectRatio", "eyes", -1.4),
+  metric("browTilt", "eyes", -1.4),
   metric("midfaceRatio", "midface", 0.9),
-  metric("nasalIndex", "nose", -0.8),
   metric("lipRatio", "lips", 1.1),
-  metric("gonialProxy", "jaw", -1.9),
-  metric("chinHeightRatio", "chin", 0.7),
+  metric("jawCheekRatio", "jaw", -1.9),
+  metric("philtrumChinRatio", "chin", 0.7),
   metric("facialIndex", "proportions", -0.6),
 ];
 

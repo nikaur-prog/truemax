@@ -1,6 +1,7 @@
 import type { RegionId, Report, ScoredMetric } from "./types.js";
 import { REGION_NAMES } from "./scoring.js";
 import { statedPct } from "./precision.js";
+import { reliabilityOf } from "./reliability.js";
 import { SPREAD, rarityShort, spreadLine } from "./rarity.js";
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,17 @@ export interface ReelScriptOptions {
 // within the noise of one photograph and saying anything about it is filler
 // that makes the whole video less credible.
 const NOTABLE_Z = 0.45;
+
+// The reliability a metric needs before it may carry a sentence in a published
+// video. See the filter in the beat builder for why this sits above the
+// product-wide RELIABLE_MIN of 0.15.
+//
+// At 0.35 this drops jaw frontal angle (0.10), gonial angularity (0.25) and
+// every metric measured at zero, while keeping jaw : cheekbone width (0.47) and
+// the strong performers — lip ratio (0.74), intercanthal (0.73), philtrum-chin
+// (0.69). The jaw is not silenced, only the two ways of measuring it that do
+// not survive a change of photograph.
+const REEL_RELIABLE_MIN = 0.35;
 
 // The sentence for one measurement.
 //
@@ -204,8 +216,32 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   // Notable, measured, and not an impossible reading. An implausible metric is
   // a landmark in the wrong place (see scoring.ts) — it carries no weight in
   // the score and it must not carry a sentence in a video either.
+  // Reliability is a harder gate here than anywhere else in the product, and
+  // the reason is that a video is published.
+  //
+  // reliability.ts measures what share of each metric's variance is real
+  // between-person signal rather than photo-to-photo noise. Jaw frontal angle
+  // is 0.10 — ninety per cent noise — and it was eligible to headline a beat,
+  // so a rundown could and did assert "Jaw frontal angle, 3.7 out of 10, below
+  // average" over somebody's face. That is a coin flip set in serif type, and
+  // it is the single sentence most likely to make a viewer conclude the whole
+  // instrument is invented.
+  //
+  // The argument was already made two lines above for implausible values: it
+  // carries no weight in the score, so it must not carry a sentence in a video.
+  // Noise deserves the same treatment and was simply never given it.
+  //
+  // The bar is deliberately ABOVE the product-wide RELIABLE_MIN of 0.15. That
+  // threshold decides whether an on-screen row gets a score or an "indicative"
+  // chip — a row is glanceable, revisable, and sits beside its own caveat. A
+  // video has none of that: it is downloaded, posted, and argued with in a
+  // comment section months later with no chip anywhere near it. Something
+  // barely past meaningless does not belong in one.
   const candidates = report.metrics.filter(
-    (m) => !m.implausible && Math.abs(m.zEff) >= NOTABLE_Z,
+    (m) =>
+      !m.implausible &&
+      Math.abs(m.zEff) >= NOTABLE_Z &&
+      reliabilityOf(m.def.id) >= REEL_RELIABLE_MIN,
   );
 
   // Selection is by interest AND tone balance; the running order is by anatomy.
