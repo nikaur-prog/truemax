@@ -51,18 +51,35 @@ import { drawMeasurement } from "./measureOverlay.js";
 // Generous on purpose: a crop tight enough to be exactly the eyes reads as a
 // stock-photo close-up and loses the face doing the reacting. These include
 // enough around them to keep it a person.
+// How much head sits above the mesh, in mesh-box heights.
+//
+// MediaPipe's topmost vertex lands near the hairline, not the crown, so the
+// bounding box of the landmarks is a face rather than a head — roughly the
+// bottom three quarters of one. Framing anything against that box without
+// adding this back guarantees a flat-topped portrait.
+const CROWN = 0.34;
+
+//
+// Note that the box these are fractions of is the MESH box, and the mesh stops
+// at the top of the forehead. Zero is not the top of the head — it is somewhere
+// around the hairline, with a third of a head still above it. Every band here
+// is written in those units, and CROWN below is what converts back.
 const BAND: Record<RegionId, [number, number]> = {
-  eyes: [0.14, 0.58],
-  midface: [0.24, 0.72],
-  nose: [0.3, 0.78],
-  lips: [0.5, 0.94],
-  jaw: [0.46, 1.02],
-  chin: [0.6, 1.06],
-  // Whole-face measurements. Cropping in on a proportion between two distant
-  // points and then drawing a line to one that is off screen would be worse
-  // than not cropping at all.
-  proportions: [0, 1],
-  symmetry: [0, 1],
+  eyes: [0.06, 0.66],
+  midface: [0.16, 0.8],
+  nose: [0.22, 0.86],
+  lips: [0.42, 1.02],
+  jaw: [0.36, 1.1],
+  chin: [0.5, 1.14],
+  // Whole-face measurements, and the reason this table needed revisiting.
+  //
+  // [0, 1] is not the whole face. It is the mesh, which starts at the forehead
+  // and ends at the chin — so a "whole face" crop cut the top of the head off
+  // and stopped flush at the jaw, which is what made every rundown look like it
+  // had been framed by someone standing too close. A portrait needs the skull
+  // and some air under the chin, and neither of those is inside the mesh.
+  proportions: [-CROWN, 1.12],
+  symmetry: [-CROWN, 1.12],
 };
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -124,7 +141,7 @@ export function regionCrop(
 
   // Height wanted for this band, with headroom so the band is not flush to the
   // frame edge, then width derived from the output aspect.
-  const bandH = faceH * (bottom - top) * 1.34;
+  const bandH = faceH * (bottom - top) * 1.16;
   let sh = Math.max(bandH, 1);
   let sw = sh * aspect;
   // A floor on how tight the crop may get, so an extreme zoom on a narrow band
@@ -140,7 +157,14 @@ export function regionCrop(
   // Below the face width is correct for a close-up: framing the eyes means the
   // ears are outside the frame, which is what a close-up IS. Whole-face metrics
   // are unaffected because their band asks for more height than this floor sets.
-  const minW = faceW * 0.72;
+  //
+  // Raised from 0.72. That number was set while fixing the opposite fault — a
+  // floor of 1.12 face widths was forcing every band to the same clamped frame
+  // — and the correction went too far the other way: at 0.72 an eyes beat is
+  // cropped inside the cheekbones, which is a texture, not a face reacting.
+  // 0.9 is still a close-up (the ears leave the frame) while keeping enough
+  // face on either side to read as a person.
+  const minW = faceW * 0.9;
   if (sw < minW) {
     sw = minW;
     sh = sw / aspect;

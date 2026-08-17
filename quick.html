@@ -56,6 +56,16 @@
             <span class="q-pillar-what">Describe someone, preview them, then film them</span>
             <span class="q-pillar-needs">No photos · a description</span>
           </button>
+          <!-- Not a content pillar. It makes nothing to post — it is the tool
+               that decides whether the other three are telling the truth, and
+               it lives here because this is the page the person who does that
+               work already has open. -->
+          <button class="q-pillar q-pillar-tool" data-mode="calibrate" type="button">
+            <span class="q-pillar-kicker">04</span>
+            <b>Calibrate</b>
+            <span class="q-pillar-what">Rate a face, then see what the engine said</span>
+            <span class="q-pillar-needs">One photo · your honest number</span>
+          </button>
         </div>
       </section>
 
@@ -152,6 +162,19 @@
           <p class="q-lib-note">Kept on this device only, never uploaded. Tap one to load it without re-scanning.</p>
         </section>
         <p class="engine-status" id="q-engine">Loading analysis engine…</p>
+      </section>
+
+      <!-- Calibrate: the rating step and the set so far.
+           Shown after a scan in calibrate mode, in place of the export row —
+           there is nothing to export here, the output is a number a person
+           types and the JSON the whole set becomes. -->
+      <section id="q-cal" class="hidden">
+        <div class="q-modebar">
+          <button type="button" class="linkish" id="q-cal-back">← All modes</button>
+          <span class="q-modebar-name">Calibrate</span>
+          <span class="q-modebar-step" id="q-cal-step"></span>
+        </div>
+        <div id="q-cal-body"></div>
       </section>
 
       <!-- Result.

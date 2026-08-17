@@ -4,6 +4,7 @@ import { METRICS, computeRawMetrics, directionFor, distFor } from "./metrics.js"
 import { AGG_NORM } from "./aggNorm.js";
 import { RELIABLE_MIN, reliabilityOf } from "./reliability.js";
 import { extractShape, shapeZScore } from "./shape.js";
+import { findHairline } from "./hairline.js";
 import { SIDE_METRICS, computeSideMetrics, sidePointIntegrityIssues } from "./sideMetrics.js";
 import type { SidePoints } from "./sideMetrics.js";
 import type {
@@ -21,6 +22,13 @@ import type {
 // σ-based (score = 5 + SCALE·z), so 6.5+ is genuinely rare:
 //   6.5 → z ≈ +1.15 → top ~12%      9.0 → z ≈ +3.1 → ~1 in 1000
 // ---------------------------------------------------------------------------
+
+// Metrics that come from the image rather than from landmark coordinates, and
+// may therefore legitimately be absent. Kept as a list rather than a flag on
+// MetricDef because it is a fact about how the value ARRIVES, not about the
+// measurement — the same forehead number is a pixel metric from a live scan and
+// a plain stored value when a saved scan is replayed.
+const PIXEL_METRICS = new Set(["foreheadRatio"]);
 
 const SCORE_SCALE = 1.3; // score points per σ
 const Z_CLAMP = 2.2; // per-metric influence clamp (noisy landmark guard)
@@ -186,7 +194,10 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
       break;
     }
   }
-  zEff = clamp(zEff, -Z_CLAMP, Z_CLAMP);
+  // A measurement that could not be taken has no position on the scale. It is
+  // already excluded by effWeight; pinning zEff to zero as well keeps it from
+  // travelling as NaN through anything that reads it before the weighting.
+  zEff = Number.isFinite(zEff) ? clamp(zEff, -Z_CLAMP, Z_CLAMP) : 0;
 
   const ideal = d.ideal ?? d.mean;
   const idealRange: [number, number] =
@@ -212,10 +223,21 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
 // Weighted mean of correlated z-scores, re-standardized so the aggregate is
 // itself ~N(0,1) across the population (see RHO_* above).
 function aggregateZ(zs: number[], weights: number[], rho: number): number {
-  const wSum = weights.reduce((a, b) => a + b, 0);
+  // Zero-weight entries are dropped rather than multiplied by zero.
+  //
+  // Not a micro-optimisation — a latent poisoning bug. An excluded metric has
+  // weight 0 and, when it was excluded BECAUSE its value is not a number, a
+  // z of NaN. 0 × NaN is NaN, so a single unmeasurable metric turned the
+  // pillar, the region, the overall score and every percentile built on them
+  // into NaN, and the exclusion machinery that was supposed to contain it did
+  // nothing. It stayed hidden while every metric was a landmark ratio and
+  // therefore always computable; it surfaced the moment one of them was
+  // allowed to say "I could not measure this face".
+  const kept = zs.map((z, i) => [z, weights[i]] as const).filter(([, w]) => w > 0);
+  const wSum = kept.reduce((a, [, w]) => a + w, 0);
   if (!wSum) return 0;
-  const mean = zs.reduce((a, z, i) => a + z * weights[i], 0) / wSum;
-  const w2 = weights.reduce((a, b) => a + b * b, 0);
+  const mean = kept.reduce((a, [z, w]) => a + z * w, 0) / wSum;
+  const w2 = kept.reduce((a, [, w]) => a + w * w, 0);
   const varOfMean = rho + (1 - rho) * (w2 / (wSum * wSum));
   return mean / Math.sqrt(varOfMean);
 }
@@ -486,11 +508,30 @@ export function analyze(
   width: number,
   height: number,
   sex: Sex,
+  /**
+   * The photograph, when the caller has it.
+   *
+   * Everything else in this engine is computed from landmark coordinates, which
+   * is why it could never see a hairline: the mesh does not have one. Passing
+   * the pixels lets the measurements that need image evidence take it. Optional
+   * because several callers legitimately have only landmarks — a stored scan, a
+   * replay — and those simply go without, which the scoring already handles as
+   * "not measured" rather than as zero.
+   */
+  source?: CanvasImageSource,
 ): Report {
   const g = buildGeometry(landmarks, width, height);
   const raw = computeRawMetrics(g);
+  if (source) {
+    const hair = findHairline(source, landmarks, width, height);
+    if (hair) raw.foreheadRatio = hair.foreheadRatio;
+  }
+  // Pixel-derived measurements are allowed to be missing; landmark ones are
+  // not. A landmark metric that cannot be computed means the mesh itself is
+  // broken and nothing downstream is trustworthy, whereas a refused hairline
+  // means exactly what it says.
   const invalid = METRICS
-    .filter((m) => m.view === "front")
+    .filter((m) => m.view === "front" && !PIXEL_METRICS.has(m.id))
     .filter((m) => !Number.isFinite(raw[m.id]))
     .map((m) => m.id);
   if (invalid.length) throw new Error(`Face scan produced invalid measurements: ${invalid.join(", ")}`);
