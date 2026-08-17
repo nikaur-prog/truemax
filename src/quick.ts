@@ -21,6 +21,7 @@ import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
+import { spokenSeconds } from "./engine/reelScript.js";
 import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
@@ -636,6 +637,19 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       </label>
     </div>
 
+    <!-- The thing the engine could not have known to say.
+         Optional, and it sits here rather than behind the render button on
+         purpose: it changes the length of the voiceover, so it has to be
+         written BEFORE somebody commits to a sixty-second encode and goes to
+         find footage. The counter under it says how much extra picture the
+         sentence will need, while it is still cheap to shorten. -->
+    <label class="q-namefield q-notefield">
+      <span>Anything the measurement misses <i>(optional)</i></span>
+      <textarea id="q-rundown-note" class="q-input" rows="2" maxlength="320"
+                placeholder="He's a singer with a stadium career, and that moves how he's seen far more than a jaw measurement does."></textarea>
+      <small id="q-rundown-note-len">Read out verbatim just before the call to action.</small>
+    </label>
+
     <div class="q-actions">
       <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
@@ -696,6 +710,26 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
+
+  // Live length, while the sentence is still cheap to shorten.
+  //
+  // The disclaimer lands as its own card near the end, and the rundown holds
+  // one still frame per beat — so every second of it is a second of picture
+  // that has to come from somewhere. Saying so as it is typed is the difference
+  // between trimming a sentence now and discovering you are eight seconds short
+  // of footage after a sixty-second encode.
+  const noteField = document.getElementById("q-rundown-note") as HTMLTextAreaElement | null;
+  const noteLen = document.getElementById("q-rundown-note-len");
+  if (noteField && noteLen) {
+    const update = () => {
+      const seconds = spokenSeconds(noteField.value);
+      noteLen.textContent = seconds
+        ? `Adds about ${seconds.toFixed(1)}s of voiceover — find roughly that much extra footage.`
+        : "Read out verbatim just before the call to action.";
+    };
+    noteField.addEventListener("input", update);
+    update();
+  }
   document.getElementById("q-diagnostics")!.onclick = async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const label = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim() ?? "";
@@ -940,6 +974,7 @@ async function downloadRundown(r: Report): Promise<void> {
   const btn = document.getElementById("q-rundown-download") as HTMLButtonElement | null;
   const field = document.getElementById("q-rundown-name") as HTMLInputElement | null;
   const name = (field?.value ?? "").trim();
+  const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name) {
     // Point at the missing thing rather than explaining it. The field is six
     // inches from the button that was just pressed.
@@ -961,6 +996,7 @@ async function downloadRundown(r: Report): Promise<void> {
     const accessToken = (await currentAccessToken()) ?? undefined;
     const result = await downloadRundownVideo(last.photo, last.lm, r, {
       name,
+      note,
       accessToken,
       onProgress: (progress, stage) => {
         if (btn) btn.textContent = `${stage} · ${Math.round(progress * 100)}%`;

@@ -1,6 +1,7 @@
 import type { Geom, Pt } from "./geometry.js";
 import { LM, MIRROR_PAIRS, dist, mid, angleAt, lineTiltDeg } from "./geometry.js";
-import type { MetricDef } from "./types.js";
+import { PIPELINE_BIAS } from "./calibration/pipelineBias.js";
+import type { Direction, MetricDef, SexDist, Sex } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Metric computers. Every distance is normalized by the inter-eye distance
@@ -255,13 +256,69 @@ export function computeRawMetrics(g: Geom): Record<string, number> {
 }
 
 // ---------------------------------------------------------------------------
-// Metric definitions. Distribution means/SDs are in MESH-MEASUREMENT SPACE —
-// seeded from published facial-anthropometry averages where the mesh tracks
-// anatomy closely, hand-calibrated against test faces where it doesn't
-// (see CALIBRATION.md). Tune means/SDs/ideals here; nothing else changes.
+// Metric definitions. Distribution means/SDs are seeded from published
+// facial-anthropometry averages — caliper measurements, which this engine does
+// not take. What it takes is a mesh fitted to a photograph, and the offset
+// between the two is corrected in calibration/pipelineBias.ts rather than by
+// editing the seeded numbers, so what was assumed stays visible next to what
+// was measured. Read every distribution through distFor().
+//
+// `direction` is the other half, and it is where most of the damage was.
+// Twenty-seven of these were scored as bands — distance from an ideal, sign
+// discarded — and a band returns roughly the same score for a face above the
+// ideal and one below it. Measurements that track human judgement at r ≈ 0.6
+// were contributing r ≈ 0.0 after that transform, and one of them (midface :
+// lower face) was contributing −0.56: the faces nearest its stated ideal were
+// the ones people rated worst.
+//
+// Twenty-four directions below were re-derived from the nineteen rated faces in
+// calibration/corpus.json, per sex, and several genuinely split by sex — fWHR
+// reads +0.55 with attractiveness in men and −0.51 in women, which is the
+// textbook dimorphism and not a contradiction. Held out, the overall score now
+// ranks women at r ≈ 0.84 against a human, up from nothing. The men do not
+// hold up; nine faces bunched in the middle of the range cannot settle
+// thirty-one directions, and calibration.test.ts says so out loud rather than
+// hiding it in a pooled average.
+//
+// Two of these are on notice. `mouthCornerTilt` for men and `browTilt` for
+// women both point the way an EXPRESSION would push them, and nothing in this
+// engine can tell a downturned mouth from a neutral one held for a photo.
+// Re-check both when the corpus has faces of the same person pulling different
+// faces.
 // ---------------------------------------------------------------------------
 
 const M = (def: MetricDef) => def;
+
+/**
+ * The distribution to score against: the seeded one, corrected for the offset
+ * between caliper anthropometry and what this mesh actually reads.
+ *
+ * Nothing should read `def.dist[sex]` directly. The raw table is the literature
+ * as published, and the literature was not measured on a 478-point mesh fitted
+ * to a phone photograph — see calibration/pipelineBias.ts for how far apart the
+ * two turned out to be and why a constant offset does real damage to a band.
+ *
+ * Cheap enough to call per metric per scan (a lookup and two arithmetic ops),
+ * so it is deliberately not memoized; a cache keyed on def+sex would be more
+ * code than the thing it saves.
+ */
+export function distFor(def: MetricDef, sex: Sex): SexDist {
+  const b = PIPELINE_BIAS[def.id]?.[sex];
+  const d = def.dist[sex];
+  if (!b) return d;
+  const shift = b.shift ?? 0;
+  const spread = b.spread ?? 1;
+  return {
+    mean: d.mean + shift,
+    sd: d.sd * spread,
+    ...(d.ideal === undefined ? {} : { ideal: d.ideal + shift }),
+  };
+}
+
+/** Which way this metric runs for this sex. Never read `def.direction` raw. */
+export function directionFor(def: MetricDef, sex: Sex): Direction {
+  return typeof def.direction === "string" ? def.direction : def.direction[sex];
+}
 
 export const METRICS: MetricDef[] = [
   // ---- Eyes ----
@@ -292,7 +349,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "eyeAspectRatio", name: "Eye aspect ratio", unit: "", decimals: 2,
     view: "front", region: "eyes", pillar: "Dimorphism", weight: 0.9,
-    direction: "band", fixability: 0.2,
+    direction: { male: "band", female: "higher" }, fixability: 0.2,
     dist: {
       male: { mean: 0.325, sd: 0.043, ideal: 0.316 },
       female: { mean: 0.3305, sd: 0.0467, ideal: 0.345 },
@@ -301,7 +358,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "eyeSeparationRatio", name: "Eye separation ratio", unit: "", decimals: 3,
     view: "front", region: "eyes", pillar: "Features", weight: 1.1,
-    direction: "band", fixability: 0,
+    direction: { male: "band", female: "higher" }, fixability: 0,
     dist: {
       male: { mean: 0.4685, sd: 0.01379, ideal: 0.47105 },
       female: { mean: 0.4821, sd: 0.00964, ideal: 0.49174 },
@@ -310,7 +367,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "intercanthalEyeWidth", name: "Intercanthal : eye width", unit: "×", decimals: 2,
     view: "front", region: "eyes", pillar: "Harmony", weight: 1.0,
-    direction: "band", fixability: 0,
+    direction: { male: "lower", female: "band" }, fixability: 0,
     dist: {
       male: { mean: 1.316, sd: 0.132, ideal: 1.259 },
       female: { mean: 1.3065, sd: 0.0919, ideal: 1.2615 },
@@ -319,7 +376,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "browPosition", name: "Brow height", unit: "×eye-span", decimals: 3,
     view: "front", region: "eyes", pillar: "Dimorphism", weight: 1.0,
-    direction: "band", fixability: 0.25,
+    direction: { male: "band", female: "higher" }, fixability: 0.25,
     dist: {
       male: { mean: 0.3421, sd: 0.0341, ideal: 0.3345 },
       female: { mean: 0.369, sd: 0.04285, ideal: 0.3891 },
@@ -328,7 +385,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "browTilt", name: "Brow tilt", unit: "°", decimals: 1,
     view: "front", region: "eyes", pillar: "Features", weight: 0.7,
-    direction: "band", fixability: 0.3,
+    direction: { male: "band", female: "lower" }, fixability: 0.3,
     dist: {
       male: { mean: -4.92, sd: 2.076, ideal: -4.685 },
       female: { mean: -3.98, sd: 3.291, ideal: -1.115 },
@@ -339,7 +396,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "fwhr", name: "Facial width-to-height (fWHR)", unit: "", decimals: 2,
     view: "front", region: "midface", pillar: "Dimorphism", weight: 1.2,
-    direction: "band", fixability: 0.3,
+    direction: { male: "higher", female: "lower" }, fixability: 0.3,
     dist: {
       male: { mean: 1.992, sd: 0.2298, ideal: 1.9395 },
       female: { mean: 2.1205, sd: 0.195, ideal: 2.1575 },
@@ -348,7 +405,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "midfaceRatio", name: "Midface ratio", unit: "", decimals: 2,
     view: "front", region: "midface", pillar: "Harmony", weight: 1.2,
-    direction: "band", fixability: 0,
+    direction: { male: "higher", female: "band" }, fixability: 0,
     dist: {
       male: { mean: 1.034, sd: 0.126, ideal: 1.04 },
       female: { mean: 1.162, sd: 0.1201, ideal: 1.2065 },
@@ -357,7 +414,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "cheekboneHeight", name: "Cheekbone height", unit: "", decimals: 2,
     view: "front", region: "midface", pillar: "Angularity", weight: 1.0,
-    direction: "band", fixability: 0.5,
+    direction: { male: "band", female: "higher" }, fixability: 0.5,
     dist: {
       male: { mean: 0.168, sd: 0.0133, ideal: 0.1625 },
       female: { mean: 0.145, sd: 0.0193, ideal: 0.1643 },
@@ -413,7 +470,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "jawFrontalAngle", name: "Jaw frontal angle", unit: "°", decimals: 1,
     view: "front", region: "jaw", pillar: "Angularity", weight: 1.0,
-    direction: "band", fixability: 0.4,
+    direction: "higher", fixability: 0.4,
     dist: {
       male: { mean: 117.21, sd: 7.057, ideal: 112.68 },
       female: { mean: 107.38, sd: 9.563, ideal: 116.943 },
@@ -424,7 +481,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "chinHeightRatio", name: "Chin height proportion", unit: "", decimals: 2,
     view: "front", region: "chin", pillar: "Dimorphism", weight: 1.0,
-    direction: "band", fixability: 0.1,
+    direction: { male: "band", female: "lower" }, fixability: 0.1,
     dist: {
       male: { mean: 0.666, sd: 0.0252, ideal: 0.685 },
       female: { mean: 0.6595, sd: 0.023, ideal: 0.676 },
@@ -433,7 +490,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "philtrumChinRatio", name: "Chin : philtrum ratio", unit: "×", decimals: 2,
     view: "front", region: "chin", pillar: "Features", weight: 0.8,
-    direction: "band", fixability: 0.1,
+    direction: { male: "higher", female: "band" }, fixability: 0.1,
     dist: {
       male: { mean: 2.691, sd: 0.3632, ideal: 3.0542 },
       female: { mean: 3.27, sd: 0.5908, ideal: 3.56 },
@@ -442,7 +499,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "chinWidthRatio", name: "Chin width ratio", unit: "", decimals: 2,
     view: "front", region: "chin", pillar: "Angularity", weight: 0.8,
-    direction: "band", fixability: 0.3,
+    direction: { male: "band", female: "lower" }, fixability: 0.3,
     dist: {
       male: { mean: 0.504, sd: 0.0163, ideal: 0.5135 },
       female: { mean: 0.4985, sd: 0.0193, ideal: 0.4945 },
@@ -451,7 +508,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "lowerFacePct", name: "Lower face proportion", unit: "%", decimals: 1,
     view: "front", region: "chin", pillar: "Harmony", weight: 1.0,
-    direction: "band", fixability: 0.2,
+    direction: { male: "band", female: "lower" }, fixability: 0.2,
     dist: {
       male: { mean: 53.04, sd: 2.231, ideal: 53.755 },
       female: { mean: 51.555, sd: 2.469, ideal: 52.7 },
@@ -462,7 +519,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "noseMouthRatio", name: "Nose : mouth width", unit: "×", decimals: 2,
     view: "front", region: "nose", pillar: "Features", weight: 1.0,
-    direction: "band", fixability: 0,
+    direction: { male: "band", female: "higher" }, fixability: 0,
     dist: {
       male: { mean: 0.696, sd: 0.0474, ideal: 0.692 },
       female: { mean: 0.6205, sd: 0.0378, ideal: 0.6583 },
@@ -471,7 +528,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "noseIntercanthal", name: "Nose : intercanthal width", unit: "×", decimals: 2,
     view: "front", region: "nose", pillar: "Harmony", weight: 1.0,
-    direction: "band", fixability: 0,
+    direction: { male: "band", female: "lower" }, fixability: 0,
     dist: {
       male: { mean: 1.203, sd: 0.089, ideal: 1.191 },
       female: { mean: 1.1455, sd: 0.0808, ideal: 1.1115 },
@@ -480,7 +537,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "nasalIndex", name: "Nasal index (frontal)", unit: "", decimals: 2,
     view: "front", region: "nose", pillar: "Features", weight: 0.9,
-    direction: "band", fixability: 0,
+    direction: { male: "band", female: "lower" }, fixability: 0,
     dist: {
       male: { mean: 0.839, sd: 0.083, ideal: 0.8305 },
       female: { mean: 0.8565, sd: 0.0756, ideal: 0.821 },
@@ -491,7 +548,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "lipRatio", name: "Lower : upper lip ratio", unit: "×", decimals: 2,
     view: "front", region: "lips", pillar: "Features", weight: 0.9,
-    direction: "band", fixability: 0.1,
+    direction: "lower", fixability: 0.1,
     dist: {
       male: { mean: 1.4295, sd: 0.2261, ideal: 1.3895 },
       female: { mean: 1.629, sd: 0.2053, ideal: 1.4237 },
@@ -500,7 +557,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "mouthIPD", name: "Mouth width : eye span", unit: "×", decimals: 2,
     view: "front", region: "lips", pillar: "Harmony", weight: 0.9,
-    direction: "band", fixability: 0,
+    direction: { male: "band", female: "lower" }, fixability: 0,
     dist: {
       male: { mean: 0.923, sd: 0.0675, ideal: 0.862 },
       female: { mean: 0.894, sd: 0.0638, ideal: 0.8302 },
@@ -509,7 +566,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "lipHeightLowerThird", name: "Lip fullness (of lower third)", unit: "%", decimals: 1,
     view: "front", region: "lips", pillar: "Features", weight: 0.9,
-    direction: "band", fixability: 0.25,
+    direction: "higher", fixability: 0.25,
     dist: {
       male: { mean: 20.55, sd: 5.441, ideal: 22.73 },
       female: { mean: 33.96, sd: 8.303, ideal: 31.45 },
@@ -518,7 +575,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "mouthCornerTilt", name: "Mouth corner tilt", unit: "°", decimals: 1,
     view: "front", region: "lips", pillar: "Features", weight: 0.7,
-    direction: "band", fixability: 0.4,
+    direction: { male: "lower", female: "band" }, fixability: 0.4,
     dist: {
       male: { mean: -1.14, sd: 2.357, ideal: -2.95 },
       female: { mean: 1.295, sd: 2.884, ideal: -1.589 },
@@ -529,7 +586,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "topThirdEst", name: "Upper face proportion (est.)", unit: "%", decimals: 1,
     view: "front", region: "proportions", pillar: "Harmony", weight: 0.7,
-    direction: "band", fixability: 0.15,
+    direction: { male: "band", female: "higher" }, fixability: 0.15,
     dist: {
       male: { mean: 19.31, sd: 1.394, ideal: 18.925 },
       female: { mean: 18.685, sd: 1.193, ideal: 19.42 },
@@ -538,7 +595,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "middleLowerBalance", name: "Midface : lower face balance", unit: "×", decimals: 2,
     view: "front", region: "proportions", pillar: "Harmony", weight: 1.0,
-    direction: "band", fixability: 0,
+    direction: { male: "band", female: "higher" }, fixability: 0,
     dist: {
       male: { mean: 0.8855, sd: 0.0771, ideal: 0.862 },
       female: { mean: 0.94, sd: 0.0927, ideal: 0.898 },
@@ -547,7 +604,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "fifthsEyeRatio", name: "Eye width : face width (fifths)", unit: "", decimals: 3,
     view: "front", region: "proportions", pillar: "Harmony", weight: 0.9,
-    direction: "band", fixability: 0,
+    direction: "higher", fixability: 0,
     dist: {
       male: { mean: 0.2014, sd: 0.01112, ideal: 0.20905 },
       female: { mean: 0.21005, sd: 0.00993, ideal: 0.21675 },
@@ -556,7 +613,7 @@ export const METRICS: MetricDef[] = [
   M({
     id: "facialIndex", name: "Facial index (height : width)", unit: "", decimals: 2,
     view: "front", region: "proportions", pillar: "Harmony", weight: 1.0,
-    direction: "band", fixability: 0.2,
+    direction: { male: "band", female: "higher" }, fixability: 0.2,
     dist: {
       male: { mean: 1.319, sd: 0.0667, ideal: 1.3305 },
       female: { mean: 1.303, sd: 0.0593, ideal: 1.3125 },

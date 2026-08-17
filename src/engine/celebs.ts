@@ -1,4 +1,4 @@
-import { METRICS } from "./metrics.js";
+import { METRICS, distFor } from "./metrics.js";
 import type { RegionId, Report, ScoredMetric, Sex } from "./types.js";
 
 // Celebrity / reference measurement DB. Populated as a byproduct of scanning
@@ -265,7 +265,7 @@ export function regionMatches(
     for (const m of eligible) {
       const cv = celeb.metrics[m.def.id];
       if (cv === undefined) continue;
-      const d = Math.abs(m.value - cv) / m.def.dist[sex].sd;
+      const d = Math.abs(m.value - cv) / distFor(m.def, sex).sd;
       if (!best || d < best.deltaSigma) {
         best = {
           name: celeb.name,

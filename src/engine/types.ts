@@ -35,7 +35,15 @@ export interface MetricDef {
   region: RegionId;
   pillar: PillarId;
   weight: number; // relative weight inside its pillar
-  direction: Direction;
+  // One direction, or one per sex.
+  //
+  // Sexual dimorphism is not a nuance here, it is the point: a wide, short
+  // upper face (fWHR) is the textbook masculine signal, and the nineteen-face
+  // corpus reads it +0.55 with attractiveness in men and −0.51 in women. One
+  // shared direction cannot express that, and forcing one means being wrong
+  // about half the population on the metrics that carry the most dimorphic
+  // information. Read it through directionFor(), never directly.
+  direction: Direction | { male: Direction; female: Direction };
   // 0..1 — how much of the gap non-surgical change can realistically close
   // (body fat, debloat, grooming, posture). Drives current → potential.
   fixability: number;

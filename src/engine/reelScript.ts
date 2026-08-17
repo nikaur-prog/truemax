@@ -1,5 +1,6 @@
-import type { RegionId, Report, ScoredMetric } from "./types.js";
+import type { RegionId, Report, ScoredMetric, Sex } from "./types.js";
 import { REGION_NAMES } from "./scoring.js";
+import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
 import { reliabilityOf } from "./reliability.js";
 import { SPREAD, rarityShort, spreadLine } from "./rarity.js";
@@ -75,7 +76,43 @@ export interface ReelScriptOptions {
   metricBeats?: number;
   /** Non-facial context — height, status, whatever makes the ending fair. */
   context?: string[];
+  /**
+   * A sentence written by the operator, read out verbatim before the CTA.
+   *
+   * `context` is a list of terse facts and gets assembled into a sentence by
+   * the template above. This is the other half: the thing only the person
+   * cutting the video knows, in their own words. A breakdown that scores Justin
+   * Bieber a 6 and stops there hands his audience an argument; the same
+   * breakdown ending "he is a singer with a stadium career, and that changes
+   * how he is seen far more than a jaw measurement does" has already made the
+   * argument and conceded the fair part of it.
+   *
+   * Read verbatim rather than templated because the whole value is that it says
+   * something the engine could not have known to say.
+   */
+  note?: string;
   cta?: string;
+}
+
+// Words per minute the voice actually reads at.
+//
+// Measured off finished rundowns rather than assumed: ElevenLabs' default pace
+// on this copy lands near 165, which is slower than conversational speech and
+// about right for a voiceover that has to survive being watched at 1.5×.
+//
+// It exists so the person typing a disclaimer can be told, while they type, how
+// much footage they are about to need. Guessing that number after the render
+// means finding out you are eight seconds short of picture once the expensive
+// part is already done.
+const WPM = 165;
+
+/** Roughly how long a line takes to say, in seconds. */
+export function spokenSeconds(text: string): number {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  if (!words) return 0;
+  // Plus a beat of air at the end. A line that ends the instant the last
+  // syllable does cuts to the next card too tightly to read as speech.
+  return (words / WPM) * 60 + 0.45;
 }
 
 // How notable a measurement has to be to be worth a beat. Below this it is
@@ -140,6 +177,7 @@ function spokenName(name: string): string {
 function qualify(
   m: ScoredMetric,
   index: number,
+  sex: Sex,
 ): { line: (subject: string) => string; spoken: (subject: string) => string; positive: boolean } {
   const good = m.zEff;
   const name = m.def.name.toLowerCase();
@@ -159,7 +197,7 @@ function qualify(
     // good. For a band metric both extremes are penalised, so the two disagree
     // and only z knows which extreme this face is on.
     const way =
-      m.def.direction === "band"
+      directionFor(m.def, sex) === "band"
         ? m.z > 0
           ? "sits above the ideal band"
           : "sits below the ideal band"
@@ -251,7 +289,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   );
 
   const metricBeats: Beat[] = byRegion.map((m, i) => {
-    const q = qualify(m, i);
+    const q = qualify(m, i, report.sex);
     return {
       kind: "metric" as const,
       line: q.line(name),
@@ -299,6 +337,10 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       // what the face is not measuring ends the argument before it starts.
       line: `This measures a face and nothing else. ${name}: ${options.context.join(", ")}.`,
     });
+  }
+
+  if (options.note?.trim()) {
+    beats.push({ kind: "context", line: options.note.trim() });
   }
 
   beats.push({

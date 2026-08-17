@@ -453,3 +453,15 @@
   border: 1px solid var(--line); background: var(--soft, #f4f6f4); color: var(--ink);
   white-space: pre; overflow: auto;
 }
+
+/* The disclaimer field.
+   Its own full-width row under the two short inputs rather than a third column
+   beside them: it holds a sentence, and a sentence in a third of a row wraps to
+   five lines and reads like an error message. Padding matches .q-namerow so the
+   three fields share one left edge. */
+.q-notefield { padding: 12px 28px 0; }
+.q-notefield textarea.q-input {
+  width: 100%; resize: vertical; min-height: 62px; line-height: 1.5;
+  font-family: inherit;
+}
+@media (max-width: 560px) { .q-notefield { padding: 10px 20px 0; } }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildReelScript, narrationFrom, reelBlockers } from "./reelScript.js";
+import { buildReelScript, narrationFrom, reelBlockers, spokenSeconds } from "./reelScript.js";
 import type { Report, ScoredMetric } from "./types.js";
 
 // A metric stub with only the fields the script generator reads. Building a
@@ -195,4 +195,39 @@ test("the voice track never reads a parenthetical or a colon aloud", () => {
   const narration = narrationFrom(beats);
   assert.ok(!/\(|\)/.test(narration), `parenthetical survived into narration: ${narration}`);
   assert.ok(!/\s:\s/.test(narration), `colon survived into narration: ${narration}`);
+});
+
+test("a typed disclaimer is read verbatim, just before the call to action", () => {
+  // The operator knows something the engine cannot: that the subject is famous,
+  // or tall, or a singer. Templating that would defeat the point — the value is
+  // in it being a sentence nobody could have generated from the measurements.
+  const note = "He's a singer with a stadium career, and that moves how he's seen.";
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ari", note });
+  const index = beats.findIndex((b) => b.line === note);
+  assert.ok(index > 0, "the disclaimer is missing from the script");
+  assert.equal(beats[index].kind, "context");
+  assert.equal(beats[index + 1]?.kind, "cta", "the disclaimer must land immediately before the CTA");
+
+  // And it must reach the microphone, not just the screen.
+  assert.ok(narrationFrom(beats).includes(note));
+});
+
+test("no disclaimer leaves the script exactly as it was", () => {
+  const plain = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ari" });
+  for (const note of ["", "   "]) {
+    const same = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ari", note });
+    assert.deepEqual(same.map((b) => b.line), plain.map((b) => b.line), `"${note}" should be ignored`);
+  }
+});
+
+test("the spoken-length estimate is usable for planning footage", () => {
+  assert.equal(spokenSeconds(""), 0);
+  assert.equal(spokenSeconds("   "), 0);
+  // Roughly 165 words a minute plus a beat of air. Twenty words is about eight
+  // seconds — the number an operator uses to decide how much B-roll to find, so
+  // it has to be in the right neighbourhood rather than merely monotonic.
+  const twenty = new Array(20).fill("word").join(" ");
+  const s = spokenSeconds(twenty);
+  assert.ok(s > 6.5 && s < 9, `twenty words estimated at ${s.toFixed(1)}s`);
+  assert.ok(spokenSeconds(twenty + " more") > s, "a longer line must estimate longer");
 });
