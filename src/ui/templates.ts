@@ -1,5 +1,6 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
 import { REGION_NAMES } from "../engine/scoring.js";
+import { distFor } from "../engine/metrics.js";
 import { statedPct } from "../engine/precision.js";
 import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
@@ -79,7 +80,7 @@ export function fmt(m: ScoredMetric): string {
 }
 
 function fmtMean(m: ScoredMetric, sex: Sex): string {
-  return `${m.def.dist[sex].mean.toFixed(m.def.decimals)}${m.def.unit}`;
+  return `${distFor(m.def, sex).mean.toFixed(m.def.decimals)}${m.def.unit}`;
 }
 
 function ordinal(n: number): string {

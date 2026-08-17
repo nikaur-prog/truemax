@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SIDE_METRICS, SIDE_POINTS } from "./sideMetrics.js";
 import { analyzeSide } from "./scoring.js";
+import { distFor } from "./metrics.js";
 import type { SidePoints } from "./sideMetrics.js";
 
 // A profile facing image-right, laid out to roughly human proportions. Not a
@@ -72,7 +73,7 @@ test("every bound is far outside its own reference distribution", () => {
     if (!def.plausible) continue;
     const [lo, hi] = def.plausible;
     for (const sex of ["male", "female"] as const) {
-      const d = def.dist[sex];
+      const d = distFor(def, sex);
       const loZ = (d.mean - lo) / d.sd;
       const hiZ = (hi - d.mean) / d.sd;
       assert.ok(loZ >= 2.5, `${def.id} ${sex}: lower bound only ${loZ.toFixed(1)}σ out`);

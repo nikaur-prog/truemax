@@ -1,5 +1,6 @@
-import type { RegionId, Report, ScoredMetric } from "./types.js";
+import type { RegionId, Report, ScoredMetric, Sex } from "./types.js";
 import { REGION_NAMES } from "./scoring.js";
+import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
 import { reliabilityOf } from "./reliability.js";
 import { SPREAD, rarityShort, spreadLine } from "./rarity.js";
@@ -140,6 +141,7 @@ function spokenName(name: string): string {
 function qualify(
   m: ScoredMetric,
   index: number,
+  sex: Sex,
 ): { line: (subject: string) => string; spoken: (subject: string) => string; positive: boolean } {
   const good = m.zEff;
   const name = m.def.name.toLowerCase();
@@ -159,7 +161,7 @@ function qualify(
     // good. For a band metric both extremes are penalised, so the two disagree
     // and only z knows which extreme this face is on.
     const way =
-      m.def.direction === "band"
+      directionFor(m.def, sex) === "band"
         ? m.z > 0
           ? "sits above the ideal band"
           : "sits below the ideal band"
@@ -251,7 +253,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   );
 
   const metricBeats: Beat[] = byRegion.map((m, i) => {
-    const q = qualify(m, i);
+    const q = qualify(m, i, report.sex);
     return {
       kind: "metric" as const,
       line: q.line(name),

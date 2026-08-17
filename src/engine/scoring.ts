@@ -1,6 +1,6 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "./geometry.js";
-import { METRICS, computeRawMetrics } from "./metrics.js";
+import { METRICS, computeRawMetrics, directionFor, distFor } from "./metrics.js";
 import { AGG_NORM } from "./aggNorm.js";
 import { RELIABLE_MIN, reliabilityOf } from "./reliability.js";
 import { extractShape, shapeZScore } from "./shape.js";
@@ -144,7 +144,7 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
-  const d = def.dist[sex];
+  const d = distFor(def, sex);
   const z = (value - d.mean) / d.sd;
 
   // Anatomically impossible readings are placement errors, not faces.
@@ -164,8 +164,9 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
     ? value < def.plausible[0] || value > def.plausible[1] || !Number.isFinite(value)
     : !Number.isFinite(value);
 
+  const direction = directionFor(def, sex);
   let zEff: number;
-  switch (def.direction) {
+  switch (direction) {
     case "higher":
       zEff = z;
       break;
@@ -189,9 +190,9 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
 
   const ideal = d.ideal ?? d.mean;
   const idealRange: [number, number] =
-    def.direction === "lower"
+    direction === "lower"
       ? [Math.max(0, d.mean - 1.5 * d.sd), d.mean - 0.3 * d.sd]
-      : def.direction === "higher"
+      : direction === "higher"
         ? [d.mean + 0.3 * d.sd, d.mean + 1.5 * d.sd]
         : [ideal - 0.6 * d.sd, ideal + 0.6 * d.sd];
 
@@ -441,6 +442,43 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
     metrics: scored,
     zScores: rawZ,
   };
+}
+
+/**
+ * The front pipeline from measurements onward, with the camera taken out.
+ *
+ * `analyze` needs landmarks, landmarks need MediaPipe, and MediaPipe needs a
+ * browser — which meant that until now the only way to find out what the engine
+ * would say about a face was to open a page and photograph one. That is a fine
+ * way to check one face and a hopeless way to check twenty, so the whole
+ * question of whether the scoring agrees with a human stayed an opinion.
+ *
+ * Splitting it here makes the corpus in ./calibration/corpus.json runnable:
+ * measurements in, report out, no DOM. calibration.test.ts uses it to assert
+ * agreement with human ratings as an actual pass/fail rather than a claim in a
+ * commit message.
+ *
+ * `shapeZ` is optional because the corpus stores measurements, not meshes, and
+ * the outline descriptor cannot be recovered from ratios. Passing null drops
+ * W_SHAPE of the blend, so harness overalls sit a little away from what the
+ * same face shows in the app. Fine for ranking, which is what calibration is
+ * about; not to be quoted as the score somebody would see.
+ */
+export function scoreFrontMeasurements(
+  raw: Record<string, number>,
+  sex: Sex,
+  shapeZ: number | null = null,
+): Report {
+  const scored = METRICS.filter((m) => m.view === "front").map((def) =>
+    scoreMetric(def, raw[def.id], sex),
+  );
+  const report = buildReport(scored, sex, undefined, shapeZ);
+  const lift = new Map<string, number>();
+  for (const m of scored) {
+    if (m.def.fixability > 0 && m.zEff < Z_CLAMP) lift.set(m.def.id, m.def.fixability * 0.9);
+  }
+  report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
+  return report;
 }
 
 export function analyze(

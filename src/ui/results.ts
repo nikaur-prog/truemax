@@ -4,6 +4,7 @@ import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { SIDE_POINTS } from "../engine/sideMetrics.js";
+import { distFor } from "../engine/metrics.js";
 import { hasHistory, openHistory } from "./historyView.js";
 import { regionMatches } from "../engine/celebs.js";
 import { curveLegend, curveSVG } from "./curve.js";
@@ -1147,7 +1148,7 @@ function showRegion(id: RegionId): void {
 // Ideal window on the gradient bar, drawn in the same population-percentile
 // space as the marker so "inside the window" always means "in the ideal band".
 function idealWindow(m: ScoredMetric, sex: Sex): string {
-  const d = m.def.dist[sex];
+  const d = distFor(m.def, sex);
   const lo = phi((m.idealRange[0] - d.mean) / d.sd) * 100;
   const hi = phi((m.idealRange[1] - d.mean) / d.sd) * 100;
   return `<div class="ideal" style="left:${lo.toFixed(1)}%;width:${Math.max(4, hi - lo).toFixed(1)}%"></div>`;
