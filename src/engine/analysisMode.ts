@@ -69,7 +69,27 @@ export function saveAnalysisMode(mode: AnalysisMode): void {
 // inflated the score would be the same lie as a harsh one that deflated it.
 // ---------------------------------------------------------------------------
 
-export type VerdictTone = "blunt" | "kind";
+// A third register, and the one the videos use.
+//
+// "Mogger" and "chopped" are the audience's own words and they are also the
+// words that make a stranger scrolling past decide this is a red-pill account
+// rather than a measurement tool. On a video that goes to people who never
+// asked for it, the label has to be one a normal person would say out loud
+// about somebody else's face: handsome, good-looking, nice-looking.
+//
+// It is a THIRD ladder rather than a rewrite of the other two. Both survive
+// intact, the tests that pin them still pass, and going back to the slang is
+// changing which constant is the default rather than restoring deleted words.
+export type VerdictTone = "blunt" | "kind" | "polite";
+
+/**
+ * What a face is called when nobody has chosen otherwise.
+ *
+ * Polite, because the default is what the exported videos carry and a video is
+ * seen by people who did not opt into anything. The slang ladders stay one
+ * choice away for anyone who wants them.
+ */
+export const DEFAULT_VERDICT_TONE: VerdictTone = "polite";
 
 const TONE_KEY = "truemax.verdictTone";
 
@@ -78,7 +98,7 @@ const TONE_KEY = "truemax.verdictTone";
 export function loadVerdictTone(): VerdictTone | null {
   try {
     const raw = localStorage.getItem(TONE_KEY);
-    return raw === "blunt" || raw === "kind" ? raw : null;
+    return raw === "blunt" || raw === "kind" || raw === "polite" ? raw : null;
   } catch {
     return null;
   }
@@ -203,6 +223,15 @@ const LADDER: Array<{
   // thing to be called. Someone who asked for it civil asked for it civil all
   // the way up.
   kind: Record<Sex, string[]>;
+  /**
+   * The ordinary-English ladder, and the one the exports use by default.
+   *
+   * One word per rung rather than alternates: these are the words a person
+   * actually says about a face, and there are not five synonyms for "handsome"
+   * that a viewer would not read as the app straining. The variety the slang
+   * ladder gets from alternates, this one gets from having nine rungs.
+   */
+  polite: Record<Sex, string[]>;
   // The rung in plain English, said out loud after the slang one. See Verdict.
   // Sex-specific because the phrase names the person, and one that named the
   // wrong one would be the single most obvious error the video could make.
@@ -218,6 +247,11 @@ const LADDER: Array<{
     // could do real damage, and there is a difference between telling somebody
     // where they measure and telling them what they are. The rung below the
     // middle gets the same treatment for the same reason.
+    // No polite word for the floor pretends the floor is not there. "Room to
+    // grow" is what a person actually says to someone at the bottom of a scale
+    // and it is not a euphemism — it is the honest reading of a face whose gap
+    // is almost entirely the part that moves.
+    polite: { male: ["Room to grow"], female: ["Room to grow"] },
     descriptor: { male: "a male with a long way to climb", female: "a female with a long way to climb" },
     tone: "low",
     line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
@@ -229,6 +263,7 @@ const LADDER: Array<{
       male: ["Plenty to work with", "Lots of upside"],
       female: ["Plenty to work with", "Lots of upside"],
     },
+    polite: { male: ["Plain-looking"], female: ["Plain-looking"] },
     descriptor: { male: "a well below average male", female: "a well below average female" },
     tone: "low",
     line: "Bottom fifth. The gap is real, and most of it is the part that moves without surgery.",
@@ -240,6 +275,7 @@ const LADDER: Array<{
       female: ["Mildly chopped", "Rough", "Half baked", "Unfinished"],
     },
     kind: { male: ["Coming along", "On the way up"], female: ["Coming along", "On the way up"] },
+    polite: { male: ["Ordinary-looking"], female: ["Ordinary-looking"] },
     descriptor: { male: "a below average male", female: "a below average female" },
     tone: "low",
     line: "Below the middle. One or two numbers are doing the damage rather than all of them.",
@@ -269,6 +305,7 @@ const LADDER: Array<{
       male: ["Right in the middle", "Middle of the pack", "Bang on average"],
       female: ["Right in the middle", "Middle of the pack", "Bang on average"],
     },
+    polite: { male: ["Average-looking"], female: ["Average-looking"] },
     descriptor: { male: "a perfectly average male", female: "a perfectly average female" },
     tone: "mid",
     line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
@@ -283,6 +320,7 @@ const LADDER: Array<{
       male: ["Good base", "Solid footing", "Comfortably above average"],
       female: ["Good base", "Solid footing", "Comfortably above average"],
     },
+    polite: { male: ["Nice-looking"], female: ["Nice-looking"] },
     descriptor: { male: "a slightly above average male", female: "a slightly above average female" },
     tone: "mid",
     line: "Just above the middle. Nothing is wrong; nothing is carrying you either.",
@@ -297,6 +335,7 @@ const LADDER: Array<{
       male: ["Good looking", "Handsome", "Well put together"],
       female: ["Good looking", "Lovely", "Well put together"],
     },
+    polite: { male: ["Good-looking"], female: ["Good-looking"] },
     descriptor: { male: "an attractive male", female: "an attractive female" },
     tone: "high",
     line: "Top third. Measurably ahead of two out of three faces in the reference set.",
@@ -311,6 +350,7 @@ const LADDER: Array<{
       male: ["Striking", "Turns heads", "Exceptional"],
       female: ["Striking", "Turns heads", "Exceptional"],
     },
+    polite: { male: ["Great-looking"], female: ["Great-looking"] },
     descriptor: { male: "a very attractive male", female: "a very attractive female" },
     tone: "high",
     line: "Top fifth. Four out of five faces in the reference set measure below this.",
@@ -328,6 +368,10 @@ const LADDER: Array<{
       male: ["Remarkable", "Genuinely rare"],
       female: ["Remarkable", "Genuinely rare"],
     },
+    // The ladder switches families at the top two rungs, from "-looking" to the
+    // classic gendered compliment. That switch is the signal: a viewer hears
+    // handsome and knows it is not another notch on the same word.
+    polite: { male: ["Handsome"], female: ["Beautiful"] },
     descriptor: { male: "an exceptionally attractive male", female: "an exceptionally attractive female" },
     tone: "peak",
     line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
@@ -340,13 +384,14 @@ const LADDER: Array<{
     min: 99,
     words: { male: ["True Adam"], female: ["True Eve"] },
     kind: { male: ["One in a hundred"], female: ["One in a hundred"] },
+    polite: { male: ["Very handsome"], female: ["Very beautiful"] },
     descriptor: { male: "a one in a hundred male", female: "a one in a hundred female" },
     tone: "peak",
     line: "Top one per cent. There is nothing above this — the scale ends here.",
   },
 ];
 
-export function verdictFor(report: Report, tone?: VerdictTone): Verdict {
+export function verdictFor(report: Report, tone: VerdictTone = DEFAULT_VERDICT_TONE): Verdict {
   return verdictForPercentile(report.overallPercentile, report.sex, tone);
 }
 
@@ -357,12 +402,14 @@ export function verdictFor(report: Report, tone?: VerdictTone): Verdict {
 export function verdictForPercentile(
   percentile: number,
   sex: Sex = "male",
-  tone: VerdictTone = "blunt",
+  // The product default, defined once. A per-function literal is how a page
+  // and the video it exports end up calling one face two different things.
+  tone: VerdictTone = DEFAULT_VERDICT_TONE,
 ): Verdict {
   // Walk down so the highest qualifying rung wins, and the array stays readable
   // in ascending order.
   const rung = [...LADDER].reverse().find((r) => percentile >= r.min) ?? LADDER[0];
-  const words = tone === "kind" ? rung.kind[sex] : rung.words[sex];
+  const words = tone === "kind" ? rung.kind[sex] : tone === "polite" ? rung.polite[sex] : rung.words[sex];
   // Derived from the percentile, never random. Pressing the button again must
   // not change your verdict; a result that moves when you re-roll it is not a
   // measurement and nobody believes it twice.

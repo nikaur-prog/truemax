@@ -38,7 +38,7 @@ const card = {
   // The LONGEST rung on the ladder, deliberately. At a fixed 76px this drew
   // as "ooksmaxxing final bos" — a fixture that only ever holds a short word
   // cannot catch that, so this one holds the worst case.
-  verdict: "Looksmaxxing final boss", overall: 7.6, potential: 8.2, percentile: 92,
+  verdict: "Great-looking", overall: 7.6, potential: 8.2, percentile: 92,
   rows: [
     { label: "Eyes", score: 8.1 }, { label: "Midface", score: 7.4 },
     { label: "Nose", score: 5.2 }, { label: "Lips", score: 4.3 },
@@ -60,7 +60,8 @@ c.fillText("CUTAWAY", 450, 1080);
 
 const beats = [
   { kind: "metric", line: "Marlon has a canthal tilt of 6.4 degrees, so the outer corner sits above the inner.", metricId: "canthalTilt", region: "eyes", positive: true },
-  { kind: "card", line: "The verdict: Looksmaxxing final boss. An exceptionally attractive male. Marlon measures 7.6 out of 10.", card },
+  { kind: "card", line: "The verdict: Great-looking. A very attractive male.", card },
+  { kind: "card", line: "Marlon measures 7.6 out of 10.", card },
   // Two curve beats, because they render differently: the first carries a
   // badge and shows his standing, the second drops it and shows the crowd.
   { kind: "curve", line: "That's 1 in 10. Two thirds of men measure between 4.1 and 6.3.", percentile: 92, badge: "92th percentile" },

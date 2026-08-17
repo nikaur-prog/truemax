@@ -1590,6 +1590,16 @@ function clip(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
   return `${out}…`;
 }
 
+// The address, on screen the whole way through.
+//
+// It was CENTRED, which on a 720-wide frame puts it directly under the chin —
+// the one column a measurement line is most likely to be drawn down. A jaw
+// width, a philtrum, a midline: all of them run through the middle of the
+// bottom third, and all of them arrived on top of the wordmark.
+//
+// So it tucks in under the score column instead, right-aligned to the same edge
+// the number and its band already use. Nothing is measured out there, the three
+// items read as one stack, and the centre of the frame is left to the face.
 function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number): void {
   ctx.save();
   ctx.font = "500 16px Inter, Arial, sans-serif";
@@ -1598,7 +1608,10 @@ function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number): voi
   const name = "truemax";
   const tld = ".app";
   const total = ctx.measureText(name).width + ctx.measureText(tld).width;
-  const x = (W - total) / 2;
+  // Right-aligned by hand rather than with textAlign, because the wordmark is
+  // two differently coloured draws and the second has to start where the first
+  // ends.
+  const x = W - SAFE_RIGHT - total;
   const y = H - SAFE_BOTTOM + 26;
   ctx.globalAlpha = 0.62;
   ctx.fillStyle = "#f5f5f1";

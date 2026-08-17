@@ -67,7 +67,8 @@ export function askVerdictTone(force = false): Promise<VerdictTone> {
 
     for (const b of host.querySelectorAll<HTMLButtonElement>(".toneask-opt")) {
       b.onclick = () => {
-        const tone = b.dataset.tone === "kind" ? "kind" : "blunt";
+        const raw = b.dataset.tone;
+        const tone: VerdictTone = raw === "kind" ? "kind" : raw === "blunt" ? "blunt" : "polite";
         saveVerdictTone(tone);
         close();
         resolve(tone);

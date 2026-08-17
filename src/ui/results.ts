@@ -26,7 +26,7 @@ import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
-import { ANALYSIS_MODES, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor, verdictForPercentile } from "../engine/analysisMode.js";
+import { ANALYSIS_MODES, DEFAULT_VERDICT_TONE, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor, verdictForPercentile } from "../engine/analysisMode.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import { scaleTrigger, showScalePrimer, wireScaleNote } from "./scaleNote.js";
 // Aliased: this module already has a rarityLine for a REGION row, which says a
@@ -367,7 +367,7 @@ function showSideShallow(mode: AnalysisMode, report: Report): void {
 }
 
 function sideVerdictHTML(report: Report): string {
-  const v = verdictForPercentile(report.overallPercentile, report.sex, loadVerdictTone() ?? "blunt");
+  const v = verdictForPercentile(report.overallPercentile, report.sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   return `<div class="verdict ${v.tone}">
     <span class="verdict-label">SIDE PROFILE VERDICT</span>
     <b class="verdict-word">${v.word}</b>
@@ -1455,7 +1455,7 @@ function showShallow(mode: AnalysisMode): void {
 }
 
 function verdictHTML(): string {
-  const v = verdictFor(ctx!.report, loadVerdictTone() ?? "blunt");
+  const v = verdictFor(ctx!.report, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   return `<div class="verdict ${v.tone}">
     <span class="verdict-label">VERDICT</span>
     <b class="verdict-word">${v.word}</b>
@@ -1749,7 +1749,7 @@ function chatContext() {
   if (!ctx) return null;
   return buildMaxContext({
     report: ctx.report,
-    tone: loadVerdictTone() ?? "kind",
+    tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
     scans: readAllHistory().length,
     potential: maxAccess ? ctx.report.potential : undefined,
     movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,

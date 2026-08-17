@@ -15,7 +15,7 @@ import { track } from "./engine/track.js";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSideCapture, close as closeSideFlow } from "./ui/sideFlow.js";
-import { loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
+import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
 import { askVerdictTone } from "./ui/tonePrompt.js";
 import { drawLandmarksAnimated } from "./ui/overlay.js";
 import type { Report, Sex } from "./engine/types.js";
@@ -387,6 +387,14 @@ async function run(src: HTMLCanvasElement): Promise<void> {
 // The last analysed photo, kept so switching reference population re-scores it
 // rather than making someone shoot again.
 let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
+
+// The report the result screen is currently showing.
+//
+// `last` holds the photograph and the landmarks; this holds the numbers. Needed
+// because the headline score is editable and re-deriving the verdict from an
+// edit means knowing which reference population to derive it against — and a
+// woman handed the men's word is the most obvious error the page could make.
+let shown: Report | null = null;
 
 // ---------------------------------------------------------------------------
 // Which of the three jobs this session is doing.
@@ -925,6 +933,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
   el.capture.classList.add("hidden");
   el.result.classList.remove("hidden");
+  shown = r;
 
   // The photo lives in its own element now, painted once, so the sequence can
   // move it without the card markup being rebuilt underneath it.
@@ -947,7 +956,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   // and a word above the numbers it came from is a read. The toggle is on the
   // card, not in settings, since this page is used standing up with a camera in
   // one hand.
-  const verdict = verdictForPercentile(r.overallPercentile, r.sex, loadVerdictTone() ?? "blunt");
+  const verdict = verdictForPercentile(r.overallPercentile, r.sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   const dimorphism = r.sex === "female" ? "FEMININITY" : "MASCULINITY";
   const micro: Array<[string, number]> = [
     ["FACE", r.overallPercentile],
@@ -1147,9 +1156,16 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
   document.getElementById("q-sex")!.onclick = () => show(r.sex === "male" ? "female" : "male");
   document.getElementById("q-download")!.onclick = () => void downloadCard();
-  document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
-  document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
-  document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
+  // Every export reads the CORRECTED report, not the one the engine produced.
+  //
+  // The headline score is editable, and a correction that changes the number on
+  // screen and not the number in the file is worse than no edit at all — the
+  // operator sees 7.2, publishes, and the video says 8.1 and calls him
+  // handsome. editedReport re-derives the percentile, and the verdict follows
+  // the percentile everywhere it is drawn.
+  document.getElementById("q-video-download")!.onclick = () => void downloadVideo(editedReport(r), "breakdown");
+  document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(editedReport(r), "verdict");
+  document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(editedReport(r));
 
   // The before half, exported on its own. Only present after a Reel Creator run
   // — there is no before to render otherwise, and a disabled button explaining
@@ -1219,7 +1235,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     button.textContent = copied ? "Copied — paste it back" : "Copy from the box";
     window.setTimeout(() => (button.textContent = "Copy diagnostics"), 2600);
   };
-  document.getElementById("q-card-download")!.onclick = () => void downloadScoreCard(r);
+  document.getElementById("q-card-download")!.onclick = () => void downloadScoreCard(editedReport(r));
   const saveBtn = document.getElementById("q-save-face") as HTMLButtonElement | null;
   if (saveBtn) {
     saveBtn.onclick = async () => {
@@ -1313,12 +1329,52 @@ function wireEditing(): void {
       const bar = n.parentElement?.querySelector<HTMLElement>(".q-bar i");
       if (bar) bar.style.width = `${Math.max(2, Math.min(100, v * 10))}%`;
       if (n.classList.contains("q-score-num")) {
+        // The headline score is editable because the engine is not always
+        // right and the operator can see the face. Everything downstream of
+        // that number has to move with it — the rank did, and the VERDICT did
+        // not, so a face nudged from 8.1 to 7.2 kept the word it was given at
+        // 8.1 and the video went out saying "Handsome" over a 7.2.
+        //
+        // The measurements do not move, and must not: this is a correction to
+        // the aggregate, not a claim that the canthal tilt was mismeasured.
         const pct = aggregateScoreToPercentile(v);
         const rank = el.cards.querySelector<HTMLElement>(".q-rank");
         if (rank) rank.textContent = rankShort(pct);
+        refreshVerdictWord(pct);
       }
     });
   }
+}
+
+/**
+ * The verdict word, re-derived from whatever the headline score now says.
+ *
+ * Rewrites the word in place rather than re-rendering the card, for the same
+ * reason the mode toggle does: a re-render restarts the count-up and throws
+ * away every other number the operator has hand-corrected.
+ */
+function refreshVerdictWord(percentile: number): void {
+  const node = el.cards.querySelector<HTMLElement>(".q-verdict-word");
+  if (!node || !shown) return;
+  const v = verdictForPercentile(percentile, shown.sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
+  node.textContent = v.word;
+  // The tone class drives the colour, so a face that drops out of the top band
+  // has to lose the colour that band was wearing.
+  node.className = `q-verdict-word ${v.tone}`;
+}
+
+/**
+ * The report as the operator has corrected it.
+ *
+ * The headline number on screen wins over the one the engine produced, and the
+ * percentile is re-derived from it. Everything else — every measurement, every
+ * region, the ceiling — is untouched, because an edit to the aggregate is a
+ * correction to the summary and not a claim about the geometry.
+ */
+function editedReport(r: Report): Report {
+  const scores = editedExportScores(r);
+  if (scores.overall === r.overall) return r;
+  return { ...r, overall: scores.overall, overallPercentile: scores.percentile };
 }
 
 function editedExportScores(r: Report): { overall: number; percentile: number; regions: Array<{ name: string; score: number }> } {

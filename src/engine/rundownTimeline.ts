@@ -33,11 +33,13 @@ import type { Beat } from "./reelScript.js";
 // does and it reads fine.
 // ---------------------------------------------------------------------------
 
-// Words per second for the default voice at default settings, measured by ear
-// against a real synthesis rather than taken from a specification. This is only
-// the starting proportion — fitTimeline corrects the absolute value — so it
-// matters that it is roughly right for ALL beats, not exactly right for one.
-const WORDS_PER_SECOND = 2.7;
+// Speech rate for the default voice at default settings, measured by ear
+// against a real synthesis rather than taken from a specification. In
+// SYLLABLES, not words — see spokenWeight. About 2.7 words a second at the
+// measured 1.7-ish syllables a word. Only the starting proportion; fitTimeline
+// corrects the absolute value whenever there is real audio to correct it
+// against, so this number matters only for a silent render.
+const SYLLABLES_PER_SECOND = 4.6;
 
 // No beat is shorter than this however few words it has. "The jaw is
 // excellent." is four words and would otherwise flash past in under a second,
@@ -102,15 +104,131 @@ export interface RundownTimeline {
   sfx: SfxCue[];
 }
 
-function wordCount(line: string): number {
-  return line.split(/\s+/).filter(Boolean).length;
+// ---------------------------------------------------------------------------
+// How long a line takes to SAY.
+//
+// Word count was the weight, and a word is not a unit of time. The synthesiser
+// reads at a roughly constant rate in SYLLABLES per second, not words per
+// second, and the two only agree when every beat has the same average word
+// length. This script is full of beats where they do not:
+//
+//   "Before the rating, go get yours at truemax.app."
+//
+// Eight whitespace-words, and the last of them is spoken "truemax dot app" —
+// four syllables where the count says one. And:
+//
+//   "The verdict: Mogger. A very attractive male. Steph measures 7.2 out of 10."
+//
+// "7.2" is one whitespace-word and four syllables ("seven point two"); "10" is
+// one and one. A beat whose words are heavier than the video's average is
+// allocated less time than the voice takes to say it, and — this is the part
+// that shows up on screen — every beat BEFORE it is allocated more, because the
+// shares must sum to one. So the caption lags on the run-up and the lag is
+// worst immediately before the heaviest lines.
+//
+// Those two beats are exactly where the lag was reported, which is what makes
+// this the explanation rather than a plausible story about one. The mp3-silence
+// fix removed the drift that grew steadily through the video; this removes the
+// part that was never steady, and was always concentrated around the numbers.
+//
+// Syllables are estimated, not looked up. A dictionary would be better and is
+// not worth a megabyte of one: vowel-group counting is wrong on a small
+// fraction of English words, by one syllable, in both directions, and the
+// weight only has to be right on AVERAGE across a twenty-word clause.
+// ---------------------------------------------------------------------------
+
+// zero one two three four five six seven eight nine
+const DIGIT_SYLLABLES = [2, 1, 1, 1, 1, 1, 1, 2, 1, 1];
+
+// Tens are their own shape rather than a rule: "twenty" is two and "seventy" is
+// three, and there is no way to derive that from the digit.
+const TENS_SYLLABLES = [0, 0, 2, 2, 2, 2, 2, 3, 2, 2];
+
+// The teens, which follow neither pattern.
+const TEEN_SYLLABLES: Record<string, number> = {
+  "10": 1, "11": 1, "12": 2, "13": 2, "14": 2,
+  "15": 2, "16": 2, "17": 3, "18": 2, "19": 2,
+};
+
+/** Syllables in an integer as it is actually read aloud. */
+function integerSyllables(digits: string): number {
+  const n = digits.replace(/^0+(?=\d)/, "");
+  if (n.length === 1) return DIGIT_SYLLABLES[Number(n)] ?? 1;
+  if (n.length === 2) {
+    if (TEEN_SYLLABLES[n] !== undefined) return TEEN_SYLLABLES[n];
+    const tens = TENS_SYLLABLES[Number(n[0])] ?? 2;
+    return tens + (n[1] === "0" ? 0 : (DIGIT_SYLLABLES[Number(n[1])] ?? 1));
+  }
+  // Past two digits this script only ever says a percentile, and "a hundred" is
+  // as close as an estimate needs to get. Read digit by digit as a floor.
+  return [...n].reduce((total, d) => total + (DIGIT_SYLLABLES[Number(d)] ?? 1), 0);
+}
+
+/** Syllables in one whitespace-delimited token. */
+function tokenSyllables(raw: string): number {
+  // Punctuation that is heard as a pause rather than as sound.
+  const token = raw.replace(/[,;:!?"'()]/g, "");
+  if (!token) return 0;
+
+  // A percentage is two words before it is anything else.
+  if (token.includes("%")) return tokenSyllables(token.replace("%", "")) + 2;
+
+  // A number, possibly decimal, possibly ordinal: "7.2", "10", "92nd", "1.62".
+  const numeric = /^(\d+)(?:\.(\d+))?(st|nd|rd|th)?$/.exec(token);
+  if (numeric) {
+    const [, whole, fraction, ordinal] = numeric;
+    let total = integerSyllables(whole);
+    // An ordinal is the cardinal plus a syllable, near enough: "ninety-second",
+    // "twelfth" is the exception and it costs a tenth of a second.
+    if (ordinal) total += 1;
+    // A decimal point is read "point" and the digits after it are read one at
+    // a time — "seven point two", never "seven point twenty".
+    if (fraction) {
+      total += 1;
+      for (const d of fraction) total += DIGIT_SYLLABLES[Number(d)] ?? 1;
+    }
+    return total;
+  }
+
+  // A dotted token that is not a number is an address, and every dot in it is
+  // spoken. This is the whole of the truemax.app case.
+  if (token.includes(".")) {
+    const parts = token.split(".").filter(Boolean);
+    const dots = token.split(".").length - 1;
+    return parts.reduce((total, p) => total + tokenSyllables(p), 0) + dots;
+  }
+
+  // A word. Vowel groups, less a silent trailing e, floor of one — the standard
+  // heuristic, and accurate enough at clause length.
+  const word = token.toLowerCase().replace(/[^a-z]/g, "");
+  if (!word) return 1;
+  const groups = word.match(/[aeiouy]+/g);
+  let count = groups ? groups.length : 1;
+  // "male" is one syllable, not two. But "the" keeps its vowel, and a word of
+  // three letters or fewer has nothing to give back.
+  if (word.length > 3 && /[^aeiouy]e$/.test(word)) count -= 1;
+  return Math.max(1, count);
+}
+
+/**
+ * A line's share of the read, in units proportional to how long it takes to say.
+ *
+ * Exported because the timing is the half of this format that cannot be judged
+ * by reading it, and a weight that silently goes wrong on numbers is exactly
+ * the kind of thing that needs a test rather than a comment.
+ */
+export function spokenWeight(line: string): number {
+  const tokens = line.split(/\s+/).filter(Boolean);
+  let total = 0;
+  for (const token of tokens) total += tokenSyllables(token);
+  return Math.max(1, total);
 }
 
 /** The un-scaled estimate. Callers want buildTimeline. */
 function estimate(beats: Beat[]): TimedBeat[] {
   let cursor = 0;
   return beats.map((beat) => {
-    const spoken = Math.max(MIN_BEAT, wordCount(beat.spoken ?? beat.line) / WORDS_PER_SECOND);
+    const spoken = Math.max(MIN_BEAT, spokenWeight(beat.spoken ?? beat.line) / SYLLABLES_PER_SECOND);
     const duration = spoken + GAP;
     const timed: TimedBeat = { beat, start: cursor, duration };
     if (beat.metricId) timed.drawAt = cursor + duration * DRAW_AT;
@@ -169,7 +287,7 @@ export function fitTimeline(
   // rate through one request, so a beat's share of the words IS its share of
   // the duration, the allocations sum to exactly the audio length by
   // construction, and no error is left over to accumulate.
-  const words = timeline.beats.map((b) => Math.max(1, wordCount(b.beat.spoken ?? b.beat.line)));
+  const words = timeline.beats.map((b) => spokenWeight(b.beat.spoken ?? b.beat.line));
   const total = words.reduce((a, w) => a + w, 0);
 
   const beats: TimedBeat[] = [];

@@ -5,6 +5,7 @@ import { buildReelScript, narrationFrom, reelBlockers } from "../engine/reelScri
 import { buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
 import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
 import { drawRundownFrame } from "./rundownFrame.js";
+import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
 
@@ -121,6 +122,9 @@ export async function downloadRundownVideo(
     shortName: options.shortName,
     context: options.context,
     note: options.note,
+    // The operator's chosen register, so the video and the page it was exported
+    // from call one face the same thing.
+    tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
   });
 
   onProgress?.(0.05, "Recording the voiceover");

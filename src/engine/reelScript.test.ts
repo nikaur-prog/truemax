@@ -152,10 +152,23 @@ test("the score beat never states a number without the distribution", () => {
   // only safe while nothing can appear between them — a context or CTA beat
   // landing in the gap would put the number on screen alone, which is the exact
   // misreading the split is allowed to risk and this test exists to prevent.
+  // Stated as the SHAPE rather than as a count: every card, then every curve,
+  // and nothing else in between. Enumerating the exact run meant that splitting
+  // a card beat in two — which changes nothing about the contract — failed here
+  // and invited the fix of updating the list, which is how a guard quietly
+  // becomes a description of whatever the code does today.
   const first = beats.findIndex((b) => b.kind === "card");
-  assert.deepEqual(
-    beats.slice(first, first + ending.length).map((b) => b.kind),
-    ["card", "card", "curve", "curve"],
+  const run = beats.slice(first, first + ending.length).map((b) => b.kind);
+  assert.equal(run.length, ending.length, "something not in the ending landed inside it");
+  const firstCurve = run.indexOf("curve");
+  assert.ok(firstCurve > 0, "the ending has no card before its curve");
+  assert.ok(
+    run.slice(0, firstCurve).every((k) => k === "card"),
+    `cards are interrupted: ${run.join(",")}`,
+  );
+  assert.ok(
+    run.slice(firstCurve).every((k) => k === "curve"),
+    `curves are interrupted: ${run.join(",")}`,
   );
 
   // The card carries the numbers it needs to draw itself, and it gets them from

@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
-import { verdictForPercentile } from "../engine/analysisMode.js";
+import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "../engine/analysisMode.js";
 import { saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
 
@@ -140,7 +140,7 @@ function drawFrame(
   ctx.fillStyle = "#050606";
   ctx.fillRect(0, 0, W, H);
   if (variant === "verdict") {
-    drawVerdictFrame(ctx, photo, landmarks, scores, t);
+    drawVerdictFrame(ctx, photo, landmarks, sex, scores, t);
     drawWatermark(ctx);
     return;
   }
@@ -430,6 +430,7 @@ function drawVerdictFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
+  sex: Sex,
   scores: QuickExportScores,
   t: number,
 ): void {
@@ -459,7 +460,13 @@ function drawVerdictFrame(
     if (reveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, reveal * (1 - settle));
   }
 
-  const verdict = verdictForPercentile(scores.percentile);
+  // Sex and tone both threaded in rather than defaulted.
+  //
+  // This was verdictForPercentile(scores.percentile) — no sex, so every woman
+  // measured got the men's word on the one frame this cut exists to deliver,
+  // and no tone, so the file said "Mogger" while the page behind it said
+  // "Great-looking". Both were available at the call site the whole time.
+  const verdict = verdictForPercentile(scores.percentile, sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   const bright = verdict.tone === "high" || verdict.tone === "peak";
   // A hard, fast entrance rather than a fade. The joke is the cut.
   const punch = clamp01((t - 2.25) / 0.22);
