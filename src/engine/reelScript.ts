@@ -510,9 +510,15 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // "The verdict:" rather than a sentence around the word, because the ladder
     // holds nouns AND clauses — "Mogger", "True Adam", "You're cooked" — and no
     // one sentence frame fits all three. It was shipping "Marlon has mogger".
+    //
+    // The rung is said TWICE: once in the ladder's own word and once in plain
+    // English. "Mogger" is the word that gets quoted in a comment section and it
+    // is also a word that means nothing to somebody who arrived from the For You
+    // page without ever having heard it. "A very attractive male" costs four
+    // words and carries the same verdict to everybody else watching.
     {
       kind: "card",
-      line: `The verdict: ${verdictFor(report).word}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
+      line: `The verdict: ${verdictFor(report).word}. ${capitalize(verdictFor(report).descriptor)}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
       card: cardData(report),
     },
     // Still on the card. The ceiling as a NUMBER, not a ladder rung: named rungs

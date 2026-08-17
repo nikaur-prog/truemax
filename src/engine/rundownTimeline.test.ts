@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { beatAt, buildTimeline, fitTimeline, typedFraction } from "./rundownTimeline.js";
+import { beatAt, beatNear, buildTimeline, fitTimeline, typedFraction } from "./rundownTimeline.js";
 import type { Beat } from "./reelScript.js";
 
 const BEATS: Beat[] = [
@@ -175,4 +175,60 @@ test("beatAt is exclusive at the end so no time belongs to two beats", () => {
   assert.equal(beatAt(timeline, first.start)!.beat.line, first.beat.line);
   assert.equal(beatAt(timeline, first.start + first.duration)!.beat.line, timeline.beats[1].beat.line);
   assert.equal(beatAt(timeline, timeline.duration), null);
+});
+
+// ---------------------------------------------------------------------------
+// Fitting to the SPEECH rather than to the file.
+// ---------------------------------------------------------------------------
+
+test("the beats start where the talking starts, not where the file does", () => {
+  // A synthesised mp3 opens with a little silence. Beats that begin at zero
+  // begin before the voice does, and every one after them inherits the offset.
+  const timeline = buildTimeline(BEATS);
+  const fitted = fitTimeline(timeline, 40, 0.3);
+
+  assert.ok(Math.abs(fitted.beats[0].start - 0.3) < 1e-9, `first beat starts at ${fitted.beats[0].start}`);
+
+  // Contiguous from the offset, and ending at offset + speech. The duration is
+  // where the beats END — the renderer asks with an absolute t, so a duration
+  // that ignored the offset would put the last frames past the timeline.
+  let cursor = 0.3;
+  for (const b of fitted.beats) {
+    assert.ok(Math.abs(b.start - cursor) < 1e-9, `beat starts at ${b.start}, previous ended ${cursor}`);
+    cursor += b.duration;
+  }
+  assert.ok(Math.abs(cursor - 40.3) < 1e-6, `beats end at ${cursor}, expected 40.3`);
+  assert.ok(Math.abs(fitted.duration - 40.3) < 1e-6, `duration is ${fitted.duration}`);
+
+  // Every cue still lands inside a beat.
+  for (const cue of fitted.sfx) {
+    assert.ok(beatAt(fitted, cue.at), `cue at ${cue.at} fell outside every beat`);
+  }
+});
+
+test("trailing silence in the file does not stretch the video", () => {
+  // THE DRIFT, stated as an inequality. Fitting to a 41s file that holds 40s of
+  // speech hands every beat 2.5% more time than the voice takes, and the error
+  // accumulates: by the last beat the picture is most of a second behind.
+  const timeline = buildTimeline(BEATS);
+  const toFile = fitTimeline(timeline, 41);
+  const toSpeech = fitTimeline(timeline, 40);
+  const last = timeline.beats.length - 1;
+  const lag = toFile.beats[last].start - toSpeech.beats[last].start;
+  assert.ok(lag > 0.7, `fitting to the file only cost ${lag.toFixed(2)}s by the last beat`);
+});
+
+test("beatNear clamps instead of falling off either end", () => {
+  // The renderer asks per frame and cannot be handed null. Before the offset
+  // existed, "no beat here" only happened past the END, and the fallback was
+  // the last beat — which with an offset would have opened the video on its own
+  // sign-off card.
+  const fitted = fitTimeline(buildTimeline(BEATS), 40, 0.5);
+  assert.equal(beatNear(fitted, 0)!.beat.line, fitted.beats[0].beat.line);
+  assert.equal(beatNear(fitted, 0.2)!.beat.line, fitted.beats[0].beat.line);
+  assert.equal(beatNear(fitted, 1e6)!.beat.line, fitted.beats[fitted.beats.length - 1].beat.line);
+  // And inside the timeline it agrees with beatAt exactly.
+  for (let t = 0.5; t < 40; t += 0.37) {
+    assert.equal(beatNear(fitted, t), beatAt(fitted, t), `disagreed at ${t.toFixed(2)}`);
+  }
 });

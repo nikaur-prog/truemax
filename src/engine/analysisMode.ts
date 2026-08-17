@@ -161,6 +161,20 @@ export interface Verdict {
   word: string;
   line: string;
   tone: "low" | "mid" | "high" | "peak";
+  /**
+   * The rung in plain English, as a noun phrase: "a very attractive male".
+   *
+   * The ladder's words are slang and jokes, which is what makes them worth
+   * quoting and also what makes them unreadable to anybody outside the niche.
+   * "Mogger" means nothing to a viewer who arrived from the For You page; "a
+   * very attractive male" means the same thing to everyone. So the verdict is
+   * said twice — once in the audience's vocabulary and once in English — and
+   * the second half is what carries it to people who do not know the first.
+   *
+   * Not tone-dependent. The kind ladder already reads as plain English, and a
+   * second plain-English phrase after it would just be the same sentence twice.
+   */
+  descriptor: string;
 }
 
 // Eight rungs, and where the words differ by reference population they differ,
@@ -189,6 +203,10 @@ const LADDER: Array<{
   // thing to be called. Someone who asked for it civil asked for it civil all
   // the way up.
   kind: Record<Sex, string[]>;
+  // The rung in plain English, said out loud after the slang one. See Verdict.
+  // Sex-specific because the phrase names the person, and one that named the
+  // wrong one would be the single most obvious error the video could make.
+  descriptor: Record<Sex, string>;
   tone: Verdict["tone"];
   line: string;
 }> = [
@@ -196,23 +214,33 @@ const LADDER: Array<{
     min: 0,
     words: { male: ["You're cooked"], female: ["You're cooked"] },
     kind: { male: ["Starting point", "Early days"], female: ["Starting point", "Early days"] },
+    // Not "an unattractive male". The bottom rung is the one place this product
+    // could do real damage, and there is a difference between telling somebody
+    // where they measure and telling them what they are. The rung below the
+    // middle gets the same treatment for the same reason.
+    descriptor: { male: "a male with a long way to climb", female: "a female with a long way to climb" },
     tone: "low",
     line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
   },
   {
     min: 12,
-    words: { male: ["Chopped"], female: ["Chopped"] },
+    words: { male: ["Chopped", "Undercooked", "Raw"], female: ["Chopped", "Undercooked", "Raw"] },
     kind: {
       male: ["Plenty to work with", "Lots of upside"],
       female: ["Plenty to work with", "Lots of upside"],
     },
+    descriptor: { male: "a well below average male", female: "a well below average female" },
     tone: "low",
     line: "Bottom fifth. The gap is real, and most of it is the part that moves without surgery.",
   },
   {
     min: 26,
-    words: { male: ["Mildly chopped", "Rough"], female: ["Mildly chopped", "Rough"] },
+    words: {
+      male: ["Mildly chopped", "Rough", "Half baked", "Unfinished"],
+      female: ["Mildly chopped", "Rough", "Half baked", "Unfinished"],
+    },
     kind: { male: ["Coming along", "On the way up"], female: ["Coming along", "On the way up"] },
+    descriptor: { male: "a below average male", female: "a below average female" },
     tone: "low",
     line: "Below the middle. One or two numbers are doing the damage rather than all of them.",
   },
@@ -225,39 +253,51 @@ const LADDER: Array<{
     // rung lands as banter rather than an insult. None of them says anything is
     // wrong with the face, because nothing is.
     words: {
-      male: ["Mid", "NPC", "Background character", "Stock photo", "Default settings"],
-      female: ["Mid", "Girl next door", "NPC", "Stock photo", "Default settings", "Background character"],
+      male: ["Mid", "NPC", "Background character", "Stock photo", "Default settings", "Extra", "Filler", "Beige"],
+      female: [
+        "Mid",
+        "Girl next door",
+        "NPC",
+        "Stock photo",
+        "Default settings",
+        "Background character",
+        "Extra",
+        "Beige",
+      ],
     },
     kind: {
       male: ["Right in the middle", "Middle of the pack", "Bang on average"],
       female: ["Right in the middle", "Middle of the pack", "Bang on average"],
     },
+    descriptor: { male: "a perfectly average male", female: "a perfectly average female" },
     tone: "mid",
     line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
   },
   {
     min: 52,
     words: {
-      male: ["Aight", "Decent", "Solid", "Alright", "Not bad"],
-      female: ["Aight", "Cute", "Solid", "Alright", "Not bad"],
+      male: ["Aight", "Decent", "Solid", "Alright", "Not bad", "Passable", "Respectable"],
+      female: ["Aight", "Cute", "Solid", "Alright", "Not bad", "Passable", "Respectable"],
     },
     kind: {
       male: ["Good base", "Solid footing", "Comfortably above average"],
       female: ["Good base", "Solid footing", "Comfortably above average"],
     },
+    descriptor: { male: "a slightly above average male", female: "a slightly above average female" },
     tone: "mid",
     line: "Just above the middle. Nothing is wrong; nothing is carrying you either.",
   },
   {
     min: 65,
     words: {
-      male: ["Good looking", "Attractive", "Sharp"],
-      female: ["Good looking", "Attractive", "Striking"],
+      male: ["Good looking", "Attractive", "Sharp", "Top tier", "Clean", "Chiselled"],
+      female: ["Good looking", "Attractive", "Striking", "Top tier", "Clean", "Sculpted"],
     },
     kind: {
       male: ["Good looking", "Handsome", "Well put together"],
       female: ["Good looking", "Lovely", "Well put together"],
     },
+    descriptor: { male: "an attractive male", female: "an attractive female" },
     tone: "high",
     line: "Top third. Measurably ahead of two out of three faces in the reference set.",
   },
@@ -271,6 +311,7 @@ const LADDER: Array<{
       male: ["Striking", "Turns heads", "Exceptional"],
       female: ["Striking", "Turns heads", "Exceptional"],
     },
+    descriptor: { male: "a very attractive male", female: "a very attractive female" },
     tone: "high",
     line: "Top fifth. Four out of five faces in the reference set measure below this.",
   },
@@ -287,6 +328,7 @@ const LADDER: Array<{
       male: ["Remarkable", "Genuinely rare"],
       female: ["Remarkable", "Genuinely rare"],
     },
+    descriptor: { male: "an exceptionally attractive male", female: "an exceptionally attractive female" },
     tone: "peak",
     line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
   },
@@ -298,6 +340,7 @@ const LADDER: Array<{
     min: 99,
     words: { male: ["True Adam"], female: ["True Eve"] },
     kind: { male: ["One in a hundred"], female: ["One in a hundred"] },
+    descriptor: { male: "a one in a hundred male", female: "a one in a hundred female" },
     tone: "peak",
     line: "Top one per cent. There is nothing above this — the scale ends here.",
   },
@@ -324,5 +367,5 @@ export function verdictForPercentile(
   // not change your verdict; a result that moves when you re-roll it is not a
   // measurement and nobody believes it twice.
   const pick = words[Math.abs(Math.round(percentile * 10)) % words.length];
-  return { word: pick, line: rung.line, tone: rung.tone };
+  return { word: pick, line: rung.line, tone: rung.tone, descriptor: rung.descriptor[sex] };
 }

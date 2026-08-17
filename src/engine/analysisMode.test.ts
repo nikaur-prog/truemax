@@ -29,9 +29,12 @@ test("the ladder has a defined floor and nothing below it", () => {
 test("each rung starts exactly where it says it does", () => {
   const at = (pct: number) => verdictFor(report({ overallPercentile: pct })).word;
   assert.equal(at(11.9), "You're cooked");
-  assert.equal(at(12), "Chopped");
-  assert.equal(at(25.9), "Chopped");
-  assert.ok(["Mildly chopped", "Rough"].includes(at(26)));
+  // The bottom-fifth rung carries alternates now, like every rung above it, so
+  // two friends who land in the same band do not read the same word. What this
+  // test is about is the BOUNDARY, so both ends of the band assert the band.
+  assert.ok(["Chopped", "Undercooked", "Raw"].includes(at(12)));
+  assert.ok(["Chopped", "Undercooked", "Raw"].includes(at(25.9)));
+  assert.ok(["Mildly chopped", "Rough", "Half baked", "Unfinished"].includes(at(26)));
   assert.ok(["Mid", "NPC", "Background character"].includes(at(40)));
   assert.ok(["Aight", "Decent", "Solid"].includes(at(52)));
   assert.ok(["Good looking", "Attractive", "Sharp"].includes(at(65)));
@@ -208,4 +211,58 @@ test("tone changes the label and never the measurement", () => {
 test("blunt is the default, so an unasked caller gets the real ladder", () => {
   assert.equal(verdictForPercentile(5).word, "You're cooked");
   assert.equal(verdictForPercentile(5, "male").word, "You're cooked");
+});
+
+// ---------------------------------------------------------------------------
+// The verdict in plain English.
+//
+// The ladder's words are slang, which is what makes them worth quoting and also
+// what makes them meaningless to a viewer who arrived from the For You page.
+// Every rung carries a second phrase that says the same thing in English, and
+// the video says both.
+// ---------------------------------------------------------------------------
+
+test("every rung says what it means in plain English", () => {
+  for (const sex of ["male", "female"] as const) {
+    for (let pct = 0; pct <= 100; pct += 0.5) {
+      const v = verdictForPercentile(pct, sex);
+      assert.ok(v.descriptor.length > 0, `${sex} ${pct} has no descriptor`);
+      // A noun phrase, so it can be read as its own sentence after the word:
+      // "The verdict: Mogger. A very attractive male."
+      assert.ok(/^an? /.test(v.descriptor), `${sex} ${pct}: "${v.descriptor}" is not a noun phrase`);
+      // And it names the right person. Handing a woman "male" is the single
+      // most obvious error the video could make.
+      assert.ok(
+        v.descriptor.includes(sex === "male" ? "male" : "female"),
+        `${sex} ${pct}: "${v.descriptor}"`,
+      );
+      assert.ok(sex === "female" || !v.descriptor.includes("female"), `male got "${v.descriptor}"`);
+    }
+  }
+});
+
+test("the descriptor climbs with the ladder and never insults the floor", () => {
+  // The bottom rung is the one place this product could do real damage. There
+  // is a difference between telling somebody where they measure and telling
+  // them what they are, and the plain-English half is the one that would say
+  // the second thing if it were written carelessly.
+  assert.ok(!/unattractive|ugly/i.test(verdictForPercentile(2).descriptor));
+  assert.ok(!/unattractive|ugly/i.test(verdictForPercentile(15).descriptor));
+
+  assert.equal(verdictForPercentile(45).descriptor, "a perfectly average male");
+  assert.equal(verdictForPercentile(70).descriptor, "an attractive male");
+  assert.equal(verdictForPercentile(85).descriptor, "a very attractive male");
+  assert.equal(verdictForPercentile(85, "female").descriptor, "a very attractive female");
+});
+
+test("the descriptor does not move with the tone", () => {
+  // The kind ladder already reads as plain English; a second plain-English
+  // phrase behind it would be the same sentence twice.
+  for (const pct of [5, 30, 50, 70, 90, 99.5]) {
+    assert.equal(
+      verdictForPercentile(pct, "male", "kind").descriptor,
+      verdictForPercentile(pct, "male", "blunt").descriptor,
+      `${pct}`,
+    );
+  }
 });

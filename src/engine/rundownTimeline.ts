@@ -128,7 +128,19 @@ function estimate(beats: Beat[]): TimedBeat[] {
  * a stretched video makes those moves progressively more abrupt as the read
  * gets longer.
  */
-export function fitTimeline(timeline: RundownTimeline, actualDuration: number): RundownTimeline {
+export function fitTimeline(
+  timeline: RundownTimeline,
+  actualDuration: number,
+  /**
+   * Where the speech starts inside the audio file, in seconds.
+   *
+   * Not zero, because a synthesised mp3 opens with a little silence and the
+   * beats have to start where the talking starts rather than where the file
+   * does. See speechSpan in ui/rundownAudio.ts, which measures both ends —
+   * actualDuration here is the length of the SPEECH, not of the file.
+   */
+  startAt = 0,
+): RundownTimeline {
   if (!(actualDuration > 0) || !(timeline.duration > 0)) return timeline;
 
   // Re-allocate by WORD SHARE, rather than scaling the estimate by one factor.
@@ -161,7 +173,7 @@ export function fitTimeline(timeline: RundownTimeline, actualDuration: number): 
   const total = words.reduce((a, w) => a + w, 0);
 
   const beats: TimedBeat[] = [];
-  let cursor = 0;
+  let cursor = Math.max(0, startAt);
   const starts: number[] = [];
   timeline.beats.forEach((b, i) => {
     const duration = (words[i] / total) * actualDuration;
@@ -180,7 +192,11 @@ export function fitTimeline(timeline: RundownTimeline, actualDuration: number): 
   // Sound effects are re-derived rather than scaled, for the same reason: a cue
   // placed against the estimate is a cue placed against a beat boundary that
   // has just moved.
-  return { duration: actualDuration, beats, sfx: cuesFor(beats) };
+  // duration is where the beats END, which with an offset is not the same as
+  // how long they run for. The renderer asks "which beat is playing at t" with
+  // an absolute t, so an end that did not include the offset would send the last
+  // few frames past the end of the timeline.
+  return { duration: cursor, beats, sfx: cuesFor(beats) };
 }
 
 function cuesFor(timed: TimedBeat[]): SfxCue[] {
@@ -226,10 +242,28 @@ export function typedFraction(beat: TimedBeat, t: number): number {
   return Math.max(0, Math.min(1, (t - beat.start) / typing));
 }
 
-/** The beat playing at time t, or null past the end. */
+/** The beat playing at time t, or null outside the timeline. */
 export function beatAt(timeline: RundownTimeline, t: number): TimedBeat | null {
   for (const b of timeline.beats) {
     if (t >= b.start && t < b.start + b.duration) return b;
   }
   return null;
+}
+
+/**
+ * The beat to DRAW at time t. Never null while the timeline has any beats.
+ *
+ * A fitted timeline no longer starts at zero — it starts where the speech starts
+ * inside the audio file, which is a few tens of milliseconds in. Those frames
+ * belong to no beat, and the renderer's old fallback was "the last beat", which
+ * would have opened the video on the sign-off card for a frame or two. Clamping
+ * to the ends is what a viewer expects at both edges: hold the first frame
+ * before the talking starts, hold the last one after it stops.
+ */
+export function beatNear(timeline: RundownTimeline, t: number): TimedBeat | null {
+  const beats = timeline.beats;
+  if (!beats.length) return null;
+  const exact = beatAt(timeline, t);
+  if (exact) return exact;
+  return t < beats[0].start ? beats[0] : beats[beats.length - 1];
 }
