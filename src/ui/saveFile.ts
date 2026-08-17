@@ -20,9 +20,63 @@
 // be asked about the actual file: Safari reports navigator.share exists while
 // refusing video payloads on older versions, and calling share() anyway throws
 // after the user gesture has been spent.
+//
+// ALL OF THAT IS AN ARGUMENT ABOUT PHONES, and it was being applied to
+// desktops. macOS Chrome and Safari both implement canShare({ files }), so a
+// laptop got the same treatment: press "Breakdown MP4" and an AirDrop / Mail /
+// Messages / Notes sheet appears, when the file was always going to end up in
+// a folder on the way to an editing timeline. There is no camera roll on a
+// laptop for the sheet to be better than — it is a detour with a "Save to
+// Files" at the bottom of it.
+//
+// So the sheet is offered where its argument actually holds — a device whose
+// primary input is a finger — and everywhere else the file downloads. The
+// override exists on top of that because the rule is a heuristic about hardware
+// and the person pressing the button knows better than the heuristic does.
 // ---------------------------------------------------------------------------
 
 export type SaveOutcome = "shared" | "downloaded" | "opened" | "cancelled";
+
+const DIRECT_KEY = "truemax.saveDirect";
+
+/**
+ * Is this a phone or a tablet — a device where "Save Video" writes to a camera
+ * roll and the next thing that happens to the file is being posted?
+ *
+ * Pointer and hover rather than a user-agent string. A UA string is a claim
+ * about a browser; these are claims about the input hardware, which is the
+ * thing the share sheet's argument actually rests on. A laptop with a
+ * touchscreen still has a mouse, so `any-hover` keeps it on the download path.
+ */
+function isHandheld(): boolean {
+  if (typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(pointer: coarse)").matches && !window.matchMedia("(any-hover: hover)").matches;
+}
+
+/** Has the operator asked for files to download rather than open a share sheet? */
+export function savesDirectly(): boolean {
+  try {
+    return localStorage.getItem(DIRECT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setSavesDirectly(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(DIRECT_KEY, "1");
+    else localStorage.removeItem(DIRECT_KEY);
+  } catch {
+    // A browser with storage disabled loses the preference between reloads and
+    // keeps the platform default, which is the right thing to degrade to.
+  }
+}
+
+/** Whether saveFile will actually reach for the share sheet on this device. */
+function willShare(file: File): boolean {
+  if (savesDirectly() || !isHandheld()) return false;
+  return typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+}
 
 // A share sheet dismissed by the user rejects with AbortError. That is a
 // deliberate "no", not a failure, and must not fall through to also triggering
@@ -34,7 +88,7 @@ function isAbort(error: unknown): boolean {
 export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcome> {
   const file = new File([blob], filename, { type: blob.type });
 
-  if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+  if (willShare(file)) {
     try {
       await navigator.share({ files: [file] });
       return "shared";
@@ -67,10 +121,12 @@ export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcom
   }
 }
 
-// Whether the OS share sheet is available for a file of this type. Used only to
+// Whether saving a file of this type will open the OS share sheet. Used only to
 // pick the button's WORDS — "Save or share" against "Download" — so the label
-// matches what tapping it will actually do.
+// matches what pressing it will actually do, including when the operator has
+// turned the sheet off.
 export function canShareFiles(type = "video/mp4"): boolean {
+  if (savesDirectly() || !isHandheld()) return false;
   if (typeof navigator.canShare !== "function") return false;
   try {
     return navigator.canShare({ files: [new File([new Blob([], { type })], `probe.${type.split("/")[1]}`, { type })] });

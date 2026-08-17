@@ -32,3 +32,28 @@ Two faults this found on its first run, both invisible to the type checker:
 the caption was drawn over the region rows and hid two of the eight, and the
 curve's marker was labelled "HIM" from a hardcoded string — so every woman
 measured got a masculine pronoun on the one frame the whole video builds to.
+
+## The before/after panel
+
+`tools/cmpcheck.html` does the same job for the Reel Creator's comparison
+block, which is HTML rather than canvas and therefore also invisible to `tsc`:
+
+    npm run dev
+    npx tsx -e "
+    const { chromium } = require('playwright');
+    (async () => {
+      const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+      for (const [w, n] of [[430,'phone'],[900,'desktop']]) {
+        const pg = await b.newPage({ viewport: { width: w, height: 900 } });
+        await pg.goto('http://localhost:5173/tools/cmpcheck.html');
+        await pg.waitForFunction('window.ready === true');
+        await pg.screenshot({ path: 'cmp-' + n + '.png', fullPage: true });
+      }
+      await b.close();
+    })();
+    "
+
+It feeds two fabricated reports through the same `regionMoves` the page uses,
+so the join, the signs and the flat-move threshold are the real ones. Both
+widths matter: the three before-export buttons wrap to one per row on a phone
+and to two-then-one on a laptop, and neither layout is obvious from the CSS.

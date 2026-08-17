@@ -5,6 +5,7 @@ import { assessQuality } from "./engine/quality.js";
 import { analyze } from "./engine/scoring.js";
 import { aggregateScoreToPercentile } from "./engine/scoring.js";
 import { REGION_NAMES, REGION_RELIABLE_MIN } from "./engine/scoring.js";
+import { moveLabel, regionMoves } from "./engine/comparison.js";
 import { isSupported, startCamera } from "./ui/camera.js";
 import type { CameraHandle } from "./ui/camera.js";
 import { rankShort } from "./ui/templates.js";
@@ -36,7 +37,7 @@ import {
 } from "./engine/calibrationSet.js";
 import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
-import { canShareFiles, saveFile } from "./ui/saveFile.js";
+import { canShareFiles, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 
@@ -1090,6 +1091,17 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>
+    <!-- Where the files go.
+         The share sheet is the right answer on a phone — "Save Video" writes to
+         the camera roll and the TikTok app is one tap away — and the wrong one
+         on a laptop, where it is an AirDrop menu in front of a folder. The
+         platform is detected, and this is here because the detection is a
+         heuristic about hardware and the person pressing the button knows
+         better than it does. -->
+    <label class="q-direct">
+      <input type="checkbox" id="q-direct" ${savesDirectly() ? "checked" : ""} />
+      <span>Download files straight away, no share sheet</span>
+    </label>
     <div class="prod-caption hidden" id="q-caption"></div>`;
 
   // Stagger index for the drop, so the cards arrive in reading order rather
@@ -1138,6 +1150,41 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
+
+  // The before half, exported on its own. Only present after a Reel Creator run
+  // — there is no before to render otherwise, and a disabled button explaining
+  // that would be a control for a mode you are not in.
+  const direct = document.getElementById("q-direct") as HTMLInputElement | null;
+  if (direct) {
+    direct.onchange = () => {
+      setSavesDirectly(direct.checked);
+      // The two labels that promise a share sheet have to stop promising one.
+      const dl = document.getElementById("q-download");
+      if (dl) dl.textContent = canShareFiles("image/png") ? "Save image" : "Download image";
+    };
+  }
+
+  const before = beforeSource();
+  if (before && beforeScan) {
+    const held = beforeScan;
+    const wire = (id: string, idle: string, variant: QuickVariant) => {
+      const b = document.getElementById(id);
+      if (b) b.onclick = () => void downloadVideo(r, variant, { source: before, buttonId: id, idle, tag: "before" });
+    };
+    wire("q-before-video", "Before breakdown MP4", "breakdown");
+    wire("q-before-verdict", "Before verdict MP4", "verdict");
+    const card = document.getElementById("q-before-card");
+    if (card) {
+      card.onclick = () =>
+        void downloadScoreCard(r, {
+          report: held.report,
+          photo: held.photo,
+          lm: held.lm,
+          buttonId: "q-before-card",
+          idle: "Before score card PNG",
+        });
+    }
+  }
 
   // Live length, while the sentence is still cheap to shorten.
   //
@@ -1624,14 +1671,64 @@ function showCaption(options: Parameters<typeof showCaptionStep>[1]): void {
   if (host) showCaptionStep(host, options);
 }
 
+/**
+ * The photograph, landmarks and numbers an export should be built from.
+ *
+ * The result screen shows ONE face, so every export used to read the on-screen
+ * card: `last` for the picture and the editable cells for the scores. That is
+ * right for the face on screen and wrong for the other one — a Reel Creator run
+ * measures two, and the before is held in memory with nothing on screen to read
+ * it off. Passing the source explicitly is what lets the same two functions
+ * render either half.
+ */
+interface ExportSource {
+  photo: HTMLCanvasElement;
+  lm: NormalizedLandmark[];
+  scores: ReturnType<typeof editedExportScores>;
+}
+
+/**
+ * The before half of a Reel Creator run, as an export source.
+ *
+ * Its scores come from the REPORT, not from the cells — the cells hold the
+ * after. A creator who nudges a number on screen is editing the face they can
+ * see, and silently applying that edit to the other one would produce a
+ * before/after where the movement is partly typed.
+ */
+function beforeSource(): ExportSource | null {
+  if (!beforeScan) return null;
+  const r = beforeScan.report;
+  return {
+    photo: beforeScan.photo,
+    lm: beforeScan.lm,
+    scores: {
+      overall: r.overall,
+      percentile: r.overallPercentile,
+      // Same order the grid uses, so the two files lay out identically and can
+      // be cut against each other without the rows dancing.
+      regions: [...r.regions]
+        .sort((a, b) => b.score - a.score)
+        .map((g) => ({ name: REGION_NAMES[g.region], score: g.score })),
+    },
+  };
+}
+
 // Two cuts of the same scan. The breakdown explains the product; the verdict
 // travels further. Which one is being built only changes the renderer and the
 // button label — the footage, the landmarks and the scores are identical, so
 // the two files can never tell a different story about one face.
-async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
-  if (!last) return;
-  const id = variant === "verdict" ? "q-verdict-download" : "q-video-download";
-  const idle = variant === "verdict" ? "Verdict MP4" : "Breakdown MP4";
+async function downloadVideo(
+  r: Report,
+  variant: QuickVariant,
+  // Which face, and which button is reporting on it. Omitted for the face on
+  // screen, which is what every caller but the before/after row wants.
+  from?: { source: ExportSource; buttonId: string; idle: string; tag: string },
+): Promise<void> {
+  const source: ExportSource | null =
+    from?.source ?? (last ? { photo: last.photo, lm: last.lm, scores: editedExportScores(r) } : null);
+  if (!source) return;
+  const id = from?.buttonId ?? (variant === "verdict" ? "q-verdict-download" : "q-video-download");
+  const idle = from?.idle ?? (variant === "verdict" ? "Verdict MP4" : "Breakdown MP4");
   const btn = document.getElementById(id) as HTMLButtonElement | null;
   if (btn) {
     btn.disabled = true;
@@ -1639,10 +1736,10 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
   }
   try {
     const outcome = await downloadQuickVideo(
-      last.photo,
-      last.lm,
+      source.photo,
+      source.lm,
       r.sex,
-      editedExportScores(r),
+      source.scores,
       (progress) => {
         if (btn) btn.textContent = `Building · ${Math.round(progress * 100)}%`;
       },
@@ -1660,11 +1757,15 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       // step existed only inside the before/after producer, so the two cuts an
       // operator actually publishes most often dropped them at a saved MP4 with
       // nothing to paste under it.
+      // The caption describes the FILE that was just saved. On a before export
+      // that is the before's numbers — captioning it with the after's would
+      // hand somebody a post whose text argues with its own video.
+      const subject = from && beforeScan ? beforeScan.report : r;
       showCaption({
         kind: variant,
-        overall: r.overall,
-        percentile: r.overallPercentile,
-        potential: r.potential,
+        overall: source.scores.overall,
+        percentile: source.scores.percentile,
+        potential: subject.potential,
       });
       offerProducer(r);
     }
@@ -1690,9 +1791,15 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
 // The name field doubles as the caption when it is filled in, so a before/after
 // pair can be labelled BEFORE and AFTER without a second control. Left empty it
 // simply renders without one.
-async function downloadScoreCard(r: Report): Promise<void> {
-  if (!last) return;
-  const btn = document.getElementById("q-card-download") as HTMLButtonElement | null;
+async function downloadScoreCard(
+  r: Report,
+  // The before half, when that is what is being rendered. Same reasoning as
+  // downloadVideo: the result screen shows one face and a Reel Creator run
+  // measured two, so the other one has to be handed in.
+  from?: { report: Report; photo: HTMLCanvasElement; lm: NormalizedLandmark[]; buttonId: string; idle: string },
+): Promise<void> {
+  if (!from && !last) return;
+  const btn = document.getElementById(from?.buttonId ?? "q-card-download") as HTMLButtonElement | null;
   const caption = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim();
   if (btn) {
     btn.disabled = true;
@@ -1710,15 +1817,19 @@ async function downloadScoreCard(r: Report): Promise<void> {
     // running it knows that.
     const raw = Number((document.getElementById("q-card-before") as HTMLInputElement | null)?.value);
     const typed = Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : undefined;
-    const previousOverall = typed ?? beforeScan?.report.overall;
-    renderScoreCard(canvas, last.photo, last.lm, {
-      report: r,
+    // The before card carries NO comparison. A "before" that is itself drawn
+    // against an earlier score is two comparisons in one image and neither of
+    // them is the one the pair is about; it shows now versus ceiling, which is
+    // the opening card of a glow-up video and exactly what the before is for.
+    const previousOverall = from ? undefined : (typed ?? beforeScan?.report.overall);
+    renderScoreCard(canvas, from?.photo ?? last!.photo, from?.lm ?? last!.lm, {
+      report: from?.report ?? r,
       caption: caption || undefined,
       previousOverall,
     });
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("The card would not encode.");
-    const outcome = await saveFile(blob, `truemax-card-${Date.now()}.png`);
+    const outcome = await saveFile(blob, `truemax-card-${from ? "before-" : ""}${Date.now()}.png`);
     if (btn) {
       btn.textContent =
         outcome === "cancelled"
@@ -1735,7 +1846,7 @@ async function downloadScoreCard(r: Report): Promise<void> {
     if (btn) {
       window.setTimeout(() => {
         btn.disabled = false;
-        btn.textContent = "Score card PNG";
+        btn.textContent = from?.idle ?? "Score card PNG";
       }, 2200);
     }
   }
@@ -2093,6 +2204,30 @@ function comparisonHTML(before: Report, after: Report): string {
   // person using it, and going down is a real outcome of a real rescan.
   const sign = move > 0 ? "+" : move < 0 ? "−" : "";
   const dir = move > 0 ? "up" : move < 0 ? "down" : "flat";
+
+  // BOTH ANALYSES, not just both headline scores.
+  //
+  // This mode scans two faces and then showed one of them. The strip said 4.7 →
+  // 6.1 and the eight-region grid underneath belonged entirely to the after, so
+  // the question every before/after actually raises — WHICH PART moved — had no
+  // answer anywhere on the page, even though the engine had measured it twice
+  // and was holding both sets.
+  //
+  // Joined on the region rather than zipped by position: the grid above sorts
+  // by score, and a face whose ranking changed between the two scans would
+  // otherwise have its jaw compared against its cheekbones.
+  const rows = regionMoves(before, after)
+    .map(
+      (m) => `
+        <tr data-dir="${m.direction}">
+          <th scope="row">${m.label}</th>
+          <td>${m.before === null ? "—" : m.before.toFixed(1)}</td>
+          <td>${m.after.toFixed(1)}</td>
+          <td class="q-cmp-delta">${moveLabel(m)}</td>
+        </tr>`,
+    )
+    .join("");
+
   return `
     <div class="q-compare" data-dir="${dir}">
       <div class="q-compare-side">
@@ -2107,6 +2242,29 @@ function comparisonHTML(before: Report, after: Report): string {
         <span class="q-compare-tag">AFTER</span>
         <b>${after.overall.toFixed(1)}</b>
         <span class="q-compare-rank">${rankShort(after.overallPercentile)}</span>
+      </div>
+    </div>
+    <div class="q-cmp">
+      <table class="q-cmp-table">
+        <thead>
+          <tr><th scope="col">Region</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Move</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <!-- The before, on its own.
+           The buttons further down the page render the face on screen, which is
+           the after — so the before existed only inside the joined cut and
+           could not be taken into an edit. These are the same two exports
+           pointed at the other half, for somebody assembling the video
+           themselves rather than using the producer. -->
+      <div class="q-cmp-get">
+        <span class="q-klabel">THE BEFORE, ON ITS OWN</span>
+        <div class="q-cmp-buttons">
+          <button type="button" class="btn gho" id="q-before-video">Before breakdown MP4</button>
+          <button type="button" class="btn gho" id="q-before-verdict">Before verdict MP4</button>
+          <button type="button" class="btn gho" id="q-before-card">Before score card PNG</button>
+        </div>
+        <small>Every other export on this page renders the after.</small>
       </div>
     </div>`;
 }

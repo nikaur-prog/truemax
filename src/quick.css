@@ -376,6 +376,51 @@
 .q-compare[data-dir="up"] .q-compare-move span { background: #e6f4ef; color: #0c876f; }
 .q-compare[data-dir="down"] .q-compare-move span { background: #fbeae7; color: #b4432f; }
 .q-compare[data-dir="flat"] .q-compare-move span { background: var(--soft, #eef1ef); color: var(--muted, #6b716d); }
+/* Only the headline strip sits on its own card; the table below is the same
+   card continued, so the two are pulled together and the strip loses its
+   bottom corners. */
+.q-compare:has(+ .q-cmp) { margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 0; }
+
+/* Both analyses, region by region.
+
+   The strip above says the face moved 1.4; this says WHICH part of it did,
+   which is the question every before/after actually raises and the one the
+   page could not answer while it showed only the after's grid. */
+.q-cmp {
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 0 0 18px 18px;
+  padding: 4px 14px 14px; margin-bottom: 14px;
+}
+.q-cmp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.q-cmp-table th, .q-cmp-table td { padding: 7px 4px; text-align: right; }
+.q-cmp-table thead th {
+  font-size: 10.5px; letter-spacing: 1.4px; font-weight: 600; text-transform: uppercase;
+  color: var(--muted, #6b716d); border-bottom: 1px solid var(--line);
+}
+.q-cmp-table tbody th { text-align: left; font-weight: 500; color: var(--ink); }
+.q-cmp-table tbody tr + tr th, .q-cmp-table tbody tr + tr td { border-top: 1px solid var(--soft, #eef1ef); }
+/* The before is the reference and the after is the result, so the after reads
+   at full weight and the before sits back. Without that the eye has no reason
+   to prefer either column and the table stops being a comparison. */
+.q-cmp-table td:nth-child(2) { color: var(--muted, #6b716d); }
+.q-cmp-table td:nth-child(3) { font-weight: 700; color: var(--ink); }
+.q-cmp-delta { font-weight: 700; font-variant-numeric: tabular-nums; }
+tr[data-dir="up"] .q-cmp-delta { color: #0c876f; }
+tr[data-dir="down"] .q-cmp-delta { color: #b4432f; }
+tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
+
+.q-cmp-get { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.q-cmp-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.q-cmp-buttons .btn { flex: 1 1 auto; }
+.q-cmp-get small { display: block; margin-top: 8px; font-size: 11.5px; color: var(--muted, #6b716d); }
+
+/* Where the files go. A checkbox rather than a settings screen: it is one
+   sentence, it belongs next to the buttons it changes, and this page is used
+   standing up. */
+.q-direct {
+  display: flex; align-items: center; gap: 9px; margin-top: 12px;
+  font-size: 12.5px; color: var(--muted, #6b716d); cursor: pointer;
+}
+.q-direct input { width: 16px; height: 16px; accent-color: var(--ink); cursor: pointer; }
 
 /* The ceiling, beside the score.
    
