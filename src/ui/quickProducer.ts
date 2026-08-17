@@ -57,11 +57,31 @@ export interface ProducerContext {
 // which one is right depends on footage the operator has and we do not, so it
 // is a choice rather than a default we defend:
 //
+//   paired    before clips, before score, after clips, after score. The default
+//             whenever there are two scans, and the reason is retention rather
+//             than symmetry: it keeps a question open across the whole video.
+//             The viewer has seen the old number, and every second of after
+//             footage is spent wondering what the new one will say. The other
+//             two orders both answer that question early.
 //   framed    open on the before scan, clips in the middle, close on the after.
 //             The scan is the argument and the clips are the evidence.
 //   sandwich  before clips, the measurement, after clips. The original shape,
 //             and the only one available when there is a single scan.
-export type ProducerOrder = "framed" | "sandwich";
+//
+// Putting the two score cards back to back — which "framed" nearly does — reads
+// as a spreadsheet: two number cards in a row, and whatever footage follows has
+// nothing left at stake. "paired" gets the delta legible a different way, by
+// counting the second card up FROM the first number instead of from zero. Same
+// comparison, without spending the tension to get it.
+export type ProducerOrder = "paired" | "framed" | "sandwich";
+
+// The most clips one side can hold.
+//
+// Six, because the format is a fast cut sequence and six two-second clips is
+// already twelve seconds a side — past that the video stops being a
+// transformation and becomes a montage, and the analysis it is built around
+// gets buried. It is a ceiling, not a target: one clip a side still builds.
+const MAX_SLOTS = 6;
 
 // 1080×1920 at 30fps. The analysis compositor renders at its native 720×1280
 // and is scaled up; the clips people supply are usually phone footage and
@@ -89,6 +109,28 @@ interface Clip {
   duration: number;
   // Where the used window starts, chosen on the trim slider for long clips.
   trimStart: number;
+  // How long this clip runs in the cut. Every clip carries its own, because a
+  // sequence where all six are the same length reads as a slideshow — the beat
+  // you want is a long establishing shot and then four fast ones, and that is
+  // not something one global number can express.
+  length: number;
+  // Whether that length was chosen for this clip specifically. The default
+  // control at the bottom moves every clip still sitting at the default and
+  // leaves the ones somebody has already set, so changing it late does not
+  // silently undo their work.
+  custom: boolean;
+}
+
+/** How long a side runs, so the row can say it before anything is built. */
+function runTime(slots: Slots): number {
+  return (slots.filter(Boolean) as Clip[]).reduce((sum, clip) => sum + usedLength(clip), 0);
+}
+
+/** A clip cannot run longer than it is. Stills can be held for any length. */
+function usedLength(clip: Clip): number {
+  return clip.kind === "image"
+    ? clip.length
+    : Math.max(0.4, Math.min(clip.length, clip.duration - clip.trimStart));
 }
 
 type Slots = Array<Clip | null>;
@@ -97,13 +139,15 @@ let overlay: HTMLDivElement | null = null;
 
 export function openProducer(ctx: ProducerContext): void {
   closeProducer();
-  const before: Slots = [null, null, null];
-  const after: Slots = [null, null, null];
+  const before: Slots = Array(MAX_SLOTS).fill(null);
+  const after: Slots = Array(MAX_SLOTS).fill(null);
+  // The default every clip starts at. Each one can then be set on its own —
+  // this only decides where a freshly added clip begins.
   let clipLen = 2.5;
   let transition: Transition = "cut";
   // Two scans means the measurement can bracket the footage instead of sitting
   // in the middle of it, so that becomes the default the moment it is possible.
-  let order: ProducerOrder = ctx.after ? "framed" : "sandwich";
+  let order: ProducerOrder = ctx.after ? "paired" : "sandwich";
 
   overlay = document.createElement("div");
   overlay.className = "prod";
@@ -123,7 +167,7 @@ export function openProducer(ctx: ProducerContext): void {
           </label>
         </div>
         <div class="prod-slots" data-row="before"></div>
-        <p class="prod-row-note" data-note="before">Pick up to three at once · one is enough</p>
+        <p class="prod-row-note" data-note="before">Pick up to six at once · one is enough</p>
       </section>
       <section class="prod-row prod-mid">
         <h2>THEN</h2>
@@ -139,14 +183,16 @@ export function openProducer(ctx: ProducerContext): void {
           </label>
         </div>
         <div class="prod-slots" data-row="after"></div>
-        <p class="prod-row-note" data-note="after">Pick up to three at once · one is enough</p>
+        <p class="prod-row-note" data-note="after">Pick up to six at once · one is enough</p>
       </section>
       <div class="prod-opts">
         <div class="prod-opt">
-          <span>Clip length</span>
+          <span>Default clip length</span>
           <div class="prod-seg" data-opt="len">
+            <button type="button" data-v="1.5">1.5s</button>
             <button type="button" data-v="2">2.0s</button>
             <button type="button" data-v="2.5" class="on">2.5s</button>
+            <button type="button" data-v="3.5">3.5s</button>
           </div>
         </div>
         ${
@@ -154,7 +200,8 @@ export function openProducer(ctx: ProducerContext): void {
             ? `<div class="prod-opt">
           <span>Where the measurement sits</span>
           <div class="prod-seg" data-opt="order">
-            <button type="button" data-v="framed" class="on">Around the clips</button>
+            <button type="button" data-v="paired" class="on">After each side</button>
+            <button type="button" data-v="framed">Around the clips</button>
             <button type="button" data-v="sandwich">In the middle</button>
           </div>
         </div>`
@@ -186,18 +233,18 @@ export function openProducer(ctx: ProducerContext): void {
   const slotsOf = (row: "before" | "after") => (row === "before" ? before : after);
   const cells: Record<"before" | "after", HTMLElement[]> = { before: [], after: [] };
   const redrawRow = (row: "before" | "after") => {
-    cells[row].forEach((cell, i) => renderSlot(cell, slotsOf(row), i, row, () => clipLen, () => redrawRow(row)));
+    cells[row].forEach((cell, i) => renderSlot(cell, slotsOf(row), i, row, () => redrawRow(row)));
     const note = overlay?.querySelector<HTMLElement>(`[data-note="${row}"]`);
     const used = slotsOf(row).filter(Boolean).length;
     if (note) {
       note.textContent = used
-        ? `${used} of 3 · ${used < 3 ? "add more or leave it here" : "full"}`
-        : "Pick up to three at once · one is enough";
+        ? `${used} of ${MAX_SLOTS} · ${runTime(slotsOf(row)).toFixed(1)}s${used < MAX_SLOTS ? " · add more or leave it here" : " · full"}`
+        : `Pick up to ${MAX_SLOTS} at once · one is enough`;
     }
   };
   for (const row of ["before", "after"] as const) {
     const host = overlay.querySelector<HTMLElement>(`.prod-slots[data-row="${row}"]`)!;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MAX_SLOTS; i++) {
       const cell = document.createElement("div");
       cell.className = "prod-slot";
       host.appendChild(cell);
@@ -228,7 +275,7 @@ export function openProducer(ctx: ProducerContext): void {
       let failed = 0;
       for (const [n, file] of chosen.slice(0, free.length).entries()) {
         try {
-          slots[free[n]] = await loadClip(file);
+          slots[free[n]] = await loadClip(file, clipLen);
         } catch {
           failed++;
         }
@@ -239,7 +286,7 @@ export function openProducer(ctx: ProducerContext): void {
       redrawRow(row);
       if (note && (skipped || failed)) {
         note.textContent = [
-          skipped ? `${skipped} skipped — three is the most per side.` : "",
+          skipped ? `${skipped} skipped — ${MAX_SLOTS} is the most per side.` : "",
           failed ? `${failed} file${failed > 1 ? "s" : ""} could not be read.` : "",
         ].filter(Boolean).join(" ");
       }
@@ -253,11 +300,13 @@ export function openProducer(ctx: ProducerContext): void {
       for (const other of seg.querySelectorAll("button")) other.classList.toggle("on", other === btn);
       if (seg.dataset.opt === "len") {
         clipLen = Number(btn.dataset.v);
-        // Trim windows are sized by the clip length; redraw so their labels
-        // and ranges tell the truth about the new window.
-        for (const cell of overlay!.querySelectorAll<HTMLElement>(".prod-slot")) {
-          const rerender = (cell as unknown as { __rerender?: () => void }).__rerender;
-          rerender?.();
+        // Applies to every clip still sitting at the default, and to none that
+        // has been set on its own — moving somebody's hand-picked 4s clip back
+        // to 2.5s because they nudged the default afterwards is the kind of
+        // quiet undo that makes an editor untrustworthy.
+        for (const row of ["before", "after"] as const) {
+          for (const clip of slotsOf(row)) if (clip && !clip.custom) clip.length = clipLen;
+          redrawRow(row);
         }
       } else if (seg.dataset.opt === "order") {
         order = btn.dataset.v as ProducerOrder;
@@ -279,7 +328,7 @@ export function openProducer(ctx: ProducerContext): void {
     buildBtn.disabled = true;
     msg.textContent = "";
     try {
-      const outcome = await buildVideo(ctx, heads, tails, clipLen, transition, order, (p: number) => {
+      const outcome = await buildVideo(ctx, heads, tails, transition, order, (p: number) => {
         buildBtn.textContent = `Building · ${Math.round(p * 100)}%`;
       });
       // A dismissed share sheet is a decision, not a failure: the video is
@@ -316,11 +365,8 @@ function renderSlot(
   slots: Slots,
   index: number,
   row: "before" | "after",
-  clipLen: () => number,
   redrawRow: () => void,
 ): void {
-  const rerender = () => renderSlot(cell, slots, index, row, clipLen, redrawRow);
-  (cell as unknown as { __rerender?: () => void }).__rerender = rerender;
   const clip = slots[index];
   if (!clip) {
     // An empty slot is a target, not a second way in: the row's own picker
@@ -333,21 +379,46 @@ function renderSlot(
     return;
   }
 
-  const used = Math.min(clipLen(), clip.kind === "video" ? clip.duration : clipLen());
-  const needsTrim = clip.kind === "video" && clip.duration > clipLen() + 0.05;
+  // A clip can never be asked to run longer than it is, so the options offered
+  // are the ones this particular file can actually deliver. A still has no such
+  // limit — it is held for as long as you like.
+  const cap = clip.kind === "image" ? 6 : Math.max(0.5, clip.duration);
+  const choices = [1, 1.5, 2, 2.5, 3, 4, 5, 6].filter((v) => v <= cap + 0.001);
+  if (!choices.length) choices.push(Number(cap.toFixed(1)));
+  if (clip.length > cap) clip.length = choices[choices.length - 1];
+  const used = usedLength(clip);
+  const needsTrim = clip.kind === "video" && clip.duration > clip.length + 0.05;
   cell.innerHTML = `
     <div class="prod-thumb"><canvas width="96" height="128"></canvas>
       <span class="prod-dur">${clip.kind === "image" ? "PHOTO" : `${clip.duration.toFixed(1)}s`}</span>
       <button type="button" class="prod-rm" aria-label="Remove clip">✕</button>
     </div>
+    <div class="prod-len" role="group" aria-label="Clip length">
+      ${choices
+        .map(
+          (v) =>
+            `<button type="button" data-len="${v}"${Math.abs(v - clip.length) < 0.01 ? ' class="on"' : ""}>${
+              Number.isInteger(v) ? v : v.toFixed(1)
+            }s</button>`,
+        )
+        .join("")}
+    </div>
     ${
       needsTrim
         ? `<label class="prod-trim">
-            <input type="range" min="0" max="${(clip.duration - clipLen()).toFixed(2)}" step="0.1" value="${clip.trimStart}">
+            <input type="range" min="0" max="${(clip.duration - clip.length).toFixed(2)}" step="0.1" value="${Math.min(clip.trimStart, clip.duration - clip.length).toFixed(2)}">
             <span></span>
           </label>`
         : ""
     }`;
+  for (const btn of cell.querySelectorAll<HTMLButtonElement>(".prod-len button")) {
+    btn.addEventListener("click", () => {
+      clip.length = Number(btn.dataset.len);
+      clip.custom = true;
+      clip.trimStart = Math.min(clip.trimStart, Math.max(0, clip.duration - clip.length));
+      redrawRow();
+    });
+  }
   drawThumb(cell.querySelector("canvas")!, clip);
   cell.querySelector(".prod-rm")!.addEventListener("click", () => {
     URL.revokeObjectURL(clip.url);
@@ -361,7 +432,7 @@ function renderSlot(
   if (range) {
     const label = cell.querySelector<HTMLElement>(".prod-trim span")!;
     const update = () => {
-      clip.trimStart = Math.min(Number(range.value), Math.max(0, clip.duration - clipLen()));
+      clip.trimStart = Math.min(Number(range.value), Math.max(0, clip.duration - clip.length));
       label.textContent = `Using ${clip.trimStart.toFixed(1)}–${(clip.trimStart + used).toFixed(1)}s`;
       void seekVideo(clip.media as HTMLVideoElement, clip.trimStart).then(() =>
         drawThumb(cell.querySelector("canvas")!, clip),
@@ -372,7 +443,7 @@ function renderSlot(
   }
 }
 
-async function loadClip(file: File): Promise<Clip> {
+async function loadClip(file: File, defaultLen: number): Promise<Clip> {
   const url = URL.createObjectURL(file);
   if (file.type.startsWith("video")) {
     const video = document.createElement("video");
@@ -385,12 +456,12 @@ async function loadClip(file: File): Promise<Clip> {
       video.onerror = () => reject(new Error("unreadable video"));
     });
     if (!Number.isFinite(video.duration) || video.duration <= 0) throw new Error("unreadable video");
-    return { kind: "video", media: video, url, duration: video.duration, trimStart: 0 };
+    return { kind: "video", media: video, url, duration: video.duration, trimStart: 0, length: defaultLen, custom: false };
   }
   const image = new Image();
   image.src = url;
   await image.decode();
-  return { kind: "image", media: image, url, duration: 0, trimStart: 0 };
+  return { kind: "image", media: image, url, duration: 0, trimStart: 0, length: defaultLen, custom: false };
 }
 
 function mediaSize(media: Clip["media"]): { w: number; h: number } {
@@ -453,35 +524,50 @@ async function buildVideo(
   ctx: ProducerContext,
   before: Clip[],
   after: Clip[],
-  clipLen: number,
   transition: Transition,
   order: ProducerOrder,
   onProgress: (p: number) => void,
 ): Promise<SaveOutcome> {
-  const segDur = (clip: Clip) =>
-    clip.kind === "image" ? clipLen : Math.max(0.6, Math.min(clipLen, clip.duration));
   const analysisDur = quickVideoDuration("breakdown");
   const firstScan: ProducerScan = { photo: ctx.photo, landmarks: ctx.landmarks, scores: ctx.scores };
   const clipSegs = (clips: Clip[]): Segment[] =>
-    clips.map((clip) => ({ kind: "clip" as const, clip, duration: segDur(clip) }));
+    clips.map((clip) => ({ kind: "clip" as const, clip, duration: usedLength(clip) }));
+  // The second card counts up out of the first number rather than out of zero.
+  // Built here rather than at the call site because it is a property of the
+  // PAIR, and nothing upstream of the producer knows there is a pair.
+  const afterScan: ProducerScan | undefined = ctx.after && {
+    ...ctx.after,
+    scores: { ...ctx.after.scores, from: ctx.scores.overall },
+  };
 
   // "framed" needs two scans to mean anything — one measurement cannot bracket
   // a change. Falling back rather than refusing keeps a half-finished run
   // usable, and the option is disabled in the UI anyway when there is no
   // second scan, so reaching this line means something else went wrong.
-  const framed = order === "framed" && ctx.after;
-  const segments: Segment[] = framed
+  // Both two-scan orders need a second scan to mean anything — one measurement
+  // cannot bracket a change. Falling back rather than refusing keeps a
+  // half-finished run usable; the options are hidden in the UI without a second
+  // scan anyway, so reaching that branch means something else went wrong.
+  const twoScans = afterScan && order !== "sandwich";
+  const segments: Segment[] = !twoScans
     ? [
-        { kind: "analysis", scan: firstScan, duration: analysisDur },
         ...clipSegs(before),
+        { kind: "analysis", scan: firstScan, duration: analysisDur },
         ...clipSegs(after),
-        { kind: "analysis", scan: ctx.after, duration: analysisDur },
       ]
-    : [
-        ...clipSegs(before),
-        { kind: "analysis", scan: firstScan, duration: analysisDur },
-        ...clipSegs(after),
-      ];
+    : order === "framed"
+      ? [
+          { kind: "analysis", scan: firstScan, duration: analysisDur },
+          ...clipSegs(before),
+          ...clipSegs(after),
+          { kind: "analysis", scan: afterScan, duration: analysisDur },
+        ]
+      : [
+          ...clipSegs(before),
+          { kind: "analysis", scan: firstScan, duration: analysisDur },
+          ...clipSegs(after),
+          { kind: "analysis", scan: afterScan, duration: analysisDur },
+        ];
   const total = segments.reduce((sum, s) => sum + s.duration, 0);
   const frameCount = Math.round(total * FPS);
 

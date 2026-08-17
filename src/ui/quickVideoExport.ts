@@ -36,6 +36,17 @@ export interface QuickExportScores {
   overall: number;
   percentile: number;
   regions: Array<{ name: string; score: number }>;
+  /**
+   * The score this face used to have, when this card is the second of a pair.
+   *
+   * The headline number counts up on reveal. From zero, that is a nice piece of
+   * motion and nothing more. From the previous score it is the entire point of
+   * the video: the viewer watched the before card land on 4.5, sat through the
+   * after footage, and now watches the number climb out of 4.5 rather than
+   * arrive from nowhere. The delta is the shareable frame, and it only exists
+   * if the two numbers are drawn in the same place doing the same thing.
+   */
+  from?: number;
 }
 
 // Returns how the file left the device, so the button can say what happened —
@@ -177,18 +188,26 @@ function drawFrame(
   ctx.fillText(`VS ${sex === "male" ? "MEN" : "WOMEN"}`, px, y0);
 
   const count = smoother(clamp01((t - 2.7) / 0.72));
+  // From the old score when there is one, from zero otherwise. A rise is drawn
+  // in the accent green so the direction of travel is legible in the half
+  // second somebody spends on the frame — a number climbing and a number
+  // arriving look identical at 30fps otherwise.
+  const from = scores.from ?? 0;
+  const shown = from + (scores.overall - from) * count;
+  const rising = scores.from !== undefined && scores.overall > scores.from;
   ctx.font = "300 95px Fraunces, Georgia, serif";
   ctx.letterSpacing = "-3px";
-  ctx.fillStyle = "#f7f7f2";
-  ctx.fillText((scores.overall * count).toFixed(1), px, y0 + 96);
-  const scoreW = ctx.measureText((scores.overall * count).toFixed(1)).width;
+  ctx.fillStyle = rising ? "#3fbf9a" : "#f7f7f2";
+  ctx.fillText(shown.toFixed(1), px, y0 + 96);
+  const scoreW = ctx.measureText(shown.toFixed(1)).width;
   ctx.font = "300 31px Fraunces, Georgia, serif";
   ctx.fillStyle = "#747b77";
   ctx.fillText("/10", px + scoreW + 7, y0 + 96);
   ctx.font = "500 21px Inter, Arial, sans-serif";
   ctx.letterSpacing = "0px";
   ctx.fillStyle = "#0c876f";
-  ctx.fillText(rankShort(scores.percentile), px, y0 + 131);
+  const delta = scores.from === undefined ? "" : ` · ${scores.overall >= scores.from ? "+" : ""}${(scores.overall - scores.from).toFixed(1)}`;
+  ctx.fillText(rankShort(scores.percentile) + delta, px, y0 + 131);
 
   const gridY = y0 + 171;
   const gap = 12;

@@ -41,6 +41,8 @@ export interface RundownOptions {
   name: string;
   /** Non-facial context for the fairness beat — height, titles, whatever. */
   context?: string[];
+  /** A closing disclaimer in the operator's own words, read verbatim. */
+  note?: string;
   /** Supabase access token; the TTS route is staff-gated. */
   accessToken?: string;
   /** How far off level the capture is, for the publish guard. */
@@ -80,7 +82,11 @@ export async function downloadRundownVideo(
   if (blockers.length) throw new RundownBlocked(blockers);
 
   onProgress?.(0, "Writing the running order");
-  const beats = buildReelScript(report, { name: options.name, context: options.context });
+  const beats = buildReelScript(report, {
+    name: options.name,
+    context: options.context,
+    note: options.note,
+  });
 
   onProgress?.(0.05, "Recording the voiceover");
   const spoken = options.accessToken
