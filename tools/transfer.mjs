@@ -14,8 +14,6 @@
 //   node tools/transfer.mjs [male|female]
 import { readFileSync } from "node:fs";
 
-const RHO_METRICS = 0.3;
-const RHO_PILLARS = 0.55;
 const SCORE_SCALE = 1.3;
 const PILLARS = ["Harmony", "Angularity", "Dimorphism", "Features"];
 const METRICS_PER_PILLAR = 8;
@@ -64,26 +62,49 @@ function normalizeAgg(z, q) {
   const span = q[i + 1] - q[i] || 1e-9;
   return probit(Math.min(Math.max((i + (z - q[i]) / span) / last, 0.001), 0.999));
 }
-const aggregateZ = (zs, rho) =>
-  (zs.reduce((a, z) => a + z, 0) / zs.length) / Math.sqrt(rho + (1 - rho) / zs.length);
+// Plain weighted mean, mirroring scoring.ts. Deliberately a copy, so a
+// change on either side shows up here as a diff rather than agreeing silently.
+const aggregateZ = (zs) => zs.reduce((a, z) => a + z, 0) / zs.length;
 
 const overall = table("overall");
 const pillar = Object.fromEntries(PILLARS.map((p) => [p, table(`pillar:${p}`)]));
 
+// Anchored on the POPULATION, not on the metric ideal.
+//
+// The first version of this walked out from metric z = 0 and called that "an
+// average face". It is not: z = 0 is a face sitting exactly on every aesthetic
+// ideal, and the reference population's median sits well below that. Measuring
+// steepness from the wrong origin made the curve look worse than it is and hid
+// the property that actually matters — how far a face moves per unit of REAL
+// between-person variation.
+const med = overall[(overall.length / 2) | 0];
+const sd = (overall[overall.length - 1] - overall[0]) / 6; // ~6 sd across a sample this size
+
 console.log(`\nTransfer function — ${sex}\n`);
-console.log("  every metric at the same z, so metric score = 5 + 1.3z\n");
-console.log("   metric z   metric score   raw aggregate   overall pct   overall score");
-console.log("   " + "-".repeat(72));
-for (const mz of [-0.75, -0.5, -0.25, -0.1, 0, 0.1, 0.25, 0.5, 0.75, 1.0]) {
+console.log("  offsets are in population SD from the reference median\n");
+console.log("   pop SD   metric score   raw aggregate   overall pct   overall score");
+console.log("   " + "-".repeat(70));
+for (const nsd of [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5]) {
+  const mz = med + nsd * sd;
   const pz = PILLARS.map((p) =>
-    normalizeAgg(aggregateZ(Array(METRICS_PER_PILLAR).fill(mz), RHO_METRICS), pillar[p]));
-  const raw = aggregateZ(pz, RHO_PILLARS);
+    normalizeAgg(aggregateZ(Array(METRICS_PER_PILLAR).fill(mz)), pillar[p]));
+  const raw = aggregateZ(pz);
   const oz = normalizeAgg(raw, overall);
-  const pct = phi(oz) * 100;
   console.log(
-    `   ${mz.toFixed(2).padStart(8)}   ${(5 + SCORE_SCALE * mz).toFixed(2).padStart(12)}` +
-    `   ${raw.toFixed(3).padStart(13)}   ${(pct.toFixed(1) + "%").padStart(11)}` +
+    `   ${nsd.toFixed(1).padStart(6)}   ${(5 + SCORE_SCALE * mz).toFixed(2).padStart(12)}` +
+    `   ${raw.toFixed(3).padStart(13)}   ${((phi(oz) * 100).toFixed(1) + "%").padStart(11)}` +
     `   ${(5 + SCORE_SCALE * oz).toFixed(2).padStart(13)}`);
+}
+// The number that matters for stability: two photographs of one man moved the
+// mean metric z by 0.37 on the shipped build. How much score is that worth?
+{
+  const at = (mz) => {
+    const pz = PILLARS.map((p) =>
+      normalizeAgg(aggregateZ(Array(METRICS_PER_PILLAR).fill(mz)), pillar[p]));
+    return 5 + SCORE_SCALE * normalizeAgg(aggregateZ(pz), overall);
+  };
+  console.log(`\n   a 0.37 shift in mean metric z (one man, two photos) is worth ` +
+    `${(at(med + 0.37) - at(med)).toFixed(2)} points of score at the median.`);
 }
 console.log("\n   reference population aggregate: " +
   `min ${overall[0].toFixed(3)}  median ${overall[(overall.length / 2) | 0].toFixed(3)}` +

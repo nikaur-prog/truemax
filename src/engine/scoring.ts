@@ -35,8 +35,6 @@ const Z_CLAMP = 2.2; // per-metric influence clamp (noisy landmark guard)
 // Assumed inter-metric correlation when re-standardizing aggregates. Facial
 // metrics correlate (a lean, structured face moves many at once); without
 // this, averaging ~30 z-scores would crush everyone toward 5.0.
-const RHO_METRICS = 0.3;
-const RHO_PILLARS = 0.55;
 
 const PILLAR_WEIGHTS: Record<PillarId, number> = {
   Harmony: 0.35,
@@ -222,7 +220,7 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
 
 // Weighted mean of correlated z-scores, re-standardized so the aggregate is
 // itself ~N(0,1) across the population (see RHO_* above).
-function aggregateZ(zs: number[], weights: number[], rho: number): number {
+function aggregateZ(zs: number[], weights: number[]): number {
   // Zero-weight entries are dropped rather than multiplied by zero.
   //
   // Not a micro-optimisation — a latent poisoning bug. An excluded metric has
@@ -236,11 +234,34 @@ function aggregateZ(zs: number[], weights: number[], rho: number): number {
   const kept = zs.map((z, i) => [z, weights[i]] as const).filter(([, w]) => w > 0);
   const wSum = kept.reduce((a, [, w]) => a + w, 0);
   if (!wSum) return 0;
-  const mean = kept.reduce((a, [z, w]) => a + z * w, 0) / wSum;
-  const w2 = kept.reduce((a, [, w]) => a + w * w, 0);
-  const varOfMean = rho + (1 - rho) * (w2 / (wSum * wSum));
-  return mean / Math.sqrt(varOfMean);
+  return kept.reduce((a, [z, w]) => a + z * w, 0) / wSum;
 }
+
+// Why this is a plain weighted mean and not the standard error of one.
+//
+// It used to return mean / sqrt(rho + (1 - rho) * Sw2/wSum^2) — the z of the
+// sample MEAN. That is the correct statistic for "how confident am I that this
+// face is above average", and the wrong one for "where does this face rank",
+// which is the only question the score asks. Averaging thirty-one measurements
+// does make the estimate more precise, but precision is not extremity, and
+// dividing by it turned the one into the other.
+//
+// It was applied twice — once across metrics inside a pillar, once across the
+// pillars — so roughly twice the true deviation reached the quantile table. The
+// table could not absorb it: faces ran past the reference maximum and tailZ's
+// linear extrapolation took over, which is how a face whose metrics averaged
+// 5.33 out of 10 was reported at the 98.4th percentile. Measured on the shipped
+// build, one sigma of movement on every metric moved the aggregate by 3.1,
+// against a total spread of 2.83 across the whole 52-man reference population.
+//
+// The evidence is in tools/transfer.mjs, and the invariants it has to satisfy
+// are in aggregation.test.ts.
+//
+// Note that the aggregate is deliberately insensitive to SPREAD: a face with
+// every metric at 5.3 aggregates identically to one with half at 2.8 and half
+// at 7.9. That is what a mean does. Whether a lopsided face should be scored
+// differently from an even one is a real question, but it is a question about
+// what to measure, not about how to add measurements up.
 
 // Empirical standardization of the aggregate. Per-metric effective z's are
 // only approximately N(0,1) — real measurements are skewed and heavy-tailed,
@@ -427,12 +448,12 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   const pillarZ = {} as Record<PillarId, number>;
   for (const p of Object.keys(PILLAR_WEIGHTS) as PillarId[]) {
     const ms = scored.filter((m) => m.def.pillar === p);
-    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight), RHO_METRICS), sex, `pillar:${p}`, rawZ);
+    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight)), sex, `pillar:${p}`, rawZ);
     pillars[p] = aggScore(pillarZ[p]);
   }
 
   const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
-  const ratioZ = aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]), RHO_PILLARS);
+  const ratioZ = aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]));
   const blended = shapeZ == null ? ratioZ : W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;
   // Recorded so the calibration harness can decompose where score variance
   // between two photos of the same face actually comes from.
@@ -442,7 +463,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {
     const ms = scored.filter((m) => m.def.region === r);
-    const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight), RHO_METRICS + 0.05), sex, `region:${r}`, rawZ);
+    const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight)), sex, `region:${r}`, rawZ);
     return {
       region: r,
       score: aggScore(rz),
@@ -642,7 +663,6 @@ const W_SIDE = 0.25;
 // 0.5 is a deliberate midpoint: it is the value that makes the combined score
 // move meaningfully when the side disagrees with the front, without letting a
 // hand-placed profile swing the result. Revisit the moment paired data exists.
-const RHO_VIEWS = 0.5;
 
 export function mergeReports(front: Report, side: Report): Report {
   // The NORMALISED aggregates, not zScores.overall. zScores holds the raw
@@ -667,7 +687,7 @@ export function mergeReports(front: Report, side: Report): Report {
   // hard; a mis-placed one cannot bury it.
   const zs = clamp(zsRaw, -Z_CLAMP, Z_CLAMP);
 
-  const z = aggregateZ([zf, zs], [W_FRONT, W_SIDE], RHO_VIEWS);
+  const z = aggregateZ([zf, zs], [W_FRONT, W_SIDE]);
 
   // Regions the two views share get combined the same way; regions only one
   // view measures pass through untouched.
@@ -682,7 +702,7 @@ export function mergeReports(front: Report, side: Report): Report {
       byRegion.set(r.region, r);
       continue;
     }
-    const rz = aggregateZ([zfr, clamp(zsr, -Z_CLAMP, Z_CLAMP)], [W_FRONT, W_SIDE], RHO_VIEWS);
+    const rz = aggregateZ([zfr, clamp(zsr, -Z_CLAMP, Z_CLAMP)], [W_FRONT, W_SIDE]);
     byRegion.set(r.region, {
       region: r.region,
       score: aggScore(rz),
@@ -740,15 +760,12 @@ export function maxMetricInfluence(): number {
   for (const p of Object.keys(PILLAR_WEIGHTS) as PillarId[]) {
     const ms = METRICS.filter((m) => m.view === "front" && m.pillar === p);
     const wSum = ms.reduce((a, m) => a + m.weight, 0);
-    const w2 = ms.reduce((a, m) => a + m.weight * m.weight, 0);
-    const restd = 1 / Math.sqrt(RHO_METRICS + (1 - RHO_METRICS) * (w2 / (wSum * wSum)));
     const pillarShare = PILLAR_WEIGHTS[p];
-    const pillarRestd =
-      1 / Math.sqrt(RHO_PILLARS + (1 - RHO_PILLARS) * 0.265); // Σw² of pillar weights
     for (const m of ms) {
-      const sens =
-        SCORE_SCALE * (m.weight / wSum) * restd * pillarShare * pillarRestd;
-      worst = Math.max(worst, sens);
+      // A weighted mean of weighted means: a metric's share of its pillar times
+      // that pillar's share of the whole. No re-standardising step, because
+      // aggregateZ no longer has one.
+      worst = Math.max(worst, SCORE_SCALE * (m.weight / wSum) * pillarShare);
     }
   }
   return worst;
