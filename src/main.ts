@@ -883,6 +883,35 @@ let feedbackDeliveryNote: { ok: boolean; message: string } | null = null;
 // Upload exists only after an explicit Yes. It is deliberately best-effort:
 // optional product-improvement feedback must never hold a person's analysis
 // hostage if Storage or the network is unavailable.
+// Held so the analysis can overlap the upload instead of queueing behind it.
+// See startConsentedSideFeedback.
+let feedbackInFlight: Promise<void> | null = null;
+
+// Fire the upload WITHOUT waiting for it.
+//
+// This is the fix for a three-to-five second dead screen. The upload encodes
+// the side photograph to JPEG and POSTs it, and every caller used to await it
+// before starting the analysis — so after confirming their landmark
+// corrections, somebody sat looking at nothing while an optional
+// product-improvement upload finished. Blank, no spinner, entirely at the mercy
+// of their connection, immediately before the animation that is supposed to be
+// the best moment in the product.
+//
+// The function's own comment always said this must never happen — "optional
+// product-improvement feedback must never hold a person's analysis hostage" —
+// and awaiting it did precisely that. One call site already used void; the four
+// that mattered did not.
+//
+// Not simply dropping the await, though: the delivery note becomes a quality
+// chip on the results screen, and a fire-and-forget upload would still be in
+// flight when those chips render, so the chip would silently go missing. The
+// promise is kept instead and awaited at the one point that needs it — after
+// the reveal animation, by which time a ~100KB POST has almost always landed.
+// The upload now runs underneath the animation rather than in front of it.
+function startConsentedSideFeedback(): void {
+  feedbackInFlight = submitConsentedSideFeedback();
+}
+
 async function submitConsentedSideFeedback(): Promise<void> {
   const side = lastSide;
   if (!side?.feedback || side.feedbackSubmitted || !side.photo) return;
@@ -1001,6 +1030,13 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   el.status.textContent = "";
   el.barFill.style.width = "0";
   drawCalm(el.overlayCanvas, landmarks, width, height);
+  // The one place the upload's outcome is actually needed: it decides a quality
+  // chip. By now the reveal animation has run, so the POST fired underneath it
+  // has almost always landed and this waits for nothing. A slow connection
+  // costs a slightly later chip rather than a blank screen up front, and a
+  // rejection must never surface here — it is optional feedback and the note
+  // itself already records the failure.
+  await feedbackInFlight?.catch(() => {});
   renderQualityChips(quality, autoNote);
 
   const ctxArgs = {
@@ -1082,7 +1118,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
             seedMethod: review.seedMethod,
             feedback: review.feedback ?? undefined,
           };
-          await submitConsentedSideFeedback();
+          startConsentedSideFeedback();
           await runFullAnalysis(sideReport);
         },
       });
@@ -1129,7 +1165,7 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
   // if the modal itself cannot open.
   const user = await currentUser().catch(() => null);
   if (!isAuthAvailable() || user) {
-    await submitConsentedSideFeedback();
+    startConsentedSideFeedback();
     await runFullAnalysis(sideReport);
     return;
   }
@@ -1211,7 +1247,7 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
         // this continuation before the deferred auth listener gets a turn, so
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
-        await submitConsentedSideFeedback();
+        startConsentedSideFeedback();
         await runFullAnalysis(sideReport);
       },
     }).catch(() => {
@@ -1292,7 +1328,7 @@ async function resumePendingAfterAuth(): Promise<void> {
   closeSide();
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
-  await submitConsentedSideFeedback();
+  startConsentedSideFeedback();
   await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex));
 }
 
