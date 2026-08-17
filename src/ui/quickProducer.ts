@@ -315,7 +315,10 @@ export function openProducer(ctx: ProducerContext): void {
       }
     }
     if (!media.length) return;
+    // Consumed here, and the scan's own paste handler must not also see it —
+    // see the capture-phase note below.
     event.preventDefault();
+    event.stopImmediatePropagation();
 
     // Where it lands: the armed slot, else the first free one, before-row
     // first — which is the order somebody filling this screen works in.
@@ -350,8 +353,13 @@ export function openProducer(ctx: ProducerContext): void {
     const note = overlay.querySelector<HTMLElement>(`[data-note="${rows[0]}"]`);
     if (note && !placed) note.textContent = "That paste had no image in it.";
   };
-  document.addEventListener("paste", onPaste);
-  overlay.addEventListener("prod-close", () => document.removeEventListener("paste", onPaste));
+  // CAPTURE phase, for the same reason as the cutaway strip in quick.ts:
+  // enablePhotoPaste listens on the document too and its job is to START A
+  // SCAN. It is registered first, so on the bubble phase it wins, and a paste
+  // meant for a producer slot kicked off a full analysis instead. Capture puts
+  // this ahead regardless of registration order.
+  document.addEventListener("paste", onPaste, true);
+  overlay.addEventListener("prod-close", () => document.removeEventListener("paste", onPaste, true));
 
   for (const input of overlay.querySelectorAll<HTMLInputElement>("input[data-pick]")) {
     input.addEventListener("change", async () => {
