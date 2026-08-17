@@ -104,7 +104,14 @@ export interface ReelScriptOptions {
 // much footage they are about to need. Guessing that number after the render
 // means finding out you are eight seconds short of picture once the expensive
 // part is already done.
-const WPM = 165;
+//
+// 185 is that measured 165 times the VOICE_SPEED of 1.12 the synthesiser is
+// asked for in api/tts.ts. The two have to be changed together. Nothing BREAKS
+// if they drift — rundownExport fits the visual timeline onto the real audio
+// duration once it exists, so the render stays in sync either way — but this is
+// the number quoted BEFORE the render, and a stale one sends somebody off to
+// shoot the wrong amount of footage.
+const WPM = 185;
 
 /** Roughly how long a line takes to say, in seconds. */
 export function spokenSeconds(text: string): number {
