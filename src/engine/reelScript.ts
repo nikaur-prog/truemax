@@ -47,7 +47,33 @@ const REGION_ORDER: RegionId[] = [
   "symmetry",
 ];
 
-export type BeatKind = "hook" | "metric" | "score" | "context" | "cta";
+export type BeatKind =
+  | "hook"
+  | "metric"
+  | "score"
+  | "context"
+  | "cta"
+  // The ending, in three moves. The face shrinks to the top and the full card
+  // arrives under it; the card gives way to the curve on the word "percent";
+  // the curve gives way to a search bar with the address being typed into it.
+  //
+  // Three separate kinds rather than one "ending", because each is a different
+  // argument and the renderer has to know which one it is drawing: the card is
+  // about the subject, the curve is about everybody else, and the search bar is
+  // about the viewer.
+  | "card"
+  | "curve"
+  | "search";
+
+/** Everything the scorecard frame needs, so the renderer never reads a Report. */
+export interface CardData {
+  verdict: string;
+  overall: number;
+  potential: number;
+  percentile: number;
+  /** Region name and score, top to bottom of the face. */
+  rows: Array<{ label: string; score: number }>;
+}
 
 export interface Beat {
   kind: BeatKind;
@@ -81,6 +107,17 @@ export interface Beat {
   positive?: boolean;
   /** The measured value, already formatted, for the badge on screen. */
   badge?: string;
+  /**
+   * Where on the distribution this face sits, 0..100, for the curve beat.
+   *
+   * Carried on the beat rather than looked up from the report by the renderer,
+   * because everything else in this module is already a self-contained
+   * instruction and a renderer that has to reach back into a Report to draw one
+   * frame is the seam every drift bug in this pipeline has come through.
+   */
+  percentile?: number;
+  /** For the card beat: the whole scorecard, pre-assembled. */
+  card?: CardData;
 }
 
 export interface ReelScriptOptions {
@@ -264,7 +301,7 @@ const OPENERS: Record<GroupKind, (subject: string, pronoun: string) => string[]>
     "Then there's",
   ],
   side: (_s, p) => [`From the side, ${p} has`, "In profile there's", `And ${p} has`],
-  "side-negative": (_s, p) => ["The profile isn't perfect —", "There's also", `And ${p} has`],
+  "side-negative": (_s, p) => ["The profile isn't perfect. He has", "There's also", `And ${p} has`],
 };
 
 // One measurement to a sentence.
@@ -316,6 +353,26 @@ function groupedBeats(ms: ScoredMetric[], sex: Sex, subject: string, kind: Group
 }
 
 const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+// The scorecard, assembled here rather than read out of the Report by the
+// renderer.
+//
+// Every other beat in this module is a self-contained instruction — a sentence
+// and the id of the thing to draw — and a renderer reaching back into a Report
+// for one frame is the seam every drift bug in this pipeline has come through.
+// The regions are already in face order in the Report, so the card reads top to
+// bottom the same way the video just did.
+function cardData(report: Report): CardData {
+  return {
+    verdict: verdictFor(report).word,
+    overall: report.overall,
+    potential: report.potential,
+    percentile: report.overallPercentile,
+    rows: [...report.regions]
+      .sort((a, b) => REGION_ORDER.indexOf(a.region) - REGION_ORDER.indexOf(b.region))
+      .map((r) => ({ label: REGION_NAMES[r.region] ?? r.region, score: r.score })),
+  };
+}
 
 export function buildReelScript(report: Report, options: ReelScriptOptions): Beat[] {
   const limit = options.metricBeats ?? 10;
@@ -408,10 +465,17 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // The number is the only thing a viewer is waiting for, so it is the only
     // moment the ask is free. Put it afterwards and it arrives at the exact
     // instant they have what they came for and their thumb is already moving.
+    //
+    // It is a spoken line only. The SHOWN ask is the search bar at the end,
+    // which needs the curve to have landed first to mean anything, so the two
+    // are deliberately not the same beat.
     {
       kind: "cta",
-      line: options.cta ?? "Before the rating — get yours at truemax.app.",
+      line: options.cta ?? "Before the rating, go get yours at truemax.app.",
     },
+    // THE CARD. The face shrinks to the top of the frame and the whole
+    // breakdown arrives under it.
+    //
     // Verdict and number in one line. A number is an argument, a name is a
     // conclusion, and split across two beats the conclusion lands after the
     // viewer has already decided what they think of the number.
@@ -419,33 +483,40 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // "The verdict:" rather than a sentence around the word, because the ladder
     // holds nouns AND clauses — "Mogger", "True Adam", "You're cooked" — and no
     // one sentence frame fits all three. It was shipping "Marlon has mogger".
-    // Colon, name, full stop: works for every rung and reads harder than a
-    // sentence would.
     {
-      kind: "score",
+      kind: "card",
       line: `The verdict: ${verdictFor(report).word}. ${name} measures ${report.overall.toFixed(1)} out of 10.`,
-      badge: `${pct}th percentile`,
+      card: cardData(report),
     },
+    // Still on the card. The ceiling as a NUMBER, not a ladder rung: named rungs
+    // work for where somebody IS, but as a CEILING a name is discouraging,
+    // because the top rung is defined as almost nobody and a viewer knows they
+    // are not about to become the one. A number one point above the one they
+    // just heard is a target; the same ceiling as a name is a door with
+    // somebody else's name on it.
     {
-      kind: "score",
-      line: `That's ${rarityShort(report.overallPercentile).toLowerCase()} of the reference set.`,
-      badge: `${pct}th percentile`,
+      kind: "card",
+      line: `Ceiling: ${report.potential.toFixed(1)}. That's the same bone structure with everything soft fixed.`,
+      card: cardData(report),
     },
-    {
-      kind: "score",
-      line: `${spreadLine(report.sex)} ${SPREAD.median.toFixed(1)} is the exact middle.`,
-    },
-    // The ceiling, as a NUMBER.
+    // THE CURVE, on the word "percent". Crowd shaded, one marker outside it.
     //
-    // The tier ladder is the wrong shape for this one slot. Named rungs work
-    // for where somebody IS — it is a label for a thing that already exists —
-    // but as a ceiling a name is discouraging, because the top rung is defined
-    // as almost nobody and a viewer knows they are not about to become the one.
-    // A number one point above the one they just heard is a target. The same
-    // ceiling as a name is a door with somebody else's name on it.
+    // The distribution was previously SAID here, and saying it is not the same
+    // as showing it. "Two thirds of men measure between 4.1 and 6.3" asks a
+    // viewer to hold two numbers and compare them to a third they heard ten
+    // seconds ago. The same fact as a shaded band with a line standing outside
+    // it is understood before it is read. This is the frame the whole format
+    // has been building an argument for, and it was narration over a face.
     {
-      kind: "score",
-      line: `Ceiling: ${report.potential.toFixed(1)}. That's what the same bone structure measures with everything soft fixed.`,
+      kind: "curve",
+      line: `That's ${rarityShort(report.overallPercentile).toLowerCase()}. ${spreadLine(report.sex)}`,
+      percentile: report.overallPercentile,
+      badge: `${pct}th percentile`,
+    },
+    {
+      kind: "curve",
+      line: `${SPREAD.median.toFixed(1)} is the exact middle, and that shaded band is where most of them are.`,
+      percentile: report.overallPercentile,
     },
   ];
 
@@ -462,6 +533,15 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   if (options.note?.trim()) {
     beats.push({ kind: "context", line: options.note.trim() });
   }
+
+  // The address, typed into a search bar on screen.
+  //
+  // A URL spoken aloud is a URL nobody types. A URL being typed into a search
+  // bar is an instruction the viewer's hands already know how to follow, and it
+  // is the one piece of the video with a job outside the video. It lands the
+  // beat after the curve, which is the moment the viewer has just been shown
+  // where a stranger stands and has not yet been shown where they stand.
+  beats.push({ kind: "search", line: "Want yours analysed? truemax.app." });
 
   // Ends on a question rather than a statement. The rundowns that collect
   // comments all close by asking for the next subject, and it costs one line.

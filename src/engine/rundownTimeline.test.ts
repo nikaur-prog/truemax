@@ -81,27 +81,74 @@ test("captions finish typing before their beat ends", () => {
   }
 });
 
-test("fitting to real audio scales everything and keeps the order", () => {
-  // The voice comes back as one file of unknown length, so the estimate gets
-  // stretched onto it. Relative pacing must survive that.
+test("fitting to real audio allocates by word share, not by one scale factor", () => {
+  // This test used to assert uniform scaling — every start multiplied by
+  // actual/estimated. That is what produced the drift: the estimate adds a flat
+  // GAP and a MIN_BEAT floor to every beat, both fixed costs that are a far
+  // bigger share of a short beat than a long one, and scaling preserves that
+  // surplus as a proportion. The error does not cancel across beats, it
+  // accumulates, so the picture falls further behind the voice the longer the
+  // video runs.
+  //
+  // The synthesiser reads at a roughly constant rate through one request, so a
+  // beat's share of the WORDS is its share of the duration. That is the claim
+  // being made here, and it is the whole fix.
   const timeline = buildTimeline(BEATS);
-  const stretched = fitTimeline(timeline, timeline.duration * 1.25);
+  const REAL = 40;
+  const fitted = fitTimeline(timeline, REAL);
 
-  assert.equal(Number(stretched.duration.toFixed(6)), Number((timeline.duration * 1.25).toFixed(6)));
-  for (let i = 0; i < timeline.beats.length; i++) {
-    assert.equal(
-      Number(stretched.beats[i].start.toFixed(6)),
-      Number((timeline.beats[i].start * 1.25).toFixed(6)),
+  const words = (b: (typeof BEATS)[number]) =>
+    (b.spoken ?? b.line).split(/\s+/).filter(Boolean).length;
+  const total = BEATS.reduce((a, b) => a + words(b), 0);
+
+  fitted.beats.forEach((b, i) => {
+    const want = (words(BEATS[i]) / total) * REAL;
+    assert.ok(
+      Math.abs(b.duration - want) < 1e-6,
+      `beat ${i} got ${b.duration.toFixed(3)}s, word share says ${want.toFixed(3)}s`,
     );
+  });
+
+  // Contiguous, and summing to the audio EXACTLY. Any residue here is drift by
+  // another name — a gap the picture spends waiting for a voice that has moved
+  // on, or an overlap it never catches up from.
+  let cursor = 0;
+  for (const b of fitted.beats) {
+    assert.ok(Math.abs(b.start - cursor) < 1e-9, `beat starts at ${b.start}, previous ended ${cursor}`);
+    cursor += b.duration;
   }
-  // Still contiguous after scaling, and the draw cues moved with their beats.
-  for (const b of stretched.beats) {
+  assert.ok(Math.abs(cursor - REAL) < 1e-6, `beats sum to ${cursor}, audio is ${REAL}`);
+  assert.equal(Number(fitted.duration.toFixed(6)), REAL);
+
+  // The draw cues moved with their beats rather than being rescaled from an
+  // absolute time that no longer means anything.
+  for (const b of fitted.beats) {
     if (b.drawAt === undefined) continue;
     assert.ok(b.drawAt >= b.start && b.drawAt < b.start + b.duration);
   }
-  for (const cue of stretched.sfx) {
-    assert.ok(beatAt(stretched, cue.at), `cue at ${cue.at} fell outside every beat after scaling`);
+  for (const cue of fitted.sfx) {
+    assert.ok(beatAt(fitted, cue.at), `cue at ${cue.at} fell outside every beat after fitting`);
   }
+});
+
+test("a short beat does not steal time from the beats after it", () => {
+  // The concrete symptom. The hook is four words and the estimate gives it
+  // MIN_BEAT + GAP = 1.95s; the voice says it in well under half that. Under
+  // the old uniform scaling that surplus survived, and every beat after the
+  // hook started late by it — cumulatively, so the last beat was the worst.
+  const timeline = buildTimeline(BEATS);
+  const fitted = fitTimeline(timeline, 40);
+  const hook = fitted.beats[0];
+  const hookWords = (BEATS[0].spoken ?? BEATS[0].line).split(/\s+/).filter(Boolean).length;
+  const allWords = BEATS.reduce(
+    (a, b) => a + (b.spoken ?? b.line).split(/\s+/).filter(Boolean).length,
+    0,
+  );
+  // Its slice of the video is its slice of the script, and nothing else.
+  assert.ok(
+    Math.abs(hook.duration / 40 - hookWords / allWords) < 1e-9,
+    `hook takes ${((hook.duration / 40) * 100).toFixed(1)}% of the video for ${((hookWords / allWords) * 100).toFixed(1)}% of the words`,
+  );
 });
 
 test("fitting refuses nonsense rather than producing it", () => {

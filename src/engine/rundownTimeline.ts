@@ -54,7 +54,27 @@ const GAP = 0.35;
 // a machine gun; halving it keeps the texture and loses the rattle.
 const CHARS_PER_KEYSTROKE = 2;
 
-export type SfxKind = "key" | "click";
+// Where in a beat the measurement finishes drawing itself, as a fraction.
+//
+// The line must be on the face while the sentence about it is still being said.
+// Drawing it afterwards reads as an illustration of a claim already made;
+// drawing it during reads as the claim being demonstrated.
+//
+// Was 0.34 of the SPOKEN portion, which put the line a third of the way into a
+// sentence that now runs twenty words — the viewer heard "a canthal tilt of 6.4
+// degrees" and had nothing to look at for the length of it. At 0.16 the
+// measurement lands under the figure rather than after it, which is the moment
+// it is evidence rather than illustration.
+//
+// Expressed against the beat's whole duration so fitTimeline can place it
+// without re-deriving what the "spoken portion" of a fitted beat means.
+const DRAW_AT = 0.16;
+
+// "pop" is the curve arriving. It is a different sound from the measurement
+// click on purpose: the click is a line landing on a face, and this is a whole
+// frame changing to make an argument about the population. Using the same
+// sample for both taught the viewer nothing about which was which.
+export type SfxKind = "key" | "click" | "pop";
 
 export interface SfxCue {
   at: number;
@@ -94,13 +114,7 @@ function estimate(beats: Beat[]): TimedBeat[] {
     const spoken = Math.max(MIN_BEAT, wordCount(beat.spoken ?? beat.line) / WORDS_PER_SECOND);
     const duration = spoken + GAP;
     const timed: TimedBeat = { beat, start: cursor, duration };
-    if (beat.metricId) {
-      // The overlay draws over the first third of the beat, so the line is on
-      // the face while the sentence about it is still being said. Drawing it
-      // afterwards reads as an illustration of a claim already made; drawing it
-      // during reads as the claim being demonstrated.
-      timed.drawAt = cursor + spoken * 0.34;
-    }
+    if (beat.metricId) timed.drawAt = cursor + duration * DRAW_AT;
     cursor += duration;
     return timed;
   });
@@ -117,24 +131,62 @@ function estimate(beats: Beat[]): TimedBeat[] {
  */
 export function fitTimeline(timeline: RundownTimeline, actualDuration: number): RundownTimeline {
   if (!(actualDuration > 0) || !(timeline.duration > 0)) return timeline;
-  const k = actualDuration / timeline.duration;
-  return {
-    duration: actualDuration,
-    beats: timeline.beats.map((b) => ({
+
+  // Re-allocate by WORD SHARE, rather than scaling the estimate by one factor.
+  //
+  // The old version multiplied every start and duration by
+  // actualDuration / estimatedDuration. That is only correct if the estimate is
+  // proportional to the real speech, and it is not, for two reasons that both
+  // push the same way:
+  //
+  //   estimated_i = max(MIN_BEAT, words_i / 2.7) + GAP
+  //
+  // GAP is a flat 0.35s added to every beat, and MIN_BEAT is a floor. Both are
+  // fixed costs, so they are a much larger share of a short beat than a long
+  // one. The hook — "How attractive is Marlon?", four words — estimates at
+  // 1.6 + 0.35 = 1.95s while the voice says it in about 1.3. The synthesiser
+  // does not insert a third of a second of silence after every sentence, so
+  // that surplus is not real; scaling preserves it as a proportion and hands
+  // it back to the same short beats.
+  //
+  // The error does not cancel, it ACCUMULATES: every over-long early beat
+  // pushes everything after it later, so the visuals fall further behind the
+  // voice the longer the video runs. That is the drift — nothing is wrong at
+  // the top and by the score beat the caption is a full sentence behind.
+  //
+  // Word share has none of that. The synthesiser reads at a roughly constant
+  // rate through one request, so a beat's share of the words IS its share of
+  // the duration, the allocations sum to exactly the audio length by
+  // construction, and no error is left over to accumulate.
+  const words = timeline.beats.map((b) => Math.max(1, wordCount(b.beat.spoken ?? b.beat.line)));
+  const total = words.reduce((a, w) => a + w, 0);
+
+  const beats: TimedBeat[] = [];
+  let cursor = 0;
+  const starts: number[] = [];
+  timeline.beats.forEach((b, i) => {
+    const duration = (words[i] / total) * actualDuration;
+    starts.push(cursor);
+    beats.push({
       ...b,
-      start: b.start * k,
-      duration: b.duration * k,
-      drawAt: b.drawAt === undefined ? undefined : b.drawAt * k,
-    })),
-    sfx: timeline.sfx.map((cue) => ({ ...cue, at: cue.at * k })),
-  };
+      start: cursor,
+      duration,
+      // drawAt keeps its position WITHIN the beat rather than being rescaled
+      // from an absolute time that no longer means anything.
+      drawAt: b.drawAt === undefined ? undefined : cursor + duration * DRAW_AT,
+    });
+    cursor += duration;
+  });
+
+  // Sound effects are re-derived rather than scaled, for the same reason: a cue
+  // placed against the estimate is a cue placed against a beat boundary that
+  // has just moved.
+  return { duration: actualDuration, beats, sfx: cuesFor(beats) };
 }
 
-export function buildTimeline(beats: Beat[]): RundownTimeline {
-  const timed = estimate(beats);
-  const duration = timed.reduce((total, b) => total + b.duration, 0);
-
+function cuesFor(timed: TimedBeat[]): SfxCue[] {
   const sfx: SfxCue[] = [];
+  let seenCurve = false;
   for (const b of timed) {
     // Captions type over the first 62% of the beat, so the line is complete and
     // readable for a moment before it leaves. A caption still typing when the
@@ -145,10 +197,21 @@ export function buildTimeline(beats: Beat[]): RundownTimeline {
       sfx.push({ at: b.start + (typing * i) / Math.max(1, strokes), kind: "key" });
     }
     if (b.drawAt !== undefined) sfx.push({ at: b.drawAt, kind: "click" });
+    // The graph lands on the first curve beat only. Firing it on both would
+    // punctuate a frame that is already on screen and did not change.
+    if (b.beat.kind === "curve" && !seenCurve) {
+      sfx.push({ at: b.start + 0.06, kind: "pop" });
+      seenCurve = true;
+    }
   }
   sfx.sort((a, b) => a.at - b.at);
+  return sfx;
+}
 
-  return { beats: timed, duration, sfx };
+export function buildTimeline(beats: Beat[]): RundownTimeline {
+  const timed = estimate(beats);
+  const duration = timed.reduce((total, b) => total + b.duration, 0);
+  return { beats: timed, duration, sfx: cuesFor(timed) };
 }
 
 /**

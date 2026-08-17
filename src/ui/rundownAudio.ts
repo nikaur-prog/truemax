@@ -1,4 +1,4 @@
-import type { RundownTimeline } from "../engine/rundownTimeline.js";
+import type { RundownTimeline, SfxKind } from "../engine/rundownTimeline.js";
 
 // ---------------------------------------------------------------------------
 // The sound of a rundown: one voice track and a few hundred small noises.
@@ -80,6 +80,34 @@ function click(sampleRate: number): Float32Array {
   return out;
 }
 
+/**
+ * The graph landing: a downward swoop with a low body under it.
+ *
+ * The click is a number arriving on a face and lasts a few milliseconds. This
+ * is a whole frame changing to make an argument about the population, so it is
+ * longer and it moves — a falling pitch reads as something coming to rest,
+ * which is what the marker on the curve is doing. Reusing the click here
+ * punctuated the biggest frame in the video with the same tick as a cheekbone.
+ */
+function pop(sampleRate: number): Float32Array {
+  const n = Math.floor(sampleRate * 0.42);
+  const out = new Float32Array(n);
+  let phase = 0;
+  for (let i = 0; i < n; i++) {
+    const u = i / n;
+    // 900Hz down to 180Hz over the swoop, integrated so the phase is continuous
+    // — stepping frequency per sample without integrating produces a click at
+    // every step rather than a glide.
+    const freq = 900 * Math.exp(-u * 1.6) + 180;
+    phase += (2 * Math.PI * freq) / sampleRate;
+    // Fast attack, long tail. A slow attack on a sound meant to punctuate a cut
+    // arrives after the cut.
+    const envelope = Math.min(1, u * 40) * Math.exp(-u * 4.2);
+    out[i] = (Math.sin(phase) * 0.75 + Math.sin(phase * 0.5) * 0.25) * envelope * 0.5;
+  }
+  return out;
+}
+
 /** Sum a short effect into a mix at a sample offset, clipping at the end. */
 function stamp(mix: Float32Array, effect: Float32Array, offset: number): void {
   const start = Math.max(0, Math.round(offset));
@@ -150,10 +178,13 @@ export async function mixRundownAudio(
     for (let i = 0; i < count; i++) mix[i] = source[i];
   }
 
-  const key = keystroke(sampleRate);
-  const tick = click(sampleRate);
+  const effects: Record<SfxKind, Float32Array> = {
+    key: keystroke(sampleRate),
+    click: click(sampleRate),
+    pop: pop(sampleRate),
+  };
   for (const cue of timeline.sfx) {
-    stamp(mix, cue.kind === "key" ? key : tick, cue.at * sampleRate);
+    stamp(mix, effects[cue.kind] ?? effects.click, cue.at * sampleRate);
   }
 
   // Summing hundreds of effects onto speech can exceed unity in a few places.

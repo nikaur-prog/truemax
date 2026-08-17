@@ -339,7 +339,30 @@ export function drawRundownFrame(
   // subject of a rundown is the face and every pixel spent on chrome is a pixel
   // not spent on the thing being measured.
   const crop = cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics);
-  ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+  const kind = beat.beat.kind;
+
+  if (kind === "card") {
+    // The face moves to the top and the breakdown arrives under it.
+    //
+    // Not a cut: the crop the previous beat left off on eases up into the band
+    // over the first third of this one, so the photograph appears to travel
+    // rather than to be replaced. A hard cut here loses the connection between
+    // the face just measured and the numbers now being read off it, which is
+    // the one thing the card is for.
+    const settle = smoother(clamp01((t - beat.start) / Math.max(0.001, beat.duration * 0.3)));
+    const boxH = lerp(H, H * CARD_PHOTO, settle);
+    const target = regionCrop(photo, landmarks, "proportions", W / boxH);
+    const c = lerpCrop(crop, target, settle);
+    ctx.drawImage(photo, c.x, c.y, c.w, c.h, 0, 0, W, boxH);
+    // The photograph fades into the card rather than ending on a hard edge.
+    const fade = ctx.createLinearGradient(0, boxH * 0.55, 0, boxH);
+    fade.addColorStop(0, "rgba(5,6,6,0)");
+    fade.addColorStop(1, "#050606");
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, boxH * 0.55, W, boxH * 0.45 + 2);
+  } else {
+    ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+  }
 
   // Everything except the measurement goes dark. A uniform scrim rather than a
   // shaped mask: masking around the active region means computing a region
@@ -353,10 +376,306 @@ export function drawRundownFrame(
   ctx.fillStyle = scrim;
   ctx.fillRect(0, 0, W, H);
 
+  // The curve and the search bar pop in FRONT of the face, so the face goes
+  // most of the way down. Not all the way to black: keeping the photograph
+  // faintly there is what makes the curve read as "this man, against everyone"
+  // rather than as a chart that arrived from somewhere else.
+  if (kind === "curve" || kind === "search") {
+    ctx.fillStyle = "rgba(5,6,6,0.82)";
+    ctx.fillRect(0, 0, W, H);
+  }
+
   drawOverlayForBeat(ctx, photo, landmarks, input, beat, t, crop, W, H, overlayCanvas);
+  // The two closing beats take over the frame rather than sitting beside the
+  // face. Both are arguments about the viewer rather than about the subject —
+  // where he lands against everyone, and what to do about it — and neither
+  // reads while a face is still competing for the eye.
+  if (beat.beat.kind === "card") drawCard(ctx, beat, W, H);
+  if (beat.beat.kind === "curve") drawCurve(ctx, beat, t, W, H);
+  if (beat.beat.kind === "search") drawSearchBar(ctx, beat, t, W, H);
   drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
+}
+
+// How far through its own animation a full-frame beat is, 0..1, with a little
+// air at the end so the finished picture is held rather than cut on.
+function beatProgress(beat: TimedBeat, t: number): number {
+  return clamp01((t - beat.start) / Math.max(0.001, beat.duration * 0.62));
+}
+
+// How much of the frame the photograph keeps once the card is up.
+const CARD_PHOTO = 0.42;
+
+// ---------------------------------------------------------------------------
+// The scorecard: the face at the top, everything measured underneath it.
+//
+// The rundown spent a minute making a case one measurement at a time and then
+// delivered the conclusion as a sentence over a close-up of a cheekbone. The
+// card is where the case is added up, and it is also the frame that gets
+// screenshotted — which is the only distribution mechanism in this format that
+// costs nothing.
+//
+// Every number on it was already said out loud somewhere in the video. It is a
+// summary, not new information, and that is deliberate: a card that introduces
+// a figure the voice never mentioned invites the viewer to wonder what else was
+// left out.
+// ---------------------------------------------------------------------------
+function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: number): void {
+  const card = beat.beat.card;
+  if (!card) return;
+
+  const top = H * CARD_PHOTO;
+  ctx.save();
+  ctx.textAlign = "center";
+
+  // The verdict, big, because it is the conclusion and a name is what gets
+  // quoted in a comment section.
+  ctx.font = "300 76px Fraunces, Georgia, serif";
+  ctx.fillStyle = "#f7f7f2";
+  ctx.fillText(card.verdict, W / 2, top + 78);
+
+  // The three figures, in a row. Score first because it is the one they came
+  // for; ceiling next because it is the one that sells a subscription; rarity
+  // last because it is the one nobody else in this niche can actually compute.
+  const stats: Array<[string, string]> = [
+    ["SCORE", card.overall.toFixed(1)],
+    ["CEILING", card.potential.toFixed(1)],
+    ["TOP", `${Math.max(1, Math.round(100 - card.percentile))}%`],
+  ];
+  const colW = W / 3;
+  stats.forEach(([label, value], i) => {
+    const cx = colW * i + colW / 2;
+    ctx.font = "500 14px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "3px";
+    ctx.fillStyle = "#7f8682";
+    ctx.fillText(label, cx, top + 128);
+    ctx.font = "300 56px Fraunces, Georgia, serif";
+    ctx.letterSpacing = "0px";
+    ctx.fillStyle = "#f7f7f2";
+    ctx.fillText(value, cx, top + 184);
+  });
+
+  // The regions, top of the face to the bottom — the same order the video just
+  // walked in, so the card reads as a recap rather than as a second opinion.
+  let y = top + 246;
+  const left = W * 0.12;
+  const right = W * 0.88;
+  ctx.textAlign = "left";
+  for (const row of card.rows) {
+    if (y > H - 150) break; // never collide with the bottom bar
+    ctx.font = "500 24px Inter, Arial, sans-serif";
+    ctx.fillStyle = "#c9d1cd";
+    ctx.fillText(row.label, left, y);
+
+    // A bar as well as a number. The number is the fact; the bar is what makes
+    // one region visibly the weak one at a glance, which is the thing a viewer
+    // screenshots to argue about.
+    const barX = left + 190;
+    const barW = right - barX - 74;
+    ctx.fillStyle = "rgba(247,247,242,0.12)";
+    ctx.fillRect(barX, y - 14, barW, 8);
+    ctx.fillStyle = row.score >= 6.5 ? "#8ff3e0" : row.score <= 4.5 ? "#e8a17a" : "#f7f7f2";
+    ctx.fillRect(barX, y - 14, barW * clamp01(row.score / 10), 8);
+
+    ctx.textAlign = "right";
+    ctx.font = "500 24px Inter, Arial, sans-serif";
+    ctx.fillStyle = "#f7f7f2";
+    ctx.fillText(row.score.toFixed(1), right, y);
+    ctx.textAlign = "left";
+    y += 46;
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The distribution, with the crowd shaded and one marker standing outside it.
+//
+// The single most persuasive frame available to this format, and it was being
+// delivered as narration over a photograph. "Two thirds of men measure between
+// 4.1 and 6.3" asks a viewer to hold two numbers and compare them to a third
+// they heard ten seconds ago. The same fact drawn — a hump, a shaded middle,
+// and a line out on the right-hand tail — is understood before it is read.
+//
+// A normal curve rather than the empirical one. The engine's own aggregate is
+// normalised through a quantile table, so the population IS approximately
+// gaussian in this space by construction, and drawing the sample's lumps would
+// be drawing 52 people's noise as if it were structure.
+// ---------------------------------------------------------------------------
+function drawCurve(
+  ctx: CanvasRenderingContext2D,
+  beat: TimedBeat,
+  t: number,
+  W: number,
+  H: number,
+): void {
+  const p = beatProgress(beat, t);
+  const pct = clamp01((beat.beat.percentile ?? 50) / 100);
+
+  const left = W * 0.12;
+  const right = W * 0.88;
+  const span = right - left;
+  const baseline = H * 0.52;
+  const peak = H * 0.2;
+
+  // z for a percentile, by the Beasley-Springer-Moro-ish rational approximation
+  // that precision.ts already trusts elsewhere. Only used for placement, so
+  // three decimals of accuracy is far more than the pixels can show.
+  const zOf = (q: number): number => {
+    const a = clamp01(Math.min(0.9995, Math.max(0.0005, q)));
+    const s = a < 0.5 ? -1 : 1;
+    const r = Math.sqrt(-2 * Math.log(a < 0.5 ? a : 1 - a));
+    return (
+      s * (r - (2.30753 + 0.27061 * r) / (1 + (0.99229 + 0.04481 * r) * r))
+    );
+  };
+
+  const Z_EDGE = 3; // the axis runs -3σ..+3σ, which is the whole population
+  const xOf = (z: number) => left + ((z + Z_EDGE) / (2 * Z_EDGE)) * span;
+  const yOf = (z: number) => baseline - Math.exp(-(z * z) / 2) * (baseline - peak);
+
+  ctx.save();
+
+  // The crowd: the middle 68%, shaded. This is the "where most men are" band,
+  // and it is one sigma rather than two on purpose — the 95% band runs so wide
+  // it reads as "anything is normal" and tells nobody where they stand.
+  const shade = ctx.createLinearGradient(0, peak, 0, baseline);
+  shade.addColorStop(0, "rgba(143,243,224,0.30)");
+  shade.addColorStop(1, "rgba(143,243,224,0.05)");
+  ctx.beginPath();
+  ctx.moveTo(xOf(-1), baseline);
+  for (let z = -1; z <= 1.0001; z += 0.02) ctx.lineTo(xOf(z), yOf(z));
+  ctx.lineTo(xOf(1), baseline);
+  ctx.closePath();
+  ctx.fillStyle = shade;
+  ctx.fill();
+
+  // The curve itself, drawn left to right over the beat so the frame has
+  // something happening in it rather than appearing whole.
+  ctx.beginPath();
+  const drawnTo = -Z_EDGE + 2 * Z_EDGE * p;
+  ctx.moveTo(xOf(-Z_EDGE), yOf(-Z_EDGE));
+  for (let z = -Z_EDGE; z <= drawnTo; z += 0.02) ctx.lineTo(xOf(z), yOf(z));
+  ctx.strokeStyle = "rgba(247,247,242,0.85)";
+  ctx.lineWidth = 3;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  // Baseline.
+  ctx.beginPath();
+  ctx.moveTo(left, baseline);
+  ctx.lineTo(right, baseline);
+  ctx.strokeStyle = "rgba(247,247,242,0.22)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.font = "500 15px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "1px";
+  ctx.fillStyle = "#8ff3e0";
+  ctx.fillText("MOST MEN", (xOf(-1) + xOf(1)) / 2, baseline + 34);
+
+  // The marker, which arrives only once the curve has been drawn past it —
+  // otherwise it stands on a line that is not there yet.
+  const z = Math.max(-Z_EDGE, Math.min(Z_EDGE, zOf(pct)));
+  if (drawnTo >= z) {
+    const x = xOf(z);
+    ctx.beginPath();
+    ctx.moveTo(x, baseline);
+    ctx.lineTo(x, yOf(z) - 26);
+    ctx.strokeStyle = "#f7f7f2";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, yOf(z) - 26, 7, 0, Math.PI * 2);
+    ctx.fillStyle = "#f7f7f2";
+    ctx.fill();
+
+    ctx.font = "600 22px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "0px";
+    ctx.fillStyle = "#f7f7f2";
+    // Kept inside the frame when the marker is far out on either tail.
+    const label = `HIM`;
+    const lx = Math.max(left + 26, Math.min(right - 26, x));
+    ctx.fillText(label, lx, yOf(z) - 44);
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The address, typed into a search bar.
+//
+// A URL read aloud is a URL nobody types. A search bar with a cursor blinking
+// after "truemax.app" is an instruction the viewer's hands already know how to
+// follow, and it costs one beat at the point in the video where they have just
+// been given a reason to want their own.
+// ---------------------------------------------------------------------------
+function drawSearchBar(
+  ctx: CanvasRenderingContext2D,
+  beat: TimedBeat,
+  t: number,
+  W: number,
+  H: number,
+): void {
+  const p = beatProgress(beat, t);
+  const URL = "www.truemax.app";
+
+  const w = W * 0.78;
+  const h = 92;
+  const x = (W - w) / 2;
+  const y = H * 0.42;
+  const r = h / 2;
+
+  ctx.save();
+
+  // The bar pops in over the first fifth of the beat, then holds while the
+  // address types. Two things animating at once reads as a loading screen.
+  const pop = clamp01(p / 0.2);
+  const scale = 0.86 + 0.14 * smoother(pop);
+  ctx.translate(x + w / 2, y + h / 2);
+  ctx.scale(scale, scale);
+  ctx.translate(-(x + w / 2), -(y + h / 2));
+  ctx.globalAlpha = pop;
+
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arc(x + w - r, y + r, r, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(x + r, y + h);
+  ctx.arc(x + r, y + r, r, Math.PI / 2, -Math.PI / 2);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(247,247,242,0.96)";
+  ctx.fill();
+
+  // The magnifier.
+  const gx = x + 46;
+  const gy = y + h / 2;
+  ctx.beginPath();
+  ctx.arc(gx, gy - 3, 12, 0, Math.PI * 2);
+  ctx.strokeStyle = "#3d4744";
+  ctx.lineWidth = 3.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(gx + 9, gy + 6);
+  ctx.lineTo(gx + 18, gy + 15);
+  ctx.stroke();
+
+  // The address, one character at a time over the rest of the beat.
+  const typed = URL.slice(0, Math.round(URL.length * clamp01((p - 0.2) / 0.7)));
+  ctx.textAlign = "left";
+  ctx.font = "500 40px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "0px";
+  ctx.fillStyle = "#121614";
+  ctx.fillText(typed, x + 84, y + h / 2 + 14);
+
+  // A cursor that blinks only once the typing has stopped. Blinking while text
+  // is still arriving reads as a glitch rather than as a caret.
+  if (typed.length === URL.length && Math.floor(t * 2) % 2 === 0) {
+    const cx = x + 84 + ctx.measureText(typed).width + 4;
+    ctx.fillRect(cx, y + h / 2 - 22, 3, 40);
+  }
+  ctx.restore();
 }
 
 function drawOverlayForBeat(
