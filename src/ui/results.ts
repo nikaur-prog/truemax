@@ -672,6 +672,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
+      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side") : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
@@ -907,7 +908,15 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
   { mood: "happy" },
 ];
 
-function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
+// `scope` exists for one sentence. Everything else here composes from whichever
+// Report it is handed, so the profile gets a genuine read of the profile's own
+// regions and metrics for free — but the delta does not generalise. It tracks
+// the OVERALL score, and printing "0.1 down against yesterday" under fifteen
+// side measurements would attribute a whole-face movement to the jaw.
+//
+// So the profile says nothing about movement rather than something untrue. The
+// front keeps the tracking line, where it is about the number directly above it.
+function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front"): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
   const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
@@ -925,16 +934,21 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
   const improve = weakest
     ? `The one I would attack first: ${weakest.def.name.toLowerCase()} (${fmt(weakest)}). ${leverFor(weakest).title} is the lever, and it moves without surgery.`
     : "";
-  const tracking = delta
-    ? deltaReadingCopy(delta)
-    : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
+  // Suppressed entirely on the profile: "first scan on record" is false on a
+  // rescan, and the real delta belongs to the overall number, not to this half.
+  const tracking =
+    scope === "side"
+      ? ""
+      : delta
+        ? deltaReadingCopy(delta)
+        : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
     <div class="maxan-body">
       <span class="klabel">MAX'S READ</span>
       <p><b>${good}</b> ${improve}</p>
-      <p class="maxan-track">${tracking}</p>
+      ${tracking ? `<p class="maxan-track">${tracking}</p>` : ""}
       <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
       <!-- Looks like the thing it starts, rather than describing it.
            "Tap me in the corner" asked the reader to find a separate control
