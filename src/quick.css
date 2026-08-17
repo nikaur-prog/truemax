@@ -399,3 +399,22 @@
   .q-potential { gap: 10px; }
   .q-potential-arrow { font-size: 21px; }
 }
+
+/* The refusal. Deliberately plain: no wordmark, no product language, nothing
+   that suggests a stranger has found something worth pushing at. */
+.q-denied {
+  max-width: 440px; margin: 18vh auto; padding: 0 24px; text-align: center;
+}
+.q-denied h1 {
+  font-family: var(--serif, Georgia, serif); font-weight: 300; font-size: 30px;
+  color: var(--ink); margin: 0 0 12px; letter-spacing: -0.3px;
+}
+.q-denied p { font-size: 14.5px; line-height: 1.6; color: var(--muted, #6b716d); margin: 0 0 22px; }
+.q-denied a { font-size: 14px; color: var(--acc); text-decoration: none; font-weight: 600; }
+.q-denied a:hover { text-decoration: underline; }
+
+/* Hidden until the access check passes. In the stylesheet rather than applied
+   by script, so it holds from the first paint: a gate that only closes after
+   the bundle has parsed has already shown the page to whoever it was meant to
+   stop. */
+.q-wrap.q-locked { visibility: hidden; }

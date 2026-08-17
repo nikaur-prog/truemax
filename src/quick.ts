@@ -24,6 +24,7 @@ import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
 import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
+import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -90,7 +91,24 @@ const DOTS_HOLD_MS = 550; // beat after the dots land, before the photo moves
 let cam: CameraHandle | null = null;
 let ready = false;
 
-initLandmarker()
+// Checked before anything else starts.
+//
+// The markup ships in the HTML, so the interface would otherwise be on screen
+// throughout this round trip — a stranger would see the whole tool, then have it
+// taken away, which shows them exactly what they were not supposed to find. The
+// page therefore starts hidden in the document itself and is revealed only on a
+// pass, so the refusal is the first and only thing an unauthorised visitor gets.
+//
+// The landmarker is deferred behind the same check for the plainer reason that
+// downloading multiple megabytes of face model for somebody about to be refused
+// is a waste of their data.
+void allowQuickAccess().then((allowed) => {
+  if (!allowed) {
+    denyQuickAccess();
+    return;
+  }
+  document.querySelector(".q-wrap")?.classList.remove("q-locked");
+  initLandmarker()
   .then(() => {
     el.engine.textContent = "ENGINE READY";
     el.engine.classList.add("ready");
@@ -106,6 +124,7 @@ initLandmarker()
     el.engine.textContent = "ENGINE FAILED TO LOAD · REFRESH";
     el.engine.classList.add("error");
   });
+});
 
 async function loadPreviewPhoto(): Promise<void> {
   const response = await fetch("/demo/michael-b-jordan.jpg");
