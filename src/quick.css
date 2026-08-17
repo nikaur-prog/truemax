@@ -376,3 +376,26 @@
 .q-compare[data-dir="up"] .q-compare-move span { background: #e6f4ef; color: #0c876f; }
 .q-compare[data-dir="down"] .q-compare-move span { background: #fbeae7; color: #b4432f; }
 .q-compare[data-dir="flat"] .q-compare-move span { background: var(--soft, #eef1ef); color: var(--muted, #6b716d); }
+
+/* The ceiling, beside the score.
+   
+   Deliberately lighter than the measured number: same family, smaller, in the
+   accent rather than the ink, behind an arrow. On a frame that gets paused and
+   screenshotted the two must not read as the same kind of fact — one is
+   measured off a photograph, the other is modelled. */
+.q-hero { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+
+.q-potential { display: flex; align-items: center; gap: 14px; }
+.q-potential-arrow { font-size: 26px; color: var(--line); line-height: 1; }
+.q-potential-fig { display: flex; flex-direction: column; gap: 2px; }
+.q-potential-fig b {
+  font-family: var(--serif, Georgia, serif); font-weight: 400; font-size: 42px;
+  line-height: 1; color: var(--acc);
+}
+.q-potential-gap { font-size: 11.5px; color: var(--acc); font-weight: 600; letter-spacing: .3px; }
+
+@media (max-width: 560px) {
+  .q-potential-fig b { font-size: 34px; }
+  .q-potential { gap: 10px; }
+  .q-potential-arrow { font-size: 21px; }
+}

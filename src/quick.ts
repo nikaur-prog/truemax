@@ -544,6 +544,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
           contenteditable="true" inputmode="decimal" spellcheck="false">0.0</span><small>/10</small></div>
         <span class="q-rank">${rankShort(r.overallPercentile)}</span>
       </div>
+      ${potentialHTML(r)}
     </div>
 
     <div class="q-verdict hidden" id="q-verdict">
@@ -1121,6 +1122,41 @@ function comparisonHTML(before: Report, after: Report): string {
         <span class="q-compare-tag">AFTER</span>
         <b>${after.overall.toFixed(1)}</b>
         <span class="q-compare-rank">${rankShort(after.overallPercentile)}</span>
+      </div>
+    </div>`;
+}
+
+// Current score, then the ceiling.
+//
+// This is the number that sells the product, and it belongs on the content tool
+// for exactly that reason: somebody watching a stranger get scanned does not
+// buy because the stranger measured 4.7, they buy because the stranger could
+// reach 6.4 and they want to know their own version of that figure. The
+// measurement is the hook and the ceiling is the offer.
+//
+// It is still marked as a projection — "COULD REACH" rather than a second
+// score, at a smaller weight, after an arrow. Not to hedge it: a decent
+// projection is exciting whether or not somebody lands on it, and hedged copy
+// would waste that. It is so the two numbers cannot be confused for the same
+// KIND of thing on a screen that gets paused and screenshotted, because the
+// left one is measured from a photograph and the right one is modelled.
+//
+// Suppressed when the ceiling is not meaningfully above the score. "Could reach
+// 5.1" under a 5.0 reads as the product having nothing to offer, which is worse
+// than saying nothing — and for a face already near its own ceiling, nothing is
+// the honest answer.
+const POTENTIAL_MIN_GAP = 0.3;
+
+function potentialHTML(r: Report): string {
+  const gap = r.potential - r.overall;
+  if (!Number.isFinite(gap) || gap < POTENTIAL_MIN_GAP) return "";
+  return `
+    <div class="q-potential">
+      <span class="q-potential-arrow" aria-hidden="true">→</span>
+      <div class="q-potential-fig">
+        <span class="q-klabel">COULD REACH</span>
+        <b><span class="q-num" data-target="${r.potential.toFixed(1)}">0.0</span></b>
+        <span class="q-potential-gap">+${gap.toFixed(1)} to gain</span>
       </div>
     </div>`;
 }
