@@ -25,6 +25,7 @@ import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
+import { copyDiagnostics } from "./ui/diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -640,6 +641,10 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
       <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
       <button class="btn pri" id="q-rundown-download">Rundown MP4</button>
+      <!-- Calibration, not a user feature. A screenshot of the region cards
+           says the jaw is wrong; only the metric table says WHICH jaw metric,
+           by how far, and whether the ideal or the spread is at fault. -->
+      <button class="btn gho" id="q-diagnostics">Copy diagnostics</button>
       <button class="btn pri" id="q-card-download">Score card PNG</button>
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
@@ -691,6 +696,15 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
+  document.getElementById("q-diagnostics")!.onclick = async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const label = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim() ?? "";
+    const copied = await copyDiagnostics(r, label);
+    // Says which of the two things happened. "Copied" over a clipboard write
+    // that silently failed is the one outcome that wastes somebody's scan.
+    button.textContent = copied ? "Copied — paste it back" : "Copy from the box";
+    window.setTimeout(() => (button.textContent = "Copy diagnostics"), 2600);
+  };
   document.getElementById("q-card-download")!.onclick = () => void downloadScoreCard(r);
   const saveBtn = document.getElementById("q-save-face") as HTMLButtonElement | null;
   if (saveBtn) {
