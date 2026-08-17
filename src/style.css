@@ -3471,3 +3471,29 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .maxan-ask > span { font-size: 14px; }
   .maxan-ask > b { padding: 9px 17px; }
 }
+
+/* Max asking whether he is welcome. Shown once, seven seconds after he arrives,
+   anchored to his own corner so it never covers the character it is about. */
+.maxpet-tip {
+  position: fixed; z-index: 60; max-width: 268px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  padding: 14px 15px 12px; box-shadow: 0 10px 34px rgba(0, 0, 0, .17);
+  animation: mxt-in .22s ease-out;
+}
+.maxpet-tip p { margin: 0 0 11px; font-size: 13.5px; line-height: 1.45; color: var(--ink); }
+.maxpet-tip-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.maxpet-tip-actions button {
+  font: inherit; font-size: 12.5px; cursor: pointer; padding: 7px 14px;
+  border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--mut);
+  transition: border-color .16s, color .16s;
+}
+.maxpet-tip-actions button:hover { border-color: var(--acc); color: var(--ink); }
+/* "Keep him" is the affirmative, so it carries the weight — but "Hide Max" is a
+   real button beside it, not a link in the corner. A dismissal that only offers
+   the polite option is not offering anything. */
+.maxpet-tip-actions button.on {
+  background: var(--acc); border-color: var(--acc); color: #fff; font-weight: 600;
+}
+.maxpet-tip-actions button.on:hover { filter: brightness(1.07); color: #fff; }
+
+@keyframes mxt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
