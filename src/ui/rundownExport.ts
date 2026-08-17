@@ -38,11 +38,25 @@ const H = 1280;
 const FPS = 30;
 
 export interface RundownOptions {
+  /** The full name, said once in the hook. */
   name: string;
+  /**
+   * What to call them for the rest of the video. Defaults to the first word.
+   * See ReelScriptOptions.shortName for why it is overridable.
+   */
+  shortName?: string;
   /** Non-facial context for the fairness beat — height, titles, whatever. */
   context?: string[];
   /** A closing disclaimer in the operator's own words, read verbatim. */
   note?: string;
+  /**
+   * Extra photographs of the same person, shown but never measured.
+   *
+   * Cutaways only, on the beats that draw no geometry — see RundownInput.broll
+   * for why that restriction is what makes the feature safe rather than what
+   * limits it. Nothing here reaches the landmarker, the scoring or the report.
+   */
+  broll?: CanvasImageSource[];
   /** Supabase access token; the TTS route is staff-gated. */
   accessToken?: string;
   /** How far off level the capture is, for the publish guard. */
@@ -84,6 +98,7 @@ export async function downloadRundownVideo(
   onProgress?.(0, "Writing the running order");
   const beats = buildReelScript(report, {
     name: options.name,
+    shortName: options.shortName,
     context: options.context,
     note: options.note,
   });
@@ -159,7 +174,14 @@ export async function downloadRundownVideo(
   // frames are still being composited.
   await audioSource.add(audio.buffer);
 
-  const input = { timeline, metrics, name: options.name };
+  const input = {
+    timeline,
+    metrics,
+    // The short form: this feeds the bottom bar and the curve marker, and a
+    // full name under a marker is a label that owns the frame it sits in.
+    name: (options.shortName?.trim() || options.name.trim().split(/\s+/)[0] || options.name).trim(),
+    broll: options.broll,
+  };
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
     drawRundownFrame(ctx, photo, landmarks, input, t, { width: W, height: H, overlayCanvas });

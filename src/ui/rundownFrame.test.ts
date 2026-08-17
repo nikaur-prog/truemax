@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { cropAt, drawProgress, regionCrop } from "./rundownFrame.js";
+import { brollFor, cropAt, drawProgress, regionCrop } from "./rundownFrame.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
 
@@ -139,4 +139,76 @@ test("a measurement that already fits does not move the camera", () => {
   const tight = regionCrop(PHOTO, FACE, "chin", ASPECT);
   const held = regionCrop(PHOTO, FACE, "chin", ASPECT, small);
   assert.equal(held.w.toFixed(3), tight.w.toFixed(3));
+});
+
+// ---------------------------------------------------------------------------
+// Cutaways may never cover a measurement.
+//
+// This is the entire safety argument for showing other photographs of the same
+// person. Every overlay is drawn in the MEASURED photograph's normalized
+// landmark space and composited through the same crop rectangle; put that line
+// over a different photograph and it lands somewhere arbitrary on a different
+// face — a jaw measurement drawn across somebody's forehead, with a number on
+// it, in a published video.
+//
+// So the rule is: a beat that draws geometry shows the photograph the geometry
+// came from. Nothing else about this feature matters if that slips.
+// ---------------------------------------------------------------------------
+test("a cutaway never covers a beat that draws a measurement", () => {
+  const beats: Beat[] = [
+    { kind: "hook", line: "How attractive is Test?" },
+    { kind: "metric", line: "Eyes.", metricId: "canthalTilt", region: "eyes", positive: true },
+    { kind: "metric", line: "Jaw.", metricId: "jawCheekRatio", region: "jaw", positive: false },
+    { kind: "context", line: "This measures a face and nothing else." },
+    { kind: "card", line: "The verdict.", card: { verdict: "V", overall: 7, potential: 8, percentile: 90, rows: [] } },
+    { kind: "curve", line: "The curve.", percentile: 90 },
+    { kind: "search", line: "truemax.app" },
+    { kind: "cta", line: "Who next?" },
+  ] as Beat[];
+  const timeline = buildTimeline(beats);
+  const pool = [{} as CanvasImageSource, {} as CanvasImageSource];
+
+  for (const timed of timeline.beats) {
+    const covered = brollFor({ timeline, metrics: new Map(), name: "Test", broll: pool }, timed);
+    if (timed.beat.metricId) {
+      assert.equal(covered, null, `cutaway over a measured beat: ${timed.beat.line}`);
+    }
+    // The full-frame compositions own their own background too — a photograph
+    // behind the curve is the head-shaped smudge the search beat was fixed to
+    // stop having.
+    if (["card", "curve", "search"].includes(timed.beat.kind)) {
+      assert.equal(covered, null, `cutaway behind a ${timed.beat.kind} beat`);
+    }
+  }
+});
+
+test("cutaways do appear, and always in the same places", () => {
+  // The restriction is worthless if it silently excludes everything, and a
+  // rundown that shuffled its own B-roll between two exports of one scan would
+  // be a different video each time — which is the reason this module is pure.
+  const beats: Beat[] = [
+    { kind: "hook", line: "How attractive is Test?" },
+    { kind: "metric", line: "Eyes.", metricId: "canthalTilt", region: "eyes", positive: true },
+    { kind: "context", line: "Context." },
+    { kind: "cta", line: "Who next?" },
+  ] as Beat[];
+  const timeline = buildTimeline(beats);
+  const a = {} as CanvasImageSource;
+  const b = {} as CanvasImageSource;
+  const input = { timeline, metrics: new Map(), name: "Test", broll: [a, b] };
+
+  const shown = timeline.beats.map((t) => brollFor(input, t));
+  assert.ok(shown.filter(Boolean).length >= 2, "no cutaway was ever shown");
+  // Same input, same output, every time.
+  assert.deepEqual(timeline.beats.map((t) => brollFor(input, t)), shown);
+});
+
+test("no cutaways at all changes nothing", () => {
+  const beats: Beat[] = [{ kind: "hook", line: "How attractive is Test?" }] as Beat[];
+  const timeline = buildTimeline(beats);
+  assert.equal(brollFor({ timeline, metrics: new Map(), name: "Test" }, timeline.beats[0]), null);
+  assert.equal(
+    brollFor({ timeline, metrics: new Map(), name: "Test", broll: [] }, timeline.beats[0]),
+    null,
+  );
 });

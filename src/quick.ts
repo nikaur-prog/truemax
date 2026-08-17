@@ -1010,7 +1010,18 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         <span>Whose face is this?</span>
         <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
                placeholder="LeBron James" autocomplete="off" />
-        <small>Used in the rundown's opening line.</small>
+        <small>Said once, in the opening line.</small>
+      </label>
+      <label class="q-namefield">
+        <span>Call them <i>(optional)</i></span>
+        <input id="q-rundown-short" class="q-input" type="text" maxlength="24"
+               placeholder="LeBron" autocomplete="off" />
+        <small>Used for the rest of the video. Defaults to the first name.</small>
+      </label>
+      <label class="q-namefield">
+        <span>Cutaway photos <i>(optional)</i></span>
+        <input id="q-rundown-broll" class="q-input" type="file" accept="image/*" multiple />
+        <small>More shots of the same person. Shown between measurements, never measured.</small>
       </label>
       <!-- Turns the score card into a before/after. Left empty the card shows
            now-versus-potential, which is the FIRST card in a glow-up video;
@@ -1241,6 +1252,34 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
   };
 }
 
+// Cutaway photographs for the rundown, decoded and nothing more.
+//
+// An unreadable file is skipped rather than thrown: these are decoration, and
+// failing a ninety-second render because the fourth of five cutaways was a HEIC
+// the browser will not decode is the wrong trade by a distance.
+async function loadBroll(files: FileList | null | undefined): Promise<HTMLImageElement[]> {
+  if (!files?.length) return [];
+  const out: HTMLImageElement[] = [];
+  // Six is plenty: the rundown has four beats that can take one, so past that
+  // they simply never appear.
+  for (const file of [...files].slice(0, 6)) {
+    if (!/^image\//.test(file.type)) continue;
+    try {
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("decode failed"));
+        image.src = url;
+      });
+      out.push(image);
+    } catch {
+      // Skipped, deliberately and quietly.
+    }
+  }
+  return out;
+}
+
 // The caption panel, under the action row and shared by all three cuts.
 //
 // A no-op when the node is missing rather than a throw: this runs immediately
@@ -1381,6 +1420,14 @@ async function downloadRundown(r: Report): Promise<void> {
   const btn = document.getElementById("q-rundown-download") as HTMLButtonElement | null;
   const field = document.getElementById("q-rundown-name") as HTMLInputElement | null;
   const name = (field?.value ?? "").trim();
+  const shortName =
+    (document.getElementById("q-rundown-short") as HTMLInputElement | null)?.value.trim() || undefined;
+  // Cutaways. Decoded here as plain pictures and handed to the compositor —
+  // they never touch the landmarker, the scoring or the report, which is the
+  // reason they cannot move a measurement.
+  const broll = await loadBroll(
+    (document.getElementById("q-rundown-broll") as HTMLInputElement | null)?.files,
+  );
   const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name) {
     // Point at the missing thing rather than explaining it. The field is six
@@ -1403,7 +1450,9 @@ async function downloadRundown(r: Report): Promise<void> {
     const accessToken = (await currentAccessToken()) ?? undefined;
     const result = await downloadRundownVideo(last.photo, last.lm, r, {
       name,
+      shortName,
       note,
+      broll,
       accessToken,
       onProgress: (progress, stage) => {
         if (btn) btn.textContent = `${stage} · ${Math.round(progress * 100)}%`;

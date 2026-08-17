@@ -118,6 +118,26 @@ export interface RundownInput {
   /** Keyed by metric id, for the overlay geometry. */
   metrics: Map<string, ScoredMetric>;
   name: string;
+  /**
+   * Extra photographs of the same person, shown but NEVER measured.
+   *
+   * A rundown built from one photograph is one photograph held for ninety
+   * seconds, and a still frame is the format's biggest weakness — every
+   * competitor cuts between shots. These are the cutaways.
+   *
+   * They are strictly B-ROLL and the restriction is not a limitation, it is the
+   * thing that makes the feature safe. Every measurement is drawn in the
+   * MEASURED photograph's normalized landmark space; the same line composited
+   * over a different photograph would sit somewhere arbitrary on a different
+   * face, which is a rundown drawing a jaw measurement across somebody's
+   * forehead. So a cutaway may only appear on a beat that draws no measurement:
+   * the hook, the context beat, the disclaimer, the sign-off.
+   *
+   * That is also why they cannot "confuse the system" — the engine never sees
+   * them. They are decoded as pictures by the compositor and reach no part of
+   * the scoring, the landmarker or the report.
+   */
+  broll?: CanvasImageSource[];
 }
 
 interface Box {
@@ -361,7 +381,18 @@ export function drawRundownFrame(
   const crop = cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics);
   const kind = beat.beat.kind;
 
-  if (kind === "card") {
+  // A cutaway, when this beat draws no measurement and there is one to show.
+  //
+  // Keyed off the beat's index rather than a clock, so the same rundown always
+  // cuts to the same photograph at the same moment — a video that shuffled its
+  // own B-roll between two renders of one scan would be a different video every
+  // time it was exported.
+  const cutaway = brollFor(input, beat);
+  if (cutaway) {
+    // Cover, no crop maths: there are no landmarks for this photograph and
+    // inventing a face box for it is exactly the guess this feature avoids.
+    coverDraw(ctx, cutaway, W, H);
+  } else if (kind === "card") {
     // The face moves to the top and the breakdown arrives under it.
     //
     // Not a cut: the crop the previous beat left off on eases up into the band
@@ -432,6 +463,52 @@ export function drawRundownFrame(
   drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
+}
+
+// Which beats a cutaway may cover, and which photograph it gets.
+//
+// The rule is one line long and it is the whole safety argument: a beat that
+// DRAWS a measurement must show the photograph that measurement was taken from.
+// Everything else — the hook, the operator's context and disclaimer, the
+// sign-off — draws no geometry and can show anything.
+//
+// The card, the curve and the search bar are excluded too, but for a different
+// reason: they are compositions that own the whole frame, and a photograph
+// behind them is the head-shaped smudge the search beat was just fixed to stop
+// having.
+//
+// The photograph is chosen by the beat's INDEX in the timeline, not by a clock
+// or a counter, so one scan always produces the same cut at the same moment. A
+// rundown that shuffled its own B-roll between two exports of one face would be
+// a different video every time, and the reason the whole module is pure is that
+// it must not be.
+export function brollFor(input: RundownInput, beat: TimedBeat): CanvasImageSource | null {
+  const pool = input.broll;
+  if (!pool?.length) return null;
+  const kind = beat.beat.kind;
+  if (kind !== "hook" && kind !== "context" && kind !== "cta") return null;
+  const index = input.timeline.beats.indexOf(beat);
+  if (index < 0) return null;
+  return pool[index % pool.length] ?? null;
+}
+
+// Cover-fit, centred. No crop maths and no face box: there are no landmarks for
+// a cutaway, and inventing a bounding box for one is precisely the guess this
+// feature exists to avoid making.
+function coverDraw(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  W: number,
+  H: number,
+): void {
+  const iw =
+    (image as HTMLVideoElement).videoWidth || (image as HTMLImageElement).width || W;
+  const ih =
+    (image as HTMLVideoElement).videoHeight || (image as HTMLImageElement).height || H;
+  const scale = Math.max(W / iw, H / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  ctx.drawImage(image, (W - dw) / 2, (H - dh) / 2, dw, dh);
 }
 
 // How far through its own animation a full-frame beat is, 0..1, with a little

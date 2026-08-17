@@ -121,7 +121,23 @@ export interface Beat {
 }
 
 export interface ReelScriptOptions {
+  /**
+   * The full name, said ONCE, in the hook.
+   *
+   * How the format is actually read: "How attractive is Timothée Chalamet?" to
+   * open, and then "Timothée" for the next ninety seconds. Repeating a full
+   * name eight times is the station-announcement problem — it stops sounding
+   * like somebody talking about a person and starts sounding like a record
+   * being read out.
+   */
   name: string;
+  /**
+   * What to call them for the rest of the video. Defaults to the first word of
+   * `name`, which is right for almost every name and wrong for enough of them
+   * — a mononym, a stage name, a surname somebody is universally known by —
+   * that it has to be overridable rather than merely derived.
+   */
+  shortName?: string;
   /** How many measurement beats to keep. Ten is about ninety seconds. */
   metricBeats?: number;
   /** Non-facial context — height, status, whatever makes the ending fair. */
@@ -377,6 +393,10 @@ function cardData(report: Report): CardData {
 export function buildReelScript(report: Report, options: ReelScriptOptions): Beat[] {
   const limit = options.metricBeats ?? 10;
   const name = options.name;
+  // Everything after the hook uses the short form. Falls back to the full name
+  // when the first word IS the whole thing, so a mononym never ends up with an
+  // empty label on the curve.
+  const shortName = (options.shortName?.trim() || name.trim().split(/\s+/)[0] || name).trim();
 
   // Notable, measured, and not an impossible reading. An implausible metric is
   // a landmark in the wrong place (see scoring.ts) — it carries no weight in
@@ -442,10 +462,10 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   const metricBeats: Beat[] = [
     // Front strengths, grouped. Side is held back for its own section — it is
     // a different photograph and naming it gives the rundown a second act.
-    ...groupedBeats(positives.filter((m) => m.def.view !== "side"), report.sex, name, "positive"),
-    ...groupedBeats(negatives.filter((m) => m.def.view !== "side"), report.sex, name, "negative"),
-    ...groupedBeats(positives.filter((m) => m.def.view === "side"), report.sex, name, "side"),
-    ...groupedBeats(negatives.filter((m) => m.def.view === "side"), report.sex, name, "side-negative"),
+    ...groupedBeats(positives.filter((m) => m.def.view !== "side"), report.sex, shortName, "positive"),
+    ...groupedBeats(negatives.filter((m) => m.def.view !== "side"), report.sex, shortName, "negative"),
+    ...groupedBeats(positives.filter((m) => m.def.view === "side"), report.sex, shortName, "side"),
+    ...groupedBeats(negatives.filter((m) => m.def.view === "side"), report.sex, shortName, "side-negative"),
   ];
 
   const pct = statedPct(report.overallPercentile);
@@ -492,7 +512,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // one sentence frame fits all three. It was shipping "Marlon has mogger".
     {
       kind: "card",
-      line: `The verdict: ${verdictFor(report).word}. ${name} measures ${report.overall.toFixed(1)} out of 10.`,
+      line: `The verdict: ${verdictFor(report).word}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
       card: cardData(report),
     },
     // Still on the card. The ceiling as a NUMBER, not a ladder rung: named rungs
@@ -533,7 +553,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       // The fairness beat, and it is not only fairness. A breakdown that stops
       // at the face invites the subject's audience to argue with it; naming
       // what the face is not measuring ends the argument before it starts.
-      line: `This measures a face and nothing else. ${name}: ${options.context.join(", ")}.`,
+      line: `This measures a face and nothing else. ${shortName}: ${options.context.join(", ")}.`,
     });
   }
 
