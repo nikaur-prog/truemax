@@ -4,10 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>TrueMax Quick</title>
-    <!-- Unlisted, not private. Nothing links here and search engines are asked
-         to stay away, but a URL anyone can reach is a URL anyone can reach.
-         Real access control needs Vercel's deployment protection or a backend;
-         see CALIBRATION.md. -->
+    <!-- Staff only, and no longer merely unlisted. Access requires a signed-in
+         account carrying an `app_admins` row; everybody else is shown "Not
+         found" and the interface never paints. See src/ui/quickGate.ts.
+
+         The page still asks search engines to stay away, because the cheapest
+         way to keep something private is for nobody to look for it — but that
+         is now the second line of defence rather than the only one. -->
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <meta name="theme-color" content="#141518" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -19,7 +22,7 @@
     <link rel="stylesheet" href="/src/quick.css" />
   </head>
   <body class="quick">
-    <main class="q-wrap">
+    <main class="q-wrap q-locked">
       <header class="q-top">
         <span class="wordmark">TRUE<b>MAX</b></span>
         <span class="tag">QUICK · FRONT ONLY</span>
