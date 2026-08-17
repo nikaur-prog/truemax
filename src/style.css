@@ -1069,7 +1069,8 @@ body.funnel-open { overflow: hidden; }
 /* The name the rundown opens on. Sits directly above the export row and inside
    the same padding, so it reads as part of that block rather than as another
    field in the analysis above it. */
-.q-namerow { padding: 14px 28px 0; }
+.q-namerow { padding: 14px 28px 0; display: flex; gap: 10px; }
+.q-namerow .q-input { flex: 1; }
 
 .q-actions { display: flex; gap: 10px; padding: 16px 28px 22px; border-top: 1px solid var(--line); margin-top: 14px; }
 .q-actions .btn { flex: 1; }

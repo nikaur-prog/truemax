@@ -49,6 +49,24 @@ export interface ScoreCardInput {
   report: Report;
   /** Optional label above the photo — a name, a week number, "AFTER". */
   caption?: string;
+  /**
+   * An earlier scan's overall score, turning the card into a before/after.
+   *
+   * The two cards in a glow-up video are not the same card twice. On the FIRST
+   * one the pair is now-versus-potential, because the hook is the headroom. On
+   * the SECOND the hook is the distance travelled — showing potential again
+   * there answers a question nobody is asking, when the whole video has just
+   * spent fifteen seconds setting up "how far did he get?".
+   *
+   * So passing this swaps the left column from NOW to BEFORE and the right from
+   * POTENTIAL to NOW. Same layout, same bars, different question.
+   *
+   * A score rather than a whole Report because the earlier scan is a different
+   * photograph on a different day and only its number survives. The percentile
+   * is re-derived from that score through the same curve, so the two columns
+   * are always on one scale.
+   */
+  previousOverall?: number;
 }
 
 /** The top-N% a percentile corresponds to, already rounded for print. */
@@ -90,21 +108,25 @@ export function renderScoreCard(
   }
 
   const nowPct = report.overallPercentile;
-  const potentialPct = aggregateScoreToPercentile(report.potential);
+  const colWidth = (W - 192) / 2 - 24;
 
   // The hero pair. Two columns, same layout, so the eye compares them directly
   // and the difference is the only thing that moves.
-  drawHero(ctx, 96, 830, (W - 192) / 2 - 24, "NOW", report.overall, nowPct, "#f7f7f2");
-  drawHero(
-    ctx,
-    W / 2 + 24,
-    830,
-    (W - 192) / 2 - 24,
-    "POTENTIAL",
-    report.potential,
-    potentialPct,
-    "#8ff3e0",
-  );
+  //
+  // Which pair depends on which card this is — see previousOverall.
+  const comparing = typeof input.previousOverall === "number";
+  const left = comparing
+    ? { label: "BEFORE", score: input.previousOverall!, pct: aggregateScoreToPercentile(input.previousOverall!) }
+    : { label: "NOW", score: report.overall, pct: nowPct };
+  const right = comparing
+    ? { label: "NOW", score: report.overall, pct: nowPct }
+    : { label: "POTENTIAL", score: report.potential, pct: aggregateScoreToPercentile(report.potential) };
+
+  // The left column is deliberately dimmer in both readings: it is either the
+  // starting point or the past, and in neither case is it the number the card
+  // is about.
+  drawHero(ctx, 96, 830, colWidth, left.label, left.score, left.pct, "#f7f7f2");
+  drawHero(ctx, W / 2 + 24, 830, colWidth, right.label, right.score, right.pct, "#8ff3e0");
 
   drawTiles(ctx, report, 96, 1180, W - 192);
   drawWatermark(ctx);

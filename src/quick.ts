@@ -470,6 +470,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     <div class="q-namerow">
       <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
              placeholder="Name for the rundown — e.g. LeBron James" autocomplete="off" />
+      <!-- Turns the score card into a before/after. Left empty the card shows
+           now-versus-potential, which is the FIRST card in a glow-up video;
+           filled in it shows before-versus-now, which is the last one. -->
+      <input id="q-card-before" class="q-input" type="number" min="0" max="10" step="0.1"
+             placeholder="Earlier score for a before/after card — optional" autocomplete="off" />
     </div>
 
     <div class="q-actions">
@@ -710,7 +715,15 @@ async function downloadScoreCard(r: Report): Promise<void> {
   try {
     const { renderScoreCard } = await import("./ui/scoreCard.js");
     const canvas = document.createElement("canvas");
-    renderScoreCard(canvas, last.photo, last.lm, { report: r, caption: caption || undefined });
+    // Anything outside the scale is a typo, not an earlier scan, and a card
+    // built from a typo is worse than one without a comparison.
+    const raw = Number((document.getElementById("q-card-before") as HTMLInputElement | null)?.value);
+    const previousOverall = Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : undefined;
+    renderScoreCard(canvas, last.photo, last.lm, {
+      report: r,
+      caption: caption || undefined,
+      previousOverall,
+    });
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("The card would not encode.");
     const outcome = await saveFile(blob, `truemax-card-${Date.now()}.png`);
