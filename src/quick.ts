@@ -937,7 +937,21 @@ function offerProducer(r: Report): void {
   actions.insertAdjacentElement("afterend", bar);
   (bar.querySelector("#q-produce") as HTMLButtonElement).onclick = () => {
     if (!last) return;
-    openProducer({ photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) });
+    // A Reel Creator run holds the before scan, so the producer can bracket the
+    // footage with both measurements instead of putting one in the middle. The
+    // current scan is always the LATER one here — reel mode only reaches the
+    // results screen on the after photo — so the stored scan is the opening.
+    openProducer(
+      beforeScan
+        ? {
+            photo: beforeScan.photo,
+            landmarks: beforeScan.lm,
+            sex: r.sex,
+            scores: editedExportScores(beforeScan.report),
+            after: { photo: last.photo, landmarks: last.lm, scores: editedExportScores(r) },
+          }
+        : { photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) },
+    );
   };
 }
 
