@@ -49,6 +49,10 @@ import { canShareFiles, saveFile } from "./ui/saveFile.js";
 const MAX_DIM = 1280;
 
 const el = {
+  pillars: document.getElementById("q-pillars")!,
+  modeBack: document.getElementById("q-mode-back")!,
+  modeName: document.getElementById("q-mode-name")!,
+  modeStep: document.getElementById("q-mode-step")!,
   capture: document.getElementById("q-capture")!,
   result: document.getElementById("q-result")!,
   frame: document.getElementById("q-frame")!,
@@ -291,6 +295,78 @@ async function run(src: HTMLCanvasElement): Promise<void> {
 let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
 
 // ---------------------------------------------------------------------------
+// Which of the three jobs this session is doing.
+//
+// The page has three distinct products in it and they want different things at
+// the door: two photographs, one photograph, or none at all. Asking first is
+// what lets each flow request exactly what it needs — a single capture screen
+// that afterwards asks what you meant has already taken the wrong photograph.
+//
+//   reel     — before and after, both scanned, cut together with the clips
+//   analysis — one face, one narrated rundown. Deliberately ONE photograph:
+//              extra angles of the same person do not make the measurement
+//              better, they make it ambiguous, and the operator was right that
+//              a second look with different lighting confuses more than it adds
+//   ai       — no photograph at all; a description, a preview, then footage
+// ---------------------------------------------------------------------------
+type QuickMode = "reel" | "analysis" | "ai";
+
+const MODE_NAMES: Record<QuickMode, string> = {
+  reel: "Reel Creator",
+  analysis: "Full Analysis",
+  ai: "AI Model Reel",
+};
+
+let mode: QuickMode | null = null;
+
+// Reel Creator scans twice. This holds the first one while the second is taken,
+// so the pair can be compared at the end — the whole reason the mode exists.
+let beforeScan: { report: Report; photo: HTMLCanvasElement; lm: NormalizedLandmark[] } | null = null;
+
+/** Which half of a Reel Creator run we are on. Meaningless in the other modes. */
+let reelStage: "before" | "after" = "before";
+
+function enterMode(next: QuickMode): void {
+  mode = next;
+  beforeScan = null;
+  reelStage = "before";
+  el.pillars.classList.add("hidden");
+  el.capture.classList.remove("hidden");
+  el.modeName.textContent = MODE_NAMES[next];
+  updateModeStep();
+  if (next === "ai") {
+    // Nothing to photograph. The AI flow collects a description instead, and
+    // until that screen exists this says so rather than silently showing a
+    // camera that makes no sense for the mode.
+    el.modeStep.textContent = "Character setup — coming next";
+  }
+  track("quick-visit");
+}
+
+function updateModeStep(): void {
+  if (mode !== "reel") {
+    el.modeStep.textContent = mode === "analysis" ? "One photo" : "";
+    return;
+  }
+  el.modeStep.textContent =
+    reelStage === "before" ? "Step 1 of 2 — the before photo" : "Step 2 of 2 — the after photo";
+}
+
+function leaveMode(): void {
+  mode = null;
+  beforeScan = null;
+  reelStage = "before";
+  el.capture.classList.add("hidden");
+  el.result.classList.add("hidden");
+  el.pillars.classList.remove("hidden");
+}
+
+for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) {
+  button.onclick = () => enterMode(button.dataset.mode as QuickMode);
+}
+el.modeBack.onclick = () => leaveMode();
+
+// ---------------------------------------------------------------------------
 // The saved-face strip.
 //
 // Filming a set of clips means coming back to the same handful of faces over
@@ -386,6 +462,25 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
+  // Reel Creator: the first scan is not a result, it is half of a comparison.
+  // Showing the full card set here would be a dead end — the operator would
+  // have to work out for themselves that they are meant to go round again.
+  if (mode === "reel" && reelStage === "before" && last) {
+    beforeScan = { report: r, photo, lm: last.lm };
+    reelStage = "after";
+    updateModeStep();
+    el.result.classList.add("hidden");
+    el.capture.classList.remove("hidden");
+    el.hintTitle.textContent = "After photo";
+    // The one instruction that decides whether the finished video survives
+    // contact with a comment section. Most of the jump in a viral before/after
+    // is the camera moving, not the face changing, and the person who notices
+    // is always in the replies. Said here because this is the only moment it
+    // can still be acted on.
+    el.hintDetail.textContent = "Match the before: same angle, same distance, same light";
+    return;
+  }
+
   el.capture.classList.add("hidden");
   el.result.classList.remove("hidden");
 
@@ -717,8 +812,14 @@ async function downloadScoreCard(r: Report): Promise<void> {
     const canvas = document.createElement("canvas");
     // Anything outside the scale is a typo, not an earlier scan, and a card
     // built from a typo is worse than one without a comparison.
+    // A Reel Creator run already measured the before photo, so the comparison
+    // fills itself in and the operator never retypes a number they have just
+    // been shown. The field still wins when it holds something valid — a scan
+    // from a previous session is a legitimate before, and only the person
+    // running it knows that.
     const raw = Number((document.getElementById("q-card-before") as HTMLInputElement | null)?.value);
-    const previousOverall = Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : undefined;
+    const typed = Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : undefined;
+    const previousOverall = typed ?? beforeScan?.report.overall;
     renderScoreCard(canvas, last.photo, last.lm, {
       report: r,
       caption: caption || undefined,

@@ -245,3 +245,63 @@
 @media (max-width: 420px) {
   .q-unit { grid-template-columns: 78px 1fr 30px; gap: 8px; }
 }
+
+/* ---------------------------------------------------------------------------
+   The three pillars.
+
+   Deliberately large and deliberately only three. This is the first thing a
+   hired clipper sees, and the job of the screen is to make the choice obvious
+   to somebody who has never used the tool — so each card states what it makes
+   AND what it will ask for, because "two photos" is the fact that decides which
+   one you want when you are holding a phone in a filming session.
+   --------------------------------------------------------------------------- */
+#q-pillars { padding: 8px 0 28px; }
+
+.q-pillars-lede {
+  font-family: var(--serif, Georgia, serif); font-size: 27px; font-weight: 300;
+  color: var(--ink); margin: 6px 0 20px; letter-spacing: -0.4px;
+}
+
+.q-pillar-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+.q-pillar {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 7px;
+  text-align: left; cursor: pointer; font: inherit;
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 20px;
+  padding: 22px 20px 20px; min-height: 178px;
+  transition: border-color .18s, transform .18s, box-shadow .18s;
+}
+.q-pillar:hover, .q-pillar:focus-visible {
+  border-color: var(--acc); transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(12, 135, 111, .09); outline: none;
+}
+.q-pillar-kicker {
+  font-size: 11px; letter-spacing: 3px; color: var(--acc); font-weight: 600;
+}
+.q-pillar b {
+  font-family: var(--serif, Georgia, serif); font-size: 22px; font-weight: 400;
+  letter-spacing: -0.2px; color: var(--ink);
+}
+.q-pillar-what { font-size: 13.5px; line-height: 1.45; color: var(--muted, #6b716d); }
+/* Pushed to the bottom so the requirement line is in the same place on every
+   card and can be compared at a glance. */
+.q-pillar-needs {
+  margin-top: auto; padding-top: 12px; font-size: 11.5px; letter-spacing: 1.6px;
+  text-transform: uppercase; color: var(--acc); font-weight: 600;
+}
+
+/* The bar that replaces the pillars once a mode is chosen. Always offers the
+   way back — a clipper who picked the wrong one should not have to reload. */
+.q-modebar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 2px 0 18px; font-size: 13px;
+}
+.q-modebar-name { font-weight: 600; color: var(--ink); }
+.q-modebar-step { color: var(--muted, #6b716d); }
+.q-modebar-step:not(:empty)::before { content: "·"; margin-right: 12px; }
+
+@media (max-width: 720px) {
+  .q-pillar-grid { grid-template-columns: 1fr; gap: 11px; }
+  .q-pillar { min-height: 0; padding: 18px 18px 16px; }
+  .q-pillars-lede { font-size: 23px; margin-bottom: 15px; }
+}

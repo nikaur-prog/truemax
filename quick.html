@@ -25,8 +25,44 @@
         <span class="tag">QUICK · FRONT ONLY</span>
       </header>
 
+      <!-- The three pillars.
+           This page stopped being one tool a while ago. It is a content
+           pipeline with three distinct jobs, and each of them wants different
+           things at the door — one photo, two photos, or no photos at all. A
+           single capture screen that then asks what you meant is the wrong
+           order: choosing first is what lets each flow ask for exactly what it
+           needs and nothing else. -->
+      <section id="q-pillars">
+        <p class="q-pillars-lede">What are you making?</p>
+        <div class="q-pillar-grid">
+          <button class="q-pillar" data-mode="reel" type="button">
+            <span class="q-pillar-kicker">01</span>
+            <b>Reel Creator</b>
+            <span class="q-pillar-what">Before &amp; after, scanned and cut together</span>
+            <span class="q-pillar-needs">Two photos · up to six clips</span>
+          </button>
+          <button class="q-pillar" data-mode="analysis" type="button">
+            <span class="q-pillar-kicker">02</span>
+            <b>Full Analysis</b>
+            <span class="q-pillar-what">The narrated walk down one face</span>
+            <span class="q-pillar-needs">One photo</span>
+          </button>
+          <button class="q-pillar" data-mode="ai" type="button">
+            <span class="q-pillar-kicker">03</span>
+            <b>AI Model Reel</b>
+            <span class="q-pillar-what">Describe someone, preview them, then film them</span>
+            <span class="q-pillar-needs">No photos · a description</span>
+          </button>
+        </div>
+      </section>
+
       <!-- Capture -->
-      <section id="q-capture">
+      <section id="q-capture" class="hidden">
+        <div class="q-modebar">
+          <button type="button" class="linkish" id="q-mode-back">← All modes</button>
+          <span class="q-modebar-name" id="q-mode-name"></span>
+          <span class="q-modebar-step" id="q-mode-step"></span>
+        </div>
         <div class="q-frame" id="q-frame">
           <!-- Behind the video, visible only until the camera opens. A page
                built to be filmed should not open on a blank grey box. -->
