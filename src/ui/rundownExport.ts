@@ -50,6 +50,8 @@ export interface RundownOptions {
   context?: string[];
   /** A closing disclaimer in the operator's own words, read verbatim. */
   note?: string;
+  /** The opening line, when the default question is not the one being asked. */
+  opening?: string;
   /**
    * Extra photographs of the same person, shown but never measured.
    *
@@ -122,6 +124,7 @@ export async function downloadRundownVideo(
     shortName: options.shortName,
     context: options.context,
     note: options.note,
+    opening: options.opening,
     // The operator's chosen register, so the video and the page it was exported
     // from call one face the same thing.
     tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,

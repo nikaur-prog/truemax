@@ -416,6 +416,10 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 /* Where the files go. A checkbox rather than a settings screen: it is one
    sentence, it belongs next to the buttons it changes, and this page is used
    standing up. */
+/* The opening line wants the full row: it holds a sentence, not a name, and at
+   a third of the width the placeholder read as "How attractive is {na". */
+.q-openfield { grid-column: 1 / -1; }
+
 .q-direct {
   display: flex; align-items: center; gap: 9px; margin-top: 12px;
   font-size: 12.5px; color: var(--muted, #6b716d); cursor: pointer;
