@@ -47,8 +47,18 @@ export type BeatKind = "hook" | "metric" | "score" | "context" | "cta";
 
 export interface Beat {
   kind: BeatKind;
-  /** Spoken/captioned line. */
+  /** The line as it appears on screen. */
   line: string;
+  /**
+   * The line as it should be READ ALOUD, when that differs from the screen.
+   *
+   * Metric names are written for a results table, not a microphone. "Facial
+   * width-to-height (fWHR)" is right on screen and becomes "f-w-h-r" out of a
+   * speech synthesiser; "Nose : mouth width" puts a colon where a reader needs
+   * a word. The screen keeps the precise label and the voice gets the sentence
+   * a person would actually say.
+   */
+  spoken?: string;
   /** For a metric beat: what the renderer should draw. */
   metricId?: string;
   region?: RegionId;
@@ -96,10 +106,29 @@ const FRAMES = [
   (_subject: string, name: string, predicate: string) => `Notice the ${name} — it ${predicate}.`,
 ];
 
+// A metric name a voice can say.
+//
+// The engine's names are written to sit in a results table next to a number,
+// where "(frontal)" disambiguates the front measurement from the side one and
+// "fWHR" is the term the literature uses. Read aloud, the parenthetical is
+// noise and the acronym comes out as four letters. The screen keeps the exact
+// label; this is only what goes to the synthesiser.
+function spokenName(name: string): string {
+  return name
+    .toLowerCase()
+    // "(frontal)", "(est.)", "(fwhr)" — all disambiguators for a reader.
+    .replace(/\s*\([^)]*\)/g, "")
+    // "nose : mouth width" -> "nose to mouth width"
+    .replace(/\s*:\s*/g, " to ")
+    // "width-to-height" survives as-is, but a trailing hyphen would not.
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function qualify(
   m: ScoredMetric,
   index: number,
-): { line: (subject: string) => string; positive: boolean } {
+): { line: (subject: string) => string; spoken: (subject: string) => string; positive: boolean } {
   const good = m.zEff;
   const name = m.def.name.toLowerCase();
   const positive = good >= 0;
@@ -129,28 +158,43 @@ function qualify(
   }
 
   const frame = FRAMES[index % FRAMES.length];
-  return { line: (subject: string) => frame(subject, name, predicate), positive };
+  const said = spokenName(m.def.name);
+  return {
+    line: (subject: string) => frame(subject, name, predicate),
+    spoken: (subject: string) => frame(subject, said, predicate),
+    positive,
+  };
 }
 
-// Alternate strengths and weaknesses without reordering the face.
+// Get a mixed tone by CHOOSING a balanced set, not by reordering one.
 //
-// Sorting purely by how notable a measurement is produces a video that opens
-// with five compliments and ends with five insults, which reads as a bait and
-// switch. Interleaving inside the existing top-to-bottom order keeps the eye
-// travelling down the face while the tone stays mixed.
-function interleave(beats: Beat[]): Beat[] {
-  const good = beats.filter((b) => b.positive);
-  const bad = beats.filter((b) => !b.positive);
-  const out: Beat[] = [];
-  // Open on a strength. Leading with a flaw is what makes these videos feel
-  // like an attack, and the subject's own audience is most of the reach.
-  let takeGood = true;
-  while (good.length || bad.length) {
-    const from = takeGood ? (good.length ? good : bad) : bad.length ? bad : good;
-    out.push(from.shift()!);
-    takeGood = !takeGood;
+// An earlier version sorted the chosen metrics down the face and then zipped
+// strengths and weaknesses back together. Those two operations are in direct
+// conflict and the zip ran second, so it silently undid the sort: the running
+// order came out midface, eyes, midface, nose, lips, nose, jaw, proportions,
+// jaw, chin. The comment above it claimed the eye travelled down the face. It
+// did not, and on a format where the camera crops to the region being measured
+// the bouncing is the most visible thing in the video.
+//
+// You cannot have both a strict anatomical order and a strict good/bad
+// alternation. Anatomy wins, because it is what a viewer perceives. Tone
+// balance is achieved instead at SELECTION time — take the most notable
+// strengths and the most notable weaknesses in roughly equal number — and then
+// a single sort down the face is the last thing that touches the order.
+function selectBalanced(candidates: ScoredMetric[], limit: number): ScoredMetric[] {
+  const byInterest = [...candidates].sort((a, b) => Math.abs(b.zEff) - Math.abs(a.zEff));
+  const good = byInterest.filter((m) => m.zEff >= 0);
+  const bad = byInterest.filter((m) => m.zEff < 0);
+
+  // Half each, and whichever side is short is made up by the other so a very
+  // even or very lopsided face still fills the running order.
+  const wantGood = Math.ceil(limit / 2);
+  const picked = [...good.slice(0, wantGood), ...bad.slice(0, limit - wantGood)];
+  if (picked.length < limit) {
+    const taken = new Set(picked);
+    picked.push(...byInterest.filter((m) => !taken.has(m)).slice(0, limit - picked.length));
   }
-  return out;
+  return picked;
 }
 
 export function buildReelScript(report: Report, options: ReelScriptOptions): Beat[] {
@@ -160,14 +204,13 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   // Notable, measured, and not an impossible reading. An implausible metric is
   // a landmark in the wrong place (see scoring.ts) — it carries no weight in
   // the score and it must not carry a sentence in a video either.
-  const candidates = report.metrics
-    .filter((m) => !m.implausible && Math.abs(m.zEff) >= NOTABLE_Z)
-    .sort((a, b) => Math.abs(b.zEff) - Math.abs(a.zEff))
-    .slice(0, limit);
+  const candidates = report.metrics.filter(
+    (m) => !m.implausible && Math.abs(m.zEff) >= NOTABLE_Z,
+  );
 
-  // Back into face order once the notable ones are chosen, so the selection is
-  // by interest and the running order is by anatomy.
-  const byRegion = [...candidates].sort(
+  // Selection is by interest AND tone balance; the running order is by anatomy.
+  // This sort is the last thing that touches the order — see selectBalanced.
+  const byRegion = selectBalanced(candidates, limit).sort(
     (a, b) => REGION_ORDER.indexOf(a.def.region) - REGION_ORDER.indexOf(b.def.region),
   );
 
@@ -176,6 +219,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     return {
       kind: "metric" as const,
       line: q.line(name),
+      spoken: q.spoken(name),
       metricId: m.def.id,
       region: m.def.region,
       positive: q.positive,
@@ -186,18 +230,28 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   const pct = statedPct(report.overallPercentile);
   const beats: Beat[] = [
     { kind: "hook", line: `How attractive is ${name}?` },
-    ...interleave(metricBeats),
+    ...metricBeats,
+    // The number and the curve, never the number alone — a score with no
+    // distribution beside it gets read against a school mark, which is the
+    // misreading this product exists to correct.
+    //
+    // Three beats rather than one. As a single block this ran eleven seconds
+    // of unbroken narration at the exact moment a viewer is most likely to be
+    // watching, and the renderer had nothing to cut on. Split, the number lands
+    // alone, then the curve arrives as its own reveal.
     {
-      // The number and the curve in one beat, never the number alone. A score
-      // with no distribution beside it gets read against a school mark, which
-      // is the misreading this whole product exists to correct.
       kind: "score",
-      line: `${name} measures ${report.overall.toFixed(1)} out of 10 — ${rarityShort(
-        report.overallPercentile,
-      ).toLowerCase()} of the reference set. ${spreadLine(report.sex)} ${SPREAD.median.toFixed(
-        1,
-      )} is the exact middle.`,
+      line: `${name} measures ${report.overall.toFixed(1)} out of 10.`,
       badge: `${pct}th percentile`,
+    },
+    {
+      kind: "score",
+      line: `That's ${rarityShort(report.overallPercentile).toLowerCase()} of the reference set.`,
+      badge: `${pct}th percentile`,
+    },
+    {
+      kind: "score",
+      line: `${spreadLine(report.sex)} ${SPREAD.median.toFixed(1)} is the exact middle.`,
     },
   ];
 
@@ -222,7 +276,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
 // A single narration block, for text-to-speech. Kept separate from the beats
 // so the captions on screen and the voice track cannot drift.
 export function narrationFrom(beats: Beat[]): string {
-  return beats.map((b) => b.line).join(" ");
+  return beats.map((b) => b.spoken ?? b.line).join(" ");
 }
 
 // Whether a report is fit to publish.

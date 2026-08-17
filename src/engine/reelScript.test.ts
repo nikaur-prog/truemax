@@ -105,11 +105,25 @@ test("the score beat never states a number without the distribution", () => {
   // The whole correction this product exists to make. A score alone gets read
   // against a school mark; the same score against the curve is the thing that
   // makes somebody want their own.
+  // The score is delivered over several beats so the renderer has something to
+  // cut on, so the guard is on the SECTION rather than any one beat: whatever
+  // the split, a viewer must not receive the number without the curve.
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
-  const score = beats.find((b) => b.kind === "score")!;
-  assert.match(score.line, /5\.4 out of 10/);
-  assert.match(score.line, /Two thirds of men measure between/);
-  assert.match(score.line, /5\.0 is the exact middle/);
+  const score = beats.filter((b) => b.kind === "score");
+  const said = score.map((b) => b.line).join(" ");
+  assert.match(said, /5\.4 out of 10/);
+  assert.match(said, /Two thirds of men measure between/);
+  assert.match(said, /5\.0 is the exact middle/);
+
+  // And they must be contiguous. Splitting the number from its distribution is
+  // only safe while nothing can appear between them — a context or CTA beat
+  // landing in the gap would put the number on screen alone, which is the exact
+  // misreading the split is allowed to risk and this test exists to prevent.
+  const first = beats.findIndex((b) => b.kind === "score");
+  assert.deepEqual(
+    beats.slice(first, first + score.length).map((b) => b.kind),
+    score.map(() => "score"),
+  );
 });
 
 test("the hook and the call to action bookend it", () => {
@@ -147,4 +161,29 @@ test("a tilted capture blocks the reel", () => {
 test("a thin scan blocks the reel", () => {
   const blockers = reelBlockers(report([metric("a", "eyes", 1.2), metric("b", "jaw", -1.1)]), 0, 6);
   assert.ok(blockers.some((b) => /not enough for a breakdown/.test(b)));
+});
+
+test("the running order is strictly anatomical, tone is balanced by selection", () => {
+  // The bug this replaces: metrics were sorted down the face and then zipped
+  // good/bad, which silently undid the sort and bounced the viewer around the
+  // face. Order must be monotonic down REGION_ORDER, with no exceptions.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
+  const order = ["eyes", "midface", "nose", "lips", "jaw", "chin", "proportions", "symmetry"];
+  const seen = beats.filter((b) => b.kind === "metric").map((b) => order.indexOf(b.region!));
+  for (let i = 1; i < seen.length; i++) {
+    assert.ok(seen[i] >= seen[i - 1], `bounced back up the face at beat ${i}: ${seen.join(",")}`);
+  }
+  // Balance is still there, it just comes from which metrics were chosen.
+  const metrics = beats.filter((b) => b.kind === "metric");
+  assert.ok(metrics.some((b) => b.positive), "no strengths chosen");
+  assert.ok(metrics.some((b) => !b.positive), "no weaknesses chosen");
+});
+
+test("the voice track never reads a parenthetical or a colon aloud", () => {
+  // Screen keeps "Facial width-to-height (fWHR)"; the synthesiser must not say
+  // "f-w-h-r", and "nose : mouth width" must not put a colon where a word goes.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
+  const narration = narrationFrom(beats);
+  assert.ok(!/\(|\)/.test(narration), `parenthetical survived into narration: ${narration}`);
+  assert.ok(!/\s:\s/.test(narration), `colon survived into narration: ${narration}`);
 });
