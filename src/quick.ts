@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
+import { detect, initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
 import { analyze } from "./engine/scoring.js";
@@ -494,6 +494,14 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) 
   button.onclick = () => enterMode(button.dataset.mode as QuickMode);
 }
 el.modeBack.onclick = () => leaveMode();
+// The wordmark is the way back. Every other page in the product treats a logo
+// in the corner as "home", and this one was the exception — mid-flow the only
+// way out was the browser's back button, which leaves the URL and the mode
+// disagreeing about where you are.
+document.getElementById("q-home")?.addEventListener("click", () => {
+  if (mode) leaveMode();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 el.calBack.onclick = () => leaveMode();
 
 // ---------------------------------------------------------------------------
@@ -1018,11 +1026,6 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
                placeholder="LeBron" autocomplete="off" />
         <small>Used for the rest of the video. Defaults to the first name.</small>
       </label>
-      <label class="q-namefield">
-        <span>Cutaway photos <i>(optional)</i></span>
-        <input id="q-rundown-broll" class="q-input" type="file" accept="image/*" multiple />
-        <small>More shots of the same person. Shown between measurements, never measured.</small>
-      </label>
       <!-- Turns the score card into a before/after. Left empty the card shows
            now-versus-potential, which is the FIRST card in a glow-up video;
            filled in it shows before-versus-now, which is the last one. -->
@@ -1032,6 +1035,19 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
                placeholder="4.5" autocomplete="off" />
         <small>Makes the card a before/after. Empty shows now vs potential.</small>
       </label>
+    </div>
+
+    <!-- Cutaways get a strip of their own rather than a fourth column: they are
+         pictures, and a file input squeezed into a quarter of a row shows
+         neither what is attached nor how many. -->
+    <div class="q-cut">
+      <div class="q-cut-head">
+        <span>Cutaway photos <i>(optional)</i></span>
+        <small>More shots of the same person. Cut to between measurements — the numbers
+        always come from the photo above.</small>
+      </div>
+      <div class="q-cut-slots" id="q-cut-slots"></div>
+      <input id="q-rundown-broll" type="file" accept="image/*" multiple hidden />
     </div>
 
     <!-- The thing the engine could not have known to say.
@@ -1049,14 +1065,17 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
     <!-- The one beat whose length is known BEFORE the render, and therefore the
          one an operator can go and cut footage for. -->
-    <label class="q-namefield" id="q-disc-row">
-      <span>Footage for that line <i>(optional)</i></span>
-      <input id="q-disc-clip" class="q-input" type="file" accept="video/*" />
-      <label class="q-disc-start">Start at
-        <input id="q-disc-start" class="q-input" type="number" min="0" step="0.1" value="0" />s
-      </label>
-      <small id="q-disc-note">Attach a clip and say where to start it. It plays under the line above.</small>
-    </label>
+    <!-- Disabled until there is a line for it to play under. Attaching footage
+         for a sentence nobody has written is a control that cannot do anything
+         yet, and one that silently does nothing is worse than one that says so. -->
+    <div class="q-cut q-disc" id="q-disc-row" data-armed="0">
+      <div class="q-cut-head">
+        <span>Footage for that line <i>(optional)</i></span>
+        <small id="q-disc-note">Write the line above first.</small>
+      </div>
+      <div class="q-disc-clips" id="q-disc-clips"></div>
+      <input id="q-disc-clip" type="file" accept="video/*" hidden />
+    </div>
 
     <div class="q-actions">
       <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
@@ -1140,46 +1159,10 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     update();
   }
 
-  // The disclaimer clip: how much is needed, how much there is, and whether the
-  // chosen start point leaves enough.
-  //
-  // Said in seconds against the clip's own length rather than as a rule,
-  // because "your clip is 6.0s and the line needs 4.2s, so start by 1.8s" is
-  // the sentence somebody can act on, and "choose a valid start point" is not.
-  const discInput = document.getElementById("q-disc-clip") as HTMLInputElement | null;
-  const discStart = document.getElementById("q-disc-start") as HTMLInputElement | null;
-  const discNote = document.getElementById("q-disc-note");
-  if (discInput && discStart && discNote && noteField) {
-    const describe = () => {
-      const needed = spokenSeconds(noteField.value);
-      const clip = discClip;
-      if (!clip) {
-        discNote.textContent = needed
-          ? `The line runs about ${needed.toFixed(1)}s. Attach a clip at least that long.`
-          : "Attach a clip and say where to start it. It plays under the line above.";
-        return;
-      }
-      const start = Number(discStart.value) || 0;
-      const left = clip.duration - start;
-      discNote.textContent =
-        left + 0.05 >= needed
-          ? `Clip is ${clip.duration.toFixed(1)}s. From ${start.toFixed(1)}s that leaves ${left.toFixed(1)}s for a ${needed.toFixed(1)}s line.`
-          : `Only ${Math.max(0, left).toFixed(1)}s left from ${start.toFixed(1)}s and the line needs ${needed.toFixed(1)}s — start by ${Math.max(0, clip.duration - needed).toFixed(1)}s or use a longer clip.`;
-    };
-    discInput.addEventListener("change", async () => {
-      discClip = await loadDisclaimerClip(discInput.files?.[0]);
-      // The furthest start that still fits, as the default. Somebody who
-      // attaches a clip and changes nothing else should get a working video.
-      if (discClip) {
-        const needed = spokenSeconds(noteField.value);
-        discStart.max = Math.max(0, discClip.duration - needed).toFixed(1);
-      }
-      describe();
-    });
-    discStart.addEventListener("input", describe);
-    noteField.addEventListener("input", describe);
-    describe();
-  }
+  mountCutaways();
+
+  mountDisclaimerClips();
+
   document.getElementById("q-diagnostics")!.onclick = async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const label = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim() ?? "";
@@ -1304,9 +1287,295 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
   };
 }
 
-// The disclaimer's clip, held between renders so changing the start point does
-// not mean re-picking the file.
-let discClip: HTMLVideoElement | null = null;
+// ---------------------------------------------------------------------------
+// Cutaway slots: + cards, clickable, pasteable.
+//
+// Was a bare <input type="file" multiple> in a quarter-width column, which
+// showed neither what was attached nor how many. These are pictures, and the
+// control for choosing pictures should show them.
+//
+// Paste is the point, same as in the producer: a still off a search results
+// page is two keystrokes pasted and a four-step detour through the filesystem
+// otherwise. The listener is on the document and routed by an armed slot, for
+// the same reason it is there in quickProducer — a paste goes to whatever holds
+// focus, and what holds focus after a click is a button the redraw replaces.
+// ---------------------------------------------------------------------------
+const CUT_SLOTS = 4;
+interface Cutaway {
+  image: HTMLImageElement;
+  landmarks?: NormalizedLandmark[];
+}
+const cutaways: Array<Cutaway | null> = Array(CUT_SLOTS).fill(null);
+let cutArmed: number | null = null;
+
+function drawCutSlots(): void {
+  const host = document.getElementById("q-cut-slots");
+  if (!host) return;
+  host.innerHTML = "";
+  cutaways.forEach((image, i) => {
+    const cell = document.createElement("div");
+    cell.className = "q-cut-cell";
+    if (image) {
+      cell.innerHTML = `<img alt="Cutaway ${i + 1}" />
+        <button type="button" class="q-cut-x" title="Remove">✕</button>`;
+      cell.querySelector("img")!.src = image.image.src;
+      if (!image.landmarks) cell.classList.add("q-cut-noface");
+      cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+        cutaways[i] = null;
+        drawCutSlots();
+      });
+    } else {
+      const armed = cutArmed === i;
+      cell.innerHTML = `<button type="button" class="q-cut-add${armed ? " armed" : ""}">
+          <span>+</span>${armed ? "⌘V" : "Photo"}</button>
+        <button type="button" class="q-cut-paste">${armed ? "ready" : "paste"}</button>`;
+      cell.querySelector(".q-cut-add")!.addEventListener("click", () => {
+        cutArmed = i;
+        (document.getElementById("q-rundown-broll") as HTMLInputElement | null)?.click();
+      });
+      cell.querySelector(".q-cut-paste")!.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cutArmed = armed ? null : i;
+        drawCutSlots();
+      });
+    }
+    host.append(cell);
+  });
+}
+
+function firstFreeCut(from = 0): number {
+  for (let i = from; i < CUT_SLOTS; i++) if (!cutaways[i]) return i;
+  return cutaways.findIndex((c) => !c);
+}
+
+async function addCutaway(file: File, at: number): Promise<void> {
+  const image = await decodeImage(file);
+  if (!image || at < 0) return;
+
+  // Landmark it, so the measurement can be drawn where the feature actually is
+  // on THIS face rather than where it was on the other one.
+  //
+  // The number never comes from here — one face, one set of figures, taken from
+  // the measured photograph and stated once. This only supplies geometry, and a
+  // cutaway with no face in it (a hand, a silhouette, the back of a head) simply
+  // carries no line rather than failing.
+  let landmarks: NormalizedLandmark[] | undefined;
+  try {
+    if (isReady()) {
+      await setRunningMode("IMAGE");
+      const found = detect(image)?.faceLandmarks?.[0];
+      if (found?.length) landmarks = found;
+    }
+  } catch {
+    // A cutaway that will not landmark is still a perfectly good cutaway.
+  }
+  cutaways[at] = { image, landmarks };
+}
+
+function mountCutaways(): void {
+  drawCutSlots();
+  const input = document.getElementById("q-rundown-broll") as HTMLInputElement | null;
+  input?.addEventListener("change", async () => {
+    const files = [...(input.files ?? [])];
+    input.value = "";
+    let at = cutArmed ?? firstFreeCut();
+    for (const file of files) {
+      if (at < 0) break;
+      await addCutaway(file, at);
+      at = firstFreeCut();
+    }
+    cutArmed = null;
+    drawCutSlots();
+  });
+
+  document.addEventListener("paste", async (event) => {
+    // Only while this panel is on screen, and only when a slot is armed or free.
+    if (!document.getElementById("q-cut-slots")) return;
+    const data = (event as ClipboardEvent).clipboardData;
+    if (!data) return;
+    const images = [...data.files].filter((f) => /^image\//.test(f.type));
+    if (!images.length) {
+      for (const item of data.items) {
+        if (!/^image\//.test(item.type)) continue;
+        const file = item.getAsFile();
+        if (file) images.push(file);
+      }
+    }
+    if (!images.length) return;
+    event.preventDefault();
+    let at = cutArmed ?? firstFreeCut();
+    for (const file of images) {
+      if (at < 0) break;
+      await addCutaway(file, at);
+      at = firstFreeCut();
+    }
+    cutArmed = null;
+    drawCutSlots();
+  });
+}
+
+async function decodeImage(file: File): Promise<HTMLImageElement | null> {
+  if (!/^image\//.test(file.type)) return null;
+  try {
+    const image = new Image();
+    image.src = URL.createObjectURL(file);
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("decode failed"));
+    });
+    return image;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The disclaimer's footage: up to four clips sharing one budget.
+//
+// This is the only point in a rundown where cutting to a duration is possible
+// at all. Every other beat is timed by a synthesiser whose real length nobody
+// has until the mp3 comes back; the disclaimer's length is derived from its own
+// text by spokenSeconds, while it is still being typed.
+//
+// So the budget is fixed and the clips divide it. Fifteen seconds of talking
+// can be five from one clip and ten from another, which is the difference
+// between a disclaimer that looks like a held shot and one that looks cut.
+//
+// Each clip owns two numbers and they are different questions: `startAt` is
+// WHERE IN THE SOURCE to begin, and `length` is HOW MUCH OF THE SENTENCE this
+// clip covers. Conflating them is the mistake that makes a trimmer confusing —
+// one is about the file, the other is about the video being built.
+// ---------------------------------------------------------------------------
+const DISC_SLOTS = 4;
+interface DiscClip {
+  video: HTMLVideoElement;
+  startAt: number;
+  length: number;
+}
+const discClips: Array<DiscClip | null> = Array(DISC_SLOTS).fill(null);
+
+/** The voiceover length this footage has to cover, from the typed line. */
+function discBudget(): number {
+  const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value ?? "";
+  return spokenSeconds(note);
+}
+
+const discUsed = () => discClips.reduce((a, c) => a + (c?.length ?? 0), 0);
+
+function drawDiscClips(): void {
+  const host = document.getElementById("q-disc-clips");
+  const row = document.getElementById("q-disc-row");
+  const note = document.getElementById("q-disc-note");
+  if (!host || !note) return;
+
+  const budget = discBudget();
+  const armed = budget > 0;
+  row?.setAttribute("data-armed", armed ? "1" : "0");
+
+  if (!armed) {
+    // No line, no footage. A clip attached to a sentence that no longer exists
+    // would be rendered under nothing.
+    discClips.fill(null);
+    host.innerHTML = "";
+    note.textContent = "Write the line above first.";
+    return;
+  }
+
+  const used = discUsed();
+  const left = budget - used;
+  note.textContent =
+    used === 0
+      ? `The line runs about ${budget.toFixed(1)}s. Add up to ${DISC_SLOTS} clips to cover it.`
+      : left > 0.05
+        ? `${used.toFixed(1)}s of ${budget.toFixed(1)}s covered — ${left.toFixed(1)}s still on the last frame.`
+        : `${budget.toFixed(1)}s covered. Every second of the line has picture.`;
+
+  host.innerHTML = "";
+  discClips.forEach((clip, i) => {
+    const cell = document.createElement("div");
+    cell.className = "q-disc-cell";
+    if (!clip) {
+      // Only ever one empty slot offered, right after the last filled one:
+      // four empty boxes reads as four required things.
+      if (i !== discClips.findIndex((c) => !c)) return;
+      cell.innerHTML = `<button type="button" class="q-cut-add"><span>+</span>${
+        used === 0 ? "Add a clip" : "Add another"
+      }</button>`;
+      cell.querySelector("button")!.addEventListener("click", () => {
+        discPickInto = i;
+        (document.getElementById("q-disc-clip") as HTMLInputElement | null)?.click();
+      });
+      host.append(cell);
+      return;
+    }
+
+    const maxLen = Math.min(clip.video.duration - clip.startAt, left + clip.length);
+    cell.innerHTML = `
+      <video muted playsinline preload="metadata"></video>
+      <button type="button" class="q-cut-x" title="Remove">✕</button>
+      <div class="q-disc-fields">
+        <label>Start
+          <input type="range" data-k="start" min="0" step="0.1"
+                 max="${Math.max(0, clip.video.duration - 0.2).toFixed(1)}" value="${clip.startAt}" />
+          <b>${clip.startAt.toFixed(1)}s</b>
+        </label>
+        <label>Use
+          <input type="range" data-k="len" min="0.5" step="0.1"
+                 max="${Math.max(0.5, maxLen).toFixed(1)}" value="${clip.length}" />
+          <b>${clip.length.toFixed(1)}s</b>
+        </label>
+      </div>`;
+    const video = cell.querySelector("video")!;
+    video.src = clip.video.src;
+    video.currentTime = clip.startAt;
+    cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+      discClips[i] = null;
+      // Close the gap so the slots stay contiguous — a hole in the middle would
+      // put a clip after a clip that is not there.
+      const rest = discClips.filter(Boolean);
+      discClips.fill(null);
+      rest.forEach((c, n) => (discClips[n] = c));
+      drawDiscClips();
+    });
+    for (const range of cell.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
+      range.addEventListener("input", () => {
+        const value = Number(range.value);
+        if (range.dataset.k === "start") {
+          clip.startAt = value;
+          // The scrub preview follows the handle, so the start point is chosen
+          // by looking at the frame rather than by guessing a number.
+          video.currentTime = value;
+          clip.length = Math.min(clip.length, Math.max(0.5, clip.video.duration - value));
+        } else {
+          clip.length = value;
+        }
+        drawDiscClips();
+      });
+    }
+    host.append(cell);
+  });
+}
+
+let discPickInto = 0;
+
+function mountDisclaimerClips(): void {
+  drawDiscClips();
+  const note = document.getElementById("q-rundown-note") as HTMLTextAreaElement | null;
+  note?.addEventListener("input", drawDiscClips);
+  const input = document.getElementById("q-disc-clip") as HTMLInputElement | null;
+  input?.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    input.value = "";
+    const video = await loadDisclaimerClip(file);
+    if (!video) return;
+    // A new clip takes whatever budget is left, capped by its own length, so
+    // attaching one and touching nothing else produces a working video.
+    const left = Math.max(0, discBudget() - discUsed());
+    const length = Math.max(0.5, Math.min(video.duration, left || video.duration));
+    discClips[discPickInto] = { video, startAt: 0, length };
+    drawDiscClips();
+  });
+}
 
 // Decoded far enough to know its duration and to be seekable. Metadata is
 // enough for both — waiting for the whole file would stall the panel on a
@@ -1327,34 +1596,6 @@ async function loadDisclaimerClip(file: File | undefined): Promise<HTMLVideoElem
   } catch {
     return null;
   }
-}
-
-// Cutaway photographs for the rundown, decoded and nothing more.
-//
-// An unreadable file is skipped rather than thrown: these are decoration, and
-// failing a ninety-second render because the fourth of five cutaways was a HEIC
-// the browser will not decode is the wrong trade by a distance.
-async function loadBroll(files: FileList | null | undefined): Promise<HTMLImageElement[]> {
-  if (!files?.length) return [];
-  const out: HTMLImageElement[] = [];
-  // Six is plenty: the rundown has four beats that can take one, so past that
-  // they simply never appear.
-  for (const file of [...files].slice(0, 6)) {
-    if (!/^image\//.test(file.type)) continue;
-    try {
-      const url = URL.createObjectURL(file);
-      const image = new Image();
-      await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error("decode failed"));
-        image.src = url;
-      });
-      out.push(image);
-    } catch {
-      // Skipped, deliberately and quietly.
-    }
-  }
-  return out;
 }
 
 // The caption panel, under the action row and shared by all three cuts.
@@ -1502,9 +1743,7 @@ async function downloadRundown(r: Report): Promise<void> {
   // Cutaways. Decoded here as plain pictures and handed to the compositor —
   // they never touch the landmarker, the scoring or the report, which is the
   // reason they cannot move a measurement.
-  const broll = await loadBroll(
-    (document.getElementById("q-rundown-broll") as HTMLInputElement | null)?.files,
-  );
+  const broll = cutaways.filter((c): c is Cutaway => !!c);
   const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name) {
     // Point at the missing thing rather than explaining it. The field is six
@@ -1530,12 +1769,8 @@ async function downloadRundown(r: Report): Promise<void> {
       shortName,
       note,
       broll,
-      disclaimer: discClip
-        ? {
-            video: discClip,
-            startAt:
-              Number((document.getElementById("q-disc-start") as HTMLInputElement | null)?.value) || 0,
-          }
+      disclaimer: discClips.some(Boolean)
+        ? { clips: discClips.filter((c): c is DiscClip => !!c) }
         : undefined,
       accessToken,
       onProgress: (progress, stage) => {
@@ -1706,19 +1941,88 @@ for (const id of ["q-ai-before", "q-ai-after"]) {
 
 el.aiBack.onclick = () => leaveMode();
 
-el.aiForm.onsubmit = (event) => {
+el.aiForm.onsubmit = async (event) => {
   event.preventDefault();
   const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
   const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
+  const blemishes =
+    (document.getElementById("q-ai-blemish") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name || !desc) return;
-  // Generation is a server capability and this deployment may not have it. Say
-  // which, in the same shape as every other unconfigured service in the
-  // product, rather than spinning on a request that cannot succeed.
-  el.aiMsg.classList.add("err");
-  el.aiMsg.textContent =
-    "Image generation is not configured on this deployment yet — the character is saved, but the preview pair has to be generated outside the app for now.";
-  saveAiCharacter({ name, sex: aiSex, description: desc });
+
+  // Saved BEFORE the request, not after. Generation is the slow, billable and
+  // failable half; the character is the half worth keeping either way, and
+  // losing a description because an image service was rate limited is the kind
+  // of thing that stops somebody using a tool.
+  saveAiCharacter({ name, sex: aiSex, description: desc, blemishes });
+
+  const go = document.getElementById("q-ai-go") as HTMLButtonElement | null;
+  el.aiMsg.classList.remove("err");
+  el.aiMsg.textContent = "Making the before…";
+  if (go) {
+    go.disabled = true;
+    go.textContent = "Generating…";
+  }
+  try {
+    const token = await currentAccessToken();
+    const response = await fetch("/api/ai-image", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ sex: aiSex, description: desc, blemishes }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      before?: string;
+      after?: string;
+      error?: string;
+    };
+    if (!response.ok || !payload.before || !payload.after) {
+      el.aiMsg.classList.add("err");
+      el.aiMsg.textContent = payload.error ?? "The pair could not be generated.";
+      return;
+    }
+    el.aiMsg.textContent = "";
+    showAiPair(name, payload.before, payload.after);
+  } catch {
+    el.aiMsg.classList.add("err");
+    el.aiMsg.textContent = "Could not reach the image service.";
+  } finally {
+    if (go) {
+      go.disabled = false;
+      go.textContent = "Generate the preview pair";
+    }
+  }
 };
+
+// The pair, side by side, each downloadable.
+//
+// Downloadable individually rather than as one composite: these are the INPUT
+// to the Reel Creator, which wants two separate photographs to scan, not a
+// picture of two photographs.
+function showAiPair(name: string, before: string, after: string): void {
+  const host = document.getElementById("q-ai-preview");
+  if (!host) return;
+  host.classList.remove("hidden");
+  host.innerHTML = `
+    <div class="q-ai-pair">
+      <figure><img src="${before}" alt="${name}, before" /><figcaption>BEFORE</figcaption></figure>
+      <figure><img src="${after}" alt="${name}, after" /><figcaption>AFTER</figcaption></figure>
+    </div>
+    <div class="q-ai-pair-actions">
+      <button type="button" class="btn pri" data-save="before">Save the before</button>
+      <button type="button" class="btn pri" data-save="after">Save the after</button>
+    </div>
+    <p class="q-ai-note">Scan these two in Reel Creator to get the measured before/after.</p>`;
+  for (const button of host.querySelectorAll<HTMLButtonElement>("[data-save]")) {
+    button.onclick = async () => {
+      const which = button.dataset.save === "after" ? after : before;
+      const blob = await (await fetch(which)).blob();
+      await saveFile(blob, `truemax-${button.dataset.save}-${Date.now()}.png`);
+    };
+  }
+  host.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 // The library the operator was promised: describe somebody once, film them
 // again next week. Local for now, because a character is a prompt and a name —
@@ -1727,6 +2031,20 @@ interface AiCharacter {
   name: string;
   sex: Sex;
   description: string;
+  /**
+   * What the BEFORE shot should show, and only the before.
+   *
+   * The description is what stays the same across the pair — face, hair, age,
+   * build — because a before/after where the person changes is not a before and
+   * after. This is the half that is meant to disappear: the acne, the patchy
+   * stubble, the tired eyes.
+   *
+   * There is deliberately no equivalent for the after. "Glowed up" is the
+   * absence of these rather than a list of its own, and asking somebody to
+   * describe an improvement twice is how the two shots stop looking like one
+   * person.
+   */
+  blemishes?: string;
 }
 
 const AI_CHARACTERS_KEY = "truemax.aiCharacters";
