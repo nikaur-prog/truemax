@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/src/style.css">
+<link rel="stylesheet" href="/src/quick.css">
+<body class="q-body"><main style="max-width:560px;margin:0 auto;padding:24px 16px"><div id="host"></div></main>
+<script type="module">
+import { moveLabel, regionMoves } from "/src/engine/comparison.ts";
+import { rankShort } from "/src/ui/templates.ts";
+const R = (regions, overall, pct) => ({ sex:"male", overall, overallPercentile:pct, potential:overall+1,
+  pillars:{Harmony:5,Angularity:5,Dimorphism:5,Features:5}, regions, metrics:[], zScores:{} });
+const g = (region,score) => ({region,score,reliability:1});
+const before = R([g("eyes",6.0),g("midface",4.7),g("nose",6.8),g("lips",7.2),g("jaw",4.1),g("chin",6.2),g("proportions",6.9),g("symmetry",6.6)], 4.7, 31);
+const after  = R([g("eyes",6.0),g("midface",5.4),g("nose",6.8),g("lips",8.0),g("jaw",6.3),g("chin",6.8),g("proportions",7.5),g("symmetry",6.9)], 6.1, 62);
+const move = after.overall - before.overall;
+const sign = move>0?"+":move<0?"−":""; const dir = move>0?"up":move<0?"down":"flat";
+const rows = regionMoves(before, after).map(m=>`
+  <tr data-dir="${m.direction}"><th scope="row">${m.label}</th>
+  <td>${m.before===null?"—":m.before.toFixed(1)}</td><td>${m.after.toFixed(1)}</td>
+  <td class="q-cmp-delta">${moveLabel(m)}</td></tr>`).join("");
+document.getElementById("host").innerHTML = `
+  <div class="q-compare" data-dir="${dir}">
+    <div class="q-compare-side"><span class="q-compare-tag">BEFORE</span><b>${before.overall.toFixed(1)}</b><span class="q-compare-rank">${rankShort(before.overallPercentile)}</span></div>
+    <div class="q-compare-move"><span>${sign}${Math.abs(move).toFixed(1)}</span></div>
+    <div class="q-compare-side"><span class="q-compare-tag">AFTER</span><b>${after.overall.toFixed(1)}</b><span class="q-compare-rank">${rankShort(after.overallPercentile)}</span></div>
+  </div>
+  <div class="q-cmp">
+    <table class="q-cmp-table"><thead><tr><th scope="col">Region</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Move</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="q-cmp-get"><span class="q-klabel">THE BEFORE, ON ITS OWN</span>
+      <div class="q-cmp-buttons">
+        <button type="button" class="btn gho">Before breakdown MP4</button>
+        <button type="button" class="btn gho">Before verdict MP4</button>
+        <button type="button" class="btn gho">Before score card PNG</button>
+      </div>
+      <small>Every other export on this page renders the after.</small></div>
+  </div>
+  <div class="q-actions"><button class="btn pri">Breakdown MP4</button><button class="btn pri">Verdict MP4</button></div>
+  <label class="q-direct"><input type="checkbox" checked><span>Download files straight away, no share sheet</span></label>`;
+window.ready = true;
+</script>

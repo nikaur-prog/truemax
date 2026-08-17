@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { beatAt, buildTimeline, fitTimeline, typedFraction } from "./rundownTimeline.js";
+import {
+  beatAt,
+  beatNear,
+  buildTimeline,
+  fitTimeline,
+  spokenWeight,
+  typedFraction,
+} from "./rundownTimeline.js";
 import type { Beat } from "./reelScript.js";
 
 const BEATS: Beat[] = [
@@ -81,7 +88,7 @@ test("captions finish typing before their beat ends", () => {
   }
 });
 
-test("fitting to real audio allocates by word share, not by one scale factor", () => {
+test("fitting to real audio allocates by spoken share, not by one scale factor", () => {
   // This test used to assert uniform scaling — every start multiplied by
   // actual/estimated. That is what produced the drift: the estimate adds a flat
   // GAP and a MIN_BEAT floor to every beat, both fixed costs that are a far
@@ -97,15 +104,16 @@ test("fitting to real audio allocates by word share, not by one scale factor", (
   const REAL = 40;
   const fitted = fitTimeline(timeline, REAL);
 
-  const words = (b: (typeof BEATS)[number]) =>
-    (b.spoken ?? b.line).split(/\s+/).filter(Boolean).length;
+  // Weighted by how long each line takes to SAY, not by how many spaces are in
+  // it. A word is not a unit of time — see spokenWeight.
+  const words = (b: (typeof BEATS)[number]) => spokenWeight(b.spoken ?? b.line);
   const total = BEATS.reduce((a, b) => a + words(b), 0);
 
   fitted.beats.forEach((b, i) => {
     const want = (words(BEATS[i]) / total) * REAL;
     assert.ok(
       Math.abs(b.duration - want) < 1e-6,
-      `beat ${i} got ${b.duration.toFixed(3)}s, word share says ${want.toFixed(3)}s`,
+      `beat ${i} got ${b.duration.toFixed(3)}s, spoken share says ${want.toFixed(3)}s`,
     );
   });
 
@@ -139,11 +147,8 @@ test("a short beat does not steal time from the beats after it", () => {
   const timeline = buildTimeline(BEATS);
   const fitted = fitTimeline(timeline, 40);
   const hook = fitted.beats[0];
-  const hookWords = (BEATS[0].spoken ?? BEATS[0].line).split(/\s+/).filter(Boolean).length;
-  const allWords = BEATS.reduce(
-    (a, b) => a + (b.spoken ?? b.line).split(/\s+/).filter(Boolean).length,
-    0,
-  );
+  const hookWords = spokenWeight(BEATS[0].spoken ?? BEATS[0].line);
+  const allWords = BEATS.reduce((a, b) => a + spokenWeight(b.spoken ?? b.line), 0);
   // Its slice of the video is its slice of the script, and nothing else.
   assert.ok(
     Math.abs(hook.duration / 40 - hookWords / allWords) < 1e-9,
@@ -175,4 +180,118 @@ test("beatAt is exclusive at the end so no time belongs to two beats", () => {
   assert.equal(beatAt(timeline, first.start)!.beat.line, first.beat.line);
   assert.equal(beatAt(timeline, first.start + first.duration)!.beat.line, timeline.beats[1].beat.line);
   assert.equal(beatAt(timeline, timeline.duration), null);
+});
+
+// ---------------------------------------------------------------------------
+// Fitting to the SPEECH rather than to the file.
+// ---------------------------------------------------------------------------
+
+test("the beats start where the talking starts, not where the file does", () => {
+  // A synthesised mp3 opens with a little silence. Beats that begin at zero
+  // begin before the voice does, and every one after them inherits the offset.
+  const timeline = buildTimeline(BEATS);
+  const fitted = fitTimeline(timeline, 40, 0.3);
+
+  assert.ok(Math.abs(fitted.beats[0].start - 0.3) < 1e-9, `first beat starts at ${fitted.beats[0].start}`);
+
+  // Contiguous from the offset, and ending at offset + speech. The duration is
+  // where the beats END — the renderer asks with an absolute t, so a duration
+  // that ignored the offset would put the last frames past the timeline.
+  let cursor = 0.3;
+  for (const b of fitted.beats) {
+    assert.ok(Math.abs(b.start - cursor) < 1e-9, `beat starts at ${b.start}, previous ended ${cursor}`);
+    cursor += b.duration;
+  }
+  assert.ok(Math.abs(cursor - 40.3) < 1e-6, `beats end at ${cursor}, expected 40.3`);
+  assert.ok(Math.abs(fitted.duration - 40.3) < 1e-6, `duration is ${fitted.duration}`);
+
+  // Every cue still lands inside a beat.
+  for (const cue of fitted.sfx) {
+    assert.ok(beatAt(fitted, cue.at), `cue at ${cue.at} fell outside every beat`);
+  }
+});
+
+test("trailing silence in the file does not stretch the video", () => {
+  // THE DRIFT, stated as an inequality. Fitting to a 41s file that holds 40s of
+  // speech hands every beat 2.5% more time than the voice takes, and the error
+  // accumulates: by the last beat the picture is most of a second behind.
+  const timeline = buildTimeline(BEATS);
+  const toFile = fitTimeline(timeline, 41);
+  const toSpeech = fitTimeline(timeline, 40);
+  const last = timeline.beats.length - 1;
+  const lag = toFile.beats[last].start - toSpeech.beats[last].start;
+  assert.ok(lag > 0.7, `fitting to the file only cost ${lag.toFixed(2)}s by the last beat`);
+});
+
+test("beatNear clamps instead of falling off either end", () => {
+  // The renderer asks per frame and cannot be handed null. Before the offset
+  // existed, "no beat here" only happened past the END, and the fallback was
+  // the last beat — which with an offset would have opened the video on its own
+  // sign-off card.
+  const fitted = fitTimeline(buildTimeline(BEATS), 40, 0.5);
+  assert.equal(beatNear(fitted, 0)!.beat.line, fitted.beats[0].beat.line);
+  assert.equal(beatNear(fitted, 0.2)!.beat.line, fitted.beats[0].beat.line);
+  assert.equal(beatNear(fitted, 1e6)!.beat.line, fitted.beats[fitted.beats.length - 1].beat.line);
+  // And inside the timeline it agrees with beatAt exactly.
+  for (let t = 0.5; t < 40; t += 0.37) {
+    assert.equal(beatNear(fitted, t), beatAt(fitted, t), `disagreed at ${t.toFixed(2)}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Weighting by how long a line takes to SAY.
+// ---------------------------------------------------------------------------
+
+test("a decimal is weighted as the words it is read as", () => {
+  // "7.2" is one whitespace-word and "seven point two" out loud. Weighted by
+  // word count it was worth the same as "at", which is where a third of the
+  // remaining caption lag was coming from.
+  assert.equal(spokenWeight("7.2"), 4);
+  assert.equal(spokenWeight("10"), 1);
+  assert.equal(spokenWeight("6.4"), 3);
+  assert.equal(spokenWeight("1.62"), 4);
+  // An ordinal is the cardinal plus a syllable.
+  assert.equal(spokenWeight("92nd"), 4);
+});
+
+test("an address is weighted with its dots spoken", () => {
+  // "truemax dot app". The CTA beat is mostly short function words and then
+  // this, so under word count it was the lightest beat in the video and the
+  // voice took the longest over it.
+  assert.equal(spokenWeight("truemax.app"), 4);
+  assert.ok(spokenWeight("at truemax.app.") > spokenWeight("at the door."));
+});
+
+test("a percentage is heard as two words", () => {
+  assert.equal(spokenWeight("40%"), 4); // "forty per cent"
+});
+
+test("syllable weight beats word count on the lines that were lagging", () => {
+  // The diagnosis, as an inequality rather than a story. Both reported beats
+  // are heavier per word than a measurement beat, so word count was handing
+  // the measurement beats time that belonged to these two — and the lag showed
+  // up on the run-up into them.
+  const perWord = (line: string) => spokenWeight(line) / line.split(/\s+/).filter(Boolean).length;
+
+  const metric =
+    "Steph has a canthal tilt of 6.4 degrees, so the outer corner of the eye sits well above the inner and that's the hunter-eye look.";
+  const cta = "Before the rating, go get yours at truemax.app.";
+  const card = "The verdict: Mogger. A very attractive male. Steph measures 7.2 out of 10.";
+
+  assert.ok(perWord(cta) > perWord(metric), `cta ${perWord(cta)} vs metric ${perWord(metric)}`);
+  assert.ok(perWord(card) > perWord(metric), `card ${perWord(card)} vs metric ${perWord(metric)}`);
+});
+
+test("the weight is never zero, so no beat can be allocated no time", () => {
+  // A beat with a duration of zero is a caption that never appears and a
+  // measurement that never draws.
+  for (const line of ["", "   ", "...", "—", "?"]) {
+    assert.ok(spokenWeight(line) >= 1, `"${line}" weighed ${spokenWeight(line)}`);
+  }
+});
+
+test("a silent e is not a syllable but a short word keeps its vowel", () => {
+  assert.equal(spokenWeight("male"), 1);
+  assert.equal(spokenWeight("the"), 1);
+  assert.equal(spokenWeight("attractive"), 3);
 });

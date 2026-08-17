@@ -3,8 +3,9 @@ import type { Report, ScoredMetric } from "../engine/types.js";
 import type { Beat } from "../engine/reelScript.js";
 import { buildReelScript, narrationFrom, reelBlockers } from "../engine/reelScript.js";
 import { buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
-import { decodeVoice, fetchNarration, mixRundownAudio } from "./rundownAudio.js";
+import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
 import { drawRundownFrame } from "./rundownFrame.js";
+import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
 
@@ -121,6 +122,9 @@ export async function downloadRundownVideo(
     shortName: options.shortName,
     context: options.context,
     note: options.note,
+    // The operator's chosen register, so the video and the page it was exported
+    // from call one face the same thing.
+    tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
   });
 
   onProgress?.(0.05, "Recording the voiceover");
@@ -130,8 +134,14 @@ export async function downloadRundownVideo(
   const voice = await decodeVoice(spoken);
 
   // Fit before mixing. See the header — this is the ordering that matters.
+  //
+  // Fitted to the SPEECH, not to the file. A synthesised mp3 carries silence at
+  // both ends, and fitting the beats across it stretches every one of them by
+  // that ratio — an error that compounds until the caption is most of a second
+  // behind the voice by the end. speechSpan finds where the talking is.
   const estimated = buildTimeline(beats);
-  const timeline = voice ? fitTimeline(estimated, voice.duration) : estimated;
+  const span = voice ? speechSpan(voice) : null;
+  const timeline = span ? fitTimeline(estimated, span.end - span.start, span.start) : estimated;
 
   onProgress?.(0.12, "Mixing the audio");
   const audio = await mixRundownAudio(voice, timeline);

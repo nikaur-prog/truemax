@@ -1,5 +1,6 @@
 import type { RegionId, Report, ScoredMetric, Sex } from "./types.js";
 import { verdictFor } from "./analysisMode.js";
+import type { VerdictTone } from "./analysisMode.js";
 import { REGION_NAMES } from "./scoring.js";
 import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
@@ -158,6 +159,15 @@ export interface ReelScriptOptions {
    */
   note?: string;
   cta?: string;
+  /**
+   * Which ladder the verdict word comes from.
+   *
+   * Passed in rather than read here, because this module is pure and the
+   * preference lives in the browser — but passed in AT ALL because the page and
+   * the video it exports have to call one face the same thing. A video that
+   * says "Mogger" over a page that says "Great-looking" is two products.
+   */
+  tone?: VerdictTone;
 }
 
 // Words per minute the voice actually reads at.
@@ -378,9 +388,9 @@ const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 // for one frame is the seam every drift bug in this pipeline has come through.
 // The regions are already in face order in the Report, so the card reads top to
 // bottom the same way the video just did.
-function cardData(report: Report): CardData {
+function cardData(report: Report, tone?: VerdictTone): CardData {
   return {
-    verdict: verdictFor(report).word,
+    verdict: verdictFor(report, tone).word,
     overall: report.overall,
     potential: report.potential,
     percentile: report.overallPercentile,
@@ -397,6 +407,9 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   // when the first word IS the whole thing, so a mononym never ends up with an
   // empty label on the curve.
   const shortName = (options.shortName?.trim() || name.trim().split(/\s+/)[0] || name).trim();
+  // Resolved once. Called twice in one template it was one edit away from the
+  // spoken word and the word on the card disagreeing.
+  const verdict = verdictFor(report, options.tone);
 
   // Notable, measured, and not an impossible reading. An implausible metric is
   // a landmark in the wrong place (see scoring.ts) — it carries no weight in
@@ -510,10 +523,32 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // "The verdict:" rather than a sentence around the word, because the ladder
     // holds nouns AND clauses — "Mogger", "True Adam", "You're cooked" — and no
     // one sentence frame fits all three. It was shipping "Marlon has mogger".
+    //
+    // The rung is said TWICE: once in the ladder's own word and once in plain
+    // English. "Mogger" is the word that gets quoted in a comment section and it
+    // is also a word that means nothing to somebody who arrived from the For You
+    // page without ever having heard it. "A very attractive male" costs four
+    // words and carries the same verdict to everybody else watching.
     {
       kind: "card",
-      line: `The verdict: ${verdictFor(report).word}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
-      card: cardData(report),
+      line: `The verdict: ${verdict.word}. ${capitalize(verdict.descriptor)}.`,
+      card: cardData(report, options.tone),
+    },
+    // The number is its OWN beat rather than a third sentence on the verdict's.
+    //
+    // Three sentences ran to five caption lines, which pages as two-plus-two
+    // and then a single orphan line reading "out of 10." — and it made the
+    // longest beat in the video the one the lag was reported on. Two shorter
+    // beats page cleanly, track the voice more closely because there is less
+    // room inside each for the estimate to be wrong, and land the word and the
+    // number as two separate hits instead of one run-on.
+    //
+    // Still a card beat, so the card does not move: the entrance is keyed to
+    // the FIRST card beat and all of these are the same state.
+    {
+      kind: "card",
+      line: `${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
+      card: cardData(report, options.tone),
     },
     // Still on the card. The ceiling as a NUMBER, not a ladder rung: named rungs
     // work for where somebody IS, but as a CEILING a name is discouraging,
@@ -524,7 +559,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     {
       kind: "card",
       line: `Ceiling: ${report.potential.toFixed(1)}. That's the same bone structure with everything soft fixed.`,
-      card: cardData(report),
+      card: cardData(report, options.tone),
     },
     // THE CURVE, on the word "percent". Crowd shaded, one marker outside it.
     //

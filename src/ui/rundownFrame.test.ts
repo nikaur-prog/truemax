@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { brollFor, cropAt, drawProgress, overlayAlpha, overlayVisible, regionCrop } from "./rundownFrame.js";
+import {
+  brollFor,
+  cropAt,
+  drawProgress,
+  fitFont,
+  overlayAlpha,
+  overlayVisible,
+  regionCrop,
+} from "./rundownFrame.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
 
@@ -343,4 +351,59 @@ test("the safe area is at least what the platforms actually cover", () => {
 
   // And the right-hand column of the bottom bar clears the action rail.
   assert.ok(W - 132 < W - MEASURED.right, "value column runs into the action rail");
+});
+
+// ---------------------------------------------------------------------------
+// The verdict has to fit inside the frame it is the conclusion of.
+// ---------------------------------------------------------------------------
+
+// A stand-in for a canvas context, wide enough to be honest: a glyph is a fixed
+// fraction of the font size, so width is proportional to size AND to length,
+// which is the only property fitFont depends on.
+const fakeCtx = () => {
+  const ctx = {
+    font: "",
+    measureText(text: string) {
+      const px = Number(/(\d+)px/.exec(ctx.font)?.[1] ?? 16);
+      return { width: text.length * px * 0.56 } as TextMetrics;
+    },
+  };
+  return ctx as unknown as CanvasRenderingContext2D;
+};
+
+test("the verdict is shrunk until it fits the frame", () => {
+  // "Looksmaxxing final boss" at a flat 76px ran off both edges of a 720-wide
+  // frame and shipped as "ooksmaxxing final bos". Every rung on the ladder goes
+  // through here, so the assertion is over all of them rather than the one that
+  // was seen to break.
+  const ctx = fakeCtx();
+  const font = (px: number) => `300 ${px}px Fraunces, Georgia, serif`;
+  const maxWidth = 720 - 48 * 2;
+
+  const words = [
+    "Mid",
+    "Chopped",
+    "Mogger",
+    "She-mogger",
+    "Good looking",
+    "Background character",
+    "Looksmaxxing final boss",
+    "Certified baddie",
+    "True Adam",
+  ];
+  for (const word of words) {
+    ctx.font = fitFont(ctx, word, maxWidth, 76, 44, font);
+    assert.ok(
+      ctx.measureText(word).width <= maxWidth,
+      `"${word}" is ${ctx.measureText(word).width.toFixed(0)}px wide in ${ctx.font}`,
+    );
+  }
+});
+
+test("a short verdict is not shrunk at all", () => {
+  // Shrink-to-fit that also shrinks what already fits would quietly restyle the
+  // whole ladder to the length of its longest rung.
+  const ctx = fakeCtx();
+  const font = (px: number) => `300 ${px}px Fraunces, Georgia, serif`;
+  assert.equal(fitFont(ctx, "Mid", 720 - 96, 76, 44, font), font(76));
 });

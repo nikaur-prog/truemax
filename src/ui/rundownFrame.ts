@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
-import { beatAt } from "../engine/rundownTimeline.js";
+import { beatNear } from "../engine/rundownTimeline.js";
 import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
 import { SPREAD } from "../engine/rarity.js";
 
@@ -419,8 +419,14 @@ export function cropAt(
     return out;
   };
 
-  const index = timeline.beats.findIndex((b) => t >= b.start && t < b.start + b.duration);
-  const current = timeline.beats[index] ?? timeline.beats[timeline.beats.length - 1];
+  // Clamped at both ends. A fitted timeline starts where the SPEECH starts
+  // inside the audio file rather than at zero, so the opening frames belong to
+  // no beat — and findIndex answers -1 for those, which through a bare fallback
+  // meant the video opened on the crop of its own last beat.
+  const found = timeline.beats.findIndex((b) => t >= b.start && t < b.start + b.duration);
+  const index =
+    found >= 0 ? found : t < (timeline.beats[0]?.start ?? 0) ? 0 : timeline.beats.length - 1;
+  const current = timeline.beats[index];
   if (!current) return regionCrop(photo, landmarks, undefined, aspect);
 
   const here = regionCrop(photo, landmarks, current.beat.region, aspect, bounds(current));
@@ -500,7 +506,7 @@ export function drawRundownFrame(
   ctx.fillStyle = "#050606";
   ctx.fillRect(0, 0, W, H);
 
-  const beat = beatAt(input.timeline, t) ?? input.timeline.beats[input.timeline.beats.length - 1];
+  const beat = beatNear(input.timeline, t);
   if (!beat) return;
 
   // The photograph is the frame. Full bleed rather than a card, because the
@@ -560,10 +566,7 @@ export function drawRundownFrame(
     //
     // The card is one continuous state that happens to be narrated over two
     // sentences, so the move belongs to the state, not to the sentence.
-    const firstCard = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
-    const settle = smoother(
-      clamp01((t - firstCard.start) / Math.max(0.001, firstCard.duration * 0.45)),
-    );
+    const settle = cardSettle(input, beat, t);
     const boxH = lerp(H, H * CARD_PHOTO, settle);
     const target = regionCrop(photo, landmarks, "proportions", W / boxH);
     const c = lerpCrop(crop, target, settle);
@@ -633,7 +636,7 @@ export function drawRundownFrame(
   // face. Both are arguments about the viewer rather than about the subject —
   // where he lands against everyone, and what to do about it — and neither
   // reads while a face is still competing for the eye.
-  if (beat.beat.kind === "card") drawCard(ctx, beat, W, H);
+  if (beat.beat.kind === "card") drawCard(ctx, input, beat, t, W, H);
   if (beat.beat.kind === "curve") drawCurve(ctx, beat, t, W, H, input.name);
   if (beat.beat.kind === "search") drawSearchBar(ctx, beat, t, W, H);
   // The caption is drawn on every beat including the card. It collided with the
@@ -756,6 +759,34 @@ function beatProgress(beat: TimedBeat, t: number): number {
   return clamp01((t - beat.start) / Math.max(0.001, beat.duration * 0.62));
 }
 
+/**
+ * The largest font size at which `text` fits `maxWidth`, as a ready font string.
+ *
+ * Canvas has no shrink-to-fit, so every fixed font size in this renderer is a
+ * bet that the longest string it will ever be handed is the one that was on
+ * screen when the number was chosen. That bet loses quietly: the text does not
+ * wrap or error, it just draws past the edge of the frame and the ends are gone.
+ *
+ * Steps down a point at a time rather than solving for the scale, because
+ * measureText is not exactly linear in the font size — kerning and hinting move
+ * — and a computed size can still overflow by a pixel or two. Twenty-odd
+ * measureText calls on one short string, once per frame, is nothing.
+ */
+export function fitFont(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  max: number,
+  min: number,
+  font: (px: number) => string,
+): string {
+  for (let px = Math.round(max); px > min; px--) {
+    ctx.font = font(px);
+    if (ctx.measureText(text).width <= maxWidth) return font(px);
+  }
+  return font(min);
+}
+
 // How much of the frame the photograph keeps once the card is up.
 const CARD_PHOTO = 0.3;
 
@@ -763,6 +794,24 @@ const CARD_PHOTO = 0.3;
 // itself has to finish above the safe area, and at the old 46px they ran 120px
 // past it.
 const CARD_ROW = 40;
+
+/**
+ * How far the card has settled at time t, 0..1.
+ *
+ * Keyed to the FIRST card beat rather than the current one, because there are
+ * two — the verdict and the ceiling — and each running its own entrance meant
+ * the same move played twice with a cut back to full screen in between. The card
+ * is one state narrated over two sentences, so the move belongs to the state.
+ *
+ * Shared by the photograph's travel and the card's own fade so the two cannot
+ * drift apart: the card used to draw at full opacity from its first frame, on
+ * top of a photograph still on its way up, which is a page of white text over a
+ * face for a third of a second.
+ */
+function cardSettle(input: RundownInput, beat: TimedBeat, t: number): number {
+  const first = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
+  return smoother(clamp01((t - first.start) / Math.max(0.001, first.duration * 0.45)));
+}
 
 // ---------------------------------------------------------------------------
 // The scorecard: the face at the top, everything measured underneath it.
@@ -778,7 +827,14 @@ const CARD_ROW = 40;
 // a figure the voice never mentioned invites the viewer to wonder what else was
 // left out.
 // ---------------------------------------------------------------------------
-function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: number): void {
+function drawCard(
+  ctx: CanvasRenderingContext2D,
+  input: RundownInput,
+  beat: TimedBeat,
+  t: number,
+  W: number,
+  H: number,
+): void {
   const card = beat.beat.card;
   if (!card) return;
 
@@ -786,10 +842,37 @@ function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: 
   ctx.save();
   ctx.textAlign = "center";
 
+  // The card arrives WITH the photograph, not before it.
+  //
+  // It was drawn at full opacity from its first frame, which put a page of
+  // white text across a face that was still on its way up to the top of the
+  // frame. That is the transition that looked wrong: not the move, but the two
+  // halves of it disagreeing about when the move had happened. Fading on the
+  // same curve costs one multiply and makes the card look like it is being
+  // revealed by the photograph moving rather than dropped on top of it.
+  //
+  // Held back a little further than the photograph — text arriving under a
+  // frame that has already stopped moving reads as settled; text arriving into
+  // a moving frame reads as a mistake.
+  const settle = cardSettle(input, beat, t);
+  ctx.globalAlpha = clamp01((settle - 0.55) / 0.4);
+
   // The verdict, big, because it is the conclusion and a name is what gets
   // quoted in a comment section.
-  ctx.font = "300 76px Fraunces, Georgia, serif";
+  //
+  // SHRUNK TO FIT, because the ladder holds strings of wildly different lengths
+  // and the font size was fixed. "Mid" is three characters and "Looksmaxxing
+  // final boss" is twenty-two; at a flat 76px the second one ran off both edges
+  // of a 720-wide frame and shipped as "ooksmaxxing final bos". A conclusion
+  // that is missing its first and last letter is not a conclusion.
+  //
+  // Shrinking rather than wrapping: the verdict is one phrase and one line, and
+  // a two-line verdict pushes the stats row into the region rows underneath it.
+  // Down to 44px, which still reads on a phone at arm's length — and if a rung
+  // is ever added that will not fit even there, the clamp keeps it inside the
+  // frame rather than letting it bleed.
   ctx.fillStyle = "#f7f7f2";
+  ctx.font = fitFont(ctx, card.verdict, W - SAFE_LEFT * 2, 76, 44, (px) => `300 ${px}px Fraunces, Georgia, serif`);
   ctx.fillText(card.verdict, W / 2, top + 74);
 
   // The three figures, in a row. Score first because it is the one they came
@@ -800,9 +883,9 @@ function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: 
     ["CEILING", card.potential.toFixed(1)],
     ["TOP", `${Math.max(1, Math.round(100 - card.percentile))}%`],
   ];
-  const colW = W / 3;
+  const statW = W / 3;
   stats.forEach(([label, value], i) => {
-    const cx = colW * i + colW / 2;
+    const cx = statW * i + statW / 2;
     ctx.font = "500 14px Inter, Arial, sans-serif";
     ctx.letterSpacing = "3px";
     ctx.fillStyle = "#7f8682";
@@ -815,33 +898,52 @@ function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: 
 
   // The regions, top of the face to the bottom — the same order the video just
   // walked in, so the card reads as a recap rather than as a second opinion.
-  let y = top + 238;
-  const left = W * 0.12;
-  const right = W * 0.88;
+  //
+  // TWO COLUMNS, because one did not fit and the overflow was being dropped.
+  // The loop broke as soon as a row would have reached the caption, and with
+  // eight regions at a 40px pitch that happened on the fifth: the card called
+  // itself the full breakdown and showed the top half of the face. Nothing
+  // errored — the rows simply stopped, in the order they were listed, so it was
+  // always the jaw and the chin that vanished.
+  //
+  // Down the left column first and then down the right, rather than left-right
+  // in pairs. The regions are in face order and reading them in face order is
+  // the point; a viewer scanning for the jaw looks down a column, not across.
+  const rowsTop = top + 232;
+  const cols = 2;
+  const perCol = Math.ceil(card.rows.length / cols);
+  const gutter = 24;
+  const colW = (W - SAFE_LEFT * 2 - gutter) / cols;
   ctx.textAlign = "left";
-  for (const row of card.rows) {
-    if (y > H - SAFE_BOTTOM - 200) break; // never collide with the caption
-    ctx.font = "500 24px Inter, Arial, sans-serif";
+  card.rows.forEach((row, i) => {
+    const col = Math.floor(i / perCol);
+    const y = rowsTop + (i % perCol) * CARD_ROW;
+    // Still guarded. Two columns is enough for the eight regions this engine
+    // has; a ninth would silently start a third column that has nowhere to go,
+    // and dropping it is better than drawing it over the caption.
+    if (col >= cols || y > H - SAFE_BOTTOM - 130) return;
+    const x0 = SAFE_LEFT + col * (colW + gutter);
+    const x1 = x0 + colW;
+
+    ctx.font = "500 21px Inter, Arial, sans-serif";
     ctx.fillStyle = "#c9d1cd";
-    ctx.fillText(row.label, left, y);
+    ctx.fillText(row.label, x0, y);
 
     // A bar as well as a number. The number is the fact; the bar is what makes
     // one region visibly the weak one at a glance, which is the thing a viewer
     // screenshots to argue about.
-    const barX = left + 190;
-    const barW = right - barX - 74;
+    const barX = x0 + 128;
+    const barW = x1 - barX - 46;
     ctx.fillStyle = "rgba(247,247,242,0.12)";
-    ctx.fillRect(barX, y - 14, barW, 8);
+    ctx.fillRect(barX, y - 13, barW, 7);
     ctx.fillStyle = row.score >= 6.5 ? "#8ff3e0" : row.score <= 4.5 ? "#e8a17a" : "#f7f7f2";
-    ctx.fillRect(barX, y - 14, barW * clamp01(row.score / 10), 8);
+    ctx.fillRect(barX, y - 13, barW * clamp01(row.score / 10), 7);
 
     ctx.textAlign = "right";
-    ctx.font = "500 24px Inter, Arial, sans-serif";
     ctx.fillStyle = "#f7f7f2";
-    ctx.fillText(row.score.toFixed(1), right, y);
+    ctx.fillText(row.score.toFixed(1), x1, y);
     ctx.textAlign = "left";
-    y += CARD_ROW;
-  }
+  });
   ctx.restore();
 }
 
@@ -1292,9 +1394,38 @@ function drawCaption(
   // behind it.
   const perPage = Math.max(1, CAPTION_LINES_PER_PAGE);
   const pageCount = Math.max(1, Math.ceil(layout.lineCount / perPage));
-  const progress = clamp01((t - beat.start) / Math.max(0.001, beat.duration));
-  const page = Math.min(pageCount - 1, Math.floor(progress * pageCount));
-  const within = clamp01(progress * pageCount - page);
+  // A small lead, because a caption that lands exactly with the voice reads as
+  // late. The word is heard before it is read — the eye needs the glyph to
+  // already be there when the sound arrives, not to appear on the same frame.
+  // A tenth of a second is under the threshold at which anything looks early and
+  // over the threshold at which it stops looking behind.
+  const LEAD = 0.12;
+  const progress = clamp01((t - beat.start + LEAD) / Math.max(0.001, beat.duration));
+
+  // Pages divide the beat BY WORD, not evenly.
+  //
+  // Evenly is what this did, and it is wrong whenever the last page is a partial
+  // one — which is most beats, since a line break rarely lands on a page
+  // boundary. A five-line caption is three pages, and giving the one-line third
+  // page the same third of the beat as the two full pages ahead of it means both
+  // full pages are hurried through and the tail sits there. The flip has to
+  // happen where the voice reaches those words.
+  const pageWords: number[] = new Array(pageCount).fill(0);
+  for (const w of layout.words) pageWords[Math.floor(w.line / perPage)]++;
+  const totalWords = pageWords.reduce((a, n) => a + n, 0) || 1;
+
+  let page = pageCount - 1;
+  let within = 1;
+  let cursor = 0;
+  for (let i = 0; i < pageCount; i++) {
+    const share = pageWords[i] / totalWords;
+    if (progress < cursor + share || i === pageCount - 1) {
+      page = i;
+      within = share > 0 ? clamp01((progress - cursor) / share) : 1;
+      break;
+    }
+    cursor += share;
+  }
 
   const firstLine = page * perPage;
   const visible = layout.words.filter((w) => w.line >= firstLine && w.line < firstLine + perPage);
@@ -1459,6 +1590,16 @@ function clip(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
   return `${out}…`;
 }
 
+// The address, on screen the whole way through.
+//
+// It was CENTRED, which on a 720-wide frame puts it directly under the chin —
+// the one column a measurement line is most likely to be drawn down. A jaw
+// width, a philtrum, a midline: all of them run through the middle of the
+// bottom third, and all of them arrived on top of the wordmark.
+//
+// So it tucks in under the score column instead, right-aligned to the same edge
+// the number and its band already use. Nothing is measured out there, the three
+// items read as one stack, and the centre of the frame is left to the face.
 function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number): void {
   ctx.save();
   ctx.font = "500 16px Inter, Arial, sans-serif";
@@ -1467,7 +1608,10 @@ function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number): voi
   const name = "truemax";
   const tld = ".app";
   const total = ctx.measureText(name).width + ctx.measureText(tld).width;
-  const x = (W - total) / 2;
+  // Right-aligned by hand rather than with textAlign, because the wordmark is
+  // two differently coloured draws and the second has to start where the first
+  // ends.
+  const x = W - SAFE_RIGHT - total;
   const y = H - SAFE_BOTTOM + 26;
   ctx.globalAlpha = 0.62;
   ctx.fillStyle = "#f5f5f1";

@@ -146,6 +146,89 @@ export async function decodeVoice(voice: ArrayBuffer | null): Promise<AudioBuffe
 }
 
 /**
+ * Where the speech actually starts and stops inside the decoded file.
+ *
+ * THIS IS THE SYNC BUG, and it is not in the timeline maths.
+ *
+ * fitTimeline allocates the beats across the duration it is given, and it was
+ * being given `voice.duration` — the length of the FILE. A synthesised mp3 is
+ * not wall-to-wall speech: the decoder's own priming adds a few tens of
+ * milliseconds at the front, and the synthesiser leaves a tail of silence at the
+ * end, which for a minute-long read is commonly half a second to a second.
+ *
+ * Fitting to the file stretches every beat by that ratio. The stretch is
+ * invisible at the top and compounds: by the middle of the video the caption is
+ * a few tenths behind the voice, and by the card it is nearly a full second —
+ * which is exactly the amount, and exactly the shape, of the lateness that was
+ * being reported after the word-share fix. The words were being shared out
+ * correctly across a span that was too long.
+ *
+ * So the span of actual sound is measured and the beats are fitted to THAT. The
+ * audio track is untouched — the file still plays start to finish, silence and
+ * all — only the timeline stops pretending the silence is speech.
+ *
+ * Peak per window rather than RMS: speech is spiky, and a window holding one
+ * consonant has a low mean and an unmistakable peak. The threshold is relative
+ * to the track's own peak so it works on a quiet render and an loud one alike,
+ * with an absolute floor so a track of pure digital silence does not resolve to
+ * "all of it is speech".
+ */
+export function speechSpan(buffer: AudioBuffer): { start: number; end: number } {
+  const whole = { start: 0, end: buffer.duration };
+  const data = buffer.getChannelData(0);
+  if (!data.length) return whole;
+
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = Math.abs(data[i]);
+    if (v > peak) peak = v;
+  }
+  // Nothing audible in the file at all; there is no span to find and the caller
+  // is better off with the file length than with zero.
+  if (peak < 0.02) return whole;
+
+  // 20ms windows. Long enough that a single zero crossing inside a vowel does
+  // not read as silence, short enough that the answer is precise to well under
+  // the tolerance anybody can see.
+  const window = Math.max(1, Math.round(buffer.sampleRate * 0.02));
+  const threshold = Math.max(0.008, peak * 0.035);
+
+  let first = -1;
+  let last = -1;
+  for (let start = 0; start < data.length; start += window) {
+    let loud = 0;
+    const end = Math.min(data.length, start + window);
+    for (let i = start; i < end; i++) {
+      const v = Math.abs(data[i]);
+      if (v > loud) loud = v;
+    }
+    if (loud >= threshold) {
+      if (first < 0) first = start;
+      last = end;
+    }
+  }
+  if (first < 0 || last <= first) return whole;
+
+  // A little air either side. The threshold necessarily clips the quietest
+  // fraction of the first and last phoneme, and a timeline that starts a hair
+  // early is invisible where one that starts a hair late is the whole complaint.
+  const pad = buffer.sampleRate * 0.04;
+  const span = {
+    start: Math.max(0, (first - pad) / buffer.sampleRate),
+    end: Math.min(buffer.duration, (last + pad) / buffer.sampleRate),
+  };
+
+  // A sanity floor, not a tuning knob. If the detector claims that less than
+  // three quarters of a narration file is speech, the more likely explanation is
+  // that the detector is wrong about this file than that the synthesiser
+  // returned a quarter of a minute of silence — and being wrong in that
+  // direction compresses the whole video into the first half of its own audio,
+  // which is far worse than the drift this is fixing.
+  if (span.end - span.start < buffer.duration * 0.75) return whole;
+  return span;
+}
+
+/**
  * Mix the voice track and every cue into one buffer.
  *
  * The voice is decoded from whatever the synthesiser returned; the effects are

@@ -1,6 +1,6 @@
 import { percentileLine } from "./templates.js";
 import { verdictFor } from "../engine/analysisMode.js";
-import { loadVerdictTone } from "../engine/analysisMode.js";
+import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import type { Report } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ export function renderScoreStrip(report: Report): void {
   const pane = document.querySelector<HTMLElement>(".pane-photo");
   if (!pane) return;
 
-  const verdict = verdictFor(report, loadVerdictTone() ?? "kind");
+  const verdict = verdictFor(report, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   const strip = document.createElement("div");
   strip.className = "scorestrip";
   strip.id = "scorestrip";
