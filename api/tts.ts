@@ -56,6 +56,16 @@ const DEFAULT_VOICE = "pNInz6obpgDQGcFmaJgB";
 // opposite way to a chat endpoint.
 const DEFAULT_MODEL = "eleven_multilingual_v2";
 
+// How fast the narrator talks, as a multiplier on ElevenLabs' default pace.
+// Raising it shortens the whole rundown, because the visual timeline is fitted
+// to the audio rather than the other way round.
+//
+// 1.12 is a deliberate ceiling. Past about 1.2 the delivery starts clipping its
+// own pauses, and the beat of air spokenSeconds leaves at the end of each line
+// stops landing — which is what makes a rundown read as a list being recited
+// rather than as somebody talking.
+const VOICE_SPEED = 1.12;
+
 export async function POST(request: Request): Promise<Response> {
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin narration is not allowed." }, 403);
@@ -102,7 +112,19 @@ export async function POST(request: Request): Promise<Response> {
           // narration that varies its delivery without drifting off the voice.
           // A completely stable setting reads every sentence identically, which
           // is the station-announcement problem again, one layer down.
-          voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.15 },
+          //
+          // speed is a native delivery control, not a resample: the voice talks
+          // faster, it does not get played faster, so nothing shifts in pitch.
+          // Doing this here rather than with an ffmpeg atempo pass afterwards is
+          // also what keeps the video in sync for free — rundownExport fits the
+          // visual beats onto the REAL audio duration, so a shorter read
+          // compresses the whole rundown to match and nothing else changes.
+          voice_settings: {
+            stability: 0.4,
+            similarity_boost: 0.8,
+            style: 0.15,
+            speed: VOICE_SPEED,
+          },
         }),
       },
     );

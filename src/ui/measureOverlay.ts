@@ -167,6 +167,75 @@ export function hasOverlay(metricId: string): boolean {
   return metricId in RECIPES;
 }
 
+/**
+ * The box, in NORMALIZED coordinates, that a metric's overlay actually touches.
+ *
+ * The rundown crops to a band of the face chosen by region — eyes, jaw, chin —
+ * and then composites this overlay through the same rectangle. Those are two
+ * independent guesses at the same question and they disagreed: a chin-width
+ * span runs the full width of the jaw, the chin band crops to nine tenths of
+ * the face width, and the measurement ran off the right edge of the frame with
+ * its label outside the picture. A viewer sees a line leaving the screen, which
+ * reads as a bug in the measurement rather than in the framing.
+ *
+ * So the crop asks the overlay where it is going to draw instead of assuming.
+ * Returns undefined when the metric has no recipe — the fallback lights a
+ * region's landmarks, which are inside the band by construction.
+ */
+export function measurementBounds(
+  metric: ScoredMetric,
+  landmarks: NormalizedLandmark[],
+): { x0: number; y0: number; x1: number; y1: number } | undefined {
+  const recipe = RECIPES[metric.def.id];
+  if (!recipe) return undefined;
+  // Resolved in normalized space (width and height of 1), which is the same
+  // resolution the renderer does at photo scale — mid-markers included, since a
+  // midpoint of two off-frame points can itself be off frame.
+  const P = (ref: number | Pt2): Pt2 => {
+    if (typeof ref === "number") {
+      const l = landmarks[ref];
+      return l ? { x: l.x, y: l.y } : { x: 0.5, y: 0.5 };
+    }
+    if (isMidMarker(ref)) {
+      const a = P(-1 - ref.x);
+      const b = P(-1 - ref.y);
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    }
+    return ref;
+  };
+
+  let x0 = 1;
+  let y0 = 1;
+  let x1 = 0;
+  let y1 = 0;
+  let any = false;
+  const add = (p: Pt2) => {
+    any = true;
+    x0 = Math.min(x0, p.x);
+    y0 = Math.min(y0, p.y);
+    x1 = Math.max(x1, p.x);
+    y1 = Math.max(y1, p.y);
+  };
+  for (const seg of recipe(metric)) {
+    if (seg.kind === "span") {
+      add(P(seg.a));
+      add(P(seg.b));
+    } else if (seg.kind === "angle") {
+      add(P(seg.v));
+      add(P(seg.a));
+      add(P(seg.b));
+    } else if (seg.kind === "rule") {
+      // A horizontal rule spans the frame; only its height constrains the crop.
+      const p = P(seg.y);
+      add({ x: x1 === 0 ? p.x : x1, y: p.y });
+      add({ x: x0 === 1 ? p.x : x0, y: p.y });
+    } else {
+      add(P(seg.x));
+    }
+  }
+  return any ? { x0, y0, x1, y1 } : undefined;
+}
+
 // Every measurement row is tappable, so every row has to draw something. Most
 // have a bespoke recipe above; the rest — chiefly the side-profile metrics,
 // whose points live in a different image entirely — fall back to lighting the

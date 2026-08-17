@@ -84,13 +84,33 @@ test("it opens on a strength", () => {
   assert.equal(firstMetric.positive, true);
 });
 
-test("it does not stack all the compliments then all the insults", () => {
+test("strengths run together, then one clean turn into the flaws", () => {
+  // This test used to assert the OPPOSITE — that the signs must alternate
+  // early, on the reasoning that all-praise-then-all-criticism is a bait and
+  // switch. That reasoning was about a script whose sentences were "excellent
+  // canthal tilt" and "weak brow tilt": when every line is the same length and
+  // the same shape, alternation is the only thing giving the video a rhythm.
+  //
+  // It is not the only thing any more. The bait-and-switch risk was that the
+  // turn is unannounced — a viewer who has heard four compliments does not know
+  // the fifth line is where it changes. So the turn is announced now, out loud,
+  // in the copy: "Now the flaws." A stated pivot is a structure. An unstated one
+  // was the thing worth preventing, and the guard below is on the pivot rather
+  // than on the ordering it used to stand in for.
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
-  const signs = beats.filter((b) => b.kind === "metric").map((b) => b.positive);
-  // At least one sign change in the first four: a video that opens with four
-  // compliments and closes with four insults is a bait and switch.
-  const early = signs.slice(0, 4);
-  assert.ok(new Set(early).size > 1, `first four all ${early[0]}`);
+  const metrics = beats.filter((b) => b.kind === "metric");
+  const signs = metrics.map((b) => b.positive);
+
+  // Exactly one sign change: strengths, turn, flaws. Bouncing back to a
+  // compliment after the turn is what makes a rundown feel arbitrary.
+  const changes = signs.filter((s, i) => i > 0 && s !== signs[i - 1]).length;
+  assert.equal(changes, 1, `${changes} tone changes: ${signs.join(",")}`);
+
+  // And the turn must be audible. The viewer is told the video has changed
+  // direction rather than left to work it out from the adjectives.
+  const turn = metrics.find((b, i) => i > 0 && !b.positive && metrics[i - 1].positive);
+  assert.ok(turn, "no turn from strengths into flaws");
+  assert.match(turn.line, /^Now the flaws\./);
 });
 
 test("an impossible measurement never gets a sentence", () => {
@@ -172,20 +192,51 @@ test("a thin scan blocks the reel", () => {
   assert.ok(blockers.some((b) => /not enough for a breakdown/.test(b)));
 });
 
-test("the running order is strictly anatomical, tone is balanced by selection", () => {
-  // The bug this replaces: metrics were sorted down the face and then zipped
-  // good/bad, which silently undid the sort and bounced the viewer around the
-  // face. Order must be monotonic down REGION_ORDER, with no exceptions.
+test("the running order is anatomical WITHIN each act", () => {
+  // The bug this originally caught: metrics were sorted down the face and then
+  // zipped good/bad, which silently undid the sort and bounced the viewer
+  // around the face. That is still the thing being prevented — on a format
+  // where the camera crops to the region being measured, bouncing is the most
+  // visible fault in the video.
+  //
+  // What changed is the scope. The script now has acts — strengths, then the
+  // flaws, then the profile — and the eye is expected to travel back to the top
+  // of the face ONCE, at the turn, which the copy announces out loud. So the
+  // guard is per-act: monotonic down REGION_ORDER inside each run of the same
+  // tone, and no constraint across the boundary between them.
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
   const order = ["eyes", "midface", "nose", "lips", "jaw", "chin", "proportions", "symmetry"];
-  const seen = beats.filter((b) => b.kind === "metric").map((b) => order.indexOf(b.region!));
-  for (let i = 1; i < seen.length; i++) {
-    assert.ok(seen[i] >= seen[i - 1], `bounced back up the face at beat ${i}: ${seen.join(",")}`);
+  const metrics = beats.filter((b) => b.kind === "metric");
+  for (let i = 1; i < metrics.length; i++) {
+    if (metrics[i].positive !== metrics[i - 1].positive) continue; // the announced turn
+    const [prev, here] = [order.indexOf(metrics[i - 1].region!), order.indexOf(metrics[i].region!)];
+    assert.ok(here >= prev, `bounced up the face at beat ${i}: ${metrics[i - 1].region}→${metrics[i].region}`);
   }
   // Balance is still there, it just comes from which metrics were chosen.
-  const metrics = beats.filter((b) => b.kind === "metric");
   assert.ok(metrics.some((b) => b.positive), "no strengths chosen");
   assert.ok(metrics.some((b) => !b.positive), "no weaknesses chosen");
+});
+
+test("every spoken measurement carries its number", () => {
+  // The whole correction. "Excellent canthal tilt" is an opinion; "a canthal
+  // tilt of 6.4 degrees" is a reading, and the difference between those two
+  // sentences is the difference between this and a horoscope. A grouping change
+  // silently dropped every figure once already, and nothing caught it.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
+  for (const b of beats.filter((b) => b.kind === "metric")) {
+    assert.match(b.line, /\d/, `no figure in: ${b.line}`);
+  }
+});
+
+test("no two sentences in a row open the same way", () => {
+  // Three consecutive lines beginning "There is also" is what the last version
+  // shipped, and it is the single loudest way a generated script announces that
+  // it was generated.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
+  const opens = beats.filter((b) => b.kind === "metric").map((b) => b.line.split(/\s+/).slice(0, 3).join(" "));
+  for (let i = 1; i < opens.length; i++) {
+    assert.notEqual(opens[i], opens[i - 1], `repeated opener at beat ${i}: "${opens[i]}"`);
+  }
 });
 
 test("the voice track never reads a parenthetical or a colon aloud", () => {
