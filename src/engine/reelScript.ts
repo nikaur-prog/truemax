@@ -370,9 +370,21 @@ export function reelBlockers(report: Report, offAxisDeg: number, jawWarnDeg: num
       `Capture is ${offAxisDeg.toFixed(0)}° off level; jaw and chin cannot be stated from it.`,
     );
   }
-  const implausible = report.metrics.filter((m) => m.implausible);
-  if (implausible.length) {
-    blockers.push(`${implausible.length} measurement(s) came back anatomically impossible.`);
+  // A measurement that DECLINED is not a measurement that lied.
+  //
+  // foreheadRatio refuses on a cap, a fringe, or hair the same value as the
+  // skin — that refusal is the hairline detector working, and it says so about
+  // the photograph rather than about the mesh. Counting it here blocked a
+  // rundown on any face wearing a hat, and reported the reason as a tilt.
+  //
+  // A landmark metric cannot decline: if one is unmeasurable the mesh itself is
+  // broken and nothing built on it can be trusted, which is why analyzeFront
+  // throws outright rather than reaching this function. So what is left to
+  // catch here is the plausibility guard — a value that WAS produced and is
+  // anatomically impossible.
+  const impossible = report.metrics.filter((m) => m.implausible && Number.isFinite(m.value));
+  if (impossible.length) {
+    blockers.push(`${impossible.length} measurement(s) came back anatomically impossible.`);
   }
   const usable = report.metrics.filter((m) => !m.implausible && Math.abs(m.zEff) >= NOTABLE_Z);
   if (usable.length < 6) {

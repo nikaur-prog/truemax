@@ -231,3 +231,35 @@ test("the spoken-length estimate is usable for planning footage", () => {
   assert.ok(s > 6.5 && s < 9, `twenty words estimated at ${s.toFixed(1)}s`);
   assert.ok(spokenSeconds(twenty + " more") > s, "a longer line must estimate longer");
 });
+
+// ---------------------------------------------------------------------------
+// A declined measurement must not block a rundown.
+//
+// Marlon in a baseball cap: the hairline detector correctly refused to measure
+// a forehead it could not see, that refusal was counted as "anatomically
+// impossible", and the rundown was blocked and reported as a tilt — of a
+// photograph whose measured symmetry was among the best of the set.
+// ---------------------------------------------------------------------------
+test("a metric that declined to measure does not block a rundown", () => {
+  const notable = Array.from({ length: 8 }, (_, i) => ({
+    def: { id: `m${i}` },
+    value: 1,
+    zEff: 1.5,
+  }));
+  const declined = { def: { id: "foreheadRatio" }, value: Number.NaN, implausible: true };
+  const report = { metrics: [...notable, declined] } as unknown as Report;
+  assert.deepEqual(reelBlockers(report, 0, 8), []);
+});
+
+test("a measurement that was taken and is impossible still blocks", () => {
+  const notable = Array.from({ length: 8 }, (_, i) => ({
+    def: { id: `m${i}` },
+    value: 1,
+    zEff: 1.5,
+  }));
+  const impossible = { def: { id: "gonialProxy" }, value: 300, implausible: true };
+  const report = { metrics: [...notable, impossible] } as unknown as Report;
+  const blockers = reelBlockers(report, 0, 8);
+  assert.equal(blockers.length, 1);
+  assert.match(blockers[0], /anatomically impossible/);
+});
