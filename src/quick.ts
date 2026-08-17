@@ -477,6 +477,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
       <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
       <button class="btn pri" id="q-rundown-download">Rundown MP4</button>
+      <button class="btn pri" id="q-card-download">Score card PNG</button>
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>`;
@@ -527,6 +528,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
+  document.getElementById("q-card-download")!.onclick = () => void downloadScoreCard(r);
   const saveBtn = document.getElementById("q-save-face") as HTMLButtonElement | null;
   if (saveBtn) {
     saveBtn.onclick = async () => {
@@ -683,6 +685,52 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
       window.setTimeout(() => {
         btn.disabled = false;
         btn.textContent = idle;
+      }, 2200);
+    }
+  }
+}
+
+// The endcard.
+//
+// Eighteen seconds of the operator's own footage and then this, which makes it
+// the cheapest of the four formats by a distance — the clips already exist and
+// this card is the entire product placement.
+//
+// The name field doubles as the caption when it is filled in, so a before/after
+// pair can be labelled BEFORE and AFTER without a second control. Left empty it
+// simply renders without one.
+async function downloadScoreCard(r: Report): Promise<void> {
+  if (!last) return;
+  const btn = document.getElementById("q-card-download") as HTMLButtonElement | null;
+  const caption = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim();
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Rendering…";
+  }
+  try {
+    const { renderScoreCard } = await import("./ui/scoreCard.js");
+    const canvas = document.createElement("canvas");
+    renderScoreCard(canvas, last.photo, last.lm, { report: r, caption: caption || undefined });
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("The card would not encode.");
+    const outcome = await saveFile(blob, `truemax-card-${Date.now()}.png`);
+    if (btn) {
+      btn.textContent =
+        outcome === "cancelled"
+          ? "Not saved — tap to retry"
+          : outcome === "shared"
+            ? "Sent to your share sheet"
+            : "Card downloaded";
+    }
+    if (outcome !== "cancelled") track("quick-card-downloaded");
+  } catch (error) {
+    console.error(error);
+    if (btn) btn.textContent = "Card unavailable here";
+  } finally {
+    if (btn) {
+      window.setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Score card PNG";
       }, 2200);
     }
   }
