@@ -1069,8 +1069,17 @@ body.funnel-open { overflow: hidden; }
 /* The name the rundown opens on. Sits directly above the export row and inside
    the same padding, so it reads as part of that block rather than as another
    field in the analysis above it. */
-.q-namerow { padding: 14px 28px 0; display: flex; gap: 10px; }
-.q-namerow .q-input { flex: 1; }
+.q-namerow { padding: 14px 28px 0; display: flex; gap: 12px; align-items: start; }
+/* Each field is a labelled column now. The label carries the meaning, so the
+   placeholder can be a short example instead of a sentence that gets clipped. */
+.q-namefield { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.q-namefield > span {
+  font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--mut); font-weight: 600;
+}
+.q-namefield > span i { font-style: normal; opacity: .62; letter-spacing: .6px; }
+.q-namefield .q-input { width: 100%; }
+.q-namefield small { font-size: 11.5px; line-height: 1.35; color: var(--mut); }
 
 .q-actions { display: flex; gap: 10px; padding: 16px 28px 22px; border-top: 1px solid var(--line); margin-top: 14px; }
 .q-actions .btn { flex: 1; }

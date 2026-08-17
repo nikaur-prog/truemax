@@ -598,14 +598,29 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
          without a name. Asked for here rather than in a prompt() at click time:
          a modal that appears after you have committed to a sixty-second render
          is a modal you dismiss by accident. -->
+    <!-- Labelled above rather than explained inside.
+
+         Both of these carried their entire meaning in a placeholder longer than
+         the box that held it, so they read as "Name for the rundow" and
+         "Earlier score for a t" — and a placeholder is the wrong place for the
+         only explanation anyway, because it vanishes the moment somebody types
+         into the field it was explaining. -->
     <div class="q-namerow">
-      <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
-             placeholder="Name for the rundown — e.g. LeBron James" autocomplete="off" />
+      <label class="q-namefield">
+        <span>Whose face is this?</span>
+        <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
+               placeholder="LeBron James" autocomplete="off" />
+        <small>Used in the rundown's opening line.</small>
+      </label>
       <!-- Turns the score card into a before/after. Left empty the card shows
            now-versus-potential, which is the FIRST card in a glow-up video;
            filled in it shows before-versus-now, which is the last one. -->
-      <input id="q-card-before" class="q-input" type="number" min="0" max="10" step="0.1"
-             placeholder="Earlier score for a before/after card — optional" autocomplete="off" />
+      <label class="q-namefield">
+        <span>Their earlier score <i>(optional)</i></span>
+        <input id="q-card-before" class="q-input" type="number" min="0" max="10" step="0.1"
+               placeholder="4.5" autocomplete="off" />
+        <small>Makes the card a before/after. Empty shows now vs potential.</small>
+      </label>
     </div>
 
     <div class="q-actions">
