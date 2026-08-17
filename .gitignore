@@ -16,3 +16,9 @@ calib/*
 !calib/README.md
 .reel-cache/
 .vercel
+
+# Vite's dependency-optimiser cache. Written into the repo root whenever the
+# dev server runs, including from the headless frame-check harness, so it turns
+# up as an untracked directory after any session that looked at a rendered
+# frame. A build cache, not source.
+.vite/
