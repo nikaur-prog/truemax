@@ -391,9 +391,13 @@ export function drawRundownFrame(
   // where he lands against everyone, and what to do about it — and neither
   // reads while a face is still competing for the eye.
   if (beat.beat.kind === "card") drawCard(ctx, beat, W, H);
-  if (beat.beat.kind === "curve") drawCurve(ctx, beat, t, W, H);
+  if (beat.beat.kind === "curve") drawCurve(ctx, beat, t, W, H, input.name);
   if (beat.beat.kind === "search") drawSearchBar(ctx, beat, t, W, H);
-  drawCaption(ctx, beat, t, W, H);
+  // No caption over the card. The card already prints the verdict and the
+  // number in 76px and 56px type, so the caption is saying the same words a
+  // third time — and it is drawn in the middle of the frame, straight through
+  // the region rows. Two of the eight regions were unreadable behind it.
+  if (beat.beat.kind !== "card") drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
 }
@@ -508,6 +512,7 @@ function drawCurve(
   t: number,
   W: number,
   H: number,
+  name: string,
 ): void {
   const p = beatProgress(beat, t);
   const pct = clamp01((beat.beat.percentile ?? 50) / 100);
@@ -595,9 +600,14 @@ function drawCurve(
     ctx.font = "600 22px Inter, Arial, sans-serif";
     ctx.letterSpacing = "0px";
     ctx.fillStyle = "#f7f7f2";
+    // The subject's own name, not "HIM" — which was hardcoded, so every woman
+    // measured by this got a masculine pronoun printed on the one frame the
+    // whole video builds to. The name is also simply better: it is the person
+    // the viewer has been looking at for a minute.
+    const label = name.trim().split(/\s+/)[0]?.toUpperCase() || "THIS FACE";
     // Kept inside the frame when the marker is far out on either tail.
-    const label = `HIM`;
-    const lx = Math.max(left + 26, Math.min(right - 26, x));
+    const half = ctx.measureText(label).width / 2 + 12;
+    const lx = Math.max(left + half, Math.min(right - half, x));
     ctx.fillText(label, lx, yOf(z) - 44);
   }
   ctx.restore();
