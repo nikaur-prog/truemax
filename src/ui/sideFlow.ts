@@ -1,3 +1,4 @@
+import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
 import { faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
@@ -559,6 +560,15 @@ function mountVerify(
 }
 
 function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
+  // Resolved while the dialog is still being read rather than at the moment of
+  // the tap, so the confirmation never waits on a network round trip to decide
+  // which sentence to print. Defaults to the signed-out wording if the check
+  // has not landed yet, which is the safe direction: it names a condition that
+  // is already met rather than promising something conditional on nothing.
+  let signedIn = false;
+  void currentAccessToken().then((token) => {
+    signedIn = Boolean(token);
+  });
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "side-feedback-backdrop";
@@ -587,8 +597,18 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
         return;
       }
       const dialog = backdrop.querySelector<HTMLElement>(".side-feedback-dialog")!;
+      // Telling somebody who is already signed in that we will send it "after
+      // you are signed in" reads as a task they still owe us, and the only
+      // thing they can do about it is the thing they have already done.
+      //
+      // Note the tense is the same in both: nothing has been sent at this
+      // point either way — the upload happens on confirm, a few taps later.
+      // What differs is what it is waiting FOR, so that is what the sentence
+      // says. Claiming "sent" here would be a nicer sentence about a thing that
+      // has not happened yet.
+      const waiting = signedIn ? "when you confirm" : "once you are signed in";
       dialog.innerHTML = `<span class="side-feedback-thanks" aria-live="polite">Thank you.</span>
-        <p>We’ll share it privately after you are signed in.</p>`;
+        <p>We’ll share it privately ${waiting}.</p>`;
       window.setTimeout(() => {
         backdrop.remove();
         resolve(true);

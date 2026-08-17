@@ -160,6 +160,17 @@ export function spreadLine(sex: Sex): string {
 // count. Deriving it here rather than hardcoding the top score means that if
 // REFERENCE_N ever grows and statedPct earns another digit, the ladder gains
 // a real rung instead of silently keeping a stale ceiling.
+// `capped` marks a rung the reference sample cannot resolve past — the honest
+// reading is a bound rather than a count. That much is right and is why the
+// flag exists.
+//
+// What it does NOT license is a bound in the flattering direction. An 8.0 sits
+// at the 98.90th percentile, which is about 1 in 91 — slightly MORE common than
+// one in a hundred. The rung was rendered as "rarer than 1 in 100", turning a
+// rounding step into a claim stronger than the measurement, on the one number
+// people screenshot. Every other guard in this file rounds away from flattering
+// the reader; this one rounded toward it. The wording is fixed where it is
+// rendered, in scaleNote.ts, rather than by moving the cap.
 export const LADDER: Array<{ score: number; oneIn: number; capped: boolean }> = [5, 6, 7, 8].map(
   (score) => {
     const pct = aggregateScoreToPercentile(score);
