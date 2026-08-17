@@ -1,8 +1,9 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
-import { beatAt, typedFraction } from "../engine/rundownTimeline.js";
+import { beatAt } from "../engine/rundownTimeline.js";
 import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
+import { SPREAD } from "../engine/rarity.js";
 
 // ---------------------------------------------------------------------------
 // The rundown, one frame at a time.
@@ -98,7 +99,24 @@ const BAND: Record<RegionId, [number, number]> = {
 // rather than reasoned about — TikTok's caption block runs to roughly 20% and
 // Instagram's to roughly 18%, so this clears both with a little margin for the
 // taller phones where the safe area grows.
+// Measured from the published TikTok/Reels safe-zone template, on its own
+// 1080x1920 canvas, and divided by 1.5 for this frame's 720x1280:
+//
+//   top     270px -> 180   the handle, the "following/for you" tabs, the search
+//   bottom  335px -> 223   caption block, sound title, progress bar
+//   left     60px ->  40   thumb rest
+//   right   120px ->  80   the action rail, from about a third down
+//
+// SAFE_BOTTOM stays at 300 rather than dropping to the measured 223. The
+// template is the minimum that is not COVERED; a caption sitting one pixel
+// above a sound title is legible and still looks cramped, and taller phones
+// grow that zone. The extra 77px is breathing room, deliberately spent.
+//
+// SAFE_RIGHT likewise sits at 132 against a measured 80 — the action rail is
+// wider on the newer layout and its icons carry labels.
+const SAFE_TOP = 180;
 const SAFE_BOTTOM = 300;
+const SAFE_LEFT = 48;
 // The right-hand action rail. Only the bottom bar is wide enough to reach it.
 const SAFE_RIGHT = 132;
 
@@ -309,6 +327,39 @@ export function regionCrop(
     }
   }
 
+  // NEVER cut the face in half.
+  //
+  // The band table says which part of the face a beat is about, and a close-up
+  // is the point: framing the eyes means the ears leave the frame. But a band
+  // plus a floor is still only a guess at how much face there is, and on a
+  // photograph where the head fills more of the picture than usual the guess
+  // came out tighter than the head — chin off the bottom, crown off the top.
+  // A face cut off mid-forehead is the one framing fault a viewer reads as a
+  // broken renderer rather than as a choice.
+  //
+  // So the crop is grown until it holds the whole head, whatever the band asked
+  // for. HEAD_FIT below is deliberately under 1: a close-up may still crop the
+  // ears and the very top of the hair, which is what a close-up is. What it may
+  // not do is cut through the features.
+  const headW = faceW * 1.04;
+  const headH = faceH * (1 + CROWN) * 1.04;
+  const HEAD_FIT = 0.86;
+  if (sw < headW * HEAD_FIT || sh < headH * HEAD_FIT) {
+    sw = Math.max(sw, headW * HEAD_FIT, headH * HEAD_FIT * aspect);
+    sh = sw / aspect;
+  }
+
+  // Re-clamped after growing: everything above may have pushed the crop past
+  // the edge of the photograph, and drawing past the edge paints the void.
+  if (sw > photo.width) {
+    sw = photo.width;
+    sh = sw / aspect;
+  }
+  if (sh > photo.height) {
+    sh = photo.height;
+    sw = sh * aspect;
+  }
+
   return {
     x: Math.max(0, Math.min(photo.width - sw, cx - sw / 2)),
     y: Math.max(0, Math.min(photo.height - sh, cy - sh / 2)),
@@ -395,8 +446,39 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   if (beat.drawAt === undefined) return 0;
   // The figure arrives over the run-up to drawAt, so it COMPLETES on the click
   // rather than starting there. The sound is the measurement landing.
+  //
+  // The run-up is clamped to the beat's own start. drawAt sits 16% into the
+  // beat, so on a short one — a four-word hook, a sign-off — half a second of
+  // run-up began BEFORE the beat did, and the line was already part drawn on
+  // its first frame. Rare, and exactly the kind of thing that looks like the
+  // renderer is a frame out.
   const DRAW = 0.5;
-  return clamp01((t - (beat.drawAt - DRAW)) / DRAW);
+  const from = Math.max(beat.start, beat.drawAt - DRAW);
+  const span = Math.max(0.001, beat.drawAt - from);
+  return clamp01((t - from) / span);
+}
+
+/**
+ * How opaque the measurement is at this instant, 0..1.
+ *
+ * Separate from drawProgress, which is how much of the LINE has been drawn.
+ * They are different questions and were being answered by the same number: the
+ * figure snapped to full opacity the moment it existed and vanished the frame
+ * the beat ended, which is the popping.
+ *
+ * In over the draw, held through the middle, out over the last stretch. The
+ * fade out matters more than the fade in — a measurement that disappears
+ * between two frames reads as a glitch, and one that dissolves reads as the
+ * video moving on.
+ */
+export function overlayAlpha(beat: TimedBeat, t: number): number {
+  const inAlpha = smoother(drawProgress(beat, t));
+  // Out over the tail, and finished a little before the cut so the frame is
+  // clean at the boundary rather than mid-dissolve.
+  const OUT = 0.5;
+  const end = beat.start + beat.duration - 0.12;
+  const outAlpha = smoother(clamp01((end - t) / OUT));
+  return Math.min(inAlpha, outAlpha);
 }
 
 export interface RundownFrameOptions {
@@ -452,12 +534,12 @@ export function drawRundownFrame(
     // away feel like continued analysis rather than an interruption.
     const id = beat.beat.metricId;
     const metric = id ? input.metrics.get(id) : undefined;
-    if (cutaway.landmarks && metric && drawProgress(beat, t) > 0) {
+    if (cutaway.landmarks && metric && overlayAlpha(beat, t) > 0.004) {
       const iw = (cutaway.image as HTMLImageElement).width || W;
       const ih = (cutaway.image as HTMLImageElement).height || H;
       drawMeasurement(overlayCanvas, cutaway.landmarks, iw, ih, metric, 1);
       ctx.save();
-      ctx.globalAlpha = 0.92;
+      ctx.globalAlpha = 0.92 * overlayAlpha(beat, t);
       ctx.drawImage(overlayCanvas, 0, 0, iw, ih, fit.x, fit.y, fit.w, fit.h);
       ctx.restore();
     }
@@ -469,7 +551,19 @@ export function drawRundownFrame(
     // rather than to be replaced. A hard cut here loses the connection between
     // the face just measured and the numbers now being read off it, which is
     // the one thing the card is for.
-    const settle = smoother(clamp01((t - beat.start) / Math.max(0.001, beat.duration * 0.3)));
+    // Settled against the FIRST card beat, not this one.
+    //
+    // There are two card beats — the verdict and the ceiling — and each was
+    // running its own full-screen-to-top-third move, so the same transition
+    // played twice with a cut back to full screen in between. From the viewer's
+    // side the card arrived, left, and arrived again.
+    //
+    // The card is one continuous state that happens to be narrated over two
+    // sentences, so the move belongs to the state, not to the sentence.
+    const firstCard = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
+    const settle = smoother(
+      clamp01((t - firstCard.start) / Math.max(0.001, firstCard.duration * 0.45)),
+    );
     const boxH = lerp(H, H * CARD_PHOTO, settle);
     const target = regionCrop(photo, landmarks, "proportions", W / boxH);
     const c = lerpCrop(crop, target, settle);
@@ -623,7 +717,7 @@ export function brollFor(
 export function overlayVisible(input: RundownInput, beat: TimedBeat, t: number): boolean {
   if (!beat.beat.metricId) return false;
   if (brollFor(input, beat, t)) return false;
-  return drawProgress(beat, t) > 0;
+  return overlayAlpha(beat, t) > 0.004;
 }
 
 // How much of a measurement beat's tail a cutaway may take. A third leaves the
@@ -780,7 +874,10 @@ function drawCurve(
   const right = W * 0.88;
   const span = right - left;
   const baseline = H * 0.52;
-  const peak = H * 0.2;
+  // Clear of the top zone, where TikTok puts the search and the tabs. At 0.2 the
+  // peak sat at 256 and was already clear, but expressing it against SAFE_TOP
+  // means it stays clear if either number moves.
+  const peak = Math.max(SAFE_TOP + 40, H * 0.2);
 
   // z for a percentile, by the Beasley-Springer-Moro-ish rational approximation
   // that precision.ts already trusts elsewhere. Only used for placement, so
@@ -861,6 +958,27 @@ function drawCurve(
   ctx.stroke();
 
   ctx.textAlign = "center";
+
+  // The scale, along the bottom.
+  //
+  // A curve with no axis is a shape. The band was labelled "where most men are"
+  // and a viewer still had no way to read WHERE on it a marker sat, which is
+  // the only question the frame exists to answer. The ticks are the same
+  // one-sigma numbers the script says aloud, so the picture and the narration
+  // cannot disagree.
+  ctx.font = "500 13px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "1px";
+  ctx.fillStyle = "rgba(247,247,242,0.52)";
+  for (const [z, label] of [
+    [-1, SPREAD.low.toFixed(1)],
+    [0, SPREAD.median.toFixed(1)],
+    [1, SPREAD.high.toFixed(1)],
+  ] as Array<[number, string]>) {
+    ctx.fillText(label, xOf(z), baseline + 62);
+  }
+  ctx.font = "500 11px Inter, Arial, sans-serif";
+  ctx.fillStyle = "rgba(247,247,242,0.34)";
+  ctx.fillText("SCORE", W / 2, baseline + 84);
 
   // TWO STAGES, and the order is the argument.
   //
@@ -1057,7 +1175,9 @@ function drawOverlayForBeat(
   // same coordinates, so there is no second transform to get wrong.
   drawMeasurement(overlayCanvas, landmarks, photo.width, photo.height, metric, progress);
   ctx.save();
-  ctx.globalAlpha = Math.min(1, progress * 1.6);
+  // The line's own draw is a subset of the true figure; the ALPHA is what makes
+  // it arrive and leave rather than blink. See overlayAlpha.
+  ctx.globalAlpha = overlayAlpha(beat, t);
   ctx.drawImage(overlayCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
   ctx.restore();
 }
@@ -1067,6 +1187,75 @@ function drawOverlayForBeat(
 // Sits low enough to clear the measurement and high enough to clear the bottom
 // bar. Two lines maximum — a third means the sentence was too long for a beat
 // and the fix is in the script, not here.
+// ---------------------------------------------------------------------------
+// The caption, revealed a word at a time and PAGED.
+//
+// The bug this replaces was quiet and total: wrap() took maxLines = 2 and threw
+// away everything that did not fit. Back when a beat was "the jaw is excellent"
+// two lines was the whole sentence. A clause is twenty words now, so the
+// caption typed out the first two lines and then stopped dead while the voice
+// carried on talking for another eight seconds. Nothing errored; the words
+// simply had nowhere to go.
+//
+// So the line is laid out in full and shown a PAGE at a time, the way subtitles
+// work — two lines on screen, advancing as the voice reaches them. Nothing is
+// dropped, and the caption tracks the read instead of falling behind it.
+//
+// Revealed by WORD rather than by character. A per-character typewriter is a
+// nice effect on a short line and a distraction on a long one: the eye reads
+// words, so revealing letters makes a viewer wait for a word they can already
+// half see. Each word fades up and rises a couple of pixels over its own moment
+// instead, which is smooth at 30fps and reads as speech landing rather than as
+// a machine printing.
+//
+// Timed against the WHOLE beat, not 62% of it. The voice uses the whole beat;
+// finishing the caption early is what made it look out of sync in the other
+// direction.
+// ---------------------------------------------------------------------------
+const CAPTION_FONT = "600 33px Inter, Arial, sans-serif";
+const CAPTION_LINE = 42;
+const CAPTION_LINES_PER_PAGE = 2;
+// How long one word takes to fade up, as a share of the time each word gets.
+const WORD_FADE = 0.55;
+
+interface CaptionLayout {
+  /** Words with the line they belong to, in reading order. */
+  words: Array<{ text: string; line: number; x: number }>;
+  lineCount: number;
+}
+
+// Laid out once per draw. Cheap — a dozen measureText calls on a string that is
+// already in the atlas — and doing it per frame keeps it honest about the font
+// the context actually has rather than one cached from a different canvas.
+function layoutCaption(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): CaptionLayout {
+  const words = text.split(/\s+/).filter(Boolean);
+  const out: CaptionLayout = { words: [], lineCount: 0 };
+  let line = 0;
+  let current: string[] = [];
+
+  const flush = () => {
+    if (!current.length) return;
+    const full = current.join(" ");
+    let x = -ctx.measureText(full).width / 2;
+    for (const word of current) {
+      const w = ctx.measureText(word).width;
+      out.words.push({ text: word, line, x: x + w / 2 });
+      x += w + ctx.measureText(" ").width;
+    }
+    line++;
+    current = [];
+  };
+
+  for (const word of words) {
+    const candidate = [...current, word].join(" ");
+    if (current.length && ctx.measureText(candidate).width > maxWidth) flush();
+    current.push(word);
+  }
+  flush();
+  out.lineCount = line;
+  return out;
+}
+
 function drawCaption(
   ctx: CanvasRenderingContext2D,
   beat: TimedBeat,
@@ -1075,53 +1264,98 @@ function drawCaption(
   H: number,
 ): void {
   const full = beat.beat.line;
-  const shown = full.slice(0, Math.round(full.length * typedFraction(beat, t)));
-  if (!shown) return;
+  if (!full) return;
 
   ctx.save();
-  ctx.font = "600 34px Inter, Arial, sans-serif";
+  ctx.font = CAPTION_FONT;
   ctx.letterSpacing = "0px";
   ctx.textAlign = "center";
-  const maxWidth = W - 96;
-  const lines = wrap(ctx, shown, maxWidth, 2);
-  // Bottom-aligned against the safe area rather than measured down from the
-  // frame edge, so a one-line beat and a two-line beat both END in the same
-  // place instead of the second line sliding into TikTok's caption.
-  const baseline = H - SAFE_BOTTOM - 96 - (lines.length - 1) * 44;
-  lines.forEach((line, i) => {
-    const y = baseline + i * 44;
-    // A shadow rather than a plate behind the text. A plate is a rectangle the
-    // eye has to look past; a shadow keeps the face visible underneath.
-    ctx.shadowColor = "rgba(0,0,0,.9)";
-    ctx.shadowBlur = 18;
+
+  const maxWidth = W - 108;
+  const layout = layoutCaption(ctx, full, maxWidth);
+  if (!layout.words.length) {
+    ctx.restore();
+    return;
+  }
+
+  // PAGES, each with its own slot of the beat.
+  //
+  // The complaint was that the typewriter could not keep up: a per-character
+  // reveal spread across a whole beat is slower than anybody talks, so the
+  // caption trailed the voice and then stopped entirely when the line ran past
+  // two lines and the rest was silently dropped.
+  //
+  // So the line is paged, the pages divide the beat in proportion to the words
+  // they hold, and inside a page the reveal is FAST — done in the first third,
+  // held while it is read, faded out at the end. Typewriter in, fade out, which
+  // is what was asked for and also what keeps it ahead of the read rather than
+  // behind it.
+  const perPage = Math.max(1, CAPTION_LINES_PER_PAGE);
+  const pageCount = Math.max(1, Math.ceil(layout.lineCount / perPage));
+  const progress = clamp01((t - beat.start) / Math.max(0.001, beat.duration));
+  const page = Math.min(pageCount - 1, Math.floor(progress * pageCount));
+  const within = clamp01(progress * pageCount - page);
+
+  const firstLine = page * perPage;
+  const visible = layout.words.filter((w) => w.line >= firstLine && w.line < firstLine + perPage);
+  if (!visible.length) {
+    ctx.restore();
+    return;
+  }
+
+  // Reveal over the first third of the page, hold, fade over the last sixth.
+  // The fade is the page leaving rather than each word leaving: words arriving
+  // one at a time and departing one at a time reads as a fault.
+  const REVEAL = 0.34;
+  const FADE_OUT = 0.16;
+  const head = (within / REVEAL) * visible.length;
+  const pageAlpha = smoother(clamp01((1 - within) / FADE_OUT));
+
+  const rows = Math.min(perPage, layout.lineCount - firstLine);
+  // Clear of the bottom bar, which sits at H - SAFE_BOTTOM - 40. At 54 the two
+  // were fourteen pixels apart and read as one crowded block.
+  const baseline = H - SAFE_BOTTOM - 124 - (rows - 1) * CAPTION_LINE;
+
+  // A soft band behind the caption zone.
+  //
+  // The complaint was that the caption sits "in front of the face", and it does
+  // — on a full-bleed portrait every position is in front of the face, so the
+  // question is whether it looks placed or dropped. A shadow alone left white
+  // text floating on a cheek. A gradient darkening toward the bottom reads as
+  // the lower third being the place captions live, and costs no legibility up
+  // where the eyes are because it is nearly clear there.
+  const bandTop = baseline - CAPTION_LINE - 46;
+  // All the way to the frame edge. Ending it at the safe line left a visible
+  // horizontal seam where the band stopped and the base scrim carried on — a
+  // straight line across a photograph, which is the most obviously wrong thing
+  // a gradient can do.
+  const bandBottom = H;
+  const band = ctx.createLinearGradient(0, bandTop, 0, bandBottom);
+  band.addColorStop(0, "rgba(3,5,5,0)");
+  band.addColorStop(0.55, "rgba(3,5,5,.40)");
+  band.addColorStop(1, "rgba(3,5,5,.60)");
+  ctx.globalAlpha = pageAlpha;
+  ctx.fillStyle = band;
+  ctx.fillRect(0, bandTop, W, bandBottom - bandTop);
+  ctx.globalAlpha = 1;
+
+  visible.forEach((word, index) => {
+    // Each word gets its own slice of the reveal and fades up inside it.
+    const local = clamp01((head - index) / WORD_FADE);
+    if (local <= 0) return;
+    const eased = smoother(local);
+    const y = baseline + (word.line - firstLine) * CAPTION_LINE + (1 - eased) * 6;
+    ctx.globalAlpha = eased * pageAlpha;
+    // A shadow rather than a plate. A plate is a rectangle the eye has to look
+    // past; a shadow keeps the face visible underneath it.
+    ctx.shadowColor = "rgba(0,0,0,.92)";
+    ctx.shadowBlur = 20;
     ctx.fillStyle = "#f7f7f2";
-    ctx.fillText(line, W / 2, y);
+    ctx.fillText(word.text, W / 2 + word.x, y);
   });
   ctx.restore();
 }
 
-function wrap(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  maxLines: number,
-): string[] {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (ctx.measureText(candidate).width <= maxWidth || !line) {
-      line = candidate;
-    } else {
-      lines.push(line);
-      line = word;
-      if (lines.length === maxLines) break;
-    }
-  }
-  if (lines.length < maxLines && line) lines.push(line);
-  return lines.slice(0, maxLines);
-}
 
 // The bottom bar. Fixed position, every frame, because a value that moves is a
 // value the eye has to find again on every beat.
@@ -1144,12 +1378,12 @@ function drawBottomBar(
   ctx.letterSpacing = "0px";
   ctx.fillStyle = "#f5f5f1";
   const title = metric ? metric.def.name : titleFor(beat, input.name);
-  ctx.fillText(clip(ctx, title, W * 0.56), 48, y);
+  ctx.fillText(clip(ctx, title, W * 0.56), SAFE_LEFT, y);
 
   ctx.font = "500 14px Inter, Arial, sans-serif";
   ctx.letterSpacing = "3px";
   ctx.fillStyle = "#7f8682";
-  ctx.fillText(metric ? "SCORE" : "TRUEMAX", 48, y + 26);
+  ctx.fillText(metric ? "SCORE" : "TRUEMAX", SAFE_LEFT, y + 26);
 
   // The number, right-aligned, with the qualitative band under it. The band is
   // the part a viewer repeats out loud, so it is never omitted — a bare 9.5
