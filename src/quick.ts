@@ -1388,6 +1388,19 @@ function mountCutaways(): void {
     drawCutSlots();
   });
 
+  // CAPTURE phase, and it stops the event dead when it takes it.
+  //
+  // enablePhotoPaste (ui/pastePhoto.ts) also listens for a paste on the
+  // document, and its job is to start a SCAN — ask for the reference
+  // population, run the landmarker, produce a report. It is registered first,
+  // so on the bubble phase it ran first: pasting a cutaway kicked off a full
+  // analysis of a photograph that was never meant to be measured, and asked
+  // which sex to measure it against on the way.
+  //
+  // preventDefault does not help — it stops the browser's default action, not
+  // the other listener. Registering in the capture phase is what puts this one
+  // ahead regardless of who registered first, and stopImmediatePropagation is
+  // what keeps the scan handler from seeing an event this panel has consumed.
   document.addEventListener("paste", async (event) => {
     // Only while this panel is on screen, and only when a slot is armed or free.
     if (!document.getElementById("q-cut-slots")) return;
@@ -1402,7 +1415,10 @@ function mountCutaways(): void {
       }
     }
     if (!images.length) return;
+    // No free slot is not "not ours" — it is ours and full. Swallowing it here
+    // stops a paste aimed at a full cutaway strip from starting a scan instead.
     event.preventDefault();
+    event.stopImmediatePropagation();
     let at = cutArmed ?? firstFreeCut();
     for (const file of images) {
       if (at < 0) break;
@@ -1411,7 +1427,7 @@ function mountCutaways(): void {
     }
     cutArmed = null;
     drawCutSlots();
-  });
+  }, true);
 }
 
 async function decodeImage(file: File): Promise<HTMLImageElement | null> {
