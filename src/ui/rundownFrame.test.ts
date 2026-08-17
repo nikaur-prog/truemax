@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { brollFor, cropAt, drawProgress, overlayVisible, regionCrop } from "./rundownFrame.js";
+import { brollFor, cropAt, drawProgress, overlayAlpha, overlayVisible, regionCrop } from "./rundownFrame.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
 
@@ -267,5 +267,52 @@ test("the overlay and a cutaway are never both live at one instant", () => {
         assert.fail(`overlay and cutaway both live at t=${t.toFixed(2)} on "${beat.beat.line}"`);
       }
     }
+  }
+});
+
+test("a crop never cuts through the face", () => {
+  // The one framing fault a viewer reads as a broken renderer rather than as a
+  // choice. A band plus a close-up floor is a guess at how much face there is,
+  // and on a photograph where the head fills more of the picture than usual the
+  // guess came out tighter than the head — chin off the bottom, crown off the
+  // top, mid-sentence.
+  //
+  // A close-up may still lose the ears and the very top of the hair. It may not
+  // lose a feature.
+  const box = { x0: 0.3, y0: 0.2, x1: 0.7, y1: 0.8 };
+  const faceW = (box.x1 - box.x0) * PHOTO.width;
+  const faceH = (box.y1 - box.y0) * PHOTO.height;
+  for (const region of ["eyes", "midface", "nose", "lips", "jaw", "chin", "proportions"] as const) {
+    const c = regionCrop(PHOTO, FACE, region, ASPECT);
+    assert.ok(
+      c.w >= faceW * 0.85,
+      `${region}: crop ${c.w.toFixed(0)}px against a ${faceW.toFixed(0)}px face`,
+    );
+    assert.ok(c.h >= faceH * 0.85, `${region}: crop is shorter than the face`);
+  }
+});
+
+test("the overlay arrives and leaves rather than blinking", () => {
+  // drawProgress is how much of the LINE is drawn; overlayAlpha is how opaque
+  // it is. They were the same number, so the figure snapped to full the moment
+  // it existed and vanished on the frame the beat ended. A measurement that
+  // disappears between two frames reads as a glitch.
+  const beats: Beat[] = [
+    { kind: "metric", line: "Eyes measured here, at some length.", metricId: "canthalTilt", region: "eyes", positive: true },
+  ] as Beat[];
+  const timeline = buildTimeline(beats);
+  const b = timeline.beats[0];
+
+  assert.equal(overlayAlpha(b, b.start), 0, "visible before it is drawn");
+  assert.ok(overlayAlpha(b, b.drawAt!) > 0.9, "not solid once drawn");
+  // And it dissolves rather than cutting.
+  const nearEnd = b.start + b.duration - 0.14;
+  assert.ok(overlayAlpha(b, nearEnd) < 0.35, `still ${overlayAlpha(b, nearEnd).toFixed(2)} at the cut`);
+  // Monotonic out: no flicker back up on the way down.
+  let prev = 1;
+  for (let t = b.start + b.duration - 0.6; t < b.start + b.duration; t += 0.02) {
+    const a = overlayAlpha(b, t);
+    assert.ok(a <= prev + 1e-6, `alpha rose during the fade out at ${t.toFixed(2)}`);
+    prev = a;
   }
 });

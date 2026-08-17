@@ -70,10 +70,9 @@ const CHARS_PER_KEYSTROKE = 2;
 // without re-deriving what the "spoken portion" of a fitted beat means.
 const DRAW_AT = 0.16;
 
-// "pop" is the curve arriving. It is a different sound from the measurement
-// click on purpose: the click is a line landing on a face, and this is a whole
-// frame changing to make an argument about the population. Using the same
-// sample for both taught the viewer nothing about which was which.
+// "pop" existed for the curve and is no longer emitted — see cuesFor. The kind
+// stays in the union so the mixer keeps its sample and re-enabling it is one
+// line rather than a re-import.
 export type SfxKind = "key" | "click" | "pop";
 
 export interface SfxCue {
@@ -186,7 +185,6 @@ export function fitTimeline(timeline: RundownTimeline, actualDuration: number): 
 
 function cuesFor(timed: TimedBeat[]): SfxCue[] {
   const sfx: SfxCue[] = [];
-  let seenCurve = false;
   for (const b of timed) {
     // Captions type over the first 62% of the beat, so the line is complete and
     // readable for a moment before it leaves. A caption still typing when the
@@ -197,12 +195,14 @@ function cuesFor(timed: TimedBeat[]): SfxCue[] {
       sfx.push({ at: b.start + (typing * i) / Math.max(1, strokes), kind: "key" });
     }
     if (b.drawAt !== undefined) sfx.push({ at: b.drawAt, kind: "click" });
-    // The graph lands on the first curve beat only. Firing it on both would
-    // punctuate a frame that is already on screen and did not change.
-    if (b.beat.kind === "curve" && !seenCurve) {
-      sfx.push({ at: b.start + 0.06, kind: "pop" });
-      seenCurve = true;
-    }
+    // No sound on the curve.
+    //
+    // It had a downward swoop on the reasoning that the biggest frame in the
+    // video deserved punctuation. Heard against the narration it is a noise
+    // arriving over a sentence, and the frame is already the loudest thing on
+    // screen — it does not need announcing. The keystroke and measurement cues
+    // stay; they sit under the voice rather than across it.
+
   }
   sfx.sort((a, b) => a.at - b.at);
   return sfx;

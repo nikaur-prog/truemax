@@ -72,7 +72,7 @@ window.shot = (i) => {
   const b = timeline.beats[i];
   // Late in the beat, so any entrance animation has finished.
   const t = b.start + b.duration * 0.8;
-  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [cut] }, t,
+  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [{ image: cut }] }, t,
     { width: 720, height: 1280, overlayCanvas });
   return true;
 };
@@ -81,7 +81,7 @@ window.shot = (i) => {
 // what a beat looks like at a given moment rather than only near its end.
 window.shotAt = (i, frac) => {
   const b = timeline.beats[i];
-  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [cut] },
+  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [{ image: cut }] },
     b.start + b.duration * frac, { width: 720, height: 1280, overlayCanvas });
   return true;
 };
