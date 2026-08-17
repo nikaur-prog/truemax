@@ -2,7 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { buildGeometry } from "./geometry.js";
 import { METRICS, computeRawMetrics } from "./metrics.js";
 import { AGG_NORM } from "./aggNorm.js";
-import { reliabilityOf } from "./reliability.js";
+import { RELIABLE_MIN, reliabilityOf } from "./reliability.js";
 import { extractShape, shapeZScore } from "./shape.js";
 import { SIDE_METRICS, computeSideMetrics, sidePointIntegrityIssues } from "./sideMetrics.js";
 import type { SidePoints } from "./sideMetrics.js";
@@ -332,6 +332,36 @@ function normalizeAgg(
   return SHRINK * probit(clamp(pct, 0.001, 0.999));
 }
 
+// How much of a region's score is signal rather than noise.
+//
+// Weighted by the same declared weights the aggregate uses, so this answers the
+// question actually being asked: of the evidence that PRODUCED this number, how
+// much of it holds still between two photographs of one face.
+//
+// The nose is the case that forced this. All three of its metrics measure below
+// 0.15 and nasalIndex is exactly 0.00 — two photographs of one person disagree
+// about it as much as two different people do — and yet a nose score appeared on
+// a headline card with the same weight and typography as proportions, whose
+// metrics average 0.61. effWeight already keeps that out of the overall number.
+// Nothing kept it away from the reader, who has no way to tell the two apart.
+export function regionReliability(ms: ScoredMetric[]): number {
+  let num = 0;
+  let den = 0;
+  for (const m of ms) {
+    if (m.implausible) continue;
+    const w = m.def.weight;
+    num += w * reliabilityOf(m.def.id);
+    den += w;
+  }
+  return den > 0 ? num / den : 0;
+}
+
+// Below this, a region's score is presented as indicative rather than as a
+// number. Set at the product-wide RELIABLE_MIN rather than the stricter bar the
+// reel uses: a card can carry a caveat right next to it and can be tapped for
+// the detail underneath, which is exactly what a published video cannot do.
+export const REGION_RELIABLE_MIN = RELIABLE_MIN;
+
 // A metric only influences the score in proportion to how reproducibly it
 // measures the same face across different photos (see reliability.ts).
 function effWeight(m: ScoredMetric): number {
@@ -396,6 +426,7 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
       percentile: Math.round(phi(rz) * 1000) / 10,
       z: rz,
       metrics: ms,
+      reliability: regionReliability(ms),
     };
   });
 
@@ -579,6 +610,7 @@ export function mergeReports(front: Report, side: Report): Report {
       percentile: Math.round(phi(rz) * 1000) / 10,
       z: rz,
       metrics: [...f.metrics, ...r.metrics],
+      reliability: regionReliability([...f.metrics, ...r.metrics]),
     });
   }
 

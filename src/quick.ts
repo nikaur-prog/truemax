@@ -4,7 +4,7 @@ import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
 import { analyze } from "./engine/scoring.js";
 import { aggregateScoreToPercentile } from "./engine/scoring.js";
-import { REGION_NAMES } from "./engine/scoring.js";
+import { REGION_NAMES, REGION_RELIABLE_MIN } from "./engine/scoring.js";
 import { isSupported, startCamera } from "./ui/camera.js";
 import type { CameraHandle } from "./ui/camera.js";
 import { rankShort } from "./ui/templates.js";
@@ -596,10 +596,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     <div class="q-grid">
       ${regions
         .map(
-          (g) => `<div class="q-cell">
+          (g) => `<div class="q-cell${g.reliability < REGION_RELIABLE_MIN ? " q-cell-weak" : ""}">
             <span>${REGION_NAMES[g.region]}</span>
             ${num(g.score)}
             <div class="q-bar"><i data-w="${Math.max(2, Math.min(100, g.score * 10))}" style="width:0%"></i></div>
+            ${g.reliability < REGION_RELIABLE_MIN ? `<em class="q-cell-note">indicative</em>` : ""}
           </div>`,
         )
         .join("")}

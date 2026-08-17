@@ -418,3 +418,18 @@
    the bundle has parsed has already shown the page to whoever it was meant to
    stop. */
 .q-wrap.q-locked { visibility: hidden; }
+
+/* A region whose score is built mostly from measurements that do not hold still
+   between two photographs of one face.
+   
+   Every nose metric is under 0.15 reliability and nasalIndex is 0.00 — two
+   photos of one person disagree about it as much as two different people do.
+   The number is still shown, because hiding it invites "what are you not
+   telling me", but it must not carry the same visual authority as a region
+   measured well. Dimmed, with the word that says so. */
+.q-cell-weak { opacity: .62; }
+.q-cell-note {
+  display: block; margin-top: 3px; font-style: normal;
+  font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase;
+  color: var(--muted, #6b716d);
+}
