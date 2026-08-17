@@ -158,6 +158,22 @@ export interface ReelScriptOptions {
    * something the engine could not have known to say.
    */
   note?: string;
+  /**
+   * The opening line, when the default question is not the one being asked.
+   *
+   * The format's whole retention argument is the first two seconds, and
+   * "How attractive is X?" is one framing of maybe five that work. Rage bait
+   * ("How UNATTRACTIVE is X?") and the fallen-off angle ("How much is X
+   * scoring compared to what he used to?") are different videos with the same
+   * measurements underneath, and which one gets posted is a judgement about a
+   * subject and an audience that the engine cannot make.
+   *
+   * `{name}` is substituted wherever it appears; a line with no placeholder is
+   * used verbatim, since some openings do not want the name in them at all.
+   * The full name goes in here, not the short one — this is the one beat that
+   * says it, and everything after it is already on the short form.
+   */
+  opening?: string;
   cta?: string;
   /**
    * Which ladder the verdict word comes from.
@@ -380,6 +396,22 @@ function groupedBeats(ms: ScoredMetric[], sex: Sex, subject: string, kind: Group
 
 const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
+/** The default opening question. Exported so the field can show it as a hint. */
+export const DEFAULT_OPENING = "How attractive is {name}?";
+
+/**
+ * The hook, with the name substituted in.
+ *
+ * Falls back to the default on an empty or whitespace-only override rather than
+ * shipping a blank first beat — a rundown that opens on silence has thrown away
+ * the two seconds the whole format depends on.
+ */
+export function openingLine(opening: string | undefined, name: string): string {
+  const raw = opening?.trim();
+  if (!raw) return DEFAULT_OPENING.replace(/\{name\}/g, name);
+  return raw.replace(/\{name\}/g, name);
+}
+
 // The scorecard, assembled here rather than read out of the Report by the
 // renderer.
 //
@@ -490,7 +522,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
   };
   const beats: Beat[] = [
-    { kind: "hook", line: `How attractive is ${name}?` },
+    { kind: "hook", line: openingLine(options.opening, name) },
     ...metricBeats,
     // The number and the curve, never the number alone — a score with no
     // distribution beside it gets read against a school mark, which is the

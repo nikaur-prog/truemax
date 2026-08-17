@@ -1030,6 +1030,16 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
                placeholder="LeBron James" autocomplete="off" />
         <small>Said once, in the opening line.</small>
       </label>
+      <!-- The first two seconds, which is the whole retention argument. The
+           default question works for a straight breakdown and is the wrong
+           framing for rage bait or a fallen-off angle, and which one to post is
+           a judgement about a subject and an audience the engine cannot make. -->
+      <label class="q-namefield q-openfield">
+        <span>Opening line <i>(optional)</i></span>
+        <input id="q-rundown-opening" class="q-input" type="text" maxlength="120"
+               placeholder="How attractive is {name}?" autocomplete="off" />
+        <small>{name} becomes the full name. Empty opens with the default question.</small>
+      </label>
       <label class="q-namefield">
         <span>Call them <i>(optional)</i></span>
         <input id="q-rundown-short" class="q-input" type="text" maxlength="24"
@@ -1923,6 +1933,8 @@ async function downloadRundown(r: Report): Promise<void> {
   const name = (field?.value ?? "").trim();
   const shortName =
     (document.getElementById("q-rundown-short") as HTMLInputElement | null)?.value.trim() || undefined;
+  const opening =
+    (document.getElementById("q-rundown-opening") as HTMLInputElement | null)?.value.trim() || undefined;
   // Cutaways. Decoded here as plain pictures and handed to the compositor —
   // they never touch the landmarker, the scoring or the report, which is the
   // reason they cannot move a measurement.
@@ -1950,6 +1962,7 @@ async function downloadRundown(r: Report): Promise<void> {
     const result = await downloadRundownVideo(last.photo, last.lm, r, {
       name,
       shortName,
+      opening,
       note,
       broll,
       disclaimer: discClips.some(Boolean)

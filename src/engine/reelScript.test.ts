@@ -399,3 +399,58 @@ test("the short name can be overridden", () => {
   assert.match(rest, /Ronaldo has/);
   assert.doesNotMatch(rest, /Cristiano/);
 });
+
+// ---------------------------------------------------------------------------
+// The opening line.
+//
+// The first two seconds are the whole retention argument, and the default
+// question is one framing of several that work. Which one to post is a
+// judgement about a subject and an audience, so it is an input.
+// ---------------------------------------------------------------------------
+
+test("the default opening asks the default question", () => {
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ethan Garcia" });
+  assert.equal(beats[0].kind, "hook");
+  assert.equal(beats[0].line, "How attractive is Ethan Garcia?");
+});
+
+test("an override replaces the question and keeps the name", () => {
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), {
+    name: "Ethan Garcia",
+    opening: "How UNATTRACTIVE is {name}?",
+  });
+  assert.equal(beats[0].line, "How UNATTRACTIVE is Ethan Garcia?");
+});
+
+test("an opening with no placeholder is used verbatim", () => {
+  // Some hooks do not want the name in them — "Bro fell off" opens on the face
+  // rather than on a question, and forcing a name into it would break the line.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), {
+    name: "Ethan Garcia",
+    opening: "Bro really fell off.",
+  });
+  assert.equal(beats[0].line, "Bro really fell off.");
+});
+
+test("an empty opening falls back rather than shipping a blank first beat", () => {
+  // A rundown that opens on silence has thrown away the two seconds the whole
+  // format depends on, and a field left as spaces is indistinguishable from one
+  // left alone as far as the person typing is concerned.
+  for (const opening of ["", "   ", "\t"]) {
+    const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ethan Garcia", opening });
+    assert.equal(beats[0].line, "How attractive is Ethan Garcia?", JSON.stringify(opening));
+  }
+});
+
+test("the name still appears only once, however the opening is written", () => {
+  // The reason the hook and the short name are separate inputs at all: a full
+  // name repeated through a ninety-second read stops sounding like somebody
+  // talking about a person.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), {
+    name: "Ethan Garcia",
+    opening: "{name}. Is {name} actually good looking?",
+  });
+  assert.equal(beats[0].line, "Ethan Garcia. Is Ethan Garcia actually good looking?");
+  const rest = beats.slice(1).map((b) => b.line).join(" ");
+  assert.ok(!rest.includes("Ethan Garcia"), "the full name leaked past the hook");
+});
