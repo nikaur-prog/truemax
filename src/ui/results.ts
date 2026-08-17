@@ -128,6 +128,7 @@ export function renderResults(c: Ctx): void {
     for (const b of toggle.querySelectorAll<HTMLButtonElement>(".vt-btn")) {
       b.onclick = () => select(b.dataset.view === "side" ? "side" : "overall");
     }
+    if (c.sideReport) floatToggleWhenScrolledPast(toggle);
   }
 
   c.analysis.innerHTML = "";
@@ -1835,4 +1836,39 @@ function progressCopy(d: ScanDelta): string {
   if (d.overall < -0.15)
     return `<p class="rarity">Down <b>${d.overall.toFixed(1)}</b> overall. Before reading into it: lighting, expression and angle explain most small drops, so recapture in the same conditions first.</p>`;
   return `<p class="rarity">Overall is <b>flat</b> (${d.overall >= 0 ? "+" : ""}${d.overall.toFixed(1)}), which is within capture variance. Structural change shows up over weeks, not days.</p>`;
+}
+
+// Keep the Front/Side toggle reachable once the photograph has scrolled away.
+//
+// The toggle lives in the photo pane. On a phone the panes stack, so reading
+// the analysis scrolls the photograph — and the toggle with it — entirely out
+// of the viewport. The side profile is a quarter of the overall score and
+// fifteen of the measurements; making somebody scroll back up to reach it is
+// how a quarter of the product goes unread.
+//
+// position:sticky cannot solve this. Sticky pins an element inside its
+// SCROLLING ANCESTOR, and here that ancestor is the pane that leaves the
+// screen, so the toggle would leave with it exactly as it does now.
+//
+// So the toggle detaches instead, and an anchor left behind in the flow reports
+// when that should happen. Observing the anchor rather than the toggle is the
+// part that matters: a floating element is position:fixed, which means it is
+// always in the viewport, which means it would immediately report itself
+// visible and un-float — a loop that flickers once per frame.
+let toggleObserver: IntersectionObserver | null = null;
+
+function floatToggleWhenScrolledPast(toggle: HTMLElement): void {
+  const anchor = document.getElementById("view-toggle-anchor");
+  if (!anchor || typeof IntersectionObserver === "undefined") return;
+  // Results re-render on every mode switch; without this each one would add
+  // another observer on the same anchor.
+  toggleObserver?.disconnect();
+  toggleObserver = new IntersectionObserver(
+    ([entry]) => toggle.classList.toggle("floating", !entry.isIntersecting),
+    // A negative top margin so it floats slightly BEFORE the anchor is fully
+    // gone, rather than at the exact frame it vanishes — a control that appears
+    // the instant its predecessor disappears reads as a swap rather than a jump.
+    { rootMargin: "-8px 0px 0px 0px", threshold: 0 },
+  );
+  toggleObserver.observe(anchor);
 }
