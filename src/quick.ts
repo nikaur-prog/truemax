@@ -230,10 +230,31 @@ async function openCamera(): Promise<void> {
 // time on a tool built for scanning other people.
 //
 // The previous choice is pre-selected, so the common case is still one tap.
+// Asked once per FACE, not once per button press. The question is about the
+// person in the photo, so pressing "Use camera", changing your mind and
+// pressing "Upload" is still the same face and still the same answer — but it
+// used to re-ask, and so did coming back after dismissing a file picker. Two
+// identical full-screen questions in a row read as a bug, because they are one.
+//
+// Cleared when a face is finished or abandoned (see resetSexAsk), so the next
+// face always gets asked afresh — which is the property that actually matters:
+// a remembered answer is a wrong answer most of the time on a tool built for
+// scanning other people.
+let askedForThisFace = false;
+
+function resetSexAsk(): void {
+  askedForThisFace = false;
+}
+
 function withSex(next: () => void): void {
+  if (askedForThisFace && storedSex()) {
+    next();
+    return;
+  }
   openSexChooser(
     (sex) => {
       storeSex(sex);
+      askedForThisFace = true;
       paintSilhouette();
       next();
     },
@@ -243,6 +264,7 @@ function withSex(next: () => void): void {
     // the set is the home screen of that mode, so a cancelled scan returns to
     // it with the count intact rather than leaving a camera pointed at nothing.
     () => {
+      resetSexAsk();
       if (mode !== "calibrate") return;
       el.capture.classList.add("hidden");
       el.cal.classList.remove("hidden");
@@ -350,6 +372,10 @@ async function run(src: HTMLCanvasElement): Promise<void> {
   // man as female while testing this page, and at 58.8% on held-out faces
   // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
   last = { lm, w: src.width, h: src.height, photo: src };
+  // The photograph is taken, so whatever happens next is a different face and
+  // gets asked afresh. Placed on the way out of every mode rather than in each
+  // one, since "a scan finished" is exactly the condition that ends a face.
+  resetSexAsk();
   track("quick-scan-done");
   show(storedSex() ?? "male", true);
 }
@@ -630,6 +656,9 @@ function renderVerdictStep(r: Report, rating: number): void {
 }
 
 function renderCalibrationSet(): void {
+  // The set is the one screen with no face in flight, so arriving here always
+  // ends the current one.
+  resetSexAsk();
   const faces = loadCalibrationSet();
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
   const health = (["male", "female"] as const).map((sex) => setHealth(faces, sex));
@@ -685,6 +714,7 @@ function renderCalibrationSet(): void {
     </div>`;
 
   document.getElementById("q-cal-add")!.onclick = () => {
+    resetSexAsk();
     el.cal.classList.add("hidden");
     el.capture.classList.remove("hidden");
   };
