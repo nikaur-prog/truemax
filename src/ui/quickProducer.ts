@@ -136,6 +136,24 @@ type Slots = Array<Clip | null>;
 
 let overlay: HTMLDivElement | null = null;
 
+// Which empty slot a paste lands in.
+//
+// Pasting is the fastest way to fill this screen by a wide margin — a still off
+// a search results page is two keystrokes, where the same image through the
+// picker is a download, a trip to the camera roll and a scroll. Images were
+// always accepted (the pickers take image/* and the compositor has held stills
+// from the start); what was missing was any way in that did not go through the
+// filesystem.
+//
+// A paste needs a destination, and the slot body already opens the picker on
+// click, so arming is its own small chip rather than a second meaning for the
+// same tap. Null means "the first free slot", which is what somebody who has
+// not noticed the chips will expect anyway.
+let pasteTarget: { row: "before" | "after"; index: number } | null = null;
+// Set while the producer is open. Arming a slot has to clear the arming in the
+// OTHER row, and a per-row redraw cannot do that.
+let redrawBoth: (() => void) | null = null;
+
 export function openProducer(ctx: ProducerContext): void {
   closeProducer();
   const before: Slots = Array(MAX_SLOTS).fill(null);
@@ -166,7 +184,7 @@ export function openProducer(ctx: ProducerContext): void {
           </label>
         </div>
         <div class="prod-slots" data-row="before"></div>
-        <p class="prod-row-note" data-note="before">Pick up to six at once · one is enough</p>
+        <p class="prod-row-note" data-note="before">Pick up to six at once · one is enough · or hit <b>paste</b> on a slot and ⌘V an image straight in</p>
       </section>
       <section class="prod-row prod-mid">
         <h2>THEN</h2>
@@ -215,8 +233,15 @@ export function openProducer(ctx: ProducerContext): void {
           </div>
         </div>
       </div>
-      <p class="prod-note">No music and no headline are burned in on purpose — sounds and
-      text added natively in the app you post from reach further than baked-in ones.</p>
+      <div class="prod-opt">
+        <span>Headline (optional)</span>
+        <input class="prod-input" id="prod-headline" maxlength="60"
+          placeholder="e.g. 8 weeks. No surgery.">
+      </div>
+      <p class="prod-note">Music is still added natively in the app you post from — native
+      sounds reach further than baked-in ones, and this cannot mix audio anyway.
+      Text is the trade you get to make: typed natively it ranks a little better,
+      typed here you skip the round trip through CapCut entirely.</p>
       <button class="btn pri prod-build" id="prod-build">Confirm — build the video</button>
       <p class="prod-note">${
         canShareFiles()
@@ -259,6 +284,75 @@ export function openProducer(ctx: ProducerContext): void {
   // row-level input is `multiple` and fills every free slot in order, so the
   // whole thing is two visits to the camera roll. Anything past the three
   // spare slots is dropped with a line saying so rather than silently.
+  redrawBoth = () => {
+    redrawRow("before");
+    redrawRow("after");
+  };
+
+  // Paste an image straight into a slot.
+  //
+  // Bound to the document rather than to a slot: a paste is delivered to
+  // whatever has focus, and the thing that has focus after clicking a chip is a
+  // button that is about to be replaced by the redraw. Listening at the top and
+  // routing by pasteTarget is the only version that survives the redraw.
+  //
+  // Files first, then items. Copying an image in a browser puts a File on
+  // clipboardData.files in Chrome and only an item in Safari, and a screenshot
+  // on macOS arrives as an item either way.
+  const headlineOf = () =>
+    overlay?.querySelector<HTMLInputElement>("#prod-headline")?.value.trim() ?? "";
+
+  const onPaste = async (event: ClipboardEvent) => {
+    if (!overlay) return;
+    const data = event.clipboardData;
+    if (!data) return;
+    const media = [...data.files].filter((f) => /^(image|video)\//.test(f.type));
+    if (!media.length) {
+      for (const item of data.items) {
+        if (!/^(image|video)\//.test(item.type)) continue;
+        const file = item.getAsFile();
+        if (file) media.push(file);
+      }
+    }
+    if (!media.length) return;
+    event.preventDefault();
+
+    // Where it lands: the armed slot, else the first free one, before-row
+    // first — which is the order somebody filling this screen works in.
+    const target = pasteTarget;
+    const rows: Array<"before" | "after"> = target ? [target.row] : ["before", "after"];
+    let placed = 0;
+    for (const file of media) {
+      let done = false;
+      for (const row of rows) {
+        const slots = slotsOf(row);
+        const start = target && row === target.row && placed === 0 ? target.index : 0;
+        // `slots` is null-FILLED, not sparse, so an empty slot is null and
+        // never undefined. Testing for undefined meant the armed slot was
+        // never honoured and every paste silently fell through to the first
+        // free one — the chip lit up and then did nothing it said it would.
+        const index = !slots[start] ? start : slots.findIndex((clip) => !clip);
+        if (index < 0) continue;
+        try {
+          slots[index] = await loadClip(file, clipLen);
+          placed++;
+          done = true;
+        } catch {
+          // An unreadable paste is reported below rather than thrown: the
+          // clipboard is full of things that claim to be images and are not.
+        }
+        break;
+      }
+      if (!done && placed === 0) break;
+    }
+    pasteTarget = null;
+    redrawBoth?.();
+    const note = overlay.querySelector<HTMLElement>(`[data-note="${rows[0]}"]`);
+    if (note && !placed) note.textContent = "That paste had no image in it.";
+  };
+  document.addEventListener("paste", onPaste);
+  overlay.addEventListener("prod-close", () => document.removeEventListener("paste", onPaste));
+
   for (const input of overlay.querySelectorAll<HTMLInputElement>("input[data-pick]")) {
     input.addEventListener("change", async () => {
       const row = input.dataset.pick as "before" | "after";
@@ -329,7 +423,7 @@ export function openProducer(ctx: ProducerContext): void {
     try {
       const outcome = await buildVideo(ctx, heads, tails, transition, order, (p: number) => {
         buildBtn.textContent = `Building · ${Math.round(p * 100)}%`;
-      });
+      }, headlineOf());
       // A dismissed share sheet is a decision, not a failure: the video is
       // built and the button offers it again rather than claiming it saved.
       if (outcome === "cancelled") {
@@ -359,6 +453,9 @@ export function openProducer(ctx: ProducerContext): void {
 }
 
 export function closeProducer(): void {
+  overlay?.dispatchEvent(new Event("prod-close"));
+  pasteTarget = null;
+  redrawBoth = null;
   overlay?.remove();
   overlay = null;
 }
@@ -378,10 +475,19 @@ function renderSlot(
   if (!clip) {
     // An empty slot is a target, not a second way in: the row's own picker
     // fills these, and clicking one opens that same picker.
-    cell.innerHTML = `<button type="button" class="prod-add" data-open="${row}">
-      <span>+</span>Clip ${index + 1}</button>`;
+    const armed = pasteTarget?.row === row && pasteTarget.index === index;
+    cell.innerHTML = `<button type="button" class="prod-add${armed ? " armed" : ""}" data-open="${row}">
+      <span>+</span>Clip ${index + 1}</button>
+      <button type="button" class="prod-paste" title="Paste an image here">${armed ? "⌘V ready" : "paste"}</button>`;
     cell.querySelector(".prod-add")!.addEventListener("click", () => {
       cell.ownerDocument.querySelector<HTMLInputElement>(`input[data-pick="${row}"]`)?.click();
+    });
+    cell.querySelector(".prod-paste")!.addEventListener("click", (event) => {
+      // Not the picker. Arming and opening a file dialog are opposites: the
+      // dialog takes the focus a paste needs.
+      event.stopPropagation();
+      pasteTarget = armed ? null : { row, index };
+      (redrawBoth ?? redrawRow)();
     });
     return;
   }
@@ -534,6 +640,8 @@ async function buildVideo(
   transition: Transition,
   order: ProducerOrder,
   onProgress: (p: number) => void,
+  /** Burned into the footage segments. Empty means none, which is the default. */
+  headline = "",
 ): Promise<SaveOutcome> {
   const analysisDur = quickVideoDuration("breakdown");
   const firstScan: ProducerScan = { photo: ctx.photo, landmarks: ctx.landmarks, scores: ctx.scores };
@@ -640,6 +748,7 @@ async function buildVideo(
       // motion already and is left alone.
       const zoom = clip.kind === "image" ? 1 + 0.06 * (local / seg.duration) : 1;
       drawCover(ctx2d, clip.media, W, H, zoom);
+      drawHeadline(ctx2d, headline, W, H);
       drawProducerWatermark(ctx2d);
     }
     drawTransition(ctx2d, transition, segIndex, segments.length, local, seg.duration);
@@ -657,6 +766,65 @@ async function buildVideo(
     new Blob([target.buffer], { type: format.mimeType }),
     `truemax-tiktok-${Date.now()}.mp4`,
   );
+}
+
+// The typed headline, burned into the footage.
+//
+// The screen used to say no headline was burned in "on purpose", and the
+// reasoning was sound as far as it went: text typed natively in TikTok is
+// indexed and does rank a little better than pixels. What that reasoning
+// missed is the alternative it was pushing people towards, which is not
+// "type it natively" — it is a round trip through CapCut to add one line, and
+// a video that never gets cut ranks nowhere at all.
+//
+// So it is offered, empty by default, with the trade stated on the screen
+// rather than decided for somebody. Music is genuinely different and stays
+// native: this compositor writes a video track and no audio track, so there
+// is nothing here to mix into.
+//
+// Drawn only over the FOOTAGE segments. The analysis card is a composition
+// with its own typography and its own safe areas, and a second headline landing
+// on top of it is two designs fighting.
+function drawHeadline(ctx2d: CanvasRenderingContext2D, text: string, W: number, H: number): void {
+  if (!text) return;
+  ctx2d.save();
+  ctx2d.textAlign = "center";
+  ctx2d.font = `700 ${Math.round(W / 13)}px Inter, Arial, sans-serif`;
+
+  // Wrapped to two lines at most, because a third is a paragraph and a
+  // paragraph on a reel is not read.
+  const words = text.split(/\s+/).filter(Boolean);
+  const max = W * 0.86;
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx2d.measureText(next).width > max && line) {
+      lines.push(line);
+      line = word;
+      if (lines.length === 2) break;
+    } else {
+      line = next;
+    }
+  }
+  if (lines.length < 2 && line) lines.push(line);
+
+  // High in the frame, clear of TikTok's caption block at the bottom and of the
+  // action rail on the right. A headline the app covers is a headline nobody
+  // typed.
+  const lh = Math.round(W / 11);
+  let y = Math.round(H * 0.13);
+  for (const l of lines) {
+    // Stroke then fill, so it survives a light frame without a plate behind it.
+    ctx2d.lineWidth = Math.max(6, W / 90);
+    ctx2d.lineJoin = "round";
+    ctx2d.strokeStyle = "rgba(3,5,5,0.82)";
+    ctx2d.strokeText(l, W / 2, y);
+    ctx2d.fillStyle = "#ffffff";
+    ctx2d.fillText(l, W / 2, y);
+    y += lh;
+  }
+  ctx2d.restore();
 }
 
 // Transitions are drawn as overlays at segment edges, never by blending two
