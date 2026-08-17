@@ -2571,10 +2571,54 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   background: none; color: var(--mut); font-size: 13px; cursor: pointer;
 }
 .prod-add:hover { border-color: var(--acc); color: var(--acc); }
-/* The disclaimer's start-point field sits inline under its file picker. */
-.q-disc-start { display: flex; align-items: center; gap: 8px; margin-top: 8px;
+/* ---------- cutaway strip + disclaimer footage ---------- */
+.q-cut { padding: 18px 28px 0; }
+.q-cut-head > span { display: block; font: 600 10.5px var(--mono); letter-spacing: .18em;
+  text-transform: uppercase; color: var(--mut); margin-bottom: 4px; }
+.q-cut-head > span i { font-style: normal; opacity: .6; }
+.q-cut-head > small { display: block; color: var(--mut); font-size: 12px; line-height: 1.45;
+  margin-bottom: 10px; max-width: 62ch; }
+.q-cut-slots { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.q-cut-cell { position: relative; width: 84px; height: 108px; }
+.q-cut-cell img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px;
+  border: 1px solid var(--line); display: block; }
+.q-cut-x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px;
+  border-radius: 50%; border: 0; cursor: pointer; font-size: 11px; line-height: 1;
+  background: rgba(8,10,10,.82); color: #f7f7f2; }
+.q-cut-add {
+  width: 100%; height: 100%; border: 1px dashed var(--line); border-radius: 12px;
+  background: transparent; color: var(--mut); cursor: pointer;
+  font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+}
+.q-cut-add span { font-size: 19px; line-height: 1; }
+.q-cut-add:hover:not(:disabled) { border-color: var(--acc); color: var(--acc); }
+.q-cut-add.armed { border-style: solid; border-color: var(--acc); color: var(--acc); }
+.q-cut-add:disabled { opacity: .45; cursor: not-allowed; }
+.q-cut-paste {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: -18px;
+  font: 500 9px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--mut);
+}
+.q-cut-paste:hover { border-color: var(--acc); color: var(--acc); }
+.q-cut-cell:has(.q-cut-paste) { margin-bottom: 20px; }
+/* A cutaway with no face found still cuts, it just carries no measurement.
+   Worth saying on the thumbnail rather than only in a comment. */
+.q-cut-noface::after {
+  content: "no face"; position: absolute; left: 4px; bottom: 4px;
+  font: 500 8px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 5px; border-radius: 5px; background: rgba(8,10,10,.82); color: var(--mut);
+}
+
+/* The disclaimer's clip picker is wider than a photo cell — it holds a sentence
+   of state ("Clip attached — replace") rather than a thumbnail. */
+.q-disc .q-cut-add { width: auto; height: 44px; padding: 0 18px; flex-direction: row; gap: 8px; }
+.q-disc[data-armed="0"] .q-cut-head > small { opacity: .6; }
+.q-disc-start { display: inline-flex; align-items: center; gap: 8px;
   font: 500 12px var(--mono); letter-spacing: .06em; color: var(--mut); }
-.q-disc-start .q-input { width: 92px; margin: 0; }
+.q-disc-start .q-input { width: 88px; margin: 0; }
+.q-disc-start .q-input:disabled { opacity: .45; }
 /* An armed slot has to be obvious from across the screen — the whole point is
    that you look away from it, copy something, and come back. */
 .prod-add.armed { border-color: var(--acc); border-style: solid; color: var(--acc); }

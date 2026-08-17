@@ -166,7 +166,7 @@ test("a cutaway never covers a beat that draws a measurement", () => {
     { kind: "cta", line: "Who next?" },
   ] as Beat[];
   const timeline = buildTimeline(beats);
-  const pool = [{} as CanvasImageSource, {} as CanvasImageSource];
+  const pool = [{ image: {} as CanvasImageSource }, { image: {} as CanvasImageSource }];
 
   for (const timed of timeline.beats) {
     const covered = brollFor({ timeline, metrics: new Map(), name: "Test", broll: pool }, timed, timed.start);
@@ -193,8 +193,8 @@ test("cutaways do appear, and always in the same places", () => {
     { kind: "cta", line: "Who next?" },
   ] as Beat[];
   const timeline = buildTimeline(beats);
-  const a = {} as CanvasImageSource;
-  const b = {} as CanvasImageSource;
+  const a = { image: {} as CanvasImageSource };
+  const b = { image: {} as CanvasImageSource };
   const input = { timeline, metrics: new Map(), name: "Test", broll: [a, b] };
 
   const shown = timeline.beats.map((t) => brollFor(input, t, t.start));
@@ -232,7 +232,7 @@ test("a measurement beat cuts away only in its tail, never while the line is up"
     },
   ] as Beat[];
   const timeline = buildTimeline(beats);
-  const input = { timeline, metrics: new Map(), name: "Test", broll: [{} as CanvasImageSource] };
+  const input = { timeline, metrics: new Map(), name: "Test", broll: [{ image: {} as CanvasImageSource }] };
   const beat = timeline.beats[1];
 
   // The line is drawn at drawAt. At that moment and for a good while after,
@@ -259,7 +259,7 @@ test("the overlay and a cutaway are never both live at one instant", () => {
     { kind: "metric", line: "Jaw measured here.", metricId: "jawCheekRatio", region: "jaw", positive: false },
   ] as Beat[];
   const timeline = buildTimeline(beats);
-  const input = { timeline, metrics: new Map(), name: "Test", broll: [{} as CanvasImageSource] };
+  const input = { timeline, metrics: new Map(), name: "Test", broll: [{ image: {} as CanvasImageSource }] };
 
   for (const beat of timeline.beats) {
     for (let t = beat.start; t < beat.start + beat.duration; t += 0.02) {

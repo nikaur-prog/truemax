@@ -56,7 +56,7 @@ export interface RundownOptions {
    * for why that restriction is what makes the feature safe rather than what
    * limits it. Nothing here reaches the landmarker, the scoring or the report.
    */
-  broll?: CanvasImageSource[];
+  broll?: Array<{ image: CanvasImageSource; landmarks?: NormalizedLandmark[] }>;
   /**
    * Footage for the disclaimer, and the one point in the video where choosing
    * footage to a duration is actually possible.

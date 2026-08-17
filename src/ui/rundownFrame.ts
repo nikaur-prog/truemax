@@ -133,11 +133,34 @@ export interface RundownInput {
    * forehead. So a cutaway may only appear on a beat that draws no measurement:
    * the hook, the context beat, the disclaimer, the sign-off.
    *
-   * That is also why they cannot "confuse the system" — the engine never sees
-   * them. They are decoded as pictures by the compositor and reach no part of
-   * the scoring, the landmarker or the report.
+   * They cannot move a score: nothing here reaches the scoring or the report,
+   * and every number said or drawn in the video comes from the measured
+   * photograph. What they CAN carry is the same measurement drawn in the right
+   * place on the face currently on screen — see `landmarks` below.
    */
-  broll?: CanvasImageSource[];
+  broll?: Array<{
+    image: CanvasImageSource;
+    /**
+     * The cutaway's OWN landmarks, when a face was found in it.
+     *
+     * This is what makes a cutaway able to carry a measurement rather than
+     * merely interrupt one. The number is always the measured photograph's —
+     * one face, one set of figures, stated once — but the LINE is positioned by
+     * this photograph's own geometry, so it lands on the mouth that is actually
+     * on screen instead of where the other photograph's mouth happened to be.
+     *
+     * It is an annotation, not a second measurement, and the distinction is
+     * real: the value shown is not re-derived here and a cutaway shot at a
+     * different angle will have a slightly different true value than the label
+     * says. That is the same licence any documentary takes with B-roll, and it
+     * is the reason the figure is quoted once from the controlled photograph
+     * rather than per shot.
+     *
+     * Absent when no face was detected — a hand, a silhouette, a back of a
+     * head — and then the cutaway simply carries no line.
+     */
+    landmarks?: NormalizedLandmark[];
+  }>;
   /**
    * A clip that plays under the operator's disclaimer, already seeked.
    *
@@ -414,11 +437,30 @@ export function drawRundownFrame(
   // attached for: it was chosen to match that sentence, and a still shuffled in
   // from the general pool would be the operator's work thrown away.
   const isDisclaimer = beat.beat.kind === "context" && beat.beat.line === input.disclaimerLine;
-  const cutaway = (isDisclaimer && input.disclaimerClip) || brollFor(input, beat, t);
+  const cutaway =
+    (isDisclaimer && input.disclaimerClip ? { image: input.disclaimerClip } : null) ??
+    brollFor(input, beat, t);
   if (cutaway) {
-    // Cover, no crop maths: there are no landmarks for this photograph and
-    // inventing a face box for it is exactly the guess this feature avoids.
-    coverDraw(ctx, cutaway, W, H);
+    // Cover, not the crop maths — the crop is derived from the MEASURED
+    // photograph's face box and means nothing here.
+    const fit = coverDraw(ctx, cutaway.image, W, H);
+    // The same measurement, drawn where it actually is on THIS face.
+    //
+    // Without this a cutaway is a gap in the analysis: the video stops
+    // measuring for a third of every beat and just shows a picture. With it the
+    // line follows the sentence onto the next shot, which is what makes cutting
+    // away feel like continued analysis rather than an interruption.
+    const id = beat.beat.metricId;
+    const metric = id ? input.metrics.get(id) : undefined;
+    if (cutaway.landmarks && metric && drawProgress(beat, t) > 0) {
+      const iw = (cutaway.image as HTMLImageElement).width || W;
+      const ih = (cutaway.image as HTMLImageElement).height || H;
+      drawMeasurement(overlayCanvas, cutaway.landmarks, iw, ih, metric, 1);
+      ctx.save();
+      ctx.globalAlpha = 0.92;
+      ctx.drawImage(overlayCanvas, 0, 0, iw, ih, fit.x, fit.y, fit.w, fit.h);
+      ctx.restore();
+    }
   } else if (kind === "card") {
     // The face moves to the top and the breakdown arrives under it.
     //
@@ -529,7 +571,7 @@ export function brollFor(
   input: RundownInput,
   beat: TimedBeat,
   t: number,
-): CanvasImageSource | null {
+): { image: CanvasImageSource; landmarks?: NormalizedLandmark[] } | null {
   const pool = input.broll;
   if (!pool?.length) return null;
   const kind = beat.beat.kind;
@@ -597,7 +639,7 @@ function coverDraw(
   image: CanvasImageSource,
   W: number,
   H: number,
-): void {
+): { x: number; y: number; w: number; h: number } {
   const iw =
     (image as HTMLVideoElement).videoWidth || (image as HTMLImageElement).width || W;
   const ih =
@@ -605,7 +647,13 @@ function coverDraw(
   const scale = Math.max(W / iw, H / ih);
   const dw = iw * scale;
   const dh = ih * scale;
-  ctx.drawImage(image, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  const x = (W - dw) / 2;
+  const y = (H - dh) / 2;
+  ctx.drawImage(image, x, y, dw, dh);
+  // Returned so an overlay for this photograph is composited through the very
+  // same rectangle. Two independent fits of one image is how a line ends up
+  // near a feature instead of on it.
+  return { x, y, w: dw, h: dh };
 }
 
 // How far through its own animation a full-frame beat is, 0..1, with a little
