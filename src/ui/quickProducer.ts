@@ -136,6 +136,24 @@ type Slots = Array<Clip | null>;
 
 let overlay: HTMLDivElement | null = null;
 
+// Which empty slot a paste lands in.
+//
+// Pasting is the fastest way to fill this screen by a wide margin — a still off
+// a search results page is two keystrokes, where the same image through the
+// picker is a download, a trip to the camera roll and a scroll. Images were
+// always accepted (the pickers take image/* and the compositor has held stills
+// from the start); what was missing was any way in that did not go through the
+// filesystem.
+//
+// A paste needs a destination, and the slot body already opens the picker on
+// click, so arming is its own small chip rather than a second meaning for the
+// same tap. Null means "the first free slot", which is what somebody who has
+// not noticed the chips will expect anyway.
+let pasteTarget: { row: "before" | "after"; index: number } | null = null;
+// Set while the producer is open. Arming a slot has to clear the arming in the
+// OTHER row, and a per-row redraw cannot do that.
+let redrawBoth: (() => void) | null = null;
+
 export function openProducer(ctx: ProducerContext): void {
   closeProducer();
   const before: Slots = Array(MAX_SLOTS).fill(null);
@@ -166,7 +184,7 @@ export function openProducer(ctx: ProducerContext): void {
           </label>
         </div>
         <div class="prod-slots" data-row="before"></div>
-        <p class="prod-row-note" data-note="before">Pick up to six at once · one is enough</p>
+        <p class="prod-row-note" data-note="before">Pick up to six at once · one is enough · or hit <b>paste</b> on a slot and ⌘V an image straight in</p>
       </section>
       <section class="prod-row prod-mid">
         <h2>THEN</h2>
@@ -259,6 +277,70 @@ export function openProducer(ctx: ProducerContext): void {
   // row-level input is `multiple` and fills every free slot in order, so the
   // whole thing is two visits to the camera roll. Anything past the three
   // spare slots is dropped with a line saying so rather than silently.
+  redrawBoth = () => {
+    redrawRow("before");
+    redrawRow("after");
+  };
+
+  // Paste an image straight into a slot.
+  //
+  // Bound to the document rather than to a slot: a paste is delivered to
+  // whatever has focus, and the thing that has focus after clicking a chip is a
+  // button that is about to be replaced by the redraw. Listening at the top and
+  // routing by pasteTarget is the only version that survives the redraw.
+  //
+  // Files first, then items. Copying an image in a browser puts a File on
+  // clipboardData.files in Chrome and only an item in Safari, and a screenshot
+  // on macOS arrives as an item either way.
+  const onPaste = async (event: ClipboardEvent) => {
+    if (!overlay) return;
+    const data = event.clipboardData;
+    if (!data) return;
+    const media = [...data.files].filter((f) => /^(image|video)\//.test(f.type));
+    if (!media.length) {
+      for (const item of data.items) {
+        if (!/^(image|video)\//.test(item.type)) continue;
+        const file = item.getAsFile();
+        if (file) media.push(file);
+      }
+    }
+    if (!media.length) return;
+    event.preventDefault();
+
+    // Where it lands: the armed slot, else the first free one, before-row
+    // first — which is the order somebody filling this screen works in.
+    const target = pasteTarget;
+    const rows: Array<"before" | "after"> = target ? [target.row] : ["before", "after"];
+    let placed = 0;
+    for (const file of media) {
+      let done = false;
+      for (const row of rows) {
+        const slots = slotsOf(row);
+        const start = target && row === target.row && placed === 0 ? target.index : 0;
+        const index = slots[start] === undefined && start < MAX_SLOTS
+          ? start
+          : slots.findIndex((clip) => !clip);
+        if (index < 0) continue;
+        try {
+          slots[index] = await loadClip(file, clipLen);
+          placed++;
+          done = true;
+        } catch {
+          // An unreadable paste is reported below rather than thrown: the
+          // clipboard is full of things that claim to be images and are not.
+        }
+        break;
+      }
+      if (!done && placed === 0) break;
+    }
+    pasteTarget = null;
+    redrawBoth?.();
+    const note = overlay.querySelector<HTMLElement>(`[data-note="${rows[0]}"]`);
+    if (note && !placed) note.textContent = "That paste had no image in it.";
+  };
+  document.addEventListener("paste", onPaste);
+  overlay.addEventListener("prod-close", () => document.removeEventListener("paste", onPaste));
+
   for (const input of overlay.querySelectorAll<HTMLInputElement>("input[data-pick]")) {
     input.addEventListener("change", async () => {
       const row = input.dataset.pick as "before" | "after";
@@ -359,6 +441,9 @@ export function openProducer(ctx: ProducerContext): void {
 }
 
 export function closeProducer(): void {
+  overlay?.dispatchEvent(new Event("prod-close"));
+  pasteTarget = null;
+  redrawBoth = null;
   overlay?.remove();
   overlay = null;
 }
@@ -378,10 +463,19 @@ function renderSlot(
   if (!clip) {
     // An empty slot is a target, not a second way in: the row's own picker
     // fills these, and clicking one opens that same picker.
-    cell.innerHTML = `<button type="button" class="prod-add" data-open="${row}">
-      <span>+</span>Clip ${index + 1}</button>`;
+    const armed = pasteTarget?.row === row && pasteTarget.index === index;
+    cell.innerHTML = `<button type="button" class="prod-add${armed ? " armed" : ""}" data-open="${row}">
+      <span>+</span>Clip ${index + 1}</button>
+      <button type="button" class="prod-paste" title="Paste an image here">${armed ? "⌘V ready" : "paste"}</button>`;
     cell.querySelector(".prod-add")!.addEventListener("click", () => {
       cell.ownerDocument.querySelector<HTMLInputElement>(`input[data-pick="${row}"]`)?.click();
+    });
+    cell.querySelector(".prod-paste")!.addEventListener("click", (event) => {
+      // Not the picker. Arming and opening a file dialog are opposites: the
+      // dialog takes the focus a paste needs.
+      event.stopPropagation();
+      pasteTarget = armed ? null : { row, index };
+      (redrawBoth ?? redrawRow)();
     });
     return;
   }
