@@ -1266,6 +1266,16 @@ body.funnel-open { overflow: hidden; }
   background: var(--bg); opacity: 0; transition: opacity 0.22s ease;
 }
 .sexpick.in { opacity: 1; }
+/* The way out. Small and quiet — it is an escape hatch, not a third choice —
+   but always visible, because a full-screen question with no exit is a trap. */
+.sexpick-cancel {
+  position: absolute; top: 14px; right: 16px; z-index: 2;
+  padding: 7px 14px; border: 1px solid rgba(255,255,255,.22); border-radius: 999px;
+  background: rgba(0,0,0,.28); color: rgba(255,255,255,.78);
+  font: 500 12.5px var(--sans); cursor: pointer;
+  transition: color .16s, border-color .16s;
+}
+.sexpick-cancel:hover { color: #fff; border-color: rgba(255,255,255,.5); }
 .sexpick-head { text-align: center; padding: clamp(24px, 6vh, 60px) 20px 18px; }
 .sexpick-head h2 { font-family: var(--serif); font-weight: 300; font-size: clamp(24px, 4vw, 38px); margin: 0 0 8px; }
 .sexpick-head p { color: var(--mut); font-size: 14px; max-width: 40ch; margin: 0 auto; line-height: 1.5; }
