@@ -24,7 +24,7 @@
   <body class="quick">
     <main class="q-wrap q-locked">
       <header class="q-top">
-        <span class="wordmark">TRUE<b>MAX</b></span>
+        <button type="button" class="wordmark" id="q-home" title="Back to the mode picker">TRUE<b>MAX</b></button>
         <span class="tag">QUICK · FRONT ONLY</span>
       </header>
 
@@ -82,6 +82,13 @@
           <span class="q-modebar-step" id="q-ai-step">Describe your character</span>
         </div>
         <form id="q-ai-form" class="q-ai-form">
+          <label class="q-ai-field">
+            <span>What the BEFORE should show</span>
+            <textarea id="q-ai-blemish" rows="2" maxlength="220"
+              placeholder="Acne along the jaw, patchy stubble, tired eyes, softer jawline"></textarea>
+            <small>Only the first shot. The after is the same face with these cleared — there is
+            nothing to describe for it, which is the point of a glow-up.</small>
+          </label>
           <div class="q-ai-row">
             <label class="q-ai-field">
               <span>Name</span>

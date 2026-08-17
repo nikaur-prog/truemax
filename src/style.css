@@ -2572,6 +2572,12 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 }
 .prod-add:hover { border-color: var(--acc); color: var(--acc); }
 /* ---------- cutaway strip + disclaimer footage ---------- */
+/* The wordmark is a button on /quick — it goes home. Stripped back to looking
+   like the span it replaced, minus the cursor, which should say it is live. */
+.quick .wordmark { background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+  color: inherit; letter-spacing: inherit; }
+.quick .wordmark:hover b { opacity: .78; }
+
 .q-cut { padding: 18px 28px 0; }
 .q-cut-head > span { display: block; font: 600 10.5px var(--mono); letter-spacing: .18em;
   text-transform: uppercase; color: var(--mut); margin-bottom: 4px; }

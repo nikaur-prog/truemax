@@ -66,10 +66,17 @@ export interface RundownOptions {
    * its length from the text alone, while it is being typed, so an operator can
    * go and find that much footage and say where in it to start.
    *
-   * `startAt` is where in the file to begin. The clip plays forward from there
-   * for as long as the sentence takes; anything past that is never reached.
+   * Up to four clips, played in order, sharing that one budget. Fifteen seconds
+   * of talking can be five from one clip and ten from another, which is the
+   * difference between a disclaimer that looks like a held shot and one that
+   * looks cut.
+   *
+   * `startAt` is where in the source file to begin and `length` is how much of
+   * the sentence this clip covers. If the clips together come up short the last
+   * frame holds rather than cutting to black — a gap is the one failure that
+   * looks like a broken render rather than a short edit.
    */
-  disclaimer?: { video: HTMLVideoElement; startAt: number };
+  disclaimer?: { clips: Array<{ video: HTMLVideoElement; startAt: number; length: number }> };
   /** Supabase access token; the TTS route is staff-gated. */
   accessToken?: string;
   /** How far off level the capture is, for the publish guard. */
@@ -195,7 +202,8 @@ export async function downloadRundownVideo(
     name: (options.shortName?.trim() || options.name.trim().split(/\s+/)[0] || options.name).trim(),
     broll: options.broll,
     disclaimerLine: options.note?.trim() || undefined,
-    disclaimerClip: options.disclaimer?.video,
+    // Set per frame below: which clip is on screen depends on t.
+    disclaimerClip: undefined as CanvasImageSource | undefined,
   };
 
   // The disclaimer beat, so the clip can be seeked to the right frame rather
@@ -210,8 +218,28 @@ export async function downloadRundownVideo(
     // element left running would drift against a timeline that is fitted to the
     // audio afterwards; seeking makes the clip a function of t like everything
     // else in this renderer, which is what keeps a re-render identical.
-    if (options.disclaimer && noteBeat && t >= noteBeat.start && t < noteBeat.start + noteBeat.duration) {
-      await seekTo(options.disclaimer.video, options.disclaimer.startAt + (t - noteBeat.start));
+    // Which clip is showing, and where in it. Walking the list per frame rather
+    // than precomputing a schedule, because the beat's start and duration are
+    // only final after the timeline has been fitted to the real audio.
+    if (options.disclaimer?.clips.length && noteBeat) {
+      const local = t - noteBeat.start;
+      if (local >= 0 && local < noteBeat.duration) {
+        let cursor = 0;
+        let active = options.disclaimer.clips[options.disclaimer.clips.length - 1];
+        let into = Math.max(0, local - (totalOf(options.disclaimer.clips) - active.length));
+        for (const clip of options.disclaimer.clips) {
+          if (local < cursor + clip.length) {
+            active = clip;
+            into = local - cursor;
+            break;
+          }
+          cursor += clip.length;
+        }
+        await seekTo(active.video, active.startAt + into);
+        input.disclaimerClip = active.video;
+      } else {
+        input.disclaimerClip = undefined;
+      }
     }
     drawRundownFrame(ctx, photo, landmarks, input, t, { width: W, height: H, overlayCanvas });
     await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
@@ -229,6 +257,8 @@ export async function downloadRundownVideo(
   onProgress?.(1, "Done");
   return { outcome, beats, duration: audio.duration, narrated: Boolean(voice) };
 }
+
+const totalOf = (clips: Array<{ length: number }>) => clips.reduce((a, c) => a + c.length, 0);
 
 // Seek and wait for the frame to actually be there.
 //

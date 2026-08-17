@@ -494,6 +494,14 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) 
   button.onclick = () => enterMode(button.dataset.mode as QuickMode);
 }
 el.modeBack.onclick = () => leaveMode();
+// The wordmark is the way back. Every other page in the product treats a logo
+// in the corner as "home", and this one was the exception — mid-flow the only
+// way out was the browser's back button, which leaves the URL and the mode
+// disagreeing about where you are.
+document.getElementById("q-home")?.addEventListener("click", () => {
+  if (mode) leaveMode();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 el.calBack.onclick = () => leaveMode();
 
 // ---------------------------------------------------------------------------
@@ -1065,14 +1073,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         <span>Footage for that line <i>(optional)</i></span>
         <small id="q-disc-note">Write the line above first.</small>
       </div>
-      <div class="q-cut-slots">
-        <button type="button" class="q-cut-add" id="q-disc-pick" disabled>
-          <span>+</span>Add a clip
-        </button>
-        <label class="q-disc-start">Start at
-          <input id="q-disc-start" class="q-input" type="number" min="0" step="0.1" value="0" disabled />s
-        </label>
-      </div>
+      <div class="q-disc-clips" id="q-disc-clips"></div>
       <input id="q-disc-clip" type="file" accept="video/*" hidden />
     </div>
 
@@ -1160,69 +1161,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
   mountCutaways();
 
-  // The disclaimer clip: how much is needed, how much there is, and whether the
-  // chosen start point leaves enough.
-  //
-  // Said in seconds against the clip's own length rather than as a rule,
-  // because "your clip is 6.0s and the line needs 4.2s, so start by 1.8s" is
-  // the sentence somebody can act on, and "choose a valid start point" is not.
-  const discInput = document.getElementById("q-disc-clip") as HTMLInputElement | null;
-  const discStart = document.getElementById("q-disc-start") as HTMLInputElement | null;
-  const discNote = document.getElementById("q-disc-note");
-  if (discInput && discStart && discNote && noteField) {
-    const describe = () => {
-      const needed = spokenSeconds(noteField.value);
-      const clip = discClip;
-      if (!needed) {
-        discNote.textContent = "Write the line above first.";
-        return;
-      }
-      if (!clip) {
-        discNote.textContent = `The line runs about ${needed.toFixed(1)}s. Attach a clip at least that long.`;
-        return;
-      }
-      const start = Number(discStart.value) || 0;
-      const left = clip.duration - start;
-      discNote.textContent =
-        left + 0.05 >= needed
-          ? `Clip is ${clip.duration.toFixed(1)}s. From ${start.toFixed(1)}s that leaves ${left.toFixed(1)}s for a ${needed.toFixed(1)}s line.`
-          : `Only ${Math.max(0, left).toFixed(1)}s left from ${start.toFixed(1)}s and the line needs ${needed.toFixed(1)}s — start by ${Math.max(0, clip.duration - needed).toFixed(1)}s or use a longer clip.`;
-    };
-    // The picker is armed only once the line exists — see the markup for why a
-    // control that silently does nothing is worse than one that says so.
-    const pick = document.getElementById("q-disc-pick") as HTMLButtonElement | null;
-    const row = document.getElementById("q-disc-row");
-    const arm = () => {
-      const ready = !!noteField.value.trim();
-      if (pick) pick.disabled = !ready;
-      discStart.disabled = !ready;
-      row?.setAttribute("data-armed", ready ? "1" : "0");
-      if (!ready) {
-        // Dropping the line drops the footage with it. A clip left attached to
-        // a sentence that no longer exists would be rendered under nothing.
-        discClip = null;
-        discInput.value = "";
-      }
-    };
-    pick?.addEventListener("click", () => discInput.click());
-    noteField.addEventListener("input", arm);
-    arm();
+  mountDisclaimerClips();
 
-    discInput.addEventListener("change", async () => {
-      discClip = await loadDisclaimerClip(discInput.files?.[0]);
-      if (pick) pick.textContent = discClip ? "Clip attached — replace" : "Add a clip";
-      // The furthest start that still fits, as the default. Somebody who
-      // attaches a clip and changes nothing else should get a working video.
-      if (discClip) {
-        const needed = spokenSeconds(noteField.value);
-        discStart.max = Math.max(0, discClip.duration - needed).toFixed(1);
-      }
-      describe();
-    });
-    discStart.addEventListener("input", describe);
-    noteField.addEventListener("input", describe);
-    describe();
-  }
   document.getElementById("q-diagnostics")!.onclick = async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const label = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim() ?? "";
@@ -1489,9 +1429,153 @@ async function decodeImage(file: File): Promise<HTMLImageElement | null> {
   }
 }
 
-// The disclaimer's clip, held between renders so changing the start point does
-// not mean re-picking the file.
-let discClip: HTMLVideoElement | null = null;
+// ---------------------------------------------------------------------------
+// The disclaimer's footage: up to four clips sharing one budget.
+//
+// This is the only point in a rundown where cutting to a duration is possible
+// at all. Every other beat is timed by a synthesiser whose real length nobody
+// has until the mp3 comes back; the disclaimer's length is derived from its own
+// text by spokenSeconds, while it is still being typed.
+//
+// So the budget is fixed and the clips divide it. Fifteen seconds of talking
+// can be five from one clip and ten from another, which is the difference
+// between a disclaimer that looks like a held shot and one that looks cut.
+//
+// Each clip owns two numbers and they are different questions: `startAt` is
+// WHERE IN THE SOURCE to begin, and `length` is HOW MUCH OF THE SENTENCE this
+// clip covers. Conflating them is the mistake that makes a trimmer confusing —
+// one is about the file, the other is about the video being built.
+// ---------------------------------------------------------------------------
+const DISC_SLOTS = 4;
+interface DiscClip {
+  video: HTMLVideoElement;
+  startAt: number;
+  length: number;
+}
+const discClips: Array<DiscClip | null> = Array(DISC_SLOTS).fill(null);
+
+/** The voiceover length this footage has to cover, from the typed line. */
+function discBudget(): number {
+  const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value ?? "";
+  return spokenSeconds(note);
+}
+
+const discUsed = () => discClips.reduce((a, c) => a + (c?.length ?? 0), 0);
+
+function drawDiscClips(): void {
+  const host = document.getElementById("q-disc-clips");
+  const row = document.getElementById("q-disc-row");
+  const note = document.getElementById("q-disc-note");
+  if (!host || !note) return;
+
+  const budget = discBudget();
+  const armed = budget > 0;
+  row?.setAttribute("data-armed", armed ? "1" : "0");
+
+  if (!armed) {
+    // No line, no footage. A clip attached to a sentence that no longer exists
+    // would be rendered under nothing.
+    discClips.fill(null);
+    host.innerHTML = "";
+    note.textContent = "Write the line above first.";
+    return;
+  }
+
+  const used = discUsed();
+  const left = budget - used;
+  note.textContent =
+    used === 0
+      ? `The line runs about ${budget.toFixed(1)}s. Add up to ${DISC_SLOTS} clips to cover it.`
+      : left > 0.05
+        ? `${used.toFixed(1)}s of ${budget.toFixed(1)}s covered — ${left.toFixed(1)}s still on the last frame.`
+        : `${budget.toFixed(1)}s covered. Every second of the line has picture.`;
+
+  host.innerHTML = "";
+  discClips.forEach((clip, i) => {
+    const cell = document.createElement("div");
+    cell.className = "q-disc-cell";
+    if (!clip) {
+      // Only ever one empty slot offered, right after the last filled one:
+      // four empty boxes reads as four required things.
+      if (i !== discClips.findIndex((c) => !c)) return;
+      cell.innerHTML = `<button type="button" class="q-cut-add"><span>+</span>${
+        used === 0 ? "Add a clip" : "Add another"
+      }</button>`;
+      cell.querySelector("button")!.addEventListener("click", () => {
+        discPickInto = i;
+        (document.getElementById("q-disc-clip") as HTMLInputElement | null)?.click();
+      });
+      host.append(cell);
+      return;
+    }
+
+    const maxLen = Math.min(clip.video.duration - clip.startAt, left + clip.length);
+    cell.innerHTML = `
+      <video muted playsinline preload="metadata"></video>
+      <button type="button" class="q-cut-x" title="Remove">✕</button>
+      <div class="q-disc-fields">
+        <label>Start
+          <input type="range" data-k="start" min="0" step="0.1"
+                 max="${Math.max(0, clip.video.duration - 0.2).toFixed(1)}" value="${clip.startAt}" />
+          <b>${clip.startAt.toFixed(1)}s</b>
+        </label>
+        <label>Use
+          <input type="range" data-k="len" min="0.5" step="0.1"
+                 max="${Math.max(0.5, maxLen).toFixed(1)}" value="${clip.length}" />
+          <b>${clip.length.toFixed(1)}s</b>
+        </label>
+      </div>`;
+    const video = cell.querySelector("video")!;
+    video.src = clip.video.src;
+    video.currentTime = clip.startAt;
+    cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+      discClips[i] = null;
+      // Close the gap so the slots stay contiguous — a hole in the middle would
+      // put a clip after a clip that is not there.
+      const rest = discClips.filter(Boolean);
+      discClips.fill(null);
+      rest.forEach((c, n) => (discClips[n] = c));
+      drawDiscClips();
+    });
+    for (const range of cell.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
+      range.addEventListener("input", () => {
+        const value = Number(range.value);
+        if (range.dataset.k === "start") {
+          clip.startAt = value;
+          // The scrub preview follows the handle, so the start point is chosen
+          // by looking at the frame rather than by guessing a number.
+          video.currentTime = value;
+          clip.length = Math.min(clip.length, Math.max(0.5, clip.video.duration - value));
+        } else {
+          clip.length = value;
+        }
+        drawDiscClips();
+      });
+    }
+    host.append(cell);
+  });
+}
+
+let discPickInto = 0;
+
+function mountDisclaimerClips(): void {
+  drawDiscClips();
+  const note = document.getElementById("q-rundown-note") as HTMLTextAreaElement | null;
+  note?.addEventListener("input", drawDiscClips);
+  const input = document.getElementById("q-disc-clip") as HTMLInputElement | null;
+  input?.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    input.value = "";
+    const video = await loadDisclaimerClip(file);
+    if (!video) return;
+    // A new clip takes whatever budget is left, capped by its own length, so
+    // attaching one and touching nothing else produces a working video.
+    const left = Math.max(0, discBudget() - discUsed());
+    const length = Math.max(0.5, Math.min(video.duration, left || video.duration));
+    discClips[discPickInto] = { video, startAt: 0, length };
+    drawDiscClips();
+  });
+}
 
 // Decoded far enough to know its duration and to be seekable. Metadata is
 // enough for both — waiting for the whole file would stall the panel on a
@@ -1685,12 +1769,8 @@ async function downloadRundown(r: Report): Promise<void> {
       shortName,
       note,
       broll,
-      disclaimer: discClip
-        ? {
-            video: discClip,
-            startAt:
-              Number((document.getElementById("q-disc-start") as HTMLInputElement | null)?.value) || 0,
-          }
+      disclaimer: discClips.some(Boolean)
+        ? { clips: discClips.filter((c): c is DiscClip => !!c) }
         : undefined,
       accessToken,
       onProgress: (progress, stage) => {
@@ -1865,6 +1945,8 @@ el.aiForm.onsubmit = (event) => {
   event.preventDefault();
   const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
   const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
+  const blemishes =
+    (document.getElementById("q-ai-blemish") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name || !desc) return;
   // Generation is a server capability and this deployment may not have it. Say
   // which, in the same shape as every other unconfigured service in the
@@ -1872,7 +1954,7 @@ el.aiForm.onsubmit = (event) => {
   el.aiMsg.classList.add("err");
   el.aiMsg.textContent =
     "Image generation is not configured on this deployment yet — the character is saved, but the preview pair has to be generated outside the app for now.";
-  saveAiCharacter({ name, sex: aiSex, description: desc });
+  saveAiCharacter({ name, sex: aiSex, description: desc, blemishes });
 };
 
 // The library the operator was promised: describe somebody once, film them
@@ -1882,6 +1964,20 @@ interface AiCharacter {
   name: string;
   sex: Sex;
   description: string;
+  /**
+   * What the BEFORE shot should show, and only the before.
+   *
+   * The description is what stays the same across the pair — face, hair, age,
+   * build — because a before/after where the person changes is not a before and
+   * after. This is the half that is meant to disappear: the acne, the patchy
+   * stubble, the tired eyes.
+   *
+   * There is deliberately no equivalent for the after. "Glowed up" is the
+   * absence of these rather than a list of its own, and asking somebody to
+   * describe an improvement twice is how the two shots stop looking like one
+   * person.
+   */
+  blemishes?: string;
 }
 
 const AI_CHARACTERS_KEY = "truemax.aiCharacters";
