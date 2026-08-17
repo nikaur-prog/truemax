@@ -82,6 +82,26 @@ const BAND: Record<RegionId, [number, number]> = {
   symmetry: [-CROWN, 1.12],
 };
 
+// ---------------------------------------------------------------------------
+// THE SAFE AREA, in pixels of a 1280-tall frame.
+//
+// TikTok and Instagram both draw their own furniture over the bottom of a reel
+// — the poster's handle, the caption, the sound name — and TikTok adds a column
+// of action buttons up the right side. Anything the video puts under that is
+// not "subtle", it is invisible.
+//
+// The header comment above claims the bottom bar "sits above the zone where
+// TikTok puts its own caption and buttons". It did not: it was at H - 128, and
+// the watermark at H - 22 was underneath the sound title on every single post.
+//
+// 300px of 1280 is about 23%, measured against a screenshot of a real TikTok
+// rather than reasoned about — TikTok's caption block runs to roughly 20% and
+// Instagram's to roughly 18%, so this clears both with a little margin for the
+// taller phones where the safe area grows.
+const SAFE_BOTTOM = 300;
+// The right-hand action rail. Only the bottom bar is wide enough to reach it.
+const SAFE_RIGHT = 132;
+
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 const smoother = (n: number) => n * n * n * (n * (n * 6 - 15) + 10);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -380,8 +400,21 @@ export function drawRundownFrame(
   // most of the way down. Not all the way to black: keeping the photograph
   // faintly there is what makes the curve read as "this man, against everyone"
   // rather than as a chart that arrived from somewhere else.
-  if (kind === "curve" || kind === "search") {
-    ctx.fillStyle = "rgba(5,6,6,0.82)";
+  if (kind === "curve") {
+    // The curve pops in FRONT of the face. Not all the way to black: keeping
+    // the photograph faintly there is what makes the curve read as "this man,
+    // against everyone" rather than as a chart that arrived from somewhere else.
+    ctx.fillStyle = "rgba(5,6,6,0.90)";
+    ctx.fillRect(0, 0, W, H);
+  } else if (kind === "search") {
+    // The search bar goes to BLACK, with nothing behind it.
+    //
+    // At 0.82 the photograph was still legible as a shape, and a head-shaped
+    // smudge behind a search box is neither a portrait nor a clean end card —
+    // it just looks like something failed to clear. This frame is the only one
+    // that is not about the subject at all: it is an instruction, and an
+    // instruction wants no competition.
+    ctx.fillStyle = "#050606";
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -393,11 +426,10 @@ export function drawRundownFrame(
   if (beat.beat.kind === "card") drawCard(ctx, beat, W, H);
   if (beat.beat.kind === "curve") drawCurve(ctx, beat, t, W, H, input.name);
   if (beat.beat.kind === "search") drawSearchBar(ctx, beat, t, W, H);
-  // No caption over the card. The card already prints the verdict and the
-  // number in 76px and 56px type, so the caption is saying the same words a
-  // third time — and it is drawn in the middle of the frame, straight through
-  // the region rows. Two of the eight regions were unreadable behind it.
-  if (beat.beat.kind !== "card") drawCaption(ctx, beat, t, W, H);
+  // The caption is drawn on every beat including the card. It collided with the
+  // region rows the first time round; the card is compressed now — a shorter
+  // photo band, a tighter row pitch — specifically so both fit.
+  drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
 }
@@ -409,7 +441,12 @@ function beatProgress(beat: TimedBeat, t: number): number {
 }
 
 // How much of the frame the photograph keeps once the card is up.
-const CARD_PHOTO = 0.42;
+const CARD_PHOTO = 0.3;
+
+// Row pitch on the card. Eight regions have to finish above the caption, which
+// itself has to finish above the safe area, and at the old 46px they ran 120px
+// past it.
+const CARD_ROW = 40;
 
 // ---------------------------------------------------------------------------
 // The scorecard: the face at the top, everything measured underneath it.
@@ -437,7 +474,7 @@ function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: 
   // quoted in a comment section.
   ctx.font = "300 76px Fraunces, Georgia, serif";
   ctx.fillStyle = "#f7f7f2";
-  ctx.fillText(card.verdict, W / 2, top + 78);
+  ctx.fillText(card.verdict, W / 2, top + 74);
 
   // The three figures, in a row. Score first because it is the one they came
   // for; ceiling next because it is the one that sells a subscription; rarity
@@ -453,21 +490,21 @@ function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: 
     ctx.font = "500 14px Inter, Arial, sans-serif";
     ctx.letterSpacing = "3px";
     ctx.fillStyle = "#7f8682";
-    ctx.fillText(label, cx, top + 128);
+    ctx.fillText(label, cx, top + 122);
     ctx.font = "300 56px Fraunces, Georgia, serif";
     ctx.letterSpacing = "0px";
     ctx.fillStyle = "#f7f7f2";
-    ctx.fillText(value, cx, top + 184);
+    ctx.fillText(value, cx, top + 178);
   });
 
   // The regions, top of the face to the bottom — the same order the video just
   // walked in, so the card reads as a recap rather than as a second opinion.
-  let y = top + 246;
+  let y = top + 238;
   const left = W * 0.12;
   const right = W * 0.88;
   ctx.textAlign = "left";
   for (const row of card.rows) {
-    if (y > H - 150) break; // never collide with the bottom bar
+    if (y > H - SAFE_BOTTOM - 200) break; // never collide with the caption
     ctx.font = "500 24px Inter, Arial, sans-serif";
     ctx.fillStyle = "#c9d1cd";
     ctx.fillText(row.label, left, y);
@@ -487,7 +524,7 @@ function drawCard(ctx: CanvasRenderingContext2D, beat: TimedBeat, W: number, H: 
     ctx.fillStyle = "#f7f7f2";
     ctx.fillText(row.score.toFixed(1), right, y);
     ctx.textAlign = "left";
-    y += 46;
+    y += CARD_ROW;
   }
   ctx.restore();
 }
@@ -541,19 +578,46 @@ function drawCurve(
 
   ctx.save();
 
-  // The crowd: the middle 68%, shaded. This is the "where most men are" band,
-  // and it is one sigma rather than two on purpose — the 95% band runs so wide
-  // it reads as "anything is normal" and tells nobody where they stand.
-  const shade = ctx.createLinearGradient(0, peak, 0, baseline);
-  shade.addColorStop(0, "rgba(143,243,224,0.30)");
-  shade.addColorStop(1, "rgba(143,243,224,0.05)");
+  // The fill is a RARITY scale, left to right, and it is the whole point of
+  // colouring it at all.
+  //
+  // Green through the common low end, orange across the bulk where most men
+  // actually are, red out on the right tail where almost nobody is. It is a
+  // heat scale for how UNUSUAL a position is, not a good/bad scale — red is the
+  // rare end, which in this niche is the end people want. A viewer reads where
+  // the marker falls against the colour before they read a single number, and
+  // "he is off in the red" is the sentence the frame is trying to produce.
+  //
+  // Shading the WHOLE curve rather than only the middle 68%: the old version
+  // shaded one sigma and left the tails bare, which drew the eye to the middle
+  // — the exact opposite of what a video about somebody exceptional wants. The
+  // band is now marked by its edges instead.
+  const heat = ctx.createLinearGradient(left, 0, right, 0);
+  heat.addColorStop(0.0, "rgba(143,243,224,0.10)");
+  heat.addColorStop(0.22, "rgba(143,243,224,0.34)");
+  heat.addColorStop(0.5, "rgba(232,161,122,0.40)");
+  heat.addColorStop(0.78, "rgba(228,110,84,0.40)");
+  heat.addColorStop(1.0, "rgba(228,60,60,0.34)");
   ctx.beginPath();
-  ctx.moveTo(xOf(-1), baseline);
-  for (let z = -1; z <= 1.0001; z += 0.02) ctx.lineTo(xOf(z), yOf(z));
-  ctx.lineTo(xOf(1), baseline);
+  ctx.moveTo(xOf(-Z_EDGE), baseline);
+  for (let z = -Z_EDGE; z <= Z_EDGE + 0.0001; z += 0.02) ctx.lineTo(xOf(z), yOf(z));
+  ctx.lineTo(xOf(Z_EDGE), baseline);
   ctx.closePath();
-  ctx.fillStyle = shade;
+  ctx.fillStyle = heat;
   ctx.fill();
+
+  // The middle 68%, marked by its EDGES rather than by a fill, so the crowd is
+  // legible without the eye being pulled into it.
+  ctx.setLineDash([6, 8]);
+  ctx.strokeStyle = "rgba(247,247,242,0.34)";
+  ctx.lineWidth = 1.5;
+  for (const edge of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(xOf(edge), baseline);
+    ctx.lineTo(xOf(edge), yOf(edge));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
 
   // The curve itself, drawn left to right over the beat so the frame has
   // something happening in it rather than appearing whole.
@@ -575,10 +639,26 @@ function drawCurve(
   ctx.stroke();
 
   ctx.textAlign = "center";
-  ctx.font = "500 15px Inter, Arial, sans-serif";
-  ctx.letterSpacing = "1px";
-  ctx.fillStyle = "#8ff3e0";
-  ctx.fillText("MOST MEN", (xOf(-1) + xOf(1)) / 2, baseline + 34);
+
+  // TWO STAGES, and the order is the argument.
+  //
+  // First his POSITION — the marker and the headline rarity, because a viewer
+  // who has just heard a score wants to know what it is worth before they want
+  // a lesson in distributions. Then the GENERALISATION: where the crowd sits,
+  // which is only interesting once there is a marker to compare it to.
+  //
+  // The first curve beat is the one carrying a badge; the second has none.
+  const showsCrowd = !beat.beat.badge;
+  if (showsCrowd) {
+    ctx.font = "500 15px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "1px";
+    ctx.fillStyle = "#e8a17a";
+    ctx.fillText("WHERE MOST MEN ARE", (xOf(-1) + xOf(1)) / 2, baseline + 34);
+    ctx.font = "500 13px Inter, Arial, sans-serif";
+    ctx.fillStyle = "#7f8682";
+    ctx.fillText("RARE", xOf(2.25), baseline + 34);
+    ctx.fillText("RARE", xOf(-2.25), baseline + 34);
+  }
 
   // The marker, which arrives only once the curve has been drawn past it —
   // otherwise it stands on a line that is not there yet.
@@ -609,6 +689,24 @@ function drawCurve(
     const half = ctx.measureText(label).width / 2 + 12;
     const lx = Math.max(left + half, Math.min(right - half, x));
     ctx.fillText(label, lx, yOf(z) - 44);
+
+    // His standing, printed big under the curve, on the first beat only. This
+    // is the number the whole video has been earning and it was only spoken.
+    //
+    // AFTER the name, not before: setting up this block's own 14px grey style
+    // first left it in place for the name, which came out as a dim caption
+    // instead of a label on a marker.
+    if (!showsCrowd) {
+      const top = Math.max(1, Math.round(100 - (beat.beat.percentile ?? 50)));
+      ctx.font = "300 64px Fraunces, Georgia, serif";
+      ctx.letterSpacing = "0px";
+      ctx.fillStyle = "#f7f7f2";
+      ctx.fillText(`TOP ${top}%`, W / 2, baseline + 96);
+      ctx.font = "500 14px Inter, Arial, sans-serif";
+      ctx.letterSpacing = "3px";
+      ctx.fillStyle = "#7f8682";
+      ctx.fillText("OF THE REFERENCE SET", W / 2, baseline + 130);
+    }
   }
   ctx.restore();
 }
@@ -685,6 +783,30 @@ function drawSearchBar(
     const cx = x + 84 + ctx.measureText(typed).width + 4;
     ctx.fillRect(cx, y + h / 2 - 22, 3, 40);
   }
+
+  // The wordmark under the bar, arriving once the address has finished typing.
+  //
+  // The frame is black and holds exactly one instruction, so there is room for
+  // the brand to be stated properly rather than as the 16px watermark it wears
+  // everywhere else. It comes in AFTER the typing so the eye follows the
+  // address first and lands on the name second, which is the order the two
+  // things matter in.
+  const brand = clamp01((p - 0.86) / 0.14);
+  if (brand > 0) {
+    ctx.globalAlpha = brand;
+    ctx.textAlign = "center";
+    ctx.font = "500 34px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "6px";
+    const my = y + h + 96;
+    ctx.fillStyle = "#f7f7f2";
+    ctx.fillText("TRUE", W / 2 - ctx.measureText("MAX").width / 2, my);
+    ctx.fillStyle = "#8ff3e0";
+    ctx.fillText("MAX", W / 2 + ctx.measureText("TRUE").width / 2, my);
+    ctx.font = "500 13px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "3px";
+    ctx.fillStyle = "#7f8682";
+    ctx.fillText("MEASURED, NOT GUESSED", W / 2, my + 38);
+  }
   ctx.restore();
 }
 
@@ -740,7 +862,10 @@ function drawCaption(
   ctx.textAlign = "center";
   const maxWidth = W - 96;
   const lines = wrap(ctx, shown, maxWidth, 2);
-  const baseline = H - 268;
+  // Bottom-aligned against the safe area rather than measured down from the
+  // frame edge, so a one-line beat and a two-line beat both END in the same
+  // place instead of the second line sliding into TikTok's caption.
+  const baseline = H - SAFE_BOTTOM - 96 - (lines.length - 1) * 44;
   lines.forEach((line, i) => {
     const y = baseline + i * 44;
     // A shadow rather than a plate behind the text. A plate is a rectangle the
@@ -787,7 +912,9 @@ function drawBottomBar(
 ): void {
   const id = beat.beat.metricId;
   const metric = id ? input.metrics.get(id) : undefined;
-  const y = H - 128;
+  // Was H - 128, which put the metric name and its value inside the block where
+  // TikTok prints the caption and the sound name.
+  const y = H - SAFE_BOTTOM - 40;
 
   ctx.save();
   ctx.textAlign = "left";
@@ -816,23 +943,23 @@ function drawBottomBar(
       // textAlign once and forget the second string is a separate draw.
       ctx.font = "300 20px Fraunces, Georgia, serif";
       ctx.fillStyle = "#747b77";
-      ctx.fillText("/10", W - 48, y + 12);
+      ctx.fillText("/10", W - SAFE_RIGHT, y + 12);
       const suffix = ctx.measureText("/10").width;
       ctx.font = "300 54px Fraunces, Georgia, serif";
       ctx.fillStyle = toneColour(metric);
-      ctx.fillText(metric.score.toFixed(1), W - 48 - suffix - 6, y + 12);
+      ctx.fillText(metric.score.toFixed(1), W - SAFE_RIGHT - suffix - 6, y + 12);
       ctx.font = "500 13px Inter, Arial, sans-serif";
       ctx.letterSpacing = "2px";
       ctx.fillStyle = "#7f8682";
-      ctx.fillText(bandFor(metric).toUpperCase(), W - 48, y + 36);
-    } else if (badge) {
+      ctx.fillText(bandFor(metric).toUpperCase(), W - SAFE_RIGHT, y + 36);
+    } else if (badge && beat.beat.kind !== "curve" && beat.beat.kind !== "card") {
       ctx.font = "300 54px Fraunces, Georgia, serif";
       ctx.fillStyle = "#f7f7f2";
-      ctx.fillText(badge, W - 48, y + 12);
+      ctx.fillText(badge, W - SAFE_RIGHT, y + 12);
       ctx.font = "500 13px Inter, Arial, sans-serif";
       ctx.letterSpacing = "2px";
       ctx.fillStyle = "#7f8682";
-      ctx.fillText("MEASURED, NOT GUESSED", W - 48, y + 36);
+      ctx.fillText("MEASURED, NOT GUESSED", W - SAFE_RIGHT, y + 36);
     }
   }
   ctx.restore();
@@ -885,7 +1012,7 @@ function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number): voi
   const tld = ".app";
   const total = ctx.measureText(name).width + ctx.measureText(tld).width;
   const x = (W - total) / 2;
-  const y = H - 22;
+  const y = H - SAFE_BOTTOM + 26;
   ctx.globalAlpha = 0.62;
   ctx.fillStyle = "#f5f5f1";
   ctx.fillText(name, x, y);

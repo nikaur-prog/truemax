@@ -106,10 +106,10 @@ export function buildCaption(input: CaptionInput): CaptionResult {
         delta === null
           ? `${score}${standing} after.`
           : delta >= 0.05
-            ? `${input.from!.toFixed(1)} → ${score}. Same face, same measurements, both times.`
+            ? `${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. Same face, same measurements, both times.`
             : delta <= -0.05
-              ? `${input.from!.toFixed(1)} → ${score}. It went down, and that's worth posting too.`
-              : `${input.from!.toFixed(1)} → ${score}. Barely moved, and that's the honest read.`;
+              ? `${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. It went down, and that's worth posting too.`
+              : `${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. Barely moved, and that's the honest read.`;
       break;
     }
     case "rundown":

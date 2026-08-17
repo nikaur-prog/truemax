@@ -449,6 +449,13 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   ];
 
   const pct = statedPct(report.overallPercentile);
+  // "92th percentile" was printed on the badge of the frame this video builds
+  // to. English ordinals: 11, 12 and 13 take "th" despite ending in 1, 2, 3.
+  const ord = (n: number) => {
+    const t = n % 100;
+    if (t >= 11 && t <= 13) return `${n}th`;
+    return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+  };
   const beats: Beat[] = [
     { kind: "hook", line: `How attractive is ${name}?` },
     ...metricBeats,
@@ -511,7 +518,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       kind: "curve",
       line: `That's ${rarityShort(report.overallPercentile).toLowerCase()}. ${spreadLine(report.sex)}`,
       percentile: report.overallPercentile,
-      badge: `${pct}th percentile`,
+      badge: `${ord(pct)} percentile`,
     },
     {
       kind: "curve",
