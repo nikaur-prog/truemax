@@ -232,7 +232,7 @@ let captureMethod: "camera" | "upload" | null = null;
   const stats = stillFrameStats(c, faceBox);
   const occlusion = detectOcclusion(c, landmarks, w, h);
   const eligibility = frontPhotoRejection(quality, stats, occlusion, landmarks, w, h);
-  const report = analyze(landmarks, w, h, sex);
+  const report = analyze(landmarks, w, h, sex, c);
   return {
     faceFound: true,
     overall: report.overall,
@@ -997,7 +997,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   });
   await reveal.done;
 
-  const front = analyze(landmarks, width, height, selectedSex);
+  const front = analyze(landmarks, width, height, selectedSex, frontShot);
   // Front-only is a real result: mergeReports already returns the front report
   // untouched when the side is absent, so the same call covers both and the
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
@@ -1132,7 +1132,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
       storeSex(sex);
       paintRefPop();
       if (!lastSide) return;
-      const f = analyze(landmarks, width, height, sex);
+      const f = analyze(landmarks, width, height, sex, frontShot);
       const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
       const merged = mergeReports(f, sd);
       renderQualityChips(quality, `Scored against ${sex} norms`);

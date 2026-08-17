@@ -22,6 +22,15 @@ import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./eng
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
 import { spokenSeconds } from "./engine/reelScript.js";
+import {
+  addRatedFace,
+  clearCalibrationSet,
+  corpusJSON,
+  loadCalibrationSet,
+  missingCoverage,
+  removeRatedFace,
+  setHealth,
+} from "./engine/calibrationSet.js";
 import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
@@ -54,6 +63,10 @@ const MAX_DIM = 1280;
 const el = {
   pillars: document.getElementById("q-pillars")!,
   ai: document.getElementById("q-ai")!,
+  cal: document.getElementById("q-cal")!,
+  calBody: document.getElementById("q-cal-body")!,
+  calStep: document.getElementById("q-cal-step")!,
+  calBack: document.getElementById("q-cal-back")!,
   aiBack: document.getElementById("q-ai-back")!,
   aiForm: document.getElementById("q-ai-form") as HTMLFormElement,
   aiSex: document.getElementById("q-ai-sex")!,
@@ -346,13 +359,24 @@ let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasEle
 //              better, they make it ambiguous, and the operator was right that
 //              a second look with different lighting confuses more than it adds
 //   ai       — no photograph at all; a description, a preview, then footage
+//
+//   calibrate — the odd one out, and deliberately so. It produces nothing to
+//              post. It takes one photograph, asks the operator what the face
+//              is actually worth BEFORE showing what the engine said, and adds
+//              the pair to a growing set. Its output is the corpus every other
+//              number in this product is fitted against.
+//
+//              It sits here rather than on its own page because this is the
+//              page the person doing that work already has open, and because a
+//              calibration tool nobody opens calibrates nothing.
 // ---------------------------------------------------------------------------
-type QuickMode = "reel" | "analysis" | "ai";
+type QuickMode = "reel" | "analysis" | "ai" | "calibrate";
 
 const MODE_NAMES: Record<QuickMode, string> = {
   reel: "Reel Creator",
   analysis: "Full Analysis",
   ai: "AI Model Reel",
+  calibrate: "Calibrate",
 };
 
 let mode: QuickMode | null = null;
@@ -383,15 +407,30 @@ function enterMode(next: QuickMode): void {
   }
 
   el.ai.classList.add("hidden");
-  el.capture.classList.remove("hidden");
   el.modeName.textContent = MODE_NAMES[next];
   updateModeStep();
   track("quick-visit");
+
+  // Calibrate opens on the SET, not the camera. The other three modes exist to
+  // make one thing and the camera is step one; this one is a session of twenty
+  // faces, and the first question is always "where am I up to" — how many are
+  // in, whether the ratings still span the scale, which faces the engine is
+  // worst at. Opening on a viewfinder answers none of that.
+  if (next === "calibrate") {
+    el.capture.classList.add("hidden");
+    el.cal.classList.remove("hidden");
+    renderCalibrationSet();
+    return;
+  }
+
+  el.cal.classList.add("hidden");
+  el.capture.classList.remove("hidden");
 }
 
 function updateModeStep(): void {
   if (mode !== "reel") {
-    el.modeStep.textContent = mode === "analysis" ? "One photo" : "";
+    el.modeStep.textContent =
+      mode === "analysis" ? "One photo" : mode === "calibrate" ? "One photo · then your rating" : "";
     return;
   }
   el.modeStep.textContent =
@@ -405,6 +444,7 @@ function leaveMode(): void {
   el.capture.classList.add("hidden");
   el.result.classList.add("hidden");
   el.ai.classList.add("hidden");
+  el.cal.classList.add("hidden");
   el.pillars.classList.remove("hidden");
 }
 
@@ -412,6 +452,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) 
   button.onclick = () => enterMode(button.dataset.mode as QuickMode);
 }
 el.modeBack.onclick = () => leaveMode();
+el.calBack.onclick = () => leaveMode();
 
 // ---------------------------------------------------------------------------
 // The saved-face strip.
@@ -477,7 +518,7 @@ function escapeHtml(value: string): string {
 function show(sex: Sex, animate = false): void {
   if (!last) return;
   storeSex(sex);
-  render(analyze(last.lm, last.w, last.h, sex), last.photo, animate);
+  render(analyze(last.lm, last.w, last.h, sex, last.photo), last.photo, animate);
 }
 
 // Scan line, then landmarks, then the photo gives up its space to the cards.
@@ -506,9 +547,195 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
   settleNumbers(true);
 }
 
+
+// ---------------------------------------------------------------------------
+// Calibrate: rate the face, then meet the disagreement.
+// ---------------------------------------------------------------------------
+
+function renderRatingStep(r: Report): void {
+  el.calStep.textContent = "Your rating";
+  el.calBody.innerHTML = `
+    <div class="q-cal-rate">
+      <p class="q-cal-ask">Before you see what it said — what is this face, out of ten?</p>
+      <div class="q-cal-input">
+        <input type="number" id="q-cal-num" min="1" max="10" step="0.1" inputmode="decimal"
+               placeholder="6.4" autocomplete="off" />
+        <input type="text" id="q-cal-label" placeholder="Label (optional, never exported)"
+               maxlength="40" autocomplete="off" />
+        <button type="button" class="btn pri" id="q-cal-save">Lock it in</button>
+      </div>
+      <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale —
+      a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
+      how the men in the current corpus ended up useless.</p>
+      <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
+    </div>`;
+
+  const num = document.getElementById("q-cal-num") as HTMLInputElement;
+  const label = document.getElementById("q-cal-label") as HTMLInputElement;
+  const msg = document.getElementById("q-cal-msg")!;
+  num.focus();
+  const commit = () => {
+    const rating = Number(num.value);
+    if (!(rating >= 1 && rating <= 10)) {
+      msg.textContent = "A number between 1 and 10.";
+      num.focus();
+      return;
+    }
+    addRatedFace(r, Math.round(rating * 10) / 10, label.value.trim() || undefined);
+    renderVerdictStep(r, Math.round(rating * 10) / 10);
+  };
+  document.getElementById("q-cal-save")!.onclick = commit;
+  num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
+}
+
+function renderVerdictStep(r: Report, rating: number): void {
+  const gap = r.overall - rating;
+  // Named rather than left as a number. "−2.3" is a figure; "the engine is
+  // two points below you on this face" is the thing worth acting on, and the
+  // whole set is a list of these.
+  const verdict =
+    Math.abs(gap) < 0.6 ? "agrees with you" : gap > 0 ? "is too generous here" : "is too harsh here";
+  el.calStep.textContent = "Saved";
+  el.calBody.innerHTML = `
+    <div class="q-cal-verdict">
+      <div class="q-cal-pair">
+        <div><span>YOU</span><b>${rating.toFixed(1)}</b></div>
+        <div class="q-cal-gap">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</div>
+        <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
+      </div>
+      <p class="q-cal-said">It ${verdict}.</p>
+      <div class="q-actions">
+        <button class="btn pri" id="q-cal-next">Next face</button>
+        <button class="btn gho" id="q-cal-list">See the set</button>
+      </div>
+    </div>`;
+  document.getElementById("q-cal-next")!.onclick = () => {
+    el.cal.classList.add("hidden");
+    el.capture.classList.remove("hidden");
+  };
+  document.getElementById("q-cal-list")!.onclick = () => renderCalibrationSet();
+}
+
+function renderCalibrationSet(): void {
+  const faces = loadCalibrationSet();
+  el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
+  const health = (["male", "female"] as const).map((sex) => setHealth(faces, sex));
+  const missing = missingCoverage(faces);
+
+  el.calBody.innerHTML = `
+    <div class="q-cal-set">
+      <div class="q-cal-health">
+        ${health
+          .map(
+            (h) => `<div class="q-cal-hcard${h.enough ? " ok" : ""}">
+              <span>${h.sex === "male" ? "MEN" : "WOMEN"}</span>
+              <b>${h.count}</b>
+              <small>${h.note}</small>
+            </div>`,
+          )
+          .join("")}
+      </div>
+      ${
+        missing.length
+          ? `<p class="q-cal-missing">No face in this set carries ${missing.join(", ")} yet —
+             those stay on a prior until one does.</p>`
+          : ""
+      }
+      ${
+        faces.length
+          ? `<div class="q-cal-rows">
+              <div class="q-cal-row q-cal-head"><span>FACE</span><span>YOU</span><span>ENGINE</span><span>GAP</span><span></span></div>
+              ${[...faces]
+                .sort((a, b) => Math.abs(b.scored - b.rating) - Math.abs(a.scored - a.rating))
+                .map((f) => {
+                  const gap = f.scored - f.rating;
+                  return `<div class="q-cal-row">
+                    <span>${f.label ? escapeHtml(f.label) : f.id}</span>
+                    <span>${f.rating.toFixed(1)}</span>
+                    <span>${f.scored.toFixed(1)}</span>
+                    <span class="${Math.abs(gap) >= 1.5 ? "bad" : ""}">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</span>
+                    <button type="button" class="linkish" data-drop="${f.id}">remove</button>
+                  </div>`;
+                })
+                .join("")}
+            </div>`
+          : `<p class="q-cal-empty">Nothing yet. Scan a face and give it a number.</p>`
+      }
+      <div class="q-actions">
+        <button class="btn pri" id="q-cal-add">Add a face</button>
+        <button class="btn gho" id="q-cal-copy"${faces.length ? "" : " disabled"}>Copy corpus JSON</button>
+        <button class="btn gho" id="q-cal-clear"${faces.length ? "" : " disabled"}>Clear the set</button>
+      </div>
+      <p class="q-cal-hint">Copy pastes straight over src/engine/calibration/corpus.json.
+      Rows sort by disagreement, so the faces the engine is worst at are at the top.</p>
+      <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
+    </div>`;
+
+  document.getElementById("q-cal-add")!.onclick = () => {
+    el.cal.classList.add("hidden");
+    el.capture.classList.remove("hidden");
+  };
+  for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-drop]")) {
+    button.onclick = () => { removeRatedFace(button.dataset.drop!); renderCalibrationSet(); };
+  }
+  const msg = document.getElementById("q-cal-msg")!;
+  document.getElementById("q-cal-copy")!.onclick = async () => {
+    const text = corpusJSON(loadCalibrationSet());
+    try {
+      await navigator.clipboard.writeText(text);
+      msg.textContent = "Copied.";
+    } catch {
+      // Same reasoning as the diagnostics dump: the entire job of this button
+      // is getting text OUT, so a silent clipboard failure is the one outcome
+      // worth handling rather than logging.
+      const area = document.createElement("textarea");
+      area.className = "q-cal-fallback";
+      area.readOnly = true;
+      area.value = text;
+      el.calBody.appendChild(area);
+      area.focus();
+      area.select();
+      msg.textContent = "Clipboard refused — select and copy from the box.";
+    }
+  };
+  document.getElementById("q-cal-clear")!.onclick = () => {
+    // Two taps. Fifty scans is a day of work and a stray tap should not end it.
+    const button = document.getElementById("q-cal-clear") as HTMLButtonElement;
+    if (button.dataset.armed !== "1") {
+      button.dataset.armed = "1";
+      button.textContent = "Really clear it?";
+      window.setTimeout(() => {
+        button.dataset.armed = "";
+        button.textContent = "Clear the set";
+      }, 4000);
+      return;
+    }
+    clearCalibrationSet();
+    renderCalibrationSet();
+  };
+}
+
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
+  // Calibrate: the rating comes FIRST, and the engine's number is not on screen
+  // while it is being given.
+  //
+  // This is the whole methodological point of the mode and it is worth being
+  // strict about. A rating typed underneath a 6.8 is not an independent
+  // judgement of the face, it is a reaction to a 6.8 — and a corpus of ratings
+  // anchored to the engine's own output would fit the engine to itself and
+  // report excellent agreement while measuring nothing. The scan runs, the
+  // score is held back, the number is typed, and only then are the two shown
+  // side by side.
+  if (mode === "calibrate") {
+    el.result.classList.add("hidden");
+    el.capture.classList.add("hidden");
+    el.cal.classList.remove("hidden");
+    renderRatingStep(r);
+    return;
+  }
+
   // Reel Creator: the first scan is not a result, it is half of a comparison.
   // Showing the full card set here would be a dead end — the operator would
   // have to work out for themselves that they are meant to go round again.

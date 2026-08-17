@@ -465,3 +465,63 @@
   font-family: inherit;
 }
 @media (max-width: 560px) { .q-notefield { padding: 10px 20px 0; } }
+
+/* ---------------------------------------------------------------------------
+   Calibrate.
+
+   Deliberately plainer than the other three pillars. Those are filmed; this one
+   is a workbench, used for an hour at a time by one person, and every gram of
+   decoration on it is something between them and the next face.
+   --------------------------------------------------------------------------- */
+.q-pillar-tool { border-style: dashed; }
+
+.q-cal-rate, .q-cal-verdict, .q-cal-set { padding: 20px 28px 30px; }
+.q-cal-ask { margin: 0 0 16px; font: 400 20px var(--serif); line-height: 1.35; }
+.q-cal-input { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.q-cal-input input {
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); color: inherit; font-size: 16px;
+}
+#q-cal-num { width: 108px; font: 300 26px var(--serif); text-align: center; }
+#q-cal-label { flex: 1; min-width: 160px; }
+.q-cal-hint { margin: 14px 0 0; max-width: 520px; color: var(--mut); font-size: 12.5px; line-height: 1.6; }
+.q-cal-msg { min-height: 18px; margin: 8px 0 0; color: var(--warm, #c07a4a); font-size: 12.5px; }
+
+/* The disagreement, which is the only thing this screen is for. */
+.q-cal-pair { display: flex; align-items: center; gap: 22px; }
+.q-cal-pair > div { display: flex; flex-direction: column; gap: 2px; }
+.q-cal-pair span { font: 600 10px var(--mono); letter-spacing: .18em; color: var(--mut); }
+.q-cal-pair b { font: 300 46px var(--serif); line-height: 1; }
+.q-cal-gap { font: 500 15px var(--mono); color: var(--mut); }
+.q-cal-said { margin: 14px 0 22px; font: 400 17px var(--serif); }
+
+.q-cal-health { display: flex; gap: 10px; margin-bottom: 16px; }
+.q-cal-hcard {
+  flex: 1; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+}
+.q-cal-hcard.ok { border-color: var(--acc); }
+.q-cal-hcard span { display: block; font: 600 10px var(--mono); letter-spacing: .18em; color: var(--mut); }
+.q-cal-hcard b { display: block; margin: 2px 0 3px; font: 300 30px var(--serif); line-height: 1; }
+.q-cal-hcard small { color: var(--mut); font-size: 11.5px; line-height: 1.45; }
+.q-cal-missing { margin: 0 0 16px; color: var(--mut); font-size: 12px; line-height: 1.55; }
+.q-cal-empty { margin: 0 0 18px; color: var(--mut); font-size: 13px; }
+
+.q-cal-rows { margin-bottom: 20px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.q-cal-row {
+  display: grid; grid-template-columns: 1fr 52px 62px 52px 62px; gap: 8px;
+  align-items: center; padding: 9px 14px; font-size: 13px;
+}
+.q-cal-row + .q-cal-row { border-top: 1px solid var(--line); }
+.q-cal-head { font: 600 9.5px var(--mono); letter-spacing: .14em; color: var(--mut); background: var(--card); }
+.q-cal-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A gap of a point and a half is the engine and a person disagreeing about
+   what kind of face this is, not about a decimal. Worth seeing from across
+   the room. */
+.q-cal-row .bad { color: var(--warm, #c07a4a); font-weight: 600; }
+.q-cal-fallback { width: 100%; min-height: 180px; margin-top: 12px; font: 11px/1.5 var(--mono); }
+
+@media (max-width: 560px) {
+  .q-cal-rate, .q-cal-verdict, .q-cal-set { padding: 16px 20px 26px; }
+  .q-cal-health { flex-direction: column; }
+  .q-cal-row { grid-template-columns: 1fr 44px 52px 44px 56px; font-size: 12px; padding: 8px 11px; }
+}

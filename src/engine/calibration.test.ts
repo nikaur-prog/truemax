@@ -48,6 +48,17 @@ const spearman = (a: number[], b: number[]) => corr(ranks(a), ranks(b));
 
 const scoreAll = (faces: Face[]) => faces.map((f) => scoreFrontMeasurements(f.measurements, f.sex).overall);
 
+// Metrics added to the engine AFTER these nineteen faces were captured.
+//
+// The corpus is a record of what was measured on a given day, so it cannot
+// contain a measurement that did not exist yet, and a new metric must not be
+// able to fail this file just by being new. What it must also not do is go
+// unnoticed: an entry here is a metric with NO rated evidence behind it, so its
+// direction and its distribution are a prior and nothing more.
+//
+// Remove a name from this list by re-scanning the corpus, not by deleting it.
+const MEASURED_AFTER_CORPUS = new Set(["cheekFullness", "foreheadRatio"]);
+
 test("the corpus is intact and every face carries every front measurement", () => {
   assert.equal(FACES.length, 19);
   assert.equal(FACES.filter((f) => f.sex === "male").length, 9);
@@ -55,9 +66,30 @@ test("the corpus is intact and every face carries every front measurement", () =
   for (const f of FACES) {
     assert.ok(f.rating >= 1 && f.rating <= 10, `${f.id} has no usable rating`);
     for (const def of FRONT) {
+      if (MEASURED_AFTER_CORPUS.has(def.id)) continue;
       assert.equal(typeof f.measurements[def.id], "number", `${f.id} is missing ${def.id}`);
     }
   }
+});
+
+test("a metric the corpus predates cannot poison a score", () => {
+  // The bug this pair of tests found. A measurement missing from the input used
+  // to arrive as NaN, get correctly excluded with weight zero, and then poison
+  // every aggregate anyway through 0 × NaN — so the overall score, both
+  // percentiles and the whole region grid came back NaN because one metric was
+  // unavailable. Every pixel-derived measurement can legitimately be
+  // unavailable, so this has to hold rather than be avoided.
+  const face = FACES[0];
+  const report = scoreFrontMeasurements(face.measurements, face.sex);
+  assert.ok(Number.isFinite(report.overall), "overall went non-finite");
+  assert.ok(Number.isFinite(report.overallPercentile), "percentile went non-finite");
+  for (const r of report.regions) {
+    assert.ok(Number.isFinite(r.score), `${r.region} score went non-finite`);
+  }
+  // And it is genuinely absent, not quietly defaulted to something.
+  const missing = report.metrics.find((m) => MEASURED_AFTER_CORPUS.has(m.def.id));
+  assert.ok(missing, "expected at least one metric the corpus predates");
+  assert.equal(missing!.implausible, true, "an unmeasurable metric must be excluded, not scored");
 });
 
 test("a higher score means a better looking face", () => {

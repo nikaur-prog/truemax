@@ -121,6 +121,60 @@ export const COMPUTERS: Record<string, Computer> = {
     return (zygoY - d.eyeMid.y) / (p(LM.MENTON).y - d.eyeMid.y);
   },
 
+  // Buccal fullness: how far the visible cheek bows out of the line between the
+  // widest point of the face and the jaw corner, as a percentage of face width.
+  //
+  // The gap in this engine that mattered most, and the one every complaint about
+  // it eventually landed on: thirty-one measurements, and not one of them could
+  // see facial fat. Every ratio here is built from landmarks, and landmarks
+  // describe where features ARE, not how much tissue is sitting on them. A lean
+  // face and a heavy one with identical bone structure returned identical
+  // scores, which is the opposite of the truth — fat is simultaneously the most
+  // visible thing about a face and the most changeable, and a product about
+  // improving your face that cannot measure the one variable you control is
+  // missing its own subject.
+  //
+  // This can see it, because it does not compare two widths — it measures the
+  // CURVE between them. Draw the straight chord from the widest point of the
+  // face down to the jaw corner, and ask which side of it the visible outline
+  // falls on:
+  //
+  //     lean          full
+  //      |  \           |   )
+  //      |   )  <- in    |    )  <- out
+  //      |  /            |   )
+  //
+  // A lean face runs INSIDE that line — the taper people mean by "definition",
+  // the buccal hollow under the cheekbone. A fuller face bows OUTSIDE it. Both
+  // faces can have the same bizygomatic width and the same bigonial width, so
+  // jawCheekRatio reads them identically; this does not.
+  //
+  // Signed, in percent of face width: negative is hollow, positive is full.
+  // Averaged across both sides, because a three-quarter turn pushes one cheek
+  // out and pulls the other in by roughly the same amount and the mean is far
+  // steadier than either half.
+  cheekFullness: (d) => {
+    const p = d.g.pt.bind(d.g);
+    const side = (out: number, mid: number, gonion: number): number => {
+      const a = p(out);
+      const b = p(gonion);
+      const m = p(mid);
+      // Perpendicular distance from the mid-cheek point to the chord, signed
+      // by which side of the chord it sits on. The face's own centre decides
+      // what "outward" means, so this works on both sides without a sign table.
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) return 0;
+      const cross = ((m.x - a.x) * dy - (m.y - a.y) * dx) / len;
+      const outward = m.x < d.eyeMid.x ? -1 : 1;
+      return cross * outward;
+    };
+    const r = side(LM.CHEEK_OUT_R, LM.CHEEK_MID_R, LM.GONION_R);
+    const l = side(LM.CHEEK_OUT_L, LM.CHEEK_MID_L, LM.GONION_L);
+    return (((r + l) / 2) / d.bizygo) * 100;
+  },
+
   // ---- Jaw ----
   jawCheekRatio: (d) => d.bigonial / d.bizygo,
 
@@ -411,6 +465,37 @@ export const METRICS: MetricDef[] = [
       female: { mean: 1.162, sd: 0.1201, ideal: 1.2065 },
     },
   }),
+  // Direction is `lower` on a prior, not on this corpus — nineteen text
+  // diagnostics were captured before this measurement existed, so there is no
+  // rated face carrying it yet and calibration.test.ts cannot speak for it.
+  //
+  // Setting it anyway, rather than a band, because "less buccal fat reads as
+  // more attractive across the range faces occupy" is about as safe as a claim
+  // gets here: it is what every buccal-fat-removal and every cut is FOR, and it
+  // is what the rated corpus already said twice through the only two
+  // measurements that came near it — jaw : cheekbone at r −0.70, and the note
+  // against a face that "should be taken down by her face fat" while the engine
+  // scored her mid.
+  //
+  // The distribution is a seed and is expected to be wrong. It gets corrected
+  // the same way every other one did: scan the corpus again now that this is
+  // measured, and let calibration/pipelineBias.ts move it. Weight is held low
+  // and reliability is seeded conservatively until that happens — see
+  // reliabilitySeed.ts — so a wrong seed cannot swing a score before there is
+  // evidence for it.
+  M({
+    id: "cheekFullness", name: "Cheek fullness", unit: "%", decimals: 2,
+    view: "front", region: "midface", pillar: "Angularity", weight: 0.9,
+    direction: "lower", fixability: 0.85,
+    dist: {
+      male: { mean: 0, sd: 1.6 },
+      female: { mean: 0.4, sd: 1.6 },
+    },
+    // A cheek outline more than a tenth of the face's width off the chord is
+    // not a cheek, it is a landmark that has slid onto an ear or a collar.
+    plausible: [-10, 10],
+    points: ["CHEEK_OUT", "CHEEK_MID", "GONION"],
+  }),
   M({
     id: "cheekboneHeight", name: "Cheekbone height", unit: "", decimals: 2,
     view: "front", region: "midface", pillar: "Angularity", weight: 1.0,
@@ -583,6 +668,41 @@ export const METRICS: MetricDef[] = [
   }),
 
   // ---- Proportions ----
+  // The forehead, measured rather than assumed.
+  //
+  // `topThirdEst` below is built on the mesh's topmost vertex, which is not a
+  // hairline and never was — it is a fixed fraction up a fitted model, so it
+  // lands in the same place on a tall forehead and a short one. That is why a
+  // face whose forehead is the first thing anybody notices scanned four sigma
+  // SMALL, and why the number nobody could argue with was also the number
+  // nobody could see. See hairline.ts for how this one is found.
+  //
+  // Filed under midface rather than proportions on purpose. "Proportions" is
+  // where a forehead measurement goes to be ignored: it is a region card
+  // averaging seven whole-face ratios, so a person staring at a forehead they
+  // dislike reads "Proportions 3.5" and learns nothing. The forehead is a
+  // FEATURE to the person looking at it, and it belongs beside the other
+  // features of the upper face.
+  //
+  // Absent whenever the hairline could not be found — a fringe, a shaved head,
+  // hair the same value as the skin. Excluded from every aggregate in that
+  // case rather than defaulted, which is the behaviour the corpus test pins.
+  //
+  // Direction and distribution are priors: this measurement postdates the rated
+  // corpus, so no face in it carries one. `lower` because a shorter forehead
+  // relative to the eyes reads better across the range faces occupy — the thing
+  // fringes, brow-height and hairline surgery all exist to change.
+  M({
+    id: "foreheadRatio", name: "Forehead height", unit: "×eye-span", decimals: 2,
+    view: "front", region: "midface", pillar: "Harmony", weight: 0.9,
+    direction: "lower", fixability: 0.15,
+    dist: {
+      male: { mean: 0.86, sd: 0.17 },
+      female: { mean: 0.82, sd: 0.16 },
+    },
+    plausible: [0.33, 1.7],
+    points: ["GLABELLA", "hairline"],
+  }),
   M({
     id: "topThirdEst", name: "Upper face proportion (est.)", unit: "%", decimals: 1,
     view: "front", region: "proportions", pillar: "Harmony", weight: 0.7,

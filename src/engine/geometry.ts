@@ -57,6 +57,15 @@ export const LM = {
   // Mid-ramus points on the jaw outline, between the corner and the chin
   JAW_MID_R: 172,
   JAW_MID_L: 397,
+  // The visible OUTLINE of the cheek, between the widest point of the face and
+  // the jaw corner. These are silhouette points, not structural ones, and that
+  // distinction is the whole reason they exist: MALAR and GONION sit on bone,
+  // while these follow whatever soft tissue is draped over it. The gap between
+  // the two is the only thing in a frontal photograph that reports facial fat.
+  CHEEK_OUT_R: 234, // widest oval point, cheekbone height
+  CHEEK_MID_R: 132, // mid-cheek, between cheekbone and jaw corner
+  CHEEK_OUT_L: 454,
+  CHEEK_MID_L: 361,
   CHIN_SIDE_R: 149,
   CHIN_SIDE_L: 378,
 } as const;
