@@ -231,11 +231,24 @@ async function openCamera(): Promise<void> {
 //
 // The previous choice is pre-selected, so the common case is still one tap.
 function withSex(next: () => void): void {
-  openSexChooser((sex) => {
-    storeSex(sex);
-    paintSilhouette();
-    next();
-  }, storedSex() ?? undefined);
+  openSexChooser(
+    (sex) => {
+      storeSex(sex);
+      paintSilhouette();
+      next();
+    },
+    storedSex() ?? undefined,
+    // Backing out has to land somewhere that makes sense, and on /quick that is
+    // not "the capture screen you were pushed onto". In Calibrate especially:
+    // the set is the home screen of that mode, so a cancelled scan returns to
+    // it with the count intact rather than leaving a camera pointed at nothing.
+    () => {
+      if (mode !== "calibrate") return;
+      el.capture.classList.add("hidden");
+      el.cal.classList.remove("hidden");
+      renderCalibrationSet();
+    },
+  );
 }
 
 function paintSilhouette(): void {
