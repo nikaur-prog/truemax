@@ -433,3 +433,23 @@
   font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase;
   color: var(--muted, #6b716d);
 }
+
+/* Clipboard fallback for the diagnostics dump. navigator.clipboard needs a
+   secure context and a gesture and still refuses in a few browsers; the entire
+   point of the button is getting text out of the page, so a silent failure is
+   the one outcome worth building around. */
+.diag-fallback {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;
+  background: rgba(12, 14, 13, .55); padding: 20px;
+}
+.diag-sheet {
+  background: var(--card, #fff); border-radius: 18px; padding: 18px;
+  width: min(720px, 100%); display: flex; flex-direction: column; gap: 12px;
+}
+.diag-sheet p { margin: 0; font-size: 13.5px; color: var(--ink); }
+.diag-sheet textarea {
+  width: 100%; height: 46vh; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; line-height: 1.45; padding: 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--soft, #f4f6f4); color: var(--ink);
+  white-space: pre; overflow: auto;
+}
