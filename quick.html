@@ -56,6 +56,58 @@
         </div>
       </section>
 
+      <!-- AI Model Reel: character setup.
+           No photograph is taken here, so the capture section is not merely
+           hidden behind a notice — it is a different screen entirely. A camera
+           on a screen that will never use one is worse than an unfinished
+           feature, because it tells somebody to do something that cannot
+           help them. -->
+      <section id="q-ai" class="hidden">
+        <div class="q-modebar">
+          <button type="button" class="linkish" id="q-ai-back">← All modes</button>
+          <span class="q-modebar-name">AI Model Reel</span>
+          <span class="q-modebar-step" id="q-ai-step">Describe your character</span>
+        </div>
+        <form id="q-ai-form" class="q-ai-form">
+          <div class="q-ai-row">
+            <label class="q-ai-field">
+              <span>Name</span>
+              <input type="text" id="q-ai-name" placeholder="Jess" maxlength="40" required />
+              <small>Saved under this name so you can film them again.</small>
+            </label>
+            <fieldset class="q-ai-field q-ai-seg">
+              <legend>Gender</legend>
+              <div class="q-seg" id="q-ai-sex">
+                <button type="button" data-v="female" class="on">Woman</button>
+                <button type="button" data-v="male">Man</button>
+              </div>
+            </fieldset>
+          </div>
+          <label class="q-ai-field">
+            <span>Describe them</span>
+            <textarea id="q-ai-desc" rows="3" placeholder="Mid-twenties, brown hair, freckles, a bit of acne along the jaw" required></textarea>
+            <small>Face first. Hair, skin, age, build — the things that stay the same between the two shots.</small>
+          </label>
+          <div class="q-ai-row">
+            <label class="q-ai-field">
+              <span>Before</span>
+              <input type="number" id="q-ai-before" min="1" max="10" step="0.1" value="4.5" />
+            </label>
+            <label class="q-ai-field">
+              <span>After</span>
+              <input type="number" id="q-ai-after" min="1" max="10" step="0.1" value="7.5" />
+            </label>
+          </div>
+          <!-- Said before the first generation rather than after a
+               disappointing one: the numbers steer the prompt, they are not
+               promises the scanner has agreed to. -->
+          <p class="q-ai-note" id="q-ai-note"></p>
+          <button type="submit" class="btn pri" id="q-ai-go">Generate the preview pair</button>
+          <p class="q-ai-msg" id="q-ai-msg" role="status"></p>
+        </form>
+        <div class="q-ai-preview hidden" id="q-ai-preview"></div>
+      </section>
+
       <!-- Capture -->
       <section id="q-capture" class="hidden">
         <div class="q-modebar">

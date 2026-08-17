@@ -305,3 +305,74 @@
   .q-pillar { min-height: 0; padding: 18px 18px 16px; }
   .q-pillars-lede { font-size: 23px; margin-bottom: 15px; }
 }
+
+/* AI Model Reel — character setup. */
+.q-ai-form { display: flex; flex-direction: column; gap: 18px; max-width: 620px; }
+.q-ai-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.q-ai-field { display: flex; flex-direction: column; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.q-ai-field > span, .q-ai-field > legend {
+  font-size: 11.5px; letter-spacing: 1.6px; text-transform: uppercase;
+  color: var(--muted, #6b716d); font-weight: 600; padding: 0;
+}
+.q-ai-field input, .q-ai-field textarea {
+  font: inherit; font-size: 15px; color: var(--ink); background: var(--card, #fff);
+  border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px; width: 100%;
+  transition: border-color .16s, box-shadow .16s;
+}
+.q-ai-field textarea { resize: vertical; line-height: 1.5; }
+.q-ai-field input:focus, .q-ai-field textarea:focus {
+  outline: none; border-color: var(--acc);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 16%, transparent);
+}
+.q-ai-field small { font-size: 12px; color: var(--muted, #6b716d); line-height: 1.4; }
+
+.q-seg { display: inline-flex; background: var(--soft, #eef1ef); border-radius: 99px; padding: 3px; gap: 2px; }
+.q-seg button {
+  border: 0; background: none; cursor: pointer; font: inherit; font-size: 13px;
+  color: var(--muted, #6b716d); padding: 8px 20px; border-radius: 99px;
+  transition: background .16s, color .16s;
+}
+.q-seg button.on { background: var(--card, #fff); color: var(--ink); font-weight: 600; }
+
+.q-ai-note {
+  font-size: 12.5px; line-height: 1.5; color: var(--muted, #6b716d);
+  border-left: 2px solid var(--line); padding-left: 12px; margin: 0;
+}
+.q-ai-msg { font-size: 13px; color: var(--muted, #6b716d); margin: 0; min-height: 1.2em; }
+.q-ai-msg.err { color: #b4432f; }
+
+/* The preview pair. Side by side, because the entire question being asked of
+   the operator is whether these two are the same person. */
+.q-ai-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+.q-ai-shot { display: flex; flex-direction: column; gap: 8px; }
+.q-ai-shot img { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; }
+.q-ai-shot b { font-size: 12px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--acc); }
+
+@media (max-width: 620px) {
+  .q-ai-row { grid-template-columns: 1fr; }
+  .q-ai-preview { grid-template-columns: 1fr; }
+}
+
+/* Before and after, side by side. The pair is the point of the mode, so it sits
+   above the full card set rather than being buried under it. */
+.q-compare {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px;
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 18px;
+  padding: 16px 14px; margin-bottom: 14px;
+}
+.q-compare-side { display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; }
+.q-compare-tag { font-size: 10.5px; letter-spacing: 2px; color: var(--muted, #6b716d); font-weight: 600; }
+.q-compare-side b {
+  font-family: var(--serif, Georgia, serif); font-size: 34px; font-weight: 400;
+  line-height: 1; color: var(--ink);
+}
+.q-compare-rank { font-size: 11px; color: var(--muted, #6b716d); }
+.q-compare-move span {
+  display: inline-block; font-size: 14px; font-weight: 700; padding: 6px 13px;
+  border-radius: 999px; white-space: nowrap;
+}
+/* Green for up, red for down, grey for neither — a comparison that renders a
+   drop in the colour of a win would be lying about the only thing it shows. */
+.q-compare[data-dir="up"] .q-compare-move span { background: #e6f4ef; color: #0c876f; }
+.q-compare[data-dir="down"] .q-compare-move span { background: #fbeae7; color: #b4432f; }
+.q-compare[data-dir="flat"] .q-compare-move span { background: var(--soft, #eef1ef); color: var(--muted, #6b716d); }

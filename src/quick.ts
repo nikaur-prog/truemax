@@ -50,6 +50,12 @@ const MAX_DIM = 1280;
 
 const el = {
   pillars: document.getElementById("q-pillars")!,
+  ai: document.getElementById("q-ai")!,
+  aiBack: document.getElementById("q-ai-back")!,
+  aiForm: document.getElementById("q-ai-form") as HTMLFormElement,
+  aiSex: document.getElementById("q-ai-sex")!,
+  aiNote: document.getElementById("q-ai-note")!,
+  aiMsg: document.getElementById("q-ai-msg")!,
   modeBack: document.getElementById("q-mode-back")!,
   modeName: document.getElementById("q-mode-name")!,
   modeStep: document.getElementById("q-mode-step")!,
@@ -331,15 +337,23 @@ function enterMode(next: QuickMode): void {
   beforeScan = null;
   reelStage = "before";
   el.pillars.classList.add("hidden");
+
+  // Nothing is photographed in the AI flow, so it gets its own screen rather
+  // than the capture screen with a notice bolted on. Leaving the camera up
+  // was worse than an unfinished feature: it told somebody to do something
+  // that could not possibly help them.
+  if (next === "ai") {
+    el.ai.classList.remove("hidden");
+    el.capture.classList.add("hidden");
+    renderAiNote();
+    track("quick-visit");
+    return;
+  }
+
+  el.ai.classList.add("hidden");
   el.capture.classList.remove("hidden");
   el.modeName.textContent = MODE_NAMES[next];
   updateModeStep();
-  if (next === "ai") {
-    // Nothing to photograph. The AI flow collects a description instead, and
-    // until that screen exists this says so rather than silently showing a
-    // camera that makes no sense for the mode.
-    el.modeStep.textContent = "Character setup — coming next";
-  }
   track("quick-visit");
 }
 
@@ -358,6 +372,7 @@ function leaveMode(): void {
   reelStage = "before";
   el.capture.classList.add("hidden");
   el.result.classList.add("hidden");
+  el.ai.classList.add("hidden");
   el.pillars.classList.remove("hidden");
 }
 
@@ -519,6 +534,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button type="button" class="q-mode on" data-qmode="score">Score</button>
       <button type="button" class="q-mode" data-qmode="verdict">Verdict</button>
     </div>
+    ${beforeScan ? comparisonHTML(beforeScan.report, r) : ""}
 
     <div class="q-hero">
       <div class="q-headline">
@@ -995,4 +1011,116 @@ function loadImage(file: File): Promise<HTMLImageElement> {
     };
     img.src = url;
   });
+}
+
+// ---------------------------------------------------------------------------
+// AI Model Reel — character setup.
+//
+// The two ratings steer the prompt; they are not a contract. The generator has
+// never heard of this engine's percentile tables, so asking for a 4.5 produces
+// a face that reads roughly that way to a person, and the scanner may well
+// disagree by a point in either direction. Saying so before the first
+// generation costs one sentence. Discovering it afterwards costs a session of
+// wondering why the tool is broken when it is behaving exactly as it must.
+// ---------------------------------------------------------------------------
+let aiSex: Sex = "female";
+
+function renderAiNote(): void {
+  const before = Number((document.getElementById("q-ai-before") as HTMLInputElement).value);
+  const after = Number((document.getElementById("q-ai-after") as HTMLInputElement).value);
+  const gap = after - before;
+  // A gap this wide stops being a glow-up and starts being a different person,
+  // which is the one failure this format cannot survive: the whole claim of a
+  // before/after is that the bones underneath did not change.
+  const wide = gap >= 3.5;
+  el.aiNote.innerHTML = wide
+    ? `<b>${before.toFixed(1)} → ${after.toFixed(1)} is a wide jump.</b> Past about three points the
+       generator tends to hand back a different face rather than the same one improved, and the
+       comment section spots that instantly. These numbers steer the prompt; the scan decides.`
+    : `These numbers steer the prompt — the generator has never seen our percentile tables, so the
+       scan may land a point either side. The pair is built to keep one face throughout.`;
+}
+
+for (const b of el.aiSex.querySelectorAll<HTMLButtonElement>("button")) {
+  b.onclick = () => {
+    for (const other of el.aiSex.querySelectorAll("button")) other.classList.toggle("on", other === b);
+    aiSex = b.dataset.v === "male" ? "male" : "female";
+  };
+}
+
+for (const id of ["q-ai-before", "q-ai-after"]) {
+  document.getElementById(id)!.addEventListener("input", renderAiNote);
+}
+
+el.aiBack.onclick = () => leaveMode();
+
+el.aiForm.onsubmit = (event) => {
+  event.preventDefault();
+  const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
+  const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
+  if (!name || !desc) return;
+  // Generation is a server capability and this deployment may not have it. Say
+  // which, in the same shape as every other unconfigured service in the
+  // product, rather than spinning on a request that cannot succeed.
+  el.aiMsg.classList.add("err");
+  el.aiMsg.textContent =
+    "Image generation is not configured on this deployment yet — the character is saved, but the preview pair has to be generated outside the app for now.";
+  saveAiCharacter({ name, sex: aiSex, description: desc });
+};
+
+// The library the operator was promised: describe somebody once, film them
+// again next week. Local for now, because a character is a prompt and a name —
+// there is nothing here worth a round trip until the generator is wired up.
+interface AiCharacter {
+  name: string;
+  sex: Sex;
+  description: string;
+}
+
+const AI_CHARACTERS_KEY = "truemax.aiCharacters";
+
+function saveAiCharacter(character: AiCharacter): void {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AI_CHARACTERS_KEY) ?? "[]") as AiCharacter[];
+    const next = [character, ...raw.filter((c) => c.name !== character.name)].slice(0, 24);
+    localStorage.setItem(AI_CHARACTERS_KEY, JSON.stringify(next));
+  } catch {
+    /* storage disabled: the character lives for this session only */
+  }
+}
+
+// The before and after, next to each other.
+//
+// A Reel Creator run measured two faces and then showed one set of cards, which
+// is the wrong answer to the question the mode exists to ask. The operator did
+// not scan twice to see the second number; they scanned twice to see the pair.
+//
+// Both photographs and both scores, side by side, with the movement between
+// them stated once rather than left as arithmetic for the viewer. This sits
+// above the full card set rather than replacing it — the after scan still gets
+// its complete breakdown underneath, because that is what the video's closing
+// segment is built from.
+function comparisonHTML(before: Report, after: Report): string {
+  const move = after.overall - before.overall;
+  // Signed explicitly. A before/after that quietly renders a drop as though it
+  // were a gain is the one thing that would make this tool untrustworthy to the
+  // person using it, and going down is a real outcome of a real rescan.
+  const sign = move > 0 ? "+" : move < 0 ? "−" : "";
+  const dir = move > 0 ? "up" : move < 0 ? "down" : "flat";
+  return `
+    <div class="q-compare" data-dir="${dir}">
+      <div class="q-compare-side">
+        <span class="q-compare-tag">BEFORE</span>
+        <b>${before.overall.toFixed(1)}</b>
+        <span class="q-compare-rank">${rankShort(before.overallPercentile)}</span>
+      </div>
+      <div class="q-compare-move">
+        <span>${sign}${Math.abs(move).toFixed(1)}</span>
+      </div>
+      <div class="q-compare-side">
+        <span class="q-compare-tag">AFTER</span>
+        <b>${after.overall.toFixed(1)}</b>
+        <span class="q-compare-rank">${rankShort(after.overallPercentile)}</span>
+      </div>
+    </div>`;
 }
