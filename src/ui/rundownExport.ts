@@ -57,6 +57,19 @@ export interface RundownOptions {
    * limits it. Nothing here reaches the landmarker, the scoring or the report.
    */
   broll?: CanvasImageSource[];
+  /**
+   * Footage for the disclaimer, and the one point in the video where choosing
+   * footage to a duration is actually possible.
+   *
+   * Everything else is timed by a synthesiser whose real length nobody knows
+   * until the mp3 comes back. The disclaimer is different: spokenSeconds gives
+   * its length from the text alone, while it is being typed, so an operator can
+   * go and find that much footage and say where in it to start.
+   *
+   * `startAt` is where in the file to begin. The clip plays forward from there
+   * for as long as the sentence takes; anything past that is never reached.
+   */
+  disclaimer?: { video: HTMLVideoElement; startAt: number };
   /** Supabase access token; the TTS route is staff-gated. */
   accessToken?: string;
   /** How far off level the capture is, for the publish guard. */
@@ -181,9 +194,25 @@ export async function downloadRundownVideo(
     // full name under a marker is a label that owns the frame it sits in.
     name: (options.shortName?.trim() || options.name.trim().split(/\s+/)[0] || options.name).trim(),
     broll: options.broll,
+    disclaimerLine: options.note?.trim() || undefined,
+    disclaimerClip: options.disclaimer?.video,
   };
+
+  // The disclaimer beat, so the clip can be seeked to the right frame rather
+  // than played from wherever it happened to stop.
+  const noteBeat = options.note?.trim()
+    ? timeline.beats.find((b) => b.beat.kind === "context" && b.beat.line === options.note!.trim())
+    : undefined;
+
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
+    // Seeked per frame, and only while its own beat is on screen. A video
+    // element left running would drift against a timeline that is fitted to the
+    // audio afterwards; seeking makes the clip a function of t like everything
+    // else in this renderer, which is what keeps a re-render identical.
+    if (options.disclaimer && noteBeat && t >= noteBeat.start && t < noteBeat.start + noteBeat.duration) {
+      await seekTo(options.disclaimer.video, options.disclaimer.startAt + (t - noteBeat.start));
+    }
     drawRundownFrame(ctx, photo, landmarks, input, t, { width: W, height: H, overlayCanvas });
     await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 15 === 0) onProgress?.(0.15 + 0.8 * (frame / frameCount), "Rendering");
@@ -199,6 +228,26 @@ export async function downloadRundownVideo(
   );
   onProgress?.(1, "Done");
   return { outcome, beats, duration: audio.duration, narrated: Boolean(voice) };
+}
+
+// Seek and wait for the frame to actually be there.
+//
+// drawImage on a video that has not finished seeking paints the PREVIOUS frame,
+// which on a per-frame render is not a glitch but a systematic one-frame lag
+// that gets worse the further the seek travels.
+function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+  const target = Math.max(0, Math.min(time, Math.max(0, (video.duration || 0) - 0.05)));
+  if (Math.abs(video.currentTime - target) < 0.001) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      video.removeEventListener("seeked", done);
+      resolve();
+    };
+    video.addEventListener("seeked", done);
+    video.currentTime = target;
+    // A seek that never lands must not hang a ninety-second render.
+    window.setTimeout(done, 400);
+  });
 }
 
 function slug(name: string): string {
