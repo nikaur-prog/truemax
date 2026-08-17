@@ -344,3 +344,45 @@ test("a measurement that was taken and is impossible still blocks", () => {
   assert.equal(blockers.length, 1);
   assert.match(blockers[0], /anatomically impossible/);
 });
+
+// ---------------------------------------------------------------------------
+// The full name once, the first name after.
+//
+// How the format is actually read: "How attractive is Timothée Chalamet?" to
+// open, and then "Timothée" for the next ninety seconds. Eight repetitions of a
+// full name stops sounding like somebody talking about a person and starts
+// sounding like a record being read out.
+// ---------------------------------------------------------------------------
+test("the full name is said once, and only in the hook", () => {
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Timothée Chalamet" });
+  assert.match(beats[0].line, /How attractive is Timothée Chalamet\?/);
+
+  const rest = beats.slice(1).map((b) => b.line).join(" ");
+  assert.doesNotMatch(rest, /Chalamet/, `surname repeated after the hook: ${rest}`);
+  // And the short form IS used — dropping the name entirely would be the other
+  // way to pass the assertion above and is not the same thing at all.
+  assert.match(rest, /Timothée/);
+});
+
+test("a name that is one word survives being shortened", () => {
+  // A mononym has no first word to fall back to, and an empty label under the
+  // curve marker is worse than a repeated name.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Zendaya" });
+  const said = beats.map((b) => b.line).join(" ");
+  assert.match(said, /How attractive is Zendaya\?/);
+  assert.match(said, /Zendaya has/);
+});
+
+test("the short name can be overridden", () => {
+  // Somebody universally known by a surname, a stage name, a nickname — the
+  // first word is right often enough to be the default and wrong often enough
+  // that deriving it silently is not good enough.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), {
+    name: "Cristiano Ronaldo",
+    shortName: "Ronaldo",
+  });
+  assert.match(beats[0].line, /How attractive is Cristiano Ronaldo\?/);
+  const rest = beats.slice(1).map((b) => b.line).join(" ");
+  assert.match(rest, /Ronaldo has/);
+  assert.doesNotMatch(rest, /Cristiano/);
+});

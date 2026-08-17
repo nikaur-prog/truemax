@@ -118,6 +118,49 @@ export interface RundownInput {
   /** Keyed by metric id, for the overlay geometry. */
   metrics: Map<string, ScoredMetric>;
   name: string;
+  /**
+   * Extra photographs of the same person, shown but NEVER measured.
+   *
+   * A rundown built from one photograph is one photograph held for ninety
+   * seconds, and a still frame is the format's biggest weakness — every
+   * competitor cuts between shots. These are the cutaways.
+   *
+   * They are strictly B-ROLL and the restriction is not a limitation, it is the
+   * thing that makes the feature safe. Every measurement is drawn in the
+   * MEASURED photograph's normalized landmark space; the same line composited
+   * over a different photograph would sit somewhere arbitrary on a different
+   * face, which is a rundown drawing a jaw measurement across somebody's
+   * forehead. So a cutaway may only appear on a beat that draws no measurement:
+   * the hook, the context beat, the disclaimer, the sign-off.
+   *
+   * That is also why they cannot "confuse the system" — the engine never sees
+   * them. They are decoded as pictures by the compositor and reach no part of
+   * the scoring, the landmarker or the report.
+   */
+  broll?: CanvasImageSource[];
+  /**
+   * A clip that plays under the operator's disclaimer, already seeked.
+   *
+   * The disclaimer is the one beat whose length the operator knows BEFORE the
+   * render — spokenSeconds tells them while they type — so it is the one beat
+   * they can go and find footage for. Everything else in the video is timed by
+   * a synthesiser whose real duration nobody has yet.
+   *
+   * Seeking is the caller's job, not this module's: seeking an HTMLVideoElement
+   * is asynchronous and every function in here is a synchronous draw. The
+   * compositor awaits the seek and then hands the element over on the frame it
+   * is wanted.
+   */
+  disclaimerClip?: CanvasImageSource;
+  /**
+   * The exact disclaimer text, so the clip lands on the right beat.
+   *
+   * Matched by line rather than by index because the context section holds up
+   * to two beats — the templated "this measures a face and nothing else" and
+   * the operator's own sentence — and only the second one has footage chosen
+   * for it.
+   */
+  disclaimerLine?: string;
 }
 
 interface Box {
@@ -361,7 +404,22 @@ export function drawRundownFrame(
   const crop = cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics);
   const kind = beat.beat.kind;
 
-  if (kind === "card") {
+  // A cutaway, when this beat draws no measurement and there is one to show.
+  //
+  // Keyed off the beat's index rather than a clock, so the same rundown always
+  // cuts to the same photograph at the same moment — a video that shuffled its
+  // own B-roll between two renders of one scan would be a different video every
+  // time it was exported.
+  // The disclaimer's own clip wins over the cutaway pool on the beat it was
+  // attached for: it was chosen to match that sentence, and a still shuffled in
+  // from the general pool would be the operator's work thrown away.
+  const isDisclaimer = beat.beat.kind === "context" && beat.beat.line === input.disclaimerLine;
+  const cutaway = (isDisclaimer && input.disclaimerClip) || brollFor(input, beat, t);
+  if (cutaway) {
+    // Cover, no crop maths: there are no landmarks for this photograph and
+    // inventing a face box for it is exactly the guess this feature avoids.
+    coverDraw(ctx, cutaway, W, H);
+  } else if (kind === "card") {
     // The face moves to the top and the breakdown arrives under it.
     //
     // Not a cut: the crop the previous beat left off on eases up into the band
@@ -388,11 +446,23 @@ export function drawRundownFrame(
   // shaped mask: masking around the active region means computing a region
   // outline, and a slightly wrong outline draws attention to itself far more
   // than an even dim does.
+  // Lighter over a cutaway. The scrim exists to make ONE measurement stand out
+  // of a photograph; a cutaway has no measurement to stand out of, so the same
+  // dimming just produces a dull frame at the exact moment the video is meant
+  // to feel like it has more than one shot in it. Enough is kept at the top and
+  // bottom to hold the caption and the bar, which carry their own shadows.
   const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  scrim.addColorStop(0, "rgba(3,5,5,.72)");
-  scrim.addColorStop(0.34, "rgba(3,5,5,.34)");
-  scrim.addColorStop(0.68, "rgba(3,5,5,.42)");
-  scrim.addColorStop(1, "rgba(3,5,5,.92)");
+  if (cutaway) {
+    scrim.addColorStop(0, "rgba(3,5,5,.46)");
+    scrim.addColorStop(0.34, "rgba(3,5,5,.06)");
+    scrim.addColorStop(0.68, "rgba(3,5,5,.20)");
+    scrim.addColorStop(1, "rgba(3,5,5,.78)");
+  } else {
+    scrim.addColorStop(0, "rgba(3,5,5,.72)");
+    scrim.addColorStop(0.34, "rgba(3,5,5,.34)");
+    scrim.addColorStop(0.68, "rgba(3,5,5,.42)");
+    scrim.addColorStop(1, "rgba(3,5,5,.92)");
+  }
   ctx.fillStyle = scrim;
   ctx.fillRect(0, 0, W, H);
 
@@ -418,7 +488,11 @@ export function drawRundownFrame(
     ctx.fillRect(0, 0, W, H);
   }
 
-  drawOverlayForBeat(ctx, photo, landmarks, input, beat, t, crop, W, H, overlayCanvas);
+  // Never over a cutaway — see overlayVisible, which owns that rule so it is
+  // not a branch here that a later refactor can quietly drop.
+  if (overlayVisible(input, beat, t)) {
+    drawOverlayForBeat(ctx, photo, landmarks, input, beat, t, crop, W, H, overlayCanvas);
+  }
   // The two closing beats take over the frame rather than sitting beside the
   // face. Both are arguments about the viewer rather than about the subject —
   // where he lands against everyone, and what to do about it — and neither
@@ -432,6 +506,106 @@ export function drawRundownFrame(
   drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
+}
+
+// Which beats a cutaway may cover, and which photograph it gets.
+//
+// The rule is one line long and it is the whole safety argument: a beat that
+// DRAWS a measurement must show the photograph that measurement was taken from.
+// Everything else — the hook, the operator's context and disclaimer, the
+// sign-off — draws no geometry and can show anything.
+//
+// The card, the curve and the search bar are excluded too, but for a different
+// reason: they are compositions that own the whole frame, and a photograph
+// behind them is the head-shaped smudge the search beat was just fixed to stop
+// having.
+//
+// The photograph is chosen by the beat's INDEX in the timeline, not by a clock
+// or a counter, so one scan always produces the same cut at the same moment. A
+// rundown that shuffled its own B-roll between two exports of one face would be
+// a different video every time, and the reason the whole module is pure is that
+// it must not be.
+export function brollFor(
+  input: RundownInput,
+  beat: TimedBeat,
+  t: number,
+): CanvasImageSource | null {
+  const pool = input.broll;
+  if (!pool?.length) return null;
+  const kind = beat.beat.kind;
+  const index = input.timeline.beats.indexOf(beat);
+  if (index < 0) return null;
+
+  // The card, the curve and the search bar own their whole frame and never take
+  // one — a photograph behind a chart is the head-shaped smudge the search beat
+  // was fixed to stop having.
+  if (kind === "card" || kind === "curve" || kind === "search") return null;
+
+  // A beat that draws nothing can take a cutaway for its whole length.
+  if (kind !== "metric") return pool[index % pool.length] ?? null;
+
+  // A MEASUREMENT beat takes one only in its tail, and this is the part worth
+  // being careful about.
+  //
+  // The measurement cannot be drawn over a cutaway — the overlay lives in the
+  // measured photograph's landmark space, so the same line over a different
+  // face lands somewhere arbitrary. But "no cutaways during the analysis" costs
+  // the format its only cuts through the longest stretch of the video, which is
+  // most of the reason a rundown made of one still frame looks like one still
+  // frame.
+  //
+  // So the beat is split. The line lands at DRAW_AT, holds on the measured
+  // photograph through the middle of the sentence — long enough to be read and
+  // to be the evidence it exists to be — and the last third cuts away while the
+  // sentence finishes. Every measurement is still shown on the face it was
+  // taken from, and there is now a cut on every beat instead of four in ninety
+  // seconds.
+  //
+  // The crop move to the next region happens behind that cutaway, which is a
+  // free improvement: the camera arrives already settled instead of gliding.
+  const local = (t - beat.start) / Math.max(0.001, beat.duration);
+  if (local < 1 - CUTAWAY_TAIL) return null;
+  return pool[index % pool.length] ?? null;
+}
+
+/**
+ * Whether the measurement overlay is on screen at this instant.
+ *
+ * A named predicate rather than an `if` at the call site, because it carries
+ * the one invariant this whole feature rests on — the overlay and a cutaway are
+ * never both drawn — and an invariant living in a single branch inside a 200
+ * line compositor is an invariant one refactor away from being gone. The
+ * renderer asks this, and so does the test that sweeps every frame of every
+ * beat looking for the pair being live at once.
+ */
+export function overlayVisible(input: RundownInput, beat: TimedBeat, t: number): boolean {
+  if (!beat.beat.metricId) return false;
+  if (brollFor(input, beat, t)) return false;
+  return drawProgress(beat, t) > 0;
+}
+
+// How much of a measurement beat's tail a cutaway may take. A third leaves the
+// line on screen for the majority of the sentence that describes it, which is
+// the ordering that makes it evidence rather than illustration.
+const CUTAWAY_TAIL = 0.34;
+
+// Cover-fit, centred. No crop maths and no face box: there are no landmarks for
+// a cutaway, and inventing a bounding box for one is precisely the guess this
+// feature exists to avoid making.
+function coverDraw(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  W: number,
+  H: number,
+): void {
+  const iw =
+    (image as HTMLVideoElement).videoWidth || (image as HTMLImageElement).width || W;
+  const ih =
+    (image as HTMLVideoElement).videoHeight || (image as HTMLImageElement).height || H;
+  const scale = Math.max(W / iw, H / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  ctx.drawImage(image, (W - dw) / 2, (H - dh) / 2, dw, dh);
 }
 
 // How far through its own animation a full-frame beat is, 0..1, with a little

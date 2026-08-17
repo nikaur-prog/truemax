@@ -2571,6 +2571,10 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   background: none; color: var(--mut); font-size: 13px; cursor: pointer;
 }
 .prod-add:hover { border-color: var(--acc); color: var(--acc); }
+/* The disclaimer's start-point field sits inline under its file picker. */
+.q-disc-start { display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  font: 500 12px var(--mono); letter-spacing: .06em; color: var(--mut); }
+.q-disc-start .q-input { width: 92px; margin: 0; }
 /* An armed slot has to be obvious from across the screen — the whole point is
    that you look away from it, copy something, and come back. */
 .prod-add.armed { border-color: var(--acc); border-style: solid; color: var(--acc); }

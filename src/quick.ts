@@ -1010,7 +1010,18 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         <span>Whose face is this?</span>
         <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
                placeholder="LeBron James" autocomplete="off" />
-        <small>Used in the rundown's opening line.</small>
+        <small>Said once, in the opening line.</small>
+      </label>
+      <label class="q-namefield">
+        <span>Call them <i>(optional)</i></span>
+        <input id="q-rundown-short" class="q-input" type="text" maxlength="24"
+               placeholder="LeBron" autocomplete="off" />
+        <small>Used for the rest of the video. Defaults to the first name.</small>
+      </label>
+      <label class="q-namefield">
+        <span>Cutaway photos <i>(optional)</i></span>
+        <input id="q-rundown-broll" class="q-input" type="file" accept="image/*" multiple />
+        <small>More shots of the same person. Shown between measurements, never measured.</small>
       </label>
       <!-- Turns the score card into a before/after. Left empty the card shows
            now-versus-potential, which is the FIRST card in a glow-up video;
@@ -1034,6 +1045,17 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <textarea id="q-rundown-note" class="q-input" rows="2" maxlength="320"
                 placeholder="He's a singer with a stadium career, and that moves how he's seen far more than a jaw measurement does."></textarea>
       <small id="q-rundown-note-len">Read out verbatim just before the call to action.</small>
+    </label>
+
+    <!-- The one beat whose length is known BEFORE the render, and therefore the
+         one an operator can go and cut footage for. -->
+    <label class="q-namefield" id="q-disc-row">
+      <span>Footage for that line <i>(optional)</i></span>
+      <input id="q-disc-clip" class="q-input" type="file" accept="video/*" />
+      <label class="q-disc-start">Start at
+        <input id="q-disc-start" class="q-input" type="number" min="0" step="0.1" value="0" />s
+      </label>
+      <small id="q-disc-note">Attach a clip and say where to start it. It plays under the line above.</small>
     </label>
 
     <div class="q-actions">
@@ -1116,6 +1138,47 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     };
     noteField.addEventListener("input", update);
     update();
+  }
+
+  // The disclaimer clip: how much is needed, how much there is, and whether the
+  // chosen start point leaves enough.
+  //
+  // Said in seconds against the clip's own length rather than as a rule,
+  // because "your clip is 6.0s and the line needs 4.2s, so start by 1.8s" is
+  // the sentence somebody can act on, and "choose a valid start point" is not.
+  const discInput = document.getElementById("q-disc-clip") as HTMLInputElement | null;
+  const discStart = document.getElementById("q-disc-start") as HTMLInputElement | null;
+  const discNote = document.getElementById("q-disc-note");
+  if (discInput && discStart && discNote && noteField) {
+    const describe = () => {
+      const needed = spokenSeconds(noteField.value);
+      const clip = discClip;
+      if (!clip) {
+        discNote.textContent = needed
+          ? `The line runs about ${needed.toFixed(1)}s. Attach a clip at least that long.`
+          : "Attach a clip and say where to start it. It plays under the line above.";
+        return;
+      }
+      const start = Number(discStart.value) || 0;
+      const left = clip.duration - start;
+      discNote.textContent =
+        left + 0.05 >= needed
+          ? `Clip is ${clip.duration.toFixed(1)}s. From ${start.toFixed(1)}s that leaves ${left.toFixed(1)}s for a ${needed.toFixed(1)}s line.`
+          : `Only ${Math.max(0, left).toFixed(1)}s left from ${start.toFixed(1)}s and the line needs ${needed.toFixed(1)}s — start by ${Math.max(0, clip.duration - needed).toFixed(1)}s or use a longer clip.`;
+    };
+    discInput.addEventListener("change", async () => {
+      discClip = await loadDisclaimerClip(discInput.files?.[0]);
+      // The furthest start that still fits, as the default. Somebody who
+      // attaches a clip and changes nothing else should get a working video.
+      if (discClip) {
+        const needed = spokenSeconds(noteField.value);
+        discStart.max = Math.max(0, discClip.duration - needed).toFixed(1);
+      }
+      describe();
+    });
+    discStart.addEventListener("input", describe);
+    noteField.addEventListener("input", describe);
+    describe();
   }
   document.getElementById("q-diagnostics")!.onclick = async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -1239,6 +1302,59 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
       score: parseFloat(cell.querySelector<HTMLElement>(".q-num")?.textContent ?? "") || 0,
     })),
   };
+}
+
+// The disclaimer's clip, held between renders so changing the start point does
+// not mean re-picking the file.
+let discClip: HTMLVideoElement | null = null;
+
+// Decoded far enough to know its duration and to be seekable. Metadata is
+// enough for both — waiting for the whole file would stall the panel on a
+// 200MB screen recording for no gain.
+async function loadDisclaimerClip(file: File | undefined): Promise<HTMLVideoElement | null> {
+  if (!file || !/^video\//.test(file.type)) return null;
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.src = URL.createObjectURL(file);
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("decode failed"));
+    });
+    return video;
+  } catch {
+    return null;
+  }
+}
+
+// Cutaway photographs for the rundown, decoded and nothing more.
+//
+// An unreadable file is skipped rather than thrown: these are decoration, and
+// failing a ninety-second render because the fourth of five cutaways was a HEIC
+// the browser will not decode is the wrong trade by a distance.
+async function loadBroll(files: FileList | null | undefined): Promise<HTMLImageElement[]> {
+  if (!files?.length) return [];
+  const out: HTMLImageElement[] = [];
+  // Six is plenty: the rundown has four beats that can take one, so past that
+  // they simply never appear.
+  for (const file of [...files].slice(0, 6)) {
+    if (!/^image\//.test(file.type)) continue;
+    try {
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("decode failed"));
+        image.src = url;
+      });
+      out.push(image);
+    } catch {
+      // Skipped, deliberately and quietly.
+    }
+  }
+  return out;
 }
 
 // The caption panel, under the action row and shared by all three cuts.
@@ -1381,6 +1497,14 @@ async function downloadRundown(r: Report): Promise<void> {
   const btn = document.getElementById("q-rundown-download") as HTMLButtonElement | null;
   const field = document.getElementById("q-rundown-name") as HTMLInputElement | null;
   const name = (field?.value ?? "").trim();
+  const shortName =
+    (document.getElementById("q-rundown-short") as HTMLInputElement | null)?.value.trim() || undefined;
+  // Cutaways. Decoded here as plain pictures and handed to the compositor —
+  // they never touch the landmarker, the scoring or the report, which is the
+  // reason they cannot move a measurement.
+  const broll = await loadBroll(
+    (document.getElementById("q-rundown-broll") as HTMLInputElement | null)?.files,
+  );
   const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name) {
     // Point at the missing thing rather than explaining it. The field is six
@@ -1403,7 +1527,16 @@ async function downloadRundown(r: Report): Promise<void> {
     const accessToken = (await currentAccessToken()) ?? undefined;
     const result = await downloadRundownVideo(last.photo, last.lm, r, {
       name,
+      shortName,
       note,
+      broll,
+      disclaimer: discClip
+        ? {
+            video: discClip,
+            startAt:
+              Number((document.getElementById("q-disc-start") as HTMLInputElement | null)?.value) || 0,
+          }
+        : undefined,
       accessToken,
       onProgress: (progress, stage) => {
         if (btn) btn.textContent = `${stage} · ${Math.round(progress * 100)}%`;
