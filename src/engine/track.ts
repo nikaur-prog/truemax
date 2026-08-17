@@ -24,6 +24,7 @@ export type FunnelEvent =
   | "quick-visit"
   | "quick-scan-done"
   | "quick-video-downloaded"
+  | "quick-rundown-downloaded"
   | "max-chat-opened"
   | "scan-gate-shown"
   | "scan-gate-buy";

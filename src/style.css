@@ -1066,8 +1066,17 @@ body.funnel-open { overflow: hidden; }
 .q-input:focus { border-color: var(--acc); }
 .q-input::placeholder { color: #b6b8b2; }
 
+/* The name the rundown opens on. Sits directly above the export row and inside
+   the same padding, so it reads as part of that block rather than as another
+   field in the analysis above it. */
+.q-namerow { padding: 14px 28px 0; }
+
 .q-actions { display: flex; gap: 10px; padding: 16px 28px 22px; border-top: 1px solid var(--line); margin-top: 14px; }
 .q-actions .btn { flex: 1; }
+/* Four exports no longer fit on one line at any phone width, and squeezing them
+   makes every label truncate. Wrapping keeps each button readable. */
+.q-actions { flex-wrap: wrap; }
+.q-actions .btn { flex: 1 1 46%; }
 
 /* Entry point on the landing screen */
 .q-strip {
@@ -1101,6 +1110,7 @@ body.funnel-open { overflow: hidden; }
   .q-grid.five { grid-template-columns: repeat(3, 1fr); }
   .q-body { padding: 20px 20px 4px; }
   .q-actions { padding: 14px 20px 18px; }
+  .q-namerow { padding: 12px 20px 0; }
 }
 
 /* Disclosure for the long "what we measure" copy */

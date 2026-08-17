@@ -20,6 +20,8 @@ import type { Report, Sex } from "./engine/types.js";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
+import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
+import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
 
@@ -461,10 +463,20 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         .join("")}
     </div>
 
+    <!-- The rundown opens on "How attractive is X?", so it cannot be built
+         without a name. Asked for here rather than in a prompt() at click time:
+         a modal that appears after you have committed to a sixty-second render
+         is a modal you dismiss by accident. -->
+    <div class="q-namerow">
+      <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
+             placeholder="Name for the rundown — e.g. LeBron James" autocomplete="off" />
+    </div>
+
     <div class="q-actions">
       <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
       <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
+      <button class="btn pri" id="q-rundown-download">Rundown MP4</button>
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>`;
@@ -514,6 +526,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-download")!.onclick = () => void downloadCard();
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
+  document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
   const saveBtn = document.getElementById("q-save-face") as HTMLButtonElement | null;
   if (saveBtn) {
     saveBtn.onclick = async () => {
@@ -671,6 +684,78 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
         btn.disabled = false;
         btn.textContent = idle;
       }, 2200);
+    }
+  }
+}
+
+// The long cut: a full walk down the face, narrated, about a minute.
+//
+// Unlike the other two this one talks to the network — speech synthesis needs a
+// key the browser must never hold — so it is the only export that can be
+// degraded rather than simply working. It never fails for that reason though:
+// no session, no quota or a refused key all produce a silent rundown with its
+// sound effects intact, and the button says so. A finished composite is worth
+// far more than a strict guarantee about its audio.
+async function downloadRundown(r: Report): Promise<void> {
+  if (!last) return;
+  const btn = document.getElementById("q-rundown-download") as HTMLButtonElement | null;
+  const field = document.getElementById("q-rundown-name") as HTMLInputElement | null;
+  const name = (field?.value ?? "").trim();
+  if (!name) {
+    // Point at the missing thing rather than explaining it. The field is six
+    // inches from the button that was just pressed.
+    field?.focus();
+    if (btn) {
+      btn.textContent = "Name it first ↑";
+      window.setTimeout(() => (btn.textContent = "Rundown MP4"), 2000);
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+  }
+  try {
+    // The token is what gets past the staff gate on /api/tts. Absent for a
+    // signed-out operator, which is not an error here — it means no voice.
+    const accessToken = (await currentAccessToken()) ?? undefined;
+    const result = await downloadRundownVideo(last.photo, last.lm, r, {
+      name,
+      accessToken,
+      onProgress: (progress, stage) => {
+        if (btn) btn.textContent = `${stage} · ${Math.round(progress * 100)}%`;
+      },
+    });
+    if (result.outcome === "cancelled") {
+      if (btn) btn.textContent = "Not saved — tap to retry";
+    } else {
+      // Say when it came out silent. An operator who does not notice until the
+      // edit has wasted the whole render, and the fix is usually just signing
+      // in — so the message has to name the cause, not just the symptom.
+      if (btn) {
+        btn.textContent = result.narrated
+          ? result.outcome === "shared"
+            ? "Sent to your share sheet"
+            : "Rundown downloaded"
+          : "Downloaded — no voiceover";
+      }
+      track("quick-rundown-downloaded");
+    }
+  } catch (error) {
+    console.error(error);
+    // A blocked capture is not a failure of the exporter, it is the exporter
+    // refusing to publish a number it cannot stand behind. Say which.
+    if (btn) {
+      btn.textContent =
+        error instanceof RundownBlocked ? "Capture too tilted for a rundown" : "Rundown unavailable here";
+    }
+  } finally {
+    if (btn) {
+      window.setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Rundown MP4";
+      }, 2600);
     }
   }
 }
