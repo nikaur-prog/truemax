@@ -1408,7 +1408,13 @@ async function downloadRundown(r: Report): Promise<void> {
     // refusing to publish a number it cannot stand behind. Say which.
     if (btn) {
       btn.textContent =
-        error instanceof RundownBlocked ? "Capture too tilted for a rundown" : "Rundown unavailable here";
+        // The reasons, not a guess at them. RundownBlocked has carried the
+        // actual blocker list all along and this printed "too tilted"
+        // regardless — so a rundown refused because a cap hid the hairline
+        // sent the operator off to re-shoot a head angle that was fine.
+        error instanceof RundownBlocked
+          ? error.blockers.join(" ")
+          : "Rundown unavailable here";
     }
   } finally {
     if (btn) {
