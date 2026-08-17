@@ -22,6 +22,7 @@ import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
+import { showCaptionStep } from "./ui/captionStep.js";
 import { spokenSeconds } from "./engine/reelScript.js";
 import {
   addRatedFace,
@@ -1047,7 +1048,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn pri" id="q-card-download">Score card PNG</button>
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
-    </div>`;
+    </div>
+    <div class="prod-caption hidden" id="q-caption"></div>`;
 
   // Stagger index for the drop, so the cards arrive in reading order rather
   // than all at once.
@@ -1239,6 +1241,16 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
   };
 }
 
+// The caption panel, under the action row and shared by all three cuts.
+//
+// A no-op when the node is missing rather than a throw: this runs immediately
+// after a file has been saved, and failing there would report the export as
+// broken when the only thing wrong is that the panel is not on this screen.
+function showCaption(options: Parameters<typeof showCaptionStep>[1]): void {
+  const host = document.getElementById("q-caption");
+  if (host) showCaptionStep(host, options);
+}
+
 // Two cuts of the same scan. The breakdown explains the product; the verdict
 // travels further. Which one is being built only changes the renderer and the
 // button label — the footage, the landmarks and the scores are identical, so
@@ -1271,6 +1283,16 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
     } else {
       if (btn) btn.textContent = outcome === "shared" ? "Sent to your share sheet" : "MP4 downloaded";
       track("quick-video-downloaded");
+      // The words to post it with, next to the file that was just saved. This
+      // step existed only inside the before/after producer, so the two cuts an
+      // operator actually publishes most often dropped them at a saved MP4 with
+      // nothing to paste under it.
+      showCaption({
+        kind: variant,
+        overall: r.overall,
+        percentile: r.overallPercentile,
+        potential: r.potential,
+      });
       offerProducer(r);
     }
   } catch (error) {
@@ -1401,6 +1423,15 @@ async function downloadRundown(r: Report): Promise<void> {
           : "Downloaded — no voiceover";
       }
       track("quick-rundown-downloaded");
+      showCaption({
+        kind: "rundown",
+        overall: r.overall,
+        percentile: r.overallPercentile,
+        potential: r.potential,
+        // The operator already typed a name for the render; asking twice is the
+        // kind of small friction that stops a step being used.
+        name,
+      });
     }
   } catch (error) {
     console.error(error);
