@@ -265,13 +265,28 @@ const M = (def: MetricDef) => def;
 
 export const METRICS: MetricDef[] = [
   // ---- Eyes ----
+  // The metric that was already working, held back by the wrong model.
+  //
+  // Across ten rated men the RAW value correlates +0.54 with the human
+  // judgement — one of the few measurements in this engine carrying real
+  // signal. Scored as a band around an ideal of 4.73 degrees, that signal was
+  // then partly thrown away: the man rated highest in the set measured +7.8,
+  // the strongest positive tilt present, and was marked 1.4 sigma OFF and
+  // handed 3.9. He was penalised for having more of the good thing.
+  //
+  // A band says "there is a correct amount and both directions from it are
+  // worse". That is true of some proportions and it is not true of canthal
+  // tilt within the range human faces occupy: from the negative tilt that reads
+  // as tired or downturned, up through neutral, to the positive tilt that reads
+  // as alert, more is better the whole way. Anatomy caps it long before the
+  // scoring would need to.
   M({
     id: "canthalTilt", name: "Canthal tilt", unit: "°", decimals: 1,
     view: "front", region: "eyes", pillar: "Features", weight: 1.3,
-    direction: "band", fixability: 0.1,
+    direction: "higher", fixability: 0.1,
     dist: {
-      male: { mean: 3.57, sd: 2.12, ideal: 4.73 },
-      female: { mean: 4.935, sd: 2.446, ideal: 6.24 },
+      male: { mean: 3.57, sd: 2.12 },
+      female: { mean: 4.935, sd: 2.446 },
     },
   }),
   M({
@@ -350,13 +365,40 @@ export const METRICS: MetricDef[] = [
   }),
 
   // ---- Jaw ----
+  // Direction, not a band, and the ideal is gone. This metric was scored as
+  // closeness to 1.0224 — a jaw WIDER than the cheekbones — and it ran exactly
+  // backwards against human judgement.
+  //
+  // Ten men, rated by eye and then measured:
+  //
+  //   rated 7.0  ratio 0.923  scored 2.1   <- lowest ratio, worst score
+  //   rated 6.8  ratio 0.930  scored 2.1
+  //   rated 6.0  ratio 0.976  scored 3.3
+  //   rated 3.1  ratio 1.017  scored 6.3   <- highest ratio, best score
+  //   rated 2.7  ratio 0.954  scored 2.1
+  //
+  // The raw value correlates -0.54 with the human rating: a NARROWER jaw
+  // relative to the cheekbones reads as more attractive, which is the cheekbone
+  // taper everybody actually means when they talk about facial structure. The
+  // old ideal sat at the opposite end of the range, so the two best faces in the
+  // set were handed 2.1 and the heaviest face in the set was handed 6.3.
+  //
+  // That last part is the mechanism worth naming: bigonial/bizygo cannot tell a
+  // strong bony jaw from a soft wide one. Both widen the lower face and both
+  // push the ratio up, so under the old ideal the metric was rewarding body fat
+  // and calling it structure.
+  //
+  // "lower" rather than a band at the bottom of the range, because a band would
+  // need an ideal roughly 3 sigma below the population mean, which puts nearly
+  // everybody far from it and reproduces the original failure mirrored. Within
+  // the range real faces occupy, less is monotonically better.
   M({
     id: "jawCheekRatio", name: "Jaw : cheekbone width", unit: "", decimals: 3,
     view: "front", region: "jaw", pillar: "Angularity", weight: 1.2,
-    direction: "band", fixability: 0.5,
+    direction: "lower", fixability: 0.5,
     dist: {
-      male: { mean: 1.0091, sd: 0.02357, ideal: 1.0224 },
-      female: { mean: 0.98935, sd: 0.01853, ideal: 0.97082 },
+      male: { mean: 1.0091, sd: 0.02357 },
+      female: { mean: 0.98935, sd: 0.01853 },
     },
   }),
   M({
