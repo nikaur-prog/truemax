@@ -452,8 +452,27 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
     pillars[p] = aggScore(pillarZ[p]);
   }
 
-  const pillarIds = Object.keys(PILLAR_WEIGHTS) as PillarId[];
-  const ratioZ = aggregateZ(pillarIds.map((p) => pillarZ[p]), pillarIds.map((p) => PILLAR_WEIGHTS[p]));
+  // The overall is built from the RAW metric z's in ONE aggregation, not by
+  // averaging the pillar scores.
+  //
+  // Averaging the pillars normalises twice. Each pillarZ is already that
+  // pillar's position in the population, so a face above the median on all four
+  // gets four high numbers whose mean stays high — while the reference
+  // population's mean-of-pillars is tight, because real faces are strong at some
+  // pillars and weak at others and those positions cancel. A face that is
+  // genuinely good everywhere does not cancel, lands far outside the range of a
+  // statistic built from faces that do, and tailZ extrapolates it off the top.
+  // That is how two faces whose metrics averaged 5.69 and 5.37 both came out at
+  // the 100th percentile, 9.9 and 9.7.
+  //
+  // So: every front metric, weighted by its own effective weight times its
+  // pillar's share, averaged once, normalised once. Pillars keep their own
+  // normalisation because a pillar CARD is a rank and should read as one — it
+  // just no longer feeds the overall.
+  const ratioZ = aggregateZ(
+    scored.map(eff),
+    scored.map((m) => effWeight(m) * PILLAR_WEIGHTS[m.def.pillar]),
+  );
   const blended = shapeZ == null ? ratioZ : W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;
   // Recorded so the calibration harness can decompose where score variance
   // between two photos of the same face actually comes from.
