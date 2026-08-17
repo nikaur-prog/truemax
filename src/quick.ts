@@ -1941,21 +1941,88 @@ for (const id of ["q-ai-before", "q-ai-after"]) {
 
 el.aiBack.onclick = () => leaveMode();
 
-el.aiForm.onsubmit = (event) => {
+el.aiForm.onsubmit = async (event) => {
   event.preventDefault();
   const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
   const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
   const blemishes =
     (document.getElementById("q-ai-blemish") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name || !desc) return;
-  // Generation is a server capability and this deployment may not have it. Say
-  // which, in the same shape as every other unconfigured service in the
-  // product, rather than spinning on a request that cannot succeed.
-  el.aiMsg.classList.add("err");
-  el.aiMsg.textContent =
-    "Image generation is not configured on this deployment yet — the character is saved, but the preview pair has to be generated outside the app for now.";
+
+  // Saved BEFORE the request, not after. Generation is the slow, billable and
+  // failable half; the character is the half worth keeping either way, and
+  // losing a description because an image service was rate limited is the kind
+  // of thing that stops somebody using a tool.
   saveAiCharacter({ name, sex: aiSex, description: desc, blemishes });
+
+  const go = document.getElementById("q-ai-go") as HTMLButtonElement | null;
+  el.aiMsg.classList.remove("err");
+  el.aiMsg.textContent = "Making the before…";
+  if (go) {
+    go.disabled = true;
+    go.textContent = "Generating…";
+  }
+  try {
+    const token = await currentAccessToken();
+    const response = await fetch("/api/ai-image", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ sex: aiSex, description: desc, blemishes }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      before?: string;
+      after?: string;
+      error?: string;
+    };
+    if (!response.ok || !payload.before || !payload.after) {
+      el.aiMsg.classList.add("err");
+      el.aiMsg.textContent = payload.error ?? "The pair could not be generated.";
+      return;
+    }
+    el.aiMsg.textContent = "";
+    showAiPair(name, payload.before, payload.after);
+  } catch {
+    el.aiMsg.classList.add("err");
+    el.aiMsg.textContent = "Could not reach the image service.";
+  } finally {
+    if (go) {
+      go.disabled = false;
+      go.textContent = "Generate the preview pair";
+    }
+  }
 };
+
+// The pair, side by side, each downloadable.
+//
+// Downloadable individually rather than as one composite: these are the INPUT
+// to the Reel Creator, which wants two separate photographs to scan, not a
+// picture of two photographs.
+function showAiPair(name: string, before: string, after: string): void {
+  const host = document.getElementById("q-ai-preview");
+  if (!host) return;
+  host.classList.remove("hidden");
+  host.innerHTML = `
+    <div class="q-ai-pair">
+      <figure><img src="${before}" alt="${name}, before" /><figcaption>BEFORE</figcaption></figure>
+      <figure><img src="${after}" alt="${name}, after" /><figcaption>AFTER</figcaption></figure>
+    </div>
+    <div class="q-ai-pair-actions">
+      <button type="button" class="btn pri" data-save="before">Save the before</button>
+      <button type="button" class="btn pri" data-save="after">Save the after</button>
+    </div>
+    <p class="q-ai-note">Scan these two in Reel Creator to get the measured before/after.</p>`;
+  for (const button of host.querySelectorAll<HTMLButtonElement>("[data-save]")) {
+    button.onclick = async () => {
+      const which = button.dataset.save === "after" ? after : before;
+      const blob = await (await fetch(which)).blob();
+      await saveFile(blob, `truemax-${button.dataset.save}-${Date.now()}.png`);
+    };
+  }
+  host.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 // The library the operator was promised: describe somebody once, film them
 // again next week. Local for now, because a character is a prompt and a name —

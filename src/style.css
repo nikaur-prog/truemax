@@ -2596,6 +2596,14 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   background: none; color: var(--mut); font-size: 13px; cursor: pointer;
 }
 .prod-add:hover { border-color: var(--acc); color: var(--acc); }
+/* ---------- the AI pair ---------- */
+.q-ai-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 12px; }
+.q-ai-pair figure { margin: 0; }
+.q-ai-pair img { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; }
+.q-ai-pair figcaption { margin-top: 6px; font: 600 10px var(--mono); letter-spacing: .18em; color: var(--mut); }
+.q-ai-pair-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.q-ai-pair-actions .btn { flex: 1; min-width: 140px; }
+
 /* ---------- cutaway strip + disclaimer footage ---------- */
 /* The wordmark is a button on /quick — it goes home. Stripped back to looking
    like the span it replaced, minus the cursor, which should say it is live. */
