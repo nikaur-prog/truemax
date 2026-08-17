@@ -167,13 +167,18 @@ test("a region missing from either end is skipped, not zero-filled", () => {
 });
 
 test("movers sort by magnitude, mixed directions get both named", () => {
+  // Moves are sized to clear REGION_NOISE comfortably. They used to be 1.8 and
+  // 1.5, chosen against a 1.3 floor; the floor rose to 1.8 when the shrinkage
+  // was retired, which left this fixture testing sorting on two moves that no
+  // longer qualify as moves. The subject of the test is the ordering and the
+  // naming, so the fixture grows rather than the floor shrinking.
   const note = regionNote(
-    [rp(0, { jaw: 4.0, midface: 6.5, eyes: 5.0 }), rp(40, { jaw: 5.8, midface: 5.0, eyes: 5.2 })],
+    [rp(0, { jaw: 4.0, midface: 7.0, eyes: 5.0 }), rp(40, { jaw: 6.4, midface: 5.0, eyes: 5.2 })],
     LABELS,
   );
   assert.ok(note);
-  assert.match(note!, /jaw up 1\.8/);
-  assert.match(note!, /midface down 1\.5/);
+  assert.match(note!, /jaw up 2\.4/);
+  assert.match(note!, /midface down 2\.0/);
 });
 
 test("nothing past the floor means no sentence at all", () => {
