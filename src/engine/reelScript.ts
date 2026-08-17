@@ -1,4 +1,5 @@
 import type { RegionId, Report, ScoredMetric, Sex } from "./types.js";
+import { verdictFor } from "./analysisMode.js";
 import { REGION_NAMES } from "./scoring.js";
 import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
@@ -156,11 +157,33 @@ const REEL_RELIABLE_MIN = 0.35;
 // parts of speech otherwise. An earlier version mixed the two and produced
 // "Notice the a nose : mouth width further from ideal" — an article and a verb
 // out of place, in the one sentence on screen.
+//
+// Six rather than three, because three frames over ten beats means every frame
+// is heard three times and the pattern is audible by the fourth. Six is heard
+// twice, which reads as a person with habits rather than a template.
+//
+// The full name is used sparingly on purpose: hearing "Marlon Lundgren-Garcia"
+// five times in ninety seconds is the station-announcement problem again.
 const FRAMES = [
   (subject: string, name: string, predicate: string) => `${subject}'s ${name} ${predicate}.`,
   (_subject: string, name: string, predicate: string) => `The ${name} ${predicate}.`,
   (_subject: string, name: string, predicate: string) => `Notice the ${name} — it ${predicate}.`,
+  (_subject: string, name: string, predicate: string) => `Look at the ${name}: it ${predicate}.`,
+  (_subject: string, name: string, predicate: string) => `Then the ${name}, which ${predicate}.`,
+  (_subject: string, name: string, predicate: string) => `On the ${name} — it ${predicate}.`,
 ];
+
+// A measured value a voice can say.
+//
+// Trailing zeros and four decimal places are for a table. Read aloud, "zero
+// point three eight zero" is noise where "zero point three eight" is a number,
+// and an angle wants none of it at all.
+function fmtValue(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 100) return v.toFixed(0);
+  if (a >= 10) return v.toFixed(1).replace(/\.0$/, "");
+  return v.toFixed(2).replace(/0$/, "").replace(/\.$/, "");
+}
 
 // A metric name a voice can say.
 //
@@ -191,10 +214,31 @@ function qualify(
   const positive = good >= 0;
   const strength = Math.abs(good);
 
+  // A standout gets its NUMBER said, not just its adjective.
+  //
+  // "Notice the chin-to-philtrum ratio, it is excellent" is a claim. "Chin to
+  // philtrum of 3.94, against an ideal of 3.39 — excellent" is the same claim
+  // with its evidence attached, and it is the difference between a face app
+  // and somebody who measured something. It is reserved for standouts because
+  // eleven numbers in ninety seconds is a spreadsheet being read aloud; one or
+  // two, on the features that actually carry the face, is a case being made.
+  // The midpoint of the display band is the ideal the bar is drawn around, so
+  // it is the one the viewer is looking at while this is said.
+  const ideal = (m.idealRange[0] + m.idealRange[1]) / 2;
+  const figures = Number.isFinite(m.value) && Number.isFinite(ideal)
+    ? `${fmtValue(m.value)}, against an ideal of ${fmtValue(ideal)}`
+    : null;
+
+  // Alternates within a band rather than repeating one word, keyed off the
+  // metric's position in the running order so the same face always narrates
+  // identically — a rundown that reworded itself between two renders of one
+  // scan would look like the measurement had changed.
+  const pick = <T,>(options: T[]): T => options[index % options.length];
+
   let predicate: string;
-  if (good >= 1.2) predicate = "is excellent";
-  else if (good >= 0.5) predicate = "is good";
-  else if (strength < 0.5) predicate = "is about average";
+  if (good >= 1.2) predicate = figures ? `of ${figures} — excellent` : "is excellent";
+  else if (good >= 0.5) predicate = pick(["is good", "is a strength here", "holds up well"]);
+  else if (strength < 0.5) predicate = pick(["is about average", "sits mid-pack", "lands near the middle"]);
   else {
     // Below the mean and worth naming: say WHICH WAY, not just "weak". "Weak
     // gonial angularity" tells a viewer nothing they can picture; "sits flatter
@@ -333,6 +377,21 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     {
       kind: "score",
       line: `${spreadLine(report.sex)} ${SPREAD.median.toFixed(1)} is the exact middle.`,
+    },
+    // The verdict, and it is the beat the format was missing.
+    //
+    // A number is an argument; a name is a conclusion, and a conclusion is what
+    // gets quoted in a comment section. Every competitor in this niche ends on
+    // one. Ending on a percentile instead is ending on the working.
+    //
+    // It is the SAME ladder the app shows — analysisMode owns the bands, and a
+    // second copy here is exactly the drift that module exists to prevent, so
+    // this asks rather than restates. Which also means a video and the app can
+    // never disagree about what a face is called.
+    {
+      kind: "score",
+      line: `Verdict: ${verdictFor(report).word.toLowerCase()}.`,
+      badge: verdictFor(report).word,
     },
   ];
 
