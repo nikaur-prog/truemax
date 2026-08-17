@@ -2,10 +2,9 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.js";
 import type { QuickExportScores } from "./quickVideoExport.js";
 import { quickVideoDuration, renderQuickVideoFrame } from "./quickVideoExport.js";
-import { buildCaption } from "../engine/caption.js";
+import { showCaptionStep } from "./captionStep.js";
 import { canShareFiles, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
-import type { Platform } from "../engine/caption.js";
 import { track } from "../engine/track.js";
 
 // ---------------------------------------------------------------------------
@@ -339,7 +338,15 @@ export function openProducer(ctx: ProducerContext): void {
       } else {
         track("quick-video-downloaded");
         buildBtn.textContent = outcome === "shared" ? "Sent to your share sheet" : "Video downloaded";
-        showCaptionStep(overlay!.querySelector<HTMLElement>("#prod-caption")!, ctx);
+        showCaptionStep(overlay!.querySelector<HTMLElement>("#prod-caption")!, {
+          // Two scans means the video is about a CHANGE, and the caption's
+          // headline is the delta rather than the number. One scan is the
+          // plain reel, which is what this always produced.
+          kind: ctx.after ? "beforeAfter" : "reel",
+          overall: (ctx.after ?? ctx).scores.overall,
+          percentile: (ctx.after ?? ctx).scores.percentile,
+          from: ctx.after ? ctx.scores.overall : undefined,
+        });
       }
     } catch (error) {
       console.error(error);
@@ -706,84 +713,3 @@ function drawProducerWatermark(ctx2d: CanvasRenderingContext2D): void {
   ctx2d.restore();
 }
 
-// After the file lands: the words to post it with. Platform and subject are
-// questions because they change the caption; everything else is derived from
-// the scan that is already on screen.
-function showCaptionStep(host: HTMLElement, ctx: ProducerContext): void {
-  host.classList.remove("hidden");
-  host.innerHTML = `
-    <h2>The caption</h2>
-    <div class="prod-opt">
-      <span>What platform is this on?</span>
-      <div class="prod-seg" data-q="platform">
-        <button type="button" data-v="tiktok" class="on">TikTok</button>
-        <button type="button" data-v="instagram">Instagram</button>
-      </div>
-    </div>
-    <div class="prod-opt">
-      <span>Who is this about?</span>
-      <div class="prod-seg" data-q="who">
-        <button type="button" data-v="me" class="on">Me</button>
-        <button type="button" data-v="name">Someone else</button>
-      </div>
-    </div>
-    <input class="prod-input hidden" id="prod-who-name" placeholder="Their first name" maxlength="40">
-    <input class="prod-input" id="prod-desc" placeholder="One line about it (optional) — e.g. 8 weeks of training" maxlength="140">
-    <div class="prod-cap-out">
-      <pre id="prod-cap-text"></pre>
-      <button type="button" class="btn pri" id="prod-copy">Copy caption + hashtags</button>
-    </div>`;
-
-  let platform: Platform = "tiktok";
-  let whoMode = "me";
-  const nameInput = host.querySelector<HTMLInputElement>("#prod-who-name")!;
-  const descInput = host.querySelector<HTMLInputElement>("#prod-desc")!;
-  const out = host.querySelector<HTMLElement>("#prod-cap-text")!;
-
-  const regenerate = () => {
-    const who = whoMode === "me" ? "me" : nameInput.value;
-    out.textContent = buildCaption({
-      platform,
-      who,
-      description: descInput.value,
-      overall: ctx.scores.overall,
-      percentile: ctx.scores.percentile,
-    }).full;
-  };
-
-  for (const seg of host.querySelectorAll<HTMLElement>(".prod-seg")) {
-    seg.addEventListener("click", (event) => {
-      const btn = (event.target as HTMLElement).closest("button");
-      if (!btn) return;
-      for (const other of seg.querySelectorAll("button")) other.classList.toggle("on", other === btn);
-      if (seg.dataset.q === "platform") platform = btn.dataset.v as Platform;
-      else {
-        whoMode = btn.dataset.v!;
-        nameInput.classList.toggle("hidden", whoMode === "me");
-      }
-      regenerate();
-    });
-  }
-  nameInput.addEventListener("input", regenerate);
-  descInput.addEventListener("input", regenerate);
-  regenerate();
-
-  const copy = host.querySelector<HTMLButtonElement>("#prod-copy")!;
-  copy.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(out.textContent ?? "");
-      copy.textContent = "Copied";
-    } catch {
-      // Clipboard permission denied — select the text so a manual copy is one
-      // keystroke instead of a drag.
-      const range = document.createRange();
-      range.selectNodeContents(out);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      copy.textContent = "Press ⌘C / Ctrl-C";
-    }
-    window.setTimeout(() => (copy.textContent = "Copy caption + hashtags"), 2000);
-  };
-  host.scrollIntoView({ behavior: "smooth", block: "start" });
-}

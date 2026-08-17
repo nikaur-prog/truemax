@@ -75,3 +75,73 @@ test("nothing demeaning can come out of it", () => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// One caption engine, four cuts.
+//
+// The three exports make three different claims, and a caption that ignores
+// which one it is under undersells two of them. Adding the cut must not change
+// what the callers that do not pass one produce.
+// ---------------------------------------------------------------------------
+const BASE = { platform: "tiktok" as const, who: "me", description: "", overall: 7.6, percentile: 92 };
+
+test("an omitted cut produces exactly what it always did", () => {
+  // Every existing caller passes no kind. If this drifts, captions already
+  // copied and posted stop matching the ones the app now generates.
+  assert.equal(buildCaption(BASE).full, buildCaption({ ...BASE, kind: "reel" }).full);
+  assert.match(buildCaption(BASE).caption, /^I let the math rate my face\./);
+});
+
+test("a before/after leads with the change, not the number", () => {
+  // A before/after captioned with only the new score throws away the reason
+  // the video exists.
+  const up = buildCaption({ ...BASE, kind: "beforeAfter", from: 6.1 });
+  assert.match(up.caption, /6\.1 → 7\.6/);
+  assert.match(up.caption, /What should I fix next\?/);
+
+  // And a drop is stated, not hidden. A generator that only knows how to
+  // report improvement is a generator nobody should believe about improvement.
+  const down = buildCaption({ ...BASE, kind: "beforeAfter", overall: 5.4, percentile: 40, from: 6.1 });
+  assert.match(down.caption, /6\.1 → 5\.4/);
+  assert.match(down.caption, /went down/);
+});
+
+test("the verdict WORD never reaches a caption, on any cut", () => {
+  // The tone rule at the top of this module: a caption is the most public
+  // sentence the app writes, it outlives the video, and it gets read by people
+  // who never watched it. The ladder holds "Chopped" and "You're cooked" — the
+  // video may say them over a face, a caption under somebody's own photograph
+  // may not.
+  for (const kind of ["reel", "rundown", "breakdown", "verdict", "beforeAfter"] as const) {
+    for (const percentile of [3, 12, 30, 50, 70, 92, 99]) {
+      const text = buildCaption({ ...BASE, kind, percentile, overall: 4.1, from: 3.8 }).full;
+      assert.doesNotMatch(text, /chopped|cooked|mogger|subhuman/i, `${kind} at p${percentile}: ${text}`);
+    }
+  }
+});
+
+test("a below-median score is stated plainly and never dressed up", () => {
+  // Carried over from the original rules and now checked on every cut, since
+  // each one assembles its own opening line.
+  for (const kind of ["reel", "rundown", "breakdown", "verdict", "beforeAfter"] as const) {
+    const text = buildCaption({ ...BASE, kind, overall: 3.9, percentile: 18 }).caption;
+    assert.doesNotMatch(text, /top \d/i, `${kind} claimed standing it does not have: ${text}`);
+    assert.match(text, /3\.9\/10/, `${kind} dropped the score: ${text}`);
+  }
+});
+
+test("the ceiling appears only when it is above the score", () => {
+  assert.match(buildCaption({ ...BASE, kind: "rundown", potential: 8.4 }).caption, /Ceiling: 8\.4/);
+  // A ceiling equal to the score is not a target, it is a full stop, and
+  // printing it reads as the product admitting it has nothing to sell.
+  assert.doesNotMatch(buildCaption({ ...BASE, kind: "rundown", potential: 7.6 }).caption, /Ceiling/);
+});
+
+test("every cut still carries the address and the hashtags", () => {
+  for (const kind of ["reel", "rundown", "breakdown", "verdict", "beforeAfter"] as const) {
+    const out = buildCaption({ ...BASE, kind });
+    assert.match(out.full, /truemax\.app/, kind);
+    assert.ok(out.hashtags.length > 0, kind);
+    assert.ok(out.full.endsWith(out.hashtags.join(" ")), kind);
+  }
+});

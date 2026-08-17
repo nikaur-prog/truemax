@@ -43,12 +43,27 @@ const GRADIENT = `<defs>
     </linearGradient>
   </defs>`;
 
-// 560 wide, horizontally centred, sitting a touch above the vertical centre so
-// the head lands on the optical centre rather than the geometric one.
-const W = 560;
-const H = 590;
+// Horizontally centred, sitting a touch above the vertical centre so the head
+// lands on the optical centre rather than the geometric one.
+//
+// Was 560 wide, and that was too timid by half. The safe-radius reasoning above
+// is right about the geometry and wrong about the SHAPE: it measured the corner
+// of Max's bounding BOX against the inscribed circle, but Max is an egg with
+// two stubby arms and his bounding-box corners are empty pixels. The circle
+// crop removes the square's corners, and Max's furthest real pixels — the widest
+// point of his body and the antenna tip — sit on the horizontal and vertical
+// axes, which is exactly where the circle is at its full 512 radius.
+//
+// So the old picture spent 45% of a profile photograph on empty gradient. That
+// does not read as breathing room at the size this is actually seen: a TikTok
+// avatar is about 50 pixels across, and 560/1024 of it left roughly twenty
+// pixels of character to recognise. At 780 the widest point lands near 390 from
+// the centre — still comfortably inside the safe radius — and Max is legible in
+// a comment thread, which is the entire job.
+const W = 780;
+const H = 822;
 const X = (1024 - W) / 2;
-const Y = 200;
+const Y = 92;
 
 const profile = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   ${GRADIENT}

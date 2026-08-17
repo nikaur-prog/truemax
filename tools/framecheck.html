@@ -1,0 +1,67 @@
+<!doctype html><meta charset="utf-8"><body style="margin:0;background:#111">
+<canvas id="c" width="720" height="1280"></canvas>
+<script type="module">
+import { drawRundownFrame } from "/src/ui/rundownFrame.ts";
+import { buildTimeline } from "/src/engine/rundownTimeline.ts";
+
+// A stand-in photograph: a flat portrait with a face-shaped blob, enough for
+// the crop maths to have a bounding box to work against.
+const photo = document.createElement("canvas");
+photo.width = 900; photo.height = 1200;
+const p = photo.getContext("2d");
+// A stand-in PORTRAIT, not a cut-out: a full-bleed rectangular photograph with
+// a head-and-shoulders figure in it, because that is what a real scan is. The
+// first version of this drew a bare ellipse on a flat field, and the ellipse
+// read as though the renderer were masking the photo to an oval — which it
+// never has. The harness should not invent a fault to look at.
+const bg = p.createLinearGradient(0,0,0,1200);
+bg.addColorStop(0,"#6b7d78"); bg.addColorStop(1,"#2c3a37");
+p.fillStyle = bg; p.fillRect(0,0,900,1200);
+p.fillStyle = "#2a3550"; p.beginPath(); p.ellipse(450,1120,330,330,0,0,7); p.fill(); // shoulders
+p.fillStyle = "#c9a88a"; p.beginPath(); p.ellipse(450,760,86,110,0,0,7); p.fill();   // neck
+p.fillStyle = "#d8b696"; p.beginPath(); p.ellipse(450,520,196,258,0,0,7); p.fill();  // head
+p.fillStyle = "#3a2a20"; p.beginPath(); p.ellipse(450,330,200,120,0,0,7); p.fill();  // hair
+p.fillStyle = "#2b2b2b";
+p.beginPath(); p.ellipse(378,500,26,13,0,0,7); p.fill();
+p.beginPath(); p.ellipse(522,500,26,13,0,0,7); p.fill();
+p.strokeStyle = "#8a6a55"; p.lineWidth = 7;
+p.beginPath(); p.arc(450,640,58,0.25,Math.PI-0.25); p.stroke();
+
+// Landmarks spanning the blob.
+const lm = [];
+for (let i=0;i<60;i++){
+  const a = (i/60)*Math.PI*2;
+  lm.push({ x: (450+Math.cos(a)*180)/900, y: (520+Math.sin(a)*240)/1200, z: 0 });
+}
+
+const card = {
+  verdict: "Mogger", overall: 7.6, potential: 8.2, percentile: 92,
+  rows: [
+    { label: "Eyes", score: 8.1 }, { label: "Midface", score: 7.4 },
+    { label: "Nose", score: 5.2 }, { label: "Lips", score: 4.3 },
+    { label: "Jaw", score: 7.9 }, { label: "Chin", score: 6.8 },
+    { label: "Proportions", score: 5.9 }, { label: "Symmetry", score: 7.1 },
+  ],
+};
+const beats = [
+  { kind: "card", line: "The verdict: Mogger. Marlon measures 7.6 out of 10.", card },
+  // Two curve beats, because they render differently: the first carries a
+  // badge and shows his standing, the second drops it and shows the crowd.
+  { kind: "curve", line: "That's 1 in 10. Two thirds of men measure between 4.1 and 6.3.", percentile: 92, badge: "92th percentile" },
+  { kind: "curve", line: "5.0 is the exact middle, and that shaded band is where most of them are.", percentile: 92 },
+  { kind: "search", line: "Want yours analysed? truemax.app." },
+];
+const timeline = buildTimeline(beats);
+const overlayCanvas = document.createElement("canvas");
+const ctx = document.getElementById("c").getContext("2d");
+
+window.shot = (i) => {
+  const b = timeline.beats[i];
+  // Late in the beat, so any entrance animation has finished.
+  const t = b.start + b.duration * 0.8;
+  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon" }, t,
+    { width: 720, height: 1280, overlayCanvas });
+  return true;
+};
+window.ready = true;
+</script>

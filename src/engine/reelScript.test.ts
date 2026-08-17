@@ -137,9 +137,13 @@ test("the score beat never states a number without the distribution", () => {
   // The score is delivered over several beats so the renderer has something to
   // cut on, so the guard is on the SECTION rather than any one beat: whatever
   // the split, a viewer must not receive the number without the curve.
+  // The number now lives on the CARD and the distribution on the CURVE, which
+  // is a stronger version of the same contract rather than a weaker one — the
+  // curve is drawn, not merely spoken. The guard is unchanged in substance: a
+  // viewer must not receive the number without the thing that gives it meaning.
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
-  const score = beats.filter((b) => b.kind === "score");
-  const said = score.map((b) => b.line).join(" ");
+  const ending = beats.filter((b) => b.kind === "card" || b.kind === "curve");
+  const said = ending.map((b) => b.line).join(" ");
   assert.match(said, /5\.4 out of 10/);
   assert.match(said, /Two thirds of men measure between/);
   assert.match(said, /5\.0 is the exact middle/);
@@ -148,11 +152,30 @@ test("the score beat never states a number without the distribution", () => {
   // only safe while nothing can appear between them — a context or CTA beat
   // landing in the gap would put the number on screen alone, which is the exact
   // misreading the split is allowed to risk and this test exists to prevent.
-  const first = beats.findIndex((b) => b.kind === "score");
+  const first = beats.findIndex((b) => b.kind === "card");
   assert.deepEqual(
-    beats.slice(first, first + score.length).map((b) => b.kind),
-    score.map(() => "score"),
+    beats.slice(first, first + ending.length).map((b) => b.kind),
+    ["card", "card", "curve", "curve"],
   );
+
+  // The card carries the numbers it needs to draw itself, and it gets them from
+  // here rather than reaching back into a Report at render time.
+  const card = beats.find((b) => b.kind === "card")!.card!;
+  assert.equal(card.overall, 5.4);
+  assert.ok(card.rows.length >= 0);
+  // And the curve knows where the marker goes.
+  assert.equal(beats.find((b) => b.kind === "curve")!.percentile, 62);
+});
+
+test("the video ends by showing the address, then asking for the next face", () => {
+  // A URL read aloud is a URL nobody types. The search bar is the one frame
+  // with a job outside the video, and it has to land AFTER the curve — before
+  // it, the viewer has not yet been given a reason to want their own.
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
+  const kinds = beats.map((b) => b.kind);
+  assert.ok(kinds.lastIndexOf("curve") < kinds.indexOf("search"), "search bar lands before the curve");
+  assert.equal(beats[beats.length - 1].kind, "cta");
+  assert.match(beats[beats.length - 2].line, /truemax\.app/);
 });
 
 test("the hook and the call to action bookend it", () => {
@@ -257,7 +280,14 @@ test("a typed disclaimer is read verbatim, just before the call to action", () =
   const index = beats.findIndex((b) => b.line === note);
   assert.ok(index > 0, "the disclaimer is missing from the script");
   assert.equal(beats[index].kind, "context");
-  assert.equal(beats[index + 1]?.kind, "cta", "the disclaimer must land immediately before the CTA");
+  // Immediately before the closing sequence — the search bar, then the sign-off.
+  // The point is that it is the last thing SAID about the subject, so nothing
+  // about the face may follow it.
+  assert.deepEqual(
+    beats.slice(index + 1).map((b) => b.kind),
+    ["search", "cta"],
+    "the disclaimer must land immediately before the closing ask",
+  );
 
   // And it must reach the microphone, not just the screen.
   assert.ok(narrationFrom(beats).includes(note));

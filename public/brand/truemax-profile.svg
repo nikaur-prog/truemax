@@ -7,7 +7,7 @@
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
-  <svg viewBox="0 0 150 158" x="232" y="200" width="560" height="590">
+  <svg viewBox="0 0 150 158" x="122" y="92" width="780" height="822">
     <defs>
       <!-- Fixed ids are safe because every instance defines identical
            gradients — whichever copy the browser resolves, he looks the same. -->
