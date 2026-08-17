@@ -996,6 +996,12 @@ body.funnel-open { overflow: hidden; }
 #capture-stage.live-cam .oval-frame { aspect-ratio: 1 / 1; }
 #v-upload { transition: padding-top 0.5s cubic-bezier(.22,1,.36,1); }
 #v-upload.camera-live { padding-top: 3vh; }
+/* Stop the browser holding the tapped button in place while the headline above
+   it collapses. Scroll anchoring is right almost everywhere and wrong here:
+   the collapse is deliberate and the thing that should stay in view is the
+   camera, not the button that opened it. main.ts corrects the scroll as well —
+   this keeps the two from fighting mid-transition. */
+#v-upload.camera-live, #v-upload.camera-live * { overflow-anchor: none; }
 #v-upload.camera-live h1,
 #v-upload.camera-live .sub,
 #v-upload.camera-live .hints { max-height: 0; opacity: 0; margin: 0; overflow: hidden;
