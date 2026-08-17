@@ -36,7 +36,7 @@ function ladderHTML(): string {
   return LADDER.map(
     (r) => `<div class="scale-rung">
       <b>${r.score.toFixed(1)}</b>
-      <span>${r.capped ? `rarer than 1 in ${r.oneIn}` : `about 1 in ${r.oneIn}`}</span>
+      <span>${r.capped ? `about 1 in ${r.oneIn} — our limit` : `about 1 in ${r.oneIn}`}</span>
     </div>`,
   ).join("");
 }
@@ -153,10 +153,11 @@ export function showScalePrimer(sex: Sex): Promise<void> {
         <div class="scale-ladder">${ladderHTML()}</div>
 
         <p>That column is the part worth thirty seconds. A 7 here is not a
-          school seven: it is rarer than one person in twenty. Almost nobody
-          is an 8, and the top of the scale is not somewhere real faces go —
-          scan anyone you consider good-looking and they will land lower than
-          you expect.</p>
+          school seven: it is about one person in twenty. An 8 is around one in
+          ninety, and past that our reference set stops being able to tell one
+          rung from the next — so 8 is where we stop counting, not where the
+          faces stop. Scan anyone you consider good-looking and they will land
+          lower than you expect.</p>
 
         <p class="scalenote-foot">${varianceLine()}</p>
 

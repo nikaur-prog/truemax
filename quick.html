@@ -25,8 +25,96 @@
         <span class="tag">QUICK · FRONT ONLY</span>
       </header>
 
+      <!-- The three pillars.
+           This page stopped being one tool a while ago. It is a content
+           pipeline with three distinct jobs, and each of them wants different
+           things at the door — one photo, two photos, or no photos at all. A
+           single capture screen that then asks what you meant is the wrong
+           order: choosing first is what lets each flow ask for exactly what it
+           needs and nothing else. -->
+      <section id="q-pillars">
+        <p class="q-pillars-lede">What are you making?</p>
+        <div class="q-pillar-grid">
+          <button class="q-pillar" data-mode="reel" type="button">
+            <span class="q-pillar-kicker">01</span>
+            <b>Reel Creator</b>
+            <span class="q-pillar-what">Before &amp; after, scanned and cut together</span>
+            <span class="q-pillar-needs">Two photos · up to six clips</span>
+          </button>
+          <button class="q-pillar" data-mode="analysis" type="button">
+            <span class="q-pillar-kicker">02</span>
+            <b>Full Analysis</b>
+            <span class="q-pillar-what">The narrated walk down one face</span>
+            <span class="q-pillar-needs">One photo</span>
+          </button>
+          <button class="q-pillar" data-mode="ai" type="button">
+            <span class="q-pillar-kicker">03</span>
+            <b>AI Model Reel</b>
+            <span class="q-pillar-what">Describe someone, preview them, then film them</span>
+            <span class="q-pillar-needs">No photos · a description</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- AI Model Reel: character setup.
+           No photograph is taken here, so the capture section is not merely
+           hidden behind a notice — it is a different screen entirely. A camera
+           on a screen that will never use one is worse than an unfinished
+           feature, because it tells somebody to do something that cannot
+           help them. -->
+      <section id="q-ai" class="hidden">
+        <div class="q-modebar">
+          <button type="button" class="linkish" id="q-ai-back">← All modes</button>
+          <span class="q-modebar-name">AI Model Reel</span>
+          <span class="q-modebar-step" id="q-ai-step">Describe your character</span>
+        </div>
+        <form id="q-ai-form" class="q-ai-form">
+          <div class="q-ai-row">
+            <label class="q-ai-field">
+              <span>Name</span>
+              <input type="text" id="q-ai-name" placeholder="Jess" maxlength="40" required />
+              <small>Saved under this name so you can film them again.</small>
+            </label>
+            <fieldset class="q-ai-field q-ai-seg">
+              <legend>Gender</legend>
+              <div class="q-seg" id="q-ai-sex">
+                <button type="button" data-v="female" class="on">Woman</button>
+                <button type="button" data-v="male">Man</button>
+              </div>
+            </fieldset>
+          </div>
+          <label class="q-ai-field">
+            <span>Describe them</span>
+            <textarea id="q-ai-desc" rows="3" placeholder="Mid-twenties, brown hair, freckles, a bit of acne along the jaw" required></textarea>
+            <small>Face first. Hair, skin, age, build — the things that stay the same between the two shots.</small>
+          </label>
+          <div class="q-ai-row">
+            <label class="q-ai-field">
+              <span>Before</span>
+              <input type="number" id="q-ai-before" min="1" max="10" step="0.1" value="4.5" />
+            </label>
+            <label class="q-ai-field">
+              <span>After</span>
+              <input type="number" id="q-ai-after" min="1" max="10" step="0.1" value="7.5" />
+            </label>
+          </div>
+          <!-- Said before the first generation rather than after a
+               disappointing one: the numbers steer the prompt, they are not
+               promises the scanner has agreed to. -->
+          <p class="q-ai-note" id="q-ai-note"></p>
+          <button type="submit" class="btn pri" id="q-ai-go">Generate the preview pair</button>
+          <p class="q-ai-msg" id="q-ai-msg" role="status"></p>
+        </form>
+        <div class="q-ai-preview hidden" id="q-ai-preview"></div>
+      </section>
+
       <!-- Capture -->
-      <section id="q-capture">
+      <section id="q-capture" class="hidden">
+        <div class="q-modebar">
+          <button type="button" class="linkish" id="q-mode-back">← All modes</button>
+          <span class="q-modebar-name" id="q-mode-name"></span>
+          <span class="q-modebar-step" id="q-mode-step"></span>
+        </div>
         <div class="q-frame" id="q-frame">
           <!-- Behind the video, visible only until the camera opens. A page
                built to be filmed should not open on a blank grey box. -->

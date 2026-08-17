@@ -251,6 +251,13 @@
           <button type="button" class="vt-btn" data-view="front">Front</button>
           <button type="button" class="vt-btn" data-view="side">Side</button>
         </div>
+        <!-- Marks where the toggle normally sits. Once this scrolls out of
+             view the toggle detaches and floats, so switching between front and
+             side never requires scrolling back up to the photograph. Observing
+             a sentinel rather than the toggle itself, because the toggle stops
+             being in the flow the moment it floats and would immediately report
+             itself visible again. -->
+        <div class="viewtoggle-anchor" id="view-toggle-anchor" aria-hidden="true"></div>
         <div class="quality-chips" id="quality-chips"></div>
       </div>
       <div class="pane-analysis" id="analysis"></div>

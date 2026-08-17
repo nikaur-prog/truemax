@@ -128,6 +128,7 @@ export function renderResults(c: Ctx): void {
     for (const b of toggle.querySelectorAll<HTMLButtonElement>(".vt-btn")) {
       b.onclick = () => select(b.dataset.view === "side" ? "side" : "overall");
     }
+    if (c.sideReport) floatToggleWhenScrolledPast(toggle);
   }
 
   c.analysis.innerHTML = "";
@@ -671,6 +672,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
+      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side") : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
@@ -906,7 +908,15 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
   { mood: "happy" },
 ];
 
-function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
+// `scope` exists for one sentence. Everything else here composes from whichever
+// Report it is handed, so the profile gets a genuine read of the profile's own
+// regions and metrics for free — but the delta does not generalise. It tracks
+// the OVERALL score, and printing "0.1 down against yesterday" under fifteen
+// side measurements would attribute a whole-face movement to the jaw.
+//
+// So the profile says nothing about movement rather than something untrue. The
+// front keeps the tracking line, where it is about the number directly above it.
+function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front"): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
   const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
@@ -924,16 +934,21 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null): string {
   const improve = weakest
     ? `The one I would attack first: ${weakest.def.name.toLowerCase()} (${fmt(weakest)}). ${leverFor(weakest).title} is the lever, and it moves without surgery.`
     : "";
-  const tracking = delta
-    ? deltaReadingCopy(delta)
-    : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
+  // Suppressed entirely on the profile: "first scan on record" is false on a
+  // rescan, and the real delta belongs to the overall number, not to this half.
+  const tracking =
+    scope === "side"
+      ? ""
+      : delta
+        ? deltaReadingCopy(delta)
+        : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
     <div class="maxan-body">
       <span class="klabel">MAX'S READ</span>
       <p><b>${good}</b> ${improve}</p>
-      <p class="maxan-track">${tracking}</p>
+      ${tracking ? `<p class="maxan-track">${tracking}</p>` : ""}
       <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
       <!-- Looks like the thing it starts, rather than describing it.
            "Tap me in the corner" asked the reader to find a separate control
@@ -1835,4 +1850,39 @@ function progressCopy(d: ScanDelta): string {
   if (d.overall < -0.15)
     return `<p class="rarity">Down <b>${d.overall.toFixed(1)}</b> overall. Before reading into it: lighting, expression and angle explain most small drops, so recapture in the same conditions first.</p>`;
   return `<p class="rarity">Overall is <b>flat</b> (${d.overall >= 0 ? "+" : ""}${d.overall.toFixed(1)}), which is within capture variance. Structural change shows up over weeks, not days.</p>`;
+}
+
+// Keep the Front/Side toggle reachable once the photograph has scrolled away.
+//
+// The toggle lives in the photo pane. On a phone the panes stack, so reading
+// the analysis scrolls the photograph — and the toggle with it — entirely out
+// of the viewport. The side profile is a quarter of the overall score and
+// fifteen of the measurements; making somebody scroll back up to reach it is
+// how a quarter of the product goes unread.
+//
+// position:sticky cannot solve this. Sticky pins an element inside its
+// SCROLLING ANCESTOR, and here that ancestor is the pane that leaves the
+// screen, so the toggle would leave with it exactly as it does now.
+//
+// So the toggle detaches instead, and an anchor left behind in the flow reports
+// when that should happen. Observing the anchor rather than the toggle is the
+// part that matters: a floating element is position:fixed, which means it is
+// always in the viewport, which means it would immediately report itself
+// visible and un-float — a loop that flickers once per frame.
+let toggleObserver: IntersectionObserver | null = null;
+
+function floatToggleWhenScrolledPast(toggle: HTMLElement): void {
+  const anchor = document.getElementById("view-toggle-anchor");
+  if (!anchor || typeof IntersectionObserver === "undefined") return;
+  // Results re-render on every mode switch; without this each one would add
+  // another observer on the same anchor.
+  toggleObserver?.disconnect();
+  toggleObserver = new IntersectionObserver(
+    ([entry]) => toggle.classList.toggle("floating", !entry.isIntersecting),
+    // A negative top margin so it floats slightly BEFORE the anchor is fully
+    // gone, rather than at the exact frame it vanishes — a control that appears
+    // the instant its predecessor disappears reads as a swap rather than a jump.
+    { rootMargin: "-8px 0px 0px 0px", threshold: 0 },
+  );
+  toggleObserver.observe(anchor);
 }

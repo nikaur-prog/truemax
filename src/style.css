@@ -1066,8 +1066,18 @@ body.funnel-open { overflow: hidden; }
 .q-input:focus { border-color: var(--acc); }
 .q-input::placeholder { color: #b6b8b2; }
 
+/* The name the rundown opens on. Sits directly above the export row and inside
+   the same padding, so it reads as part of that block rather than as another
+   field in the analysis above it. */
+.q-namerow { padding: 14px 28px 0; display: flex; gap: 10px; }
+.q-namerow .q-input { flex: 1; }
+
 .q-actions { display: flex; gap: 10px; padding: 16px 28px 22px; border-top: 1px solid var(--line); margin-top: 14px; }
 .q-actions .btn { flex: 1; }
+/* Four exports no longer fit on one line at any phone width, and squeezing them
+   makes every label truncate. Wrapping keeps each button readable. */
+.q-actions { flex-wrap: wrap; }
+.q-actions .btn { flex: 1 1 46%; }
 
 /* Entry point on the landing screen */
 .q-strip {
@@ -1101,6 +1111,7 @@ body.funnel-open { overflow: hidden; }
   .q-grid.five { grid-template-columns: repeat(3, 1fr); }
   .q-body { padding: 20px 20px 4px; }
   .q-actions { padding: 14px 20px 18px; }
+  .q-namerow { padding: 12px 20px 0; }
 }
 
 /* Disclosure for the long "what we measure" copy */
@@ -3368,3 +3379,121 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    more, so the hiding pose would be a lie about where he is. */
 .maxpet.loose, .maxpet.loose:hover, .maxpet.loose.peeking { transform: none; }
 .maxpet.loose.out { transform: scale(.6); opacity: 0; pointer-events: none; }
+
+/* The Front/Side toggle, when its natural home has scrolled away.
+   
+   It sits in the photo pane, and on a phone the panes stack — so reading the
+   analysis scrolls the photograph, and the toggle with it, completely off
+   screen. The side profile is a quarter of the score; making somebody scroll
+   back up to reach it is how a quarter of the product goes unread.
+   
+   Fixed to the bottom rather than the top: it is a control, the thumb is down
+   there, and the top of a phone screen already belongs to the browser chrome. */
+.viewtoggle-anchor { height: 0; }
+
+.viewtoggle.floating {
+  position: fixed;
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  margin-top: 0;
+  /* Opaque rather than translucent. It sits over scrolling body copy, and text
+     sliding under a frosted pill is harder to read than either state alone. */
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .16);
+  animation: vt-rise .18s ease-out;
+}
+
+@keyframes vt-rise {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Only on phones. On a desktop both panes are side by side and the toggle never
+   leaves the viewport, so floating it would be a solution to nothing that also
+   covers the page. */
+@media (min-width: 921px) {
+  .viewtoggle.floating {
+    position: static;
+    transform: none;
+    box-shadow: none;
+    border: 0;
+    background: var(--soft);
+    animation: none;
+    margin-top: 12px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Ask Max.
+   
+   A button wearing a text field. It had no styles at all and was rendering as
+   a raw browser button — a grey bevelled box with a span and a bold word in it,
+   under an analysis panel that is otherwise carefully set. It is also the main
+   way into the one feature the Max plan is sold on, so looking unfinished here
+   costs more than it does anywhere else on the screen.
+   
+   It has to read as an input rather than a button, because that is what it
+   pretends to be: a resting cursor is an invitation and a button is a command.
+   Hence the field treatment, the muted placeholder-coloured label, and a send
+   affordance that looks like the one inside every messaging app.
+   --------------------------------------------------------------------------- */
+.maxan-ask {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; margin-top: 14px; padding: 6px 6px 6px 18px;
+  font: inherit; text-align: left; cursor: text;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  transition: border-color .18s, box-shadow .18s, background .18s;
+}
+.maxan-ask:hover { border-color: var(--acc); }
+.maxan-ask:focus-visible {
+  outline: none; border-color: var(--acc);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 18%, transparent);
+}
+/* Placeholder-coloured, because it is standing in for placeholder text. */
+.maxan-ask > span {
+  flex: 1; min-width: 0; font-size: 14.5px; color: var(--mut);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.maxan-ask > b {
+  flex: none; font-size: 13px; font-weight: 600; letter-spacing: .2px;
+  color: #fff; background: var(--acc);
+  padding: 9px 20px; border-radius: 999px;
+  transition: filter .18s;
+}
+.maxan-ask:hover > b { filter: brightness(1.08); }
+.maxan-ask:active > b { filter: brightness(.94); }
+
+@media (max-width: 560px) {
+  .maxan-ask { padding-left: 15px; }
+  .maxan-ask > span { font-size: 14px; }
+  .maxan-ask > b { padding: 9px 17px; }
+}
+
+/* Max asking whether he is welcome. Shown once, seven seconds after he arrives,
+   anchored to his own corner so it never covers the character it is about. */
+.maxpet-tip {
+  position: fixed; z-index: 60; max-width: 268px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  padding: 14px 15px 12px; box-shadow: 0 10px 34px rgba(0, 0, 0, .17);
+  animation: mxt-in .22s ease-out;
+}
+.maxpet-tip p { margin: 0 0 11px; font-size: 13.5px; line-height: 1.45; color: var(--ink); }
+.maxpet-tip-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.maxpet-tip-actions button {
+  font: inherit; font-size: 12.5px; cursor: pointer; padding: 7px 14px;
+  border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--mut);
+  transition: border-color .16s, color .16s;
+}
+.maxpet-tip-actions button:hover { border-color: var(--acc); color: var(--ink); }
+/* "Keep him" is the affirmative, so it carries the weight — but "Hide Max" is a
+   real button beside it, not a link in the corner. A dismissal that only offers
+   the polite option is not offering anything. */
+.maxpet-tip-actions button.on {
+  background: var(--acc); border-color: var(--acc); color: #fff; font-weight: 600;
+}
+.maxpet-tip-actions button.on:hover { filter: brightness(1.07); color: #fff; }
+
+@keyframes mxt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

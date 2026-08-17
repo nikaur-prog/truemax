@@ -20,6 +20,8 @@ import type { Report, Sex } from "./engine/types.js";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
+import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
+import { currentAccessToken } from "./engine/auth.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile } from "./ui/saveFile.js";
 
@@ -47,6 +49,16 @@ import { canShareFiles, saveFile } from "./ui/saveFile.js";
 const MAX_DIM = 1280;
 
 const el = {
+  pillars: document.getElementById("q-pillars")!,
+  ai: document.getElementById("q-ai")!,
+  aiBack: document.getElementById("q-ai-back")!,
+  aiForm: document.getElementById("q-ai-form") as HTMLFormElement,
+  aiSex: document.getElementById("q-ai-sex")!,
+  aiNote: document.getElementById("q-ai-note")!,
+  aiMsg: document.getElementById("q-ai-msg")!,
+  modeBack: document.getElementById("q-mode-back")!,
+  modeName: document.getElementById("q-mode-name")!,
+  modeStep: document.getElementById("q-mode-step")!,
   capture: document.getElementById("q-capture")!,
   result: document.getElementById("q-result")!,
   frame: document.getElementById("q-frame")!,
@@ -289,6 +301,87 @@ async function run(src: HTMLCanvasElement): Promise<void> {
 let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
 
 // ---------------------------------------------------------------------------
+// Which of the three jobs this session is doing.
+//
+// The page has three distinct products in it and they want different things at
+// the door: two photographs, one photograph, or none at all. Asking first is
+// what lets each flow request exactly what it needs — a single capture screen
+// that afterwards asks what you meant has already taken the wrong photograph.
+//
+//   reel     — before and after, both scanned, cut together with the clips
+//   analysis — one face, one narrated rundown. Deliberately ONE photograph:
+//              extra angles of the same person do not make the measurement
+//              better, they make it ambiguous, and the operator was right that
+//              a second look with different lighting confuses more than it adds
+//   ai       — no photograph at all; a description, a preview, then footage
+// ---------------------------------------------------------------------------
+type QuickMode = "reel" | "analysis" | "ai";
+
+const MODE_NAMES: Record<QuickMode, string> = {
+  reel: "Reel Creator",
+  analysis: "Full Analysis",
+  ai: "AI Model Reel",
+};
+
+let mode: QuickMode | null = null;
+
+// Reel Creator scans twice. This holds the first one while the second is taken,
+// so the pair can be compared at the end — the whole reason the mode exists.
+let beforeScan: { report: Report; photo: HTMLCanvasElement; lm: NormalizedLandmark[] } | null = null;
+
+/** Which half of a Reel Creator run we are on. Meaningless in the other modes. */
+let reelStage: "before" | "after" = "before";
+
+function enterMode(next: QuickMode): void {
+  mode = next;
+  beforeScan = null;
+  reelStage = "before";
+  el.pillars.classList.add("hidden");
+
+  // Nothing is photographed in the AI flow, so it gets its own screen rather
+  // than the capture screen with a notice bolted on. Leaving the camera up
+  // was worse than an unfinished feature: it told somebody to do something
+  // that could not possibly help them.
+  if (next === "ai") {
+    el.ai.classList.remove("hidden");
+    el.capture.classList.add("hidden");
+    renderAiNote();
+    track("quick-visit");
+    return;
+  }
+
+  el.ai.classList.add("hidden");
+  el.capture.classList.remove("hidden");
+  el.modeName.textContent = MODE_NAMES[next];
+  updateModeStep();
+  track("quick-visit");
+}
+
+function updateModeStep(): void {
+  if (mode !== "reel") {
+    el.modeStep.textContent = mode === "analysis" ? "One photo" : "";
+    return;
+  }
+  el.modeStep.textContent =
+    reelStage === "before" ? "Step 1 of 2 — the before photo" : "Step 2 of 2 — the after photo";
+}
+
+function leaveMode(): void {
+  mode = null;
+  beforeScan = null;
+  reelStage = "before";
+  el.capture.classList.add("hidden");
+  el.result.classList.add("hidden");
+  el.ai.classList.add("hidden");
+  el.pillars.classList.remove("hidden");
+}
+
+for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) {
+  button.onclick = () => enterMode(button.dataset.mode as QuickMode);
+}
+el.modeBack.onclick = () => leaveMode();
+
+// ---------------------------------------------------------------------------
 // The saved-face strip.
 //
 // Filming a set of clips means coming back to the same handful of faces over
@@ -384,6 +477,25 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
+  // Reel Creator: the first scan is not a result, it is half of a comparison.
+  // Showing the full card set here would be a dead end — the operator would
+  // have to work out for themselves that they are meant to go round again.
+  if (mode === "reel" && reelStage === "before" && last) {
+    beforeScan = { report: r, photo, lm: last.lm };
+    reelStage = "after";
+    updateModeStep();
+    el.result.classList.add("hidden");
+    el.capture.classList.remove("hidden");
+    el.hintTitle.textContent = "After photo";
+    // The one instruction that decides whether the finished video survives
+    // contact with a comment section. Most of the jump in a viral before/after
+    // is the camera moving, not the face changing, and the person who notices
+    // is always in the replies. Said here because this is the only moment it
+    // can still be acted on.
+    el.hintDetail.textContent = "Match the before: same angle, same distance, same light";
+    return;
+  }
+
   el.capture.classList.add("hidden");
   el.result.classList.remove("hidden");
 
@@ -422,6 +534,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button type="button" class="q-mode on" data-qmode="score">Score</button>
       <button type="button" class="q-mode" data-qmode="verdict">Verdict</button>
     </div>
+    ${beforeScan ? comparisonHTML(beforeScan.report, r) : ""}
 
     <div class="q-hero">
       <div class="q-headline">
@@ -431,6 +544,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
           contenteditable="true" inputmode="decimal" spellcheck="false">0.0</span><small>/10</small></div>
         <span class="q-rank">${rankShort(r.overallPercentile)}</span>
       </div>
+      ${potentialHTML(r)}
     </div>
 
     <div class="q-verdict hidden" id="q-verdict">
@@ -461,10 +575,26 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         .join("")}
     </div>
 
+    <!-- The rundown opens on "How attractive is X?", so it cannot be built
+         without a name. Asked for here rather than in a prompt() at click time:
+         a modal that appears after you have committed to a sixty-second render
+         is a modal you dismiss by accident. -->
+    <div class="q-namerow">
+      <input id="q-rundown-name" class="q-input" type="text" maxlength="48"
+             placeholder="Name for the rundown — e.g. LeBron James" autocomplete="off" />
+      <!-- Turns the score card into a before/after. Left empty the card shows
+           now-versus-potential, which is the FIRST card in a glow-up video;
+           filled in it shows before-versus-now, which is the last one. -->
+      <input id="q-card-before" class="q-input" type="number" min="0" max="10" step="0.1"
+             placeholder="Earlier score for a before/after card — optional" autocomplete="off" />
+    </div>
+
     <div class="q-actions">
       <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
       <button class="btn pri" id="q-video-download">Breakdown MP4</button>
       <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
+      <button class="btn pri" id="q-rundown-download">Rundown MP4</button>
+      <button class="btn pri" id="q-card-download">Score card PNG</button>
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>`;
@@ -514,6 +644,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-download")!.onclick = () => void downloadCard();
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(r, "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(r, "verdict");
+  document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(r);
+  document.getElementById("q-card-download")!.onclick = () => void downloadScoreCard(r);
   const saveBtn = document.getElementById("q-save-face") as HTMLButtonElement | null;
   if (saveBtn) {
     saveBtn.onclick = async () => {
@@ -675,6 +807,138 @@ async function downloadVideo(r: Report, variant: QuickVariant): Promise<void> {
   }
 }
 
+// The endcard.
+//
+// Eighteen seconds of the operator's own footage and then this, which makes it
+// the cheapest of the four formats by a distance — the clips already exist and
+// this card is the entire product placement.
+//
+// The name field doubles as the caption when it is filled in, so a before/after
+// pair can be labelled BEFORE and AFTER without a second control. Left empty it
+// simply renders without one.
+async function downloadScoreCard(r: Report): Promise<void> {
+  if (!last) return;
+  const btn = document.getElementById("q-card-download") as HTMLButtonElement | null;
+  const caption = (document.getElementById("q-rundown-name") as HTMLInputElement | null)?.value.trim();
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Rendering…";
+  }
+  try {
+    const { renderScoreCard } = await import("./ui/scoreCard.js");
+    const canvas = document.createElement("canvas");
+    // Anything outside the scale is a typo, not an earlier scan, and a card
+    // built from a typo is worse than one without a comparison.
+    // A Reel Creator run already measured the before photo, so the comparison
+    // fills itself in and the operator never retypes a number they have just
+    // been shown. The field still wins when it holds something valid — a scan
+    // from a previous session is a legitimate before, and only the person
+    // running it knows that.
+    const raw = Number((document.getElementById("q-card-before") as HTMLInputElement | null)?.value);
+    const typed = Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : undefined;
+    const previousOverall = typed ?? beforeScan?.report.overall;
+    renderScoreCard(canvas, last.photo, last.lm, {
+      report: r,
+      caption: caption || undefined,
+      previousOverall,
+    });
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("The card would not encode.");
+    const outcome = await saveFile(blob, `truemax-card-${Date.now()}.png`);
+    if (btn) {
+      btn.textContent =
+        outcome === "cancelled"
+          ? "Not saved — tap to retry"
+          : outcome === "shared"
+            ? "Sent to your share sheet"
+            : "Card downloaded";
+    }
+    if (outcome !== "cancelled") track("quick-card-downloaded");
+  } catch (error) {
+    console.error(error);
+    if (btn) btn.textContent = "Card unavailable here";
+  } finally {
+    if (btn) {
+      window.setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Score card PNG";
+      }, 2200);
+    }
+  }
+}
+
+// The long cut: a full walk down the face, narrated, about a minute.
+//
+// Unlike the other two this one talks to the network — speech synthesis needs a
+// key the browser must never hold — so it is the only export that can be
+// degraded rather than simply working. It never fails for that reason though:
+// no session, no quota or a refused key all produce a silent rundown with its
+// sound effects intact, and the button says so. A finished composite is worth
+// far more than a strict guarantee about its audio.
+async function downloadRundown(r: Report): Promise<void> {
+  if (!last) return;
+  const btn = document.getElementById("q-rundown-download") as HTMLButtonElement | null;
+  const field = document.getElementById("q-rundown-name") as HTMLInputElement | null;
+  const name = (field?.value ?? "").trim();
+  if (!name) {
+    // Point at the missing thing rather than explaining it. The field is six
+    // inches from the button that was just pressed.
+    field?.focus();
+    if (btn) {
+      btn.textContent = "Name it first ↑";
+      window.setTimeout(() => (btn.textContent = "Rundown MP4"), 2000);
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+  }
+  try {
+    // The token is what gets past the staff gate on /api/tts. Absent for a
+    // signed-out operator, which is not an error here — it means no voice.
+    const accessToken = (await currentAccessToken()) ?? undefined;
+    const result = await downloadRundownVideo(last.photo, last.lm, r, {
+      name,
+      accessToken,
+      onProgress: (progress, stage) => {
+        if (btn) btn.textContent = `${stage} · ${Math.round(progress * 100)}%`;
+      },
+    });
+    if (result.outcome === "cancelled") {
+      if (btn) btn.textContent = "Not saved — tap to retry";
+    } else {
+      // Say when it came out silent. An operator who does not notice until the
+      // edit has wasted the whole render, and the fix is usually just signing
+      // in — so the message has to name the cause, not just the symptom.
+      if (btn) {
+        btn.textContent = result.narrated
+          ? result.outcome === "shared"
+            ? "Sent to your share sheet"
+            : "Rundown downloaded"
+          : "Downloaded — no voiceover";
+      }
+      track("quick-rundown-downloaded");
+    }
+  } catch (error) {
+    console.error(error);
+    // A blocked capture is not a failure of the exporter, it is the exporter
+    // refusing to publish a number it cannot stand behind. Say which.
+    if (btn) {
+      btn.textContent =
+        error instanceof RundownBlocked ? "Capture too tilted for a rundown" : "Rundown unavailable here";
+    }
+  } finally {
+    if (btn) {
+      window.setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Rundown MP4";
+      }, 2600);
+    }
+  }
+}
+
 // Offered after a reel is built rather than as a fourth button up front: the
 // producer needs footage the person has to go and choose, so the moment they
 // have just watched their own analysis render is the moment the ask lands.
@@ -690,7 +954,21 @@ function offerProducer(r: Report): void {
   actions.insertAdjacentElement("afterend", bar);
   (bar.querySelector("#q-produce") as HTMLButtonElement).onclick = () => {
     if (!last) return;
-    openProducer({ photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) });
+    // A Reel Creator run holds the before scan, so the producer can bracket the
+    // footage with both measurements instead of putting one in the middle. The
+    // current scan is always the LATER one here — reel mode only reaches the
+    // results screen on the after photo — so the stored scan is the opening.
+    openProducer(
+      beforeScan
+        ? {
+            photo: beforeScan.photo,
+            landmarks: beforeScan.lm,
+            sex: r.sex,
+            scores: editedExportScores(beforeScan.report),
+            after: { photo: last.photo, landmarks: last.lm, scores: editedExportScores(r) },
+          }
+        : { photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) },
+    );
   };
 }
 
@@ -734,4 +1012,151 @@ function loadImage(file: File): Promise<HTMLImageElement> {
     };
     img.src = url;
   });
+}
+
+// ---------------------------------------------------------------------------
+// AI Model Reel — character setup.
+//
+// The two ratings steer the prompt; they are not a contract. The generator has
+// never heard of this engine's percentile tables, so asking for a 4.5 produces
+// a face that reads roughly that way to a person, and the scanner may well
+// disagree by a point in either direction. Saying so before the first
+// generation costs one sentence. Discovering it afterwards costs a session of
+// wondering why the tool is broken when it is behaving exactly as it must.
+// ---------------------------------------------------------------------------
+let aiSex: Sex = "female";
+
+function renderAiNote(): void {
+  const before = Number((document.getElementById("q-ai-before") as HTMLInputElement).value);
+  const after = Number((document.getElementById("q-ai-after") as HTMLInputElement).value);
+  const gap = after - before;
+  // A gap this wide stops being a glow-up and starts being a different person,
+  // which is the one failure this format cannot survive: the whole claim of a
+  // before/after is that the bones underneath did not change.
+  const wide = gap >= 3.5;
+  el.aiNote.innerHTML = wide
+    ? `<b>${before.toFixed(1)} → ${after.toFixed(1)} is a wide jump.</b> Past about three points the
+       generator tends to hand back a different face rather than the same one improved, and the
+       comment section spots that instantly. These numbers steer the prompt; the scan decides.`
+    : `These numbers steer the prompt — the generator has never seen our percentile tables, so the
+       scan may land a point either side. The pair is built to keep one face throughout.`;
+}
+
+for (const b of el.aiSex.querySelectorAll<HTMLButtonElement>("button")) {
+  b.onclick = () => {
+    for (const other of el.aiSex.querySelectorAll("button")) other.classList.toggle("on", other === b);
+    aiSex = b.dataset.v === "male" ? "male" : "female";
+  };
+}
+
+for (const id of ["q-ai-before", "q-ai-after"]) {
+  document.getElementById(id)!.addEventListener("input", renderAiNote);
+}
+
+el.aiBack.onclick = () => leaveMode();
+
+el.aiForm.onsubmit = (event) => {
+  event.preventDefault();
+  const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
+  const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
+  if (!name || !desc) return;
+  // Generation is a server capability and this deployment may not have it. Say
+  // which, in the same shape as every other unconfigured service in the
+  // product, rather than spinning on a request that cannot succeed.
+  el.aiMsg.classList.add("err");
+  el.aiMsg.textContent =
+    "Image generation is not configured on this deployment yet — the character is saved, but the preview pair has to be generated outside the app for now.";
+  saveAiCharacter({ name, sex: aiSex, description: desc });
+};
+
+// The library the operator was promised: describe somebody once, film them
+// again next week. Local for now, because a character is a prompt and a name —
+// there is nothing here worth a round trip until the generator is wired up.
+interface AiCharacter {
+  name: string;
+  sex: Sex;
+  description: string;
+}
+
+const AI_CHARACTERS_KEY = "truemax.aiCharacters";
+
+function saveAiCharacter(character: AiCharacter): void {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AI_CHARACTERS_KEY) ?? "[]") as AiCharacter[];
+    const next = [character, ...raw.filter((c) => c.name !== character.name)].slice(0, 24);
+    localStorage.setItem(AI_CHARACTERS_KEY, JSON.stringify(next));
+  } catch {
+    /* storage disabled: the character lives for this session only */
+  }
+}
+
+// The before and after, next to each other.
+//
+// A Reel Creator run measured two faces and then showed one set of cards, which
+// is the wrong answer to the question the mode exists to ask. The operator did
+// not scan twice to see the second number; they scanned twice to see the pair.
+//
+// Both photographs and both scores, side by side, with the movement between
+// them stated once rather than left as arithmetic for the viewer. This sits
+// above the full card set rather than replacing it — the after scan still gets
+// its complete breakdown underneath, because that is what the video's closing
+// segment is built from.
+function comparisonHTML(before: Report, after: Report): string {
+  const move = after.overall - before.overall;
+  // Signed explicitly. A before/after that quietly renders a drop as though it
+  // were a gain is the one thing that would make this tool untrustworthy to the
+  // person using it, and going down is a real outcome of a real rescan.
+  const sign = move > 0 ? "+" : move < 0 ? "−" : "";
+  const dir = move > 0 ? "up" : move < 0 ? "down" : "flat";
+  return `
+    <div class="q-compare" data-dir="${dir}">
+      <div class="q-compare-side">
+        <span class="q-compare-tag">BEFORE</span>
+        <b>${before.overall.toFixed(1)}</b>
+        <span class="q-compare-rank">${rankShort(before.overallPercentile)}</span>
+      </div>
+      <div class="q-compare-move">
+        <span>${sign}${Math.abs(move).toFixed(1)}</span>
+      </div>
+      <div class="q-compare-side">
+        <span class="q-compare-tag">AFTER</span>
+        <b>${after.overall.toFixed(1)}</b>
+        <span class="q-compare-rank">${rankShort(after.overallPercentile)}</span>
+      </div>
+    </div>`;
+}
+
+// Current score, then the ceiling.
+//
+// This is the number that sells the product, and it belongs on the content tool
+// for exactly that reason: somebody watching a stranger get scanned does not
+// buy because the stranger measured 4.7, they buy because the stranger could
+// reach 6.4 and they want to know their own version of that figure. The
+// measurement is the hook and the ceiling is the offer.
+//
+// It is still marked as a projection — "COULD REACH" rather than a second
+// score, at a smaller weight, after an arrow. Not to hedge it: a decent
+// projection is exciting whether or not somebody lands on it, and hedged copy
+// would waste that. It is so the two numbers cannot be confused for the same
+// KIND of thing on a screen that gets paused and screenshotted, because the
+// left one is measured from a photograph and the right one is modelled.
+//
+// Suppressed when the ceiling is not meaningfully above the score. "Could reach
+// 5.1" under a 5.0 reads as the product having nothing to offer, which is worse
+// than saying nothing — and for a face already near its own ceiling, nothing is
+// the honest answer.
+const POTENTIAL_MIN_GAP = 0.3;
+
+function potentialHTML(r: Report): string {
+  const gap = r.potential - r.overall;
+  if (!Number.isFinite(gap) || gap < POTENTIAL_MIN_GAP) return "";
+  return `
+    <div class="q-potential">
+      <span class="q-potential-arrow" aria-hidden="true">→</span>
+      <div class="q-potential-fig">
+        <span class="q-klabel">COULD REACH</span>
+        <b><span class="q-num" data-target="${r.potential.toFixed(1)}">0.0</span></b>
+        <span class="q-potential-gap">+${gap.toFixed(1)} to gain</span>
+      </div>
+    </div>`;
 }

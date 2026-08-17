@@ -28,12 +28,40 @@ import { track } from "../engine/track.js";
 // leave the browser.
 // ---------------------------------------------------------------------------
 
+export interface ProducerScan {
+  photo: HTMLCanvasElement;
+  landmarks: NormalizedLandmark[];
+  scores: QuickExportScores;
+}
+
 export interface ProducerContext {
   photo: HTMLCanvasElement;
   landmarks: NormalizedLandmark[];
   sex: Sex;
   scores: QuickExportScores;
+  /**
+   * A second scan, when the operator photographed both ends of the change.
+   *
+   * With one scan there is a single analysis segment and it sits in the middle:
+   * clips, measurement, clips. With two, the measurement becomes the frame
+   * around the clips instead — the video opens on what they were and closes on
+   * what they are, which is the shape the format actually uses and the reason
+   * the reel mode asks for two photographs.
+   */
+  after?: ProducerScan;
 }
+
+// Where the measurement sits relative to the footage.
+//
+// Both orders come from the same observation about what these videos do, and
+// which one is right depends on footage the operator has and we do not, so it
+// is a choice rather than a default we defend:
+//
+//   framed    open on the before scan, clips in the middle, close on the after.
+//             The scan is the argument and the clips are the evidence.
+//   sandwich  before clips, the measurement, after clips. The original shape,
+//             and the only one available when there is a single scan.
+export type ProducerOrder = "framed" | "sandwich";
 
 // 1080×1920 at 30fps. The analysis compositor renders at its native 720×1280
 // and is scaled up; the clips people supply are usually phone footage and
@@ -73,6 +101,9 @@ export function openProducer(ctx: ProducerContext): void {
   const after: Slots = [null, null, null];
   let clipLen = 2.5;
   let transition: Transition = "cut";
+  // Two scans means the measurement can bracket the footage instead of sitting
+  // in the middle of it, so that becomes the default the moment it is possible.
+  let order: ProducerOrder = ctx.after ? "framed" : "sandwich";
 
   overlay = document.createElement("div");
   overlay.className = "prod";
@@ -96,7 +127,9 @@ export function openProducer(ctx: ProducerContext): void {
       </section>
       <section class="prod-row prod-mid">
         <h2>THEN</h2>
-        <div class="prod-analysis"><b>Your analysis reel</b><span>${quickVideoDuration("breakdown").toFixed(1)}s · rendered in</span></div>
+        <div class="prod-analysis"><b>${
+          ctx.after ? "Both scans, before and after" : "Your analysis reel"
+        }</b><span>${(quickVideoDuration("breakdown") * (ctx.after ? 2 : 1)).toFixed(1)}s · rendered in</span></div>
       </section>
       <section class="prod-row">
         <div class="prod-row-head">
@@ -116,6 +149,17 @@ export function openProducer(ctx: ProducerContext): void {
             <button type="button" data-v="2.5" class="on">2.5s</button>
           </div>
         </div>
+        ${
+          ctx.after
+            ? `<div class="prod-opt">
+          <span>Where the measurement sits</span>
+          <div class="prod-seg" data-opt="order">
+            <button type="button" data-v="framed" class="on">Around the clips</button>
+            <button type="button" data-v="sandwich">In the middle</button>
+          </div>
+        </div>`
+            : ""
+        }
         <div class="prod-opt">
           <span>Select your transition</span>
           <div class="prod-seg" data-opt="tr">
@@ -215,6 +259,8 @@ export function openProducer(ctx: ProducerContext): void {
           const rerender = (cell as unknown as { __rerender?: () => void }).__rerender;
           rerender?.();
         }
+      } else if (seg.dataset.opt === "order") {
+        order = btn.dataset.v as ProducerOrder;
       } else {
         transition = btn.dataset.v as Transition;
       }
@@ -233,7 +279,7 @@ export function openProducer(ctx: ProducerContext): void {
     buildBtn.disabled = true;
     msg.textContent = "";
     try {
-      const outcome = await buildVideo(ctx, heads, tails, clipLen, transition, (p) => {
+      const outcome = await buildVideo(ctx, heads, tails, clipLen, transition, order, (p: number) => {
         buildBtn.textContent = `Building · ${Math.round(p * 100)}%`;
       });
       // A dismissed share sheet is a decision, not a failure: the video is
@@ -398,6 +444,8 @@ function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
 interface Segment {
   kind: "clip" | "analysis";
   clip?: Clip;
+  /** Which scan an analysis segment renders. Ignored for clips. */
+  scan?: ProducerScan;
   duration: number;
 }
 
@@ -407,15 +455,33 @@ async function buildVideo(
   after: Clip[],
   clipLen: number,
   transition: Transition,
+  order: ProducerOrder,
   onProgress: (p: number) => void,
 ): Promise<SaveOutcome> {
   const segDur = (clip: Clip) =>
     clip.kind === "image" ? clipLen : Math.max(0.6, Math.min(clipLen, clip.duration));
-  const segments: Segment[] = [
-    ...before.map((clip) => ({ kind: "clip" as const, clip, duration: segDur(clip) })),
-    { kind: "analysis", duration: quickVideoDuration("breakdown") },
-    ...after.map((clip) => ({ kind: "clip" as const, clip, duration: segDur(clip) })),
-  ];
+  const analysisDur = quickVideoDuration("breakdown");
+  const firstScan: ProducerScan = { photo: ctx.photo, landmarks: ctx.landmarks, scores: ctx.scores };
+  const clipSegs = (clips: Clip[]): Segment[] =>
+    clips.map((clip) => ({ kind: "clip" as const, clip, duration: segDur(clip) }));
+
+  // "framed" needs two scans to mean anything — one measurement cannot bracket
+  // a change. Falling back rather than refusing keeps a half-finished run
+  // usable, and the option is disabled in the UI anyway when there is no
+  // second scan, so reaching this line means something else went wrong.
+  const framed = order === "framed" && ctx.after;
+  const segments: Segment[] = framed
+    ? [
+        { kind: "analysis", scan: firstScan, duration: analysisDur },
+        ...clipSegs(before),
+        ...clipSegs(after),
+        { kind: "analysis", scan: ctx.after, duration: analysisDur },
+      ]
+    : [
+        ...clipSegs(before),
+        { kind: "analysis", scan: firstScan, duration: analysisDur },
+        ...clipSegs(after),
+      ];
   const total = segments.reduce((sum, s) => sum + s.duration, 0);
   const frameCount = Math.round(total * FPS);
 
@@ -467,8 +533,9 @@ async function buildVideo(
     ctx2d.fillStyle = "#050606";
     ctx2d.fillRect(0, 0, W, H);
     if (seg.kind === "analysis") {
+      const scan = seg.scan ?? firstScan;
       renderQuickVideoFrame(
-        analysisCanvas, ctx.photo, ctx.landmarks, ctx.sex, ctx.scores, local, "breakdown", ANALYSIS_SCALE,
+        analysisCanvas, scan.photo, scan.landmarks, ctx.sex, scan.scores, local, "breakdown", ANALYSIS_SCALE,
       );
       ctx2d.drawImage(analysisCanvas, 0, 0, W, H);
     } else {

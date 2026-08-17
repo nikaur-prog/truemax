@@ -1,0 +1,182 @@
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import type { Report, ScoredMetric } from "../engine/types.js";
+import type { Beat } from "../engine/reelScript.js";
+import { buildReelScript, narrationFrom, reelBlockers } from "../engine/reelScript.js";
+import { buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
+import { decodeVoice, fetchNarration, mixRundownAudio } from "./rundownAudio.js";
+import { drawRundownFrame } from "./rundownFrame.js";
+import { saveFile } from "./saveFile.js";
+import type { SaveOutcome } from "./saveFile.js";
+
+// ---------------------------------------------------------------------------
+// Rendering a rundown.
+//
+// The two short cuts live in quickVideoExport.ts and are left alone. This is a
+// separate path rather than a third branch inside that file, and the duplicated
+// twenty lines of encoder setup are the price of that: the rundown has a
+// variable duration, an audio track and a completely different compositor, and
+// threading three of those through a function whose two existing callers work
+// today is how working exports stop working.
+//
+// The order below is the only order that produces correct timing, and each step
+// depends on the one before it:
+//
+//   1. script    — what is said, and in what order
+//   2. narration — one synthesis request for the whole read
+//   3. decode    — which is the first moment the real duration is known
+//   4. FIT       — stretch the estimated timeline onto that duration
+//   5. mix       — stamp the effects at their FITTED positions
+//   6. encode    — frames against the fitted timeline, audio alongside
+//
+// Getting 4 and 5 the wrong way round is the subtle failure: everything still
+// renders, and every click lands slightly early, by more and more as the video
+// runs on. It would pass a smoke test and be obvious in the finished file.
+// ---------------------------------------------------------------------------
+
+const W = 720;
+const H = 1280;
+const FPS = 30;
+
+export interface RundownOptions {
+  name: string;
+  /** Non-facial context for the fairness beat — height, titles, whatever. */
+  context?: string[];
+  /** Supabase access token; the TTS route is staff-gated. */
+  accessToken?: string;
+  /** How far off level the capture is, for the publish guard. */
+  offAxisDeg?: number;
+  jawWarnDeg?: number;
+  onProgress?: (progress: number, stage: string) => void;
+}
+
+export class RundownBlocked extends Error {
+  constructor(readonly blockers: string[]) {
+    super(blockers.join(" "));
+    this.name = "RundownBlocked";
+  }
+}
+
+export interface RundownResult {
+  outcome: SaveOutcome;
+  beats: Beat[];
+  duration: number;
+  /** False when the voice track could not be produced and the cut is silent. */
+  narrated: boolean;
+}
+
+export async function downloadRundownVideo(
+  photo: HTMLCanvasElement,
+  landmarks: NormalizedLandmark[],
+  report: Report,
+  options: RundownOptions,
+): Promise<RundownResult> {
+  const { onProgress } = options;
+
+  // The refusal comes first, before any work and before any billable call. A
+  // capture the app itself would warn a paying customer about must not be
+  // published with a number on it — nobody but us will ever check, which is
+  // exactly why it has to be checked here.
+  const blockers = reelBlockers(report, options.offAxisDeg ?? 0, options.jawWarnDeg ?? 8);
+  if (blockers.length) throw new RundownBlocked(blockers);
+
+  onProgress?.(0, "Writing the running order");
+  const beats = buildReelScript(report, { name: options.name, context: options.context });
+
+  onProgress?.(0.05, "Recording the voiceover");
+  const spoken = options.accessToken
+    ? await fetchNarration(narrationFrom(beats), options.accessToken)
+    : null;
+  const voice = await decodeVoice(spoken);
+
+  // Fit before mixing. See the header — this is the ordering that matters.
+  const estimated = buildTimeline(beats);
+  const timeline = voice ? fitTimeline(estimated, voice.duration) : estimated;
+
+  onProgress?.(0.12, "Mixing the audio");
+  const audio = await mixRundownAudio(voice, timeline);
+
+  const metrics = new Map<string, ScoredMetric>();
+  for (const metric of report.metrics) metrics.set(metric.def.id, metric);
+
+  const {
+    Output,
+    BufferTarget,
+    Mp4OutputFormat,
+    CanvasSource,
+    AudioBufferSource,
+    QUALITY_HIGH,
+    getFirstEncodableVideoCodec,
+    getFirstEncodableAudioCodec,
+  } = await import("mediabunny");
+
+  const format = new Mp4OutputFormat({ fastStart: "in-memory" });
+  const videoCodec = await getFirstEncodableVideoCodec(
+    format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
+    { width: W, height: H, quality: QUALITY_HIGH },
+  );
+  if (!videoCodec) throw new Error("This browser cannot encode an H.264 MP4.");
+  const audioCodec = await getFirstEncodableAudioCodec(
+    format.getSupportedAudioCodecs().filter((candidate) => candidate === "aac"),
+    { numberOfChannels: 1, sampleRate: audio.buffer.sampleRate },
+  );
+  if (!audioCodec) throw new Error("This browser cannot encode AAC audio.");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+
+  // One overlay canvas for the whole render. drawMeasurement reallocates its
+  // backing buffer whenever the size changes, and at thirty frames a second for
+  // a minute that would be eighteen hundred reallocations of a full-resolution
+  // canvas — which is precisely the lag that had to be fixed in the interactive
+  // overlay for the same reason.
+  const overlayCanvas = document.createElement("canvas");
+
+  const target = new BufferTarget();
+  const output = new Output({ format, target });
+  const videoSource = new CanvasSource(canvas, {
+    codec: videoCodec,
+    bitrate: 6_000_000,
+    keyFrameInterval: 2,
+  });
+  const audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 128_000 });
+  const frameCount = Math.round(FPS * audio.duration);
+  output.addVideoTrack(videoSource, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
+  output.addAudioTrack(audioSource);
+  output.setMetadataTags({ title: `TrueMax rundown — ${options.name}`, artist: "TrueMax" });
+  await output.start();
+
+  // Audio first and in one call: the whole track is a single buffer, so there is
+  // no interleaving to get wrong and the encoder can work through it while the
+  // frames are still being composited.
+  await audioSource.add(audio.buffer);
+
+  const input = { timeline, metrics, name: options.name };
+  for (let frame = 0; frame < frameCount; frame++) {
+    const t = frame / FPS;
+    drawRundownFrame(ctx, photo, landmarks, input, t, { width: W, height: H, overlayCanvas });
+    await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
+    if (frame % 15 === 0) onProgress?.(0.15 + 0.8 * (frame / frameCount), "Rendering");
+  }
+
+  await output.finalize();
+  if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
+
+  onProgress?.(0.98, "Saving");
+  const outcome = await saveFile(
+    new Blob([target.buffer], { type: format.mimeType }),
+    `truemax-rundown-${slug(options.name)}-${Date.now()}.mp4`,
+  );
+  onProgress?.(1, "Done");
+  return { outcome, beats, duration: audio.duration, narrated: Boolean(voice) };
+}
+
+function slug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || "face";
+}

@@ -19,9 +19,49 @@ import type { MaxChatContext } from "../engine/maxContext.js";
 let host: HTMLButtonElement | null = null;
 let context: MaxChatContext | null = null;
 
+// ---------------------------------------------------------------------------
+// Whether he is welcome.
+//
+// A character who wanders around the edge of the screen is a personality to
+// most people and an irritation to some, and the second group currently has no
+// way to say so — which is how a charming detail turns into the reason somebody
+// stops opening the app. It is one line of storage to let them decide.
+//
+// Hiding him never hides the FEATURE. He is one of three doors into the same
+// chat: the Max tab and the ask box on the overview both stay exactly where
+// they were. This setting is about a cartoon standing on their results, not
+// about access to the thing they are paying for.
+// ---------------------------------------------------------------------------
+const HIDDEN_KEY = "truemax.petHidden";
+const TIP_KEY = "truemax.petTipSeen";
+
+export function isPetHidden(): boolean {
+  try {
+    return localStorage.getItem(HIDDEN_KEY) === "1";
+  } catch {
+    // Storage unavailable: show him. The default has to be the product working
+    // as designed, not a silent opt-out nobody chose.
+    return false;
+  }
+}
+
+/** Exported so the settings screen and Max himself can both call it. */
+export function setPetHidden(hidden: boolean, chatContext?: MaxChatContext): void {
+  try {
+    localStorage.setItem(HIDDEN_KEY, hidden ? "1" : "0");
+  } catch {
+    /* storage disabled: the choice holds for this view and no longer */
+  }
+  if (hidden) {
+    unmountMaxPet();
+  } else if (chatContext ?? context) {
+    mountMaxPet((chatContext ?? context)!);
+  }
+}
+
 export function mountMaxPet(chatContext: MaxChatContext): void {
   context = chatContext;
-  if (host) return;
+  if (host || isPetHidden()) return;
 
   host = document.createElement("button");
   host.type = "button";
@@ -51,6 +91,8 @@ export function mountMaxPet(chatContext: MaxChatContext): void {
   if (spot?.kind !== "loose") {
     window.setTimeout(() => host?.classList.add("peeking"), 1200);
   }
+
+  showPetTipOnce();
 
   host.addEventListener("click", () => {
     if (isMaxChatOpen()) return;
@@ -261,4 +303,56 @@ function wireDrag(el: HTMLButtonElement): void {
     const spot = loadSpot();
     if (spot) applySpot(el, spot);
   });
+}
+
+// The one time he mentions that he can be asked to leave.
+//
+// Shown once, and late — several seconds after he arrives, so it reads as an
+// aside rather than as the app opening with an apology for its own character.
+// He offers it himself, in his own voice, because "you may turn this off" from
+// the interface is an admission and "want me to get out of the way?" from him
+// is just a considerate housemate.
+//
+// Both answers are equally easy to give. A dismissal that only offers the
+// polite option is not offering anything.
+function showPetTipOnce(): void {
+  try {
+    if (localStorage.getItem(TIP_KEY) === "1") return;
+  } catch {
+    // Cannot remember whether it has been shown, so do not show it. Repeating
+    // this every single visit would be exactly the nag it is meant to prevent.
+    return;
+  }
+
+  window.setTimeout(() => {
+    if (!host || isMaxChatOpen()) return;
+    const tip = document.createElement("div");
+    tip.className = "maxpet-tip";
+    tip.setAttribute("role", "status");
+    tip.innerHTML = `<p>Want me out of the way? I'll still be in the Max tab.</p>
+      <div class="maxpet-tip-actions">
+        <button type="button" data-pet-tip="hide">Hide Max</button>
+        <button type="button" data-pet-tip="keep" class="on">Keep him</button>
+      </div>`;
+    document.body.appendChild(tip);
+    // Positioned against the pet's own corner so it never covers him — he is
+    // the subject of the sentence and hiding him behind it would be absurd.
+    const box = host.getBoundingClientRect();
+    const nearLeft = box.left + box.width / 2 < window.innerWidth / 2;
+    tip.style.bottom = `${Math.max(12, window.innerHeight - box.top + 10)}px`;
+    if (nearLeft) tip.style.left = `${Math.max(12, box.left)}px`;
+    else tip.style.right = `${Math.max(12, window.innerWidth - box.right)}px`;
+
+    const done = (hide: boolean) => {
+      try {
+        localStorage.setItem(TIP_KEY, "1");
+      } catch {
+        /* asked and answered for this view only */
+      }
+      tip.remove();
+      if (hide) setPetHidden(true);
+    };
+    tip.querySelector('[data-pet-tip="hide"]')?.addEventListener("click", () => done(true));
+    tip.querySelector('[data-pet-tip="keep"]')?.addEventListener("click", () => done(false));
+  }, 7000);
 }
