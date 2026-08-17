@@ -639,6 +639,30 @@ async function openCamera(): Promise<void> {
     el.btnCancel.classList.remove("hidden");
     el.btnCamera.textContent = "Capture";
     el.btnCamera.disabled = true;
+
+    // Put the preview back at the top of the viewport.
+    //
+    // Nothing here calls scrollIntoView, and that is the point — the scroll is
+    // the browser's, not ours. The headline, the sub and the hints all collapse
+    // to max-height 0 the moment `camera-live` lands, which removes several
+    // hundred pixels from ABOVE the button somebody has just tapped. Scroll
+    // anchoring then does exactly what it is designed to do and holds that
+    // button where their thumb left it, which on a phone drags the camera up
+    // under the sticky header. The result is a capture screen whose subject —
+    // the live preview — is the one thing off screen.
+    //
+    // Corrected after a frame rather than immediately: the collapse is a CSS
+    // transition, so the layout this is measuring against does not exist yet on
+    // the same tick.
+    //
+    // A hard jump, not a smooth one. This is a correction of something the
+    // viewer never asked for, and animating it would read as the page moving on
+    // its own a second time.
+    requestAnimationFrame(() => {
+      const top = el.stage.getBoundingClientRect().top + window.scrollY;
+      // A little air above, so the frame is not flush under the header.
+      window.scrollTo({ top: Math.max(0, top - 72), behavior: "auto" });
+    });
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";

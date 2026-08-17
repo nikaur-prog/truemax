@@ -234,7 +234,27 @@ export async function signInWithProvider(provider: SocialProvider): Promise<Auth
     const c = await getSupabaseClient();
     const { error } = await c.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: authRedirects().scan },
+      options: {
+        redirectTo: authRedirects().scan,
+        // Always show the account chooser.
+        //
+        // Not a Google bug and not a phone bug: with no prompt asked for,
+        // Google silently reuses the single signed-in session on the device and
+        // skips the picker entirely. On a phone that is almost always the
+        // personal account somebody happens to be signed into in Chrome, so a
+        // person with two accounts had no way to reach the second one — and no
+        // way to tell they had been signed in as the wrong one until their
+        // history looked empty.
+        //
+        // "select_account" makes the chooser unconditional. It costs one tap
+        // for the single-account case and is the only thing that makes the
+        // two-account case possible at all, which is the right trade: an
+        // account you cannot choose is an account you cannot leave.
+        //
+        // Deliberately not "consent" — that re-asks for permissions every time
+        // and reads as though the app has forgotten who you are.
+        queryParams: provider === "google" ? { prompt: "select_account" } : undefined,
+      },
     });
     if (error) {
       console.error("[auth] signInWithOAuth rejected", provider, error);
