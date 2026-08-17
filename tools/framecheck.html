@@ -43,7 +43,20 @@ const card = {
     { label: "Proportions", score: 5.9 }, { label: "Symmetry", score: 7.1 },
   ],
 };
+// A cutaway: a visibly DIFFERENT photograph, so a frame showing it cannot be
+// mistaken for the measured one at a glance.
+const cut = document.createElement("canvas");
+cut.width = 900; cut.height = 1200;
+const c = cut.getContext("2d");
+const cg = c.createLinearGradient(0,0,900,1200);
+cg.addColorStop(0,"#7a3b2e"); cg.addColorStop(1,"#2b1410");
+c.fillStyle = cg; c.fillRect(0,0,900,1200);
+c.fillStyle = "#e8c9a8"; c.beginPath(); c.ellipse(430,560,210,270,0.12,0,7); c.fill();
+c.fillStyle = "#fff"; c.font = "bold 90px sans-serif"; c.textAlign = "center";
+c.fillText("CUTAWAY", 450, 1080);
+
 const beats = [
+  { kind: "metric", line: "Marlon has a canthal tilt of 6.4 degrees, so the outer corner sits above the inner.", metricId: "canthalTilt", region: "eyes", positive: true },
   { kind: "card", line: "The verdict: Mogger. Marlon measures 7.6 out of 10.", card },
   // Two curve beats, because they render differently: the first carries a
   // badge and shows his standing, the second drops it and shows the crowd.
@@ -59,8 +72,17 @@ window.shot = (i) => {
   const b = timeline.beats[i];
   // Late in the beat, so any entrance animation has finished.
   const t = b.start + b.duration * 0.8;
-  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon" }, t,
+  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [cut] }, t,
     { width: 720, height: 1280, overlayCanvas });
+  return true;
+};
+
+// Draw beat i at an explicit fraction through its own duration, for checking
+// what a beat looks like at a given moment rather than only near its end.
+window.shotAt = (i, frac) => {
+  const b = timeline.beats[i];
+  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [cut] },
+    b.start + b.duration * frac, { width: 720, height: 1280, overlayCanvas });
   return true;
 };
 window.ready = true;

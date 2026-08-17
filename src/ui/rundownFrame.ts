@@ -446,11 +446,23 @@ export function drawRundownFrame(
   // shaped mask: masking around the active region means computing a region
   // outline, and a slightly wrong outline draws attention to itself far more
   // than an even dim does.
+  // Lighter over a cutaway. The scrim exists to make ONE measurement stand out
+  // of a photograph; a cutaway has no measurement to stand out of, so the same
+  // dimming just produces a dull frame at the exact moment the video is meant
+  // to feel like it has more than one shot in it. Enough is kept at the top and
+  // bottom to hold the caption and the bar, which carry their own shadows.
   const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  scrim.addColorStop(0, "rgba(3,5,5,.72)");
-  scrim.addColorStop(0.34, "rgba(3,5,5,.34)");
-  scrim.addColorStop(0.68, "rgba(3,5,5,.42)");
-  scrim.addColorStop(1, "rgba(3,5,5,.92)");
+  if (cutaway) {
+    scrim.addColorStop(0, "rgba(3,5,5,.46)");
+    scrim.addColorStop(0.34, "rgba(3,5,5,.06)");
+    scrim.addColorStop(0.68, "rgba(3,5,5,.20)");
+    scrim.addColorStop(1, "rgba(3,5,5,.78)");
+  } else {
+    scrim.addColorStop(0, "rgba(3,5,5,.72)");
+    scrim.addColorStop(0.34, "rgba(3,5,5,.34)");
+    scrim.addColorStop(0.68, "rgba(3,5,5,.42)");
+    scrim.addColorStop(1, "rgba(3,5,5,.92)");
+  }
   ctx.fillStyle = scrim;
   ctx.fillRect(0, 0, W, H);
 
