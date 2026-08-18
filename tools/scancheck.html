@@ -1,0 +1,61 @@
+<!doctype html><meta charset="utf-8"><title>scan check</title>
+<body style="margin:0;background:#111"><canvas id="c" width="720" height="1280"></canvas>
+<script type="module">
+import { renderQuickVideoFrame } from "/src/ui/quickVideoExport.ts";
+
+// A face-shaped photograph and a mesh-shaped set of landmarks.
+//
+// The ring the rundown harness uses is fine for checking that a measurement
+// ANIMATES; it is useless here, because what is being checked is whether a
+// tesselated mesh looks like a face. So the points are laid out on an actual
+// face-ish surface: an ellipse filled with a jittered grid, which under
+// MediaPipe's tesselation produces the web this cut is supposed to draw.
+const photo = document.createElement("canvas");
+photo.width = 900; photo.height = 1200;
+const p = photo.getContext("2d");
+const g = p.createLinearGradient(0,0,0,1200);
+g.addColorStop(0,"#cbb4a0"); g.addColorStop(1,"#6d5445");
+p.fillStyle = g; p.fillRect(0,0,900,1200);
+p.fillStyle = "#d9c2ad";
+p.beginPath(); p.ellipse(450,560,215,290,0,0,7); p.fill();
+p.fillStyle = "#2b2b2b";
+p.beginPath(); p.ellipse(378,500,26,13,0,0,7); p.fill();
+p.beginPath(); p.ellipse(522,500,26,13,0,0,7); p.fill();
+p.strokeStyle = "#8a6a55"; p.lineWidth = 7;
+p.beginPath(); p.arc(450,640,58,0.25,Math.PI-0.25); p.stroke();
+
+// 468 points over the face oval, deterministic so two runs render identically.
+const lm = [];
+let seed = 12345;
+const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 0xffffffff);
+for (let i = 0; i < 468; i++) {
+  // Concentric rings fill the ellipse more evenly than a random scatter, which
+  // keeps the tesselation from producing long spikes across the face.
+  const ring = Math.sqrt((i % 24) / 24);
+  const a = (i / 468) * Math.PI * 2 * 7.3;
+  const jx = (rnd() - 0.5) * 0.012;
+  const jy = (rnd() - 0.5) * 0.012;
+  lm.push({
+    x: (450 + Math.cos(a) * 200 * ring) / 900 + jx,
+    y: (560 + Math.sin(a) * 275 * ring) / 1200 + jy,
+    z: 0,
+  });
+}
+
+const scores = {
+  overall: 7.6, percentile: 88,
+  regions: [
+    { name: "Eyes", score: 8.1 }, { name: "Midface", score: 7.4 },
+    { name: "Nose", score: 5.2 }, { name: "Lips", score: 4.3 },
+    { name: "Jaw", score: 7.9 }, { name: "Chin", score: 6.8 },
+    { name: "Proportions", score: 5.9 }, { name: "Symmetry", score: 7.1 },
+  ],
+};
+
+const c = document.getElementById("c");
+window.shot = (t, variant = "breakdown", scale = 1.5) => {
+  renderQuickVideoFrame(c, photo, lm, "male", scores, t, variant, scale);
+  return true;
+};
+window.ready = true;
+</script>
