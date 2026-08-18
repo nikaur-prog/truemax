@@ -461,8 +461,33 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   const DRAW = 0.5;
   const from = Math.max(beat.start, beat.drawAt - DRAW);
   const span = Math.max(0.001, beat.drawAt - from);
-  return clamp01((t - from) / span);
+  const drawn = clamp01((t - from) / span);
+
+  // And it RETRACTS on the way out, along the same paths it arrived on.
+  //
+  // The exit was a fade of the whole figure: every line dimmed in place and
+  // then was gone. It never looked wrong exactly, but it reads as an overlay
+  // being switched off, which is what it was. Un-drawing it — the line
+  // withdrawing toward its start point, the ticks and the label going first —
+  // reads as the measurement being taken away, which is the same gesture that
+  // put it there played backwards, and it is what makes the reference channels
+  // look deliberate rather than like a slideshow with annotations.
+  //
+  // Costs nothing extra: drawMeasurement already renders any partial progress
+  // as a strict subset of the true figure, so running it back down is as
+  // geometrically honest as running it up.
+  const RETRACT = 0.42;
+  const end = beat.start + beat.duration - CUT_CLEAR;
+  const leaving = clamp01((end - t) / RETRACT);
+  return Math.min(drawn, leaving);
 }
+
+// A beat of clean frame before the cut.
+//
+// The retract finishes here rather than at the boundary, so the last frames of
+// a beat hold a bare photograph. A cut that lands mid-animation is the single
+// most obvious way for an edit to look unfinished.
+const CUT_CLEAR = 0.12;
 
 /**
  * How opaque the measurement is at this instant, 0..1.
@@ -478,13 +503,17 @@ export function drawProgress(beat: TimedBeat, t: number): number {
  * video moving on.
  */
 export function overlayAlpha(beat: TimedBeat, t: number): number {
-  const inAlpha = smoother(drawProgress(beat, t));
-  // Out over the tail, and finished a little before the cut so the frame is
-  // clean at the boundary rather than mid-dissolve.
-  const OUT = 0.5;
-  const end = beat.start + beat.duration - 0.12;
-  const outAlpha = smoother(clamp01((end - t) / OUT));
-  return Math.min(inAlpha, outAlpha);
+  // The figure now RETRACTS rather than dissolving — see drawProgress — so the
+  // alpha's job on the way out is much smaller than it was. It only has to stop
+  // the last few pixels of a line popping off at zero length, which a fast fade
+  // over the tail of the retraction does.
+  //
+  // Kept as its own function because the cutaway path scales it separately and
+  // because "is any of this on screen" is a question several callers ask.
+  const drawn = drawProgress(beat, t);
+  // Fully opaque as soon as there is any meaningful line, and only softening
+  // once the retraction has nearly finished.
+  return smoother(clamp01(drawn / 0.12));
 }
 
 export interface RundownFrameOptions {

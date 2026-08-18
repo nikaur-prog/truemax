@@ -407,3 +407,67 @@ test("a short verdict is not shrunk at all", () => {
   const font = (px: number) => `300 ${px}px Fraunces, Georgia, serif`;
   assert.equal(fitFont(ctx, "Mid", 720 - 96, 76, 44, font), font(76));
 });
+
+// ---------------------------------------------------------------------------
+// The measurement arrives and is taken away, along the same paths.
+// ---------------------------------------------------------------------------
+
+test("the figure retracts rather than fading out", () => {
+  // The exit used to be a fade of the whole overlay: every line dimmed in place
+  // and was gone. It reads as an overlay being switched off, because that is
+  // what it was. Un-drawing it is the same gesture that put it there, played
+  // backwards.
+  const timeline = buildTimeline([
+    { kind: "metric", line: "a canthal tilt of 6.4 degrees, so the eye sits well above the inner", metricId: "canthalTilt" },
+    { kind: "cta", line: "Go and get yours." },
+  ]);
+  const b = timeline.beats[0];
+
+  // Complete on the click, which is the point of the run-up.
+  assert.ok(drawProgress(b, b.drawAt!) > 0.999, "not finished when the click lands");
+  // Still complete through the middle of the beat.
+  assert.ok(drawProgress(b, b.start + b.duration * 0.5) > 0.999, "retracted too early");
+  // And gone by the cut.
+  assert.equal(drawProgress(b, b.start + b.duration), 0, "still on screen at the boundary");
+});
+
+test("the retraction is monotonic and finishes before the cut", () => {
+  // A figure that flickers back up mid-retraction reads as a dropped frame, and
+  // one still moving when the beat ends puts an animation across a cut — which
+  // is the single most obvious way for an edit to look unfinished.
+  const timeline = buildTimeline([
+    { kind: "metric", line: "a canthal tilt of 6.4 degrees and the eye sits high on the outer corner", metricId: "canthalTilt" },
+    { kind: "cta", line: "Go and get yours." },
+  ]);
+  const b = timeline.beats[0];
+  const end = b.start + b.duration;
+
+  let previous = 1;
+  for (let t = b.start + b.duration * 0.5; t <= end; t += 0.01) {
+    const p = drawProgress(b, t);
+    assert.ok(p <= previous + 1e-9, `progress rose during the retraction at ${t.toFixed(2)}`);
+    previous = p;
+  }
+  // Clean frame before the boundary, not mid-animation.
+  assert.equal(drawProgress(b, end - 0.05), 0, "still retracting at the cut");
+});
+
+test("a measurement is never drawn at a size nobody can see", () => {
+  // The alpha's remaining job. The retraction ends at zero length, and a line
+  // of two pixels at full opacity popping off is the glitch the fade exists to
+  // absorb.
+  const timeline = buildTimeline([
+    { kind: "metric", line: "a canthal tilt of 6.4 degrees with the outer corner sitting well above", metricId: "canthalTilt" },
+    { kind: "cta", line: "Go and get yours." },
+  ]);
+  const b = timeline.beats[0];
+  for (let t = b.start; t < b.start + b.duration; t += 0.01) {
+    const p = drawProgress(b, t);
+    const a = overlayAlpha(b, t);
+    if (p > 0 && p < 0.05) {
+      assert.ok(a < 0.75, `a ${(p * 100).toFixed(0)}% line was ${(a * 100).toFixed(0)}% opaque`);
+    }
+  }
+  // And solid whenever there is a real figure to see.
+  assert.ok(overlayAlpha(b, b.drawAt!) > 0.99, "not solid once drawn");
+});

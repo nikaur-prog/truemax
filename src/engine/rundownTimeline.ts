@@ -385,3 +385,93 @@ export function beatNear(timeline: RundownTimeline, t: number): TimedBeat | null
   if (exact) return exact;
   return t < beats[0].start ? beats[0] : beats[beats.length - 1];
 }
+
+// ---------------------------------------------------------------------------
+// The end of estimating.
+//
+// Two versions of "work out where each sentence falls inside the audio" have
+// shipped. The first scaled a word count; the second weighed syllables and
+// trimmed the mp3's silence. Both got closer and both were still visibly late,
+// and the reason is structural rather than a tuning problem: they are models of
+// how a synthesiser reads, and a model of a thing is not the thing. Speech rate
+// varies inside one read — a clause slows for emphasis, a number gets weight, a
+// comma buys a pause that no character count predicts.
+//
+// ElevenLabs will return the start and end time of every character it spoke.
+// With that, a beat's start is not estimated at all: it is looked up. This is
+// the upgrade the module header has described since the first version, and the
+// reason it was not the first version is that it changes the response shape
+// from audio bytes to JSON-with-base64, which is a bigger change than it looks.
+// Three reports of late captions is the point at which it is worth it.
+//
+// The estimate stays for the silent path and as the fallback. A voice or model
+// that returns no alignment still produces a video — one timed the old way, and
+// therefore slightly late, which is far better than no video.
+// ---------------------------------------------------------------------------
+
+export interface CharacterAlignment {
+  characters: string[];
+  starts: number[];
+  ends: number[];
+}
+
+/**
+ * Place the beats on the synthesiser's own timings.
+ *
+ * `offsets` says where each beat's text begins in the narration paragraph — see
+ * narrationOffsets — so beat i owns characters [offsets[i], offsets[i + 1]).
+ * Its start is when the first of those was spoken and its end is when the last
+ * of them finished.
+ *
+ * The GAP is not re-added. It exists in the estimate to stop beats running into
+ * each other before the real audio is known; here the real audio says exactly
+ * where one line stops and the next starts, and inserting a pause that the
+ * voice does not take would put the picture behind again by 0.35s a beat.
+ */
+export function alignTimeline(
+  timeline: RundownTimeline,
+  alignment: CharacterAlignment,
+  offsets: number[],
+): RundownTimeline {
+  const { starts, ends } = alignment;
+  const n = Math.min(starts.length, ends.length);
+  // Nothing usable: hand back the estimate rather than a timeline of zeros.
+  if (n === 0 || offsets.length < timeline.beats.length + 1) return timeline;
+
+  const beats: TimedBeat[] = [];
+  for (let i = 0; i < timeline.beats.length; i++) {
+    const from = Math.min(offsets[i], n - 1);
+    // The character AFTER this beat's last, clamped — the paragraph's final
+    // beat runs to the end of the alignment.
+    const to = Math.min(offsets[i + 1] ?? n, n);
+
+    const start = starts[from];
+    // The end of the last character this beat owns. Walking back from `to`
+    // rather than indexing it directly, because `to` is the next beat's first
+    // character and its start time is the same instant — using it would make
+    // every beat end where the next begins, which is true and also loses the
+    // breath between them that the voice actually takes.
+    const last = Math.max(from, to - 1);
+    const end = ends[last];
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      // One unusable span must not corrupt the rest. Fall back wholesale rather
+      // than splicing an estimated beat into a measured timeline, where it
+      // would be the only one out of step and impossible to spot.
+      return timeline;
+    }
+
+    const duration = end - start;
+    beats.push({
+      ...timeline.beats[i],
+      start,
+      duration,
+      drawAt: timeline.beats[i].drawAt === undefined ? undefined : start + duration * DRAW_AT,
+    });
+  }
+
+  // Beats now START where the voice starts, which means the first one begins at
+  // the first spoken character rather than at zero. The duration is where the
+  // last one ends.
+  const duration = beats.length ? beats[beats.length - 1].start + beats[beats.length - 1].duration : 0;
+  return { duration, beats, sfx: cuesFor(beats) };
+}

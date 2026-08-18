@@ -291,7 +291,26 @@ export async function mixRundownAudio(
  * response. The caller renders a silent rundown in that case, which is a far
  * better outcome than losing a completed composite because a quota ran out.
  */
-export async function fetchNarration(text: string, accessToken: string): Promise<ArrayBuffer | null> {
+/**
+ * When the synthesiser said each character of the narration.
+ *
+ * The end of the estimating. Two versions of "guess where the sentences fall"
+ * shipped and both were visibly late, because both were models of how a voice
+ * reads and the voice is the only thing that knows. This is its own account.
+ */
+export interface Alignment {
+  characters: string[];
+  starts: number[];
+  ends: number[];
+}
+
+export interface Narration {
+  audio: ArrayBuffer;
+  /** Absent when the model or voice returned none; the caller falls back. */
+  alignment?: Alignment;
+}
+
+export async function fetchNarration(text: string, accessToken: string): Promise<Narration | null> {
   try {
     const response = await fetch("/api/tts", {
       method: "POST",
@@ -305,7 +324,25 @@ export async function fetchNarration(text: string, accessToken: string): Promise
       console.warn("narration unavailable", response.status, await response.text().catch(() => ""));
       return null;
     }
-    return await response.arrayBuffer();
+    const payload = (await response.json()) as {
+      audio?: string;
+      alignment?: { characters?: string[]; starts?: number[]; ends?: number[] };
+    };
+    if (!payload.audio) return null;
+
+    // base64 to bytes. The route returns JSON now because the timestamps have
+    // to come back alongside the audio, and there is no way to put both in one
+    // binary body without inventing a container.
+    const binary = atob(payload.audio);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    const a = payload.alignment;
+    const alignment =
+      a?.characters && a.starts && a.ends && a.characters.length === a.starts.length
+        ? { characters: a.characters, starts: a.starts, ends: a.ends }
+        : undefined;
+    return { audio: bytes.buffer, alignment };
   } catch (error) {
     console.warn("narration request failed", error);
     return null;
