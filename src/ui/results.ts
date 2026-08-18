@@ -21,7 +21,7 @@ import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
-import { REFERENCE_N, statedPct } from "../engine/precision.js";
+import { REFERENCE_N } from "../engine/precision.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
@@ -378,26 +378,26 @@ function sideVerdictHTML(report: Report): string {
 function sideBasicHTML(report: Report): string {
   const regions = report.regions.filter((r) => r.metrics.length);
   const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
-  const lead = statedPct(report.overallPercentile);
+  const lead = Math.round(report.overall * 10);
   return `<div class="basic">
     <div class="basic-lead">
       <span class="klabel">SIDE PROFILE ${scaleTrigger()}</span>
       <b><span class="basic-n" data-count="${lead}" data-decimals="0">${lead}</span><small>/100</small></b>
-      <em class="basic-rarity">${scaleRarityLine(lead)}</em>
+      <em class="basic-rarity">${scaleRarityLine(report.overallPercentile)}</em>
     </div>
     <div class="basic-grid">
       ${regions
         .map(
           (r) => `<div class="basic-cell">
         <span>${REGION_NAMES[r.region].toUpperCase()}</span>
-        <b>${statedPct(r.percentile)}</b>
-        <i style="width:${statedPct(r.percentile)}%"></i>
+        <b>${Math.round(r.score * 10)}</b>
+        <i style="width:${Math.round(r.score * 10)}%"></i>
         <em>${rarityShort(r.percentile)}</em>
       </div>`,
         )
         .join("")}
     </div>
-    <p class="basic-note">Percentiles against the ${report.sex} reference set, measured from the profile alone. The full mode shows the ${measured} measurements these come from.</p>
+    <p class="basic-note">The same profile scores shown in Full, expressed out of 100. Rarity captions separately show position against the ${report.sex} reference set. The full mode shows the ${measured} measurements these come from.</p>
   </div>`;
 }
 
@@ -1470,7 +1470,7 @@ function basicHTML(): string {
     <div class="basic-lead">
       <span class="klabel">OVERALL ${scaleTrigger()}</span>
       <b><span class="basic-n" data-count="${lead.value}" data-decimals="0">${lead.value}</span><small>/100</small></b>
-      <em class="basic-rarity">${scaleRarityLine(lead.value)}</em>
+      <em class="basic-rarity">${scaleRarityLine(lead.percentile)}</em>
     </div>
     <div class="basic-grid">
       ${rest
@@ -1479,13 +1479,13 @@ function basicHTML(): string {
         <span>${s.label.toUpperCase()}</span>
         <b>${s.value}</b>
         <i style="width:${s.value}%"></i>
-        <em>${rarityShort(s.value)}</em>
+        <em>${rarityShort(s.percentile)}</em>
       </div>`,
         )
         .join("")}
     </div>
-    <p class="basic-note">Every number here is a percentile: where you sit against the reference population, not a mark out of a hundred. The full mode shows the ${ctx!.report.metrics.length} measurements these come from.</p>
-    <p class="basic-note">Stated to the nearest 5, and that is deliberate. The reference set is about ${REFERENCE_N} people per sex, which can place you in a band but cannot tell 43 from 44. Anyone quoting you a decimal place off a sample this size is making it up.</p>
+    <p class="basic-note">Every number is the same measurement shown in Full, expressed out of 100 instead of out of 10. The rarity line is your separate position against the reference population.</p>
+    <p class="basic-note">Scores are rounded to whole points. Population bands use a reference set of about ${REFERENCE_N} people per sex, so those bands are deliberately coarse.</p>
     ${poseCaveat()}
   </div>`;
 }

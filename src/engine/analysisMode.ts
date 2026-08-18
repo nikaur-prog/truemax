@@ -1,5 +1,5 @@
 import type { Report, Sex } from "./types.js";
-import { statedPct } from "./precision.js";
+import { aggregateScoreToPercentile } from "./scoring.js";
 
 // ---------------------------------------------------------------------------
 // How much of the analysis a person wants to see.
@@ -115,25 +115,27 @@ export function saveVerdictTone(tone: VerdictTone): void {
 // ---------------------------------------------------------------------------
 // Basic mode: a few headline numbers out of 100.
 //
-// Out of 100 because that is the scale this audience already reads — Umax and
-// the PSL threads both use it — and switching scales between modes would make
-// the same face look like two different results. The number is the percentile,
-// which is the honest reading of "out of 100": it is where you sit among the
-// reference population, not a mark out of a hundred possible points.
+// Out of 100 because that is the scale this audience already reads. It is the
+// SAME 0-10 measurement shown by Full, multiplied by ten. Population position
+// is carried separately so a 7.1/10 cannot turn into 95/100 merely because it
+// sits at the 95th percentile — that was one face receiving two different-looking
+// answers from one report.
 // ---------------------------------------------------------------------------
 
 export interface BasicScore {
   label: string;
-  value: number; // 0-100, a percentile
+  value: number; // 0-100 score, exactly the Full score multiplied by ten
+  percentile: number; // population position, for the rarity caption only
 }
 
 export function basicScores(report: Report): BasicScore[] {
-  // Stated to the nearest five, like every other percentile on screen. See
-  // statedPct in ui/templates.ts: a hundred-person reference set cannot
-  // resolve a single point, and this grid is the most-read surface in the app.
-  const pct = (key: string, fallback: number): number => {
+  const regionScore = (key: string): BasicScore => {
     const region = report.regions.find((r) => r.region === key);
-    return statedPct(region ? region.percentile : fallback);
+    return {
+      label: key,
+      value: Math.round((region?.score ?? 5) * 10),
+      percentile: region?.percentile ?? 50,
+    };
   };
   // Dimorphism is the one pillar whose NAME depends on the reference
   // population. Calling a woman's score "masculinity" would be describing the
@@ -145,21 +147,23 @@ export function basicScores(report: Report): BasicScore[] {
   // asks about most after the jaw — it belongs in the short list, not three
   // taps deep in the full breakdown.
   return [
-    { label: "Overall", value: statedPct(report.overallPercentile) },
-    { label: "Sharpness", value: pillarPct(report, "Angularity") },
-    { label: dimorphism, value: pillarPct(report, "Dimorphism") },
-    { label: "Eyes", value: pct("eyes", 50) },
-    { label: "Jaw", value: pct("jaw", 50) },
-    { label: "Symmetry", value: pct("symmetry", 50) },
-    { label: "Harmony", value: pillarPct(report, "Harmony") },
+    { label: "Overall", value: Math.round(report.overall * 10), percentile: report.overallPercentile },
+    pillarScore(report, "Angularity", "Sharpness"),
+    pillarScore(report, "Dimorphism", dimorphism),
+    { ...regionScore("eyes"), label: "Eyes" },
+    { ...regionScore("jaw"), label: "Jaw" },
+    { ...regionScore("symmetry"), label: "Symmetry" },
+    pillarScore(report, "Harmony", "Harmony"),
   ];
 }
 
-// Pillars are stored as 0-10 scores rather than percentiles, so this converts
-// on the same scale the rest of the app uses rather than inventing one.
-function pillarPct(report: Report, pillar: "Harmony" | "Angularity" | "Dimorphism" | "Features"): number {
+function pillarScore(
+  report: Report,
+  pillar: "Harmony" | "Angularity" | "Dimorphism" | "Features",
+  label: string,
+): BasicScore {
   const score = report.pillars[pillar] ?? 5;
-  return statedPct(score * 10);
+  return { label, value: Math.round(score * 10), percentile: aggregateScoreToPercentile(score) };
 }
 
 // ---------------------------------------------------------------------------

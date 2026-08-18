@@ -49,8 +49,8 @@ test("a clear straight front photo passes the upload gate", () => {
   assert.equal(frontPhotoRejection(quality(), stats, occlusion, landmarks, 1200, 1600), null);
 });
 
-test("front uploads reject diagonal pose instead of silently pose-correcting it", () => {
-  const rejection = frontPhotoRejection(quality({ yawDeg: 20 }), stats, occlusion, landmarks, 1200, 1600);
+test("front uploads reject only a genuinely diagonal pose", () => {
+  const rejection = frontPhotoRejection(quality({ yawDeg: 27 }), stats, occlusion, landmarks, 1200, 1600);
   assert.match(rejection?.title ?? "", /turned too far/i);
 });
 
@@ -61,7 +61,13 @@ test("front uploads reject diagonal pose instead of silently pose-correcting it"
 // had already removed.
 test("front uploads accept the ordinary imprecision of a hand-held phone", () => {
   assert.equal(frontPhotoRejection(quality({ yawDeg: 11 }), stats, occlusion, landmarks, 1200, 1600), null);
+  assert.equal(frontPhotoRejection(quality({ yawDeg: 20 }), stats, occlusion, landmarks, 1200, 1600), null);
   assert.equal(frontPhotoRejection(quality({ pitchDeg: 15 }), stats, occlusion, landmarks, 1200, 1600), null);
+});
+
+test("a detectable face is not rejected because the downloaded image is small", () => {
+  assert.equal(frontPhotoRejection(quality(), stats, occlusion, landmarks, 320, 460), null);
+  assert.equal(sidePhotoRejection(quality({ yawDeg: 55 }), stats, silhouette(), 320, 460), null);
 });
 
 test("front uploads reject covered eyes, severe blur and cropped faces", () => {
@@ -73,7 +79,7 @@ test("front uploads reject covered eyes, severe blur and cropped faces", () => {
     frontPhotoRejection(quality(), { ...stats, sharpness: 0.12 }, occlusion, landmarks, 1200, 1600)?.title ?? "",
     /blurred/i,
   );
-  const cropped = [{ x: 0.01, y: 0.1, z: 0 }, landmarks[1]] as NormalizedLandmark[];
+  const cropped = [{ x: 0.001, y: 0.1, z: 0 }, landmarks[1]] as NormalizedLandmark[];
   assert.match(frontPhotoRejection(quality(), stats, occlusion, cropped, 1200, 1600)?.title ?? "", /cut off/i);
 });
 
@@ -110,7 +116,7 @@ test("a strong, measurable turn is accepted even when it is not mathematically 9
 });
 
 test("a relaxed partial smile passes but a broad smile still blocks", () => {
-  assert.equal(frontPhotoRejection(quality({ smileScore: 0.34 }), stats, occlusion, landmarks, 1200, 1600), null);
+  assert.equal(frontPhotoRejection(quality({ smileScore: 0.55 }), stats, occlusion, landmarks, 1200, 1600), null);
   assert.match(frontPhotoRejection(quality({ smileScore: 0.72 }), stats, occlusion, landmarks, 1200, 1600)?.title ?? "", /neutral expression/i);
 });
 

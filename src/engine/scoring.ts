@@ -287,56 +287,21 @@ function tailZ(z: number, q: number[], last: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Measurement-noise shrinkage: RETIRED, and this is why.
+// Calibrate structural position to the product's 0-10 human rating scale.
 //
-// It compressed every aggregate toward the median by a factor of 0.66, derived
-// as the reliability ratio k = var(true)/(var(true)+var(noise)) from a measured
-// single-photo noise of 0.72 sigma. The statistics were sound. The consequence
-// was not, and the consequence is what shipped:
+// The rated validation corpus currently averages 5.1 by blinded human review
+// but 6.6 through the raw empirical-percentile transform. A raw percentile is
+// useful evidence; presenting its z-score directly as attractiveness was the
+// source of the inflation users saw (including ordinary faces in the 90s).
+// Pulling aggregate z toward the median preserves ordering and the
+// 5.0 centre while making the displayed score conservative. Keep this named
+// and tested: it must be re-estimated when the rated corpus grows.
 //
-//   reference percentile   score it could produce
-//   50th                   5.00
-//   90th                   6.10
-//   95th                   6.41
-//   99th                   7.00
-//   99.9th                 7.65
-//
-// The entire top one per cent of faces was squeezed into 0.65 points. Four
-// photographs of visibly, increasingly good-looking men scored 4.5, 4.2, 4.3 and
-// 4.3 — a 0.3-point band with the ordering wrong. A scale that cannot separate
-// the people its audience most wants separated is not being conservative, it is
-// being useless, and it reads to a viewer as the instrument being invented.
-//
-// It also silently broke the product's own arithmetic. Every piece of copy here
-// describes MEASURED POSITION — "5.0 is the exact middle face", "8.0 is about 1
-// in 100" — and aggregateScoreToPercentile inverts the raw 5 + 1.3z curve. The
-// forward path applied the shrink; the inverse never undid it. The two
-// disagreed by the shrink factor, so an 8.0 was advertised as 1 in 91 while
-// actually requiring the 99.976th percentile, about 1 in 4,242. Nobody could
-// reach the number the education screen promised was reachable.
-//
-// The honest reading of the original problem is that shrinkage was the wrong
-// instrument for it. The symptom that motivated it — "a room of ordinary,
-// decent-looking people all landing mid-3s to low-4s" — is a CENTRING error:
-// everybody too low. Shrinking toward the median does lift the bottom, but only
-// as a side effect of crushing everything, and it pays for that lift by
-// destroying the top. A mean shift wants the reference re-centred, not the
-// spread compressed.
-//
-// The measurement noise is real and is still disclosed, in the three places it
-// was always disclosed and where a reader can actually see it:
-//
-//   - PHOTO_VARIANCE (+/-1.2) and varianceLine(), printed in the primer and
-//     under the score: "one photograph is not a verdict"
-//   - effWeight(), which already multiplies each metric by its measured
-//     reliability, so noisy metrics move the number less
-//   - the rescan delta copy, which says outright when a change is smaller than
-//     the instrument can resolve
-//
-// Three visible admissions of noise are worth more than a fourth invisible one
-// that quietly rewrites the scale. So the score is measured position again, and
-// 5 + SCORE_SCALE * z means what every sentence in the product says it means.
-export const SHRINK = 1;
+// This factor applies ONCE to each final aggregate. Individual metric evidence
+// stays uncompressed, so Full mode still explains what moved the result. The
+// inverse used by editing and rarity copy operates on the already-calibrated
+// aggregate z; forward and inverse must never silently disagree again.
+export const SHRINK = 0.4;
 
 function normalizeAgg(
   z: number,

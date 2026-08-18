@@ -11,6 +11,7 @@ import {
   hasMaxAccess,
   loadEntitlement,
   openBillingPortal,
+  reconcileEntitlement,
 } from "../engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { renderAuthForm } from "./authForm.js";
@@ -32,9 +33,11 @@ import { openTrialFunnel } from "./onboardingFunnel.js";
 // ---------------------------------------------------------------------------
 
 let overlay: HTMLDivElement | null = null;
+const reconciledUsers = new Set<string>();
 
 export interface OpenAccountOptions {
   notice?: string;
+  checkoutSessionId?: string | null;
   initialMode?: AuthMode;
   reason?: "account" | "analysis";
   onAuthenticated?: (user: User) => void | Promise<void>;
@@ -91,10 +94,13 @@ export function mountAccountButton(): void {
     }
     if (user && checkoutResult && !checkoutHandled) {
       checkoutHandled = true;
-      const notice = checkoutResult === "success"
-        ? "Payment received. Stripe is confirming your Max membership now."
+      const notice = checkoutResult.status === "success"
+        ? "Payment received. We are activating your membership now."
         : "Checkout was cancelled. Nothing was charged.";
-      void openAccount(notice);
+      void openAccount({
+        notice,
+        checkoutSessionId: checkoutResult.status === "success" ? checkoutResult.sessionId : null,
+      });
     }
   });
 }
@@ -135,7 +141,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
           close();
           await options.onAuthenticated(signedInUser);
         } else {
-          renderSignedIn(body, signedInUser, options.notice);
+          renderSignedIn(body, signedInUser, options.notice, options.checkoutSessionId);
         }
       },
     });
@@ -150,7 +156,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     renderSignedOut(requestedMode);
     void sessionCheck.then((lateUser) => {
       if (lateUser && overlay === activeOverlay && body.isConnected) {
-        renderSignedIn(body, lateUser, options.notice);
+        renderSignedIn(body, lateUser, options.notice, options.checkoutSessionId);
       }
     });
     return;
@@ -164,12 +170,12 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1200)),
   ]);
   if (overlay !== activeOverlay || !activeOverlay.isConnected) return;
-  if (user) renderSignedIn(body, user, options.notice);
+  if (user) renderSignedIn(body, user, options.notice, options.checkoutSessionId);
   else {
     renderSignedOut("password");
     void sessionCheck.then((lateUser) => {
       if (lateUser && overlay === activeOverlay && body.isConnected) {
-        renderSignedIn(body, lateUser, options.notice);
+        renderSignedIn(body, lateUser, options.notice, options.checkoutSessionId);
       }
     });
   }
@@ -188,7 +194,12 @@ function close(): void {
 
 // --- signed in ------------------------------------------------------------
 
-function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
+function renderSignedIn(
+  body: HTMLElement,
+  user: User,
+  notice?: string,
+  checkoutSessionId?: string | null,
+): void {
   body.innerHTML = `
     <h2>Your account</h2>
     <div class="acct-who">
@@ -216,7 +227,12 @@ function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
 
   const msg = body.querySelector(".acct-msg") as HTMLElement;
   const membership = body.querySelector(".acct-membership") as HTMLElement;
-  void renderMembership(membership, user, notice?.startsWith("Payment received") ?? false);
+  void renderMembership(
+    membership,
+    user,
+    notice?.startsWith("Payment received") ?? false,
+    checkoutSessionId,
+  );
 
   body.querySelector(".acct-signout")?.addEventListener("click", async () => {
     await signOut();
@@ -244,9 +260,20 @@ function renderSignedIn(body: HTMLElement, user: User, notice?: string): void {
   });
 }
 
-async function renderMembership(node: HTMLElement, user: User, waitForWebhook: boolean): Promise<void> {
+async function renderMembership(
+  node: HTMLElement,
+  user: User,
+  waitForWebhook: boolean,
+  checkoutSessionId?: string | null,
+): Promise<void> {
   try {
     let entitlement = await loadEntitlement();
+    if (!hasPaidAccess(entitlement) && (checkoutSessionId || !reconciledUsers.has(user.id))) {
+      reconciledUsers.add(user.id);
+      const reconciled = await reconcileEntitlement(checkoutSessionId);
+      if (!node.isConnected) return;
+      if (reconciled) entitlement = await loadEntitlement();
+    }
     for (let attempt = 0; waitForWebhook && !hasPaidAccess(entitlement) && attempt < 5; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       if (!node.isConnected) return;

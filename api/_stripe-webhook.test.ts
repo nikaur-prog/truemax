@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { entitlementFromSubscription } from "./stripe-webhook.js";
+import {
+  configuredWebhookSecrets,
+  entitlementFromSubscription,
+  verifyWebhookEvent,
+} from "./stripe-webhook.js";
 
 function subscription(overrides: Record<string, unknown> = {}) {
   return {
@@ -59,4 +63,32 @@ test("an existing server-stamped subscription survives a price replacement", () 
 test("unrelated Stripe subscriptions are ignored", () => {
   const result = entitlementFromSubscription(subscription({ metadata: {} }) as never);
   assert.equal(result, null);
+});
+
+test("webhook verification accepts either configured endpoint secret", () => {
+  const attempted: string[] = [];
+  const event = verifyWebhookEvent(
+    (_payload, _signature, secret) => {
+      attempted.push(secret);
+      if (secret !== "whsec_second") throw new Error("signature mismatch");
+      return { id: "evt_valid" };
+    },
+    "raw body",
+    "t=1,v1=signature",
+    configuredWebhookSecrets({
+      STRIPE_WEBHOOK_SECRET: "whsec_first",
+      SIGNING_SECRET: "whsec_second",
+    }),
+  );
+
+  assert.deepEqual(event, { id: "evt_valid" });
+  assert.deepEqual(attempted, ["whsec_first", "whsec_second"]);
+});
+
+test("duplicate webhook secrets are only attempted once", () => {
+  const secrets = configuredWebhookSecrets({
+    STRIPE_WEBHOOK_SECRET: "whsec_same",
+    SIGNING_SECRET: "whsec_same",
+  });
+  assert.deepEqual(secrets, ["whsec_same"]);
 });

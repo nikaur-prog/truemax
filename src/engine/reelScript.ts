@@ -26,8 +26,8 @@ import { PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
 //
 // On the score beat, which is the one that needs care. VALIDITY.md §2 measures
 // this engine at d = -0.20 separating celebrities from the general reference
-// population — it does not demonstrably rank faces, and one photograph moves a
-// score by about ±1.2 anyway. So the headline number is offered as a POSITION
+// population — it does not demonstrably rank faces, and one photograph still
+// carries material capture noise. So the headline number is offered as a POSITION
 // on a measured distribution, next to the distribution itself, rather than as
 // a verdict on a person. That is also the strongest beat in the format: a
 // number nobody understands is a shrug, and the same number against a curve is

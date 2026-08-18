@@ -4,6 +4,7 @@ import { distFor } from "../engine/metrics.js";
 import { statedPct } from "../engine/precision.js";
 import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
+import { DISPLAY_NOISE } from "../engine/history.js";
 import type { ScanDelta } from "../engine/history.js";
 
 // Deterministic explanation engine. No LLM, no randomness: banded templates
@@ -171,8 +172,8 @@ export function topPctText(pct: number): string {
 // ---------------------------------------------------------------------------
 // Reading a rescan.
 //
-// The spread between two photographs of one person is 0.87 points post-shrinkage, and
-// between two different people it is 1.20. That is a problem for weekly
+// The conservative current display puts the observed spread between two
+// photographs of one person at about 0.6 points. That is a problem for weekly
 // tracking and it is the one place the problem turns into the product: an app
 // that says "that is noise, ignore it" while its competitors say "you dropped
 // 0.4, here is what to buy" is the entire positioning.
@@ -208,7 +209,7 @@ export function deltaReadingCopy(d: ScanDelta): string {
     training, weight, alcohol, how you are grooming), this is the scan where it would show.`;
 }
 
-const DELTA_SD = "1.3";
+const DELTA_SD = DISPLAY_NOISE.toFixed(1);
 
 // ---------------------------------------------------------------------------
 // Improvement plan copy — non-surgical levers only, each tied to the actual

@@ -207,7 +207,11 @@ export async function POST(request: Request): Promise<Response> {
         mode: "subscription",
         expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${origin}/?checkout=success&plan=${tier}`,
+        // Stripe replaces this literal placeholder after Checkout. The client
+        // passes the resulting Session id to the authenticated reconciliation
+        // endpoint so a successful payment cannot stay locked behind a late
+        // or misconfigured webhook.
+        success_url: `${origin}/?checkout=success&plan=${tier}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/?checkout=cancelled&plan=${tier}`,
         client_reference_id: user.id,
         ...(customerId ? { customer: customerId } : { customer_email: user.email }),

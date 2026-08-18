@@ -15,6 +15,34 @@ interface EntitlementUpdate {
   cancelAtPeriodEnd: boolean;
 }
 
+export function configuredWebhookSecrets(
+  env: Partial<Record<"STRIPE_WEBHOOK_SECRET" | "SIGNING_SECRET", string | undefined>> = process.env,
+): string[] {
+  return [
+    ...new Set(
+      [env.STRIPE_WEBHOOK_SECRET, env.SIGNING_SECRET]
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+}
+
+export function verifyWebhookEvent<T>(
+  constructEvent: (payload: string, signature: string, secret: string) => T,
+  payload: string,
+  signature: string,
+  secrets: readonly string[],
+): T {
+  let lastError: unknown = new Error("No Stripe webhook secret is configured.");
+  for (const secret of secrets) {
+    try {
+      return constructEvent(payload, signature, secret);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 function objectId(value: { id: string } | string | null): string | null {
   if (!value) return null;
   return typeof value === "string" ? value : value.id;
@@ -57,19 +85,24 @@ async function fromCheckout(session: CheckoutSession): Promise<EntitlementUpdate
 
 export async function POST(request: Request): Promise<Response> {
   const signature = request.headers.get("stripe-signature");
-  // SIGNING_SECRET is the name the secret was actually stored under in Vercel
-  // — it is what the Stripe dashboard calls the value, so it is the name a
-  // person copying it over naturally reaches for. Accepting both beats a
-  // checkout that stays dead over a naming quibble.
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.SIGNING_SECRET;
-  if (!signature || !webhookSecret) return json({ error: "Webhook is not configured." }, 400);
+  // There are two live Stripe webhook endpoints for the same production URL,
+  // each with its own signing secret. Trying only the first configured value
+  // makes every delivery from the other endpoint look forged. Verify against
+  // every configured secret; the payload still has to match one exactly.
+  const webhookSecrets = configuredWebhookSecrets();
+  if (!signature || webhookSecrets.length === 0) return json({ error: "Webhook is not configured." }, 400);
 
   const rawBody = await request.text();
   let event: ReturnType<StripeClient["webhooks"]["constructEvent"]>;
   try {
     // Stripe signs the exact bytes it sends. Reading text here, before any JSON
     // parser touches whitespace or key order, is mandatory for verification.
-    event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
+    event = verifyWebhookEvent(
+      getStripe().webhooks.constructEvent.bind(getStripe().webhooks),
+      rawBody,
+      signature,
+      webhookSecrets,
+    );
   } catch (error) {
     console.error("stripe-webhook signature", safeMessage(error));
     return json({ error: "Invalid webhook signature." }, 400);

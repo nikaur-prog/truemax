@@ -4,7 +4,7 @@ import type { StoredScan } from "./history.js";
 // Weekly scan streaks.
 //
 // The unit is a WEEK, not a day, and that is a measurement decision rather than
-// a product one. Two photographs of the same face land about 1.3 points apart —
+// a product one. Two photographs of the same face still carry material capture noise —
 // more than two different people do — so a daily streak would be rewarding
 // people for collecting noise, and worse, showing them a number that jitters by
 // more than any real change it could ever detect. Facial structure moves over

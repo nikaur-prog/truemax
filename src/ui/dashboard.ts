@@ -1,4 +1,4 @@
-import { readAllHistory } from "../engine/history.js";
+import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory } from "../engine/history.js";
 import { followUp, regionNote } from "../engine/followUp.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
@@ -113,8 +113,9 @@ export function openDashboard(opts: {
   // Advance the rotation once per open, so coming back to the dashboard gives a
   // different headline and a different quote rather than the same pair all day.
   nextVisit();
-  const scans = readAllHistory();
-  const streak = computeStreak(scans);
+  const allScans = readAllHistory();
+  const scans = readAllComparableHistory();
+  const streak = computeStreak(allScans);
   const ctx = { name: opts.name ?? null, streak };
   const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
   overlay = document.createElement("div");
@@ -183,7 +184,7 @@ export function openDashboard(opts: {
         </div>
       </div>
 
-      ${scanSection(scans)}
+      ${scanSection(scans, allScans.length - scans.length)}
     </div>`;
 
   document.body.appendChild(overlay);
@@ -279,13 +280,15 @@ function escapeHtml(s: string): string {
   );
 }
 
-function scanSection(scans: StoredScan[]): string {
+function scanSection(scans: StoredScan[], legacyCount = 0): string {
   if (!scans.length) {
     return `<section class="dash-scans">
       <h2>Your scans</h2>
       <div class="dash-empty">
         <b>No scans yet.</b>
-        <span>Scan your face to see your first measurement — and every one after it lines up here so you can watch it move.</span>
+        <span>${legacyCount
+          ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
+          : "Scan your face to see your first measurement — and every one after it lines up here so you can watch it move."}</span>
       </div>
     </section>`;
   }
@@ -319,8 +322,8 @@ const REGION_LABEL: Record<string, string> = {
 };
 
 // Everything here is averaged across scans rather than read off the latest one.
-// A single scan carries about 1.3 points of photo-to-photo noise, which is more
-// than the gap between two different people — so "your strongest feature" taken
+// A single scan carries about 0.6 points of photo-to-photo noise on the current
+// scale, so "your strongest feature" taken
 // from one photograph is mostly a statement about that photograph. The mean over
 // several is the first number on this screen that describes the face.
 function profilePanel(scans: StoredScan[], avg: number): string {
@@ -350,7 +353,7 @@ function profilePanel(scans: StoredScan[], avg: number): string {
       <span>AVERAGE OF ${scans.length} SCAN${scans.length > 1 ? "S" : ""}</span>
     </div>
     <p class="dash-prof-note">Scored against ${sex === "male" ? "men" : "women"}. Averaged across
-      every scan on this device, because one photograph carries about 1.3 points of noise on its own.</p>
+      every comparable scan on this device, because one photograph carries about ${DISPLAY_NOISE.toFixed(1)} points of noise on its own.</p>
     ${
       means.length
         ? `<div class="dash-prof-bars">
@@ -541,7 +544,7 @@ function openCelebDetail(f: ReturnType<typeof applyShim>[number]): void {
       <p class="cd-credit">${f.credit}</p>
       <p class="cd-note">These are the scores this face is commonly given rather than a
         live measurement, and the engine's own output is one query parameter away
-        (<code>?real=1</code>). Two photographs of one person differ by about 1.3 points, so any
+        (<code>?real=1</code>). Two photographs of one person differ by about ${DISPLAY_NOISE.toFixed(1)} points, so any
         single number here is a reading rather than a verdict.</p>
     </div>`;
   document.body.appendChild(detailEl);
