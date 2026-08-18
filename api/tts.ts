@@ -97,13 +97,26 @@ export async function POST(request: Request): Promise<Response> {
     const model = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL;
 
     const upstream = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}`,
+      // WITH TIMESTAMPS, which is the whole reason this route returns JSON.
+      //
+      // The renderer used to estimate where each sentence fell inside the audio,
+      // first by scaling a word count and then by weighing syllables. Both got
+      // closer and both were still visibly late, because both are models of how
+      // a synthesiser reads and the synthesiser is the only thing that knows.
+      // This endpoint returns the start and end time of every CHARACTER it
+      // spoke, so the captions stop being predicted and start being looked up.
+      //
+      // The cost is that the response is base64 JSON rather than audio bytes,
+      // which is roughly a third larger over the wire and needs decoding on the
+      // client. For a file rendered once, in the background, that is nothing
+      // against a caption that lands on the word.
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/with-timestamps`,
       {
         method: "POST",
         headers: {
           "xi-api-key": apiKey,
           "content-type": "application/json",
-          accept: "audio/mpeg",
+          accept: "application/json",
         },
         body: JSON.stringify({
           text,
@@ -144,18 +157,46 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: message }, upstream.status === 429 ? 429 : 502);
     }
 
-    const audio = await upstream.arrayBuffer();
-    return new Response(audio, {
-      status: 200,
-      headers: {
-        "content-type": "audio/mpeg",
-        "content-length": String(audio.byteLength),
-        // Never cached. The narration is keyed to one face and one scan, and a
-        // cached voice track landing on the wrong rundown is the sort of bug
-        // that ships a video with somebody else's name in it.
-        "cache-control": "no-store",
+    const payload = (await upstream.json()) as {
+      audio_base64?: string;
+      alignment?: {
+        characters?: string[];
+        character_start_times_seconds?: number[];
+        character_end_times_seconds?: number[];
+      };
+    };
+    if (!payload.audio_base64) {
+      console.error("ElevenLabs returned no audio");
+      return json({ error: "Voiceover generation failed." }, 502);
+    }
+
+    // The alignment is passed through rather than reshaped. It is the
+    // synthesiser's own account of what it said and when; anything this route
+    // did to it would be a second model of the same thing, which is the class
+    // of bug being retired here.
+    //
+    // Forwarded as OPTIONAL: a model or voice that returns no alignment must
+    // still produce a video, just one timed by the old estimate. Losing the
+    // voiceover entirely because the timestamps were missing would be a worse
+    // failure than the one being fixed.
+    const alignment = payload.alignment;
+    return json(
+      {
+        audio: payload.audio_base64,
+        alignment:
+          alignment?.characters && alignment.character_start_times_seconds
+            ? {
+                characters: alignment.characters,
+                starts: alignment.character_start_times_seconds,
+                ends: alignment.character_end_times_seconds ?? alignment.character_start_times_seconds,
+              }
+            : undefined,
       },
-    });
+      // json() already sends no-store, which matters here: the narration is
+      // keyed to one face and one scan, and a cached voice track landing on the
+      // wrong rundown ships a video with somebody else's name in it.
+      200,
+    );
   } catch (error) {
     console.error("tts failed", error);
     return json({ error: safeMessage(error) }, 500);

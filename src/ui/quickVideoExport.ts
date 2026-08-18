@@ -1,3 +1,4 @@
+import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
@@ -22,6 +23,10 @@ export type QuickVariant = "breakdown" | "verdict";
 // cadence while 720p remains practical to encode on-device.
 const W = 720;
 const H = 1280;
+
+// What the exported file is rasterised at, as a multiple of the authored size.
+// 1.5 is 1080x1920. See downloadQuickVideo for why it is not 1.
+const EXPORT_SCALE = 1.5;
 const FPS = 30;
 const DURATION: Record<QuickVariant, number> = { breakdown: 5.5, verdict: 4 };
 
@@ -62,13 +67,21 @@ export async function downloadQuickVideo(
   const frameCount = Math.round(FPS * DURATION[variant]);
   const { Output, BufferTarget, Mp4OutputFormat, CanvasSource, QUALITY_HIGH, getFirstEncodableVideoCodec } =
     await import("mediabunny");
+
+  // Rendered at 1080x1920 through the scale the preview hook already used.
+  //
+  // The composition is authored in 720x1280 and drawn through a transform, so
+  // this is a raster change and not a layout one. It matters more here than
+  // anywhere: the platform re-encodes whatever it is handed, and the content of
+  // this cut is a hairline mesh and small type — the first things a compression
+  // pass destroys when they arrive already soft.
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = Math.round(W * EXPORT_SCALE);
+  canvas.height = Math.round(H * EXPORT_SCALE);
   const format = new Mp4OutputFormat({ fastStart: "in-memory" });
   const codec = await getFirstEncodableVideoCodec(
     format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
-    { width: W, height: H, quality: QUALITY_HIGH },
+    { width: canvas.width, height: canvas.height, quality: QUALITY_HIGH },
   );
   if (!codec) throw new Error("This browser cannot encode an H.264 MP4.");
 
@@ -76,7 +89,10 @@ export async function downloadQuickVideo(
   const output = new Output({ format, target });
   const source = new CanvasSource(canvas, {
     codec,
-    bitrate: 6_000_000,
+    // Raised with the resolution. 6 Mbps across 2.25x the pixels would be a
+    // sharper image described in fewer bits per pixel than before, which is a
+    // way to make a bigger file that looks worse.
+    bitrate: 12_000_000,
     keyFrameInterval: 2,
   });
   output.addVideoTrack(source, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
@@ -85,7 +101,7 @@ export async function downloadQuickVideo(
 
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
-    drawFrame(canvas, photo, landmarks, sex, scores, t, variant);
+    drawFrame(canvas, photo, landmarks, sex, scores, t, variant, EXPORT_SCALE);
     await source.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 6 === 0) onProgress?.(frame / frameCount);
   }
@@ -174,7 +190,10 @@ function drawFrame(
   if (t < 3.05) {
     if (t < 1.75) drawScanLine(ctx, px, py, pw, ph, t);
     const pointReveal = clamp01((t - 1.15) / 0.65);
-    if (pointReveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, pointReveal * (1 - collapse));
+    // The mesh draws down the face, then fades as the frame collapses into the
+    // analysis portrait. Two separate arguments: multiplying them together made
+    // it retreat back up the face instead.
+    if (pointReveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, pointReveal, 1 - collapse);
   }
 
   const contentAlpha = smoother(clamp01((t - 2.55) / 0.55));
@@ -308,8 +327,14 @@ function roundedImage(ctx: CanvasRenderingContext2D, photo: HTMLCanvasElement, c
   ctx.restore();
 }
 
+// The sweep. Faster than it was: at 1.15s a pass it reads as a progress bar
+// crawling down a face, and the whole beat is over in 1.35s — so the viewer saw
+// roughly one lap and never got the sense of something being scanned. At 0.72
+// the same beat carries nearly two full passes and the motion registers.
+const SCAN_PERIOD = 0.72;
+
 function drawScanLine(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, t: number): void {
-  const local = (t % 1.15) / 1.15;
+  const local = (t % SCAN_PERIOD) / SCAN_PERIOD;
   const yy = y + h * local;
   const gradient = ctx.createLinearGradient(x, 0, x + w, 0);
   gradient.addColorStop(0, "rgba(143,243,224,0)");
@@ -327,6 +352,26 @@ function drawScanLine(ctx: CanvasRenderingContext2D, x: number, y: number, w: nu
   ctx.restore();
 }
 
+// The scan: a MESH, not a scatter of dots.
+//
+// This drew every other landmark as a 2.6px white dot, which is 234 unconnected
+// specks on a face. It reads as confetti, and — the part that actually costs
+// something — it is the ONE frame in the export that is supposed to say "this
+// is measuring you". The interactive product has drawn a proper tesselated mesh
+// since the beginning (see overlay.ts strokeMesh); the exported video, which is
+// the version thousands of people see, was the odd one out with the cheap
+// version of the same idea.
+//
+// Same tesselation the app uses, so the two cannot look like different
+// products. The dots stay, smaller and dimmer, sitting on the vertices — a mesh
+// with no points reads as a net thrown over a face, and the points are what
+// make it read as measurement.
+//
+// Revealed BY POSITION rather than by index. Walking the landmark array in
+// order fills in whatever arbitrary sequence MediaPipe happens to store its
+// points in, which looks like a loading bar; revealing top-to-bottom makes the
+// mesh assemble down the face and lets it follow the scan line that is drawing
+// it.
 function drawLandmarks(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
@@ -337,17 +382,79 @@ function drawLandmarks(
   w: number,
   h: number,
   progress: number,
+  // How opaque the whole mesh is. SEPARATE from progress, which is how far down
+  // the face it has been drawn. Folding the two together — which the old
+  // scatter did, since fewer dots read as fainter — makes the mesh RETREAT back
+  // up the face as the frame settles instead of fading off it.
+  alpha = 1,
 ): void {
+  if (!landmarks.length || alpha <= 0) return;
+  const project = (p: NormalizedLandmark) => ({
+    x: x + ((p.x * photo.width - crop.x) / crop.w) * w,
+    y: y + ((p.y * photo.height - crop.y) / crop.h) * h,
+  });
+
+  // The reveal front, swept across the FACE rather than across the photograph.
+  //
+  // A front running 0 to 1 in normalised image space spends most of its travel
+  // above the forehead and below the chin, because a portrait is mostly not
+  // face. Measured against the landmarks' own extent, the whole of the reveal
+  // is spent on the thing being revealed.
+  let top = 1;
+  let bottom = 0;
+  for (const p of landmarks) {
+    if (p.y < top) top = p.y;
+    if (p.y > bottom) bottom = p.y;
+  }
+  const span = Math.max(1e-6, bottom - top);
+  // A little past the chin at full progress, so the last row is not left
+  // permanently half drawn.
+  const front = top + span * progress * 1.06;
+  const lit = (p: NormalizedLandmark) => p.y <= front;
+
   ctx.save();
-  ctx.fillStyle = "rgba(255,255,255,.88)";
-  const visible = Math.floor(landmarks.length * progress);
-  for (let i = 0; i < visible; i += 2) {
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // Weight and alpha COPIED from overlay.ts, which draws this same tesselation
+  // over real faces in the live product every day. Inventing new numbers here
+  // would mean tuning a 2,600-triangle mesh against a synthetic fixture, and a
+  // fixture's landmarks are not anatomical — the tesselation indices connect
+  // points that are neighbours on a face and strangers on anything else, so it
+  // renders as a hairball no matter what the settings are. Borrowing the values
+  // that are already proven is the only honest calibration available here.
+  //
+  // Tinted rather than white: this is the scanning state, and the accent is
+  // what the rest of the product uses to mean "the machine is working".
+  ctx.strokeStyle = "rgba(143,243,224,0.20)";
+  ctx.lineWidth = Math.max(0.35, w / 1600);
+  ctx.beginPath();
+  for (const { start, end } of FaceLandmarker.FACE_LANDMARKS_TESSELATION) {
+    const a = landmarks[start];
+    const b = landmarks[end];
+    // Both ends have to have been reached, or edges race ahead of the front and
+    // the mesh grows tendrils down the face before the points arrive.
+    if (!a || !b || !lit(a) || !lit(b)) continue;
+    const pa = project(a);
+    const pb = project(b);
+    if (pa.x < x || pa.x > x + w || pb.x < x || pb.x > x + w) continue;
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+  }
+  ctx.stroke();
+
+  // The vertices, on top. Every other one — all 468 at this size is noise, and
+  // the mesh already carries the structure.
+  ctx.fillStyle = "rgba(255,255,255,0.62)";
+  const r = Math.max(0.8, w / 520);
+  for (let i = 0; i < landmarks.length; i += 2) {
     const p = landmarks[i];
-    const px = x + ((p.x * photo.width - crop.x) / crop.w) * w;
-    const py = y + ((p.y * photo.height - crop.y) / crop.h) * h;
-    if (px < x || px > x + w || py < y || py > y + h) continue;
+    if (!p || !lit(p)) continue;
+    const q = project(p);
+    if (q.x < x || q.x > x + w || q.y < y || q.y > y + h) continue;
     ctx.beginPath();
-    ctx.arc(px, py, 2.6, 0, Math.PI * 2);
+    ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -457,7 +564,7 @@ function drawVerdictFrame(
   if (t < 2.2) {
     if (t < 1.35) drawScanLine(ctx, px, py, pw, ph, t);
     const reveal = clamp01((t - 0.8) / 0.55);
-    if (reveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, reveal * (1 - settle));
+    if (reveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, reveal, 1 - settle);
   }
 
   // Sex and tone both threaded in rather than defaulted.

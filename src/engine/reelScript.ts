@@ -650,6 +650,31 @@ export function narrationFrom(beats: Beat[]): string {
   return beats.map((b) => b.spoken ?? b.line).join(" ");
 }
 
+/**
+ * Where each beat's text begins inside narrationFrom's paragraph.
+ *
+ * The synthesiser returns the start time of every CHARACTER it spoke, indexed
+ * against the text it was handed. To turn that into "when does beat 7 start" we
+ * need to know which character beat 7 begins at — so the offsets are derived
+ * here, next to the join that produces them, rather than re-derived by the
+ * renderer from a string it would have to re-split the same way.
+ *
+ * Returns one offset per beat plus a final entry for the end of the paragraph,
+ * so a caller can read beat i's span as [offsets[i], offsets[i + 1]).
+ */
+export function narrationOffsets(beats: Beat[]): number[] {
+  const offsets: number[] = [];
+  let cursor = 0;
+  for (const b of beats) {
+    offsets.push(cursor);
+    // +1 for the space the join inserts. The last beat has no trailing space,
+    // which is why the final entry is written from the real length below.
+    cursor += (b.spoken ?? b.line).length + 1;
+  }
+  offsets.push(narrationFrom(beats).length);
+  return offsets;
+}
+
 // Whether a report is fit to publish.
 //
 // The pipeline must refuse a photograph the app itself would warn a paying

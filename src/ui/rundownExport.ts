@@ -1,8 +1,8 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Report, ScoredMetric } from "../engine/types.js";
 import type { Beat } from "../engine/reelScript.js";
-import { buildReelScript, narrationFrom, reelBlockers } from "../engine/reelScript.js";
-import { buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
+import { buildReelScript, narrationFrom, narrationOffsets, reelBlockers } from "../engine/reelScript.js";
+import { alignTimeline, buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
 import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
 import { drawRundownFrame } from "./rundownFrame.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
@@ -34,9 +34,34 @@ import type { SaveOutcome } from "./saveFile.js";
 // runs on. It would pass a smoke test and be obvious in the finished file.
 // ---------------------------------------------------------------------------
 
-const W = 720;
-const H = 1280;
+// FULL 1080p vertical, not 720.
+//
+// 720x1280 is a legal TikTok upload and it is not what the reference accounts
+// post. The platform re-encodes whatever it is given, so the file that arrives
+// at the viewer is a compression of the file that was uploaded — and starting
+// from 720 means the text, the measurement lines and the hairline detail in the
+// photograph are already soft before that pass runs. At 1080 the same lines
+// survive it.
+//
+// Everything in the compositor is authored in 720x1280 coordinates and scaled,
+// so this is one constant rather than a layout rewrite. The cost is 2.25x the
+// pixels per frame; a rundown still encodes in well under a minute.
+const W = 1080;
+const H = 1920;
 const FPS = 30;
+
+// The compositor is authored in 720x1280 and drawn through a transform.
+//
+// Every constant in rundownFrame.ts — safe areas, font sizes, row pitches, the
+// caption baseline — was chosen against a 720-wide frame and verified by
+// rendering it. Raising the output by rewriting all of them would be a layout
+// change dressed as a resolution change, and the first thing to break would be
+// the safe-zone arithmetic that took a template to get right. Scaling the
+// context instead means the layout is byte-identical and only the raster is
+// bigger, which is the whole of what was asked for.
+const LOGICAL_W = 720;
+const LOGICAL_H = 1280;
+const SCALE = W / LOGICAL_W;
 
 export interface RundownOptions {
   /** The full name, said once in the hook. */
@@ -134,17 +159,31 @@ export async function downloadRundownVideo(
   const spoken = options.accessToken
     ? await fetchNarration(narrationFrom(beats), options.accessToken)
     : null;
-  const voice = await decodeVoice(spoken);
+  const voice = await decodeVoice(spoken?.audio ?? null);
 
-  // Fit before mixing. See the header — this is the ordering that matters.
+  // Time before mixing. See the header — this is the ordering that matters.
   //
-  // Fitted to the SPEECH, not to the file. A synthesised mp3 carries silence at
-  // both ends, and fitting the beats across it stretches every one of them by
-  // that ratio — an error that compounds until the caption is most of a second
-  // behind the voice by the end. speechSpan finds where the talking is.
+  // THREE PATHS, best first.
+  //
+  //   1. The synthesiser told us when it said every character. Beat starts are
+  //      looked up rather than predicted, and there is nothing left to be wrong
+  //      about. This is the path a narrated rundown takes.
+  //
+  //   2. Audio but no alignment — an older model, or a voice that does not
+  //      return it. Fall back to fitting the estimate onto the span of real
+  //      sound, which is where this was before and is slightly late.
+  //
+  //   3. No audio at all. The estimate stands on its own and the cut is silent.
+  //
+  // Two rounds of tuning path 2 got closer and stayed visibly late, because it
+  // is a model of how a voice reads and a model of a thing is not the thing.
   const estimated = buildTimeline(beats);
   const span = voice ? speechSpan(voice) : null;
-  const timeline = span ? fitTimeline(estimated, span.end - span.start, span.start) : estimated;
+  const timeline = spoken?.alignment
+    ? alignTimeline(estimated, spoken.alignment, narrationOffsets(beats))
+    : span
+      ? fitTimeline(estimated, span.end - span.start, span.start)
+      : estimated;
 
   onProgress?.(0.12, "Mixing the audio");
   const audio = await mixRundownAudio(voice, timeline);
@@ -254,7 +293,15 @@ export async function downloadRundownVideo(
         input.disclaimerClip = undefined;
       }
     }
-    drawRundownFrame(ctx, photo, landmarks, input, t, { width: W, height: H, overlayCanvas });
+    // Reset and re-apply per frame rather than once outside the loop: the
+    // compositor saves and restores freely, and a transform that survived a
+    // stray restore would silently draw one frame at the wrong size.
+    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    drawRundownFrame(ctx, photo, landmarks, input, t, {
+      width: LOGICAL_W,
+      height: LOGICAL_H,
+      overlayCanvas,
+    });
     await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 15 === 0) onProgress?.(0.15 + 0.8 * (frame / frameCount), "Rendering");
   }

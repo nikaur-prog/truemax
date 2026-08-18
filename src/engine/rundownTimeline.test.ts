@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  alignTimeline,
   beatAt,
   beatNear,
   buildTimeline,
@@ -8,6 +9,7 @@ import {
   spokenWeight,
   typedFraction,
 } from "./rundownTimeline.js";
+import { narrationFrom, narrationOffsets } from "./reelScript.js";
 import type { Beat } from "./reelScript.js";
 
 const BEATS: Beat[] = [
@@ -294,4 +296,117 @@ test("a silent e is not a syllable but a short word keeps its vowel", () => {
   assert.equal(spokenWeight("male"), 1);
   assert.equal(spokenWeight("the"), 1);
   assert.equal(spokenWeight("attractive"), 3);
+});
+
+// ---------------------------------------------------------------------------
+// Exact alignment: the end of estimating.
+// ---------------------------------------------------------------------------
+
+/** A fake synthesiser that reads at a constant rate, so the maths is checkable. */
+function alignmentFor(text: string, secondsPerChar = 0.05) {
+  const characters = [...text];
+  const starts = characters.map((_, i) => i * secondsPerChar);
+  const ends = characters.map((_, i) => (i + 1) * secondsPerChar);
+  return { characters, starts, ends };
+}
+
+test("beats are placed on the synthesiser's own timings", () => {
+  const timeline = buildTimeline(BEATS);
+  const text = narrationFrom(BEATS);
+  const offsets = narrationOffsets(BEATS);
+  const aligned = alignTimeline(timeline, alignmentFor(text), offsets);
+
+  aligned.beats.forEach((b, i) => {
+    // Beat i starts when its first character was spoken. Nothing estimated.
+    assert.ok(Math.abs(b.start - offsets[i] * 0.05) < 1e-9, `beat ${i} starts at ${b.start}`);
+    assert.ok(b.duration > 0, `beat ${i} has no duration`);
+  });
+});
+
+test("no beat overlaps the next", () => {
+  // The one thing exact timings could still get wrong: reading a beat's end off
+  // the NEXT beat's first character would make every boundary an overlap.
+  const aligned = alignTimeline(buildTimeline(BEATS), alignmentFor(narrationFrom(BEATS)), narrationOffsets(BEATS));
+  for (let i = 1; i < aligned.beats.length; i++) {
+    const previous = aligned.beats[i - 1];
+    assert.ok(
+      previous.start + previous.duration <= aligned.beats[i].start + 1e-9,
+      `beat ${i - 1} runs into beat ${i}`,
+    );
+  }
+});
+
+test("the offsets line up with the paragraph that was actually sent", () => {
+  // The whole alignment rests on this: the synthesiser indexes its timings
+  // against the text it was handed, so an offset that does not point at the
+  // right character times every caption to the wrong word. Asserted by reading
+  // the beat's own text back out of the paragraph at its offset.
+  const text = narrationFrom(BEATS);
+  const offsets = narrationOffsets(BEATS);
+  BEATS.forEach((beat, i) => {
+    const spoken = beat.spoken ?? beat.line;
+    assert.equal(text.slice(offsets[i], offsets[i] + spoken.length), spoken, `beat ${i}`);
+  });
+  assert.equal(offsets[BEATS.length], text.length, "the final offset is not the end of the text");
+});
+
+test("an unusable alignment falls back wholesale rather than in part", () => {
+  // Splicing one estimated beat into a measured timeline would leave a single
+  // line out of step with everything around it, which is the hardest possible
+  // version of this bug to see.
+  const timeline = buildTimeline(BEATS);
+  const offsets = narrationOffsets(BEATS);
+  const good = alignmentFor(narrationFrom(BEATS));
+
+  assert.equal(alignTimeline(timeline, { characters: [], starts: [], ends: [] }, offsets), timeline);
+
+  // A bad timestamp on a beat BOUNDARY takes the whole thing back to the
+  // estimate. Only the boundaries are read — a beat's start and the end of its
+  // last character — so those are the values that can poison a result, and a
+  // NaN anywhere between them is genuinely harmless rather than merely
+  // tolerated.
+  const broken = { ...good, starts: [...good.starts] };
+  broken.starts[offsets[3]] = Number.NaN;
+  assert.equal(
+    alignTimeline(timeline, broken, offsets),
+    timeline,
+    "a bad boundary timestamp was spliced in rather than refused",
+  );
+
+  // A beat whose end lands before its start — a synthesiser reporting times out
+  // of order — is refused for the same reason.
+  const inverted = { ...good, ends: [...good.ends] };
+  inverted.ends[offsets[4] - 1] = -1;
+  assert.equal(alignTimeline(timeline, inverted, offsets), timeline, "a negative span was accepted");
+});
+
+test("alignment beats the estimate on a voice that does not read evenly", () => {
+  // The reason this exists. A synthesiser that slows down for the second half
+  // of a read is something no character or syllable count predicts, and it is
+  // the class of thing that put the caption behind twice.
+  const text = narrationFrom(BEATS);
+  const offsets = narrationOffsets(BEATS);
+  const characters = [...text];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let cursor = 0;
+  characters.forEach((_, i) => {
+    // Second half read at half speed.
+    const rate = i < characters.length / 2 ? 0.04 : 0.08;
+    starts.push(cursor);
+    cursor += rate;
+    ends.push(cursor);
+  });
+
+  const aligned = alignTimeline(buildTimeline(BEATS), { characters, starts, ends }, offsets);
+  const fitted = fitTimeline(buildTimeline(BEATS), cursor);
+
+  // The aligned timeline puts the last beat where the voice actually reaches
+  // it; the estimate, which assumes an even read, does not.
+  const last = aligned.beats.length - 1;
+  assert.ok(Math.abs(aligned.beats[last].start - starts[offsets[last]]) < 1e-9);
+  assert.ok(
+    Math.abs(fitted.beats[last].start - starts[offsets[last]]) > 0.5,
+    "the estimate happened to be right, so this test proves nothing",
+  );
 });
