@@ -1,4 +1,4 @@
-import { readAllHistory } from "../engine/history.js";
+import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory } from "../engine/history.js";
 import type { StoredScan } from "../engine/history.js";
 import { clearAllPhotos } from "../engine/photoStore.js";
 
@@ -8,7 +8,7 @@ import { clearAllPhotos } from "../engine/photoStore.js";
 // This is where the product's honesty about its own noise has to survive
 // contact with a chart. A line joining weekly dots invites the eye to read
 // every wiggle as progress, and most of the wiggle is measurement spread, not
-// the face changing. So the ±1.3-point noise band is drawn as a shaded ribbon
+// the face changing. So the calibrated noise band is drawn as a shaded ribbon
 // around the running average: a point inside the ribbon has not moved in any
 // way worth believing, and the chart says so by construction rather than by a
 // caption nobody reads.
@@ -18,7 +18,7 @@ import { clearAllPhotos } from "../engine/photoStore.js";
 // saved picture of a face.
 // ---------------------------------------------------------------------------
 
-const NOISE_SD = 1.32; // same figure history.ts reads deltas against
+const NOISE_SD = DISPLAY_NOISE;
 
 const mean = (a: number[]): number => a.reduce((s, x) => s + x, 0) / (a.length || 1);
 
@@ -105,7 +105,9 @@ export function hasHistory(): boolean {
 }
 
 export function openHistory(): void {
-  const scans = readAllHistory();
+  const allScans = readAllHistory();
+  const scans = readAllComparableHistory();
+  const legacyCount = allScans.length - scans.length;
   const wrap = document.createElement("div");
   wrap.className = "hist-overlay";
 
@@ -113,7 +115,9 @@ export function openHistory(): void {
     wrap.innerHTML = `<div class="hist-panel">
       <button class="hist-close" aria-label="Close">✕</button>
       <h2>Your scans</h2>
-      <p class="hist-empty">No scans yet. Your history builds here as you scan, week by week, all on this device.</p>
+      <p class="hist-empty">${legacyCount
+        ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous scoring calibration and will not be mixed into the new trend. Take a new scan to start the calibrated history.`
+        : "No scans yet. Your history builds here as you scan, week by week, all on this device."}</p>
     </div>`;
   } else {
     const avg = mean(scans.map((s) => s.overall));
@@ -127,9 +131,10 @@ export function openHistory(): void {
         <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
       </div>
       ${scans.length >= 2 ? trendSVG(scans) : ""}
-      <p class="hist-note">The shaded band is the ±1.3-point spread between two photos of one face.
+      <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.
         A dot inside it has not really moved — same face, different photo. Only dots clear of the
         band are a change worth reading.</p>
+      ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
       <div class="hist-list">${rows(scans)}</div>
       <p class="hist-foot">Stored on this device only, numbers and a thumbnail of each photo.
         Nothing here was ever uploaded, and clearing your browser data clears it.

@@ -2,22 +2,25 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Occlusion } from "./occlusion.js";
 import type { QualityCheck } from "./quality.js";
 import type { HeadCoveringCheck } from "./headCovering.js";
-import {
-  FRONT_PITCH_OK,
-  FRONT_ROLL_OK,
-  FRONT_SMILE_OK,
-  FRONT_YAW_OK,
-  PHOTO_BRIGHT,
-  lightOk,
-  PHOTO_SHARP_BLOCK,
-} from "./captureGuide.js";
+import { PHOTO_BRIGHT, lightOk, PHOTO_SHARP_BLOCK } from "./captureGuide.js";
 import type { FrameStats } from "./captureGuide.js";
 
-// Upload validation is deliberately fail-closed. A file chooser used to bypass
-// every live-camera gate and send any detected face into scoring. That becomes
-// especially indefensible when the same pixels feed a skin screen: landmark
-// pose correction cannot restore a hidden cheek, and a soft/filtered image can
-// erase exactly the visible findings the user asked the app to inspect.
+// Upload validation blocks only conditions that make facial geometry genuinely
+// unavailable. Once MediaPipe has returned an intact mesh, the pixel dimensions
+// of the original file are not a useful proxy for whether that geometry can be
+// measured: screenshots, downloads and social-media images are routinely under
+// 480 px on one edge while still carrying a clear, large face. Skin observations
+// can report lower confidence separately; they must not prevent the landmark
+// scan from running.
+
+// Uploaded stills get a wider pose envelope than the live shutter guide. The
+// guide can ask for a cleaner capture before a photo exists; rejecting a usable
+// photo after the user selected it is much more costly. These remain inside the
+// pose-correction envelope in quality.ts.
+const UPLOAD_FRONT_YAW_BLOCK = 25;
+const UPLOAD_FRONT_PITCH_BLOCK = 25;
+const UPLOAD_FRONT_ROLL_BLOCK = 16;
+const UPLOAD_FRONT_SMILE_BLOCK = 0.65;
 
 export interface PhotoRejection {
   title: string;
@@ -67,8 +70,8 @@ export function frontPhotoRejection(
   stats: FrameStats,
   occlusion: Occlusion | null,
   lm: NormalizedLandmark[] | null,
-  width: number,
-  height: number,
+  _width: number,
+  _height: number,
 ): PhotoRejection | null {
   if (!quality.faceFound || !lm) {
     return {
@@ -78,40 +81,32 @@ export function frontPhotoRejection(
   }
 
   const box = landmarkBox(lm);
-  if (box.x < 0.025 || box.y < 0.02 || box.x + box.w > 0.975 || box.y + box.h > 0.985) {
+  if (box.x < 0.005 || box.y < 0.005 || box.x + box.w > 0.995 || box.y + box.h > 0.995) {
     return {
       title: "Sorry, part of your face is cut off.",
       detail: "Choose a photo showing your full forehead, both cheeks, ears, jaw and chin with space around them.",
     };
   }
 
-  const facePixels = Math.min(box.w * width, box.h * height);
-  if (Math.min(width, height) < 480 || facePixels < 280) {
-    return {
-      title: "Sorry, that photo is too small for a skin and landmark scan.",
-      detail: "Use the original photo rather than a screenshot or thumbnail, with your face filling most of the frame.",
-    };
-  }
-
-  if (Math.abs(quality.yawDeg) > FRONT_YAW_OK) {
+  if (Math.abs(quality.yawDeg) > UPLOAD_FRONT_YAW_BLOCK) {
     return {
       title: "Sorry, your face is turned too far in this photo.",
       detail: "For the front scan, look straight at the lens with both ears and both cheeks equally visible.",
     };
   }
-  if (Math.abs(quality.pitchDeg) > FRONT_PITCH_OK) {
+  if (Math.abs(quality.pitchDeg) > UPLOAD_FRONT_PITCH_BLOCK) {
     return {
       title: "Sorry, the camera angle is too high or low.",
       detail: "Keep the camera at eye level and your chin neutral—not tipped up or tucked down.",
     };
   }
-  if (Math.abs(quality.rollDeg) > FRONT_ROLL_OK) {
+  if (Math.abs(quality.rollDeg) > UPLOAD_FRONT_ROLL_BLOCK) {
     return {
       title: "Sorry, your head is tilted in this photo.",
       detail: "Hold your head upright so the eye line is level.",
     };
   }
-  if (quality.smileScore > FRONT_SMILE_OK) {
+  if (quality.smileScore > UPLOAD_FRONT_SMILE_BLOCK) {
     return {
       title: "Sorry, we need a neutral expression.",
       detail: "Relax your mouth and jaw. Smiling changes the lip, cheek and jaw measurements.",
@@ -155,15 +150,9 @@ export function sidePhotoRejection(
   quality: QualityCheck,
   stats: FrameStats,
   silhouette: SideSilhouetteCheck,
-  width: number,
-  height: number,
+  _width: number,
+  _height: number,
 ): PhotoRejection | null {
-  if (Math.min(width, height) < 480) {
-    return {
-      title: "Sorry, that profile photo is too small.",
-      detail: "Use the original image with the full head and neck visible—not a screenshot or thumbnail.",
-    };
-  }
   if (!lightOk(stats)) {
     return {
       title: "Sorry, the profile is not evenly lit enough.",

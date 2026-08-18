@@ -13,7 +13,7 @@ test("one scan is not a trend", () => {
 });
 
 test("two scans days apart are not read as progress", () => {
-  // The instrument's own repeatability is 1.3 points. Reporting a two-day
+  // The instrument's own repeatability is represented by NOISE. Reporting a two-day
   // "improvement" would be reporting the camera.
   assert.equal(followUp([at(0, 5.0), at(3, 6.9)]).kind, "too-soon");
 });
@@ -167,11 +167,8 @@ test("a region missing from either end is skipped, not zero-filled", () => {
 });
 
 test("movers sort by magnitude, mixed directions get both named", () => {
-  // Moves are sized to clear REGION_NOISE comfortably. They used to be 1.8 and
-  // 1.5, chosen against a 1.3 floor; the floor rose to 1.8 when the shrinkage
-  // was retired, which left this fixture testing sorting on two moves that no
-  // longer qualify as moves. The subject of the test is the ordering and the
-  // naming, so the fixture grows rather than the floor shrinking.
+  // Moves are sized to clear REGION_NOISE comfortably. The subject of the test
+  // is the ordering and naming, not a duplicated literal threshold.
   const note = regionNote(
     [rp(0, { jaw: 4.0, midface: 7.0, eyes: 5.0 }), rp(40, { jaw: 6.4, midface: 5.0, eyes: 5.2 })],
     LABELS,

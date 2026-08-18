@@ -1,6 +1,7 @@
 import { aggregateScoreToPercentile } from "./scoring.js";
 import { statedPct } from "./precision.js";
 import type { Sex } from "./types.js";
+import { DISPLAY_NOISE } from "./history.js";
 
 // ---------------------------------------------------------------------------
 // What a number on this scale actually means.
@@ -181,11 +182,12 @@ export const LADDER: Array<{ score: number; oneIn: number; capped: boolean }> = 
 // Why the reader should not take one reading to heart.
 //
 // This is not hedging for its own sake. VALIDITY.md §1 measured it: every
-// shippable-licence photograph of one person, scored, moves about ±1.2 points
-// on a face that did not change. A person upset by a single number is reacting
+// shippable-licence photograph of one person, scored on the current calibrated
+// display, moves about ±0.6 points on a face that did not change. A person
+// upset by a single number is reacting
 // to something the instrument cannot resolve, and telling them so is both the
 // honest thing and the thing most likely to defuse it.
-export const PHOTO_VARIANCE = 1.2;
+export const PHOTO_VARIANCE = DISPLAY_NOISE;
 
 export function varianceLine(): string {
   return `One photograph is not a verdict: across many photographs of the same

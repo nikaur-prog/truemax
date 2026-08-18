@@ -97,16 +97,41 @@ export function openBillingPortal(): Promise<BillingResult> {
   return billingRedirect("/api/create-portal-session");
 }
 
-export type CheckoutResult = "success" | "cancelled";
+export interface CheckoutResult {
+  status: "success" | "cancelled";
+  sessionId: string | null;
+}
 
 export function consumeCheckoutResult(): CheckoutResult | null {
   const url = new URL(location.href);
   const value = url.searchParams.get("checkout");
   if (value !== "success" && value !== "cancelled") return null;
+  const sessionId = url.searchParams.get("session_id");
   url.searchParams.delete("checkout");
   url.searchParams.delete("plan");
+  url.searchParams.delete("session_id");
   history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  return value;
+  return { status: value, sessionId };
+}
+
+export async function reconcileEntitlement(sessionId?: string | null): Promise<boolean> {
+  const accessToken = await currentAccessToken();
+  if (!accessToken) return false;
+
+  try {
+    const response = await fetch("/api/reconcile-entitlement", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(sessionId ? { sessionId } : {}),
+    });
+    const body = await response.json().catch(() => null) as { reconciled?: boolean } | null;
+    return response.ok && body?.reconciled === true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

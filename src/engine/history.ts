@@ -16,6 +16,9 @@ export interface StoredScan {
   sex: Sex;
   overall: number;
   regions: Partial<Record<RegionId, number>>;
+  // Missing means the scan predates score calibration versioning. Scores from
+  // different versions must never be joined into one trend or delta.
+  scoreVersion?: number;
 }
 
 export interface ScanDelta {
@@ -37,6 +40,16 @@ export interface ScanDelta {
 const LOG_CAP = 120;
 const LOG_KEY = (sex: Sex) => `truemax:history:${sex}`;
 
+export const CURRENT_SCORE_VERSION = 2;
+
+export function isCurrentScore(scan: StoredScan): boolean {
+  return scan.scoreVersion === CURRENT_SCORE_VERSION;
+}
+
+export function comparableScans(scans: StoredScan[]): StoredScan[] {
+  return scans.filter(isCurrentScore);
+}
+
 export function readHistory(sex: Sex): StoredScan[] {
   try {
     const raw = localStorage.getItem(LOG_KEY(sex));
@@ -54,6 +67,14 @@ export function readAllHistory(): StoredScan[] {
   return [...readHistory("male"), ...readHistory("female")].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
+}
+
+export function readComparableHistory(sex: Sex): StoredScan[] {
+  return comparableScans(readHistory(sex));
+}
+
+export function readAllComparableHistory(): StoredScan[] {
+  return comparableScans(readAllHistory());
 }
 
 function writeHistory(sex: Sex, log: StoredScan[]): void {
@@ -76,8 +97,9 @@ const mean = (a: number[]): number => a.reduce((s, x) => s + x, 0) / (a.length |
 //                alternative.
 export type DeltaReading = "noise" | "tooSoon" | "worthNoting";
 
-// Measured, not chosen. Rescanning the same person from different photographs
-// moves the overall score with an SD of 1.32 — and that figure is an UPPER
+// Measured, not chosen. On the former uncalibrated display, rescanning the same
+// person from different photographs moved the overall score with an SD of
+// 1.32 — and that figure is an UPPER
 // bound on noise, because the repeat photos it came from span years of genuine
 // ageing, so some of that spread is real change rather than measurement error.
 // Between different people the SD is 1.20, which is the uncomfortable part: two
@@ -88,34 +110,36 @@ export type DeltaReading = "noise" | "tooSoon" | "worthNoting";
 // "two days means lighting, two weeks means real" without reference to the
 // spread would be exactly the kind of invention that was stripped out of the
 // blur gate and the population curve.
-// 0.87, not the measured 1.32: scores now pass through the 0.66 measurement-
-// noise shrinkage in scoring.ts, which compresses the same-face spread by the
-// same factor (0.66 x 1.32 = 0.87). Leaving this at 1.32 would have called
-// genuine, now-compressed progress "noise".
-const NOISE_SD = 0.87;
+// Aggregate scores now use the conservative 0.40 calibration in scoring.ts.
+// The same measured spread therefore becomes about 0.53 points. We round the
+// operational floor UP to 0.6: a slightly wide floor can hide slow progress;
+// a narrow one invents progress from the camera.
+export const DISPLAY_NOISE = 0.6;
 
 // Below this, a face has not changed shape. Body composition and skin move over
 // weeks; nothing structural moves over a long weekend.
 const STRUCTURAL_DAYS = 4;
 
 export function readDelta(overall: number, daysAgo: number): DeltaReading {
-  if (Math.abs(overall) < NOISE_SD) return "noise";
+  if (Math.abs(overall) < DISPLAY_NOISE) return "noise";
   return daysAgo < STRUCTURAL_DAYS ? "tooSoon" : "worthNoting";
 }
 
 export function compareAndStore(report: Report): ScanDelta | null {
   const log = readHistory(report.sex);
-  const prev = log.length ? log[log.length - 1] : null;
+  const comparable = comparableScans(log);
+  const prev = comparable.length ? comparable[comparable.length - 1] : null;
 
   const current: StoredScan = {
     date: new Date().toISOString(),
     sex: report.sex,
     overall: report.overall,
     regions: Object.fromEntries(report.regions.map((r) => [r.region, r.score])),
+    scoreVersion: CURRENT_SCORE_VERSION,
   };
   // Average is taken over PRIOR scans, before this one is appended, so a fresh
   // scan is compared to where the face usually lands rather than to itself.
-  const priorMean = log.length ? mean(log.map((s) => s.overall)) : null;
+  const priorMean = comparable.length ? mean(comparable.map((s) => s.overall)) : null;
   writeHistory(report.sex, [...log, current]);
 
   if (!prev) return null;
@@ -128,7 +152,7 @@ export function compareAndStore(report: Report): ScanDelta | null {
     daysAgo,
     overall,
     vsAverage: priorMean == null ? null : Math.round((report.overall - priorMean) * 10) / 10,
-    averageOf: log.length,
+    averageOf: comparable.length,
     reading: readDelta(overall, daysAgo),
     regions: report.regions
       .filter((r) => prev.regions[r.region] !== undefined)

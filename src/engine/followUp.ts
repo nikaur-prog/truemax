@@ -1,3 +1,5 @@
+import { DISPLAY_NOISE } from "./history.js";
+
 // ---------------------------------------------------------------------------
 // What Max says after the second scan, and the tenth.
 //
@@ -62,19 +64,14 @@ const DAY = 86_400_000;
 
 // Below this, a difference is the instrument rather than the face.
 //
-// Two photographs of one unchanged face differ by about 1.3 points. This sat at
-// 0.9 for exactly as long as scores passed through the 0.66 shrinkage, which
-// compressed that spread to ~0.87 — the floor tracked the scale, correctly.
-//
-// The shrinkage has been retired (see scoring.ts), so the displayed spread is
-// the raw 1.3 again and the floor has to come back with it. Leaving it at 0.9
-// would be the dangerous direction of this error: a floor BELOW the real spread
-// invents progress, cheerfully reporting a 1.0-point jump between two photos of
-// a face that did not change. A floor above it merely hides slow progress.
+// Two photographs of one unchanged face differed by about 1.32 points on the
+// former uncalibrated display. The current 0.40 aggregate calibration compresses
+// that observed spread to about 0.53, rounded up to 0.6 so the app errs against
+// inventing progress.
 //
 // This is the single most important number in the file and it must move in step
 // with the display scale, in both directions.
-export const NOISE = 1.3;
+export const NOISE = DISPLAY_NOISE;
 
 // How long a routine gets before "no change" becomes a finding rather than
 // impatience. Skin turns over in roughly six weeks and body composition shows
@@ -178,17 +175,12 @@ export interface RegionPoint {
 // so a region reading cannot be LESS noisy than the overall's, and a test pins
 // that ordering.
 //
-// It sat at 1.3 while the overall floor was 0.9 — the raw pre-shrinkage spread,
-// used as a conservative stand-in. Retiring the shrinkage moved the overall
-// floor to that same 1.3, which would have made a region exactly as trustworthy
-// as the whole face. It is not: fewer measurements, more noise.
-//
-// 1.8 keeps the gap roughly proportional to what it was. Averaging four
+// 0.8 keeps the region floor above the 0.6 overall floor. Averaging four
 // correlated metrics instead of thirty implies a wider ratio still, but a floor
 // set too high only hides slow region progress, while one set too low INVENTS
 // it — and on a sentence that names somebody's jaw specifically, inventing is
 // much the worse failure. Provisional until the calibration set pins it.
-export const REGION_NOISE = 1.8;
+export const REGION_NOISE = 0.8;
 
 export interface RegionShift {
   region: string;
