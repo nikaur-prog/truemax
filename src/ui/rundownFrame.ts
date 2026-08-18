@@ -477,9 +477,30 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   // as a strict subset of the true figure, so running it back down is as
   // geometrically honest as running it up.
   const RETRACT = 0.42;
-  const end = beat.start + beat.duration - CUT_CLEAR;
-  const leaving = clamp01((end - t) / RETRACT);
+  const leaving = clamp01((overlayEnds(beat) - t) / RETRACT);
   return Math.min(drawn, leaving);
+}
+
+/**
+ * When the measurement has to be off the face, in absolute seconds.
+ *
+ * Not simply the end of the beat. A metric beat hands its last third to a
+ * cutaway — a different photograph, which the overlay cannot be drawn over
+ * because the lines live in the measured face's landmark space. So on those
+ * beats the figure has to be gone by the time the cutaway arrives, not by the
+ * time the beat does.
+ *
+ * Scheduling the retraction against the beat's end instead put the whole
+ * animation inside the cutaway window, where nothing is drawn: the lines simply
+ * vanished on the cut and the retraction was invisible on exactly the beats
+ * that have one. Found by rendering it, after the tests for it passed.
+ */
+function overlayEnds(beat: TimedBeat): number {
+  const cut = beat.start + beat.duration - CUT_CLEAR;
+  if (beat.beat.kind !== "metric") return cut;
+  // The cutaway takes over here — see brollFor, which owns the same fraction.
+  const cutaway = beat.start + beat.duration * (1 - CUTAWAY_TAIL);
+  return Math.min(cut, cutaway);
 }
 
 // A beat of clean frame before the cut.

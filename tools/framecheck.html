@@ -3,6 +3,7 @@
 <script type="module">
 import { drawRundownFrame } from "/src/ui/rundownFrame.ts";
 import { buildTimeline } from "/src/engine/rundownTimeline.ts";
+import { METRICS } from "/src/engine/metrics.ts";
 
 // A stand-in photograph: a flat portrait with a face-shaped blob, enough for
 // the crop maths to have a bounding box to work against.
@@ -28,9 +29,17 @@ p.strokeStyle = "#8a6a55"; p.lineWidth = 7;
 p.beginPath(); p.arc(450,640,58,0.25,Math.PI-0.25); p.stroke();
 
 // Landmarks spanning the blob.
+//
+// 468 of them, which is MediaPipe's full mesh size, because a measurement
+// recipe indexes specific points by number — landmarks[EYE_R_INNER] and so on.
+// At 60 the array simply had no entry there and every overlay silently drew
+// nothing, which is why this harness could not see the animation it is most
+// needed for. The geometry is a ring rather than a face, so the LINES it
+// produces are nonsense; what is being checked here is the motion, not the
+// anatomy, and for that a wrong line in the right place is enough.
 const lm = [];
-for (let i=0;i<60;i++){
-  const a = (i/60)*Math.PI*2;
+for (let i=0;i<468;i++){
+  const a = (i/468)*Math.PI*2;
   lm.push({ x: (450+Math.cos(a)*180)/900, y: (520+Math.sin(a)*240)/1200, z: 0 });
 }
 
@@ -68,16 +77,57 @@ const beats = [
   { kind: "curve", line: "5.0 is the exact middle, and that shaded band is where most of them are.", percentile: 92 },
   { kind: "search", line: "Want yours analysed? truemax.app." },
 ];
+// A REAL scored metric, so the overlay actually draws.
+//
+// This map was empty, which meant every metric beat rendered a bare
+// photograph — so the harness could check the card, the curve and the search
+// bar, and was silently blind to the one thing it is most needed for: the
+// measurement animation. The def comes from the real table; only the scoring
+// fields are fabricated, since the recipe reads geometry from the landmarks and
+// nothing else.
+const def = METRICS.find((m) => m.id === "canthalTilt");
+const metrics = new Map();
+if (def) {
+  metrics.set(def.id, {
+    def,
+    value: 6.4,
+    z: 1.1, zEff: 1.1, percentile: 86, markerPct: 86,
+    score: 8.1, idealRange: [3, 9],
+  });
+}
+
 const timeline = buildTimeline(beats);
 const overlayCanvas = document.createElement("canvas");
 const ctx = document.getElementById("c").getContext("2d");
+// Applied per draw, matching the exporter, so a stray restore cannot leave one
+// frame at the wrong size.
+const frame = (t) => {
+  ctx.setTransform(window.k, 0, 0, window.k, 0, 0);
+  drawRundownFrame(ctx, photo, lm, { timeline, metrics, name: "Marlon", broll: [{ image: cut }] }, t,
+    { width: 720, height: 1280, overlayCanvas });
+};
+
+// Render at the real export size, through the same transform the exporter uses.
+//
+// rundownExport composites 1080x1920 by authoring at 720x1280 and scaling the
+// context. That path had no way to be looked at — the harness drew at 720
+// directly — so "the layout is unchanged, only the raster is bigger" was an
+// argument rather than an observation. window.scale(1.5) makes it an
+// observation.
+window.scale = (k) => {
+  const c = document.getElementById("c");
+  c.width = Math.round(720 * k);
+  c.height = Math.round(1280 * k);
+  window.k = k;
+  return true;
+};
+window.k = 1;
 
 window.shot = (i) => {
   const b = timeline.beats[i];
   // Late in the beat, so any entrance animation has finished.
   const t = b.start + b.duration * 0.8;
-  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [{ image: cut }] }, t,
-    { width: 720, height: 1280, overlayCanvas });
+  frame(t);
   return true;
 };
 
@@ -85,8 +135,7 @@ window.shot = (i) => {
 // what a beat looks like at a given moment rather than only near its end.
 window.shotAt = (i, frac) => {
   const b = timeline.beats[i];
-  drawRundownFrame(ctx, photo, lm, { timeline, metrics: new Map(), name: "Marlon", broll: [{ image: cut }] },
-    b.start + b.duration * frac, { width: 720, height: 1280, overlayCanvas });
+  frame(b.start + b.duration * frac);
   return true;
 };
 window.ready = true;

@@ -471,3 +471,29 @@ test("a measurement is never drawn at a size nobody can see", () => {
   // And solid whenever there is a real figure to see.
   assert.ok(overlayAlpha(b, b.drawAt!) > 0.99, "not solid once drawn");
 });
+
+test("the figure is gone before a cutaway takes the frame", () => {
+  // Found by rendering, after the retraction tests above passed.
+  //
+  // A metric beat hands its last third to a cutaway, and the overlay cannot be
+  // drawn over one — the lines live in the measured face's landmark space. The
+  // retraction was scheduled against the END of the beat, which put the whole
+  // animation inside the cutaway window where nothing is drawn: the lines
+  // vanished on the cut and the retraction was invisible on exactly the beats
+  // that have one.
+  const timeline = buildTimeline([
+    { kind: "metric", line: "a canthal tilt of 6.4 degrees, so the outer corner sits above the inner", metricId: "canthalTilt" },
+    { kind: "cta", line: "Go and get yours." },
+  ]);
+  const b = timeline.beats[0];
+
+  // brollFor hands the frame over here. Asserted against the same fraction the
+  // renderer uses, so the two cannot drift apart silently.
+  const CUTAWAY_TAIL = 0.34;
+  const handover = b.start + b.duration * (1 - CUTAWAY_TAIL);
+  assert.equal(drawProgress(b, handover), 0, "still drawing when the cutaway arrives");
+
+  // And it was still fully up a moment before it started withdrawing, so the
+  // fix did not simply move the whole animation earlier.
+  assert.ok(drawProgress(b, handover - 0.6) > 0.999, "retracted far too early");
+});
