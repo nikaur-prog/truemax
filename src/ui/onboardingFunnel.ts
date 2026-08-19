@@ -119,20 +119,20 @@ function chip(key: string, label: string, selected: boolean, sub = ""): string {
     aria-pressed="${selected}"><b>${esc(label)}</b>${sub ? `<span>${esc(sub)}</span>` : ""}</button>`;
 }
 
-function readInputs(profile: OnboardingProfile): void {
-  if (!host) return;
-  const value = (id: string) => (host?.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)?.value || "").trim();
-  if (host.querySelector("#trial-first")) {
+function readInputs(profile: OnboardingProfile, root = host): void {
+  if (!root) return;
+  const value = (id: string) => (root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)?.value || "").trim();
+  if (root.querySelector("#trial-first")) {
     profile.firstName = value("trial-first");
     profile.lastName = value("trial-last");
     profile.mobile = value("trial-mobile");
   }
-  if (host.querySelector("#trial-dob")) profile.dateOfBirth = value("trial-dob");
-  if (host.querySelector("#trial-success")) {
+  if (root.querySelector("#trial-dob")) profile.dateOfBirth = value("trial-dob");
+  if (root.querySelector("#trial-success")) {
     profile.successOutcome = value("trial-success");
     profile.expectations = value("trial-expectations");
   }
-  if (host.querySelector("#trial-strengths")) {
+  if (root.querySelector("#trial-strengths")) {
     profile.strengths = value("trial-strengths");
     profile.supportAreas = value("trial-support");
   }
@@ -150,6 +150,14 @@ function close(): void {
   host = null;
   document.body.classList.remove("funnel-open");
   document.removeEventListener("keydown", onKey);
+}
+
+// Identity changes override the compulsory-question lock. Keeping a previous
+// account's profile panel visible is never an acceptable way to preserve form
+// progress; failed saves are already queued under that exact user id.
+export function closeTrialFunnel(): void {
+  locked = false;
+  close();
 }
 
 function onKey(event: KeyboardEvent): void {
@@ -175,12 +183,14 @@ export async function openTrialFunnel(
   locked = false;
   const required = Boolean(options.required);
   close();
-  host = document.createElement("div");
-  host.className = "trial-overlay";
-  host.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Build your TrueMax pathway">
+  const activeHost = document.createElement("div");
+  host = activeHost;
+  const alive = () => host === activeHost && activeHost.isConnected;
+  activeHost.className = "trial-overlay";
+  activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Build your TrueMax pathway">
     <div class="trial-loader"></div><p>Preparing your pathway…</p>
   </div>`;
-  document.body.appendChild(host);
+  document.body.appendChild(activeHost);
   document.body.classList.add("funnel-open");
   document.addEventListener("keydown", onKey);
 
@@ -188,18 +198,19 @@ export async function openTrialFunnel(
   try {
     if (!preview) profile = await loadOnboardingProfile(user);
   } catch {
-    if (!host) return;
-    host.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true">
+    if (!alive()) return;
+    activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <span class="trial-eyebrow">PATHWAY</span>
       <h2>We couldn't load your profile.</h2>
       <p>Your analysis is safe on this device. Please try again when your connection is stable.</p>
       <button class="btn pri" id="trial-retry" type="button">Try again</button>
     </div>`;
-    host.querySelector(".trial-close")?.addEventListener("click", close);
-    host.querySelector("#trial-retry")?.addEventListener("click", () => void openTrialFunnel(user));
+    activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    activeHost.querySelector("#trial-retry")?.addEventListener("click", () => void openTrialFunnel(user));
     return;
   }
+  if (!alive()) return;
 
   const localGoals = loadProfile();
   if (!profile.primaryObjectives.length && localGoals.goals.length) profile.primaryObjectives = [...localGoals.goals];
@@ -223,11 +234,11 @@ export async function openTrialFunnel(
   // payment screen becomes a screensaver.
   let demoRan = false;
   const runMaxDemo = () => {
-    if (demoRan || !host) return;
+    if (demoRan || !alive()) return;
     demoRan = true;
-    const feed = host.querySelector<HTMLElement>(".max-feed");
-    const say = host.querySelector<HTMLElement>(".max-say");
-    const svg = host.querySelector<SVGSVGElement>(".max-stage .mx-svg");
+    const feed = activeHost.querySelector<HTMLElement>(".max-feed");
+    const say = activeHost.querySelector<HTMLElement>(".max-say");
+    const svg = activeHost.querySelector<SVGSVGElement>(".max-stage .mx-svg");
     if (!feed || !say || !svg) return;
     // He may be lying on his side from a knock. The demo picks him back up:
     // answering a question face-down would be committing to the bit too hard.
@@ -240,7 +251,7 @@ export async function openTrialFunnel(
     ask.classList.add("show");
 
     window.setTimeout(() => {
-      if (!host) return;
+      if (!alive()) return;
       // Thinking: dots in the bubble, thinking face on him. The pause is the
       // point — an instant answer reads as a recording, a visible think reads
       // as somebody working on YOUR question.
@@ -250,7 +261,7 @@ export async function openTrialFunnel(
       svg.classList.add("mx-mood-thinking");
 
       window.setTimeout(() => {
-        if (!host) return;
+        if (!alive()) return;
         say.classList.remove("pondering");
         svg.classList.remove("mx-mood-thinking");
         svg.classList.add("mx-mood-happy");
@@ -264,7 +275,7 @@ export async function openTrialFunnel(
   };
 
   const drawOffer = () => {
-    if (!host) return;
+    if (!alive()) return;
     // Inside the wrapped native app there is no offer screen at all. Apple
     // requires in-app digital subscriptions to go through In-App Purchase,
     // and outside the US an app may not even link to a web checkout — so
@@ -281,7 +292,7 @@ export async function openTrialFunnel(
     // later. This is the one moment in the product where money is asked for,
     // and it should arrive like a result, not like a form. Pure CSS, and the
     // global reduced-motion rule collapses all of it to a plain appearance.
-    host.innerHTML = `<div class="trial-shell trial-offer offer-enter" role="dialog" aria-modal="true" aria-labelledby="trial-title">
+    activeHost.innerHTML = `<div class="trial-shell trial-offer offer-enter" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <div class="trial-offer-head">
         <div><span class="trial-eyebrow">YOUR PATHWAY IS READY</span>
@@ -337,8 +348,8 @@ export async function openTrialFunnel(
       <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
     </div>`;
 
-    host.querySelector(".trial-close")?.addEventListener("click", close);
-    host.querySelector(".trial-decline")?.addEventListener("click", close);
+    activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    activeHost.querySelector(".trial-decline")?.addEventListener("click", close);
 
     // The sequence: the offer settles, Max pops up from behind the card's
     // bottom edge, waves (and puts his arm down), and only THEN does the
@@ -347,13 +358,15 @@ export async function openTrialFunnel(
     // per screen: a character who repeats his introduction stops being
     // charming somewhere around the third time.
     window.setTimeout(() => {
-      const stage = host?.querySelector(".max-stage");
+      if (!alive()) return;
+      const stage = activeHost.querySelector(".max-stage");
       stage?.classList.add("up");
       const svg = stage?.querySelector(".mx-svg");
       const arm = stage?.querySelector(".mx-arm");
       window.setTimeout(() => arm?.classList.add("waving"), 480);
       window.setTimeout(() => {
-        const say = host?.querySelector(".max-say");
+        if (!alive()) return;
+        const say = activeHost.querySelector(".max-say");
         if (say instanceof HTMLElement) {
           say.classList.add("show");
           typewriteBlock(say);
@@ -371,11 +384,11 @@ export async function openTrialFunnel(
     // Knockable here: he is a toy on this screen. Tapping shocks him and tips
     // him over; a flying bot with no legs stays down until the next tap
     // flies him back up.
-    wireMaxInteractions(host.querySelector<HTMLElement>(".max-stage"), { knockable: true });
+    wireMaxInteractions(activeHost.querySelector<HTMLElement>(".max-stage"), { knockable: true });
 
     // The stat counts up rather than appearing. A number that ticks reads as
     // something being measured; the same number sitting still reads as a claim.
-    const counter = host.querySelector<HTMLElement>(".stat-num");
+    const counter = activeHost.querySelector<HTMLElement>(".stat-num");
     if (counter && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const target = Number(counter.dataset.to) || 0;
       const started = performance.now();
@@ -391,19 +404,19 @@ export async function openTrialFunnel(
 
     // Tapping a card opens what is actually in it, rather than making people
     // read two feature lists at once.
-    for (const card of host.querySelectorAll<HTMLElement>(".plan-card")) {
+    for (const card of activeHost.querySelectorAll<HTMLElement>(".plan-card")) {
       card.addEventListener("click", (event) => {
         // Not when the tap was the buy button — that has its own job.
         if ((event.target as HTMLElement).closest("[data-checkout]")) return;
         const opening = !card.classList.contains("open");
-        for (const other of host?.querySelectorAll<HTMLElement>(".plan-card") || []) {
+        for (const other of activeHost.querySelectorAll<HTMLElement>(".plan-card")) {
           other.classList.toggle("open", other === card && opening);
         }
         // Max reacts to the card being opened rather than narrating it: one
         // short wave, no new sentence. Cheap, and it makes the screen feel
         // inhabited instead of animated-at.
         if (opening) {
-          const arm = host?.querySelector<HTMLElement>(".mx-arm");
+          const arm = activeHost.querySelector<HTMLElement>(".mx-arm");
           arm?.classList.remove("waving");
           // Reflow, or re-adding the class in the same frame does nothing.
           void arm?.offsetWidth;
@@ -415,7 +428,7 @@ export async function openTrialFunnel(
     // renewal sentence and the button all have to move together: a card
     // reading "$11.99 / month" under a selected Yearly toggle is the kind of
     // mismatch somebody notices only after they have been charged.
-    const bill = host.querySelector<HTMLElement>(".billtoggle");
+    const bill = activeHost.querySelector<HTMLElement>(".billtoggle");
     if (bill) {
       for (const opt of bill.querySelectorAll<HTMLButtonElement>(".bt-opt")) {
         opt.addEventListener("click", () => {
@@ -424,7 +437,7 @@ export async function openTrialFunnel(
           for (const other of bill.querySelectorAll(".bt-opt")) {
             other.classList.toggle("on", other === opt);
           }
-          const card = host?.querySelector<HTMLElement>('.plan-card[data-plan="max"]');
+          const card = activeHost.querySelector<HTMLElement>('.plan-card[data-plan="max"]');
           if (!card) return;
           const price = card.querySelector<HTMLElement>(".plan-top b");
           // :scope > small, not just small. The price itself contains a
@@ -446,27 +459,28 @@ export async function openTrialFunnel(
       }
     }
 
-    for (const button of host.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {
+    for (const button of activeHost.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {
       button.addEventListener("click", async () => {
         if (busy || button.disabled) return;
         busy = true;
-        const status = host?.querySelector<HTMLElement>(".trial-status");
-        for (const item of host?.querySelectorAll<HTMLButtonElement>("[data-checkout]") || []) item.disabled = true;
+        const status = activeHost.querySelector<HTMLElement>(".trial-status");
+        for (const item of activeHost.querySelectorAll<HTMLButtonElement>("[data-checkout]")) item.disabled = true;
         track("checkout-started");
         button.textContent = "Opening secure Checkout…";
         // Starter has no yearly price, so the toggle only governs Max. Sending
         // billing: "annual" for Starter would resolve to the monthly price
         // anyway, but asking for something that does not exist is how a wrong
         // charge happens later when somebody adds the price and forgets this.
-        const wantsAnnual = host?.querySelector<HTMLElement>(".billtoggle")?.dataset.billing === "annual";
+        const wantsAnnual = activeHost.querySelector<HTMLElement>(".billtoggle")?.dataset.billing === "annual";
         const chosen = button.dataset.checkout as PlanTier;
         const result = await startTrialCheckout(
           chosen,
           chosen === "max" && wantsAnnual ? "annual" : "monthly",
         );
-        if (!result.ok && host) {
+        if (!alive()) return;
+        if (!result.ok) {
           busy = false;
-          for (const item of host.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {
+          for (const item of activeHost.querySelectorAll<HTMLButtonElement>("[data-checkout]")) {
             item.disabled = item.dataset.checkout === "max" && !adult;
           }
           button.textContent = button.dataset.checkout === "starter" ? "Start 7-day free trial" : "Try Max free for 7 days";
@@ -477,15 +491,16 @@ export async function openTrialFunnel(
   };
 
   const complete = async () => {
-    if (busy || !host) return;
-    readInputs(profile);
+    if (busy || !alive()) return;
+    readInputs(profile, activeHost);
     busy = true;
-    const next = host.querySelector<HTMLButtonElement>("#trial-next");
+    const next = activeHost.querySelector<HTMLButtonElement>("#trial-next");
     if (next) {
       next.disabled = true;
       next.textContent = "Saving your pathway…";
     }
     const result = preview ? { ok: true } : await saveOnboardingProfile(user, profile);
+    if (!alive()) return;
     busy = false;
 
     // A failed write must NEVER strand somebody at the end of the quiz.
@@ -501,7 +516,7 @@ export async function openTrialFunnel(
     // database is not a reason to withhold the plans from somebody who just
     // spent two minutes telling us about themselves.
     if (!result.ok && !preview) {
-      queueOnboardingProfile(profile);
+      queueOnboardingProfile(user, profile);
       profile.completedAt = new Date().toISOString();
     }
 
@@ -520,7 +535,7 @@ export async function openTrialFunnel(
   };
 
   const draw = () => {
-    if (!host) return;
+    if (!alive()) return;
     const headers = [
       ["A LITTLE ABOUT YOU", `Let's make this yours, ${esc(profile.firstName || "first")}.`, "Your email already comes from your secure account. We only ask for what shapes your experience."],
       ["AGE & DISCOVERY", "Keep the experience age-appropriate.", "Your date of birth controls which plan can be offered. Your mobile is optional and is never required for analysis."],
@@ -554,7 +569,7 @@ export async function openTrialFunnel(
         <div class="privacy-note"><b>Your face analysis stays on this device by default.</b><span>These answers save to your account so your pathway can follow you. Photo-feedback sharing remains a separate, optional Yes/No choice.</span></div>`;
     }
 
-    host.innerHTML = `<div class="trial-shell" role="dialog" aria-modal="true" aria-labelledby="trial-title">
+    activeHost.innerHTML = `<div class="trial-shell" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <header class="trial-nav">
         <div class="trial-brand">TRUE<span>MAX</span></div>
         <div class="trial-progress" aria-label="Step ${step + 1} of ${total}">${progress(total, step)}</div>
@@ -573,17 +588,17 @@ export async function openTrialFunnel(
       </footer>
     </div>`;
 
-    host.querySelector(".trial-close")?.addEventListener("click", close);
-    host.querySelector("#trial-back")?.addEventListener("click", () => {
+    activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    activeHost.querySelector("#trial-back")?.addEventListener("click", () => {
       if (step === 0) return close();
-      readInputs(profile);
+      readInputs(profile, activeHost);
       step--;
       draw();
     });
-    host.querySelector("#trial-next")?.addEventListener("click", () => {
-      readInputs(profile);
+    activeHost.querySelector("#trial-next")?.addEventListener("click", () => {
+      readInputs(profile, activeHost);
       const issue = validateOnboardingStep(profile, step);
-      const status = host?.querySelector<HTMLElement>(".trial-status");
+      const status = activeHost.querySelector<HTMLElement>(".trial-status");
       if (issue) {
         if (status) status.textContent = issue;
         return;
@@ -594,13 +609,13 @@ export async function openTrialFunnel(
         draw();
       }
     });
-    for (const choice of host.querySelectorAll<HTMLButtonElement>(".trial-choice")) {
+    for (const choice of activeHost.querySelectorAll<HTMLButtonElement>(".trial-choice")) {
       choice.addEventListener("click", () => {
         const key = choice.dataset.key || "";
         if (step === 1) profile.discoverySource = key as OnboardingProfile["discoverySource"];
         else if (step === 2) profile.primaryObjectives = toggle(profile.primaryObjectives, key);
         else if (step === 5) profile.quietTopics = toggle(profile.quietTopics, key);
-        for (const item of host?.querySelectorAll<HTMLButtonElement>(".trial-choice") || []) {
+        for (const item of activeHost.querySelectorAll<HTMLButtonElement>(".trial-choice")) {
           const selected = step === 1
             ? profile.discoverySource === item.dataset.key
             : (step === 2 ? profile.primaryObjectives : profile.quietTopics).includes(item.dataset.key || "");

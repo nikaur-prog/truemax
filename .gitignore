@@ -24,3 +24,7 @@ calib/*
 # up as an untracked directory after any session that looked at a rendered
 # frame. A build cache, not source.
 .vite/
+supabase/.temp/
+
+# Local visual exports created by the renderer and frame-check tools.
+exports/

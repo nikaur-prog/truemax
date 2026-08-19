@@ -7,6 +7,11 @@ import {
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { ANALYSIS_MODES, loadAnalysisMode, loadVerdictTone, saveAnalysisMode } from "../engine/analysisMode.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
+import {
+  listSideCorrectionFeedback,
+  revokeSideCorrectionFeedback,
+} from "../engine/sideFeedback.js";
+import type { SharedSideFeedback } from "../engine/sideFeedback.js";
 import { askVerdictTone } from "./tonePrompt.js";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +59,10 @@ function close(): void {
   document.removeEventListener("keydown", onKey);
 }
 
+export function closeSettings(): void {
+  close();
+}
+
 function onKey(event: KeyboardEvent): void {
   if (event.key === "Escape") close();
 }
@@ -74,14 +83,21 @@ function readableDate(iso: string): string {
   return `${Number(d)} ${months[Number(m) - 1] ?? ""} ${y}`;
 }
 
+function readableTimestamp(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "Unknown date";
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 export async function openSettings(user: User): Promise<void> {
   close();
-  host = document.createElement("div");
-  host.className = "trial-overlay settings-overlay";
-  host.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Your profile">
+  const activeHost = document.createElement("div");
+  host = activeHost;
+  activeHost.className = "trial-overlay settings-overlay";
+  activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Your profile">
     <div class="trial-loader"></div><p>Loading your profile…</p>
   </div>`;
-  document.body.appendChild(host);
+  document.body.appendChild(activeHost);
   document.body.classList.add("funnel-open");
   document.addEventListener("keydown", onKey);
 
@@ -89,28 +105,57 @@ export async function openSettings(user: User): Promise<void> {
   try {
     profile = await loadOnboardingProfile(user);
   } catch {
-    if (!host) return;
-    host.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true">
+    if (host !== activeHost || !activeHost.isConnected) return;
+    activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true">
       <button class="trial-close" type="button" aria-label="Close">✕</button>
       <span class="trial-eyebrow">YOUR PROFILE</span>
       <h2>We couldn't load your profile.</h2>
       <p>Your scans are safe on this device. Try again when your connection is steady.</p>
       <button class="btn pri" id="set-retry" type="button">Try again</button>
     </div>`;
-    host.querySelector(".trial-close")?.addEventListener("click", close);
-    host.querySelector("#set-retry")?.addEventListener("click", () => void openSettings(user));
+    activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    activeHost.querySelector("#set-retry")?.addEventListener("click", () => void openSettings(user));
     return;
   }
+  if (host !== activeHost || !activeHost.isConnected) return;
 
   const local = loadProfile();
   let mode = loadAnalysisMode();
   let busy = false;
   let dirty = false;
+  let feedbackItems: SharedSideFeedback[] | null = null;
+  let feedbackMessage = "";
+  let feedbackLoadFailed = false;
+  let feedbackRequest = 0;
+  const revokingFeedback = new Set<string>();
+
+  const feedbackMarkup = (): string => {
+    if (feedbackItems === null) {
+      return `<div class="set-feedback-state"><span class="trial-loader" aria-hidden="true"></span><span>Loading shared feedback…</span></div>`;
+    }
+    if (!feedbackItems.length) {
+      return `<div class="set-feedback-empty">You have no side-correction feedback stored for review.</div>`;
+    }
+    return `<div class="set-feedback-list">${feedbackItems.map((item) => {
+      const revoking = revokingFeedback.has(item.submissionId);
+      return `<article class="set-feedback-item">
+        <div>
+          <b>Side correction shared ${esc(readableTimestamp(item.createdAt))}</b>
+          <span>Automatically deletes by ${esc(readableTimestamp(item.expiresAt))}.</span>
+        </div>
+        <button class="set-feedback-revoke" type="button"
+          data-feedback-submission="${esc(item.submissionId)}"
+          data-feedback-scan="${esc(item.scanId)}"${revoking ? " disabled" : ""}>
+          ${revoking ? "Revoking…" : "Revoke and delete"}
+        </button>
+      </article>`;
+    }).join("")}</div>`;
+  };
 
   const draw = () => {
-    if (!host) return;
+    if (host !== activeHost || !activeHost.isConnected) return;
     const tone = loadVerdictTone();
-    host.innerHTML = `<div class="trial-shell settings-shell" role="dialog" aria-modal="true" aria-labelledby="set-title">
+    activeHost.innerHTML = `<div class="trial-shell settings-shell" role="dialog" aria-modal="true" aria-labelledby="set-title">
       <header class="trial-nav">
         <div class="trial-brand">TRUE<span>MAX</span></div>
         <button class="trial-close" type="button" aria-label="Close">✕</button>
@@ -163,6 +208,16 @@ export async function openSettings(user: User): Promise<void> {
             <button type="button" class="linkish" id="set-tone">Change the wording</button>
           </div>` : ""}
         </section>
+
+        <section class="set-group" aria-labelledby="set-feedback-title">
+          <h3 id="set-feedback-title">Correction feedback you've shared</h3>
+          <p class="set-hint">Only optional side-photo corrections appear here. They are private, never affect your score, and expire after 90 days. Revoking removes the review record immediately and queues the private photo for deletion.</p>
+          ${feedbackMarkup()}
+          <p class="set-feedback-message" role="status">${esc(feedbackMessage)}</p>
+          ${feedbackLoadFailed
+            ? `<button type="button" class="linkish" id="set-feedback-retry">Try loading again</button>`
+            : ""}
+        </section>
       </main>
       <p class="trial-status" role="status"></p>
       <footer class="trial-actions">
@@ -171,10 +226,10 @@ export async function openSettings(user: User): Promise<void> {
       </footer>
     </div>`;
 
-    host.querySelector(".trial-close")?.addEventListener("click", close);
-    host.querySelector("#set-cancel")?.addEventListener("click", close);
+    activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    activeHost.querySelector("#set-cancel")?.addEventListener("click", close);
 
-    for (const group of host.querySelectorAll<HTMLElement>("[data-field]")) {
+    for (const group of activeHost.querySelectorAll<HTMLElement>("[data-field]")) {
       const field = group.dataset.field;
       for (const button of group.querySelectorAll<HTMLButtonElement>(".trial-choice")) {
         button.addEventListener("click", () => {
@@ -200,22 +255,37 @@ export async function openSettings(user: User): Promise<void> {
       }
     }
 
-    host.querySelector("#set-tone")?.addEventListener("click", async () => {
+    activeHost.querySelector("#set-tone")?.addEventListener("click", async () => {
       // force: true, because somebody who came here to change it has already
       // answered once and the stored answer is exactly what they are rejecting.
       await askVerdictTone(true);
+      if (host !== activeHost || !activeHost.isConnected) return;
       readInputs();
       draw();
     });
 
-    host.querySelector("#set-save")?.addEventListener("click", () => void save());
+    activeHost.querySelector("#set-feedback-retry")?.addEventListener("click", () => {
+      void loadFeedback();
+    });
+
+    for (const button of activeHost.querySelectorAll<HTMLButtonElement>("[data-feedback-submission]")) {
+      button.addEventListener("click", () => {
+        const submissionId = button.dataset.feedbackSubmission || "";
+        const scanId = button.dataset.feedbackScan || "";
+        const item = feedbackItems?.find((candidate) =>
+          candidate.submissionId === submissionId && candidate.scanId === scanId);
+        if (item) void revokeFeedback(item);
+      });
+    }
+
+    activeHost.querySelector("#set-save")?.addEventListener("click", () => void save());
   };
 
   const readInputs = () => {
-    if (!host) return;
+    if (host !== activeHost || !activeHost.isConnected) return;
     const value = (id: string) =>
-      (host?.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)?.value || "").trim();
-    if (host.querySelector("#set-first")) {
+      (activeHost.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)?.value || "").trim();
+    if (activeHost.querySelector("#set-first")) {
       profile.firstName = value("set-first");
       profile.lastName = value("set-last");
       profile.successOutcome = value("set-success");
@@ -224,10 +294,10 @@ export async function openSettings(user: User): Promise<void> {
   };
 
   const save = async () => {
-    if (busy || !host) return;
+    if (busy || host !== activeHost || !activeHost.isConnected) return;
     readInputs();
-    const status = host.querySelector<HTMLElement>(".trial-status");
-    const button = host.querySelector<HTMLButtonElement>("#set-save");
+    const status = activeHost.querySelector<HTMLElement>(".trial-status");
+    const button = activeHost.querySelector<HTMLButtonElement>("#set-save");
     if (!profile.firstName) {
       if (status) status.textContent = "Your first name is how the app greets you — it can't be blank.";
       return;
@@ -238,6 +308,7 @@ export async function openSettings(user: User): Promise<void> {
       button.textContent = "Saving…";
     }
     const result = await saveOnboardingProfile(user, profile);
+    if (host !== activeHost || !activeHost.isConnected) return;
     busy = false;
     if (!result.ok) {
       if (button) {
@@ -257,9 +328,49 @@ export async function openSettings(user: User): Promise<void> {
     if (button) button.textContent = "Saved";
     if (status) status.textContent = "Saved. This applies from your next scan.";
     setTimeout(() => {
-      if (!dirty) close();
+      if (!dirty && host === activeHost && activeHost.isConnected) close();
     }, 700);
   };
 
+  const loadFeedback = async () => {
+    const request = ++feedbackRequest;
+    readInputs();
+    feedbackItems = null;
+    feedbackMessage = "";
+    feedbackLoadFailed = false;
+    draw();
+    const result = await listSideCorrectionFeedback(user.id);
+    if (request !== feedbackRequest || host !== activeHost || !activeHost.isConnected) return;
+    readInputs();
+    feedbackItems = result.submissions;
+    feedbackLoadFailed = !result.ok;
+    feedbackMessage = result.ok ? "" : (result.message || "Shared feedback could not be loaded.");
+    draw();
+  };
+
+  const revokeFeedback = async (item: SharedSideFeedback) => {
+    if (revokingFeedback.has(item.submissionId)) return;
+    revokingFeedback.add(item.submissionId);
+    feedbackMessage = "";
+    readInputs();
+    draw();
+    const result = await revokeSideCorrectionFeedback(user.id, item);
+    if (host !== activeHost || !activeHost.isConnected) return;
+    revokingFeedback.delete(item.submissionId);
+    readInputs();
+    if (result.ok) {
+      feedbackLoadFailed = false;
+      feedbackItems = (feedbackItems || []).filter((candidate) =>
+        candidate.submissionId !== item.submissionId);
+      feedbackMessage = result.cleanupPending
+        ? "Review access is revoked. The private photo is queued for deletion."
+        : "Feedback revoked and its private photo deleted.";
+    } else {
+      feedbackMessage = result.message || "Feedback could not be revoked. Try again.";
+    }
+    draw();
+  };
+
   draw();
+  void loadFeedback();
 }

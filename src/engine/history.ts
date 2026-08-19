@@ -1,17 +1,22 @@
 import type { RegionId, Report, Sex } from "./types.js";
+import { scopedStorageKey } from "./scanScope.js";
+import { createScanId, isScanId } from "./scanSession.js";
 
 // Device-local scan history (localStorage) — powers week-over-week deltas and
-// the history view with no accounts and no backend. A capped log of scans is
-// kept per sex, and it holds only numbers.
+// the history view without putting scan data in the backend. A capped log of
+// numbers is kept per active account/anonymous owner and sex.
 //
 // Thumbnails of the photographs live separately, in IndexedDB, keyed by the
-// same scan date — see engine/photoStore.ts for why they are stored at all and
+// same immutable scan ID — see engine/photoStore.ts for why they are stored and
 // what that does and does not change about the privacy promise. Keeping them
 // out of this file is deliberate: the log stays small, synchronous and cheap to
 // read on every scan, and anything that clears the images cannot corrupt the
 // numbers.
 
 export interface StoredScan {
+  // Legacy entries used their timestamp as an implicit identity. Every new
+  // entry has a UUID shared with its pending analysis, photos, and corrections.
+  scanId?: string;
   date: string; // ISO
   sex: Sex;
   overall: number;
@@ -38,7 +43,7 @@ export interface ScanDelta {
 // How many scans to keep per sex. Enough for a long trend without letting
 // localStorage grow without bound; each entry is a few hundred bytes.
 const LOG_CAP = 120;
-const LOG_KEY = (sex: Sex) => `truemax:history:${sex}`;
+const LOG_KEY = (sex: Sex) => scopedStorageKey(`truemax:history:${sex}`);
 
 export const CURRENT_SCORE_VERSION = 2;
 
@@ -52,7 +57,9 @@ export function comparableScans(scans: StoredScan[]): StoredScan[] {
 
 export function readHistory(sex: Sex): StoredScan[] {
   try {
-    const raw = localStorage.getItem(LOG_KEY(sex));
+    const key = LOG_KEY(sex);
+    if (!key) return [];
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const arr = JSON.parse(raw) as StoredScan[];
     return Array.isArray(arr) ? arr : [];
@@ -61,8 +68,9 @@ export function readHistory(sex: Sex): StoredScan[] {
   }
 }
 
-// Every scan ever taken on this device, both sexes, newest first — for a
-// history view that does not care which reference population each was against.
+// Every scan belonging to the active device-local owner, both sexes, newest
+// first — for a history view that does not care which reference population
+// each was against.
 export function readAllHistory(): StoredScan[] {
   return [...readHistory("male"), ...readHistory("female")].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
@@ -77,9 +85,15 @@ export function readAllComparableHistory(): StoredScan[] {
   return comparableScans(readAllHistory());
 }
 
+export function scanStorageKey(scan: StoredScan): string {
+  return isScanId(scan.scanId) ? scan.scanId : scan.date;
+}
+
 function writeHistory(sex: Sex, log: StoredScan[]): void {
   try {
-    localStorage.setItem(LOG_KEY(sex), JSON.stringify(log.slice(-LOG_CAP)));
+    const key = LOG_KEY(sex);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(log.slice(-LOG_CAP)));
   } catch {
     /* storage unavailable (private mode) — history just won't persist */
   }
@@ -125,13 +139,29 @@ export function readDelta(overall: number, daysAgo: number): DeltaReading {
   return daysAgo < STRUCTURAL_DAYS ? "tooSoon" : "worthNoting";
 }
 
-export function compareAndStore(report: Report): ScanDelta | null {
+export function compareAndStore(report: Report, scanId = createScanId()): ScanDelta | null {
+  if (!isScanId(scanId)) throw new Error("Scan ID is invalid");
   const log = readHistory(report.sex);
-  const comparable = comparableScans(log);
+  const otherSex: Sex = report.sex === "male" ? "female" : "male";
+  const otherLog = readHistory(otherSex);
+  const otherIndex = otherLog.findIndex((scan) => scan.scanId === scanId);
+  // Re-running one scan after a landmark correction updates its row. It must
+  // not append a second "visit" or compare the corrected result against its
+  // own first draft. Changing reference population also moves the same row
+  // between the two logs rather than creating one scan under each population.
+  const existingIndex = log.findIndex((scan) => scan.scanId === scanId);
+  const existing = existingIndex >= 0
+    ? log[existingIndex]
+    : otherIndex >= 0
+      ? otherLog[otherIndex]
+      : null;
+  const priorLog = existingIndex >= 0 ? log.filter((_, index) => index !== existingIndex) : log;
+  const comparable = comparableScans(priorLog);
   const prev = comparable.length ? comparable[comparable.length - 1] : null;
 
   const current: StoredScan = {
-    date: new Date().toISOString(),
+    scanId,
+    date: existing?.date ?? new Date().toISOString(),
     sex: report.sex,
     overall: report.overall,
     regions: Object.fromEntries(report.regions.map((r) => [r.region, r.score])),
@@ -140,7 +170,14 @@ export function compareAndStore(report: Report): ScanDelta | null {
   // Average is taken over PRIOR scans, before this one is appended, so a fresh
   // scan is compared to where the face usually lands rather than to itself.
   const priorMean = comparable.length ? mean(comparable.map((s) => s.overall)) : null;
-  writeHistory(report.sex, [...log, current]);
+  if (otherIndex >= 0) writeHistory(otherSex, otherLog.filter((_, index) => index !== otherIndex));
+  if (existingIndex >= 0) {
+    const next = [...log];
+    next[existingIndex] = current;
+    writeHistory(report.sex, next);
+  } else {
+    writeHistory(report.sex, [...log, current]);
+  }
 
   if (!prev) return null;
   const daysAgo = Math.max(

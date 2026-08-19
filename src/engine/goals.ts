@@ -1,4 +1,5 @@
 import type { RegionId } from "./types.js";
+import { scopedStorageKey } from "./scanScope.js";
 
 // ---------------------------------------------------------------------------
 // The pre-quiz: what someone wants out of this, and what they want left alone.
@@ -210,7 +211,9 @@ const KEY = "truemax:profile";
 
 export function loadProfile(): Profile {
   try {
-    const raw = localStorage.getItem(KEY);
+    const key = scopedStorageKey(KEY);
+    if (!key) return { ...EMPTY_PROFILE };
+    const raw = localStorage.getItem(key);
     if (!raw) return { ...EMPTY_PROFILE };
     const p = JSON.parse(raw) as Partial<Profile>;
     if (p.v !== 1) return { ...EMPTY_PROFILE };
@@ -226,7 +229,9 @@ export function loadProfile(): Profile {
 
 export function saveProfile(p: Profile): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(p));
+    const key = scopedStorageKey(KEY);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(p));
   } catch {
     /* private mode — the quiz just won't persist between visits */
   }

@@ -1,4 +1,5 @@
 import { getSupabaseAdmin, safeMessage } from "./_shared.js";
+import { FUNNEL_EVENTS } from "../src/engine/funnelEvents.js";
 
 // ---------------------------------------------------------------------------
 // The funnel counter. Counts, not people.
@@ -19,27 +20,7 @@ import { getSupabaseAdmin, safeMessage } from "./_shared.js";
 // is the moat.
 // ---------------------------------------------------------------------------
 
-const EVENTS = new Set([
-  // The main funnel, in order.
-  "visit",
-  "scan-front-done",
-  "scan-side-done",
-  "gate-shown",
-  "account-created",
-  "results-shown",
-  "plan-opened",
-  "offer-shown",
-  "checkout-started",
-  "single-scan-started",
-  // The TikTok page.
-  "quick-visit",
-  "quick-scan-done",
-  "quick-video-downloaded",
-  "max-chat-opened",
-  // The weekly scan gate: how often it is hit, and how often it converts.
-  "scan-gate-shown",
-  "scan-gate-buy",
-]);
+const EVENTS = new Set<string>(FUNNEL_EVENTS);
 
 export async function handleEvent(request: Request): Promise<Response> {
   try {
