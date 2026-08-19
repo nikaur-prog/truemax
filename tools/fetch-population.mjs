@@ -52,14 +52,11 @@ for (const [name, sex, slug] of entries) {
     }
   };
   let ok = existsSync(dest) && statSync(dest).size >= 5000 && isImage();
-  for (let attempt = 0; !ok && attempt < 4; attempt++) {
-    // Wikipedia's throttle window is long — short backoffs just burn the
-    // remaining attempts inside the same window.
-    if (attempt) await sleep(15000 * 2 ** attempt);
+  for (let attempt = 0; !ok && attempt < 5; attempt++) {
     try {
       const title = encodeURIComponent(name.replace(/ /g, "_"));
       const json = execSync(
-        `curl -sSL -A "${UA}" "https://en.wikipedia.org/api/rest_v1/page/summary/${title}"`,
+        `curl -sSL --fail -A "${UA}" "https://en.wikipedia.org/api/rest_v1/page/summary/${title}"`,
         { timeout: 30000 },
       ).toString();
       const data = JSON.parse(json);
@@ -68,20 +65,38 @@ for (const [name, sex, slug] of entries) {
         console.log(`SKIP (no image): ${name}`);
         break;
       }
-      execSync(`curl -sSL -A "${UA}" -o "${dest}" "${url.replace(/"/g, "")}"`, { timeout: 60000 });
-      const head = execSync(`file -b "${dest}"`).toString();
-      if (!/JPEG|PNG|image/i.test(head)) {
-        if (attempt === 3) console.log(`SKIP (not an image): ${name} → ${head.trim().slice(0, 60)}`);
+      // --fail matters more than it looks. upload.wikimedia.org answers a
+      // rate-limited request with HTTP 429 and an HTML error page; without
+      // --fail curl happily wrote that page to disk under a .jpg name, and
+      // a whole pass "succeeded" with a third of the sample being error
+      // pages. Now the body is never written unless the status is 2xx.
+      const code = execSync(
+        `curl -sSL --fail -A "${UA}" -w "%{http_code}" -o "${dest}" "${url.replace(/"/g, "")}" || true`,
+        { timeout: 60000 },
+      ).toString().trim();
+      if (code === "429") {
+        // The image host's bucket is empty. Wait it out rather than burning
+        // the remaining attempts inside the same window.
+        await sleep(45000);
+        continue;
+      }
+      if (!isImage()) {
+        if (attempt === 4) console.log(`SKIP (not an image, HTTP ${code}): ${name}`);
+        await sleep(5000);
         continue;
       }
       fetched++;
       ok = true;
     } catch (e) {
-      if (attempt === 3) console.log(`SKIP (error): ${name} — ${String(e).slice(0, 80)}`);
+      // The summary API throttles a datacenter IP too, and its window is
+      // minutes long. A short retry just spends the attempt budget inside
+      // the same window and reports a face as missing when it is only late.
+      if (attempt === 4) console.log(`SKIP (error): ${name} — ${String(e).slice(0, 80)}`);
+      await sleep(/429/.test(String(e)) ? 90000 : 5000);
     }
   }
   if (ok) manifest.push({ name, sex, file: dest });
-  await sleep(1500);
+  await sleep(2500);
 }
 
 writeFileSync(`${DATA}pop-manifest.json`, JSON.stringify(manifest, null, 2));
