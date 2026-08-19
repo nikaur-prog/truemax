@@ -116,14 +116,15 @@ test("basic mode names the dimorphism score for the reference population", () =>
   assert.ok(!female.includes("Masculinity"));
 });
 
-test("basic scores stay inside 0-100", () => {
-  // Pillars are 0-10 and percentiles are 0-100; a mix-up would print 500/100.
+test("basic scores stay on the canonical 0-10 scale", () => {
+  // Scores are 0-10 and percentiles are 0-100; a mix-up would print a
+  // percentile or a score multiplied by ten as though it were a score.
   for (const pillars of [0, 5, 10]) {
     const scores = basicScores(
       report({ pillars: { Harmony: pillars, Angularity: pillars, Dimorphism: pillars, Features: pillars } }),
     );
     for (const s of scores) {
-      assert.ok(s.value >= 0 && s.value <= 100, `${s.label}=${s.value}`);
+      assert.ok(s.value >= 0 && s.value <= 10, `${s.label}=${s.value}`);
     }
   }
 });
@@ -133,11 +134,11 @@ test("every mode reads the same underlying score", () => {
   // moves together. If these ever disagree, the app is showing one face two
   // different answers.
   //
-  // Basic is the same 0-10 score multiplied by ten. Percentile is metadata for
-  // the rarity line, never a replacement score.
+  // Basic is the same 0-10 score. Percentile is metadata for the rarity line,
+  // never a replacement score.
   const strong = report({ overall: 7.1, overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
   assert.ok(["Mogger", "Marlon level"].includes(verdictFor(strong, "blunt").word));
-  assert.equal(basicScores(strong)[0].value, 71);
+  assert.equal(basicScores(strong)[0].value, 7.1);
   assert.equal(basicScores(strong)[0].percentile, 91);
 });
 

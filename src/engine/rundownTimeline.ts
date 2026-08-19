@@ -51,10 +51,27 @@ const MIN_BEAT = 1.6;
 // and without a gap the video has no rhythm and no room to move the crop.
 const GAP = 0.35;
 
-// A keystroke every other character rather than every one. Per-character is
-// what a real typewriter does and what it sounds like at 2.7 words a second is
-// a machine gun; halving it keeps the texture and loses the rattle.
-const CHARS_PER_KEYSTROKE = 2;
+/**
+ * Where each word of a line starts, as a fraction 0..1 of the spoken span,
+ * weighted by character length so long words hold longer than short ones.
+ *
+ * The single source of word timing: the caption renderer shows word i from
+ * wordStarts(line)[i], and the keystroke cue for word i fires at the same
+ * fraction. One function, so the tick and the glyph cannot drift apart —
+ * previously the caption paged on its own arithmetic while the keys fired on
+ * character counts, and the two disagreed about where in the beat a word was.
+ */
+export function wordStarts(line: string): number[] {
+  const words = line.split(/\s+/).filter(Boolean);
+  const total = words.reduce((a, w) => a + w.length + 1, 0) || 1;
+  const out: number[] = [];
+  let acc = 0;
+  for (const w of words) {
+    out.push(acc / total);
+    acc += w.length + 1;
+  }
+  return out;
+}
 
 // Where in a beat the measurement finishes drawing itself, as a fraction.
 //
@@ -320,13 +337,15 @@ export function fitTimeline(
 function cuesFor(timed: TimedBeat[]): SfxCue[] {
   const sfx: SfxCue[] = [];
   for (const b of timed) {
-    // Captions type over the first 62% of the beat, so the line is complete and
-    // readable for a moment before it leaves. A caption still typing when the
-    // beat ends has not been read by anybody.
-    const typing = (b.duration - GAP) * 0.62;
-    const strokes = Math.floor(b.beat.line.length / CHARS_PER_KEYSTROKE);
-    for (let i = 0; i < strokes; i++) {
-      sfx.push({ at: b.start + (typing * i) / Math.max(1, strokes), kind: "key" });
+    // One tick per WORD, at the moment that word pops. The caption shows a
+    // single word at a time now, so a per-character rattle was a sound with no
+    // picture: dozens of keystrokes against one glyph appearing. One soft tick
+    // per pop is the whole texture the effect ever provided, minus the machine
+    // gun — and it comes from the same wordStarts the renderer reads, so the
+    // tick and the glyph land on the same frame by construction.
+    const span = Math.max(0.001, b.duration - GAP);
+    for (const s of wordStarts(b.beat.line)) {
+      sfx.push({ at: b.start + s * span, kind: "key" });
     }
     if (b.drawAt !== undefined) sfx.push({ at: b.drawAt, kind: "click" });
     // No sound on the curve.

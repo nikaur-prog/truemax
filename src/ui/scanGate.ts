@@ -10,6 +10,7 @@ import {
 import { TRIAL_SCANS, tierOf } from "../engine/depth.js";
 import { SCAN_PRICE_MEMBER, isMemberPricing, scanPrice, setMemberPricing } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
+import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
 
 // ---------------------------------------------------------------------------
 // One free scan a week.
@@ -53,7 +54,9 @@ const STAMP_KEY = "truemax.lastScanAt";
 
 export function recordScanRun(): void {
   try {
-    localStorage.setItem(STAMP_KEY, String(Date.now()));
+    const key = scopedStorageKey(STAMP_KEY);
+    if (!key) return;
+    localStorage.setItem(key, String(Date.now()));
   } catch {
     // Storage disabled: the gate simply cannot hold this browser, and a gate
     // that fails open is the survivable direction for a free product.
@@ -63,7 +66,9 @@ export function recordScanRun(): void {
 function lastScanAt(): number | null {
   let stamp = 0;
   try {
-    stamp = Number(localStorage.getItem(STAMP_KEY)) || 0;
+    const key = scopedStorageKey(STAMP_KEY);
+    if (!key) return null;
+    stamp = Number(localStorage.getItem(key)) || 0;
   } catch {
     /* storage disabled */
   }
@@ -86,6 +91,7 @@ export function nextFreeScanAt(): number | null {
 // Free window open → proceed. In the window: staff proceed, a held credit
 // proceeds and is spent, everyone else sees the countdown.
 export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
+  const owner = activeScanOwner();
   const next = nextFreeScanAt();
   if (!next) {
     proceed();
@@ -111,6 +117,7 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
   // result). main.ts calls this again on the resume path, with a token in
   // hand, which is the first moment the question can honestly be asked.
   const token = await currentAccessToken().catch(() => null);
+  if (activeScanOwner() !== owner) return false;
   if (!token) {
     proceed();
     return true;
@@ -129,6 +136,7 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
     withTimeout(loadScanCredits(), 0),
     withTimeout(loadEntitlement(), null),
   ]);
+  if (activeScanOwner() !== owner) return false;
   const member = tierOf(entitlement) !== "free";
   setMemberPricing(member);
 
@@ -153,7 +161,7 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
 let host: HTMLElement | null = null;
 let timer: number | null = null;
 
-function closeScanGate(): void {
+export function closeScanGate(): void {
   if (timer !== null) clearInterval(timer);
   timer = null;
   host?.remove();

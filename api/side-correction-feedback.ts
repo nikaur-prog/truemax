@@ -9,13 +9,44 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 
 const BUCKET = "side-correction-feedback";
 const MAX_BODY_BYTES = 2_500_000;
+const MAX_REVOKE_BODY_BYTES = 2_000;
 const MAX_PHOTO_BYTES = 2_000_000;
 const MAX_METADATA_CHARS = 40_000;
 const MAX_SUBMISSIONS_PER_24_HOURS = 5;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Listing never returns the photo path, hashes, landmarks, notes or review
+// outcome. Those fields are for the private review process, not account UI.
+export const SIDE_FEEDBACK_LIST_FIELDS = "id,scan_id,created_at,expires_at,consent_version";
 
 interface ExistingFeedback {
   id: string;
+  scan_id: string;
   user_id: string;
+  consent_version: string;
+}
+
+interface FeedbackSummaryRow {
+  id: string;
+  scan_id: string;
+  created_at: string;
+  expires_at: string;
+  consent_version: string;
+}
+
+export interface FeedbackRevocation {
+  submissionId: string;
+  scanId: string;
+}
+
+export function parseFeedbackRevocation(value: unknown): FeedbackRevocation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Revocation details are missing");
+  }
+  const candidate = value as Partial<FeedbackRevocation>;
+  if (!UUID_PATTERN.test(candidate.submissionId || "")) throw new Error("Submission ID is invalid");
+  if (!UUID_PATTERN.test(candidate.scanId || "")) throw new Error("Scan ID is invalid");
+  return { submissionId: candidate.submissionId!, scanId: candidate.scanId! };
 }
 
 export function parseSideFeedbackMetadata(raw: string): SideFeedbackMetadata {
@@ -69,6 +100,98 @@ export function jpegDimensions(bytes: Uint8Array): { width: number; height: numb
   return null;
 }
 
+export async function GET(request: Request): Promise<Response> {
+  if (!requestOrigin(request)) return json({ error: "Cross-origin feedback access is not allowed." }, 403);
+
+  try {
+    const user = await authenticatedUser(request);
+    if (!user) return json({ error: "Sign in to view shared feedback." }, 401);
+
+    const { data, error } = await getSupabaseAdmin()
+      .from("side_landmark_feedback")
+      .select(SIDE_FEEDBACK_LIST_FIELDS)
+      .eq("user_id", user.id)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw new Error(`Feedback list failed: ${error.message}`);
+
+    const submissions = ((data || []) as FeedbackSummaryRow[]).map((row) => ({
+      submissionId: row.id,
+      scanId: row.scan_id,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      consentVersion: row.consent_version,
+    }));
+    return json({ submissions });
+  } catch (error) {
+    console.error("side-correction-feedback-list", safeMessage(error));
+    return json({ error: "Shared feedback could not be loaded." }, 503);
+  }
+}
+
+export async function DELETE(request: Request): Promise<Response> {
+  if (!requestOrigin(request)) return json({ error: "Cross-origin feedback access is not allowed." }, 403);
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > MAX_REVOKE_BODY_BYTES) return json({ error: "Revocation request is too large." }, 413);
+
+  let revocation: FeedbackRevocation;
+  try {
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_REVOKE_BODY_BYTES) {
+      return json({ error: "Revocation request is too large." }, 413);
+    }
+    revocation = parseFeedbackRevocation(JSON.parse(raw));
+  } catch (error) {
+    return json({ error: safeMessage(error) }, 400);
+  }
+
+  try {
+    const user = await authenticatedUser(request);
+    if (!user) return json({ error: "Sign in before revoking feedback." }, 401);
+
+    // The database function is security-invoker and service-only. It checks
+    // all three IDs, deletes the source row and writes the revocation audit in
+    // one transaction, so a stale UI or guessed UUID cannot touch another
+    // account's submission.
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin.rpc("revoke_side_feedback", {
+      p_submission_id: revocation.submissionId,
+      p_scan_id: revocation.scanId,
+      p_user_id: user.id,
+    });
+    if (error) throw new Error(`Feedback revocation failed: ${error.message}`);
+
+    const storagePath = (data as Array<{ storage_path?: unknown }> | null)?.[0]?.storage_path;
+    if (typeof storagePath !== "string" || !storagePath) {
+      // Idempotent and non-enumerating: callers learn nothing about whether a
+      // UUID exists for a different owner.
+      return json({ revoked: true, alreadyRemoved: true });
+    }
+
+    let cleanupPending = false;
+    const { error: removeError } = await admin.storage.from(BUCKET).remove([storagePath]);
+    if (removeError) {
+      cleanupPending = true;
+      console.error("side-correction-feedback-revoke-storage", safeMessage(removeError));
+    } else {
+      const { error: queueError } = await admin
+        .from("side_feedback_storage_cleanup")
+        .delete()
+        .eq("storage_path", storagePath);
+      if (queueError) {
+        cleanupPending = true;
+        console.error("side-correction-feedback-revoke-queue", safeMessage(queueError));
+      }
+    }
+
+    return json({ revoked: true, cleanupPending });
+  } catch (error) {
+    console.error("side-correction-feedback-revoke", safeMessage(error));
+    return json({ error: "Feedback could not be revoked. Try again." }, 503);
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   if (!requestOrigin(request)) return json({ error: "Cross-origin feedback is not allowed." }, 403);
   const declaredLength = Number(request.headers.get("content-length") || 0);
@@ -100,12 +223,24 @@ export async function POST(request: Request): Promise<Response> {
     const admin = getSupabaseAdmin();
     const { data: existing, error: existingError } = await admin
       .from("side_landmark_feedback")
-      .select("id,user_id")
+      .select("id,scan_id,user_id,consent_version")
       .eq("id", metadata.submissionId)
       .maybeSingle<ExistingFeedback>();
     if (existingError) throw new Error(`Feedback lookup failed: ${existingError.message}`);
     if (existing) {
       if (existing.user_id !== user.id) return json({ error: "Submission ID is already in use." }, 409);
+      if (existing.scan_id !== metadata.scanId) return json({ error: "Submission ID is already in use." }, 409);
+      const { error: auditError } = await admin.from("side_feedback_consent_events").upsert({
+        submission_id: existing.id,
+        scan_id: existing.scan_id,
+        event_type: "granted",
+        consent_version: existing.consent_version,
+        details: { source: "idempotent_retry" },
+      }, {
+        onConflict: "submission_id,event_type",
+        ignoreDuplicates: true,
+      });
+      if (auditError) throw new Error(`Feedback consent audit failed: ${auditError.message}`);
       return json({ received: true, duplicate: true, submissionId: existing.id });
     }
 
@@ -138,6 +273,7 @@ export async function POST(request: Request): Promise<Response> {
     const movedPointIds = movedSidePointIds(metadata.automaticPoints, metadata.correctedPoints);
     const { error: insertError } = await admin.from("side_landmark_feedback").insert({
       id: metadata.submissionId,
+      scan_id: metadata.scanId,
       user_id: user.id,
       storage_path: storagePath,
       image_sha256: createHash("sha256").update(bytes).digest("hex"),
@@ -162,6 +298,30 @@ export async function POST(request: Request): Promise<Response> {
     if (insertError) {
       await admin.storage.from(BUCKET).remove([storagePath]);
       throw new Error(`Feedback metadata insert failed: ${insertError.message}`);
+    }
+
+    const { error: auditError } = await admin.from("side_feedback_consent_events").insert({
+      submission_id: metadata.submissionId,
+      scan_id: metadata.scanId,
+      event_type: "granted",
+      consent_version: metadata.consentVersion,
+      details: { source: "explicit_consent_upload" },
+    });
+    if (auditError) {
+      // Fail closed: a consented upload is not accepted without its grant
+      // record. The row delete queues storage cleanup transactionally; the
+      // immediate remove keeps the ordinary rollback path prompt.
+      const { error: rollbackError } = await admin
+        .from("side_landmark_feedback")
+        .delete()
+        .eq("id", metadata.submissionId)
+        .eq("scan_id", metadata.scanId)
+        .eq("user_id", user.id);
+      const { error: removeError } = await admin.storage.from(BUCKET).remove([storagePath]);
+      if (!rollbackError && !removeError) {
+        await admin.from("side_feedback_storage_cleanup").delete().eq("storage_path", storagePath);
+      }
+      throw new Error(`Feedback consent audit failed: ${auditError.message}`);
     }
 
     return json({ received: true, submissionId: metadata.submissionId });

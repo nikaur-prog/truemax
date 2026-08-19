@@ -35,16 +35,19 @@ const DRAIN_CPS = 55;
 let host: HTMLElement | null = null;
 let transcript: Turn[] = [];
 let inFlight: AbortController | null = null;
+let chatGeneration = 0;
 
 export function isMaxChatOpen(): boolean {
   return Boolean(host);
 }
 
 export function closeMaxChat(): void {
+  chatGeneration += 1;
   inFlight?.abort();
   inFlight = null;
   host?.remove();
   host = null;
+  transcript = [];
 }
 
 // The opener a person sees before they have typed anything. Deterministic and
@@ -72,6 +75,7 @@ export function openMaxChat(
   options: { greeting?: string } = {},
 ): void {
   if (host) return;
+  const generation = ++chatGeneration;
   transcript = [];
 
   host = document.createElement("div");
@@ -135,7 +139,7 @@ export function openMaxChat(
     if (!question || inFlight) return;
     input.value = "";
     chips.remove();
-    void ask(log, form, question, context);
+    void ask(log, form, question, context, generation);
   };
 
   // Not on touch: focusing an input pops the keyboard over the character the
@@ -159,6 +163,7 @@ async function ask(
   form: HTMLFormElement,
   question: string,
   context: MaxChatContext | null,
+  generation: number,
 ): Promise<void> {
   say(log, question, "you");
   transcript.push({ role: "user", content: question });
@@ -182,6 +187,7 @@ async function ask(
 
   try {
     const token = await currentAccessToken();
+    if (generation !== chatGeneration) return;
     if (!token) {
       fail(bubble, "Sign in and I'll be right here.");
       return;
@@ -193,9 +199,11 @@ async function ask(
       body: JSON.stringify({ context, messages: transcript }),
       signal: controller.signal,
     });
+    if (generation !== chatGeneration) return;
 
     if (!response.ok || !response.body) {
       const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (generation !== chatGeneration) return;
       fail(bubble, detail?.error || "I could not get through just then. Try me again?");
       // A refusal is not part of the conversation, and leaving the question in
       // the transcript would send it again on the next message as though Max
@@ -212,9 +220,10 @@ async function ask(
     face?.classList.add("mx-mood-happy");
     face?.classList.add("speaking");
     const said = await drain(response.body, bubble, log);
+    if (generation !== chatGeneration) return;
     transcript.push({ role: "assistant", content: said });
   } catch (error) {
-    if ((error as Error)?.name !== "AbortError") {
+    if (generation === chatGeneration && (error as Error)?.name !== "AbortError") {
       fail(bubble, "I lost the connection there. Ask me again?");
       transcript.pop();
     }

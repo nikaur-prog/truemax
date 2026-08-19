@@ -2,7 +2,14 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Occlusion } from "./occlusion.js";
 import type { QualityCheck } from "./quality.js";
 import type { HeadCoveringCheck } from "./headCovering.js";
-import { PHOTO_BRIGHT, lightOk, PHOTO_SHARP_BLOCK } from "./captureGuide.js";
+import {
+  FRONT_PITCH_OK,
+  FRONT_ROLL_OK,
+  FRONT_SMILE_OK,
+  FRONT_YAW_OK,
+  PHOTO_SHARP_WARN,
+  lightOk,
+} from "./captureGuide.js";
 import type { FrameStats } from "./captureGuide.js";
 
 // Upload validation blocks only conditions that make facial geometry genuinely
@@ -20,7 +27,6 @@ import type { FrameStats } from "./captureGuide.js";
 const UPLOAD_FRONT_YAW_BLOCK = 25;
 const UPLOAD_FRONT_PITCH_BLOCK = 25;
 const UPLOAD_FRONT_ROLL_BLOCK = 16;
-const UPLOAD_FRONT_SMILE_BLOCK = 0.65;
 
 export interface PhotoRejection {
   title: string;
@@ -67,8 +73,8 @@ export function landmarkBox(lm: NormalizedLandmark[]): { x: number; y: number; w
 
 export function frontPhotoRejection(
   quality: QualityCheck,
-  stats: FrameStats,
-  occlusion: Occlusion | null,
+  _stats: FrameStats,
+  _occlusion: Occlusion | null,
   lm: NormalizedLandmark[] | null,
   _width: number,
   _height: number,
@@ -106,44 +112,26 @@ export function frontPhotoRejection(
       detail: "Hold your head upright so the eye line is level.",
     };
   }
-  if (quality.smileScore > UPLOAD_FRONT_SMILE_BLOCK) {
-    return {
-      title: "Sorry, we need a neutral expression.",
-      detail: "Relax your mouth and jaw. Smiling changes the lip, cheek and jaw measurements.",
-    };
-  }
-  if (occlusion?.glassesStrong) {
-    return {
-      title: "Sorry, the eye area appears to be covered.",
-      detail: "Remove glasses and anything crossing the eyes or brows, then use a clear photo without a hat or hood.",
-    };
-  }
-  // Same exposure test the live guide uses, for the same reason: a mean-luma
-  // floor rejects well-lit dark-skinned faces, which is a photograph being
-  // refused on the basis of the complexion in it.
-  if (!lightOk(stats) && stats.luma <= PHOTO_BRIGHT) {
-    return {
-      title: "Sorry, the face is too dark to inspect accurately.",
-      detail: "Use soft, even light from in front. Avoid a bright window behind you.",
-    };
-  }
-  if (stats.luma > PHOTO_BRIGHT) {
-    return {
-      title: "Sorry, highlights are blown out in this photo.",
-      detail: "Move out of direct sunlight so skin colour and texture remain visible.",
-    };
-  }
-  // The live guide starts warning at PHOTO_SHARP_WARN, but a warning is not a
-  // failed photograph. Only refuse a still below the calibrated hard floor.
-  // Using the warning threshold here made ordinary webcam frames impossible
-  // to capture even though the live gate correctly considered them usable.
-  if (stats.sharpness < PHOTO_SHARP_BLOCK) {
-    return {
-      title: "Sorry, that photo is too soft or blurred.",
-      detail: "Use an in-focus original with no beauty filter, portrait blur, smoothing or heavy compression.",
-    };
-  }
   return null;
+}
+
+// Conditions that reduce repeatability without making the landmark geometry
+// impossible. They are shown after capture and carried into the result as
+// confidence context; none spends the user's attempt by forcing a retake.
+export function frontPhotoWarnings(
+  quality: QualityCheck,
+  stats: FrameStats,
+  occlusion: Occlusion | null,
+): string[] {
+  const warnings: string[] = [];
+  if (Math.abs(quality.yawDeg) > FRONT_YAW_OK) warnings.push("Turned slightly from the camera");
+  if (Math.abs(quality.pitchDeg) > FRONT_PITCH_OK) warnings.push("Camera angle may affect repeatability");
+  if (Math.abs(quality.rollDeg) > FRONT_ROLL_OK) warnings.push("Head tilt was corrected");
+  if (quality.smileScore > FRONT_SMILE_OK) warnings.push("Expression may affect mouth and cheek measurements");
+  if (occlusion?.glassesStrong) warnings.push("Glasses may lower eye-area confidence");
+  if (!lightOk(stats)) warnings.push("Lighting lowers photo confidence");
+  if (stats.sharpness < PHOTO_SHARP_WARN) warnings.push("Soft focus lowers landmark confidence");
+  return warnings;
 }
 
 export function sidePhotoRejection(
@@ -153,18 +141,7 @@ export function sidePhotoRejection(
   _width: number,
   _height: number,
 ): PhotoRejection | null {
-  if (!lightOk(stats)) {
-    return {
-      title: "Sorry, the profile is not evenly lit enough.",
-      detail: "Use soft light from the side of the camera so the brow, nose, lips, chin and jaw edge are all visible.",
-    };
-  }
-  if (stats.sharpness < PHOTO_SHARP_BLOCK) {
-    return {
-      title: "Sorry, that profile photo is too blurred.",
-      detail: "Use a sharp original with no portrait blur, smoothing or beauty filter.",
-    };
-  }
+  void stats;
   // Side landmark placement is reviewable. Once a real face has made a useful
   // turn, prefer giving the person our best thirteen-point estimate over
   // inventing a crop failure from a noisy background silhouette. The user can

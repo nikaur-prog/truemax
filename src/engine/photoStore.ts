@@ -25,6 +25,8 @@
 // store, synchronous, and would be full after a handful of faces.
 // ---------------------------------------------------------------------------
 
+import { activeScanOwner } from "./scanScope.js";
+
 const DB_NAME = "truemax";
 const STORE = "scanPhotos";
 // MUST match engine/faceLibrary.ts, which shares this database. Opening an
@@ -41,6 +43,16 @@ const QUALITY = 0.72;
 export interface ScanPhotos {
   front?: string; // data URL
   side?: string;
+}
+
+const OWNER_SEPARATOR = "\u001f";
+
+function photoKey(owner: string, scanKey: string): string {
+  return `${owner}${OWNER_SEPARATOR}${scanKey}`;
+}
+
+function ownerPrefix(owner: string): string {
+  return `${owner}${OWNER_SEPARATOR}`;
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
@@ -105,29 +117,50 @@ export function toThumb(src: HTMLCanvasElement): string | null {
   }
 }
 
-// Keyed by the scan's ISO date, which is what the scan log already uses as its
-// identity, so the two cannot drift apart.
-export async function savePhotos(scanDate: string, photos: ScanPhotos): Promise<void> {
+// Keyed by owner plus the immutable scan ID. Legacy history entries pass their
+// ISO date as a fallback key so thumbnails created before scan IDs still load.
+export async function savePhotos(scanKey: string, photos: ScanPhotos): Promise<void> {
   if (!photos.front && !photos.side) return;
-  await tx("readwrite", (s) => s.put(photos, scanDate));
+  const owner = activeScanOwner();
+  if (!owner) return;
+  await tx("readwrite", (s) => s.put(photos, photoKey(owner, scanKey)));
 }
 
-export async function loadPhotos(scanDate: string): Promise<ScanPhotos | null> {
-  const v = await tx<ScanPhotos>("readonly", (s) => s.get(scanDate));
+export async function loadPhotos(scanKey: string): Promise<ScanPhotos | null> {
+  const owner = activeScanOwner();
+  if (!owner) return null;
+  const v = await tx<ScanPhotos>("readonly", (s) => s.get(photoKey(owner, scanKey)));
+  // An account can change while IndexedDB is resolving. Never deliver the old
+  // owner's completed read into the new owner's dashboard.
+  if (activeScanOwner() !== owner) return null;
   return v ?? null;
 }
 
 export async function clearAllPhotos(): Promise<void> {
-  await tx("readwrite", (s) => s.clear());
+  const owner = activeScanOwner();
+  if (!owner) return;
+  const prefix = ownerPrefix(owner);
+  const keys = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
+  if (!keys) return;
+  for (const key of keys) {
+    if (typeof key === "string" && key.startsWith(prefix)) {
+      await tx("readwrite", (s) => s.delete(key));
+    }
+  }
 }
 
 // Drop thumbnails whose scan is no longer in the log, so the store cannot grow
 // past the capped history it belongs to.
-export async function pruneTo(keepDates: string[]): Promise<void> {
-  const keep = new Set(keepDates);
+export async function pruneTo(keepScanKeys: string[]): Promise<void> {
+  const owner = activeScanOwner();
+  if (!owner) return;
+  const keep = new Set(keepScanKeys);
+  const prefix = ownerPrefix(owner);
   const keys = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
   if (!keys) return;
   for (const k of keys) {
-    if (typeof k === "string" && !keep.has(k)) await tx("readwrite", (s) => s.delete(k));
+    if (typeof k !== "string" || !k.startsWith(prefix)) continue;
+    const scanKey = k.slice(prefix.length);
+    if (!keep.has(scanKey)) await tx("readwrite", (s) => s.delete(k));
   }
 }

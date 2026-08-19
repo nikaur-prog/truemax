@@ -6,16 +6,17 @@ import type { QualityCheck } from "./engine/quality.js";
 import { analyze, REGION_NAMES } from "./engine/scoring.js";
 import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.js";
 import { extractShape, shapeSubset } from "./engine/shape.js";
-import { compareAndStore, readAllHistory, readHistory } from "./engine/history.js";
+import { compareAndStore, readAllHistory, scanStorageKey } from "./engine/history.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
-import { renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js";
+import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
-import { ensureScanAllowed, recordScanRun } from "./ui/scanGate.js";
+import { closeMaxChat } from "./ui/maxChat.js";
+import { closeScanGate, ensureScanAllowed, recordScanRun } from "./ui/scanGate.js";
 import { setMemberPricing } from "./engine/scanPricing.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
@@ -32,7 +33,7 @@ import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
 import { mountDemoReel } from "./ui/demoReel.js";
-import { hasHistory, openHistory } from "./ui/historyView.js";
+import { closeHistory, hasHistory, openHistory } from "./ui/historyView.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
@@ -42,7 +43,7 @@ import { revealSideScan } from "./ui/sideScan.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
-import { openDashboard } from "./ui/dashboard.js";
+import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
 import { mountFaceOutline } from "./ui/faceOutline.js";
 import type { CameraHandle } from "./ui/camera.js";
 import { stillFrameStats } from "./engine/captureGuide.js";
@@ -52,25 +53,29 @@ import { openQuiz } from "./ui/goalsQuiz.js";
 import { analyzeSkin } from "./engine/skin.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
 import { detectOcclusion } from "./engine/occlusion.js";
-import { frontPhotoRejection, landmarkBox } from "./engine/photoEligibility.js";
+import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
 import { headCoveringRejection } from "./engine/photoEligibility.js";
 import { detectHeadCovering } from "./engine/headCovering.js";
 import { REGION_LANDMARKS } from "./ui/regions.js";
 import {
+  claimPendingAnalysis,
+  clearExpiredPendingAnalysis,
   clearPendingAnalysis,
   drawStoredPhoto,
-  readPendingAnalysis,
   savePendingAnalysis,
 } from "./engine/pendingAnalysis.js";
+import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
+import { ScanSession } from "./engine/scanSession.js";
+import type { ScanSource, ScanToken } from "./engine/scanSession.js";
 import {
   brandClass,
   membershipBrand,
   MEMBERSHIP_BRAND_EVENT,
 } from "./ui/membershipBrand.js";
 import type { MembershipBrand } from "./ui/membershipBrand.js";
-import { openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
+import { closeTrialFunnel, openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
 import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, profileIsAdult } from "./engine/onboarding.js";
-import { openSettings } from "./ui/settings.js";
+import { closeSettings, openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
 import { markPlatform } from "./engine/platform.js";
 
@@ -85,6 +90,8 @@ let gateDemo: { stop(): void } | null = null;
 // shows a paywall to a paying customer, who can retry, rather than handing the
 // paid product to everyone the moment Supabase has a bad minute.
 async function refreshMaxAccess(): Promise<void> {
+  const owner = activeScanOwner();
+  const generation = scanGeneration;
   // The scan count comes from local history rather than the account, because it
   // is not a billing fact: it decides how much of the analysis to show, not
   // what anyone is charged. Reading it from the device keeps a free allowance
@@ -99,6 +106,7 @@ async function refreshMaxAccess(): Promise<void> {
       loadScanCredits().catch(() => 0),
       loadIsAdmin().catch(() => false),
     ]);
+    if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     setMaxAccess(hasMaxAccess(entitlement) || admin);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
@@ -119,6 +127,7 @@ async function refreshMaxAccess(): Promise<void> {
       void consumeScanCredit().catch(() => undefined);
     }
   } catch {
+    if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     // Both fail closed. A wall shown to a paying customer is recoverable — they
     // retry — where the paid product handed to everybody during an outage is
     // not.
@@ -201,6 +210,22 @@ let sexChosen = storedSex() !== null;
 // the camera, the side opens the camera; if you uploaded the front, the side
 // asks for a file. Null until the first capture.
 let captureMethod: "camera" | "upload" | null = null;
+
+// Changes whenever a scan is abandoned or identity changes. Async work keeps
+// the generation it started under and drops its result if this value moves, so
+// an old animation/upload cannot repaint the next person's screen.
+let scanGeneration = 0;
+const scanSession = new ScanSession();
+
+function beginScan(source: Exclude<ScanSource, "restored">): ScanToken | null {
+  const owner = activeScanOwner();
+  if (!owner) return null;
+  return scanSession.begin(owner, source);
+}
+
+function scanIsCurrent(token: ScanToken, generation: number): boolean {
+  return generation === scanGeneration && scanSession.isCurrent(token);
+}
 
 // Calibration harness API (tools/): lets the offline pipeline measure photos
 // directly, skipping the UI and its scan animation. Same engine path as a
@@ -287,14 +312,19 @@ let captureMethod: "camera" | "upload" | null = null;
 mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 el.ovalFrame.classList.add("showing-reel");
 
+// A build without accounts still needs an explicit anonymous owner. When Auth
+// is enabled, reads remain closed until INITIAL_SESSION resolves below.
+if (!isAuthAvailable()) activateScanOwner(null);
+
 // A returning visitor with scans on this device gets a way straight into their
 // history from the landing. Hidden entirely when there is nothing to show, so a
 // first-time visitor never sees a dead link.
 const landingHistory = document.getElementById("landing-history");
-if (landingHistory && hasHistory()) {
-  landingHistory.classList.remove("hidden");
-  landingHistory.addEventListener("click", () => openHistory());
+function syncLandingHistory(): void {
+  landingHistory?.classList.toggle("hidden", !hasHistory());
 }
+syncLandingHistory();
+landingHistory?.addEventListener("click", () => openHistory());
 
 // Accounts light up only when Supabase keys are set in the build environment.
 // With no keys this call returns immediately and adds no header button, so the
@@ -364,11 +394,22 @@ initLandmarker()
     el.engineStatus.classList.add("error");
   });
 
+let filePickerGeneration = 0;
 el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
-  if (file) handleFile(file);
+  if (file) handleFile(file, filePickerGeneration);
 });
-el.btnUpload.addEventListener("click", () => void ensureScanAllowed(() => ensureSex(() => el.fileInput.click())));
+el.btnUpload.addEventListener("click", () => {
+  const generation = scanGeneration;
+  void ensureScanAllowed(() => {
+    if (generation !== scanGeneration) return;
+    ensureSex(() => {
+      if (generation !== scanGeneration) return;
+      filePickerGeneration = generation;
+      el.fileInput.click();
+    });
+  });
+});
 
 // Paste or drag a photo anywhere on the page rather than going through the
 // picker. Same reasoning as /quick: the photo has usually just been cropped or
@@ -381,7 +422,13 @@ enablePhotoPaste({
   // screen and start again.
   busy: () => el.upload.classList.contains("hidden"),
   dropZone: el.ovalFrame,
-  onImage: (file) => void ensureScanAllowed(() => ensureSex(() => handleFile(file))),
+  onImage: (file) => {
+    const generation = scanGeneration;
+    void ensureScanAllowed(() => {
+      if (generation !== scanGeneration) return;
+      ensureSex(() => handleFile(file, generation));
+    });
+  },
 });
 
 // Only shown where the gesture exists.
@@ -401,7 +448,10 @@ el.ovalFrame.addEventListener("drop", (e) => {
   e.preventDefault();
   el.ovalFrame.classList.remove("dragover");
   const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file) ensureSex(() => handleFile(file));
+  if (file) {
+    const generation = scanGeneration;
+    ensureSex(() => handleFile(file, generation));
+  }
 });
 
 // Wordmark goes home only for a signed-in member. Signed-out visitors already
@@ -431,16 +481,19 @@ el.ovalFrame.addEventListener("drop", (e) => {
 // Failures open: if the profile cannot be loaded the app continues rather than
 // locking somebody out of their own scan over a dropped request.
 async function ensureOnboarded(user: User): Promise<void> {
+  const generation = scanGeneration;
   // Answers that could not be sent last time — a phone that dropped its
   // connection mid-quiz — go up first, silently. Somebody who has already
   // answered must never be asked twice because their network blipped.
   await flushPendingProfile(user).catch(() => undefined);
+  if (generation !== scanGeneration) return;
   let profile;
   try {
     profile = await loadOnboardingProfile(user);
   } catch {
     return;
   }
+  if (generation !== scanGeneration) return;
   // The one place the date of birth is already in hand. Every 18+ Max surface
   // on the results screen keys off this; the default is false, so a profile
   // that never loads behaves like a minor rather than like an adult.
@@ -450,17 +503,23 @@ async function ensureOnboarded(user: User): Promise<void> {
 }
 
 document.getElementById("logo-home")?.addEventListener("click", async () => {
+  const generation = scanGeneration;
   const user = await currentUser();
+  if (generation !== scanGeneration) return;
   if (!user) {
     await refreshHomeBrand(null);
     return;
   }
   await ensureOnboarded(user);
+  if (generation !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
   if (cam) await closeCamera();
+  if (generation !== scanGeneration) return;
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
   resetToUpload();
+  const dashboardGeneration = scanGeneration;
   const brand = await refreshHomeBrand(user);
+  if (dashboardGeneration !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
   openDashboard({
     onScan: () => resetToUpload(),
     name: displayName(user),
@@ -551,6 +610,7 @@ let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
 
 async function openCamera(): Promise<void> {
+  const generation = scanGeneration;
   if (!isSupported()) {
     el.camHintDetail.textContent = "This browser can't open a camera, so upload a photo instead.";
     return;
@@ -563,7 +623,7 @@ async function openCamera(): Promise<void> {
     ? "Your browser will ask at the top of the window. Choose Allow"
     : "Tap Allow when your browser asks";
   try {
-    cam = await startCamera({
+    const started = await startCamera({
       video: el.camVideo,
       guideCanvas: el.camGuide,
       onCheck: (c) => {
@@ -591,10 +651,19 @@ async function openCamera(): Promise<void> {
         // them, so it is not a standing invitation to skip a real check.
         el.btnNoGlasses.classList.toggle("hidden", c.hint !== "Take your glasses off");
         el.ovalFrame.classList.toggle("tracking", c.gates.face);
-        el.btnCamera.disabled = !c.ready;
+        // Auto-capture still waits for the ideal frame. Manual capture becomes
+        // available as soon as a face exists; the remaining checks are advice
+        // and confidence context, not a dead end.
+        el.btnCamera.disabled = !c.gates.face;
+        if (!autoFront?.armed()) el.btnCamera.textContent = c.ready ? "Capture" : "Capture anyway";
         autoFront?.update(c.ready);
       },
     });
+    if (generation !== scanGeneration) {
+      started.stop();
+      return;
+    }
+    cam = started;
     // The front gets the same hands-off shutter as the side. It matters less
     // here — you can see the screen — but a photo taken while reaching for a
     // button is a photo that moved, and that is true of both views.
@@ -618,7 +687,7 @@ async function openCamera(): Promise<void> {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (t?.tagName === "BUTTON" && t.id !== "btn-camera") return;
-      if (!cam || !lastCheck?.ready) return;
+      if (!cam || !lastCheck?.gates.face) return;
       e.preventDefault();
       el.btnCamera.click();
     };
@@ -700,16 +769,29 @@ el.btnCamera.addEventListener("click", async () => {
   if (!cam) {
     // Gate first, questions second: being asked your reference population and
     // THEN told to wait until Thursday is the wrong order of bad news.
-    void ensureScanAllowed(() => ensureSex(() => void openCamera()));
+    const generation = scanGeneration;
+    void ensureScanAllowed(() => {
+      if (generation !== scanGeneration) return;
+      ensureSex(() => {
+        if (generation === scanGeneration) void openCamera();
+      });
+    });
     return;
   }
-  if (!lastCheck?.ready) return;
+  if (!lastCheck?.gates.face) return;
+  const token = beginScan("camera");
+  if (!token) {
+    el.camHintDetail.textContent = "Your session is still loading. Try capture again in a moment.";
+    return;
+  }
+  const generation = ++scanGeneration;
   const shot = cam.capture();
   // Remember that the front came from the camera, so the side step defaults to
   // the camera too rather than making the user switch capture method mid-flow.
   captureMethod = "camera";
   await closeCamera();
-  if (shot) await handleCanvas(shot);
+  if (shot) await handleCanvas(shot, 1, generation, token);
+  else scanSession.reset();
 });
 
 el.btnCancel.addEventListener("click", async () => {
@@ -729,6 +811,8 @@ el.btnNoGlasses.addEventListener("click", () => {
 // public. Explicit intent only.
 
 function resetToUpload(): void {
+  scanGeneration++;
+  scanSession.reset();
   clearPendingAnalysis();
   // A new scan is a hard privacy boundary. Clearing only localStorage left the
   // previous front landmarks, full-resolution canvas and verified side points
@@ -736,6 +820,8 @@ function resetToUpload(): void {
   // receive a report rendered over the first person's front photo.
   pending = null;
   lastSide = null;
+  captureMethod = null;
+  feedbackInFlight = null;
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
   el.photoCanvas.width = 1;
@@ -750,11 +836,17 @@ function resetToUpload(): void {
   el.analysis.innerHTML = "";
   el.qualityChips.innerHTML = "";
   el.fileInput.value = "";
+  gateDemo?.stop();
+  gateDemo = null;
+  delete (window as unknown as Record<string, unknown>).__truemax;
+  delete (window as unknown as Record<string, unknown>).__truemaxSide;
+  delete (window as unknown as Record<string, unknown>).__truemaxSidePoints;
   // Takes the scroll listener with it. A strip left behind would keep
   // shrinking a photo pane that no longer holds a photograph. The pet goes
   // with it: he belongs to a result, not to the upload screen.
   clearScoreStrip();
   unmountMaxPet();
+  closeMaxChat();
 }
 
 // Two views go into the score, so the scan shows two views being measured. It
@@ -771,26 +863,36 @@ const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
   { text: "Merging both views", view: "front" },
 ];
 
-async function handleFile(file: File): Promise<void> {
+async function handleFile(file: File, expectedGeneration = scanGeneration): Promise<void> {
+  if (expectedGeneration !== scanGeneration) return;
   if (!isReady()) {
     el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
     return;
   }
+  const token = beginScan("upload");
+  if (!token) {
+    el.engineStatus.textContent = "SESSION STILL LOADING · TRY AGAIN IN A MOMENT";
+    return;
+  }
+  const generation = ++scanGeneration;
   // An uploaded front means the side step should ask for a file too.
   captureMethod = "upload";
   let image;
   try {
     image = await loadImage(file);
   } catch (err) {
+    if (!scanIsCurrent(token, generation)) return;
     el.engineStatus.textContent = (err as Error).message.toUpperCase();
     el.engineStatus.classList.add("error");
     return;
   }
+  if (!scanIsCurrent(token, generation)) return;
   // Browsers apply EXIF orientation during decode — verified against rotated
   // iPhone-style files (orientation 3 and 6 both land upright). We read the
   // flag only for diagnostics; applying it again would rotate twice, which is
   // exactly the bug this check caught.
   const exifOrientation = await readOrientation(file);
+  if (!scanIsCurrent(token, generation)) return;
   const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(image.width, image.height));
   const dw = Math.round(image.width * scale);
   const dh = Math.round(image.height * scale);
@@ -800,16 +902,23 @@ async function handleFile(file: File): Promise<void> {
   src.width = width;
   src.height = height;
   src.getContext("2d")!.drawImage(image, 0, 0, dw, dh);
-  await handleCanvas(src, exifOrientation);
+  await handleCanvas(src, exifOrientation, generation, token);
 }
 
-async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promise<void> {
+async function handleCanvas(
+  src: HTMLCanvasElement,
+  exifOrientation = 1,
+  generation = scanGeneration,
+  token = scanSession.currentToken(),
+): Promise<void> {
+  if (!token || !scanIsCurrent(token, generation)) return;
   void exifOrientation;
   // Uploading while the live preview is running left the landmarker in VIDEO
   // mode, and the still-image detector then threw "Landmarker is in VIDEO
   // mode". Capturing had always torn the camera down first; choosing a file
   // never did.
   if (cam) await closeCamera();
+  if (!scanIsCurrent(token, generation)) return;
   const width = src.width;
   const height = src.height;
   el.photoCanvas.width = width;
@@ -829,6 +938,7 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   el.analysis.innerHTML = "";
   el.qualityChips.innerHTML = "";
   await nextFrame();
+  if (!scanIsCurrent(token, generation)) return;
 
   // Real math (milliseconds) happens inside the theatre beat (~2.2s)
   const result = detectStable(el.photoCanvas);
@@ -839,7 +949,9 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     el.capRight.textContent = "NO FACE FOUND";
     el.status.innerHTML = "<b>No face detected.</b> Try a clearer, front-facing photo.";
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
-    setTimeout(() => resetToUpload(), 2600);
+    setTimeout(() => {
+      if (scanIsCurrent(token, generation)) resetToUpload();
+    }, 2600);
     return;
   }
 
@@ -847,14 +959,18 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   const faceBox = landmarkBox(landmarks);
   const stats = stillFrameStats(el.photoCanvas, faceBox);
   const occlusion = detectOcclusion(el.photoCanvas, landmarks, width, height);
+  const warnings = frontPhotoWarnings(quality, stats, occlusion);
   let rejection = frontPhotoRejection(quality, stats, occlusion, landmarks, width, height);
   if (!rejection) rejection = headCoveringRejection(await detectHeadCovering(el.photoCanvas));
+  if (!scanIsCurrent(token, generation)) return;
   if (rejection) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "PHOTO NOT VALID";
     el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}`;
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
-    setTimeout(() => resetToUpload(), 4200);
+    setTimeout(() => {
+      if (scanIsCurrent(token, generation)) resetToUpload();
+    }, 4200);
     return;
   }
 
@@ -862,7 +978,10 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
     landmarks,
     width,
     height,
-    quality,
+    quality: {
+      ...quality,
+      issues: [...new Set([...quality.issues, ...warnings])],
+    },
     autoNote: `Scored against ${selectedSex} norms`,
   };
 
@@ -879,6 +998,7 @@ async function handleCanvas(src: HTMLCanvasElement, exifOrientation = 1): Promis
   track("scan-front-done");
   el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
   drawCalm(el.overlayCanvas, landmarks, width, height);
+  if (!scanSession.transition(token, "side")) return;
   startSide();
 }
 
@@ -933,18 +1053,22 @@ let feedbackInFlight: Promise<void> | null = null;
 // the reveal animation, by which time a ~100KB POST has almost always landed.
 // The upload now runs underneath the animation rather than in front of it.
 function startConsentedSideFeedback(): void {
-  feedbackInFlight = submitConsentedSideFeedback();
+  const generation = scanGeneration;
+  feedbackInFlight = submitConsentedSideFeedback(generation);
 }
 
-async function submitConsentedSideFeedback(): Promise<void> {
+async function submitConsentedSideFeedback(generation = scanGeneration): Promise<void> {
   const side = lastSide;
   if (!side?.feedback || side.feedbackSubmitted || !side.photo) return;
+  const token = scanSession.currentToken();
+  if (!token || side.feedback.scanId !== token.scanId || !scanIsCurrent(token, generation)) return;
   const result = await submitSideCorrectionFeedback(
     side.photo,
     side.points,
     side.faceDir,
     side.feedback,
   );
+  if (!scanIsCurrent(token, generation)) return;
   if (result.ok) {
     side.feedbackSubmitted = true;
     feedbackDeliveryNote = { ok: true, message: "Optional side-landmark feedback sent privately" };
@@ -958,8 +1082,13 @@ async function submitConsentedSideFeedback(): Promise<void> {
 }
 
 // Both photographs are in. One analysis, one reveal, one score.
-async function runFullAnalysis(sideReport: Report | null): Promise<void> {
-  if (!pending) return;
+async function runFullAnalysis(
+  sideReport: Report | null,
+  token = scanSession.currentToken(),
+): Promise<void> {
+  if (!pending || !token || !scanSession.isCurrent(token)) return;
+  if (!scanSession.transition(token, "analyzing")) return;
+  const generation = scanGeneration;
   const { landmarks, width, height, quality, autoNote } = pending;
   // The scan sequence only narrates the side view when there is one. Front-only
   // is now a complete result rather than an unfinished one, so its loading bar
@@ -1009,6 +1138,11 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   await new Promise<void>((done) => {
     let s = 0;
     const step = () => {
+      if (!scanIsCurrent(token, generation)) {
+        reveal.cancel();
+        done();
+        return;
+      }
       if (s < stages.length) {
         el.status.innerHTML = `<b>${stages[s].text}</b> …`;
         el.barFill.style.width = `${((s + 1) / stages.length) * 100}%`;
@@ -1020,6 +1154,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
     setTimeout(step, 200);
   });
   await reveal.done;
+  if (!scanIsCurrent(token, generation) || !pending) return;
 
   const front = analyze(landmarks, width, height, selectedSex, frontShot);
   // Front-only is a real result: mergeReports already returns the front report
@@ -1027,26 +1162,26 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
-  const delta = compareAndStore(report);
+  const delta = compareAndStore(report, token.scanId);
   // The weekly free-scan clock starts when an analysis finishes, not when a
   // photo is chosen — an abandoned capture must not cost the week's scan.
   recordScanRun();
 
-  // Keep a thumbnail of each view against this scan, keyed by the log entry's
-  // own date so the two cannot drift. Thumbnails only — see engine/photoStore.
+  // Keep a thumbnail of each view against this scan's immutable ID. Thumbnails
+  // only — see engine/photoStore.
   // Fire-and-forget: a storage failure must never interrupt a finished
   // analysis, and the report does not depend on it.
   void (async () => {
-    const log = readHistory(report.sex);
-    const date = log[log.length - 1]?.date;
-    if (!date) return;
+    const owner = activeScanOwner();
+    if (!owner || !scanSession.isCurrent(token, owner)) return;
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
-    await savePhotos(date, {
+    await savePhotos(token.scanId, {
       front: frontThumb ?? undefined,
       side: sideThumb ?? undefined,
     });
-    await pruneTo(readAllHistory().map((s) => s.date));
+    if (!scanSession.isCurrent(token, owner)) return;
+    await pruneTo(readAllHistory().map(scanStorageKey));
   })();
 
   el.frame.classList.remove("scanning");
@@ -1061,6 +1196,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
   // rejection must never surface here — it is optional feedback and the note
   // itself already records the failure.
   await feedbackInFlight?.catch(() => {});
+  if (!scanIsCurrent(token, generation) || !pending) return;
   renderQualityChips(quality, autoNote);
 
   const ctxArgs = {
@@ -1120,6 +1256,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
         startSide();
         return;
       }
+      if (!scanSession.transition(token, "side")) return;
       el.main.classList.add("hidden");
       openSideAdjust(lastSide.photo, {
         points: lastSide.points,
@@ -1127,9 +1264,11 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
         automaticPoints: lastSide.automaticPoints,
         method: lastSide.seedMethod,
       }, {
+        scanId: token.scanId,
         sex: selectedSex,
         onBack: () => {
           closeSide();
+          scanSession.transition(token, "results");
           el.main.classList.remove("hidden");
         },
         onDone: async (sideReport, points, faceDir, review) => {
@@ -1143,7 +1282,7 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
             feedback: review.feedback ?? undefined,
           };
           startConsentedSideFeedback();
-          await runFullAnalysis(sideReport);
+          await runFullAnalysis(sideReport, token);
         },
       });
     },
@@ -1159,12 +1298,14 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
       const f = analyze(landmarks, width, height, sex, frontShot);
       const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
       const merged = mergeReports(f, sd);
+      const rescoredDelta = compareAndStore(merged, token.scanId);
       renderQualityChips(quality, `Scored against ${sex} norms`);
-      renderResults({ ...ctxArgs, report: merged, delta: null });
+      renderResults({ ...ctxArgs, report: merged, delta: rescoredDelta });
     },
   };
   track("results-shown");
   renderResults(ctxArgs);
+  scanSession.transition(token, "results");
 
   // The plan renders locked and unlocks in place if this comes back positive.
   // Deliberately not awaited: a finished analysis must never wait on a billing
@@ -1182,20 +1323,30 @@ async function runFullAnalysis(sideReport: Report | null): Promise<void> {
 // The visitor has completed both photographs before we ask for an account.
 // That ordering is the acquisition flow: let them experience the scan first,
 // then ask for identity only at the moment the result becomes valuable.
-async function gateAnalysis(sideReport: Report): Promise<void> {
+async function gateAnalysis(
+  sideReport: Report,
+  token = scanSession.currentToken(),
+): Promise<void> {
+  if (!pending || !token || !scanSession.isCurrent(token)) return;
+  const generation = scanGeneration;
   // A temporary auth/session read failure must never strand a signed-out user
   // on an empty result view. Treat an unreadable session as signed out and
   // present the account gate, which remains usable as the fallback screen even
   // if the modal itself cannot open.
   const user = await currentUser().catch(() => null);
+  if (!scanIsCurrent(token, generation) || !pending) return;
   if (!isAuthAvailable() || user) {
+    const owner = activeScanOwner();
+    if (owner && scanSession.snapshot().owner !== owner) scanSession.claim(token, owner);
+    if (!scanSession.transition(token, "analyzing")) return;
     startConsentedSideFeedback();
-    await runFullAnalysis(sideReport);
+    await runFullAnalysis(sideReport, token);
     return;
   }
 
   const saved = pending && lastSide
     ? savePendingAnalysis({
+        scanId: token.scanId,
         sex: selectedSex,
         front: { ...pending, canvas: el.photoCanvas },
         side: {
@@ -1208,6 +1359,7 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
         },
       })
     : false;
+  if (!scanSession.transition(token, "gate")) return;
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
@@ -1266,13 +1418,14 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
       onDeferred: () => {
         el.status.innerHTML = "<b>Scan saved on this device.</b> Open the newest email link to continue.";
       },
-      onAuthenticated: async () => {
+      onAuthenticated: async (signedInUser) => {
         // Supabase emits SIGNED_IN before signInWithPassword resolves. Claim
         // this continuation before the deferred auth listener gets a turn, so
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
+        scanSession.claim(token, `user:${signedInUser.id}`);
         startConsentedSideFeedback();
-        await runFullAnalysis(sideReport);
+        await runFullAnalysis(sideReport, token);
       },
     }).catch(() => {
       // Keep the visible inline gate available if a browser blocks or fails to
@@ -1289,8 +1442,11 @@ async function gateAnalysis(sideReport: Report): Promise<void> {
 let resumePendingStarted = false;
 async function resumePendingAfterAuth(): Promise<void> {
   if (resumePendingStarted) return;
-  const saved = readPendingAnalysis();
-  if (!saved || !await currentUser()) return;
+  const generation = scanGeneration;
+  const user = await currentUser();
+  if (generation !== scanGeneration || !user) return;
+  const saved = claimPendingAnalysis(user.id);
+  if (!saved) return;
 
   // The weekly gate is asked HERE, because this is the first point where there
   // is an account to ask about. scanGate.ts lets signed-out capture run to the
@@ -1303,8 +1459,10 @@ async function resumePendingAfterAuth(): Promise<void> {
   // ensureScanAllowed spends a held credit when it passes, so the answer is
   // also the payment.
   if (!(await ensureScanAllowed(() => undefined))) return;
+  if (generation !== scanGeneration) return;
 
   resumePendingStarted = true;
+  const token = scanSession.resume(`user:${user.id}`, saved.scanId);
 
   const frontOk = await drawStoredPhoto(
     el.photoCanvas,
@@ -1312,9 +1470,10 @@ async function resumePendingAfterAuth(): Promise<void> {
     saved.front.width,
     saved.front.height,
   );
+  if (!scanIsCurrent(token, generation)) return;
   if (!frontOk) {
-    clearPendingAnalysis();
     resumePendingStarted = false;
+    resetToUpload();
     return;
   }
 
@@ -1327,6 +1486,7 @@ async function resumePendingAfterAuth(): Promise<void> {
       saved.side.width,
       saved.side.height,
     );
+    if (!scanIsCurrent(token, generation)) return;
     if (!sideOk) sidePhoto = undefined;
   }
 
@@ -1353,13 +1513,16 @@ async function resumePendingAfterAuth(): Promise<void> {
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
   startConsentedSideFeedback();
-  await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex));
+  await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex), token);
 }
 
 function startSide(): void {
+  const token = scanSession.currentToken();
+  if (!token || !scanSession.transition(token, "side")) return;
   feedbackDeliveryNote = null;
   el.main.classList.add("hidden");
   openSideCapture({
+    scanId: token.scanId,
     sex: selectedSex,
     // Carry the front's capture method so the side does not make the user
     // switch: camera stays camera, upload stays upload.
@@ -1396,7 +1559,7 @@ function startSide(): void {
       // profile under a different reference population needs the input, not
       // the finished report.
       (window as unknown as Record<string, unknown>).__truemaxSidePoints = { points, faceDir };
-      await gateAnalysis(sideReport);
+      await gateAnalysis(sideReport, token);
     },
   });
 }
@@ -1466,8 +1629,38 @@ function nextFrame(): Promise<void> {
 // when Supabase emits both for one navigation.
 if (isAuthAvailable()) {
   // Also performs expiry cleanup for a signed-out visitor returning later.
-  readPendingAnalysis();
+  clearExpiredPendingAnalysis();
+  let previousUserId: string | null | undefined;
   onAuthChange((user) => {
+    const nextUserId = user?.id ?? null;
+    const identityChanged = previousUserId !== undefined && previousUserId !== nextUserId;
+    if (identityChanged) {
+      clearResultsIdentityState();
+      closeScanGate();
+      closeDashboard();
+      closeHistory();
+      closeSettings();
+      closeTrialFunnel();
+    }
+    // Signing out, or replacing one authenticated identity with another, is a
+    // hard scan boundary. Anonymous -> authenticated is the intentional claim
+    // path and keeps the just-captured canvases alive.
+    if (previousUserId && previousUserId !== nextUserId) {
+      void closeCamera();
+      closeSide();
+      resetToUpload();
+    }
+    // Anonymous -> authenticated is the only identity transition allowed to
+    // keep an active scan. It is the same tab claiming the in-memory capture;
+    // redirect-restored captures still pass the separate one-time token check.
+    if (!previousUserId && user) {
+      const token = scanSession.currentToken();
+      if (token && scanSession.snapshot().owner?.startsWith("anonymous:")) {
+        scanSession.claim(token, `user:${user.id}`);
+      }
+    }
+    previousUserId = nextUserId;
+    syncLandingHistory();
     void refreshHomeBrand(user);
     // A new account has answered nothing yet. Asking here — rather than at the
     // first moment the app needs a name or an age — means the questions arrive

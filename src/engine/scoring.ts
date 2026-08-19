@@ -30,7 +30,7 @@ import type {
 // a plain stored value when a saved scan is replayed.
 const PIXEL_METRICS = new Set(["foreheadRatio"]);
 
-const SCORE_SCALE = 1.3; // score points per σ
+export const SCORE_SCALE = 1.3; // score points per σ
 const Z_CLAMP = 2.2; // per-metric influence clamp (noisy landmark guard)
 // Assumed inter-metric correlation when re-standardizing aggregates. Facial
 // metrics correlate (a lean, structured face moves many at once); without
@@ -269,21 +269,34 @@ function aggregateZ(zs: number[], weights: number[]): number {
 // off 5.0 and exaggerate the spread. AGG_NORM is measured directly from the
 // population reference set (tools/normalize.mjs), so "5.0 = 50th percentile"
 // holds by construction rather than by assumption.
-// Continue the quantile mapping past either end at the slope of the outer
-// quartile, so faces beyond the reference population keep separating from
-// each other instead of piling onto one score.
+// Continue the quantile mapping past either end, but with a bounded claim.
+//
+// The old extrapolation continued at the slope of the outer quartile with no
+// ceiling. On a reference set whose top quantiles sit close together that
+// slope reached ~4.9 sigma per unit of aggregate z (male overall), so a face
+// 0.4 past the table maximum — attractive, not otherworldly — was reported at
+// +4 sigma. That is where the 9.9/10 came from: not a measurement of the
+// face, a cliff at the edge of the reference set.
+//
+// A quantile table built from tens of faces per sex cannot support any
+// percentile claim past roughly 1 - 1/(2n). Everything beyond the table now
+// approaches that bound smoothly instead of shooting through it: strictly
+// increasing (ordering is preserved), continuous at the table edge, and the
+// entry slope is the table-wide average rate rather than the outer bin's,
+// because the outer bin of a small sample is the noisiest thing in it.
+// Faces past the edge still separate — just by tenths of a point, which is
+// all the evidence supports until the reference set itself reaches higher.
+export const TAIL_Z_MAX = 2.6; // ≈ probit(1 - 1/(2n)) at the ~110-per-sex reference target
 function tailZ(z: number, q: number[], last: number): number {
-  const hiP = 1 - 0.5 / (last + 1);
-  const loP = 0.5 / (last + 1);
-  const qi = Math.max(1, Math.round(last * 0.25)); // quartile anchor
+  const hiZ = probit(1 - 0.5 / (last + 1));
+  const loZ = probit(0.5 / (last + 1));
+  const slope = Math.max(0.2, (hiZ - loZ) / (q[last] - q[0] || 1e-9));
   if (z >= q[last]) {
-    const span = q[last] - q[last - qi] || 1e-9;
-    const slope = (probit(hiP) - probit(1 - qi / last)) / span;
-    return probit(hiP) + (z - q[last]) * Math.max(0.2, slope);
+    const room = TAIL_Z_MAX - hiZ;
+    return hiZ + room * (1 - Math.exp((-slope * (z - q[last])) / room));
   }
-  const span = q[qi] - q[0] || 1e-9;
-  const slope = (probit(qi / last) - probit(loP)) / span;
-  return probit(loP) - (q[0] - z) * Math.max(0.2, slope);
+  const room = TAIL_Z_MAX + loZ; // loZ is negative: headroom from loZ down to -TAIL_Z_MAX
+  return loZ - room * (1 - Math.exp((-slope * (q[0] - z)) / room));
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +314,36 @@ function tailZ(z: number, q: number[], last: number): number {
 // stays uncompressed, so Full mode still explains what moved the result. The
 // inverse used by editing and rarity copy operates on the already-calibrated
 // aggregate z; forward and inverse must never silently disagree again.
-export const SHRINK = 0.4;
+export const SHRINK = 1.13;
+
+// Where 5.0 sits, in reference-population sigmas.
+//
+// The reference set is people notable for their WORK, and that is the right
+// choice for the distribution's SHAPE and the wrong one for its CENTRE: they
+// are mostly middle-aged, and this engine's metrics read youthful structure as
+// better. Measured on the rated corpus, faces blinded human reviewers score
+// 5.09/10 sit 0.87 sigma above the reference median — so "5.0 = the median of
+// our reference photographs" and "5.0 = what a person calls average" are two
+// different claims, and only the second is the one the product makes.
+//
+// Rebuilding the reference set did NOT move this. The female table was the
+// prime suspect — the sample was small and a smile gate had once biased it —
+// but going from a handful of women to 76 left the corpus women sitting in the
+// same place, which kills the sampling-error explanation and leaves the
+// population-composition one.
+//
+// So the two sources are used for what each is actually good for: the
+// reference photographs give the shape of the distribution (the quantile
+// table), and the rated corpus gives where 5.0 falls and how wide a point is.
+// Both constants are fitted by tools/fit-scale.ts and BOTH must be re-fitted
+// together whenever the corpus or the reference set changes — a scale without
+// its centre collapses the range, which is exactly the failure calibration.test
+// catches with its paired span and mean-error assertions.
+//
+// n = 19. That is thin, and it is also the same nineteen faces the shipped
+// SHRINK was already fitted to; using them for the centre as well is not a new
+// leap of faith, it is the same evidence used correctly.
+export const CENTRE = 0.87;
 
 function normalizeAgg(
   z: number,
@@ -311,11 +353,22 @@ function normalizeAgg(
 ): number {
   raw[key] = z;
   const q = AGG_NORM[sex]?.[key];
-  if (!q || q.length < 3) return SHRINK * z;
-  // Where does this face sit in the reference population? Interpolate its
-  // position in the quantile table, then convert that percentile back to a
-  // z. Deliberately NOT a mean/SD rescale: the aggregate has heavy tails, and
-  // treating it as normal is what pushed top scores to 9+.
+  // Centre first, then scale — the offset is in reference sigmas, which is the
+  // space tableZ returns, so it has to be subtracted before SHRINK converts
+  // that space into displayed points.
+  if (!q || q.length < 3) return SHRINK * (z - CENTRE);
+  return SHRINK * (tableZ(z, q) - CENTRE);
+}
+
+// Where does this face sit in the reference population? Interpolate its
+// position in the quantile table, then convert that percentile back to a
+// z. Deliberately NOT a mean/SD rescale: the aggregate has heavy tails, and
+// treating it as normal is what pushed top scores to 9+.
+//
+// Exported so the tests exercise THIS function rather than a hand-kept
+// mirror of it — the mirror in aggregation.test.ts kept passing after the
+// real mapping changed, which is a test testing nothing.
+export function tableZ(z: number, q: number[]): number {
   const last = q.length - 1;
   // Outside the reference range, EXTRAPOLATE rather than clamp.
   //
@@ -326,11 +379,9 @@ function normalizeAgg(
   // range this product's audience cares about, and no amount of genuine
   // structural advantage could ever show up as a higher number.
   //
-  // The slope is taken from the quartile-to-max span rather than the final
-  // bin. The top two quantiles of a 117-person reference sit very close
-  // together, so using that bin as the scale made the extrapolation explode:
-  // a face slightly past the maximum would have shot to 9.9.
-  if (z >= q[last] || z <= q[0]) return SHRINK * tailZ(z, q, last);
+  // The extrapolation itself is bounded — see tailZ. Separation past the
+  // table edge is real but small, because that is all the sample supports.
+  if (z >= q[last] || z <= q[0]) return tailZ(z, q, last);
   let pct: number;
   {
     let i = 0;
@@ -338,7 +389,18 @@ function normalizeAgg(
     const span = q[i + 1] - q[i] || 1e-9;
     pct = (i + (z - q[i]) / span) / last;
   }
-  return SHRINK * probit(clamp(pct, 0.001, 0.999));
+  // Plotting-position correction. The table's endpoints are the sample
+  // extremes, and a sample extreme is evidence for roughly the
+  // 1 - 0.5/(k+1) percentile of the population, not the 99.9th. Mapping raw
+  // table position straight through probit (with a 0.999 clamp) sent a face
+  // just INSIDE the top bin to +3.1 sigma while a face AT the maximum took
+  // the tail's edge value of +2.0 — a non-monotonic step, hidden only
+  // because the old tail slope was steep enough to leap back over it, and
+  // sitting exactly in the range this product's audience cares about.
+  // Rescaling position into [0.5/(k+1), 1 - 0.5/(k+1)] makes the mapping
+  // continuous with the tail and honest about what k quantile points from a
+  // small sample can claim.
+  return probit((0.5 + pct * last) / (last + 1));
 }
 
 // How much of a region's score is signal rather than noise.

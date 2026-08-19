@@ -1,4 +1,4 @@
-import { authenticatedUser, getSupabaseAdmin, json, requestOrigin } from "./_shared.js";
+import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 
 // ---------------------------------------------------------------------------
 // The before/after pair for the AI Model Reel.
@@ -132,7 +132,7 @@ export async function POST(request: Request): Promise<Response> {
       after: `data:image/png;base64,${after.b64}`,
     });
   } catch (error) {
-    console.error("ai-image failed", error);
+    console.error("ai-image failed", safeMessage(error));
     return json({ error: "The pair could not be generated." }, 500);
   }
 }
@@ -176,8 +176,9 @@ async function openaiImage(
   if (!response.ok) {
     // The upstream body carries account and quota detail worth logging and not
     // worth echoing — it describes OUR billing state, not this caller's.
-    const detail = await response.text().catch(() => "");
-    console.error("OpenAI images refused", response.status, detail.slice(0, 400));
+    // Do not log the upstream body: safety errors can echo parts of the user's
+    // description, which is content rather than operational telemetry.
+    console.error("OpenAI images refused", response.status);
     if (response.status === 401) return { error: "The image key was rejected.", status: 502 };
     if (response.status === 429) return { error: "Image generation is rate limited right now.", status: 429 };
     // A refusal is the interesting case: a prompt the safety system declined is

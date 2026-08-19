@@ -7,7 +7,16 @@ import {
   movedSidePointIds,
 } from "../src/engine/sideFeedbackPayload.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
-import { isJpeg, jpegDimensions, parseSideFeedbackMetadata } from "./side-correction-feedback.js";
+import {
+  SIDE_FEEDBACK_LIST_FIELDS,
+  isJpeg,
+  jpegDimensions,
+  parseFeedbackRevocation,
+  parseSideFeedbackMetadata,
+} from "./side-correction-feedback.js";
+
+const SCAN_ID = "a42ad7cd-2285-4f0a-82f8-f075588101f8";
+const SUBMISSION_ID = "b42ad7cd-2285-4f0a-82f8-f075588101f9";
 
 function points(): SidePoints {
   return Object.fromEntries(SIDE_POINTS.map(({ id }, index) => [id, {
@@ -19,7 +28,8 @@ function points(): SidePoints {
 test("declining correction feedback creates no upload intent", () => {
   assert.equal(createSideFeedbackIntent(
     false,
-    "b42ad7cd-2285-4f0a-82f8-f075588101f9",
+    SCAN_ID,
+    SUBMISSION_ID,
     points(),
     "mesh",
   ), null);
@@ -29,7 +39,8 @@ test("consent snapshots the automatic points instead of retaining a mutable refe
   const original = points();
   const intent = createSideFeedbackIntent(
     true,
-    "b42ad7cd-2285-4f0a-82f8-f075588101f9",
+    SCAN_ID,
+    SUBMISSION_ID,
     original,
     "silhouette",
   );
@@ -43,7 +54,8 @@ test("feedback parser accepts the full labelled pair and identifies only moved p
   const corrected = points();
   corrected.tragion.x += 12;
   const parsed = parseSideFeedbackMetadata(JSON.stringify({
-    submissionId: "b42ad7cd-2285-4f0a-82f8-f075588101f9",
+    scanId: SCAN_ID,
+    submissionId: SUBMISSION_ID,
     consentVersion: SIDE_FEEDBACK_CONSENT_VERSION,
     faceDir: 1,
     width: 400,
@@ -53,6 +65,7 @@ test("feedback parser accepts the full labelled pair and identifies only moved p
     correctedPoints: corrected,
   }));
   assert.equal(parsed.seedMethod, "mesh");
+  assert.equal(parsed.scanId, SCAN_ID);
   assert.deepEqual(movedSidePointIds(automatic, corrected), ["tragion"]);
 });
 
@@ -60,7 +73,8 @@ test("feedback parser rejects missing landmarks and files must have JPEG boundar
   const automatic = points();
   delete (automatic as Partial<SidePoints>).nasion;
   assert.throws(() => parseSideFeedbackMetadata(JSON.stringify({
-    submissionId: "b42ad7cd-2285-4f0a-82f8-f075588101f9",
+    scanId: SCAN_ID,
+    submissionId: SUBMISSION_ID,
     consentVersion: SIDE_FEEDBACK_CONSENT_VERSION,
     faceDir: -1,
     width: 400,
@@ -84,4 +98,25 @@ test("JPEG dimensions are read from the file instead of trusting client metadata
   ]);
   assert.deepEqual(jpegDimensions(jpeg), { width: 400, height: 500 });
   assert.equal(jpegDimensions(new Uint8Array([0xff, 0xd8, 0xff, 0xd9])), null);
+});
+
+test("revocation requires both immutable submission and scan IDs", () => {
+  assert.deepEqual(parseFeedbackRevocation({
+    submissionId: SUBMISSION_ID,
+    scanId: SCAN_ID,
+  }), {
+    submissionId: SUBMISSION_ID,
+    scanId: SCAN_ID,
+  });
+  assert.throws(() => parseFeedbackRevocation({ submissionId: SUBMISSION_ID }), /Scan ID/);
+  assert.throws(() => parseFeedbackRevocation({
+    submissionId: "not-a-uuid",
+    scanId: SCAN_ID,
+  }), /Submission ID/);
+  assert.throws(() => parseFeedbackRevocation([]), /missing/);
+});
+
+test("account feedback lists expose lifecycle metadata only", () => {
+  assert.equal(SIDE_FEEDBACK_LIST_FIELDS, "id,scan_id,created_at,expires_at,consent_version");
+  assert.doesNotMatch(SIDE_FEEDBACK_LIST_FIELDS, /storage|points|sha|review|notes/);
 });

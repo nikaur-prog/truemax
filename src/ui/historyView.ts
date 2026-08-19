@@ -3,7 +3,8 @@ import type { StoredScan } from "../engine/history.js";
 import { clearAllPhotos } from "../engine/photoStore.js";
 
 // ---------------------------------------------------------------------------
-// The history view: every scan taken on this device, as a trend.
+// The history view: every scan owned by the active device-local identity, as a
+// trend. Other accounts and prior anonymous sessions are deliberately absent.
 //
 // This is where the product's honesty about its own noise has to survive
 // contact with a chart. A line joining weekly dots invites the eye to read
@@ -104,11 +105,27 @@ export function hasHistory(): boolean {
   return readAllHistory().length > 0;
 }
 
+let activeHistory: HTMLDivElement | null = null;
+let activeHistoryCleanup: (() => void) | null = null;
+
+export function closeHistory(): void {
+  if (activeHistoryCleanup) {
+    const cleanup = activeHistoryCleanup;
+    activeHistoryCleanup = null;
+    cleanup();
+    return;
+  }
+  activeHistory?.remove();
+  activeHistory = null;
+}
+
 export function openHistory(): void {
+  closeHistory();
   const allScans = readAllHistory();
   const scans = readAllComparableHistory();
   const legacyCount = allScans.length - scans.length;
   const wrap = document.createElement("div");
+  activeHistory = wrap;
   wrap.className = "hist-overlay";
 
   if (!scans.length) {
@@ -136,9 +153,9 @@ export function openHistory(): void {
         band are a change worth reading.</p>
       ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
       <div class="hist-list">${rows(scans)}</div>
-      <p class="hist-foot">Stored on this device only, numbers and a thumbnail of each photo.
+      <p class="hist-foot">Stored on this device only for this profile: numbers and a thumbnail of each photo.
         Nothing here was ever uploaded, and clearing your browser data clears it.
-        <button class="linkish" id="hist-clear-photos">Delete the stored photos</button></p>
+        <button class="linkish" id="hist-clear-photos">Delete this profile's stored photos</button></p>
     </div>`;
   }
 
@@ -150,7 +167,7 @@ export function openHistory(): void {
     clearBtn.onclick = async () => {
       if (!armed) {
         armed = true;
-        clearBtn.textContent = "Tap again to delete every stored photo";
+        clearBtn.textContent = "Tap again to delete this profile's stored photos";
         return;
       }
       clearBtn.disabled = true;
@@ -159,16 +176,22 @@ export function openHistory(): void {
     };
   }
 
-  const close = () => wrap.remove();
+  function close(): void {
+    wrap.remove();
+    document.removeEventListener("keydown", esc);
+    if (activeHistory === wrap) {
+      activeHistory = null;
+      activeHistoryCleanup = null;
+    }
+  }
+  function esc(ev: KeyboardEvent): void {
+    if (ev.key === "Escape") close();
+  }
+  activeHistoryCleanup = close;
   wrap.addEventListener("click", (e) => {
     if (e.target === wrap) close();
   });
   wrap.querySelector(".hist-close")?.addEventListener("click", close);
-  document.addEventListener("keydown", function esc(ev) {
-    if (ev.key === "Escape") {
-      close();
-      document.removeEventListener("keydown", esc);
-    }
-  });
+  document.addEventListener("keydown", esc);
   document.body.appendChild(wrap);
 }

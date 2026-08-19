@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
-import { beatNear } from "../engine/rundownTimeline.js";
+import { beatNear, wordStarts } from "../engine/rundownTimeline.js";
 import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
 import { SPREAD } from "../engine/rarity.js";
 
@@ -544,6 +544,73 @@ export interface RundownFrameOptions {
   overlayCanvas: HTMLCanvasElement;
 }
 
+// A camera that never moves reads as a slideshow no matter how good the
+// cuts are. Every full-bleed beat drifts in by this much over its own length
+// — enough that the frame is visibly alive, small enough that nobody watching
+// could say where the move started.
+const PUSH_IN = 0.035;
+
+// The push is a function of the crop, not a transform on the context, so the
+// measurement overlay — composited through the very same rectangle — stays on
+// the feature for free. Zooming the photograph and not the crop is how a line
+// ends up near a jaw instead of on it.
+function pushInCrop(crop: Crop, photo: { width: number; height: number }, p: number): Crop {
+  const s = 1 - PUSH_IN * clamp01(p);
+  const w = crop.w * s;
+  const h = crop.h * s;
+  const x = Math.max(0, Math.min(photo.width - w, crop.x + (crop.w - w) / 2));
+  const y = Math.max(0, Math.min(photo.height - h, crop.y + (crop.h - h) / 2));
+  return { x, y, w, h };
+}
+
+// The opening resolve: the first frames arrive out of focus and sharpen as
+// the hook lands. Implemented as a cached downscale/upscale rather than
+// ctx.filter, because filter support in the browsers that run this export is
+// exactly the kind of thing that differs between the preview and the file.
+// Deterministic: the blur is a pure function of t and the frame content.
+const RESOLVE_S = 0.9;
+let resolveScratch: HTMLCanvasElement | null = null;
+
+function drawOpeningResolve(ctx: CanvasRenderingContext2D, t: number, W: number, H: number): void {
+  const p = clamp01(t / RESOLVE_S);
+  if (p >= 1) return;
+  resolveScratch ??= document.createElement("canvas");
+  // Stronger early: a twelfth of the frame at t=0, easing toward full
+  // resolution as the alpha runs out.
+  const f = lerp(12, 3, p);
+  const sw = Math.max(2, Math.round(W / f));
+  const sh = Math.max(2, Math.round(H / f));
+  resolveScratch.width = sw;
+  resolveScratch.height = sh;
+  const sctx = resolveScratch.getContext("2d")!;
+  sctx.imageSmoothingEnabled = true;
+  sctx.drawImage(ctx.canvas, 0, 0, ctx.canvas.width, ctx.canvas.height, 0, 0, sw, sh);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.globalAlpha = 1 - smoother(p);
+  ctx.drawImage(resolveScratch, 0, 0, sw, sh, 0, 0, W, H);
+  ctx.restore();
+}
+
+// How long a cutaway takes to rise out of black. The background under it is
+// the frame's own near-black, so an alpha ramp is a dip-to-black cut — the
+// cheapest transition that still reads as an edit rather than a glitch.
+const CUT_DIP = 0.18;
+
+function cutawayAlpha(beat: TimedBeat, t: number): number {
+  const start =
+    beat.beat.kind === "metric"
+      ? beat.start + beat.duration * (1 - CUTAWAY_TAIL)
+      : beat.start;
+  const rise = smoother(clamp01((t - start) / CUT_DIP));
+  // And back down at the beat's end. Without the fall, every cutaway ended at
+  // full brightness and slammed straight onto the next frame — the one hard
+  // cut left in the video, sitting right where the sentence lands. Through
+  // black on both sides, the same edit reads as intentional.
+  const fall = smoother(clamp01((beat.start + beat.duration - t) / CUT_DIP));
+  return rise * fall;
+}
+
 export function drawRundownFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
@@ -562,7 +629,20 @@ export function drawRundownFrame(
   // The photograph is the frame. Full bleed rather than a card, because the
   // subject of a rundown is the face and every pixel spent on chrome is a pixel
   // not spent on the thing being measured.
-  const crop = cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics);
+  //
+  // The push-in uses raw beat-local time, not an eased curve: a drift that
+  // eases in and out of every beat reads as the camera breathing. It RELEASES
+  // over the same window cropAt uses to travel to the next region, so the
+  // frame arrives at the boundary exactly where the next beat begins — without
+  // the release, the push would reset across the cut and every beat would
+  // open with a 3.5% jump.
+  const local = clamp01((t - beat.start) / Math.max(0.001, beat.duration));
+  const release = smoother(clamp01((beat.start + beat.duration - t) / 0.55));
+  const crop = pushInCrop(
+    cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics),
+    photo,
+    local * release,
+  );
   const kind = beat.beat.kind;
 
   // A cutaway, when this beat draws no measurement and there is one to show.
@@ -580,8 +660,13 @@ export function drawRundownFrame(
     brollFor(input, beat, t);
   if (cutaway) {
     // Cover, not the crop maths — the crop is derived from the MEASURED
-    // photograph's face box and means nothing here.
+    // photograph's face box and means nothing here. Rises out of the frame's
+    // own black over CUT_DIP rather than popping in whole — see cutawayAlpha.
+    const dip = cutawayAlpha(beat, t);
+    ctx.save();
+    ctx.globalAlpha = dip;
     const fit = coverDraw(ctx, cutaway.image, W, H);
+    ctx.restore();
     // The same measurement, drawn where it actually is on THIS face.
     //
     // Without this a cutaway is a gap in the analysis: the video stops
@@ -595,7 +680,10 @@ export function drawRundownFrame(
       const ih = (cutaway.image as HTMLImageElement).height || H;
       drawMeasurement(overlayCanvas, cutaway.landmarks, iw, ih, metric, 1);
       ctx.save();
-      ctx.globalAlpha = 0.92 * overlayAlpha(beat, t);
+      // The line rides the same dip as its photograph: a measurement at full
+      // strength over an image still rising out of black is two layers
+      // disagreeing about when the cut happened.
+      ctx.globalAlpha = 0.92 * overlayAlpha(beat, t) * dip;
       ctx.drawImage(overlayCanvas, 0, 0, iw, ih, fit.x, fit.y, fit.w, fit.h);
       ctx.restore();
     }
@@ -692,9 +780,15 @@ export function drawRundownFrame(
   // The caption is drawn on every beat including the card. It collided with the
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
+  drawLedger(ctx, input, beat, t, H);
   drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
-  drawWatermark(ctx, W, H);
+  drawWatermark(ctx, H);
+  // Last, over everything: the whole frame resolves, chrome included, the way
+  // a stream sharpens after a seek. Blurring only the photograph would leave
+  // razor-sharp text floating on an out-of-focus face, which reads as a
+  // rendering bug rather than an opening.
+  drawOpeningResolve(ctx, t, W, H);
 }
 
 // Which beats a cutaway may cover, and which photograph it gets.
@@ -907,6 +1001,14 @@ function drawCard(
   const settle = cardSettle(input, beat, t);
   ctx.globalAlpha = clamp01((settle - 0.55) / 0.4);
 
+  // The figures count up rather than appear. Keyed to the same first-card-beat
+  // clock as the settle, so a re-render of the same scan counts the same way —
+  // and starting only after the card is fully readable, because a number
+  // changing while its card is still fading in is two animations fighting.
+  const firstCard = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
+  const sinceCard = t - firstCard.start;
+  const countUp = 1 - (1 - clamp01((sinceCard - 0.55) / 0.85)) ** 3;
+
   // The verdict, big, because it is the conclusion and a name is what gets
   // quoted in a comment section.
   //
@@ -928,9 +1030,12 @@ function drawCard(
   // The three figures, in a row. Score first because it is the one they came
   // for; ceiling next because it is the one that sells a subscription; rarity
   // last because it is the one nobody else in this niche can actually compute.
+  // The two scores count from zero; the rarity holds still. Counting a
+  // "top X%" upward reads as the rank getting worse in front of the viewer,
+  // which is the wrong feeling for the frame that gets screenshotted.
   const stats: Array<[string, string]> = [
-    ["SCORE", card.overall.toFixed(1)],
-    ["CEILING", card.potential.toFixed(1)],
+    ["SCORE", (card.overall * countUp).toFixed(1)],
+    ["CEILING", (card.potential * countUp).toFixed(1)],
     ["TOP", `${Math.max(1, Math.round(100 - card.percentile))}%`],
   ];
   const statW = W / 3;
@@ -986,8 +1091,12 @@ function drawCard(
     const barW = x1 - barX - 46;
     ctx.fillStyle = "rgba(247,247,242,0.12)";
     ctx.fillRect(barX, y - 13, barW, 7);
+    // Each bar sweeps to its value on the count-up clock, staggered a beat
+    // per row down the column — the same top-of-face-first order the video
+    // just walked, so the card animates the way it reads.
+    const sweep = 1 - (1 - clamp01((sinceCard - 0.55 - i * 0.07) / 0.5)) ** 3;
     ctx.fillStyle = row.score >= 6.5 ? "#8ff3e0" : row.score <= 4.5 ? "#e8a17a" : "#f7f7f2";
-    ctx.fillRect(barX, y - 13, barW * clamp01(row.score / 10), 7);
+    ctx.fillRect(barX, y - 13, barW * clamp01(row.score / 10) * sweep, 7);
 
     ctx.textAlign = "right";
     ctx.fillStyle = "#f7f7f2";
@@ -1332,81 +1441,105 @@ function drawOverlayForBeat(
   ctx.globalAlpha = overlayAlpha(beat, t);
   ctx.drawImage(overlayCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
   ctx.restore();
+
 }
 
-// The caption, typed.
-//
-// Sits low enough to clear the measurement and high enough to clear the bottom
-// bar. Two lines maximum — a third means the sentence was too long for a beat
-// and the fix is in the script, not here.
 // ---------------------------------------------------------------------------
-// The caption, revealed a word at a time and PAGED.
+// The trait ledger: the analysis, accumulating on screen.
 //
-// The bug this replaces was quiet and total: wrap() took maxLines = 2 and threw
-// away everything that did not fit. Back when a beat was "the jaw is excellent"
-// two lines was the whole sentence. A clause is twenty words now, so the
-// caption typed out the first two lines and then stopped dead while the voice
-// carried on talking for another eight seconds. Nothing errored; the words
-// simply had nowhere to go.
+// The reference rundowns' signature element. As each measurement lands, its
+// verdict joins a running list — "+Tall ramus", then "+Tall ramus / +Gonial
+// angle", then more — so any single frame shows not just the current line but
+// the case built so far. A viewer who arrives mid-video (which on TikTok is
+// most of them) sees the score being assembled instead of one disconnected
+// fact, and the frame they screenshot carries the whole argument.
 //
-// So the line is laid out in full and shown a PAGE at a time, the way subtitles
-// work — two lines on screen, advancing as the voice reaches them. Nothing is
-// dropped, and the caption tracks the read instead of falling behind it.
-//
-// Revealed by WORD rather than by character. A per-character typewriter is a
-// nice effect on a short line and a distraction on a long one: the eye reads
-// words, so revealing letters makes a viewer wait for a word they can already
-// half see. Each word fades up and rises a couple of pixels over its own moment
-// instead, which is smooth at 30fps and reads as speech landing rather than as
-// a machine printing.
-//
-// Timed against the WHOLE beat, not 62% of it. The voice uses the whole beat;
-// finishing the caption early is what made it look out of sync in the other
-// direction.
+// Signs follow the metric's own tone: measured strong is a +, measured weak
+// is a −, and the middle band is a dot rather than being dropped — a ledger
+// that only lists extremes reads as a highlight reel, not an analysis.
+// Colours are the same tone palette as the score chip, glow included, so the
+// ledger and the number never disagree about whether a trait helped.
 // ---------------------------------------------------------------------------
-const CAPTION_FONT = "600 33px Inter, Arial, sans-serif";
-const CAPTION_LINE = 42;
-const CAPTION_LINES_PER_PAGE = 2;
-// How long one word takes to fade up, as a share of the time each word gets.
-const WORD_FADE = 0.55;
+const LEDGER_MAX = 5;
+const LEDGER_PITCH = 36;
+const LEDGER_REVEAL = 0.4;
 
-interface CaptionLayout {
-  /** Words with the line they belong to, in reading order. */
-  words: Array<{ text: string; line: number; x: number }>;
-  lineCount: number;
-}
-
-// Laid out once per draw. Cheap — a dozen measureText calls on a string that is
-// already in the atlas — and doing it per frame keeps it honest about the font
-// the context actually has rather than one cached from a different canvas.
-function layoutCaption(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): CaptionLayout {
-  const words = text.split(/\s+/).filter(Boolean);
-  const out: CaptionLayout = { words: [], lineCount: 0 };
-  let line = 0;
-  let current: string[] = [];
-
-  const flush = () => {
-    if (!current.length) return;
-    const full = current.join(" ");
-    let x = -ctx.measureText(full).width / 2;
-    for (const word of current) {
-      const w = ctx.measureText(word).width;
-      out.words.push({ text: word, line, x: x + w / 2 });
-      x += w + ctx.measureText(" ").width;
-    }
-    line++;
-    current = [];
-  };
-
-  for (const word of words) {
-    const candidate = [...current, word].join(" ");
-    if (current.length && ctx.measureText(candidate).width > maxWidth) flush();
-    current.push(word);
+function ledgerEntries(
+  input: RundownInput,
+  t: number,
+): Array<{ metric: ScoredMetric; reveal: number }> {
+  const out: Array<{ metric: ScoredMetric; reveal: number }> = [];
+  for (const b of input.timeline.beats) {
+    if (b.beat.kind !== "metric" || !b.beat.metricId) continue;
+    // A trait joins the ledger a beat after its line starts drawing — the
+    // measurement introduces it, the ledger records it.
+    const at = b.start + 0.35;
+    if (t < at) break;
+    const metric = input.metrics.get(b.beat.metricId);
+    if (!metric) continue;
+    out.push({ metric, reveal: clamp01((t - at) / LEDGER_REVEAL) });
   }
-  flush();
-  out.lineCount = line;
-  return out;
+  return out.slice(-LEDGER_MAX);
 }
+
+function drawLedger(
+  ctx: CanvasRenderingContext2D,
+  input: RundownInput,
+  beat: TimedBeat,
+  t: number,
+  H: number,
+): void {
+  // The closing compositions own their whole frame; the ledger's job is done
+  // by the scorecard there anyway.
+  const kind = beat.beat.kind;
+  if (kind === "card" || kind === "curve" || kind === "search") return;
+  const entries = ledgerEntries(input, t);
+  if (!entries.length) return;
+
+  // Stacked down the left edge, ending well above the caption band. Newest
+  // last, the way the sentence order went.
+  const y0 = H * 0.42 - (entries.length - 1) * LEDGER_PITCH;
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.font = "700 27px Inter, Arial, sans-serif";
+  const newest = entries[entries.length - 1];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const last = i === entries.length - 1;
+    const colour = toneColour(e.metric);
+    const sign = e.metric.zEff >= 0.5 ? "+" : e.metric.zEff <= -0.5 ? "−" : "·";
+    // The newest entry rises in; the ones before it step back as it arrives,
+    // on the newcomer's own clock so the hand-off is one motion.
+    const settle = smoother(e.reveal);
+    const dim = last ? 1 : lerp(1, 0.5, smoother(newest.reveal));
+    ctx.globalAlpha = (last ? settle : dim) * 0.96;
+    ctx.shadowColor = colour;
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = colour;
+    const y = y0 + i * LEDGER_PITCH + (last ? (1 - settle) * 12 : 0);
+    ctx.fillText(`${sign} ${e.metric.def.name}`, SAFE_LEFT, y);
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The caption: ONE word at a time.
+//
+// The paged two-line caption put a paragraph on the face. On a full-bleed
+// portrait every pixel of text is a pixel of subject, and a viewer who wants
+// the sentence has the narration reading it to them already. One word, big,
+// replaced as the voice reaches the next, is the whole job: it tracks the
+// read, it never covers more than a sliver of the frame, and it cannot fall
+// behind because there is nothing to catch up on.
+//
+// Timing comes from wordStarts in rundownTimeline — the same fractions the
+// keystroke cues fire on — so the tick, the glyph and the voice agree about
+// where in the beat a word lives.
+// ---------------------------------------------------------------------------
+// A small lead, because a caption that lands exactly with the voice reads as
+// late: the word is heard before it is read, so the glyph needs to already be
+// there when the sound arrives.
+const CAPTION_LEAD = 0.12;
 
 function drawCaption(
   ctx: CanvasRenderingContext2D,
@@ -1417,126 +1550,35 @@ function drawCaption(
 ): void {
   const full = beat.beat.line;
   if (!full) return;
+  const words = full.split(/\s+/).filter(Boolean);
+  if (!words.length) return;
+
+  const starts = wordStarts(full);
+  const progress = clamp01((t - beat.start + CAPTION_LEAD) / Math.max(0.001, beat.duration));
+  let index = 0;
+  while (index + 1 < starts.length && progress >= starts[index + 1]) index++;
+
+  // Pop in fast, hold, and leave with the beat rather than word by word —
+  // a word that fades out before its successor arrives reads as a dropout.
+  const pop = smoother(clamp01((progress - starts[index]) * beat.duration / 0.12));
+  const endFade = smoother(clamp01((beat.start + beat.duration - t) / 0.15));
 
   ctx.save();
-  ctx.font = CAPTION_FONT;
-  ctx.letterSpacing = "0px";
   ctx.textAlign = "center";
-
-  const maxWidth = W - 108;
-  const layout = layoutCaption(ctx, full, maxWidth);
-  if (!layout.words.length) {
-    ctx.restore();
-    return;
-  }
-
-  // PAGES, each with its own slot of the beat.
-  //
-  // The complaint was that the typewriter could not keep up: a per-character
-  // reveal spread across a whole beat is slower than anybody talks, so the
-  // caption trailed the voice and then stopped entirely when the line ran past
-  // two lines and the rest was silently dropped.
-  //
-  // So the line is paged, the pages divide the beat in proportion to the words
-  // they hold, and inside a page the reveal is FAST — done in the first third,
-  // held while it is read, faded out at the end. Typewriter in, fade out, which
-  // is what was asked for and also what keeps it ahead of the read rather than
-  // behind it.
-  const perPage = Math.max(1, CAPTION_LINES_PER_PAGE);
-  const pageCount = Math.max(1, Math.ceil(layout.lineCount / perPage));
-  // A small lead, because a caption that lands exactly with the voice reads as
-  // late. The word is heard before it is read — the eye needs the glyph to
-  // already be there when the sound arrives, not to appear on the same frame.
-  // A tenth of a second is under the threshold at which anything looks early and
-  // over the threshold at which it stops looking behind.
-  const LEAD = 0.12;
-  const progress = clamp01((t - beat.start + LEAD) / Math.max(0.001, beat.duration));
-
-  // Pages divide the beat BY WORD, not evenly.
-  //
-  // Evenly is what this did, and it is wrong whenever the last page is a partial
-  // one — which is most beats, since a line break rarely lands on a page
-  // boundary. A five-line caption is three pages, and giving the one-line third
-  // page the same third of the beat as the two full pages ahead of it means both
-  // full pages are hurried through and the tail sits there. The flip has to
-  // happen where the voice reaches those words.
-  const pageWords: number[] = new Array(pageCount).fill(0);
-  for (const w of layout.words) pageWords[Math.floor(w.line / perPage)]++;
-  const totalWords = pageWords.reduce((a, n) => a + n, 0) || 1;
-
-  let page = pageCount - 1;
-  let within = 1;
-  let cursor = 0;
-  for (let i = 0; i < pageCount; i++) {
-    const share = pageWords[i] / totalWords;
-    if (progress < cursor + share || i === pageCount - 1) {
-      page = i;
-      within = share > 0 ? clamp01((progress - cursor) / share) : 1;
-      break;
-    }
-    cursor += share;
-  }
-
-  const firstLine = page * perPage;
-  const visible = layout.words.filter((w) => w.line >= firstLine && w.line < firstLine + perPage);
-  if (!visible.length) {
-    ctx.restore();
-    return;
-  }
-
-  // Reveal over the first third of the page, hold, fade over the last sixth.
-  // The fade is the page leaving rather than each word leaving: words arriving
-  // one at a time and departing one at a time reads as a fault.
-  const REVEAL = 0.34;
-  const FADE_OUT = 0.16;
-  const head = (within / REVEAL) * visible.length;
-  const pageAlpha = smoother(clamp01((1 - within) / FADE_OUT));
-
-  const rows = Math.min(perPage, layout.lineCount - firstLine);
-  // Clear of the bottom bar, which sits at H - SAFE_BOTTOM - 40. At 54 the two
-  // were fourteen pixels apart and read as one crowded block.
-  const baseline = H - SAFE_BOTTOM - 124 - (rows - 1) * CAPTION_LINE;
-
-  // A soft band behind the caption zone.
-  //
-  // The complaint was that the caption sits "in front of the face", and it does
-  // — on a full-bleed portrait every position is in front of the face, so the
-  // question is whether it looks placed or dropped. A shadow alone left white
-  // text floating on a cheek. A gradient darkening toward the bottom reads as
-  // the lower third being the place captions live, and costs no legibility up
-  // where the eyes are because it is nearly clear there.
-  const bandTop = baseline - CAPTION_LINE - 46;
-  // All the way to the frame edge. Ending it at the safe line left a visible
-  // horizontal seam where the band stopped and the base scrim carried on — a
-  // straight line across a photograph, which is the most obviously wrong thing
-  // a gradient can do.
-  const bandBottom = H;
-  const band = ctx.createLinearGradient(0, bandTop, 0, bandBottom);
-  band.addColorStop(0, "rgba(3,5,5,0)");
-  band.addColorStop(0.55, "rgba(3,5,5,.40)");
-  band.addColorStop(1, "rgba(3,5,5,.60)");
-  ctx.globalAlpha = pageAlpha;
-  ctx.fillStyle = band;
-  ctx.fillRect(0, bandTop, W, bandBottom - bandTop);
-  ctx.globalAlpha = 1;
-
-  visible.forEach((word, index) => {
-    // Each word gets its own slice of the reveal and fades up inside it.
-    const local = clamp01((head - index) / WORD_FADE);
-    if (local <= 0) return;
-    const eased = smoother(local);
-    const y = baseline + (word.line - firstLine) * CAPTION_LINE + (1 - eased) * 6;
-    ctx.globalAlpha = eased * pageAlpha;
-    // A shadow rather than a plate. A plate is a rectangle the eye has to look
-    // past; a shadow keeps the face visible underneath it.
-    ctx.shadowColor = "rgba(0,0,0,.92)";
-    ctx.shadowBlur = 20;
-    ctx.fillStyle = "#f7f7f2";
-    ctx.fillText(word.text, W / 2 + word.x, y);
-  });
+  ctx.letterSpacing = "0px";
+  // Sized to the word, so a long word never leaves the frame and a short one
+  // is allowed to be big.
+  ctx.font = fitFont(ctx, words[index], W - SAFE_LEFT * 2 - 40, 46, 30, (px) => `700 ${px}px Inter, Arial, sans-serif`);
+  const y = H - SAFE_BOTTOM - 88 + (1 - pop) * 8;
+  ctx.globalAlpha = pop * endFade;
+  // A shadow rather than a plate or a band: one word does not need a stage,
+  // and the band the old caption carried was most of what hid the face.
+  ctx.shadowColor = "rgba(0,0,0,.92)";
+  ctx.shadowBlur = 22;
+  ctx.fillStyle = "#f7f7f2";
+  ctx.fillText(words[index], W / 2, y);
   ctx.restore();
 }
-
 
 // The bottom bar. Fixed position, every frame, because a value that moves is a
 // value the eye has to find again on every beat.
@@ -1549,9 +1591,13 @@ function drawBottomBar(
 ): void {
   const id = beat.beat.metricId;
   const metric = id ? input.metrics.get(id) : undefined;
-  // Was H - 128, which put the metric name and its value inside the block where
-  // TikTok prints the caption and the sound name.
-  const y = H - SAFE_BOTTOM - 40;
+  // As low as the frame allows while staying clear of TikTok's own chrome.
+  // It sat at H - SAFE_BOTTOM - 40 and together with the caption formed a
+  // block across the lower third of the face; with the caption down to one
+  // word the bar drops too, and the face gets the frame back. The watermark
+  // moves under it (drawWatermark), and the stack bottoms out around 1060 at
+  // 1280 tall — above where TikTok's description and sound rail begin.
+  const y = H - SAFE_BOTTOM + 10;
 
   ctx.save();
   ctx.textAlign = "left";
@@ -1650,19 +1696,20 @@ function clip(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
 // So it tucks in under the score column instead, right-aligned to the same edge
 // the number and its band already use. Nothing is measured out there, the three
 // items read as one stack, and the centre of the frame is left to the face.
-function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+function drawWatermark(ctx: CanvasRenderingContext2D, H: number): void {
   ctx.save();
   ctx.font = "500 16px Inter, Arial, sans-serif";
   ctx.letterSpacing = "2px";
   ctx.textAlign = "left";
   const name = "truemax";
   const tld = ".app";
-  const total = ctx.measureText(name).width + ctx.measureText(tld).width;
-  // Right-aligned by hand rather than with textAlign, because the wordmark is
-  // two differently coloured draws and the second has to start where the first
-  // ends.
-  const x = W - SAFE_RIGHT - total;
-  const y = H - SAFE_BOTTOM + 26;
+  // Bottom-left, under the metric name's own column. The bar moved down with
+  // the one-word caption and the wordmark's old right-side spot printed
+  // straight through the score; the right column now carries the number and
+  // its band, the left carries the name and the brand. Two differently
+  // coloured draws, the second starting where the first ends.
+  const x = SAFE_LEFT;
+  const y = H - SAFE_BOTTOM + 64;
   ctx.globalAlpha = 0.62;
   ctx.fillStyle = "#f5f5f1";
   ctx.fillText(name, x, y);
