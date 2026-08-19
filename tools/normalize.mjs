@@ -34,14 +34,30 @@ const pop = JSON.parse(readFileSync(DATA + "pop-manifest.json", "utf8"));
 // in ways that do not cancel.
 const GATE = { yaw: 25, pitch: 22, smile: 1.01, face: 0.2 };
 
-const server = spawn("npx", ["vite", "preview", "--port", "4186", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
-await new Promise((r) => setTimeout(r, 2500));
+const PORT = Number(process.env.TM_PORT ?? 4186);
+const server = spawn(
+  "npx",
+  ["vite", "preview", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"],
+  { cwd: APP_DIR, stdio: "ignore" },
+);
+// Poll rather than sleeping a fixed 2.5s. A cold `npx vite preview` can take
+// longer than that, and the failure mode was a whole reference scan aborting
+// on connection refused after the photos were already fetched.
+for (let i = 0; i < 60; i++) {
+  try {
+    if ((await fetch(`http://127.0.0.1:${PORT}/`)).ok) break;
+  } catch {
+    // Still starting.
+  }
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (i === 59) throw new Error("Preview server did not start");
+}
 const browser = await chromium.launch({ executablePath: CHROME });
 
 const bySex = { male: [], female: [] };
 try {
   const page = await browser.newPage();
-  await page.goto("http://localhost:4186/");
+  await page.goto(`http://127.0.0.1:${PORT}/`);
   await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
 
   for (const { name, sex, file } of pop) {
@@ -64,11 +80,39 @@ try {
 const QUANTILES = Array.from({ length: 21 }, (_, i) => i / 20);
 const out = { male: {}, female: {} };
 
+// What the shipped file currently holds, so a thin scan can carry a sex
+// forward instead of erasing it. "Leaving it unnormalized" used to mean
+// writing `male: {}` — which does not leave the old table in place, it
+// deletes it, and normalizeAgg then silently falls back to the raw z with no
+// quantile mapping at all. A tool whose stated safe path is a catastrophic
+// regression is worse than one that refuses.
+const previous = (() => {
+  try {
+    const src = readFileSync(APP_DIR + "/src/engine/aggNorm.ts", "utf8");
+    const grab = (sex) => {
+      const start = src.indexOf(`${sex}: {`);
+      const end = src.indexOf("},", start);
+      const body = src.slice(start, end);
+      const table = {};
+      for (const [, key, nums] of body.matchAll(/"([^"]+)":\s*\[([^\]]+)\]/g)) {
+        table[key] = nums.split(",").map(Number);
+      }
+      return table;
+    };
+    return { male: grab("male"), female: grab("female") };
+  } catch {
+    return { male: {}, female: {} };
+  }
+})();
+
 for (const sex of ["male", "female"]) {
   const rows = bySex[sex];
   console.log(`${sex}: ${rows.length} reference faces`);
   if (rows.length < 8) {
-    console.log(`  too few — leaving ${sex} unnormalized`);
+    const kept = Object.keys(previous[sex]).length;
+    if (!kept) throw new Error(`${sex}: only ${rows.length} faces and no existing table to keep`);
+    console.log(`  too few — KEEPING the existing ${sex} table (${kept} keys) unchanged`);
+    out[sex] = previous[sex];
     continue;
   }
   for (const key of Object.keys(rows[0])) {
@@ -79,6 +123,18 @@ for (const sex of ["male", "female"]) {
       const hi = Math.ceil(idx);
       return +(vals[lo] + (vals[hi] - vals[lo]) * (idx - lo)).toFixed(4);
     });
+  }
+  // The overall table's span is the number that decides whether real faces
+  // fall off the edge and get scored by extrapolation instead of evidence.
+  // Print it against what it was, so a rebuild's effect is visible here
+  // rather than discovered later from a user's screenshot.
+  const o = out[sex].overall;
+  const p = previous[sex].overall;
+  if (o) {
+    console.log(
+      `  overall spans ${o[0].toFixed(3)} … ${o[o.length - 1].toFixed(3)}` +
+        (p ? `  (was ${p[0].toFixed(3)} … ${p[p.length - 1].toFixed(3)})` : ""),
+    );
   }
 }
 
