@@ -314,7 +314,36 @@ function tailZ(z: number, q: number[], last: number): number {
 // stays uncompressed, so Full mode still explains what moved the result. The
 // inverse used by editing and rarity copy operates on the already-calibrated
 // aggregate z; forward and inverse must never silently disagree again.
-export const SHRINK = 0.4;
+export const SHRINK = 1.13;
+
+// Where 5.0 sits, in reference-population sigmas.
+//
+// The reference set is people notable for their WORK, and that is the right
+// choice for the distribution's SHAPE and the wrong one for its CENTRE: they
+// are mostly middle-aged, and this engine's metrics read youthful structure as
+// better. Measured on the rated corpus, faces blinded human reviewers score
+// 5.09/10 sit 0.87 sigma above the reference median — so "5.0 = the median of
+// our reference photographs" and "5.0 = what a person calls average" are two
+// different claims, and only the second is the one the product makes.
+//
+// Rebuilding the reference set did NOT move this. The female table was the
+// prime suspect — the sample was small and a smile gate had once biased it —
+// but going from a handful of women to 76 left the corpus women sitting in the
+// same place, which kills the sampling-error explanation and leaves the
+// population-composition one.
+//
+// So the two sources are used for what each is actually good for: the
+// reference photographs give the shape of the distribution (the quantile
+// table), and the rated corpus gives where 5.0 falls and how wide a point is.
+// Both constants are fitted by tools/fit-scale.ts and BOTH must be re-fitted
+// together whenever the corpus or the reference set changes — a scale without
+// its centre collapses the range, which is exactly the failure calibration.test
+// catches with its paired span and mean-error assertions.
+//
+// n = 19. That is thin, and it is also the same nineteen faces the shipped
+// SHRINK was already fitted to; using them for the centre as well is not a new
+// leap of faith, it is the same evidence used correctly.
+export const CENTRE = 0.87;
 
 function normalizeAgg(
   z: number,
@@ -324,8 +353,11 @@ function normalizeAgg(
 ): number {
   raw[key] = z;
   const q = AGG_NORM[sex]?.[key];
-  if (!q || q.length < 3) return SHRINK * z;
-  return SHRINK * tableZ(z, q);
+  // Centre first, then scale — the offset is in reference sigmas, which is the
+  // space tableZ returns, so it has to be subtracted before SHRINK converts
+  // that space into displayed points.
+  if (!q || q.length < 3) return SHRINK * (z - CENTRE);
+  return SHRINK * (tableZ(z, q) - CENTRE);
 }
 
 // Where does this face sit in the reference population? Interpolate its
