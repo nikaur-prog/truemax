@@ -30,7 +30,7 @@ import type {
 // a plain stored value when a saved scan is replayed.
 const PIXEL_METRICS = new Set(["foreheadRatio"]);
 
-const SCORE_SCALE = 1.3; // score points per σ
+export const SCORE_SCALE = 1.3; // score points per σ
 const Z_CLAMP = 2.2; // per-metric influence clamp (noisy landmark guard)
 // Assumed inter-metric correlation when re-standardizing aggregates. Facial
 // metrics correlate (a lean, structured face moves many at once); without
