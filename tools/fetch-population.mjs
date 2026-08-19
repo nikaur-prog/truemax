@@ -53,7 +53,9 @@ for (const [name, sex, slug] of entries) {
   };
   let ok = existsSync(dest) && statSync(dest).size >= 5000 && isImage();
   for (let attempt = 0; !ok && attempt < 4; attempt++) {
-    if (attempt) await sleep(2000 * 2 ** attempt);
+    // Wikipedia's throttle window is long — short backoffs just burn the
+    // remaining attempts inside the same window.
+    if (attempt) await sleep(15000 * 2 ** attempt);
     try {
       const title = encodeURIComponent(name.replace(/ /g, "_"));
       const json = execSync(
@@ -79,7 +81,7 @@ for (const [name, sex, slug] of entries) {
     }
   }
   if (ok) manifest.push({ name, sex, file: dest });
-  await sleep(300);
+  await sleep(1500);
 }
 
 writeFileSync(`${DATA}pop-manifest.json`, JSON.stringify(manifest, null, 2));
