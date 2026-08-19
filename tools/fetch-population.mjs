@@ -65,13 +65,22 @@ for (const [name, sex, slug] of entries) {
         console.log(`SKIP (no image): ${name}`);
         break;
       }
-      // --fail matters more than it looks. upload.wikimedia.org answers a
-      // rate-limited request with HTTP 429 and an HTML error page; without
-      // --fail curl happily wrote that page to disk under a .jpg name, and
-      // a whole pass "succeeded" with a third of the sample being error
-      // pages. Now the body is never written unless the status is 2xx.
+      // Fetch through Special:FilePath rather than the upload host the API
+      // points at. upload.wikimedia.org rate-limits a datacenter IP hard and
+      // stays limited for a long window — measured here, it answered 429 to
+      // every request over several minutes while en.wikipedia.org served the
+      // identical files at 200. FilePath also takes a width, and the engine
+      // downsizes to 1280 anyway, so there is nothing to gain from pulling
+      // full-resolution originals.
+      const fileName = decodeURIComponent(url.split("?")[0].split("/").pop());
+      const src =
+        `https://en.wikipedia.org/wiki/Special:FilePath/${encodeURIComponent(fileName)}?width=1280`;
+      // --fail matters more than it looks. A rate-limited request answers
+      // with HTTP 429 and an HTML error page; without --fail curl happily
+      // wrote that page to disk under a .jpg name, past the size check, and
+      // a whole pass "succeeded" with half the sample being error pages.
       const code = execSync(
-        `curl -sSL --fail -A "${UA}" -w "%{http_code}" -o "${dest}" "${url.replace(/"/g, "")}" || true`,
+        `curl -sSL --fail -A "${UA}" -w "%{http_code}" -o "${dest}" "${src.replace(/"/g, "")}" || true`,
         { timeout: 60000 },
       ).toString().trim();
       if (code === "429") {
