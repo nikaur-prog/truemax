@@ -544,6 +544,73 @@ export interface RundownFrameOptions {
   overlayCanvas: HTMLCanvasElement;
 }
 
+// A camera that never moves reads as a slideshow no matter how good the
+// cuts are. Every full-bleed beat drifts in by this much over its own length
+// — enough that the frame is visibly alive, small enough that nobody watching
+// could say where the move started.
+const PUSH_IN = 0.035;
+
+// The push is a function of the crop, not a transform on the context, so the
+// measurement overlay — composited through the very same rectangle — stays on
+// the feature for free. Zooming the photograph and not the crop is how a line
+// ends up near a jaw instead of on it.
+function pushInCrop(crop: Crop, photo: { width: number; height: number }, p: number): Crop {
+  const s = 1 - PUSH_IN * clamp01(p);
+  const w = crop.w * s;
+  const h = crop.h * s;
+  const x = Math.max(0, Math.min(photo.width - w, crop.x + (crop.w - w) / 2));
+  const y = Math.max(0, Math.min(photo.height - h, crop.y + (crop.h - h) / 2));
+  return { x, y, w, h };
+}
+
+// The opening resolve: the first frames arrive out of focus and sharpen as
+// the hook lands. Implemented as a cached downscale/upscale rather than
+// ctx.filter, because filter support in the browsers that run this export is
+// exactly the kind of thing that differs between the preview and the file.
+// Deterministic: the blur is a pure function of t and the frame content.
+const RESOLVE_S = 0.9;
+let resolveScratch: HTMLCanvasElement | null = null;
+
+function drawOpeningResolve(ctx: CanvasRenderingContext2D, t: number, W: number, H: number): void {
+  const p = clamp01(t / RESOLVE_S);
+  if (p >= 1) return;
+  resolveScratch ??= document.createElement("canvas");
+  // Stronger early: a twelfth of the frame at t=0, easing toward full
+  // resolution as the alpha runs out.
+  const f = lerp(12, 3, p);
+  const sw = Math.max(2, Math.round(W / f));
+  const sh = Math.max(2, Math.round(H / f));
+  resolveScratch.width = sw;
+  resolveScratch.height = sh;
+  const sctx = resolveScratch.getContext("2d")!;
+  sctx.imageSmoothingEnabled = true;
+  sctx.drawImage(ctx.canvas, 0, 0, ctx.canvas.width, ctx.canvas.height, 0, 0, sw, sh);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.globalAlpha = 1 - smoother(p);
+  ctx.drawImage(resolveScratch, 0, 0, sw, sh, 0, 0, W, H);
+  ctx.restore();
+}
+
+// How long a cutaway takes to rise out of black. The background under it is
+// the frame's own near-black, so an alpha ramp is a dip-to-black cut — the
+// cheapest transition that still reads as an edit rather than a glitch.
+const CUT_DIP = 0.18;
+
+function cutawayAlpha(beat: TimedBeat, t: number): number {
+  const start =
+    beat.beat.kind === "metric"
+      ? beat.start + beat.duration * (1 - CUTAWAY_TAIL)
+      : beat.start;
+  const rise = smoother(clamp01((t - start) / CUT_DIP));
+  // And back down at the beat's end. Without the fall, every cutaway ended at
+  // full brightness and slammed straight onto the next frame — the one hard
+  // cut left in the video, sitting right where the sentence lands. Through
+  // black on both sides, the same edit reads as intentional.
+  const fall = smoother(clamp01((beat.start + beat.duration - t) / CUT_DIP));
+  return rise * fall;
+}
+
 export function drawRundownFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
@@ -562,7 +629,20 @@ export function drawRundownFrame(
   // The photograph is the frame. Full bleed rather than a card, because the
   // subject of a rundown is the face and every pixel spent on chrome is a pixel
   // not spent on the thing being measured.
-  const crop = cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics);
+  //
+  // The push-in uses raw beat-local time, not an eased curve: a drift that
+  // eases in and out of every beat reads as the camera breathing. It RELEASES
+  // over the same window cropAt uses to travel to the next region, so the
+  // frame arrives at the boundary exactly where the next beat begins — without
+  // the release, the push would reset across the cut and every beat would
+  // open with a 3.5% jump.
+  const local = clamp01((t - beat.start) / Math.max(0.001, beat.duration));
+  const release = smoother(clamp01((beat.start + beat.duration - t) / 0.55));
+  const crop = pushInCrop(
+    cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics),
+    photo,
+    local * release,
+  );
   const kind = beat.beat.kind;
 
   // A cutaway, when this beat draws no measurement and there is one to show.
@@ -580,8 +660,13 @@ export function drawRundownFrame(
     brollFor(input, beat, t);
   if (cutaway) {
     // Cover, not the crop maths — the crop is derived from the MEASURED
-    // photograph's face box and means nothing here.
+    // photograph's face box and means nothing here. Rises out of the frame's
+    // own black over CUT_DIP rather than popping in whole — see cutawayAlpha.
+    const dip = cutawayAlpha(beat, t);
+    ctx.save();
+    ctx.globalAlpha = dip;
     const fit = coverDraw(ctx, cutaway.image, W, H);
+    ctx.restore();
     // The same measurement, drawn where it actually is on THIS face.
     //
     // Without this a cutaway is a gap in the analysis: the video stops
@@ -595,7 +680,10 @@ export function drawRundownFrame(
       const ih = (cutaway.image as HTMLImageElement).height || H;
       drawMeasurement(overlayCanvas, cutaway.landmarks, iw, ih, metric, 1);
       ctx.save();
-      ctx.globalAlpha = 0.92 * overlayAlpha(beat, t);
+      // The line rides the same dip as its photograph: a measurement at full
+      // strength over an image still rising out of black is two layers
+      // disagreeing about when the cut happened.
+      ctx.globalAlpha = 0.92 * overlayAlpha(beat, t) * dip;
       ctx.drawImage(overlayCanvas, 0, 0, iw, ih, fit.x, fit.y, fit.w, fit.h);
       ctx.restore();
     }
@@ -695,6 +783,11 @@ export function drawRundownFrame(
   drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
+  // Last, over everything: the whole frame resolves, chrome included, the way
+  // a stream sharpens after a seek. Blurring only the photograph would leave
+  // razor-sharp text floating on an out-of-focus face, which reads as a
+  // rendering bug rather than an opening.
+  drawOpeningResolve(ctx, t, W, H);
 }
 
 // Which beats a cutaway may cover, and which photograph it gets.
@@ -907,6 +1000,14 @@ function drawCard(
   const settle = cardSettle(input, beat, t);
   ctx.globalAlpha = clamp01((settle - 0.55) / 0.4);
 
+  // The figures count up rather than appear. Keyed to the same first-card-beat
+  // clock as the settle, so a re-render of the same scan counts the same way —
+  // and starting only after the card is fully readable, because a number
+  // changing while its card is still fading in is two animations fighting.
+  const firstCard = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
+  const sinceCard = t - firstCard.start;
+  const countUp = 1 - (1 - clamp01((sinceCard - 0.55) / 0.85)) ** 3;
+
   // The verdict, big, because it is the conclusion and a name is what gets
   // quoted in a comment section.
   //
@@ -928,9 +1029,12 @@ function drawCard(
   // The three figures, in a row. Score first because it is the one they came
   // for; ceiling next because it is the one that sells a subscription; rarity
   // last because it is the one nobody else in this niche can actually compute.
+  // The two scores count from zero; the rarity holds still. Counting a
+  // "top X%" upward reads as the rank getting worse in front of the viewer,
+  // which is the wrong feeling for the frame that gets screenshotted.
   const stats: Array<[string, string]> = [
-    ["SCORE", card.overall.toFixed(1)],
-    ["CEILING", card.potential.toFixed(1)],
+    ["SCORE", (card.overall * countUp).toFixed(1)],
+    ["CEILING", (card.potential * countUp).toFixed(1)],
     ["TOP", `${Math.max(1, Math.round(100 - card.percentile))}%`],
   ];
   const statW = W / 3;
@@ -986,8 +1090,12 @@ function drawCard(
     const barW = x1 - barX - 46;
     ctx.fillStyle = "rgba(247,247,242,0.12)";
     ctx.fillRect(barX, y - 13, barW, 7);
+    // Each bar sweeps to its value on the count-up clock, staggered a beat
+    // per row down the column — the same top-of-face-first order the video
+    // just walked, so the card animates the way it reads.
+    const sweep = 1 - (1 - clamp01((sinceCard - 0.55 - i * 0.07) / 0.5)) ** 3;
     ctx.fillStyle = row.score >= 6.5 ? "#8ff3e0" : row.score <= 4.5 ? "#e8a17a" : "#f7f7f2";
-    ctx.fillRect(barX, y - 13, barW * clamp01(row.score / 10), 7);
+    ctx.fillRect(barX, y - 13, barW * clamp01(row.score / 10) * sweep, 7);
 
     ctx.textAlign = "right";
     ctx.fillStyle = "#f7f7f2";
