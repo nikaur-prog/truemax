@@ -69,6 +69,9 @@ c.fillText("CUTAWAY", 450, 1080);
 
 const beats = [
   { kind: "metric", line: "Marlon has a canthal tilt of 6.4 degrees, so the outer corner sits above the inner.", metricId: "canthalTilt", region: "eyes", positive: true },
+  // A second metric beat so the trait ledger's stacking — the previous entry
+  // stepping back as the new one arrives — is visible in a still.
+  { kind: "metric", line: "The jaw angle comes in wide, which costs him the lower third.", metricId: "jawFrontalAngle", region: "jaw", positive: false },
   { kind: "card", line: "The verdict: Great-looking. A very attractive male.", card },
   { kind: "card", line: "Marlon measures 7.6 out of 10.", card },
   // Two curve beats, because they render differently: the first carries a
@@ -93,6 +96,15 @@ if (def) {
     value: 6.4,
     z: 1.1, zEff: 1.1, percentile: 86, markerPct: 86,
     score: 8.1, idealRange: [3, 9],
+  });
+}
+const jawDef = METRICS.find((m) => m.id === "jawFrontalAngle");
+if (jawDef) {
+  metrics.set(jawDef.id, {
+    def: jawDef,
+    value: 104,
+    z: -1.2, zEff: -1.2, percentile: 14, markerPct: 14,
+    score: 3.9, idealRange: [86, 96],
   });
 }
 

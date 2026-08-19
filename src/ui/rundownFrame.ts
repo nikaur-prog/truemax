@@ -780,6 +780,7 @@ export function drawRundownFrame(
   // The caption is drawn on every beat including the card. It collided with the
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
+  drawLedger(ctx, input, beat, t, H);
   drawCaption(ctx, beat, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, W, H);
@@ -1439,6 +1440,84 @@ function drawOverlayForBeat(
   // it arrive and leave rather than blink. See overlayAlpha.
   ctx.globalAlpha = overlayAlpha(beat, t);
   ctx.drawImage(overlayCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The trait ledger: the analysis, accumulating on screen.
+//
+// The reference rundowns' signature element. As each measurement lands, its
+// verdict joins a running list — "+Tall ramus", then "+Tall ramus / +Gonial
+// angle", then more — so any single frame shows not just the current line but
+// the case built so far. A viewer who arrives mid-video (which on TikTok is
+// most of them) sees the score being assembled instead of one disconnected
+// fact, and the frame they screenshot carries the whole argument.
+//
+// Signs follow the metric's own tone: measured strong is a +, measured weak
+// is a −, and the middle band is a dot rather than being dropped — a ledger
+// that only lists extremes reads as a highlight reel, not an analysis.
+// Colours are the same tone palette as the score chip, glow included, so the
+// ledger and the number never disagree about whether a trait helped.
+// ---------------------------------------------------------------------------
+const LEDGER_MAX = 5;
+const LEDGER_PITCH = 36;
+const LEDGER_REVEAL = 0.4;
+
+function ledgerEntries(
+  input: RundownInput,
+  t: number,
+): Array<{ metric: ScoredMetric; reveal: number }> {
+  const out: Array<{ metric: ScoredMetric; reveal: number }> = [];
+  for (const b of input.timeline.beats) {
+    if (b.beat.kind !== "metric" || !b.beat.metricId) continue;
+    // A trait joins the ledger a beat after its line starts drawing — the
+    // measurement introduces it, the ledger records it.
+    const at = b.start + 0.35;
+    if (t < at) break;
+    const metric = input.metrics.get(b.beat.metricId);
+    if (!metric) continue;
+    out.push({ metric, reveal: clamp01((t - at) / LEDGER_REVEAL) });
+  }
+  return out.slice(-LEDGER_MAX);
+}
+
+function drawLedger(
+  ctx: CanvasRenderingContext2D,
+  input: RundownInput,
+  beat: TimedBeat,
+  t: number,
+  H: number,
+): void {
+  // The closing compositions own their whole frame; the ledger's job is done
+  // by the scorecard there anyway.
+  const kind = beat.beat.kind;
+  if (kind === "card" || kind === "curve" || kind === "search") return;
+  const entries = ledgerEntries(input, t);
+  if (!entries.length) return;
+
+  // Stacked down the left edge, ending well above the caption band. Newest
+  // last, the way the sentence order went.
+  const y0 = H * 0.42 - (entries.length - 1) * LEDGER_PITCH;
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.font = "700 27px Inter, Arial, sans-serif";
+  const newest = entries[entries.length - 1];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const last = i === entries.length - 1;
+    const colour = toneColour(e.metric);
+    const sign = e.metric.zEff >= 0.5 ? "+" : e.metric.zEff <= -0.5 ? "−" : "·";
+    // The newest entry rises in; the ones before it step back as it arrives,
+    // on the newcomer's own clock so the hand-off is one motion.
+    const settle = smoother(e.reveal);
+    const dim = last ? 1 : lerp(1, 0.5, smoother(newest.reveal));
+    ctx.globalAlpha = (last ? settle : dim) * 0.96;
+    ctx.shadowColor = colour;
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = colour;
+    const y = y0 + i * LEDGER_PITCH + (last ? (1 - settle) * 12 : 0);
+    ctx.fillText(`${sign} ${e.metric.def.name}`, SAFE_LEFT, y);
+  }
   ctx.restore();
 }
 
