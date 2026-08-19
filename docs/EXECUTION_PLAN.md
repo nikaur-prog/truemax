@@ -20,174 +20,145 @@ Standing rules, restated because every phase touches them:
 
 ---
 
-## Phase 0 — Secure the Codex worktree (BLOCKING, runs on the laptop)
+## Phase 0 — Secure the Codex worktree — **DONE**
 
-**Status: not done. Everything else is gated on it.**
+The Stage 0/1 slice existed only as uncommitted changes on one laptop while
+its migrations were already live in Supabase and production had been deployed
+from it. It is now on GitHub as `codex/stage-1-privacy-state-integrity` and
+merged into this branch.
 
-The Stage 0/1 slice Codex built — identity isolation, immutable scan IDs,
-claim tokens, relaxed photo validation, canonical 0–10 display, the privacy
-GET/DELETE feedback APIs, and three Supabase migrations — exists **only as
-uncommitted changes in the local worktree**. As of this plan, `origin/main`
-is at `5b055f8` and every `codex/*` branch predates that work.
+Audited rather than trusted: merges clean, 365 tests pass here, typecheck and
+production build green, and the scoring calibration work is unaffected — the
+corpus audit reproduces the same numbers after the merge. The scan-credit
+privilege migration is the strongest piece, removing PostgreSQL's inherited
+PUBLIC execute grant, pinning `search_path = ''` inside a SECURITY DEFINER
+body, failing closed with no authenticated caller, and decrementing in one
+guarded atomic update.
 
-Meanwhile the three migrations are already applied to the **live** Supabase
-database and the production Vercel deployment was built from that uncommitted
-source. If the worktree is lost, the repository and production disagree
-permanently, with no record of what the schema hardening was.
-
-The same slice touched `analysisMode.ts`, `photoEligibility.ts`, `quick.ts`,
-`results.ts`, `main.ts`, `auth.ts` and ~25 more files — the exact files
-Phases 1 and 2 change. Building on the remote tree before syncing guarantees
-a painful merge and possible silent regressions in the privacy work.
-
-**Steps (on the machine with the dirty worktree):**
-
-1. `git checkout -b codex/stage-0-1-isolation`
-2. `git add -A && git commit -m "Stage 0/1: identity isolation, scan lifecycle, photo validation, canonical scoring"`
-3. `git push -u origin codex/stage-0-1-isolation` and open a PR.
-4. Confirm `.gitignore` still excludes the calibration photo directory
-   (Codex reported Vercel almost packaged 593 MB of it — verify the ignore
-   rule made it into the commit).
-
-**Then (remote side, this session):** pull the branch, audit the full diff —
-does the isolation hold, do the 362 tests pass here, did anything regress in
-the reel/rundown work — and reconcile it with `main` before any new code.
-
-**Exit gate:** Codex's slice is on GitHub, reviewed, and merged (or
-consciously amended), and the repo again matches what production runs.
+Its 0–100 → 0–10 display change is orthogonal to the calibration internals.
 
 ---
 
-## Phase 1 — Scoring calibration (the trust core)
+## Phase 1 — Scoring calibration — **DONE, with a named residual**
 
-The product's one non-negotiable claim is that the number means something.
-Diagnosis is complete; the evidence below was measured on the shipped code by
-running the 19-face rated corpus through the real scorer.
+The one non-negotiable claim is that the number means something. All of the
+following was measured on this tree, not assumed.
 
-### What is actually wrong (measured, not suspected)
+### What was wrong, and what fixed it
 
-1. **The reference table's top end is too low.** The male overall quantile
-   table (`aggNorm.ts`) tops out at aggregate z = **+0.338** — but a corpus
-   face humans rate 7.0 measures **+0.604**, and a 7.25 female face lands
-   **+0.370 above** the female maximum. The two most attractive faces in the
-   corpus both fall off the table. The reference set (people notable for
-   work, not appearance) simply contains too few good-looking people for the
-   table to describe the range the audience cares about.
+1. **The 9.9.** The male overall table topped out at aggregate z +0.338 while
+   real attractive faces measured past it, and `tailZ` extrapolated beyond the
+   edge at ~4.9σ per unit with no ceiling. **Fixed**: the tail now saturates
+   smoothly at `TAIL_Z_MAX` (2.6 ≈ probit(1−1/2n)), entering at the table-wide
+   average slope rather than the noisiest outer bin.
 
-2. **The tail extrapolation is a cliff.** Past the table edge, `tailZ`
-   extrapolates at ≈ **4.9 σ per unit of aggregate z** (male overall). An
-   aggregate of +0.80 — a genuinely attractive but ordinary face — became
-   +4.2 σ, i.e. **9.9/10**. That is the reported 9.9: not a measurement
-   error, a cliff at the edge of the reference set.
+2. **A second defect the first one masked.** Inside the table, position mapped
+   straight through probit with a 0.999 clamp, so a face just *inside* the top
+   bin claimed +3.09σ while a face *at* the maximum took the tail's +1.98σ — a
+   non-monotonic step the steep tail happened to leap back over. **Fixed** with
+   a plotting-position rescale into [0.5/(k+1), 1−0.5/(k+1)], which also makes
+   the handover continuous.
 
-3. **The patch that hid the 9.9 broke the scale.** `SHRINK = 0.4` (PR #125)
-   multiplies every calibrated z by 0.4. On the corpus, the displayed range
-   for faces humans rate 1.8–7.25 collapses to **4.2–6.7**: a 2.7-rated face
-   shows 5.2, the best face shows 6.3, nobody can ever be "chopped" or a
-   "mogger", and 8.0 (marketed as "1 in 100") now requires a
-   1-in-250-million face. The 0.4 comes from a least-squares fit to the
-   corpus — but regression against noisy measurements is attenuated toward
-   zero by exactly the noise it should be correcting for. Measured on the
-   corpus:
+3. **The percentile was not a percentile.** It was Φ(SHRINK × tableZ), so a
+   face measured at the top 0.2% of the reference set printed as "Top 12%".
+   Confirmed independently from production use. **Fixed** by the recalibration
+   below.
 
-   | calibration policy | slope (score per z) | SHRINK equivalent |
-   |---|---|---|
-   | naive regression (shipped) | 0.52 | **0.40** |
-   | attenuation-corrected regression | 0.73 | 0.56 |
-   | variance matching (displayed spread = human spread) | 1.13 | **0.87** |
-   | FaceIQ (fitted from their own UI labels) | 1.40 | 1.08 |
+4. **The reference table was too small and too narrow.** **Fixed**: rebuilt
+   from 64 men and 76 women measured through the real engine; the male overall
+   span reaches 0.435 (was 0.338) and the female reaches −1.188 (was −0.928).
 
-   A ranking product needs the variance-matched scale; the regression scale
-   answers "what's my safest guess" and produces a product where every
-   answer is 5-and-a-bit.
+5. **The scale was collapsed.** `SHRINK = 0.4` came from a noise-attenuated
+   regression fit and squeezed faces humans rate 1.8–7.25 into 4.2–6.7. The
+   rebuild alone made this *worse* — a wider table with the old SHRINK gave a
+   1.9-point span and tripped `calibration.test`'s guard. That paired
+   constraint (span ≥ 2 **and** |mean error| ≤ 0.75) is what forces the honest
+   answer: neither the scale nor the centre can be set alone.
 
-4. **Capture geometry is undefended.** FaceIQ's own capture flow warns that
-   an arm's-length selfie costs "−60% accuracy: bigger nose, longer face,
-   distorted proportions" and demands rear camera, ~2 m, eye level. TrueMax's
-   distance gate checks face *width in frame*, which cannot distinguish 30 cm
-   from 2 m. Perspective distortion at selfie distance plausibly moves the
-   aggregate by more than the whole width of the current quantile table.
+### The calibration as it now stands
 
-### The fix, in order
+Each source is used for what it can actually support:
 
-- **1a. Rebuild the reference table's top end.** Extend the population set
-  with enough consensus-attractive faces (and ordinary ones, keeping the
-  median honest) that the male table maximum sits near +0.9 rather than
-  +0.34 and extrapolation almost never fires. The photos and the tooling
-  (`tools/fetch-photos.mjs`, `rescan-reference.mjs`, `normalize.mjs`) live on
-  the laptop — this step runs there; the regenerated `aggNorm.ts` is what
-  gets committed.
-- **1b. Bound `tailZ`.** Whatever the table, an n≈58-per-sex reference can
-  never support a percentile claim beyond roughly the 99th. Cap the
-  extrapolated z (≈ +2.4 σ) and soften the slope so falling off the table
-  costs at most a few tenths of a point, never a 9.9. This alone kills the
-  original bug independent of 1a.
-- **1c. Re-fit the scale.** Replace SHRINK 0.4 with the variance-matched
-  value **re-fitted after 1a/1b change the z distribution** (expected
-  ≈ 0.85–0.95). Keep it named, tested, and re-estimated whenever the corpus
-  grows — that rule already exists in `scoring.ts`, it was just fed the
-  wrong estimator.
-- **1d. Capture-distance defence.** A capture-guidance step in the standard
-  flow (rear camera, ~2 m or mirror, eye level — behavioural parity with
-  FaceIQ's guidance, written in our words), plus a heads-up warning when the
-  photo is likely an arm's-length selfie. Run the controlled experiment:
-  same face, arm's length vs 2 m, compare aggregate z; the delta tells us
-  how loud the warning must be.
-- **1e. Verify the "photo too small" fix** in the synced Codex code against
-  the same photos that used to fail.
-- **1f. Grow the corpus** (task #47): more rated faces, especially 7+,
-  because 19 faces bound every constant in 1c.
+- the **reference photographs** give the distribution's SHAPE (the quantile
+  table);
+- the **rated corpus** gives where 5.0 sits (`CENTRE = 0.87` σ) and how wide a
+  point is (`SHRINK = 1.13`, by variance matching).
 
-### Acceptance criteria
+Both are fitted by `tools/fit-scale.ts` and **must be re-fitted together**
+whenever either source changes.
 
-- Corpus displayed mean ≈ human mean (5.1), Spearman ≥ 0.75, and the
-  displayed range spans at least 2.5–8.5 for humans rated 1.8–7.25.
-- No face lands beyond the quantile table by more than the tail cap allows;
-  scores above 9 require in-table evidence, not extrapolation.
-- The operator's own face scores within ±0.8 of FaceIQ's 4.5 benchmark under
-  FaceIQ-grade capture conditions.
-- The same face at arm's length and at 2 m either scores within 0.4, or the
-  selfie path carries a visible accuracy warning.
+Outcome on the rated corpus: displayed range 3.4–7.3 against human ratings of
+1.8–7.25, mean 5.35 against 5.09. And 8.0 now means 1 in 91 — the "1 in 100"
+the product advertises — where before it required one face in 250 million.
+
+### The residual, named rather than buried
+
+A hypothesis died here: the female table's centring was blamed on its small,
+once smile-biased sample, and going to 76 women did not move it. The cause is
+**population composition, not sampling error** — the reference people are
+notable for their work and mostly middle-aged, and these metrics read youthful
+structure as better. Hence a centre constant existing at all.
+
+Women still read about half a point high, and the corpus is 19 faces. The
+durable fix is a larger rated corpus, especially women and especially faces
+rated 7+; task #47 and #51 carry it.
+
+### Still open in this phase
+
+- **1d. Capture-distance defence.** FaceIQ's own flow warns an arm's-length
+  selfie costs accuracy; our distance gate checks face *width in frame*, which
+  cannot tell 30cm from 2m. Needs capture guidance plus the controlled
+  experiment (same face, arm's length vs 2m).
+- **1f. Grow the corpus** (#47) — the binding constraint on every constant above.
 
 ---
 
 ## Phase 2 — TikTok Breakdown, premium (T1–T6)
 
-The growth engine. Much of the T-plan already exists; this phase is the
-delta, verified the T6 way (frames, not vibes).
+Three reference rundowns were dissected frame-by-frame; the measured grammar
+of the format is in `docs/RUNDOWN_STYLE.md`. Build against that document.
 
 **Already built and merged** (do not rebuild): editable before/after scores
 that recompute the verdict; verdict descriptor line; custom opening line;
 ElevenLabs per-character caption timing; connected-mesh scan at 1080×1920 in
 both cuts; side-by-side before/after with separately downloadable breakdowns;
-direct file save on desktop; line retraction transitions; sticky CTA
-placement.
+direct file save on desktop; sticky CTA placement.
 
-- **T1 — Creator workflow:** drag reordering, replacement, removal, a clear
-  empty state; draft persistence across accidental navigation; a live 9:16
-  preview that matches the export composition.
-- **T2 — Deterministic rendering:** pre-decode all assets before frame one;
-  confirm every animation is timestamp-driven (most already are); real
-  progress, cancellation, retry; a labelled compatibility fallback.
-- **T3 — Premium visuals:** true-black face-first composition with automatic
-  crop that never cuts forehead/chin/profile; manual crop/zoom/position
-  override; blurred-placeholder → sharp resolution without layout shift;
-  one-word/short labels; restrained count-ups.
-- **T4 — Audio:** transition / line-draw / typewriter / score-reveal SFX
-  scheduled on the master timeline, normalized, no clipping; voiceover stays
-  optional. Verify the merged ElevenLabs alignment against a real narrated
-  render — it was merged unverified.
-- **T5 — Export & devices:** Chrome / Safari / iOS / Android-width /
-  low-power testing; no double renders, stale exports, or media from a
-  previous scan; filename, duration, resolution, codec, size shown before
-  download.
-- **T6 — Verification fixtures:** portrait/landscape/tight/loose/front/side
-  fixtures; frame-by-frame comparison against the preview timeline;
-  regression tests for ordering, editable scores, stale-scan isolation,
-  cancellation, repeated exports; **three finished example videos manually
-  reviewed before the feature is called complete.**
+**Built this session**, verified in rendered frames rather than by tests:
 
-Acceptance is the T-plan's own list, unchanged.
+- Slow push-in on every full-bleed beat, applied to the crop so measurement
+  overlays stay on the feature, releasing into the crop's move to the next
+  region so boundaries do not jump.
+- Opening blur-to-sharp resolve over the whole frame.
+- Cutaways dip in and out through the frame's own black, the measurement line
+  riding the same ramp.
+- Card score/ceiling count-up and staggered region-bar sweeps; the rarity
+  figure deliberately holds still.
+- The **accumulating trait ledger** — the signature element of the reference
+  format, and the thing that makes a mid-video arrival see a case rather than
+  a fact.
+- One-word captions replacing the paged paragraph, with word timing and the
+  keystroke cues driven from one shared `wordStarts()` so sound and glyph
+  cannot drift; bottom chrome lowered to give the face the frame back.
+
+**Remaining:**
+
+- **T1 creator workflow** — drag reorder, replace, remove, empty state, draft
+  persistence, live 9:16 preview. *Unblocked now that the Stage 1 work has
+  landed in `quick.ts`.*
+- **T3** — manual crop/zoom/position override; automatic face-first crop that
+  never cuts forehead/chin.
+- **Style spec leftovers** — value chips at the feature, word-by-word glowing
+  kickers, textured section transitions, and creator-side encouragement to
+  supply 3+ photos per subject so the multi-photo grammar has material.
+- **T5** — device matrix; no double renders, stale exports, or media from a
+  previous scan; filename/duration/resolution/codec/size shown before download.
+- **T6** — fixtures across portrait/landscape/tight/loose/front/side;
+  frame-by-frame comparison against the preview; regression tests for ordering,
+  editable scores, stale-scan isolation, cancellation, repeated exports; **three
+  finished example videos manually reviewed before this is called complete.**
+- **Beat-sync**: a BPM field so cut points can quantize to a music grid. Real
+  beat detection is not worth building; a number the operator types is.
 
 ---
 
