@@ -7,6 +7,7 @@ export const SIDE_FEEDBACK_RETENTION_DAYS = 90;
 export type SideSeedMethod = "mesh" | "silhouette" | "existing";
 
 export interface SideFeedbackIntent {
+  scanId: string;
   submissionId: string;
   consentVersion: typeof SIDE_FEEDBACK_CONSENT_VERSION;
   automaticPoints: SidePoints;
@@ -14,6 +15,7 @@ export interface SideFeedbackIntent {
 }
 
 export interface SideFeedbackMetadata {
+  scanId: string;
   submissionId: string;
   consentVersion: typeof SIDE_FEEDBACK_CONSENT_VERSION;
   faceDir: 1 | -1;
@@ -35,12 +37,14 @@ export function cloneSidePoints(points: SidePoints): SidePoints {
 // function it can accidentally invoke later.
 export function createSideFeedbackIntent(
   consented: boolean,
+  scanId: string,
   submissionId: string,
   automaticPoints: SidePoints,
   seedMethod: SideSeedMethod,
 ): SideFeedbackIntent | null {
   if (!consented) return null;
   return {
+    scanId,
     submissionId,
     consentVersion: SIDE_FEEDBACK_CONSENT_VERSION,
     automaticPoints: cloneSidePoints(automaticPoints),
@@ -52,6 +56,7 @@ export function sideFeedbackMetadataIssues(value: unknown): string[] {
   if (!value || typeof value !== "object") return ["Feedback metadata is missing"];
   const m = value as Partial<SideFeedbackMetadata>;
   const issues: string[] = [];
+  if (!uuid(m.scanId)) issues.push("Scan ID is invalid");
   if (!uuid(m.submissionId)) issues.push("Submission ID is invalid");
   if (m.consentVersion !== SIDE_FEEDBACK_CONSENT_VERSION) issues.push("Consent version is invalid");
   if (m.faceDir !== 1 && m.faceDir !== -1) issues.push("Face direction is invalid");
@@ -70,6 +75,7 @@ export function sideFeedbackIntentIssues(value: unknown, width: number, height: 
   if (!value || typeof value !== "object") return ["Feedback intent is missing"];
   const intent = value as Partial<SideFeedbackIntent>;
   const issues: string[] = [];
+  if (!uuid(intent.scanId)) issues.push("Scan ID is invalid");
   if (!uuid(intent.submissionId)) issues.push("Submission ID is invalid");
   if (intent.consentVersion !== SIDE_FEEDBACK_CONSENT_VERSION) issues.push("Consent version is invalid");
   if (intent.seedMethod !== "mesh" && intent.seedMethod !== "silhouette" && intent.seedMethod !== "existing") {

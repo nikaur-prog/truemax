@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/supabase-js";
 import { track } from "./track.js";
+import { activateScanOwner } from "./scanScope.js";
+import { pendingAnalysisRedirect } from "./pendingAnalysis.js";
 
 // ---------------------------------------------------------------------------
 // Accounts, on Supabase.
@@ -141,7 +143,7 @@ export type SocialAvailability = Record<SocialProvider, boolean>;
 // that can accept the new password, then that page returns to the scan.
 export function authRedirects(origin = window.location.origin): { scan: string; reset: string } {
   return {
-    scan: new URL("/", origin).toString(),
+    scan: pendingAnalysisRedirect(new URL("/", origin).toString()),
     reset: new URL("/auth?mode=reset", origin).toString(),
   };
 }
@@ -295,22 +297,26 @@ export async function signOut(): Promise<void> {
   if (!isAuthAvailable()) return;
   const c = await getSupabaseClient();
   await c.auth.signOut();
+  activateScanOwner(null, { rotateAnonymous: true });
 }
 
 export async function currentUser(): Promise<User | null> {
   if (!isAuthAvailable()) return null;
   const c = await getSupabaseClient();
   const { data } = await c.auth.getSession();
-  return data.session?.user ?? null;
+  const user = data.session?.user ?? null;
+  activateScanOwner(user?.id ?? null);
+  return user;
 }
 
 // Used only for same-origin calls to TrueMax's Vercel functions. The token is
 // short-lived and lets the server verify who requested Checkout; it is never
 // sent to Stripe or stored outside Supabase's normal browser session.
-export async function currentAccessToken(): Promise<string | null> {
+export async function currentAccessToken(expectedUserId?: string): Promise<string | null> {
   if (!isAuthAvailable()) return null;
   const c = await getSupabaseClient();
   const { data } = await c.auth.getSession();
+  if (expectedUserId && data.session?.user.id !== expectedUserId) return null;
   return data.session?.access_token ?? null;
 }
 
@@ -329,6 +335,7 @@ export async function deleteAccount(): Promise<AuthResult> {
     if (!response.ok) return { ok: false, message: body?.error || "Could not delete the account." };
     const c = await getSupabaseClient();
     await c.auth.signOut();
+    activateScanOwner(null, { rotateAnonymous: true });
     return { ok: true };
   } catch {
     return { ok: false, message: "Could not delete the account. Try again, or contact support." };
@@ -345,7 +352,9 @@ export function onAuthChange(
   let unsub: (() => void) | null = null;
   void getSupabaseClient().then((c) => {
     const { data } = c.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
-      cb(session?.user ?? null, event);
+      const user = session?.user ?? null;
+      activateScanOwner(user?.id ?? null, { rotateAnonymous: event === "SIGNED_OUT" });
+      cb(user, event);
     });
     unsub = () => data.subscription.unsubscribe();
     // A caller can unmount before the dynamic Supabase import resolves. Do not

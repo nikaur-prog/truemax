@@ -19,7 +19,7 @@ export type AnalysisMode = "verdict" | "basic" | "full";
 
 export const ANALYSIS_MODES: Array<{ id: AnalysisMode; label: string; blurb: string }> = [
   { id: "verdict", label: "Verdict", blurb: "One line. Nothing else." },
-  { id: "basic", label: "Basic", blurb: "A handful of scores out of 100." },
+  { id: "basic", label: "Basic", blurb: "A handful of scores on the same 0–10 scale." },
   { id: "full", label: "Full", blurb: "Every measurement, and the maths behind it." },
 ];
 
@@ -113,18 +113,16 @@ export function saveVerdictTone(tone: VerdictTone): void {
 }
 
 // ---------------------------------------------------------------------------
-// Basic mode: a few headline numbers out of 100.
+// Basic mode: a few headline numbers on the canonical 0-10 scale.
 //
-// Out of 100 because that is the scale this audience already reads. It is the
-// SAME 0-10 measurement shown by Full, multiplied by ten. Population position
-// is carried separately so a 7.1/10 cannot turn into 95/100 merely because it
-// sits at the 95th percentile — that was one face receiving two different-looking
-// answers from one report.
+// Population position is carried separately so a 7.1/10 cannot turn into
+// 95/100 merely because it sits at the 95th percentile. Basic is now a smaller
+// selection of the same score object, never a second presentation scale.
 // ---------------------------------------------------------------------------
 
 export interface BasicScore {
   label: string;
-  value: number; // 0-100 score, exactly the Full score multiplied by ten
+  value: number; // canonical 0-10 score, rounded only for display
   percentile: number; // population position, for the rarity caption only
 }
 
@@ -133,7 +131,7 @@ export function basicScores(report: Report): BasicScore[] {
     const region = report.regions.find((r) => r.region === key);
     return {
       label: key,
-      value: Math.round((region?.score ?? 5) * 10),
+      value: Math.round((region?.score ?? 5) * 10) / 10,
       percentile: region?.percentile ?? 50,
     };
   };
@@ -147,7 +145,7 @@ export function basicScores(report: Report): BasicScore[] {
   // asks about most after the jaw — it belongs in the short list, not three
   // taps deep in the full breakdown.
   return [
-    { label: "Overall", value: Math.round(report.overall * 10), percentile: report.overallPercentile },
+    { label: "Overall", value: Math.round(report.overall * 10) / 10, percentile: report.overallPercentile },
     pillarScore(report, "Angularity", "Sharpness"),
     pillarScore(report, "Dimorphism", dimorphism),
     { ...regionScore("eyes"), label: "Eyes" },
@@ -163,7 +161,7 @@ function pillarScore(
   label: string,
 ): BasicScore {
   const score = report.pillars[pillar] ?? 5;
-  return { label, value: Math.round(score * 10), percentile: aggregateScoreToPercentile(score) };
+  return { label, value: Math.round(score * 10) / 10, percentile: aggregateScoreToPercentile(score) };
 }
 
 // ---------------------------------------------------------------------------

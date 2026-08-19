@@ -33,6 +33,7 @@ import type { CameraHandle } from "./camera.js";
 const MAX_DIM = 1000;
 
 interface SideCtx {
+  scanId: string;
   sex: Sex;
   // How the front was captured, so the side matches it. "camera" opens the
   // profile camera straight away; "upload" offers only the file drop; undefined
@@ -535,6 +536,7 @@ function mountVerify(
       }
       const feedback = createSideFeedbackIntent(
         consented,
+        ctx.scanId,
         crypto.randomUUID(),
         automaticPoints,
         seedMethod,

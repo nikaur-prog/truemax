@@ -1,4 +1,4 @@
-import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory } from "../engine/history.js";
+import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
 import { followUp, regionNote } from "../engine/followUp.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
@@ -390,15 +390,16 @@ function scanRow(s: StoredScan): string {
     .filter(([, v]) => typeof v === "number")
     .sort((a, b) => (b[1] as number) - (a[1] as number));
   const stat = (label: string, v: string) => `<div><span>${label}</span><b>${v}</b></div>`;
+  const storageKey = scanStorageKey(s);
   return `<div class="dash-scan-slot">
-    <button class="dash-scan-row" data-date="${s.date}">
+    <button class="dash-scan-row" data-scan-key="${storageKey}">
       <span class="dash-scan-date">${date}</span>
       <span class="dash-scan-sex">${s.sex === "male" ? "VS MEN" : "VS WOMEN"}</span>
       <span class="dash-scan-score">${s.overall.toFixed(1)}<small>/10</small></span>
     </button>
     <div class="dash-scan-pop">
       <div class="dash-scan-pop-in">
-        <div class="dash-pop-shots" data-shots="${s.date}">
+        <div class="dash-pop-shots" data-shots="${storageKey}">
           <div class="dash-pop-shot ph"><span>FRONT</span></div>
           <div class="dash-pop-shot ph"><span>SIDE</span></div>
         </div>
@@ -425,8 +426,8 @@ function wireScanHovers(root: HTMLElement): void {
     const load = () => {
       if (loaded) return;
       loaded = true;
-      const date = row.dataset.date!;
-      void loadPhotos(date).then((p) => {
+      const scanKey = row.dataset.scanKey!;
+      void loadPhotos(scanKey).then((p) => {
         if (!p || (!p.front && !p.side)) {
           shots.innerHTML = `<p class="dash-pop-none">No photo kept for this scan. Scans taken before thumbnails were added, or on another device, keep only their numbers.</p>`;
           return;

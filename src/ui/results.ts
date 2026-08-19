@@ -362,7 +362,7 @@ function showSideShallow(mode: AnalysisMode, report: Report): void {
   const lead = body().querySelector<HTMLElement>(".basic-n");
   if (lead) {
     const target = Number(lead.dataset.count);
-    if (Number.isFinite(target)) countUp(lead, target, 0, 60);
+    if (Number.isFinite(target)) countUp(lead, target, Number(lead.dataset.decimals ?? "1"), 60);
   }
 }
 
@@ -378,11 +378,11 @@ function sideVerdictHTML(report: Report): string {
 function sideBasicHTML(report: Report): string {
   const regions = report.regions.filter((r) => r.metrics.length);
   const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
-  const lead = Math.round(report.overall * 10);
+  const lead = Math.round(report.overall * 10) / 10;
   return `<div class="basic">
     <div class="basic-lead">
       <span class="klabel">SIDE PROFILE ${scaleTrigger()}</span>
-      <b><span class="basic-n" data-count="${lead}" data-decimals="0">${lead}</span><small>/100</small></b>
+      <b><span class="basic-n" data-count="${lead}" data-decimals="1">${lead.toFixed(1)}</span><small>/10</small></b>
       <em class="basic-rarity">${scaleRarityLine(report.overallPercentile)}</em>
     </div>
     <div class="basic-grid">
@@ -390,14 +390,14 @@ function sideBasicHTML(report: Report): string {
         .map(
           (r) => `<div class="basic-cell">
         <span>${REGION_NAMES[r.region].toUpperCase()}</span>
-        <b>${Math.round(r.score * 10)}</b>
+        <b>${r.score.toFixed(1)}<small>/10</small></b>
         <i style="width:${Math.round(r.score * 10)}%"></i>
         <em>${rarityShort(r.percentile)}</em>
       </div>`,
         )
         .join("")}
     </div>
-    <p class="basic-note">The same profile scores shown in Full, expressed out of 100. Rarity captions separately show position against the ${report.sex} reference set. The full mode shows the ${measured} measurements these come from.</p>
+    <p class="basic-note">These are the same 0–10 profile scores shown in Full. Rarity captions separately show position against the ${report.sex} reference set. The full mode shows the ${measured} measurements these come from.</p>
   </div>`;
 }
 
@@ -1442,7 +1442,7 @@ function showShallow(mode: AnalysisMode): void {
   const lead = body().querySelector<HTMLElement>(".basic-n");
   if (lead) {
     const target = Number(lead.dataset.count);
-    if (Number.isFinite(target)) countUp(lead, target, 0, 60);
+    if (Number.isFinite(target)) countUp(lead, target, Number(lead.dataset.decimals ?? "1"), 60);
   }
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
@@ -1469,7 +1469,7 @@ function basicHTML(): string {
   return `<div class="basic">
     <div class="basic-lead">
       <span class="klabel">OVERALL ${scaleTrigger()}</span>
-      <b><span class="basic-n" data-count="${lead.value}" data-decimals="0">${lead.value}</span><small>/100</small></b>
+      <b><span class="basic-n" data-count="${lead.value}" data-decimals="1">${lead.value.toFixed(1)}</span><small>/10</small></b>
       <em class="basic-rarity">${scaleRarityLine(lead.percentile)}</em>
     </div>
     <div class="basic-grid">
@@ -1477,15 +1477,15 @@ function basicHTML(): string {
         .map(
           (s) => `<div class="basic-cell">
         <span>${s.label.toUpperCase()}</span>
-        <b>${s.value}</b>
-        <i style="width:${s.value}%"></i>
+        <b>${s.value.toFixed(1)}<small>/10</small></b>
+        <i style="width:${s.value * 10}%"></i>
         <em>${rarityShort(s.percentile)}</em>
       </div>`,
         )
         .join("")}
     </div>
-    <p class="basic-note">Every number is the same measurement shown in Full, expressed out of 100 instead of out of 10. The rarity line is your separate position against the reference population.</p>
-    <p class="basic-note">Scores are rounded to whole points. Population bands use a reference set of about ${REFERENCE_N} people per sex, so those bands are deliberately coarse.</p>
+    <p class="basic-note">Every number uses the same 0–10 score shown in Full. The rarity line is a separate percentile position against the reference population.</p>
+    <p class="basic-note">Scores are rounded to one decimal. Population bands use a reference set of about ${REFERENCE_N} people per sex, so those bands are deliberately coarse.</p>
     ${poseCaveat()}
   </div>`;
 }
@@ -1558,6 +1558,19 @@ export function setAdult(value: boolean): void {
 // product to everyone during an outage.
 let depth: Depth = "rating";
 let scansLeft = 0;
+
+// Account changes are a harder boundary than a new photograph. Late profile
+// or entitlement reads may still resolve, so dropping the result context keeps
+// those callbacks from repainting another identity's screen. The next result
+// starts locked until its own reads complete.
+export function clearResultsIdentityState(): void {
+  ctx = null;
+  maxAccess = false;
+  adultUser = false;
+  depth = "rating";
+  scansLeft = 0;
+  unmountMaxPet();
+}
 
 export function setMaxAccess(value: boolean): void {
   if (value === maxAccess) return;

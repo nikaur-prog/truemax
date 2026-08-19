@@ -1,4 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { activeScanOwner } from "./scanScope.js";
 
 // ---------------------------------------------------------------------------
 // The saved-face library.
@@ -37,6 +38,9 @@ const DB_VERSION = 2;
 const MAX_FACES = 40;
 
 export interface SavedFace {
+  // Absent only on quarantined legacy entries. New reads require an exact
+  // match with the active browser/account owner.
+  owner?: string;
   id: string;
   label: string;
   // A data URL. Full resolution rather than a thumbnail: this is re-scanned
@@ -98,36 +102,57 @@ function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBReque
 }
 
 export async function saveFace(face: Omit<SavedFace, "id" | "savedAt">): Promise<SavedFace | null> {
+  const owner = activeScanOwner();
+  if (!owner) return null;
   const entry: SavedFace = {
     ...face,
+    owner,
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     savedAt: Date.now(),
   };
-  const ok = await tx("readwrite", (s) => s.put(entry, entry.id));
+  const ok = await tx("readwrite", (s) => s.put(entry, faceKey(owner, entry.id)));
   if (ok === null) return null;
   await prune();
   return entry;
 }
 
 export async function listFaces(): Promise<SavedFace[]> {
+  const owner = activeScanOwner();
+  if (!owner) return [];
   const all = await tx<SavedFace[]>("readonly", (s) => s.getAll() as IDBRequest<SavedFace[]>);
   if (!all) return [];
+  if (activeScanOwner() !== owner) return [];
   // Newest first: the face you just saved is the one you are most likely to
   // want back.
-  return all.sort((a, b) => b.savedAt - a.savedAt);
+  return all.filter((face) => face.owner === owner).sort((a, b) => b.savedAt - a.savedAt);
 }
 
 export async function deleteFace(id: string): Promise<void> {
-  await tx("readwrite", (s) => s.delete(id) as unknown as IDBRequest<undefined>);
+  const owner = activeScanOwner();
+  if (!owner) return;
+  await tx("readwrite", (s) => s.delete(faceKey(owner, id)) as unknown as IDBRequest<undefined>);
 }
 
 export async function clearFaces(): Promise<void> {
-  await tx("readwrite", (s) => s.clear() as unknown as IDBRequest<undefined>);
+  const owner = activeScanOwner();
+  if (!owner) return;
+  const prefix = `${owner}\u001f`;
+  const keys = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
+  if (!keys) return;
+  for (const key of keys) {
+    if (typeof key === "string" && key.startsWith(prefix)) {
+      await tx("readwrite", (s) => s.delete(key) as unknown as IDBRequest<undefined>);
+    }
+  }
 }
 
 async function prune(): Promise<void> {
   const all = await listFaces();
   for (const face of all.slice(MAX_FACES)) await deleteFace(face.id);
+}
+
+function faceKey(owner: string, id: string): string {
+  return `${owner}\u001f${id}`;
 }
 
 // Turn a stored data URL back into something the renderer can draw. Returns

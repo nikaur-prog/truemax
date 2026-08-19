@@ -146,8 +146,9 @@ export async function POST(request: Request): Promise<Response> {
       // The upstream body can carry quota and voice-id detail worth seeing in a
       // log, but it is not echoed to the caller: it is ElevenLabs' account
       // state, not this user's, and some of it names the plan and its limits.
-      const detail = await upstream.text().catch(() => "");
-      console.error("ElevenLabs refused", upstream.status, detail.slice(0, 500));
+      // The body may repeat narration supplied by the user. Status is enough to
+      // diagnose account/quota failures without putting content in logs.
+      console.error("ElevenLabs refused", upstream.status);
       const message =
         upstream.status === 401
           ? "The voiceover key was rejected."
@@ -198,7 +199,7 @@ export async function POST(request: Request): Promise<Response> {
       200,
     );
   } catch (error) {
-    console.error("tts failed", error);
+    console.error("tts failed", safeMessage(error));
     return json({ error: safeMessage(error) }, 500);
   }
 }

@@ -35,7 +35,8 @@ import {
   removeRatedFace,
   setHealth,
 } from "./engine/calibrationSet.js";
-import { currentAccessToken } from "./engine/auth.js";
+import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
+import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
@@ -282,9 +283,26 @@ function paintSilhouette(): void {
 }
 track("quick-visit");
 
-// The strip is populated before anything else happens, so a producer opening
-// the page mid-session sees their faces immediately rather than after a scan.
-void refreshLibrary();
+// Resolve the account before reading the persistent face library. IndexedDB is
+// shared by everyone using one browser; an unqualified list would show the last
+// producer's saved faces to the next signed-in identity.
+if (!isAuthAvailable()) {
+  activateScanOwner(null);
+  void refreshLibrary();
+} else {
+  let previousOwner: string | null | undefined;
+  const syncOwner = () => {
+    const owner = activeScanOwner();
+    const changed = previousOwner !== undefined && previousOwner !== owner;
+    previousOwner = owner;
+    if (changed) leaveMode();
+    void refreshLibrary();
+  };
+  onAuthChange(() => syncOwner());
+  void currentUser().then(() => {
+    if (previousOwner === undefined) syncOwner();
+  });
+}
 el.libClear.onclick = async () => {
   await clearFaces();
   await refreshLibrary();
@@ -331,15 +349,19 @@ if (pasteHintApplies()) {
   }
 }
 
+let quickScanGeneration = 0;
+
 async function useFile(f: File): Promise<void> {
+  const generation = ++quickScanGeneration;
   stopCamera();
   const img = await loadImage(f);
+  if (generation !== quickScanGeneration) return;
   const s = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
   const c = document.createElement("canvas");
   c.width = Math.round(img.naturalWidth * s);
   c.height = Math.round(img.naturalHeight * s);
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  await run(c);
+  await run(c, generation);
 }
 
 function stopCamera(): void {
@@ -353,9 +375,20 @@ function stopCamera(): void {
   void setRunningMode("IMAGE");
 }
 
-async function run(src: HTMLCanvasElement): Promise<void> {
+async function run(
+  src: HTMLCanvasElement,
+  generation = ++quickScanGeneration,
+): Promise<void> {
+  if (generation !== quickScanGeneration) return;
+  // A new attempt owns the active scan immediately. If detection fails, no
+  // later control may fall back to the previous person's photo, landmarks, or
+  // creator attachments.
+  last = null;
+  shown = null;
+  clearRundownMedia();
   if (!isReady()) return;
   await setRunningMode("IMAGE");
+  if (generation !== quickScanGeneration) return;
   const det = detectStable(src);
   const q = assessQuality(det);
   if (!q.faceFound) {
@@ -440,6 +473,10 @@ let beforeScan: { report: Report; photo: HTMLCanvasElement; lm: NormalizedLandma
 let reelStage: "before" | "after" = "before";
 
 function enterMode(next: QuickMode): void {
+  quickScanGeneration += 1;
+  last = null;
+  shown = null;
+  clearRundownMedia();
   mode = next;
   beforeScan = null;
   reelStage = "before";
@@ -489,6 +526,10 @@ function updateModeStep(): void {
 }
 
 function leaveMode(): void {
+  quickScanGeneration += 1;
+  last = null;
+  shown = null;
+  clearRundownMedia();
   mode = null;
   beforeScan = null;
   reelStage = "before";
@@ -665,6 +706,7 @@ function renderFaceSlots(): void {
   document.getElementById("q-slot-side")!.onclick = () => withSex(() => {
     el.cal.classList.add("hidden");
     openSideCapture({
+      scanId: crypto.randomUUID(),
       sex: storedSex() ?? "male",
       // Upload only. The live profile camera coaches a turn the operator cannot
       // see, which is the right flow for scanning yourself and the wrong one for
@@ -917,6 +959,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   // have to work out for themselves that they are meant to go round again.
   if (mode === "reel" && reelStage === "before" && last) {
     beforeScan = { report: r, photo, lm: last.lm };
+    last = null;
+    shown = null;
     reelStage = "after";
     updateModeStep();
     el.result.classList.add("hidden");
@@ -959,10 +1003,10 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   const verdict = verdictForPercentile(r.overallPercentile, r.sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   const dimorphism = r.sex === "female" ? "FEMININITY" : "MASCULINITY";
   const micro: Array<[string, number]> = [
-    ["FACE", r.overallPercentile],
-    ["ANGULARITY", Math.max(1, Math.min(99, Math.round((r.pillars.Angularity ?? 5) * 10)))],
-    [dimorphism, Math.max(1, Math.min(99, Math.round((r.pillars.Dimorphism ?? 5) * 10)))],
-    ["HARMONY", Math.max(1, Math.min(99, Math.round((r.pillars.Harmony ?? 5) * 10)))],
+    ["FACE", r.overall],
+    ["ANGULARITY", r.pillars.Angularity ?? 5],
+    [dimorphism, r.pillars.Dimorphism ?? 5],
+    ["HARMONY", r.pillars.Harmony ?? 5],
   ];
 
   el.cards.innerHTML = `
@@ -991,8 +1035,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
           .map(
             ([label, value]) => `<div class="q-unit">
               <span>${label}</span>
-              <div class="q-unit-bar"><i data-w="${value}" style="width:0%"></i></div>
-              <b>${value}</b>
+              <div class="q-unit-bar"><i data-w="${Math.max(0, Math.min(100, value * 10))}" style="width:0%"></i></div>
+              <b>${value.toFixed(1)}<small>/10</small></b>
             </div>`,
           )
           .join("")}
@@ -1098,15 +1142,16 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     </div>
 
     <div class="q-actions">
-      <button class="btn pri" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
-      <button class="btn pri" id="q-video-download">Breakdown MP4</button>
-      <button class="btn pri" id="q-verdict-download">Verdict MP4</button>
-      <button class="btn pri" id="q-rundown-download">Rundown MP4</button>
+      <button class="btn pri" id="q-produce">Create Reel</button>
+      <button class="btn gho" id="q-download">${canShareFiles("image/png") ? "Save image" : "Download image"}</button>
+      <button class="btn gho" id="q-video-download">Breakdown MP4</button>
+      <button class="btn gho" id="q-verdict-download">Verdict MP4</button>
+      <button class="btn gho" id="q-rundown-download">Rundown MP4</button>
       <!-- Calibration, not a user feature. A screenshot of the region cards
            says the jaw is wrong; only the metric table says WHICH jaw metric,
            by how far, and whether the ideal or the spread is at fault. -->
       <button class="btn gho" id="q-diagnostics">Copy diagnostics</button>
-      <button class="btn pri" id="q-card-download">Score card PNG</button>
+      <button class="btn gho" id="q-card-download">Score card PNG</button>
       <button class="btn gho" id="q-save-face">Save to library</button>
       <button class="btn gho" id="q-again">New photo</button>
     </div>
@@ -1128,6 +1173,13 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   [...el.cards.children].forEach((c, i) => (c as HTMLElement).style.setProperty("--i", String(i)));
 
   wireEditing();
+
+  // The footage editor is part of the Reel Creator, not a reward revealed
+  // after somebody has already exported a different file. Keeping it in the
+  // primary action row also makes its clip pickers discoverable on a fresh
+  // result instead of requiring the operator to guess which download unlocks
+  // them.
+  document.getElementById("q-produce")?.addEventListener("click", () => openCurrentProducer(r));
 
   // Toggling swaps two blocks that are both already rendered. Re-rendering the
   // card would restart the count-up animation and, on this page, throw away any
@@ -1271,6 +1323,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     };
   }
   document.getElementById("q-again")!.onclick = () => {
+    quickScanGeneration += 1;
+    last = null;
+    shown = null;
+    clearRundownMedia();
+    resetSexAsk();
     // Reset the stage, or the next scan starts already open with last scan's
     // landmarks still painted over the new photo.
     el.stage.classList.remove("open", "scanning");
@@ -1434,6 +1491,7 @@ function drawCutSlots(): void {
       cell.querySelector("img")!.src = image.image.src;
       if (!image.landmarks) cell.classList.add("q-cut-noface");
       cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+        revokeMediaUrl(image.image.src);
         cutaways[i] = null;
         drawCutSlots();
       });
@@ -1462,6 +1520,7 @@ function firstFreeCut(from = 0): number {
 }
 
 async function addCutaway(file: File, at: number): Promise<void> {
+  const epoch = rundownMediaEpoch;
   const image = await decodeImage(file);
   if (!image || at < 0) return;
 
@@ -1481,6 +1540,10 @@ async function addCutaway(file: File, at: number): Promise<void> {
     }
   } catch {
     // A cutaway that will not landmark is still a perfectly good cutaway.
+  }
+  if (epoch !== rundownMediaEpoch) {
+    revokeMediaUrl(image.src);
+    return;
   }
   cutaways[at] = { image, landmarks };
 }
@@ -1545,15 +1608,18 @@ function mountCutaways(): void {
 
 async function decodeImage(file: File): Promise<HTMLImageElement | null> {
   if (!/^image\//.test(file.type)) return null;
+  let url = "";
   try {
     const image = new Image();
-    image.src = URL.createObjectURL(file);
+    url = URL.createObjectURL(file);
+    image.src = url;
     await new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
       image.onerror = () => reject(new Error("decode failed"));
     });
     return image;
   } catch {
+    revokeMediaUrl(url);
     return null;
   }
 }
@@ -1582,6 +1648,32 @@ interface DiscClip {
   length: number;
 }
 const discClips: Array<DiscClip | null> = Array(DISC_SLOTS).fill(null);
+let rundownMediaEpoch = 0;
+
+function revokeMediaUrl(url: string): void {
+  if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
+function clearDisclaimerClips(): void {
+  for (const clip of discClips) {
+    if (clip) revokeMediaUrl(clip.video.src);
+  }
+  discClips.fill(null);
+}
+
+// A creator panel can hold extra photographs and video clips. They belong to
+// the scan that opened it, so a new attempt or mode must release both the data
+// and its object URLs before another person's result can be shown.
+function clearRundownMedia(): void {
+  rundownMediaEpoch += 1;
+  for (const cutaway of cutaways) {
+    if (cutaway) revokeMediaUrl(cutaway.image.src);
+  }
+  cutaways.fill(null);
+  cutArmed = null;
+  clearDisclaimerClips();
+  discPickInto = 0;
+}
 
 /** The voiceover length this footage has to cover, from the typed line. */
 function discBudget(): number {
@@ -1604,7 +1696,8 @@ function drawDiscClips(): void {
   if (!armed) {
     // No line, no footage. A clip attached to a sentence that no longer exists
     // would be rendered under nothing.
-    discClips.fill(null);
+    rundownMediaEpoch += 1;
+    clearDisclaimerClips();
     host.innerHTML = "";
     note.textContent = "Write the line above first.";
     return;
@@ -1658,6 +1751,7 @@ function drawDiscClips(): void {
     video.src = clip.video.src;
     video.currentTime = clip.startAt;
     cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+      revokeMediaUrl(clip.video.src);
       discClips[i] = null;
       // Close the gap so the slots stay contiguous — a hole in the middle would
       // put a clip after a clip that is not there.
@@ -1695,8 +1789,13 @@ function mountDisclaimerClips(): void {
   input?.addEventListener("change", async () => {
     const file = input.files?.[0];
     input.value = "";
+    const epoch = rundownMediaEpoch;
     const video = await loadDisclaimerClip(file);
     if (!video) return;
+    if (epoch !== rundownMediaEpoch) {
+      revokeMediaUrl(video.src);
+      return;
+    }
     // A new clip takes whatever budget is left, capped by its own length, so
     // attaching one and touching nothing else produces a working video.
     const left = Math.max(0, discBudget() - discUsed());
@@ -1711,18 +1810,21 @@ function mountDisclaimerClips(): void {
 // 200MB screen recording for no gain.
 async function loadDisclaimerClip(file: File | undefined): Promise<HTMLVideoElement | null> {
   if (!file || !/^video\//.test(file.type)) return null;
+  let url = "";
   try {
     const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
-    video.src = URL.createObjectURL(file);
+    url = URL.createObjectURL(file);
+    video.src = url;
     await new Promise<void>((resolve, reject) => {
       video.onloadedmetadata = () => resolve();
       video.onerror = () => reject(new Error("decode failed"));
     });
     return video;
   } catch {
+    revokeMediaUrl(url);
     return null;
   }
 }
@@ -2025,33 +2127,35 @@ async function downloadRundown(r: Report): Promise<void> {
 // producer needs footage the person has to go and choose, so the moment they
 // have just watched their own analysis render is the moment the ask lands.
 // Inserted once; a new scan re-renders the card and clears it naturally.
-function offerProducer(r: Report): void {
-  if (!last || document.getElementById("q-produce")) return;
-  const actions = el.cards.querySelector(".q-actions");
-  if (!actions) return;
-  const bar = document.createElement("div");
-  bar.className = "q-produce-offer";
-  bar.innerHTML = `<span>Would you like to make a TikTok out of it? Before clips, your analysis, after clips — one video.</span>
-    <button class="btn pri" id="q-produce">Make a TikTok →</button>`;
-  actions.insertAdjacentElement("afterend", bar);
-  (bar.querySelector("#q-produce") as HTMLButtonElement).onclick = () => {
-    if (!last) return;
-    // A Reel Creator run holds the before scan, so the producer can bracket the
-    // footage with both measurements instead of putting one in the middle. The
-    // current scan is always the LATER one here — reel mode only reaches the
-    // results screen on the after photo — so the stored scan is the opening.
-    openProducer(
-      beforeScan
-        ? {
-            photo: beforeScan.photo,
-            landmarks: beforeScan.lm,
-            sex: r.sex,
-            scores: editedExportScores(beforeScan.report),
-            after: { photo: last.photo, landmarks: last.lm, scores: editedExportScores(r) },
-          }
-        : { photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) },
-    );
-  };
+function openCurrentProducer(r: Report): void {
+  if (!last) return;
+  // A Reel Creator run holds the before scan, so the producer can bracket the
+  // footage with both measurements instead of putting one in the middle. The
+  // current scan is always the LATER one here — reel mode only reaches the
+  // results screen on the after photo — so the stored scan is the opening.
+  const before = beforeSource();
+  openProducer(
+    before
+      ? {
+          photo: before.photo,
+          landmarks: before.lm,
+          sex: r.sex,
+          // There is only one editable result grid and it belongs to the AFTER
+          // photograph. Reading that grid for the before made both producer
+          // inputs start on the after score. The held source owns its own
+          // report-derived number; the visible grid owns the after correction.
+          scores: before.scores,
+          after: { photo: last.photo, landmarks: last.lm, scores: editedExportScores(r) },
+        }
+      : { photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) },
+  );
+}
+
+// Downloads still call this hook. The editor is now already present, so the
+// hook simply keeps the old call sites harmless rather than inserting a second
+// button with the same id.
+function offerProducer(_r: Report): void {
+  return;
 }
 
 // Download the card as a PNG. The stage is the whole reveal (photo + cards), so

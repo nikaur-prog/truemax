@@ -1,0 +1,25 @@
+.git/
+.vercel/
+node_modules/
+dist/
+
+# Local secrets and machine-only configuration.
+.env
+.env.*
+!.env.example
+*.local
+
+# Private calibration inputs and local render artifacts.
+.calib
+.calib/**
+calib/*
+!calib/README.md
+.reel-cache/
+.vite/
+exports/
+supabase/.temp/
+
+# Recreated during the Vercel install/build rather than uploaded.
+public/wasm/
+public/models/selfie_multiclass_256x256.tflite
+.DS_Store

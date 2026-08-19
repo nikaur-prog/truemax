@@ -10,25 +10,7 @@
 // refuses to store, which is the actual guarantee.
 // ---------------------------------------------------------------------------
 
-export type FunnelEvent =
-  | "visit"
-  | "scan-front-done"
-  | "scan-side-done"
-  | "gate-shown"
-  | "account-created"
-  | "results-shown"
-  | "plan-opened"
-  | "offer-shown"
-  | "checkout-started"
-  | "single-scan-started"
-  | "quick-visit"
-  | "quick-scan-done"
-  | "quick-video-downloaded"
-  | "quick-rundown-downloaded"
-  | "quick-card-downloaded"
-  | "max-chat-opened"
-  | "scan-gate-shown"
-  | "scan-gate-buy";
+import type { FunnelEvent } from "./funnelEvents.js";
 
 // Not "/api/track": uBlock, AdGuard and Brave block that URL pattern by
 // default, so a large share of a young mobile audience recorded nothing at

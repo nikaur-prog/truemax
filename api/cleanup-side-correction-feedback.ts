@@ -20,7 +20,11 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const admin = getSupabaseAdmin();
     const now = new Date().toISOString();
-    const [{ data: expired, error: expiredError }, { data: queued, error: queuedError }] =
+    const [
+      { data: expired, error: expiredError },
+      { data: queued, error: queuedError },
+      { count: auditsPurged, error: auditPurgeError },
+    ] =
       await Promise.all([
         admin
           .from("side_landmark_feedback")
@@ -33,9 +37,14 @@ export async function GET(request: Request): Promise<Response> {
           .select("storage_path")
           .order("queued_at", { ascending: true })
           .limit(100),
+        admin
+          .from("side_feedback_consent_events")
+          .delete({ count: "exact" })
+          .lte("retain_until", now),
       ]);
     if (expiredError) throw new Error(`Expired feedback lookup failed: ${expiredError.message}`);
     if (queuedError) throw new Error(`Storage cleanup lookup failed: ${queuedError.message}`);
+    if (auditPurgeError) throw new Error(`Consent audit cleanup failed: ${auditPurgeError.message}`);
 
     const expiredRows = (expired || []) as ExpiredFeedback[];
     const queuedRows = (queued || []) as QueuedStorage[];
@@ -43,7 +52,7 @@ export async function GET(request: Request): Promise<Response> {
       ...expiredRows.map((row) => row.storage_path),
       ...queuedRows.map((row) => row.storage_path),
     ])];
-    if (!paths.length) return json({ removed: 0 });
+    if (!paths.length) return json({ removed: 0, auditsPurged: auditsPurged ?? 0 });
 
     const { error: removeError } = await admin.storage.from(BUCKET).remove(paths);
     if (removeError) throw new Error(`Private photo deletion failed: ${removeError.message}`);
@@ -61,7 +70,7 @@ export async function GET(request: Request): Promise<Response> {
       .in("storage_path", paths);
     if (queueDeleteError) throw new Error(`Cleanup queue deletion failed: ${queueDeleteError.message}`);
 
-    return json({ removed: paths.length });
+    return json({ removed: paths.length, auditsPurged: auditsPurged ?? 0 });
   } catch (error) {
     console.error("cleanup-side-correction-feedback", safeMessage(error));
     return json({ error: "Feedback cleanup failed." }, 500);

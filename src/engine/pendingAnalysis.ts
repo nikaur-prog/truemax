@@ -4,6 +4,7 @@ import type { SidePoints } from "./sideMetrics.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./sideFeedbackPayload.js";
 import { sideFeedbackIntentIssues } from "./sideFeedbackPayload.js";
 import type { Sex } from "./types.js";
+import { isScanId } from "./scanSession.js";
 
 // OAuth and confirmation emails necessarily navigate away from the current
 // page. Preserve a reduced copy of the completed capture on this device so the
@@ -12,13 +13,19 @@ import type { Sex } from "./types.js";
 // thirty minutes and removed as soon as analysis resumes (or on the next app
 // open after expiry). Nothing is uploaded unless the person separately opted
 // in to side-landmark feedback; in that case only the side copy is submitted.
-const KEY = "truemax:pending-analysis:v1";
+const KEY = "truemax:pending-analysis:v2";
+const LEGACY_KEY = "truemax:pending-analysis:v1";
+const CLAIM_SESSION_KEY = "truemax:pending-analysis-claim:v2";
+const CLAIM_QUERY_KEY = "scan_claim";
 const MAX_AGE_MS = 30 * 60 * 1000;
 const MAX_STORED_CHARS = 4_500_000;
 const PHOTO_LONG_EDGE = 720;
 
 export interface PendingAnalysis {
-  version: 1;
+  version: 2;
+  scanId: string;
+  claimToken: string;
+  claimedByUserId?: string;
   createdAt: number;
   sex: Sex;
   front: {
@@ -42,6 +49,7 @@ export interface PendingAnalysis {
 }
 
 export interface PendingAnalysisInput {
+  scanId: string;
   sex: Sex;
   front: Omit<PendingAnalysis["front"], "photo"> & { canvas: HTMLCanvasElement };
   side: Omit<PendingAnalysis["side"], "photo" | "width" | "height"> & { canvas?: HTMLCanvasElement };
@@ -49,11 +57,15 @@ export interface PendingAnalysisInput {
 
 export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
   try {
+    if (!isScanId(input.scanId)) return false;
     const frontPhoto = reducedJpeg(input.front.canvas);
     if (!frontPhoto) return false;
     const sidePhoto = input.side.canvas ? reducedJpeg(input.side.canvas) : null;
+    const claimToken = crypto.randomUUID();
     const value: PendingAnalysis = {
-      version: 1,
+      version: 2,
+      scanId: input.scanId,
+      claimToken,
       createdAt: Date.now(),
       sex: input.sex,
       front: {
@@ -78,13 +90,18 @@ export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
     const serialized = JSON.stringify(value);
     if (serialized.length > MAX_STORED_CHARS) return false;
     localStorage.setItem(KEY, serialized);
+    sessionStorage.setItem(CLAIM_SESSION_KEY, claimToken);
     return true;
   } catch {
     return false;
   }
 }
 
-export function readPendingAnalysis(): PendingAnalysis | null {
+// Claim the anonymous scan for exactly one authenticated identity. A claim
+// token must come from the tab that captured it or from the OAuth/email return
+// URL. A random later account opening the same browser therefore cannot resume
+// whatever happened to be left in the global pending slot.
+export function claimPendingAnalysis(userId: string): PendingAnalysis | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
@@ -97,6 +114,16 @@ export function readPendingAnalysis(): PendingAnalysis | null {
       clearPendingAnalysis();
       return null;
     }
+
+    if (value.claimedByUserId) {
+      return value.claimedByUserId === userId ? value : null;
+    }
+
+    const token = claimTokenFromBrowser();
+    if (!token || token !== value.claimToken) return null;
+    value.claimedByUserId = userId;
+    localStorage.setItem(KEY, JSON.stringify(value));
+    removeClaimFromUrl();
     return value;
   } catch {
     clearPendingAnalysis();
@@ -104,9 +131,47 @@ export function readPendingAnalysis(): PendingAnalysis | null {
   }
 }
 
+// Cleanup without exposing the payload. Called on app startup before an
+// identity is known; returning the scan in that state would recreate the leak
+// the claim boundary exists to prevent.
+export function clearExpiredPendingAnalysis(): void {
+  try {
+    // Version 1 had no owner or claim token. It must be quarantined rather than
+    // silently assigned to whichever account happens to sign in next.
+    localStorage.removeItem(LEGACY_KEY);
+    const raw = localStorage.getItem(KEY);
+    if (!raw || raw.length > MAX_STORED_CHARS) {
+      if (raw) clearPendingAnalysis();
+      return;
+    }
+    const value = JSON.parse(raw) as Partial<PendingAnalysis>;
+    if (!valid(value) || Date.now() - value.createdAt > MAX_AGE_MS) clearPendingAnalysis();
+  } catch {
+    clearPendingAnalysis();
+  }
+}
+
+// Carry the one-time token across OAuth, confirmation-email, and magic-link
+// navigation. Password login stays in the same tab and reads sessionStorage;
+// redirect flows receive the same token in their approved return URL.
+export function pendingAnalysisRedirect(base: string): string {
+  try {
+    const token = sessionStorage.getItem(CLAIM_SESSION_KEY);
+    if (!token) return base;
+    const url = new URL(base);
+    url.searchParams.set(CLAIM_QUERY_KEY, token);
+    return url.toString();
+  } catch {
+    return base;
+  }
+}
+
 export function clearPendingAnalysis(): void {
   try {
     localStorage.removeItem(KEY);
+    localStorage.removeItem(LEGACY_KEY);
+    sessionStorage.removeItem(CLAIM_SESSION_KEY);
+    removeClaimFromUrl();
   } catch {
     // Storage can disappear between calls in private browsing. Cleanup is
     // best-effort and must never block a result.
@@ -148,7 +213,10 @@ function reducedJpeg(source: HTMLCanvasElement): string | null {
 function valid(value: Partial<PendingAnalysis>): value is PendingAnalysis {
   const front = value.front;
   const side = value.side;
-  return value.version === 1
+  return value.version === 2
+    && isScanId(value.scanId)
+    && uuid(value.claimToken)
+    && (value.claimedByUserId === undefined || uuid(value.claimedByUserId))
     && typeof value.createdAt === "number"
     && (value.sex === "male" || value.sex === "female")
     && !!front
@@ -169,6 +237,35 @@ function valid(value: Partial<PendingAnalysis>): value is PendingAnalysis {
       && side.seedMethod === side.feedback.seedMethod
       && sideFeedbackIntentIssues(side.feedback, side.width, side.height).length === 0
     ));
+}
+
+function claimTokenFromBrowser(): string | null {
+  try {
+    const query = typeof location === "undefined"
+      ? null
+      : new URLSearchParams(location.search).get(CLAIM_QUERY_KEY);
+    return query || sessionStorage.getItem(CLAIM_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function removeClaimFromUrl(): void {
+  try {
+    if (typeof location === "undefined" || typeof history === "undefined") return;
+    const url = new URL(location.href);
+    if (!url.searchParams.has(CLAIM_QUERY_KEY)) return;
+    url.searchParams.delete(CLAIM_QUERY_KEY);
+    history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // The claim is already bound in storage; URL cleanup is privacy polish and
+    // never a reason to discard a valid result.
+  }
+}
+
+function uuid(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function finiteSize(width: unknown, height: unknown): width is number {
