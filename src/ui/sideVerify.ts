@@ -801,7 +801,7 @@ export function mountVerifier(
   // are right, press this, and what lands on the clipboard is numbers. The
   // photograph stays where it is. Normalised 0..1 so the fixture survives a
   // re-crop or a different capture size.
-  if (new URLSearchParams(location.search).has("dev")) {
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has("dev")) {
     const dump = document.createElement("button");
     dump.type = "button";
     dump.className = "vdump";
@@ -817,7 +817,7 @@ export function mountVerifier(
       const json = JSON.stringify(out, null, 1);
       void navigator.clipboard?.writeText(json).then(
         () => { dump.textContent = "Copied"; setTimeout(() => (dump.textContent = "Copy points"), 1400); },
-        () => { dump.textContent = "See console"; console.log(json); },
+        () => { dump.textContent = "Copy unavailable"; },
       );
     };
     host.appendChild(dump);

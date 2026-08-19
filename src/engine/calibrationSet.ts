@@ -1,5 +1,6 @@
 import type { Report, Sex } from "./types.js";
 import { METRICS } from "./metrics.js";
+import { scopedStorageKey } from "./scanScope.js";
 
 // ---------------------------------------------------------------------------
 // Collecting rated faces, so the corpus can grow without being assembled by
@@ -20,10 +21,10 @@ import { METRICS } from "./metrics.js";
 // alongside the rating, and hands back exactly the JSON corpus.json expects.
 // Fifty faces stops being a transcription job and becomes fifty scans.
 //
-// Kept in localStorage and never uploaded: these are photographs of people, the
-// ratings are one person's opinion of how they look, and neither belongs on a
-// server. The export is a deliberate act — a button, producing text, that
-// somebody chooses to paste somewhere.
+// Kept in owner-scoped localStorage and never uploaded: these measurements and
+// ratings describe real faces, and neither belongs in another browser user's
+// state or on a server. The export is a deliberate act — a button, producing
+// text, that somebody chooses to paste somewhere.
 // ---------------------------------------------------------------------------
 
 const KEY = "tm.calibration.v1";
@@ -42,7 +43,9 @@ export interface RatedFace {
 
 export function loadCalibrationSet(): RatedFace[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const key = scopedStorageKey(KEY);
+    if (!key) return [];
+    const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? (parsed as RatedFace[]) : [];
   } catch {
@@ -52,7 +55,9 @@ export function loadCalibrationSet(): RatedFace[] {
 
 function save(faces: RatedFace[]): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(faces));
+    const key = scopedStorageKey(KEY);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(faces));
   } catch {
     // A full quota is not worth interrupting a scan over. The set in memory is
     // still correct for this session and the export still works.

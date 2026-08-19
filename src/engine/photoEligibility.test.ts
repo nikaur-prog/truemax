@@ -5,6 +5,7 @@ import type { FrameStats } from "./captureGuide.js";
 import type { Occlusion } from "./occlusion.js";
 import {
   frontPhotoRejection,
+  frontPhotoWarnings,
   headCoveringRejection,
   sidePhotoRejection,
   type SideSilhouetteCheck,
@@ -70,15 +71,25 @@ test("a detectable face is not rejected because the downloaded image is small", 
   assert.equal(sidePhotoRejection(quality({ yawDeg: 55 }), stats, silhouette(), 320, 460), null);
 });
 
-test("front uploads reject covered eyes, severe blur and cropped faces", () => {
-  assert.match(
-    frontPhotoRejection(quality(), stats, { ...occlusion, glassesStrong: true }, landmarks, 1200, 1600)?.detail ?? "",
-    /Remove glasses/i,
+test("front uploads warn for covered eyes and severe blur but still continue", () => {
+  assert.equal(
+    frontPhotoRejection(quality(), stats, { ...occlusion, glassesStrong: true }, landmarks, 1200, 1600),
+    null,
   );
-  assert.match(
-    frontPhotoRejection(quality(), { ...stats, sharpness: 0.12 }, occlusion, landmarks, 1200, 1600)?.title ?? "",
-    /blurred/i,
+  assert.equal(
+    frontPhotoRejection(quality(), { ...stats, sharpness: 0.12 }, occlusion, landmarks, 1200, 1600),
+    null,
   );
+  const warnings = frontPhotoWarnings(
+    quality(),
+    { ...stats, sharpness: 0.12 },
+    { ...occlusion, glassesStrong: true },
+  );
+  assert.ok(warnings.some((warning) => /glasses/i.test(warning)));
+  assert.ok(warnings.some((warning) => /focus/i.test(warning)));
+});
+
+test("front uploads still reject geometry that is cropped out", () => {
   const cropped = [{ x: 0.001, y: 0.1, z: 0 }, landmarks[1]] as NormalizedLandmark[];
   assert.match(frontPhotoRejection(quality(), stats, occlusion, cropped, 1200, 1600)?.title ?? "", /cut off/i);
 });
@@ -115,9 +126,17 @@ test("a strong, measurable turn is accepted even when it is not mathematically 9
   assert.equal(rejection, null);
 });
 
-test("a relaxed partial smile passes but a broad smile still blocks", () => {
+test("a smile is confidence context rather than a hard failure", () => {
   assert.equal(frontPhotoRejection(quality({ smileScore: 0.55 }), stats, occlusion, landmarks, 1200, 1600), null);
-  assert.match(frontPhotoRejection(quality({ smileScore: 0.72 }), stats, occlusion, landmarks, 1200, 1600)?.title ?? "", /neutral expression/i);
+  assert.equal(frontPhotoRejection(quality({ smileScore: 0.72 }), stats, occlusion, landmarks, 1200, 1600), null);
+  assert.ok(frontPhotoWarnings(quality({ smileScore: 0.72 }), stats, occlusion).some((warning) => /expression/i.test(warning)));
+});
+
+test("lighting problems warn without blocking a measurable mesh", () => {
+  const dark = { ...stats, luma: 8, lumaHigh: 20, darkShare: 0.8 };
+  assert.equal(frontPhotoRejection(quality(), dark, occlusion, landmarks, 1200, 1600), null);
+  assert.ok(frontPhotoWarnings(quality(), dark, occlusion).some((warning) => /lighting/i.test(warning)));
+  assert.equal(sidePhotoRejection(quality({ yawDeg: 55 }), dark, silhouette(), 1200, 1600), null);
 });
 
 test("detector uncertainty proceeds to review unless no head exists", () => {

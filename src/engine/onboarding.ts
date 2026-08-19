@@ -141,11 +141,11 @@ export function validateOnboardingStep(profile: OnboardingProfile, step: number)
 
 // A profile that could not be sent, kept so the answers are never lost to a
 // dropped connection. Retried on the next load; the person is not asked again.
-const PENDING_KEY = "truemax.pendingProfile";
+const PENDING_KEY = (userId: string) => `truemax.pendingProfile:user:${userId}`;
 
-export function queueOnboardingProfile(profile: OnboardingProfile): void {
+export function queueOnboardingProfile(user: User, profile: OnboardingProfile): void {
   try {
-    localStorage.setItem(PENDING_KEY, JSON.stringify(profile));
+    localStorage.setItem(PENDING_KEY(user.id), JSON.stringify(profile));
   } catch {
     /* storage full or disabled: the in-memory copy still finishes this session */
   }
@@ -156,14 +156,14 @@ export function queueOnboardingProfile(profile: OnboardingProfile): void {
 export async function flushPendingProfile(user: User): Promise<void> {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(PENDING_KEY);
+    raw = localStorage.getItem(PENDING_KEY(user.id));
   } catch {
     return;
   }
   if (!raw) return;
   try {
     const result = await saveOnboardingProfile(user, JSON.parse(raw) as OnboardingProfile);
-    if (result.ok) localStorage.removeItem(PENDING_KEY);
+    if (result.ok) localStorage.removeItem(PENDING_KEY(user.id));
   } catch {
     /* still offline: it keeps until next time */
   }

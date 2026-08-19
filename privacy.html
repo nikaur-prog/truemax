@@ -21,7 +21,7 @@
     <main class="legal-shell">
       <p class="legal-kicker">TrueMax</p>
       <h1>Privacy Policy</h1>
-      <p class="legal-meta">Last updated 12 August 2026</p>
+      <p class="legal-meta">Last updated 20 August 2026</p>
 
       <!-- The summary is not decoration and it is not marketing. Almost nobody
            reads a privacy policy end to end, so the two facts that actually
@@ -81,7 +81,11 @@
         <li>It is stored in a private database table and a private storage bucket
           that no browser can read directly.</li>
         <li>It is <b>deleted automatically after 90 days</b> by a scheduled job.
-          Deleting your account also queues its images for removal.</li>
+          You can revoke one submission from Settings at any time; deleting your
+          account also queues its images for removal.</li>
+        <li>We keep a pseudonymous record of consent, revocation, expiry or
+          deletion for up to 365 days. It contains submission and scan IDs,
+          dates and the consent version, but not your account ID or photograph.</li>
         <li>It is used only to improve landmark placement. We do not sell it,
           publish it, or use it to build any dataset outside this purpose.</li>
         <li>Declining has no effect on your score, your plan, or anything else.</li>
@@ -119,6 +123,11 @@
             <td>To personalise your plan</td>
             <td>Your browser</td>
           </tr>
+          <tr>
+            <td>Pseudonymous side-feedback consent events</td>
+            <td>To show when optional consent was granted, revoked or expired</td>
+            <td>Supabase for up to 365 days, without an account ID or photograph</td>
+          </tr>
         </tbody>
       </table>
       <p>
@@ -142,9 +151,10 @@
 
       <h2>Your rights</h2>
       <p>
-        You can <b>delete your account from inside the app</b> at any time. That
-        removes your account and your saved scans, and queues any side-profile
-        feedback images you contributed for deletion.
+        You can revoke an individual side-feedback submission from Settings, or
+        <b>delete your account from inside the app</b> at any time. Account
+        deletion removes your account and your saved scans, and queues any
+        remaining side-profile feedback images you contributed for deletion.
       </p>
       <p>
         Depending on where you live, you may also have the right to access a copy

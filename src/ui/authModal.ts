@@ -33,6 +33,7 @@ import { openTrialFunnel } from "./onboardingFunnel.js";
 // ---------------------------------------------------------------------------
 
 let overlay: HTMLDivElement | null = null;
+let overlayUserId: string | null = null;
 const reconciledUsers = new Set<string>();
 
 export interface OpenAccountOptions {
@@ -75,6 +76,7 @@ export function mountAccountButton(): void {
   const checkoutResult = consumeCheckoutResult();
   let checkoutHandled = false;
   onAuthChange((user) => {
+    if (overlayUserId && overlayUserId !== user?.id) close();
     if (user?.email) {
       signupBtn.classList.add("hidden");
       btn.textContent = "";
@@ -189,6 +191,7 @@ function close(): void {
   document.removeEventListener("keydown", escClose);
   overlay?.remove();
   overlay = null;
+  overlayUserId = null;
   document.body.classList.remove("auth-modal-open");
 }
 
@@ -200,6 +203,7 @@ function renderSignedIn(
   notice?: string,
   checkoutSessionId?: string | null,
 ): void {
+  overlayUserId = user.id;
   body.innerHTML = `
     <h2>Your account</h2>
     <div class="acct-who">

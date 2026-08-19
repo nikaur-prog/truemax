@@ -45,9 +45,10 @@ and TLS itself — which is what you want; you are not losing anything.
 
 ### 1.3 Production build
 
-- [x] Production Branch is `main`, and `main` carries the current code.
-- [x] Vercel → Deployments shows a **Production** (not Preview) deployment on the
-      latest `main` commit, status Ready.
+- [~] Production deployment `dpl_HaJVarjyMqRNt8cMx778rgSKY3NS` is Ready and
+      promoted to `www.truemax.app` from the audited Stage 1 worktree. Commit and
+      merge the preserved worktree before treating `main` as the recoverable
+      release baseline.
 
 ### 1.4 Smoke test on the real domain
 
@@ -187,6 +188,13 @@ path. The front photo is not included.
 
 ### 4.2 Known measurement debt
 
+- [ ] **Pass the paid-score validity gate in `SCORING_VALIDATION.md`.** The
+      present rated corpus contains only 19 synthetic faces, the nine-person
+      male holdout is not predictive, repeated photographs vary by about 1.32
+      points, and the front/side merge still uses unmeasured correlation and
+      weighting assumptions. Keep the side score separate and the headline
+      explicitly experimental until a consented, identity-split holdout passes.
+
 - [x] **Replace the false cheekbone pair and regenerate every dependent norm.**
       The engine now uses MediaPipe 116/345 as an approximate malar-prominence
       pair. It deliberately calls this *malar*, not a clinical skeletal zygion:
@@ -202,6 +210,29 @@ path. The front photo is not included.
 
   Remaining limit: this is a repeatable mesh proxy, not a direct anthropometric
   bizygomatic-breadth measurement.
+
+---
+
+## Stage 5 — creator tools
+
+These do not block the paid product, but they do block using `/quick` as a
+reliable content-production workflow.
+
+- [x] Put **Create Reel** on the result screen as a primary action instead of
+      revealing the producer after an unrelated download.
+- [x] Restore visible before/after clip pickers in the producer, with up to six
+      clips per side.
+- [x] Let the creator correct the before and after headline scores inside the
+      reel editor without rewriting the saved facial analysis.
+- [x] Keep the held before report separate from the editable after grid so both
+      halves cannot silently inherit the same score.
+- [x] Recut the rundown around six measurement beats, compact typed cues,
+      short keyboard/click effects and a single score-card transition.
+- [x] Raise the 1080 × 1920 export bitrate and protect source-photo fidelity so
+      thin measurement lines and facial texture survive social recompression.
+- [ ] Deploy this creator-tools release and make one phone export using real
+      before/after clips. Confirm photo fit, audio sync, both editable scores,
+      and the saved MP4 in TikTok's editor before filming the batch.
 
 ---
 
