@@ -12,8 +12,10 @@ public/models/selfie_multiclass_256x256.tflite
 !.env.example
 
 # Calibration photographs — the README, never the faces. See calib/README.md.
+# Both spellings: the tools default to .calib/, older docs used calib/.
 calib/*
 !calib/README.md
+.calib/
 .reel-cache/
 .vercel
 
