@@ -449,6 +449,16 @@
           "ourScore": 5.2,
           "view": "side",
           "note": "their Nasofrontal Angle, read from an opened card. 0.3 degrees apart \u2014 and note the SCORES are 5.2 against 7.45 on a measurement both products agree about"
+        },
+        {
+          "metric": "totalFacialConvexity",
+          "unit": "deg",
+          "ours": 139.9,
+          "theirs": 138.6,
+          "theirScore": 9.7,
+          "ourScore": 7.7,
+          "view": "side",
+          "note": "their Total Facial Convexity, opened card. 1.3 degrees apart \u2014 and again the scores are 7.7 against 9.70 on a measurement both products agree about"
         }
       ],
       "theirSideCards": {
@@ -550,6 +560,36 @@
             "value": 1.27,
             "unit": "x",
             "score": 9.55
+          },
+          {
+            "card": "Frankfort-tip Angle",
+            "value": 39.8,
+            "unit": "deg",
+            "score": 9.58
+          },
+          {
+            "card": "Total Facial Convexity",
+            "value": 138.6,
+            "unit": "deg",
+            "score": 9.7
+          },
+          {
+            "card": "Orbital Vector",
+            "value": 0.29,
+            "unit": "mm",
+            "score": 9.85
+          },
+          {
+            "card": "Facial Convexity (Nasion)",
+            "value": 166.5,
+            "unit": "deg",
+            "score": 9.91
+          },
+          {
+            "card": "Browridge Inclination Angle",
+            "value": 16.9,
+            "unit": "deg",
+            "score": 10.0
           }
         ],
         "chipReadOnly": [
@@ -636,6 +676,369 @@
           "ourScore": 4.2,
           "note": "theirs displayed as 89.4%, converted to a ratio"
         }
+      ],
+      "theirCards": [
+        {
+          "card": "Top Third",
+          "value": 32.2,
+          "unit": "%",
+          "ideal": [
+            30.0,
+            32.0
+          ],
+          "range": [
+            19.8,
+            42.2
+          ],
+          "score": 9.9
+        },
+        {
+          "card": "Middle Third",
+          "value": 31.5,
+          "unit": "%",
+          "ideal": [
+            31.4,
+            33.6
+          ],
+          "range": [
+            22.2,
+            42.6
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Lower Third",
+          "value": 36.2,
+          "unit": "%",
+          "ideal": [
+            33.9,
+            37.0
+          ],
+          "range": [
+            26.2,
+            44.3
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Lower Third Proportion",
+          "value": 35.4,
+          "unit": "%",
+          "ideal": [
+            31.0,
+            33.5
+          ],
+          "range": [
+            26.2,
+            38.3
+          ],
+          "score": 3.8
+        },
+        {
+          "card": "Total Facial Width to Height Ratio",
+          "value": 1.35,
+          "unit": "x",
+          "ideal": [
+            1.34,
+            1.37
+          ],
+          "range": [
+            1.07,
+            1.64
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Face Width to Height Ratio",
+          "value": 1.86,
+          "unit": "x",
+          "ideal": [
+            1.96,
+            2.0
+          ],
+          "range": [
+            1.55,
+            2.41
+          ],
+          "score": 7.2
+        },
+        {
+          "card": "Bigonial width",
+          "value": 89.4,
+          "unit": "%",
+          "ideal": [
+            87.5,
+            91.5
+          ],
+          "range": [
+            68.6,
+            110.4
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Jaw Frontal Angle",
+          "value": 85.3,
+          "unit": "deg",
+          "ideal": [
+            86.5,
+            92.5
+          ],
+          "range": [
+            54.8,
+            124.2
+          ],
+          "score": 9.8
+        },
+        {
+          "card": "Jaw Slope",
+          "value": 145.0,
+          "unit": "deg",
+          "ideal": [
+            140.0,
+            142.5
+          ],
+          "range": [
+            115.5,
+            167.0
+          ],
+          "score": 8.8
+        },
+        {
+          "card": "Lateral Canthal Tilt",
+          "value": 6.7,
+          "unit": "deg",
+          "ideal": [
+            6.0,
+            7.7
+          ],
+          "range": [
+            -4.3,
+            18.0
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Eye Separation Ratio",
+          "value": 47.0,
+          "unit": "%",
+          "ideal": [
+            45.7,
+            46.8
+          ],
+          "range": [
+            37.4,
+            55.1
+          ],
+          "score": 9.8
+        },
+        {
+          "card": "Eye Aspect Ratio",
+          "value": 2.96,
+          "unit": "x",
+          "ideal": [
+            3.0,
+            3.5
+          ],
+          "range": [
+            1.52,
+            4.98
+          ],
+          "score": 9.9
+        },
+        {
+          "card": "One Eye Apart Test",
+          "value": 1.0,
+          "unit": "x",
+          "ideal": [
+            0.95,
+            1.0
+          ],
+          "range": [
+            0.57,
+            1.38
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Midface Ratio",
+          "value": 0.95,
+          "unit": "x",
+          "ideal": [
+            0.97,
+            1.0
+          ],
+          "range": [
+            0.62,
+            1.35
+          ],
+          "score": 9.7
+        },
+        {
+          "card": "Eyebrow Tilt",
+          "value": 10.3,
+          "unit": "deg",
+          "ideal": [
+            6.5,
+            11.0
+          ],
+          "range": [
+            -14.0,
+            31.5
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Eyebrow Low Setedness",
+          "value": 0.29,
+          "unit": "x",
+          "ideal": [
+            0.0,
+            0.45
+          ],
+          "range": [
+            -2.36,
+            2.81
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Brow Length : Face Width",
+          "value": 0.68,
+          "unit": "",
+          "ideal": [
+            0.69,
+            0.76
+          ],
+          "range": [
+            0.33,
+            1.12
+          ],
+          "score": 9.8
+        },
+        {
+          "card": "Lower Lip to Upper Lip Ratio",
+          "value": 1.33,
+          "unit": "x",
+          "ideal": [
+            1.55,
+            1.85
+          ],
+          "range": [
+            -0.54,
+            3.94
+          ],
+          "score": 9.0
+        },
+        {
+          "card": "Chin to philtrum ratio",
+          "value": 1.88,
+          "unit": "x",
+          "ideal": [
+            2.15,
+            2.45
+          ],
+          "range": [
+            0.78,
+            3.82
+          ],
+          "score": 7.4
+        },
+        {
+          "card": "Mouth width to nose width ratio",
+          "value": 1.33,
+          "unit": "x",
+          "ideal": [
+            1.42,
+            1.5
+          ],
+          "range": [
+            1.08,
+            1.84
+          ],
+          "score": 5.7
+        },
+        {
+          "card": "Interpupillary : Mouth",
+          "value": 0.77,
+          "unit": "x",
+          "ideal": [
+            0.83,
+            0.87
+          ],
+          "range": [
+            0.42,
+            1.28
+          ],
+          "score": 8.5
+        },
+        {
+          "card": "Nose bridge : width",
+          "value": 2.43,
+          "unit": "x",
+          "ideal": [
+            2.06,
+            2.14
+          ],
+          "range": [
+            1.16,
+            3.04
+          ],
+          "score": 4.8
+        },
+        {
+          "card": "Ipsilateral Alar Angle",
+          "value": 86.3,
+          "unit": "deg",
+          "ideal": [
+            86.5,
+            92.5
+          ],
+          "range": [
+            70.2,
+            108.8
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Deviation IAA/JFA",
+          "value": 1.0,
+          "unit": "deg",
+          "ideal": [
+            0.0,
+            2.5
+          ],
+          "range": [
+            -22.2,
+            22.3
+          ],
+          "score": 10.0
+        },
+        {
+          "card": "Neck Width",
+          "value": 88.0,
+          "unit": "%",
+          "ideal": [
+            92.0,
+            98.0
+          ],
+          "range": [
+            66.2,
+            123.8
+          ],
+          "score": 8.6
+        }
+      ],
+      "cardNote": [
+        "These were supplied at the same time as the rest of the Cavill capture and were written",
+        "into docs/BENCHMARK_CAVILL.md as a markdown table. Leaving them there and treating this",
+        "file as if Cavill had only three data points was a filing error, not missing data.",
+        "",
+        "THE BLOCKER IS OUR SIDE, NOT THEIRS. Twenty-five of their Cavill values are here; only",
+        "three of OURS are. A pairing needs both, so what is actually missing is a TrueMax",
+        "diagnostics dump for the Cavill scan \u2014 one paste would turn most of these into rows.",
+        "",
+        "No side ratios for Cavill: their side tab was only discovered during the Bieber capture."
       ]
     }
   ]
