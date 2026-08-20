@@ -27,16 +27,26 @@ const ASPECT = 720 / 1280;
 
 const centreY = (c: { y: number; h: number }) => c.y + c.h / 2;
 
-test("the camera walks DOWN the face", () => {
+test("the camera never walks UP the face", () => {
   // The claim the whole format rests on, and the one that was silently false
   // before the ordering fix. Assert the geometry rather than the table.
+  //
+  // Weakened from strictly-descending to never-ascending, deliberately: the
+  // crop now refuses to cut the head (HEAD_FIT = 1), so on a photograph
+  // without spare margin two lower bands can clamp to the same frame. Equal
+  // is honest — the camera holding still is not a fault. Ascending is: a
+  // walk-down that jumps back up reads as a re-cut, and that is the
+  // regression this test exists to catch.
   const eyes = centreY(regionCrop(PHOTO, FACE, "eyes", ASPECT));
   const nose = centreY(regionCrop(PHOTO, FACE, "nose", ASPECT));
   const lips = centreY(regionCrop(PHOTO, FACE, "lips", ASPECT));
   const chin = centreY(regionCrop(PHOTO, FACE, "chin", ASPECT));
-  assert.ok(eyes < nose, `eyes ${eyes} not above nose ${nose}`);
-  assert.ok(nose < lips, `nose ${nose} not above lips ${lips}`);
-  assert.ok(lips < chin, `lips ${lips} not above chin ${chin}`);
+  assert.ok(eyes <= nose, `eyes ${eyes} below nose ${nose}`);
+  assert.ok(nose <= lips, `nose ${nose} below lips ${lips}`);
+  assert.ok(lips <= chin, `lips ${lips} below chin ${chin}`);
+  // And it still actually descends over the whole walk, or the format is a
+  // slideshow again: the top of the face must sit above the bottom.
+  assert.ok(eyes < chin, `eyes ${eyes} not above chin ${chin}`);
 });
 
 test("a crop never leaves the photograph", () => {

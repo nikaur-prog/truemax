@@ -64,6 +64,13 @@ interface Ctx {
   // nothing called it, so a quarter of the score had no screen.
   sideReport?: Report;
   sidePhoto?: HTMLCanvasElement;
+  /**
+   * The clean front capture. The authoritative source for every "front" paint
+   * of the photo pane — the pane itself is mutable state that may be holding
+   * the side photograph, and cloning it to remember "the front" is how a
+   * profile got itself labelled FRONT · ANALYZED in production.
+   */
+  frontPhoto?: HTMLCanvasElement;
   // The thirteen verified points, in the side photo's own pixel space, so the
   // Side tab can draw them where they were actually placed. Without these the
   // tab fell back to drawing the FRONT mesh at FRONT coordinates over the side
@@ -93,7 +100,13 @@ export function renderResults(c: Ctx): void {
   // already painted the new front capture; reset the cached state so this scan
   // cannot restore the previous person's canvas or stale quality chips.
   shownPhoto = "front";
-  frontPhoto = null;
+  frontPhoto = c.frontPhoto ?? null;
+  // And PAINT it, unconditionally. The pane may be holding whatever the flow
+  // that led here last drew — the side-adjust screen leaves the profile on it
+  // — and resetting shownPhoto to "front" without repainting is exactly the
+  // label/image disagreement this fixes.
+  const pane = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
+  if (pane && frontPhoto) paint(pane, frontPhoto);
   frontQualityHTML = document.getElementById("quality-chips")?.innerHTML ?? "";
   // The score under the photograph, for the phone layout where the analysis
   // column starts below the fold. Rendered here rather than inside showOverall
@@ -297,6 +310,8 @@ function showPhoto(which: "front" | "side"): void {
   if (!canvas) return;
 
   if (which === "side" && ctx.sidePhoto) {
+    // Last-resort fallback only: with a frontPhoto handed in by the caller the
+    // clone never runs, because cloning the pane trusts the pane.
     frontPhoto = frontPhoto ?? cloneCanvas(canvas);
     paint(canvas, ctx.sidePhoto);
     ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);

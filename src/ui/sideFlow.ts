@@ -146,9 +146,32 @@ export function openSideCapture(ctx: SideCtx): void {
   wireSideInputs(e, ctx);
 }
 
+// The paste listener, module-level so re-wiring the inputs replaces it
+// instead of stacking a second copy that would load the same file twice.
+let sidePaste: ((ev: ClipboardEvent) => void) | null = null;
+
 // The file input and drop handlers, shared by the choice screen and the
 // camera-first path (so an upload still works even when the camera opened first).
 function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
+  // Paste works here for the same reason it works on the front capture: the
+  // profile photo has usually just been cropped or screenshotted and is
+  // already on the clipboard. Scoped to this screen being visible, and torn
+  // down in close(), so a stray Cmd-V anywhere else in the app does nothing.
+  if (sidePaste) document.removeEventListener("paste", sidePaste);
+  sidePaste = (ev: ClipboardEvent) => {
+    if (e.section.classList.contains("hidden")) return;
+    const f = [...(ev.clipboardData?.items ?? [])]
+      .find((i) => i.type.startsWith("image/"))
+      ?.getAsFile();
+    if (f) {
+      ev.preventDefault();
+      void load(f, ctx);
+    }
+  };
+  document.addEventListener("paste", sidePaste);
+  // Say so in the pane instead of leaving a black void. The awaiting state
+  // showed nothing at all, which read as broken rather than as waiting.
+  e.cap.textContent = "AWAITING PHOTO · PASTE, DROP OR UPLOAD";
   e.input.onchange = async () => {
     const file = e.input.files?.[0];
     // Clear the selection before handling it. A file input fires `change` only
@@ -340,6 +363,10 @@ export function close(): void {
   verifier = null;
   reference?.destroy();
   reference = null;
+  if (sidePaste) {
+    document.removeEventListener("paste", sidePaste);
+    sidePaste = null;
+  }
   el().section.classList.add("hidden");
 }
 
