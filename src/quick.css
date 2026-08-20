@@ -10,6 +10,17 @@
 
 .q-wrap { max-width: 460px; margin: 0 auto; padding: 14px 16px 40px; }
 
+/* The side review is the one screen here that is not a phone screen.
+   Everything else on /quick is a 9:16 column on purpose — it is composed to be
+   screen-recorded. The landmark review is the opposite job: thirteen points
+   dragged onto a profile, where precision is a direct function of how many
+   pixels the face is drawn at, and a 460px column leaves about 380 of them for
+   a photo and a panel side by side.
+   So while that step is open the column gives way. Every other section is
+   hidden at the time, so nothing else is affected, and closing the side flow
+   puts the phone column back. */
+.quick.side-open .q-wrap { width: 100%; max-width: 1560px; }
+
 .q-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 
 /* Capture ---------------------------------------------------------------- */

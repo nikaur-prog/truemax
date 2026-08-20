@@ -118,6 +118,20 @@ function renderSideCaptureCopy(copy: HTMLElement): void {
     <p class="side-sub">Afterwards, TrueMax places thirteen points for you to review. If any missed, choose edit and drag only those points before confirming.</p>`;
 }
 
+/**
+ * Marks the document while this flow owns the screen.
+ *
+ * /quick lays itself out as a 460px phone column, which is right for every
+ * other step there and wrong for this one: the landmark review needs the photo
+ * drawn as large as the display allows, because how accurately thirteen points
+ * can be placed is a direct function of how many pixels the face occupies. The
+ * class lets quick.css widen its column for the duration; nothing outside
+ * /quick styles it, so the main app is unaffected.
+ */
+function markSideOpen(open: boolean): void {
+  document.body.classList.toggle("side-open", open);
+}
+
 export function openSideCapture(ctx: SideCtx): void {
   const e = el();
   verifier?.destroy();
@@ -125,6 +139,7 @@ export function openSideCapture(ctx: SideCtx): void {
   // Or the guide badge stays pinned over the live camera preview.
   reference?.destroy();
   reference = null;
+  markSideOpen(true);
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
@@ -369,6 +384,7 @@ export function openSideAdjust(
   ctx: SideCtx,
 ): void {
   const e = el();
+  markSideOpen(true);
   e.section.classList.remove("hidden");
   e.drop.classList.add("hidden");
   e.live.classList.add("hidden");
@@ -386,6 +402,7 @@ export function close(): void {
     document.removeEventListener("paste", sidePaste);
     sidePaste = null;
   }
+  markSideOpen(false);
   el().section.classList.add("hidden");
 }
 
