@@ -983,6 +983,10 @@ async function handleCanvas(
       issues: [...new Set([...quality.issues, ...warnings])],
     },
     autoNote: `Scored against ${selectedSex} norms`,
+    // frontShot was copied off the pane above, before anything else could draw
+    // on it. This is the only moment in the flow where #photo-canvas is
+    // guaranteed to hold the front capture and nothing else.
+    photo: frontShot,
   };
 
   // The main product is two photographs: front, then side, then one analysis of
@@ -1008,6 +1012,20 @@ interface PendingFront {
   height: number;
   quality: QualityCheck;
   autoNote: string;
+  /**
+   * The front capture, as its OWN canvas, copied at the moment it was accepted.
+   *
+   * Not optional, and deliberately not recovered later by reading #photo-canvas.
+   * That pane is shared: the scan animation swaps the profile onto it, the side
+   * flow draws on it, and a resume repaints it. Every previous attempt at this
+   * cloned whatever the pane happened to hold at some later instant, and every
+   * one of them eventually cloned the SIDE photograph — which is how the front
+   * tabs came to render front landmarks, front region zooms and a 468-point
+   * mesh over a profile labelled FRONT. Twice now the fix has been to move the
+   * clone earlier; moving it earlier only narrows the window. Owning the pixels
+   * here closes it.
+   */
+  photo: HTMLCanvasElement;
 }
 let pending: PendingFront | null = null;
 // The verified side points, kept so a change of reference population can
@@ -1089,18 +1107,22 @@ async function runFullAnalysis(
   if (!pending || !token || !scanSession.isCurrent(token)) return;
   if (!scanSession.transition(token, "analyzing")) return;
   const generation = scanGeneration;
-  const { landmarks, width, height, quality, autoNote } = pending;
+  const { landmarks, width, height, quality, autoNote, photo: frontShot } = pending;
   // The scan sequence only narrates the side view when there is one. Front-only
   // is now a complete result rather than an unfinished one, so its loading bar
   // must not claim to be reading a profile that was never taken.
   const stages = sideReport ? SCAN_STAGES : SCAN_STAGES.filter((s) => s.view === "front");
   el.main.classList.remove("hidden");
-  // The front photo, kept so the scan can switch back to it after showing the
-  // profile being measured.
-  const frontShot = document.createElement("canvas");
-  frontShot.width = el.photoCanvas.width;
-  frontShot.height = el.photoCanvas.height;
-  frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
+  // The front capture comes from `pending`, which has owned its own copy since
+  // the moment it was accepted. It used to be cloned off el.photoCanvas right
+  // here — and this function can run a second time (sign-in mid-scan resumes
+  // it), by which point the pane may be showing the profile. See PendingFront.
+  //
+  // Paint it too, so the pane always agrees with the FRONT caption underneath
+  // regardless of what the previous run, or the side flow, left behind.
+  el.photoCanvas.width = frontShot.width;
+  el.photoCanvas.height = frontShot.height;
+  el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
@@ -1469,8 +1491,13 @@ async function resumePendingAfterAuth(): Promise<void> {
   resumePendingStarted = true;
   const token = scanSession.resume(`user:${user.id}`, saved.scanId);
 
+  // Decoded into a canvas this scan OWNS, then copied onto the shared pane —
+  // rather than decoded straight onto the pane and read back later. The pane is
+  // repainted by the scan animation and by the side flow; pending.photo must
+  // survive both. See PendingFront.
+  const frontShot = document.createElement("canvas");
   const frontOk = await drawStoredPhoto(
-    el.photoCanvas,
+    frontShot,
     saved.front.photo,
     saved.front.width,
     saved.front.height,
@@ -1481,6 +1508,9 @@ async function resumePendingAfterAuth(): Promise<void> {
     resetToUpload();
     return;
   }
+  el.photoCanvas.width = frontShot.width;
+  el.photoCanvas.height = frontShot.height;
+  el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
 
   let sidePhoto: HTMLCanvasElement | undefined;
   if (saved.side.photo) {
@@ -1505,6 +1535,7 @@ async function resumePendingAfterAuth(): Promise<void> {
     height: saved.front.height,
     quality: saved.front.quality,
     autoNote: saved.front.autoNote,
+    photo: frontShot,
   };
   lastSide = {
     points: saved.side.points,

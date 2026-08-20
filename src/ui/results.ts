@@ -310,9 +310,14 @@ function showPhoto(which: "front" | "side"): void {
   if (!canvas) return;
 
   if (which === "side" && ctx.sidePhoto) {
-    // Last-resort fallback only: with a frontPhoto handed in by the caller the
-    // clone never runs, because cloning the pane trusts the pane.
-    frontPhoto = frontPhoto ?? cloneCanvas(canvas);
+    // No fallback clone of the pane here. It used to read `frontPhoto ??
+    // cloneCanvas(canvas)`, which on any path that reached this point with the
+    // profile already on the pane adopted the PROFILE as the front photograph —
+    // permanently, for the rest of the report. Switching back to Front then
+    // showed the side shot captioned FRONT, with the front mesh and the front
+    // region zooms drawn over it. The caller owns the front capture (Ctx.
+    // frontPhoto, from PendingFront.photo); if it is missing, Front is simply
+    // unavailable, which is visibly broken rather than quietly wrong.
     paint(canvas, ctx.sidePhoto);
     ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);
     if (label) label.textContent = "SIDE";
@@ -330,14 +335,10 @@ function showPhoto(which: "front" | "side"): void {
     shownPhoto = "front";
   }
 }
+// Always the front capture handed in by the caller, never a copy of the shared
+// pane. Deleting the clone-the-pane helper that used to back this is the point:
+// there is no longer a way for the profile to become "the front photograph".
 let frontPhoto: HTMLCanvasElement | null = null;
-function cloneCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = src.width;
-  c.height = src.height;
-  c.getContext("2d")!.drawImage(src, 0, 0);
-  return c;
-}
 function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
   dst.width = src.width;
   dst.height = src.height;
