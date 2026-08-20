@@ -41,6 +41,7 @@ import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
+import { mergeReports } from "./engine/scoring.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -776,13 +777,14 @@ function renderRatingStep(r: Report): void {
     );
     const held = pendingSide;
     clearPending();
-    renderVerdictStep(r, Math.round(rating * 10) / 10, held !== null);
+    renderVerdictStep(r, Math.round(rating * 10) / 10, held);
   };
   document.getElementById("q-cal-save")!.onclick = commit;
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
-function renderVerdictStep(r: Report, rating: number, withSide = false): void {
+function renderVerdictStep(r: Report, rating: number, side: Report | null = null): void {
+  const withSide = side !== null;
   const gap = r.overall - rating;
   // Named rather than left as a number. "−2.3" is a figure; "the engine is
   // two points below you on this face" is the thing worth acting on, and the
@@ -802,9 +804,35 @@ function renderVerdictStep(r: Report, rating: number, withSide = false): void {
       }</p>
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
+        <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
         <button class="btn gho" id="q-cal-list">See the set</button>
       </div>
     </div>`;
+  // The captured face as pasteable text, both views, at the one moment both
+  // are in hand.
+  //
+  // Calibrate has had front and side slots since #46, and no way to get the
+  // NUMBERS back out of it — the diagnostics button lives on the analysis
+  // results panel, which is a different mode holding a different report. So the
+  // one screen in the product that captures a verified profile could not export
+  // it, and an external comparison of a side measurement meant reading region
+  // cards off a screenshot. That is how a side pairing gets mis-matched to the
+  // wrong metric.
+  //
+  // Merged rather than front-only when both are present, because a merged
+  // report carries BOTH views' metrics (mergeReports concatenates them) and its
+  // header prints the two view scores separately. Front-only when that is all
+  // there is, which the dump then says explicitly rather than leaving the
+  // reader to notice an absence.
+  const diag = document.getElementById("q-cal-diag") as HTMLButtonElement | null;
+  if (diag) {
+    diag.onclick = async () => {
+      const full = side ? mergeReports(r, side) : r;
+      const copied = await copyDiagnostics(full, "");
+      diag.textContent = copied ? "Copied" : "Copy from the box";
+      window.setTimeout(() => (diag.textContent = "Copy diagnostics"), 2600);
+    };
+  }
   document.getElementById("q-cal-next")!.onclick = () => {
     resetSexAsk();
     clearPending();
