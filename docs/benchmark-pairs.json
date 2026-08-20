@@ -1,1137 +1,1422 @@
 {
-  "$comment": [
-    "Paired measurements: the SAME quantity on the SAME face, measured by TrueMax",
-    "and read off a competitor's own UI. Nothing here is their code, model or",
-    "formula \u2014 every `theirs` value is a number their product displayed to a",
-    "paying user, which is what any customer can read off the screen.",
+ "$comment": [
+  "Paired measurements: the SAME quantity on the SAME face, measured by TrueMax",
+  "and read off a competitor's own UI. Nothing here is their code, model or",
+  "formula — every `theirs` value is a number their product displayed to a",
+  "paying user, which is what any customer can read off the screen.",
+  "",
+  "This file exists to answer ONE question: does our pipeline measure the same",
+  "thing they do, and if not, is our disagreement systematic. It is deliberately",
+  "NOT a calibration set. Fitting anything to their SCORES would be reverse-",
+  "engineering their scoring by regression, which is the thing we said we would",
+  "not do, merely done statistically instead of by reading code. Their scores are",
+  "recorded for context and are never a target.",
+  "",
+  "Add a face by appending to `faces`. Rows only need `ours` and `theirs` in the",
+  "SAME units — convert on the way in and say so in `note`. Run:",
+  "  node tools/benchmark-agreement.mjs",
+  "",
+  "THE ONE RULE THAT IS EASY TO BREAK BY ACCIDENT. Their measured VALUES belong",
+  "here; their SCORES must never become a rating anywhere else. This happened",
+  "once — their 7.78 for Cavill was rounded to 7.8 and typed into the Calibrate",
+  "rating box while their analysis of that same face was open in another tab.",
+  "The row looked entirely ordinary and would have made the corpus a regression",
+  "onto their formula. It was caught before export, and the Calibrate step now",
+  "records where a rating came from and refuses to export a borrowed one.",
+  "",
+  "TWO FINDINGS THE TOOL HAS NOW SURFACED, both needing a measurement fix rather",
+  "than a moved ideal:",
+  "  jawCheekRatio  — reads HIGH on all three faces, by 10.1% on average.",
+  "  jawFrontalAngle — held out twice for definition mismatch, and both times",
+  "                    ours reads ~26deg high (Bieber 114.1 v 87.9, Cavill 123.1",
+  "                    v 98.0). A mismatch that consistent is a construction we",
+  "                    can identify, not noise."
+ ],
+ "faces": [
+  {
+   "name": "Justin Bieber",
+   "sex": "male",
+   "capturedOn": "2026-08-20",
+   "theirOverall": 6.58,
+   "theirGeometryOnly": 6.45,
+   "theirPillars": {
+    "harmony": 6.45,
+    "angularity": 7.5,
+    "dimorphism": 5.29,
+    "features": 7.33
+   },
+   "theirHarmonyByView": {
+    "front": 5.33,
+    "side": 8.23
+   },
+   "ourOverall": 5.5,
+   "ourSide": 6.8,
+   "ourFront": null,
+   "note": [
+    "Their Harmony pillar splits by view, which Cavill's capture did not show, and it is the",
+    "most useful number either product has produced so far: front 5.33 against side 8.23 on",
+    "one face. Our merged overall is 5.5 with the side at 6.8, so our front sits BELOW 5.5 —",
+    "the results screen does display a front-only figure but it was not in the capture, so it",
+    "is recorded as unknown rather than inferred. Read the front comparison only once that",
+    "number is in hand.",
     "",
-    "This file exists to answer ONE question: does our pipeline measure the same",
-    "thing they do, and if not, is our disagreement systematic. It is deliberately",
-    "NOT a calibration set. Fitting anything to their SCORES would be reverse-",
-    "engineering their scoring by regression, which is the thing we said we would",
-    "not do, merely done statistically instead of by reading code. Their scores are",
-    "recorded for context and are never a target.",
-    "",
-    "Add a face by appending to `faces`. Rows only need `ours` and `theirs` in the",
-    "SAME units \u2014 convert on the way in and say so in `note`. Run:",
-    "  node tools/benchmark-agreement.mjs"
-  ],
-  "faces": [
+    "No paired metric rows yet: their per-card values were not captured, only the pillar",
+    "figures and the qualitative strength/improvement lists, which are deviations rather than",
+    "measurements and cannot be paired against ours."
+   ],
+   "theirCards": [
     {
-      "name": "Justin Bieber",
-      "sex": "male",
-      "capturedOn": "2026-08-20",
-      "theirOverall": 6.58,
-      "theirGeometryOnly": 6.45,
-      "theirPillars": {
-        "harmony": 6.45,
-        "angularity": 7.5,
-        "dimorphism": 5.29,
-        "features": 7.33
-      },
-      "theirHarmonyByView": {
-        "front": 5.33,
-        "side": 8.23
-      },
-      "ourOverall": 5.5,
-      "ourSide": 6.8,
-      "ourFront": null,
-      "note": [
-        "Their Harmony pillar splits by view, which Cavill's capture did not show, and it is the",
-        "most useful number either product has produced so far: front 5.33 against side 8.23 on",
-        "one face. Our merged overall is 5.5 with the side at 6.8, so our front sits BELOW 5.5 \u2014",
-        "the results screen does display a front-only figure but it was not in the capture, so it",
-        "is recorded as unknown rather than inferred. Read the front comparison only once that",
-        "number is in hand.",
-        "",
-        "No paired metric rows yet: their per-card values were not captured, only the pillar",
-        "figures and the qualitative strength/improvement lists, which are deviations rather than",
-        "measurements and cannot be paired against ours."
-      ],
-      "theirCards": [
-        {
-          "card": "Top Third",
-          "value": 26.1,
-          "unit": "%",
-          "ideal": [
-            30.0,
-            32.0
-          ],
-          "range": [
-            19.8,
-            42.2
-          ],
-          "score": 4.3
-        },
-        {
-          "card": "Middle Third",
-          "value": 35.9,
-          "unit": "%",
-          "ideal": [
-            31.4,
-            33.4
-          ],
-          "range": [
-            22.2,
-            42.6
-          ],
-          "score": 6.5
-        },
-        {
-          "card": "Lower Third",
-          "value": 38.0,
-          "unit": "%",
-          "ideal": [
-            33.9,
-            37.0
-          ],
-          "range": [
-            26.2,
-            44.7
-          ],
-          "score": 8.8
-        },
-        {
-          "card": "Total Facial Width to Height Ratio",
-          "value": 1.4,
-          "unit": "x",
-          "ideal": [
-            1.34,
-            1.37
-          ],
-          "range": [
-            1.07,
-            1.64
-          ],
-          "score": 8.3
-        },
-        {
-          "card": "Midface Ratio",
-          "value": 0.97,
-          "unit": "x",
-          "ideal": [
-            0.97,
-            1.0
-          ],
-          "range": [
-            0.62,
-            1.35
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Bigonial width",
-          "value": 86.5,
-          "unit": "%",
-          "ideal": [
-            87.5,
-            91.5
-          ],
-          "range": [
-            68.6,
-            110.4
-          ],
-          "score": 9.7
-        },
-        {
-          "card": "Face Width to Height Ratio",
-          "value": 1.65,
-          "unit": "x",
-          "ideal": [
-            1.96,
-            2.0
-          ],
-          "range": [
-            1.55,
-            2.41
-          ],
-          "score": 0.7
-        },
-        {
-          "card": "Jaw Slope",
-          "value": 145.5,
-          "unit": "deg",
-          "ideal": [
-            140.0,
-            142.5
-          ],
-          "range": [
-            115.5,
-            167.0
-          ],
-          "score": 8.5
-        },
-        {
-          "card": "One Eye Apart Test",
-          "value": 0.98,
-          "unit": "x",
-          "ideal": [
-            0.95,
-            1.0
-          ],
-          "range": [
-            0.87,
-            1.38
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Jaw Frontal Angle",
-          "value": 87.9,
-          "unit": "deg",
-          "ideal": [
-            86.5,
-            92.5
-          ],
-          "range": [
-            54.8,
-            124.2
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Lateral Canthal Tilt",
-          "value": 3.3,
-          "unit": "deg",
-          "ideal": [
-            6.0,
-            7.7
-          ],
-          "range": [
-            -4.3,
-            18.0
-          ],
-          "score": 6.4,
-          "perSide": [
-            3.6,
-            3.0
-          ]
-        },
-        {
-          "card": "Eye Aspect Ratio",
-          "value": 2.53,
-          "unit": "x",
-          "ideal": [
-            3.0,
-            3.5
-          ],
-          "range": [
-            1.52,
-            4.98
-          ],
-          "score": 5.6,
-          "perSide": [
-            2.46,
-            2.59
-          ]
-        },
-        {
-          "card": "Lower Lip to Upper Lip Ratio",
-          "value": 1.15,
-          "unit": "x",
-          "ideal": [
-            1.55,
-            1.85
-          ],
-          "range": [
-            -0.54,
-            3.94
-          ],
-          "score": 7.1
-        },
-        {
-          "card": "Chin to philtrum ratio",
-          "value": 2.46,
-          "unit": "x",
-          "ideal": [
-            2.15,
-            2.45
-          ],
-          "range": [
-            0.78,
-            3.82
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Mouth width to nose width ratio",
-          "value": 1.38,
-          "unit": "x",
-          "ideal": [
-            1.42,
-            1.5
-          ],
-          "range": [
-            1.08,
-            1.84
-          ],
-          "score": 9.3
-        },
-        {
-          "card": "Eyebrow Tilt",
-          "value": 3.2,
-          "unit": "deg",
-          "ideal": [
-            6.5,
-            11.0
-          ],
-          "range": [
-            -14.0,
-            31.5
-          ],
-          "score": 6.8,
-          "perSide": [
-            3.5,
-            3.0
-          ]
-        },
-        {
-          "card": "Eye Separation Ratio",
-          "value": 45.0,
-          "unit": "%",
-          "ideal": [
-            45.7,
-            46.8
-          ],
-          "range": [
-            37.4,
-            55.1
-          ],
-          "score": 9.3
-        }
-      ],
-      "cardNote": [
-        "Their ideal bands and axis ranges on these five cards are IDENTICAL to the same cards on",
-        "the Cavill capture \u2014 Top Third 30.0-32.0 over 19.8-42.2, Lower Third 33.9-37.0 over",
-        "26.2-44.7, Total Facial W:H 1.34-1.37 over 1.07-1.64, Midface 0.97-1.00 over 0.62-1.35.",
-        "So their bands are per-metric CONSTANTS, not per-person, and a further face adds no",
-        "information about band width at all. Two male faces only; a female capture would say",
-        "whether they vary by sex.",
-        "",
-        "Only one row here is safely pairable against ours. Their Total Facial W:H is described",
-        "on the card as height-to-width, which is our facialIndex \u2014 1.40 against our 1.38. The",
-        "thirds are NOT pairable as they stand: their thirds are shares of trichion-to-menton",
-        "while our lowerFacePct is a share of glabella-to-menton, so 38.0 against our 50.5 is two",
-        "different quantities rather than a disagreement. Their Midface Ratio is interpupillary",
-        "against midface height, which is our midfaceRatio and not our middleLowerBalance \u2014 the",
-        "value for it was not in the capture.",
-        "",
-        "Completing this needs the TrueMax diagnostics dump, which names every metric, rather than",
-        "region cards read off a screenshot."
-      ],
-      "rows": [
-        {
-          "metric": "facialIndex",
-          "unit": "",
-          "ours": 1.38,
-          "theirs": 1.4,
-          "theirScore": 8.3,
-          "ourScore": 6.4,
-          "note": "their card titled Total Facial Width to Height Ratio, described on the card as height-to-width"
-        },
-        {
-          "metric": "jawCheekRatio",
-          "unit": "",
-          "ours": 0.95,
-          "theirs": 0.865,
-          "theirScore": 9.7,
-          "ourScore": 6.2,
-          "note": "their Bigonial width, displayed as 86.5%, converted to a ratio"
-        },
-        {
-          "metric": "gonialProxy",
-          "unit": "deg",
-          "ours": 145.3,
-          "theirs": 145.5,
-          "theirScore": 8.5,
-          "ourScore": 6.3,
-          "note": "their Jaw Slope; agreement to 0.2 degrees, the closest pairing recorded so far"
-        },
-        {
-          "metric": "jawFrontalAngle",
-          "unit": "deg",
-          "ours": 114.1,
-          "theirs": 87.9,
-          "theirScore": 10.0,
-          "ourScore": 6.4,
-          "definitionConfirmed": false,
-          "note": [
-            "HELD AS UNCONFIRMED. Their card draws what looks like the same construction \u2014 a V at",
-            "the chin subtended by the two jaw corners \u2014 but 114.1 against 87.9 is a 30% gap, far",
-            "larger than any other pairing here, and a difference that size is more often two",
-            "definitions than one disagreement. Their ideal band is 86.5-92.5, which our value could",
-            "not reach under any placement, so if the definitions DO match this is either a real",
-            "measurement fault of ours or an ideal in the wrong place. Worth resolving directly",
-            "rather than averaging into a bias estimate: excluded from the audit until then."
-          ]
-        },
-        {
-          "metric": "intercanthalEyeWidth",
-          "unit": "x",
-          "ours": 1.17,
-          "theirs": 0.98,
-          "theirScore": 10.0,
-          "ourScore": 6.4,
-          "definitionConfirmed": false,
-          "note": "their One Eye Apart Test, described as eye spacing relative to palpebral width, which is this metric \u2014 but a 19% gap wants confirming before it counts as bias"
-        },
-        {
-          "metric": "canthalTilt",
-          "unit": "deg",
-          "ours": 3.9,
-          "theirs": 3.3,
-          "theirScore": 6.4,
-          "ourScore": 6.5,
-          "note": "their Lateral Canthal Tilt"
-        },
-        {
-          "metric": "eyeSeparationRatio",
-          "unit": "",
-          "ours": 0.477,
-          "theirs": 0.45,
-          "theirScore": 9.3,
-          "ourScore": 3.4,
-          "note": "their Eye Separation Ratio, displayed as 45.0%, converted to a ratio"
-        },
-        {
-          "metric": "lipRatio",
-          "unit": "x",
-          "ours": 1.26,
-          "theirs": 1.15,
-          "theirScore": 7.1,
-          "ourScore": 6.0,
-          "note": "their Lower Lip to Upper Lip Ratio; same orientation as ours"
-        },
-        {
-          "metric": "eyeAspectRatio",
-          "unit": "",
-          "ours": 0.37,
-          "theirs": 0.395,
-          "theirScore": 5.6,
-          "ourScore": 3.1,
-          "note": "their Eye Aspect Ratio is width-over-height (2.53x); inverted to our height-over-width. Our own 0.37 is displayed to two places, so this pairing carries about +/-1.3% of rounding on its own"
-        },
-        {
-          "metric": "noseMouthRatio",
-          "unit": "x",
-          "ours": 0.75,
-          "theirs": 0.725,
-          "theirScore": 9.3,
-          "ourScore": 6.2,
-          "note": "their Mouth width to nose width (1.38x) inverted to our nose-over-mouth"
-        },
-        {
-          "metric": "philtrumChinRatio",
-          "unit": "x",
-          "ours": 3.08,
-          "theirs": 2.46,
-          "theirScore": 10.0,
-          "ourScore": 5.1,
-          "definitionConfirmed": false,
-          "note": "their Chin to philtrum ratio. 25% apart, and their ideal band 2.15-2.45 sits below our value entirely. Same order of magnitude as the other held-out pairs, so held on the same rule rather than counted"
-        },
-        {
-          "metric": "browTilt",
-          "unit": "deg",
-          "ours": -9.0,
-          "theirs": 3.2,
-          "theirScore": 6.8,
-          "ourScore": 3.2,
-          "definitionConfirmed": false,
-          "note": "their Eyebrow Tilt. OPPOSITE SIGN, which is a convention difference rather than a disagreement about the face: theirs runs medial-to-peak and reports an upward slope positive. Cannot be compared until ours is expressed the same way"
-        },
-        {
-          "metric": "nasofrontalAngle",
-          "unit": "deg",
-          "ours": 134.4,
-          "theirs": 134.7,
-          "theirScore": 7.45,
-          "ourScore": 5.2,
-          "view": "side",
-          "note": "their Nasofrontal Angle, read from an opened card. 0.3 degrees apart \u2014 and note the SCORES are 5.2 against 7.45 on a measurement both products agree about"
-        },
-        {
-          "metric": "totalFacialConvexity",
-          "unit": "deg",
-          "ours": 139.9,
-          "theirs": 138.6,
-          "theirScore": 9.7,
-          "ourScore": 7.7,
-          "view": "side",
-          "note": "their Total Facial Convexity, opened card. 1.3 degrees apart \u2014 and again the scores are 7.7 against 9.70 on a measurement both products agree about"
-        },
-        {
-          "metric": "gonialAngle",
-          "unit": "deg",
-          "ours": 120.1,
-          "theirs": 120.2,
-          "theirScore": 10.0,
-          "ourScore": 6.8,
-          "view": "side",
-          "note": "their Gonial Angle. ONE TENTH OF A DEGREE apart, and 3.2 points apart on what it is worth"
-        },
-        {
-          "metric": "nasolabialAngle",
-          "unit": "deg",
-          "ours": 114.0,
-          "theirs": 112.0,
-          "theirScore": 10.0,
-          "ourScore": 2.4,
-          "view": "side",
-          "note": "their Nasolabial Angle. Two degrees apart and SEVEN AND A HALF POINTS apart on the score \u2014 their ideal band is 97-114, which contains our value outright"
-        },
-        {
-          "metric": "ramusMandible",
-          "unit": "x",
-          "ours": 0.69,
-          "theirs": 0.66,
-          "theirScore": 10.0,
-          "ourScore": 2.1,
-          "view": "side",
-          "note": "their Ramus to Mandible Ratio. Ours is stored the other way up (1.45 as ramus-over-mandible); inverted to their orientation it is 0.690 against 0.66"
-        }
-      ],
-      "theirSideCards": {
-        "$note": [
-          "CORRECTION. An earlier read of this product concluded their Harmony cards were all",
-          "frontal and that there was nothing to pair our side metrics against. That was wrong:",
-          "there is a full 'Your Side Ratios' tab with about 33 rows, and it maps onto our side",
-          "metrics more directly than the front cards map onto our front ones.",
-          "",
-          "Values below marked confirmed:true were read from an opened card. The rest were read",
-          "from the chips in the list view at small size and need an opened card before they are",
-          "used for anything."
-        ],
-        "confirmed": [
-          {
-            "card": "Nasofrontal Angle",
-            "value": 134.7,
-            "unit": "deg",
-            "score": 7.45,
-            "confirmed": true
-          },
-          {
-            "card": "Upper Lip S-Line Position",
-            "value": 3.51,
-            "unit": "mm",
-            "score": 3.78,
-            "confirmed": true
-          },
-          {
-            "card": "Lower Lip S-Line Position",
-            "value": 2.29,
-            "unit": "mm",
-            "score": 7.18,
-            "confirmed": true
-          },
-          {
-            "card": "Nasal W to H ratio",
-            "value": 0.97,
-            "unit": "x",
-            "score": 6.08,
-            "confirmed": true
-          },
-          {
-            "card": "Anterior Facial Depth",
-            "value": 57.9,
-            "unit": "deg",
-            "score": 7.5
-          },
-          {
-            "card": "Submental Cervical Angle",
-            "value": 114.0,
-            "unit": "deg",
-            "score": 7.61
-          },
-          {
-            "card": "Nose Tip Rotation Angle",
-            "value": 26.6,
-            "unit": "deg",
-            "score": 7.99
-          },
-          {
-            "card": "Upper Forehead Slope",
-            "value": 4.1,
-            "unit": "deg",
-            "score": 8.47
-          },
-          {
-            "card": "Nasal Projection",
-            "value": 0.72,
-            "unit": "x",
-            "score": 8.5
-          },
-          {
-            "card": "Lower Lip E-Line Position",
-            "value": 4.97,
-            "unit": "mm",
-            "score": 8.85
-          },
-          {
-            "card": "Z Angle",
-            "value": 84.2,
-            "unit": "deg",
-            "score": 8.95
-          },
-          {
-            "card": "Nasal Tip Angle",
-            "value": 125.5,
-            "unit": "deg",
-            "score": 9.18
-          },
-          {
-            "card": "Mentolabial Angle",
-            "value": 133.5,
-            "unit": "deg",
-            "score": 9.34
-          },
-          {
-            "card": "Facial Depth to Height Ratio",
-            "value": 1.27,
-            "unit": "x",
-            "score": 9.55
-          },
-          {
-            "card": "Frankfort-tip Angle",
-            "value": 39.8,
-            "unit": "deg",
-            "score": 9.58
-          },
-          {
-            "card": "Total Facial Convexity",
-            "value": 138.6,
-            "unit": "deg",
-            "score": 9.7
-          },
-          {
-            "card": "Orbital Vector",
-            "value": 0.29,
-            "unit": "mm",
-            "score": 9.85
-          },
-          {
-            "card": "Facial Convexity (Nasion)",
-            "value": 166.5,
-            "unit": "deg",
-            "score": 9.91
-          },
-          {
-            "card": "Browridge Inclination Angle",
-            "value": 16.9,
-            "unit": "deg",
-            "score": 10.0
-          },
-          {
-            "card": "Gonial Angle",
-            "value": 120.2,
-            "unit": "deg",
-            "ideal": [
-              115.0,
-              121.0
-            ],
-            "range": [
-              92.3,
-              143.7
-            ],
-            "score": 10.0
-          },
-          {
-            "card": "Nasolabial Angle",
-            "value": 112.0,
-            "unit": "deg",
-            "ideal": [
-              97.0,
-              114.0
-            ],
-            "range": [
-              60.0,
-              151.0
-            ],
-            "score": 10.0
-          },
-          {
-            "card": "Ramus to Mandible Ratio",
-            "value": 0.66,
-            "unit": "x",
-            "ideal": [
-              0.62,
-              0.75
-            ],
-            "range": [
-              -0.2,
-              1.87
-            ],
-            "score": 10.0
-          },
-          {
-            "card": "Mandibular Plane Angle",
-            "value": 20.0,
-            "unit": "deg",
-            "ideal": [
-              15.0,
-              22.0
-            ],
-            "range": [
-              -5.7,
-              42.7
-            ],
-            "score": 10.0
-          }
-        ],
-        "chipReadOnly": [
-          "Gonial Angle",
-          "Nasolabial Angle",
-          "Total Facial Convexity",
-          "Facial Convexity (Glabella)",
-          "Facial Convexity (Nasion)",
-          "Ramus to Mandible Ratio",
-          "Mandibular Plane Angle",
-          "Submental Cervical Angle",
-          "Nasal Projection",
-          "Upper Lip E-Line Position",
-          "Lower Lip E-Line Position",
-          "Upper Forehead Slope"
-        ],
-        "wantedNext": [
-          "Gonial Angle, Nasolabial Angle, Ramus to Mandible Ratio, Mandibular Plane Angle,",
-          "Submental Cervical Angle, Nasal Projection, both E-Line positions, Total Facial",
-          "Convexity, Facial Convexity (Glabella), Upper Forehead Slope. Every one of those has a",
-          "direct counterpart in computeSideMetrics."
-        ],
-        "$finding": [
-          "SETTLED, ACROSS FIVE SIDE METRICS: WE MEASURE THE SAME FACE AND SCORE IT DIFFERENTLY.",
-          "",
-          "  metric                ours    theirs   apart   our score  their score",
-          "  gonialAngle           120.1   120.2    0.08%   6.8        10.0",
-          "  nasofrontalAngle      134.4   134.7    0.22%   5.2        7.45",
-          "  totalFacialConvexity  139.9   138.6    0.94%   7.7        9.70",
-          "  nasolabialAngle       114.0   112.0    1.79%   2.4        10.0",
-          "  ramusMandible         0.690   0.66     4.55%   2.1        10.0",
-          "  ------------------------------------------------------------------",
-          "  mean                                   1.52%              +4.6 points",
-          "",
-          "Mean measurement disagreement 1.5 percent. Mean score disagreement 4.6 points out of ten.",
-          "A gonial angle one tenth of a degree apart scores 6.8 against 10.0.",
-          "",
-          "Nasolabial is the clearest single case in either product. We measure 114.0 and score it",
-          "2.4 out of 10. Their ideal band is 97.0 to 114.0 \u2014 our measured value sits INSIDE their",
-          "ideal band, at its edge, and we score it in the bottom quarter. Same for ramusMandible:",
-          "our 0.690 inverted is inside their 0.62-0.75 band and we give it 2.1.",
-          "",
-          "OUR SIDE LANDMARKS ARE NOT THE PROBLEM. Our side IDEALS are. The 8.23 against our 6.8 is",
-          "where our side norms sit, not how badly we place points.",
-          "",
-          "This does not clear the side of everything. #54's repeatability problem is a separate",
-          "complaint and still real \u2014 a nasolabial that swings 21.9 degrees between two photographs",
-          "of one person is unreliable regardless of where its ideal sits. But a well-placed ideal on",
-          "a noisy measurement beats a misplaced ideal on the same noisy measurement, and the ideals",
-          "are the cheaper half.",
-          "",
-          "WHAT MUST NOT HAPPEN NEXT: adopting their bands. Their 97-114 nasolabial band is their",
-          "number. Ours has to be re-derived from our own reference set. What this table licenses is",
-          "knowing WHICH side ideals to re-derive first, in this order: nasolabialAngle,",
-          "ramusMandible, gonialAngle."
-        ]
-      }
+     "card": "Top Third",
+     "value": 26.1,
+     "unit": "%",
+     "ideal": [
+      30,
+      32
+     ],
+     "range": [
+      19.8,
+      42.2
+     ],
+     "score": 4.3
     },
     {
-      "name": "Henry Cavill",
-      "sex": "male",
-      "capturedOn": "2026-08-20",
-      "theirOverall": 8.3,
-      "theirGeometryOnly": 6.54,
-      "ourOverall": 5.3,
-      "rows": [
-        {
-          "metric": "canthalTilt",
-          "unit": "\u00b0",
-          "ours": 6.0,
-          "theirs": 6.7,
-          "theirScore": 10.0,
-          "ourScore": 7.3
-        },
-        {
-          "metric": "noseIntercanthal",
-          "unit": "\u00d7",
-          "ours": 1.14,
-          "theirs": 1.14,
-          "theirScore": 10.0,
-          "ourScore": null,
-          "note": "not scored by us"
-        },
-        {
-          "metric": "jawCheekRatio",
-          "unit": "",
-          "ours": 0.991,
-          "theirs": 0.894,
-          "theirScore": 10.0,
-          "ourScore": 4.2,
-          "note": "theirs displayed as 89.4%, converted to a ratio"
-        }
-      ],
-      "theirCards": [
-        {
-          "card": "Top Third",
-          "value": 32.2,
-          "unit": "%",
-          "ideal": [
-            30.0,
-            32.0
-          ],
-          "range": [
-            19.8,
-            42.2
-          ],
-          "score": 9.9
-        },
-        {
-          "card": "Middle Third",
-          "value": 31.5,
-          "unit": "%",
-          "ideal": [
-            31.4,
-            33.6
-          ],
-          "range": [
-            22.2,
-            42.6
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Lower Third",
-          "value": 36.2,
-          "unit": "%",
-          "ideal": [
-            33.9,
-            37.0
-          ],
-          "range": [
-            26.2,
-            44.3
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Lower Third Proportion",
-          "value": 35.4,
-          "unit": "%",
-          "ideal": [
-            31.0,
-            33.5
-          ],
-          "range": [
-            26.2,
-            38.3
-          ],
-          "score": 3.8
-        },
-        {
-          "card": "Total Facial Width to Height Ratio",
-          "value": 1.35,
-          "unit": "x",
-          "ideal": [
-            1.34,
-            1.37
-          ],
-          "range": [
-            1.07,
-            1.64
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Face Width to Height Ratio",
-          "value": 1.86,
-          "unit": "x",
-          "ideal": [
-            1.96,
-            2.0
-          ],
-          "range": [
-            1.55,
-            2.41
-          ],
-          "score": 7.2
-        },
-        {
-          "card": "Bigonial width",
-          "value": 89.4,
-          "unit": "%",
-          "ideal": [
-            87.5,
-            91.5
-          ],
-          "range": [
-            68.6,
-            110.4
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Jaw Frontal Angle",
-          "value": 85.3,
-          "unit": "deg",
-          "ideal": [
-            86.5,
-            92.5
-          ],
-          "range": [
-            54.8,
-            124.2
-          ],
-          "score": 9.8
-        },
-        {
-          "card": "Jaw Slope",
-          "value": 145.0,
-          "unit": "deg",
-          "ideal": [
-            140.0,
-            142.5
-          ],
-          "range": [
-            115.5,
-            167.0
-          ],
-          "score": 8.8
-        },
-        {
-          "card": "Lateral Canthal Tilt",
-          "value": 6.7,
-          "unit": "deg",
-          "ideal": [
-            6.0,
-            7.7
-          ],
-          "range": [
-            -4.3,
-            18.0
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Eye Separation Ratio",
-          "value": 47.0,
-          "unit": "%",
-          "ideal": [
-            45.7,
-            46.8
-          ],
-          "range": [
-            37.4,
-            55.1
-          ],
-          "score": 9.8
-        },
-        {
-          "card": "Eye Aspect Ratio",
-          "value": 2.96,
-          "unit": "x",
-          "ideal": [
-            3.0,
-            3.5
-          ],
-          "range": [
-            1.52,
-            4.98
-          ],
-          "score": 9.9
-        },
-        {
-          "card": "One Eye Apart Test",
-          "value": 1.0,
-          "unit": "x",
-          "ideal": [
-            0.95,
-            1.0
-          ],
-          "range": [
-            0.57,
-            1.38
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Midface Ratio",
-          "value": 0.95,
-          "unit": "x",
-          "ideal": [
-            0.97,
-            1.0
-          ],
-          "range": [
-            0.62,
-            1.35
-          ],
-          "score": 9.7
-        },
-        {
-          "card": "Eyebrow Tilt",
-          "value": 10.3,
-          "unit": "deg",
-          "ideal": [
-            6.5,
-            11.0
-          ],
-          "range": [
-            -14.0,
-            31.5
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Eyebrow Low Setedness",
-          "value": 0.29,
-          "unit": "x",
-          "ideal": [
-            0.0,
-            0.45
-          ],
-          "range": [
-            -2.36,
-            2.81
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Brow Length : Face Width",
-          "value": 0.68,
-          "unit": "",
-          "ideal": [
-            0.69,
-            0.76
-          ],
-          "range": [
-            0.33,
-            1.12
-          ],
-          "score": 9.8
-        },
-        {
-          "card": "Lower Lip to Upper Lip Ratio",
-          "value": 1.33,
-          "unit": "x",
-          "ideal": [
-            1.55,
-            1.85
-          ],
-          "range": [
-            -0.54,
-            3.94
-          ],
-          "score": 9.0
-        },
-        {
-          "card": "Chin to philtrum ratio",
-          "value": 1.88,
-          "unit": "x",
-          "ideal": [
-            2.15,
-            2.45
-          ],
-          "range": [
-            0.78,
-            3.82
-          ],
-          "score": 7.4
-        },
-        {
-          "card": "Mouth width to nose width ratio",
-          "value": 1.33,
-          "unit": "x",
-          "ideal": [
-            1.42,
-            1.5
-          ],
-          "range": [
-            1.08,
-            1.84
-          ],
-          "score": 5.7
-        },
-        {
-          "card": "Interpupillary : Mouth",
-          "value": 0.77,
-          "unit": "x",
-          "ideal": [
-            0.83,
-            0.87
-          ],
-          "range": [
-            0.42,
-            1.28
-          ],
-          "score": 8.5
-        },
-        {
-          "card": "Nose bridge : width",
-          "value": 2.43,
-          "unit": "x",
-          "ideal": [
-            2.06,
-            2.14
-          ],
-          "range": [
-            1.16,
-            3.04
-          ],
-          "score": 4.8
-        },
-        {
-          "card": "Ipsilateral Alar Angle",
-          "value": 86.3,
-          "unit": "deg",
-          "ideal": [
-            86.5,
-            92.5
-          ],
-          "range": [
-            70.2,
-            108.8
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Deviation IAA/JFA",
-          "value": 1.0,
-          "unit": "deg",
-          "ideal": [
-            0.0,
-            2.5
-          ],
-          "range": [
-            -22.2,
-            22.3
-          ],
-          "score": 10.0
-        },
-        {
-          "card": "Neck Width",
-          "value": 88.0,
-          "unit": "%",
-          "ideal": [
-            92.0,
-            98.0
-          ],
-          "range": [
-            66.2,
-            123.8
-          ],
-          "score": 8.6
-        }
-      ],
-      "cardNote": [
-        "These were supplied at the same time as the rest of the Cavill capture and were written",
-        "into docs/BENCHMARK_CAVILL.md as a markdown table. Leaving them there and treating this",
-        "file as if Cavill had only three data points was a filing error, not missing data.",
-        "",
-        "THE BLOCKER IS OUR SIDE, NOT THEIRS. Twenty-five of their Cavill values are here; only",
-        "three of OURS are. A pairing needs both, so what is actually missing is a TrueMax",
-        "diagnostics dump for the Cavill scan \u2014 one paste would turn most of these into rows.",
-        "",
-        "No side ratios for Cavill: their side tab was only discovered during the Bieber capture."
-      ]
+     "card": "Middle Third",
+     "value": 35.9,
+     "unit": "%",
+     "ideal": [
+      31.4,
+      33.4
+     ],
+     "range": [
+      22.2,
+      42.6
+     ],
+     "score": 6.5
+    },
+    {
+     "card": "Lower Third",
+     "value": 38,
+     "unit": "%",
+     "ideal": [
+      33.9,
+      37
+     ],
+     "range": [
+      26.2,
+      44.7
+     ],
+     "score": 8.8
+    },
+    {
+     "card": "Total Facial Width to Height Ratio",
+     "value": 1.4,
+     "unit": "x",
+     "ideal": [
+      1.34,
+      1.37
+     ],
+     "range": [
+      1.07,
+      1.64
+     ],
+     "score": 8.3
+    },
+    {
+     "card": "Midface Ratio",
+     "value": 0.97,
+     "unit": "x",
+     "ideal": [
+      0.97,
+      1
+     ],
+     "range": [
+      0.62,
+      1.35
+     ],
+     "score": 10
+    },
+    {
+     "card": "Bigonial width",
+     "value": 86.5,
+     "unit": "%",
+     "ideal": [
+      87.5,
+      91.5
+     ],
+     "range": [
+      68.6,
+      110.4
+     ],
+     "score": 9.7
+    },
+    {
+     "card": "Face Width to Height Ratio",
+     "value": 1.65,
+     "unit": "x",
+     "ideal": [
+      1.96,
+      2
+     ],
+     "range": [
+      1.55,
+      2.41
+     ],
+     "score": 0.7
+    },
+    {
+     "card": "Jaw Slope",
+     "value": 145.5,
+     "unit": "deg",
+     "ideal": [
+      140,
+      142.5
+     ],
+     "range": [
+      115.5,
+      167
+     ],
+     "score": 8.5
+    },
+    {
+     "card": "One Eye Apart Test",
+     "value": 0.98,
+     "unit": "x",
+     "ideal": [
+      0.95,
+      1
+     ],
+     "range": [
+      0.87,
+      1.38
+     ],
+     "score": 10
+    },
+    {
+     "card": "Jaw Frontal Angle",
+     "value": 87.9,
+     "unit": "deg",
+     "ideal": [
+      86.5,
+      92.5
+     ],
+     "range": [
+      54.8,
+      124.2
+     ],
+     "score": 10
+    },
+    {
+     "card": "Lateral Canthal Tilt",
+     "value": 3.3,
+     "unit": "deg",
+     "ideal": [
+      6,
+      7.7
+     ],
+     "range": [
+      -4.3,
+      18
+     ],
+     "score": 6.4,
+     "perSide": [
+      3.6,
+      3
+     ]
+    },
+    {
+     "card": "Eye Aspect Ratio",
+     "value": 2.53,
+     "unit": "x",
+     "ideal": [
+      3,
+      3.5
+     ],
+     "range": [
+      1.52,
+      4.98
+     ],
+     "score": 5.6,
+     "perSide": [
+      2.46,
+      2.59
+     ]
+    },
+    {
+     "card": "Lower Lip to Upper Lip Ratio",
+     "value": 1.15,
+     "unit": "x",
+     "ideal": [
+      1.55,
+      1.85
+     ],
+     "range": [
+      -0.54,
+      3.94
+     ],
+     "score": 7.1
+    },
+    {
+     "card": "Chin to philtrum ratio",
+     "value": 2.46,
+     "unit": "x",
+     "ideal": [
+      2.15,
+      2.45
+     ],
+     "range": [
+      0.78,
+      3.82
+     ],
+     "score": 10
+    },
+    {
+     "card": "Mouth width to nose width ratio",
+     "value": 1.38,
+     "unit": "x",
+     "ideal": [
+      1.42,
+      1.5
+     ],
+     "range": [
+      1.08,
+      1.84
+     ],
+     "score": 9.3
+    },
+    {
+     "card": "Eyebrow Tilt",
+     "value": 3.2,
+     "unit": "deg",
+     "ideal": [
+      6.5,
+      11
+     ],
+     "range": [
+      -14,
+      31.5
+     ],
+     "score": 6.8,
+     "perSide": [
+      3.5,
+      3
+     ]
+    },
+    {
+     "card": "Eye Separation Ratio",
+     "value": 45,
+     "unit": "%",
+     "ideal": [
+      45.7,
+      46.8
+     ],
+     "range": [
+      37.4,
+      55.1
+     ],
+     "score": 9.3
     }
-  ]
+   ],
+   "cardNote": [
+    "Their ideal bands and axis ranges on these five cards are IDENTICAL to the same cards on",
+    "the Cavill capture — Top Third 30.0-32.0 over 19.8-42.2, Lower Third 33.9-37.0 over",
+    "26.2-44.7, Total Facial W:H 1.34-1.37 over 1.07-1.64, Midface 0.97-1.00 over 0.62-1.35.",
+    "So their bands are per-metric CONSTANTS, not per-person, and a further face adds no",
+    "information about band width at all. Two male faces only; a female capture would say",
+    "whether they vary by sex.",
+    "",
+    "Only one row here is safely pairable against ours. Their Total Facial W:H is described",
+    "on the card as height-to-width, which is our facialIndex — 1.40 against our 1.38. The",
+    "thirds are NOT pairable as they stand: their thirds are shares of trichion-to-menton",
+    "while our lowerFacePct is a share of glabella-to-menton, so 38.0 against our 50.5 is two",
+    "different quantities rather than a disagreement. Their Midface Ratio is interpupillary",
+    "against midface height, which is our midfaceRatio and not our middleLowerBalance — the",
+    "value for it was not in the capture.",
+    "",
+    "Completing this needs the TrueMax diagnostics dump, which names every metric, rather than",
+    "region cards read off a screenshot."
+   ],
+   "rows": [
+    {
+     "metric": "facialIndex",
+     "unit": "",
+     "ours": 1.38,
+     "theirs": 1.4,
+     "theirScore": 8.3,
+     "ourScore": 6.4,
+     "note": "their card titled Total Facial Width to Height Ratio, described on the card as height-to-width"
+    },
+    {
+     "metric": "jawCheekRatio",
+     "unit": "",
+     "ours": 0.95,
+     "theirs": 0.865,
+     "theirScore": 9.7,
+     "ourScore": 6.2,
+     "note": "their Bigonial width, displayed as 86.5%, converted to a ratio"
+    },
+    {
+     "metric": "gonialProxy",
+     "unit": "deg",
+     "ours": 145.3,
+     "theirs": 145.5,
+     "theirScore": 8.5,
+     "ourScore": 6.3,
+     "note": "their Jaw Slope; agreement to 0.2 degrees, the closest pairing recorded so far"
+    },
+    {
+     "metric": "jawFrontalAngle",
+     "unit": "deg",
+     "ours": 114.1,
+     "theirs": 87.9,
+     "theirScore": 10,
+     "ourScore": 6.4,
+     "definitionConfirmed": false,
+     "note": [
+      "HELD AS UNCONFIRMED. Their card draws what looks like the same construction — a V at",
+      "the chin subtended by the two jaw corners — but 114.1 against 87.9 is a 30% gap, far",
+      "larger than any other pairing here, and a difference that size is more often two",
+      "definitions than one disagreement. Their ideal band is 86.5-92.5, which our value could",
+      "not reach under any placement, so if the definitions DO match this is either a real",
+      "measurement fault of ours or an ideal in the wrong place. Worth resolving directly",
+      "rather than averaging into a bias estimate: excluded from the audit until then."
+     ]
+    },
+    {
+     "metric": "intercanthalEyeWidth",
+     "unit": "x",
+     "ours": 1.17,
+     "theirs": 0.98,
+     "theirScore": 10,
+     "ourScore": 6.4,
+     "definitionConfirmed": false,
+     "note": "their One Eye Apart Test, described as eye spacing relative to palpebral width, which is this metric — but a 19% gap wants confirming before it counts as bias"
+    },
+    {
+     "metric": "canthalTilt",
+     "unit": "deg",
+     "ours": 3.9,
+     "theirs": 3.3,
+     "theirScore": 6.4,
+     "ourScore": 6.5,
+     "note": "their Lateral Canthal Tilt"
+    },
+    {
+     "metric": "eyeSeparationRatio",
+     "unit": "",
+     "ours": 0.477,
+     "theirs": 0.45,
+     "theirScore": 9.3,
+     "ourScore": 3.4,
+     "note": "their Eye Separation Ratio, displayed as 45.0%, converted to a ratio"
+    },
+    {
+     "metric": "lipRatio",
+     "unit": "x",
+     "ours": 1.26,
+     "theirs": 1.15,
+     "theirScore": 7.1,
+     "ourScore": 6,
+     "note": "their Lower Lip to Upper Lip Ratio; same orientation as ours"
+    },
+    {
+     "metric": "eyeAspectRatio",
+     "unit": "",
+     "ours": 0.37,
+     "theirs": 0.395,
+     "theirScore": 5.6,
+     "ourScore": 3.1,
+     "note": "their Eye Aspect Ratio is width-over-height (2.53x); inverted to our height-over-width. Our own 0.37 is displayed to two places, so this pairing carries about +/-1.3% of rounding on its own"
+    },
+    {
+     "metric": "noseMouthRatio",
+     "unit": "x",
+     "ours": 0.75,
+     "theirs": 0.725,
+     "theirScore": 9.3,
+     "ourScore": 6.2,
+     "note": "their Mouth width to nose width (1.38x) inverted to our nose-over-mouth"
+    },
+    {
+     "metric": "philtrumChinRatio",
+     "unit": "x",
+     "ours": 3.08,
+     "theirs": 2.46,
+     "theirScore": 10,
+     "ourScore": 5.1,
+     "definitionConfirmed": false,
+     "note": "their Chin to philtrum ratio. 25% apart, and their ideal band 2.15-2.45 sits below our value entirely. Same order of magnitude as the other held-out pairs, so held on the same rule rather than counted"
+    },
+    {
+     "metric": "browTilt",
+     "unit": "deg",
+     "ours": -9,
+     "theirs": 3.2,
+     "theirScore": 6.8,
+     "ourScore": 3.2,
+     "definitionConfirmed": false,
+     "note": "their Eyebrow Tilt. OPPOSITE SIGN, which is a convention difference rather than a disagreement about the face: theirs runs medial-to-peak and reports an upward slope positive. Cannot be compared until ours is expressed the same way"
+    },
+    {
+     "metric": "nasofrontalAngle",
+     "unit": "deg",
+     "ours": 134.4,
+     "theirs": 134.7,
+     "theirScore": 7.45,
+     "ourScore": 5.2,
+     "view": "side",
+     "note": "their Nasofrontal Angle, read from an opened card. 0.3 degrees apart — and note the SCORES are 5.2 against 7.45 on a measurement both products agree about"
+    },
+    {
+     "metric": "totalFacialConvexity",
+     "unit": "deg",
+     "ours": 139.9,
+     "theirs": 138.6,
+     "theirScore": 9.7,
+     "ourScore": 7.7,
+     "view": "side",
+     "note": "their Total Facial Convexity, opened card. 1.3 degrees apart — and again the scores are 7.7 against 9.70 on a measurement both products agree about"
+    },
+    {
+     "metric": "gonialAngle",
+     "unit": "deg",
+     "ours": 120.1,
+     "theirs": 120.2,
+     "theirScore": 10,
+     "ourScore": 6.8,
+     "view": "side",
+     "note": "their Gonial Angle. ONE TENTH OF A DEGREE apart, and 3.2 points apart on what it is worth"
+    },
+    {
+     "metric": "nasolabialAngle",
+     "unit": "deg",
+     "ours": 114,
+     "theirs": 112,
+     "theirScore": 10,
+     "ourScore": 2.4,
+     "view": "side",
+     "note": "their Nasolabial Angle. Two degrees apart and SEVEN AND A HALF POINTS apart on the score — their ideal band is 97-114, which contains our value outright"
+    },
+    {
+     "metric": "ramusMandible",
+     "unit": "x",
+     "ours": 0.69,
+     "theirs": 0.66,
+     "theirScore": 10,
+     "ourScore": 2.1,
+     "view": "side",
+     "note": "their Ramus to Mandible Ratio. Ours is stored the other way up (1.45 as ramus-over-mandible); inverted to their orientation it is 0.690 against 0.66"
+    }
+   ],
+   "theirSideCards": {
+    "$note": [
+     "CORRECTION. An earlier read of this product concluded their Harmony cards were all",
+     "frontal and that there was nothing to pair our side metrics against. That was wrong:",
+     "there is a full 'Your Side Ratios' tab with about 33 rows, and it maps onto our side",
+     "metrics more directly than the front cards map onto our front ones.",
+     "",
+     "Values below marked confirmed:true were read from an opened card. The rest were read",
+     "from the chips in the list view at small size and need an opened card before they are",
+     "used for anything."
+    ],
+    "confirmed": [
+     {
+      "card": "Nasofrontal Angle",
+      "value": 134.7,
+      "unit": "deg",
+      "score": 7.45,
+      "confirmed": true
+     },
+     {
+      "card": "Upper Lip S-Line Position",
+      "value": 3.51,
+      "unit": "mm",
+      "score": 3.78,
+      "confirmed": true
+     },
+     {
+      "card": "Lower Lip S-Line Position",
+      "value": 2.29,
+      "unit": "mm",
+      "score": 7.18,
+      "confirmed": true
+     },
+     {
+      "card": "Nasal W to H ratio",
+      "value": 0.97,
+      "unit": "x",
+      "score": 6.08,
+      "confirmed": true
+     },
+     {
+      "card": "Anterior Facial Depth",
+      "value": 57.9,
+      "unit": "deg",
+      "score": 7.5
+     },
+     {
+      "card": "Submental Cervical Angle",
+      "value": 114,
+      "unit": "deg",
+      "score": 7.61
+     },
+     {
+      "card": "Nose Tip Rotation Angle",
+      "value": 26.6,
+      "unit": "deg",
+      "score": 7.99
+     },
+     {
+      "card": "Upper Forehead Slope",
+      "value": 4.1,
+      "unit": "deg",
+      "score": 8.47
+     },
+     {
+      "card": "Nasal Projection",
+      "value": 0.72,
+      "unit": "x",
+      "score": 8.5
+     },
+     {
+      "card": "Lower Lip E-Line Position",
+      "value": 4.97,
+      "unit": "mm",
+      "score": 8.85
+     },
+     {
+      "card": "Z Angle",
+      "value": 84.2,
+      "unit": "deg",
+      "score": 8.95
+     },
+     {
+      "card": "Nasal Tip Angle",
+      "value": 125.5,
+      "unit": "deg",
+      "score": 9.18
+     },
+     {
+      "card": "Mentolabial Angle",
+      "value": 133.5,
+      "unit": "deg",
+      "score": 9.34
+     },
+     {
+      "card": "Facial Depth to Height Ratio",
+      "value": 1.27,
+      "unit": "x",
+      "score": 9.55
+     },
+     {
+      "card": "Frankfort-tip Angle",
+      "value": 39.8,
+      "unit": "deg",
+      "score": 9.58
+     },
+     {
+      "card": "Total Facial Convexity",
+      "value": 138.6,
+      "unit": "deg",
+      "score": 9.7
+     },
+     {
+      "card": "Orbital Vector",
+      "value": 0.29,
+      "unit": "mm",
+      "score": 9.85
+     },
+     {
+      "card": "Facial Convexity (Nasion)",
+      "value": 166.5,
+      "unit": "deg",
+      "score": 9.91
+     },
+     {
+      "card": "Browridge Inclination Angle",
+      "value": 16.9,
+      "unit": "deg",
+      "score": 10
+     },
+     {
+      "card": "Gonial Angle",
+      "value": 120.2,
+      "unit": "deg",
+      "ideal": [
+       115,
+       121
+      ],
+      "range": [
+       92.3,
+       143.7
+      ],
+      "score": 10
+     },
+     {
+      "card": "Nasolabial Angle",
+      "value": 112,
+      "unit": "deg",
+      "ideal": [
+       97,
+       114
+      ],
+      "range": [
+       60,
+       151
+      ],
+      "score": 10
+     },
+     {
+      "card": "Ramus to Mandible Ratio",
+      "value": 0.66,
+      "unit": "x",
+      "ideal": [
+       0.62,
+       0.75
+      ],
+      "range": [
+       -0.2,
+       1.87
+      ],
+      "score": 10
+     },
+     {
+      "card": "Mandibular Plane Angle",
+      "value": 20,
+      "unit": "deg",
+      "ideal": [
+       15,
+       22
+      ],
+      "range": [
+       -5.7,
+       42.7
+      ],
+      "score": 10
+     }
+    ],
+    "chipReadOnly": [
+     "Gonial Angle",
+     "Nasolabial Angle",
+     "Total Facial Convexity",
+     "Facial Convexity (Glabella)",
+     "Facial Convexity (Nasion)",
+     "Ramus to Mandible Ratio",
+     "Mandibular Plane Angle",
+     "Submental Cervical Angle",
+     "Nasal Projection",
+     "Upper Lip E-Line Position",
+     "Lower Lip E-Line Position",
+     "Upper Forehead Slope"
+    ],
+    "wantedNext": [
+     "Gonial Angle, Nasolabial Angle, Ramus to Mandible Ratio, Mandibular Plane Angle,",
+     "Submental Cervical Angle, Nasal Projection, both E-Line positions, Total Facial",
+     "Convexity, Facial Convexity (Glabella), Upper Forehead Slope. Every one of those has a",
+     "direct counterpart in computeSideMetrics."
+    ],
+    "$finding": [
+     "SETTLED, ACROSS FIVE SIDE METRICS: WE MEASURE THE SAME FACE AND SCORE IT DIFFERENTLY.",
+     "",
+     "  metric                ours    theirs   apart   our score  their score",
+     "  gonialAngle           120.1   120.2    0.08%   6.8        10.0",
+     "  nasofrontalAngle      134.4   134.7    0.22%   5.2        7.45",
+     "  totalFacialConvexity  139.9   138.6    0.94%   7.7        9.70",
+     "  nasolabialAngle       114.0   112.0    1.79%   2.4        10.0",
+     "  ramusMandible         0.690   0.66     4.55%   2.1        10.0",
+     "  ------------------------------------------------------------------",
+     "  mean                                   1.52%              +4.6 points",
+     "",
+     "Mean measurement disagreement 1.5 percent. Mean score disagreement 4.6 points out of ten.",
+     "A gonial angle one tenth of a degree apart scores 6.8 against 10.0.",
+     "",
+     "Nasolabial is the clearest single case in either product. We measure 114.0 and score it",
+     "2.4 out of 10. Their ideal band is 97.0 to 114.0 — our measured value sits INSIDE their",
+     "ideal band, at its edge, and we score it in the bottom quarter. Same for ramusMandible:",
+     "our 0.690 inverted is inside their 0.62-0.75 band and we give it 2.1.",
+     "",
+     "OUR SIDE LANDMARKS ARE NOT THE PROBLEM. Our side IDEALS are. The 8.23 against our 6.8 is",
+     "where our side norms sit, not how badly we place points.",
+     "",
+     "This does not clear the side of everything. #54's repeatability problem is a separate",
+     "complaint and still real — a nasolabial that swings 21.9 degrees between two photographs",
+     "of one person is unreliable regardless of where its ideal sits. But a well-placed ideal on",
+     "a noisy measurement beats a misplaced ideal on the same noisy measurement, and the ideals",
+     "are the cheaper half.",
+     "",
+     "WHAT MUST NOT HAPPEN NEXT: adopting their bands. Their 97-114 nasolabial band is their",
+     "number. Ours has to be re-derived from our own reference set. What this table licenses is",
+     "knowing WHICH side ideals to re-derive first, in this order: nasolabialAngle,",
+     "ramusMandible, gonialAngle."
+    ]
+   }
+  },
+  {
+   "name": "Henry Cavill",
+   "sex": "male",
+   "capturedOn": "2026-08-20",
+   "theirOverall": 8.3,
+   "theirGeometryOnly": 6.54,
+   "ourOverall": 5.3,
+   "rows": [
+    {
+     "metric": "canthalTilt",
+     "unit": "°",
+     "ours": 6,
+     "theirs": 6.7,
+     "theirScore": 10,
+     "ourScore": 7.3
+    },
+    {
+     "metric": "noseIntercanthal",
+     "unit": "×",
+     "ours": 1.14,
+     "theirs": 1.14,
+     "theirScore": 10,
+     "ourScore": null,
+     "note": "not scored by us"
+    },
+    {
+     "metric": "jawCheekRatio",
+     "unit": "",
+     "ours": 0.991,
+     "theirs": 0.894,
+     "theirScore": 10,
+     "ourScore": 4.2,
+     "note": "theirs displayed as 89.4%, converted to a ratio"
+    }
+   ],
+   "theirCards": [
+    {
+     "card": "Top Third",
+     "value": 32.2,
+     "unit": "%",
+     "ideal": [
+      30,
+      32
+     ],
+     "range": [
+      19.8,
+      42.2
+     ],
+     "score": 9.9
+    },
+    {
+     "card": "Middle Third",
+     "value": 31.5,
+     "unit": "%",
+     "ideal": [
+      31.4,
+      33.6
+     ],
+     "range": [
+      22.2,
+      42.6
+     ],
+     "score": 10
+    },
+    {
+     "card": "Lower Third",
+     "value": 36.2,
+     "unit": "%",
+     "ideal": [
+      33.9,
+      37
+     ],
+     "range": [
+      26.2,
+      44.3
+     ],
+     "score": 10
+    },
+    {
+     "card": "Lower Third Proportion",
+     "value": 35.4,
+     "unit": "%",
+     "ideal": [
+      31,
+      33.5
+     ],
+     "range": [
+      26.2,
+      38.3
+     ],
+     "score": 3.8
+    },
+    {
+     "card": "Total Facial Width to Height Ratio",
+     "value": 1.35,
+     "unit": "x",
+     "ideal": [
+      1.34,
+      1.37
+     ],
+     "range": [
+      1.07,
+      1.64
+     ],
+     "score": 10
+    },
+    {
+     "card": "Face Width to Height Ratio",
+     "value": 1.86,
+     "unit": "x",
+     "ideal": [
+      1.96,
+      2
+     ],
+     "range": [
+      1.55,
+      2.41
+     ],
+     "score": 7.2
+    },
+    {
+     "card": "Bigonial width",
+     "value": 89.4,
+     "unit": "%",
+     "ideal": [
+      87.5,
+      91.5
+     ],
+     "range": [
+      68.6,
+      110.4
+     ],
+     "score": 10
+    },
+    {
+     "card": "Jaw Frontal Angle",
+     "value": 85.3,
+     "unit": "deg",
+     "ideal": [
+      86.5,
+      92.5
+     ],
+     "range": [
+      54.8,
+      124.2
+     ],
+     "score": 9.8
+    },
+    {
+     "card": "Jaw Slope",
+     "value": 145,
+     "unit": "deg",
+     "ideal": [
+      140,
+      142.5
+     ],
+     "range": [
+      115.5,
+      167
+     ],
+     "score": 8.8
+    },
+    {
+     "card": "Lateral Canthal Tilt",
+     "value": 6.7,
+     "unit": "deg",
+     "ideal": [
+      6,
+      7.7
+     ],
+     "range": [
+      -4.3,
+      18
+     ],
+     "score": 10
+    },
+    {
+     "card": "Eye Separation Ratio",
+     "value": 47,
+     "unit": "%",
+     "ideal": [
+      45.7,
+      46.8
+     ],
+     "range": [
+      37.4,
+      55.1
+     ],
+     "score": 9.8
+    },
+    {
+     "card": "Eye Aspect Ratio",
+     "value": 2.96,
+     "unit": "x",
+     "ideal": [
+      3,
+      3.5
+     ],
+     "range": [
+      1.52,
+      4.98
+     ],
+     "score": 9.9
+    },
+    {
+     "card": "One Eye Apart Test",
+     "value": 1,
+     "unit": "x",
+     "ideal": [
+      0.95,
+      1
+     ],
+     "range": [
+      0.57,
+      1.38
+     ],
+     "score": 10
+    },
+    {
+     "card": "Midface Ratio",
+     "value": 0.95,
+     "unit": "x",
+     "ideal": [
+      0.97,
+      1
+     ],
+     "range": [
+      0.62,
+      1.35
+     ],
+     "score": 9.7
+    },
+    {
+     "card": "Eyebrow Tilt",
+     "value": 10.3,
+     "unit": "deg",
+     "ideal": [
+      6.5,
+      11
+     ],
+     "range": [
+      -14,
+      31.5
+     ],
+     "score": 10
+    },
+    {
+     "card": "Eyebrow Low Setedness",
+     "value": 0.29,
+     "unit": "x",
+     "ideal": [
+      0,
+      0.45
+     ],
+     "range": [
+      -2.36,
+      2.81
+     ],
+     "score": 10
+    },
+    {
+     "card": "Brow Length : Face Width",
+     "value": 0.68,
+     "unit": "",
+     "ideal": [
+      0.69,
+      0.76
+     ],
+     "range": [
+      0.33,
+      1.12
+     ],
+     "score": 9.8
+    },
+    {
+     "card": "Lower Lip to Upper Lip Ratio",
+     "value": 1.33,
+     "unit": "x",
+     "ideal": [
+      1.55,
+      1.85
+     ],
+     "range": [
+      -0.54,
+      3.94
+     ],
+     "score": 9
+    },
+    {
+     "card": "Chin to philtrum ratio",
+     "value": 1.88,
+     "unit": "x",
+     "ideal": [
+      2.15,
+      2.45
+     ],
+     "range": [
+      0.78,
+      3.82
+     ],
+     "score": 7.4
+    },
+    {
+     "card": "Mouth width to nose width ratio",
+     "value": 1.33,
+     "unit": "x",
+     "ideal": [
+      1.42,
+      1.5
+     ],
+     "range": [
+      1.08,
+      1.84
+     ],
+     "score": 5.7
+    },
+    {
+     "card": "Interpupillary : Mouth",
+     "value": 0.77,
+     "unit": "x",
+     "ideal": [
+      0.83,
+      0.87
+     ],
+     "range": [
+      0.42,
+      1.28
+     ],
+     "score": 8.5
+    },
+    {
+     "card": "Nose bridge : width",
+     "value": 2.43,
+     "unit": "x",
+     "ideal": [
+      2.06,
+      2.14
+     ],
+     "range": [
+      1.16,
+      3.04
+     ],
+     "score": 4.8
+    },
+    {
+     "card": "Ipsilateral Alar Angle",
+     "value": 86.3,
+     "unit": "deg",
+     "ideal": [
+      86.5,
+      92.5
+     ],
+     "range": [
+      70.2,
+      108.8
+     ],
+     "score": 10
+    },
+    {
+     "card": "Deviation IAA/JFA",
+     "value": 1,
+     "unit": "deg",
+     "ideal": [
+      0,
+      2.5
+     ],
+     "range": [
+      -22.2,
+      22.3
+     ],
+     "score": 10
+    },
+    {
+     "card": "Neck Width",
+     "value": 88,
+     "unit": "%",
+     "ideal": [
+      92,
+      98
+     ],
+     "range": [
+      66.2,
+      123.8
+     ],
+     "score": 8.6
+    }
+   ],
+   "cardNote": [
+    "These were supplied at the same time as the rest of the Cavill capture and were written",
+    "into docs/BENCHMARK_CAVILL.md as a markdown table. Leaving them there and treating this",
+    "file as if Cavill had only three data points was a filing error, not missing data.",
+    "",
+    "THE BLOCKER IS OUR SIDE, NOT THEIRS. Twenty-five of their Cavill values are here; only",
+    "three of OURS are. A pairing needs both, so what is actually missing is a TrueMax",
+    "diagnostics dump for the Cavill scan — one paste would turn most of these into rows.",
+    "",
+    "No side ratios for Cavill: their side tab was only discovered during the Bieber capture."
+   ]
+  },
+  {
+   "name": "Henry Cavill (second capture)",
+   "sex": "male",
+   "capturedOn": "2026-08-20",
+   "theirOverall": 7.78,
+   "theirHarmony": 6.68,
+   "ourOverall": null,
+   "ourFront": 4.5,
+   "note": [
+    "A DELIBERATE RETEST. Same person, different photograph, taken to find out how much of",
+    "the front/side disagreement is the face and how much is the capture.",
+    "",
+    "It answered a different question than intended. THEIR two captures of this one face",
+    "disagree by 1.35 points of Harmony — 8.03 on the first, 6.68 on this one — and by 0.52",
+    "on the headline score. Whatever else is true, their scanning is not more repeatable",
+    "than ours; it is repeatable ENOUGH that the difference was never visible from one",
+    "capture, which is the only reason this was worth doing twice.",
+    "",
+    "OUR SIDE LANDMARKS ARE WRONG ON THIS CAPTURE, and provably so rather than arguably:",
+    "nasofrontalAngle came out 83.6 against a plausibility band of 95-170, and ramusMandible",
+    "1.19 against 0.35-0.95. Both are outside the range a human face can occupy, so they are",
+    "misplaced points and not an unusual profile. facialConvexity sits at -4.1sd,",
+    "nasolabialAngle at +5.2sd, upperLipELine at +3.3sd. Every SIDE row below is therefore",
+    "held out; the front rows stand.",
+    "",
+    "This is the case for showing the face in the Calibrate set. Two impossible values were",
+    "sitting in an export that looked entirely ordinary, and nothing in the UI said so."
+   ],
+   "rows": [
+    {
+     "metric": "canthalTilt",
+     "unit": "deg",
+     "ours": 3.59,
+     "theirs": 5,
+     "theirScore": 9.1,
+     "ourScore": null,
+     "note": "second time ours reads low: 6.0 vs 6.7 on capture one, 3.6 vs 5.0 here"
+    },
+    {
+     "metric": "eyeSeparationRatio",
+     "unit": "%",
+     "ours": 48.32,
+     "theirs": 45.9,
+     "theirScore": 10,
+     "ourScore": null,
+     "note": "theirs displayed as a percentage of bizygomatic width; ours converted to match"
+    },
+    {
+     "metric": "jawCheekRatio",
+     "unit": "%",
+     "ours": 100.97,
+     "theirs": 92.2,
+     "theirScore": 9.8,
+     "ourScore": null,
+     "note": "their Bigonial width. Ours read high both captures: +1.6pp on the first, +8.8pp here"
+    },
+    {
+     "metric": "gonialProxy",
+     "unit": "deg",
+     "ours": 140.96,
+     "theirs": 136.9,
+     "theirScore": 8.4,
+     "ourScore": null,
+     "note": "their Jaw Slope. Our measured 141.0 sits inside their ideal band of 140.0-142.5"
+    },
+    {
+     "metric": "facialIndex",
+     "unit": "x",
+     "ours": 1.347,
+     "theirs": 1.36,
+     "theirScore": 10,
+     "ourScore": null,
+     "note": "their Total Facial Width to Height Ratio"
+    },
+    {
+     "metric": "fwhr",
+     "unit": "x",
+     "ours": 1.97,
+     "theirs": 1.89,
+     "theirScore": 8.6,
+     "ourScore": null,
+     "note": "their Face Width to Height Ratio; band 1.96-2.00 matches the published fWHR scale"
+    },
+    {
+     "metric": "jawFrontalAngle",
+     "unit": "deg",
+     "ours": 123.15,
+     "theirs": 98,
+     "theirScore": 8.3,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "25deg apart. Their ideal band is 86.5-92.5 and ours cannot reach it, which is a different construction rather than a bias"
+    },
+    {
+     "metric": "topThirdEst",
+     "unit": "%",
+     "ours": 20.12,
+     "theirs": 34,
+     "theirScore": 8.4,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "ours is an ESTIMATE - the mesh carries no trichion, so the top third is inferred"
+    },
+    {
+     "metric": "lowerFacePct",
+     "unit": "%",
+     "ours": 53.97,
+     "theirs": 35.5,
+     "theirScore": 10,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "ours is lower face as a share of a different vertical span; not their Lower Third"
+    }
+   ],
+   "theirCards": [
+    {
+     "card": "Top Third",
+     "value": 34,
+     "unit": "%",
+     "ideal": [
+      30,
+      32
+     ],
+     "range": [
+      19.8,
+      42.2
+     ],
+     "score": 8.4
+    },
+    {
+     "card": "Middle Third",
+     "value": 30.6,
+     "unit": "%",
+     "ideal": [
+      31.4,
+      33.6
+     ],
+     "range": [
+      22.2,
+      42.6
+     ],
+     "score": 9.3
+    },
+    {
+     "card": "Lower Third",
+     "value": 35.5,
+     "unit": "%",
+     "ideal": [
+      33.9,
+      37
+     ],
+     "range": [
+      26.2,
+      44.3
+     ],
+     "score": 10
+    },
+    {
+     "card": "Total Facial Width to Height Ratio",
+     "value": 1.36,
+     "unit": "x",
+     "ideal": [
+      1.34,
+      1.37
+     ],
+     "range": [
+      1.07,
+      1.64
+     ],
+     "score": 10
+    },
+    {
+     "card": "Face Width to Height Ratio",
+     "value": 1.89,
+     "unit": "x",
+     "ideal": [
+      1.96,
+      2
+     ],
+     "range": [
+      1.55,
+      2.41
+     ],
+     "score": 8.6
+    },
+    {
+     "card": "Bigonial width",
+     "value": 92.2,
+     "unit": "%",
+     "ideal": [
+      87.5,
+      91.5
+     ],
+     "range": [
+      68.6,
+      110.4
+     ],
+     "score": 9.8
+    },
+    {
+     "card": "Jaw Frontal Angle",
+     "value": 98,
+     "unit": "deg",
+     "ideal": [
+      86.5,
+      92.5
+     ],
+     "range": [
+      54.8,
+      124.2
+     ],
+     "score": 8.3
+    },
+    {
+     "card": "Jaw Slope",
+     "value": 136.9,
+     "unit": "deg",
+     "ideal": [
+      140,
+      142.5
+     ],
+     "range": [
+      115.5,
+      167
+     ],
+     "score": 8.4
+    },
+    {
+     "card": "Lateral Canthal Tilt",
+     "value": 5,
+     "unit": "deg",
+     "ideal": [
+      6,
+      7.7
+     ],
+     "range": [
+      -4.3,
+      18
+     ],
+     "score": 9.1
+    },
+    {
+     "card": "Eye Separation Ratio",
+     "value": 45.9,
+     "unit": "%",
+     "ideal": [
+      45.7,
+      46.8
+     ],
+     "range": [
+      37.4,
+      55.1
+     ],
+     "score": 10
+    }
+   ],
+   "cardNote": [
+    "THEIR IDEAL AND RANGE BANDS ARE IDENTICAL TO THE FIRST CAPTURE, metric for metric:",
+    "Bigonial 87.5-91.5 in 68.6-110.4, Jaw Frontal Angle 86.5-92.5 in 54.8-124.2, Jaw Slope",
+    "140.0-142.5 in 115.5-167.0, Lateral Canthal Tilt 6.0-7.7 in -4.3-18.0, Eye Separation",
+    "45.7-46.8 in 37.4-55.1. Only the measured value and the score moved.",
+    "",
+    "That is direct evidence on the open question of whether they hold different ideals for",
+    "different people. Across two captures of one face the bands never move, so a band is a",
+    "property of the METRIC and not of the person being measured. It does not by itself rule",
+    "out per-group ideals - one face cannot - but it removes the mechanism by which a band",
+    "could be chosen per capture."
+   ]
+  }
+ ]
 }

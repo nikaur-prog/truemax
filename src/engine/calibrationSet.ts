@@ -29,6 +29,31 @@ import { scopedStorageKey } from "./scanScope.js";
 
 const KEY = "tm.calibration.v1";
 
+/**
+ * Where the number in `rating` came from.
+ *
+ * This exists because it went wrong once, quietly, and could not be spotted
+ * afterwards from the data. A face was scanned while another product's analysis
+ * of the same face was open in the next tab, and that product's score — 7.78,
+ * rounded to 7.8 — was typed into the rating box instead of a gut answer.
+ *
+ * Nothing about the resulting row looks wrong. It is a plausible number next to
+ * a real measurement set, and it would have sat in the corpus indefinitely.
+ *
+ * What it would have done, though, is turn the corpus into a regression onto
+ * that product's scoring formula. Fitting our weights to their outputs is
+ * reverse-engineering their scoring — the same act as reading their source,
+ * carried out with arithmetic instead — and it is out of bounds. One row is
+ * enough to start pulling the fit that way, and forty would settle it.
+ *
+ * So provenance is recorded rather than assumed, and only `self` is exported.
+ */
+export type RatingSource =
+  /** The operator's own judgement of the face, given before seeing any score. */
+  | "self"
+  /** Another product's score, or any number derived from one. Never exported. */
+  | "external";
+
 export interface RatedFace {
   id: string;
   sex: Sex;
@@ -36,6 +61,16 @@ export interface RatedFace {
   rating: number;
   /** What the engine said at capture time. Kept for the disagreement column. */
   scored: number;
+  /**
+   * Where `rating` came from.
+   *
+   * Optional, because rows written before this field existed cannot say. Those
+   * are treated as unknown rather than as `self`: the one row known to be
+   * contaminated predates the field, so defaulting to `self` would bless
+   * exactly the case this was built for. Unknown rows are held out of the
+   * export until somebody confirms them by hand.
+   */
+  ratedBy?: RatingSource;
   /** Optional label. Never exported — it is only there to find a row again. */
   label?: string;
   measurements: Record<string, number>;
@@ -94,6 +129,10 @@ export function measurementsOf(...reports: Report[]): Record<string, number> {
 export function addRatedFace(
   report: Report,
   rating: number,
+  // Required, and deliberately not defaulted. A default would be answered by
+  // whoever wrote the call site rather than by whoever typed the number, which
+  // is the wrong person to ask.
+  ratedBy: RatingSource,
   label?: string,
   // The side scan, when the operator supplied one. Its metrics are merged into
   // the same row: one face, one human rating, everything that could be measured
@@ -111,6 +150,7 @@ export function addRatedFace(
     sex: report.sex,
     rating,
     scored: report.overall,
+    ratedBy,
     ...(label ? { label } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
@@ -124,6 +164,37 @@ export function removeRatedFace(id: string): RatedFace[] {
   return faces;
 }
 
+/**
+ * Marks one row as the operator's own judgement.
+ *
+ * The escape hatch for rows written before provenance was recorded. Those are
+ * real work — a scan and a rating each — and throwing them away to enforce a
+ * field added afterwards would be the wrong trade. But the confirmation has to
+ * be a deliberate per-row act by the person who typed the number, which is why
+ * there is no "confirm all".
+ */
+export function confirmOwnRating(id: string): RatedFace[] {
+  const faces = loadCalibrationSet().map((f) => (f.id === id ? { ...f, ratedBy: "self" as const } : f));
+  save(faces);
+  return faces;
+}
+
+/**
+ * Splits the set into what may be fitted against and what may not.
+ *
+ * `withheld` is not an error state. A row can be there because it carries
+ * another product's score, which is a permanent exclusion, or because it
+ * predates the provenance field, which one tap fixes. Either way it stays in
+ * the set — the measurements are still worth having, and a row that vanished
+ * would look like data loss rather than a deliberate hold.
+ */
+export function splitByProvenance(faces: RatedFace[]): { own: RatedFace[]; withheld: RatedFace[] } {
+  return {
+    own: faces.filter((f) => f.ratedBy === "self"),
+    withheld: faces.filter((f) => f.ratedBy !== "self"),
+  };
+}
+
 export function clearCalibrationSet(): void {
   save([]);
 }
@@ -134,11 +205,18 @@ export function clearCalibrationSet(): void {
  * Labels are dropped. They are there so a row can be recognised while rating,
  * and a corpus checked into a repository should not carry a note about whose
  * face somebody thought a photograph was.
+ *
+ * Rows whose rating is not the operator's own are dropped too, and silently as
+ * far as the JSON goes — the count is reported next to the button instead, so
+ * the exported file is exactly the set of rows that may be fitted against and
+ * nothing has to be remembered at paste time. `ratedBy` itself is not exported:
+ * everything that survives the filter is `self` by construction, so writing the
+ * field into every row would say nothing.
  */
 export function corpusJSON(faces: RatedFace[]): string {
   return `${JSON.stringify(
     {
-      faces: faces.map((f) => ({
+      faces: splitByProvenance(faces).own.map((f) => ({
         id: f.id,
         sex: f.sex,
         rating: f.rating,
@@ -178,6 +256,10 @@ export function sideCount(faces: RatedFace[]): number {
  * thirty-one directions, and nothing in the tooling said so until the numbers
  * came out flat. Counting faces is not enough — a set is only useful to the
  * degree its ratings SPREAD, so that is what this reports.
+ *
+ * Feed it `splitByProvenance(faces).own`. A withheld row contributes nothing to
+ * the fit, so counting it here would report progress towards twenty-five that
+ * the export cannot deliver.
  */
 export interface SetHealth {
   sex: Sex;

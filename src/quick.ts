@@ -28,12 +28,14 @@ import { spokenSeconds } from "./engine/reelScript.js";
 import {
   addRatedFace,
   clearCalibrationSet,
+  confirmOwnRating,
   corpusJSON,
   loadCalibrationSet,
   missingCoverage,
   sideCount,
   removeRatedFace,
   setHealth,
+  splitByProvenance,
 } from "./engine/calibrationSet.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
@@ -755,11 +757,20 @@ function renderRatingStep(r: Report): void {
       <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale —
       a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
       how the men in the current corpus ended up useless.</p>
+      <label class="q-cal-prov">
+        <input type="checkbox" id="q-cal-external" />
+        <span>This number came off another app's analysis, not out of my own head.</span>
+      </label>
+      <p class="q-cal-hint">Worth naming because it is easy to do by accident with a
+      competitor's read of the same face open in the next tab. Fitting our weights to
+      another product's scores is reverse-engineering its formula with arithmetic, so a
+      borrowed number is kept with the face and left out of the corpus export.</p>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
   const num = document.getElementById("q-cal-num") as HTMLInputElement;
   const label = document.getElementById("q-cal-label") as HTMLInputElement;
+  const external = document.getElementById("q-cal-external") as HTMLInputElement;
   const msg = document.getElementById("q-cal-msg")!;
   num.focus();
   const commit = () => {
@@ -772,6 +783,7 @@ function renderRatingStep(r: Report): void {
     addRatedFace(
       r,
       Math.round(rating * 10) / 10,
+      external.checked ? "external" : "self",
       label.value.trim() || undefined,
       pendingSide ?? undefined,
     );
@@ -847,10 +859,14 @@ function renderCalibrationSet(): void {
   resetSexAsk();
   const faces = loadCalibrationSet();
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
-  const health = (["male", "female"] as const).map((sex) => setHealth(faces, sex));
-  const missing = missingCoverage(faces);
-  const sides = sideCount(faces);
-  const missingSide = missingCoverage(faces, "side");
+  // Everything below counts only what may be fitted against. A withheld row is
+  // still a scan worth keeping, but reporting it as progress towards a usable
+  // corpus would overstate what the export can actually deliver.
+  const { own, withheld } = splitByProvenance(faces);
+  const health = (["male", "female"] as const).map((sex) => setHealth(own, sex));
+  const missing = missingCoverage(own);
+  const sides = sideCount(own);
+  const missingSide = missingCoverage(own, "side");
 
   el.calBody.innerHTML = `
     <div class="q-cal-set">
@@ -875,7 +891,7 @@ function renderCalibrationSet(): void {
         sides === 0
           ? `No face carries a side profile yet, so all ${missingSide.length} side
              measurements are still on a prior. Add one from the Side slot.`
-          : `${sides} of ${faces.length} carr${sides === 1 ? "ies" : "y"} a side profile${
+          : `${sides} of ${own.length} carr${sides === 1 ? "ies" : "y"} a side profile${
               missingSide.length
                 ? `, ${missingSide.length} side measurement${
                     missingSide.length === 1 ? "" : "s"
@@ -884,6 +900,15 @@ function renderCalibrationSet(): void {
             }.`
       }</p>
       ${
+        withheld.length
+          ? `<p class="q-cal-missing">${withheld.length} row${withheld.length === 1 ? "" : "s"}
+             held out of the export — the rating is not marked as your own. A row marked
+             <b>borrowed</b> stays out for good; a row marked <b>unknown</b> predates the
+             provenance field and one tap on "mine" clears it, but only do that for a number
+             you remember writing yourself.</p>`
+          : ""
+      }
+      ${
         faces.length
           ? `<div class="q-cal-rows">
               <div class="q-cal-row q-cal-head"><span>FACE</span><span>YOU</span><span>ENGINE</span><span>GAP</span><span></span></div>
@@ -891,12 +916,25 @@ function renderCalibrationSet(): void {
                 .sort((a, b) => Math.abs(b.scored - b.rating) - Math.abs(a.scored - a.rating))
                 .map((f) => {
                   const gap = f.scored - f.rating;
-                  return `<div class="q-cal-row">
-                    <span>${f.label ? escapeHtml(f.label) : f.id}</span>
+                  // Three states, and the middle one is the whole point: a row
+                  // whose provenance nobody recorded is not the same as a row
+                  // known to be the operator's own, and must not read like one.
+                  const flag =
+                    f.ratedBy === "self"
+                      ? ""
+                      : f.ratedBy === "external"
+                        ? ` <em class="q-cal-flag">borrowed</em>`
+                        : ` <em class="q-cal-flag">unknown</em>`;
+                  return `<div class="q-cal-row${f.ratedBy === "self" ? "" : " held"}">
+                    <span>${f.label ? escapeHtml(f.label) : f.id}${flag}</span>
                     <span>${f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
                     <span class="${Math.abs(gap) >= 1.5 ? "bad" : ""}">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</span>
-                    <button type="button" class="linkish" data-drop="${f.id}">remove</button>
+                    <span class="q-cal-acts">${
+                      f.ratedBy === undefined
+                        ? `<button type="button" class="linkish" data-mine="${f.id}">mine</button>`
+                        : ""
+                    }<button type="button" class="linkish" data-drop="${f.id}">remove</button></span>
                   </div>`;
                 })
                 .join("")}
@@ -905,7 +943,9 @@ function renderCalibrationSet(): void {
       }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-add">Add a face</button>
-        <button class="btn gho" id="q-cal-copy"${faces.length ? "" : " disabled"}>Copy corpus JSON</button>
+        <button class="btn gho" id="q-cal-copy"${own.length ? "" : " disabled"}>Copy corpus JSON${
+          withheld.length ? ` (${own.length} of ${faces.length})` : ""
+        }</button>
         <button class="btn gho" id="q-cal-clear"${faces.length ? "" : " disabled"}>Clear the set</button>
       </div>
       <p class="q-cal-hint">Copy pastes straight over src/engine/calibration/corpus.json.
@@ -920,6 +960,9 @@ function renderCalibrationSet(): void {
   };
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-drop]")) {
     button.onclick = () => { removeRatedFace(button.dataset.drop!); renderCalibrationSet(); };
+  }
+  for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-mine]")) {
+    button.onclick = () => { confirmOwnRating(button.dataset.mine!); renderCalibrationSet(); };
   }
   const msg = document.getElementById("q-cal-msg")!;
   document.getElementById("q-cal-copy")!.onclick = async () => {
