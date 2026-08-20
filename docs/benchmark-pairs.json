@@ -1554,6 +1554,76 @@
       43
      ],
      "score": 9.9
+    },
+    {
+     "card": "Jaw Slope",
+     "value": 148.7,
+     "unit": "deg",
+     "ideal": [
+      142,
+      144.5
+     ],
+     "range": [
+      117.5,
+      169
+     ],
+     "score": 7.7
+    },
+    {
+     "card": "Lateral Canthal Tilt",
+     "value": 8.6,
+     "unit": "deg",
+     "ideal": [
+      7.8,
+      9.5
+     ],
+     "range": [
+      -2.5,
+      19.8
+     ],
+     "score": 10
+    },
+    {
+     "card": "Eye Separation Ratio",
+     "value": 48.3,
+     "unit": "%",
+     "ideal": [
+      47.3,
+      48.4
+     ],
+     "range": [
+      39,
+      56.7
+     ],
+     "score": 10
+    },
+    {
+     "card": "Eye Aspect Ratio",
+     "value": 2.68,
+     "unit": "x",
+     "ideal": [
+      2.8,
+      3.3
+     ],
+     "range": [
+      1.52,
+      4.78
+     ],
+     "score": 9.4
+    },
+    {
+     "card": "One Eye Apart Test",
+     "value": 1.14,
+     "unit": "x",
+     "ideal": [
+      1.04,
+      1.09
+     ],
+     "range": [
+      0.68,
+      1.47
+     ],
+     "score": 8.3
     }
    ],
    "cardNoteExtra": "Thirds overlay also reads Lower Third 35.1%; its own card not yet captured.",
@@ -1591,6 +1661,66 @@
     "photograph and does not hold different attractiveness standards by ethnicity. Finding",
     "that a competitor does would not change that; it would only tell us why a number of",
     "theirs differs from ours on a given face."
+   ],
+   "perSideReadings": {
+    "jawSlope": {
+     "left": 149.4,
+     "right": 148,
+     "reported": 148.7
+    },
+    "lateralCanthalTilt": {
+     "left": 9.1,
+     "right": 8.2,
+     "reported": 8.6
+    },
+    "eyeAspectRatio": {
+     "left": 2.69,
+     "right": 2.67,
+     "reported": 2.68
+    }
+   },
+   "bandComparison": [
+    "NINE SHARED METRICS, NINE MOVED BANDS. Cavill (m) against Rihanna (f):",
+    "",
+    "  metric                  ideal (m)      ideal (f)      shift   width m/f",
+    "  Lateral Canthal Tilt    6.0-7.7        7.8-9.5        +1.8    1.7 / 1.7",
+    "  Eye Separation Ratio    45.7-46.8      47.3-48.4      +1.6    1.1 / 1.1",
+    "  Jaw Slope               140.0-142.5    142.0-144.5    +2.0    2.5 / 2.5",
+    "  Eye Aspect Ratio        3.00-3.50      2.80-3.30      -0.20   0.50 / 0.50",
+    "  One Eye Apart Test      0.95-1.00      1.04-1.09      +0.09   0.05 / 0.05",
+    "  Face Width to Height    1.96-2.00      1.98-2.02      +0.02   0.04 / 0.04",
+    "  Total Facial W to H     1.34-1.37      1.32-1.35      -0.02   0.03 / 0.03",
+    "  Top Third               30.0-32.0      30.4-32.6      +0.4    2.0 / 2.2",
+    "  Middle Third            31.4-33.6      31.8-33.8      +0.4    2.2 / 2.0",
+    "",
+    "SEVEN OF NINE ARE RIGID TRANSLATIONS — identical width, moved bodily. The two that are",
+    "not are the thirds, and they differ by 0.2 on a value printed to one decimal, which is",
+    "the size of a rounding artefact rather than a reshaping. On several the RANGE translates",
+    "by the same amount as the ideal (Jaw Slope +2.0, Canthal Tilt +1.8, Eye Separation +1.6),",
+    "so the whole scale slides rather than the target alone.",
+    "",
+    "That is a structural fact about their model and a useful one: whatever axis this is, it",
+    "adjusts WHERE a band sits and not HOW WIDE it is. A location shift, not a variance",
+    "change.",
+    "",
+    "AND THE DIRECTION MATCHES THEIR OWN SEX RATIONALE on five of six that state one:",
+    "  Lateral Canthal Tilt  'upturns more common and favorable in females'   female higher OK",
+    "  Eye Separation Ratio  'slightly lower for males and higher for females' female higher OK",
+    "  Eye Aspect Ratio      'males typically score higher (narrower eyes)'    female lower  OK",
+    "  Jaw Slope             'higher angles indicate a more feminine jaw'      female higher OK",
+    "  Total Facial W to H   'longer faces benefit males, shorter suit females' female lower OK",
+    "  Face Width to Height  'higher ratios are preferred for males'           female HIGHER — ",
+    "                        contradicts their own copy.",
+    "",
+    "So the axis is very probably SEX. Gigi still settles it, and the prior is now that her",
+    "bands match Rihanna's exactly. If they do not, ethnicity is the remaining candidate and",
+    "two of their own cards raise it unprompted — canthal tilt says 'certain ethnic groups',",
+    "One Eye Apart says 'ethnic variations allow flexibility'.",
+    "",
+    "UNCERTAIN READING: Rihanna's Total Facial Width to Height RANGE is recorded as 1.05-1.82",
+    "from the bar, but every other range here translates rigidly, and 1.05-1.62 would preserve",
+    "Cavill's width of 0.57 exactly. The upper figure is probably a misread of 1.62. Re-check",
+    "that one card before anything leans on it."
    ]
   }
  ]
