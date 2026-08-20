@@ -1234,6 +1234,12 @@ function drawCurve(
 
   ctx.textAlign = "center";
 
+  // Where the axis sits below the curve's baseline. Named because the headline
+  // percentile has to be placed clear of it, and two independent magic numbers
+  // are how those two ended up drawn on top of each other.
+  const AXIS_TICK_Y = 62;
+  const AXIS_UNIT_Y = 84;
+
   // The scale, along the bottom.
   //
   // A curve with no axis is a shape. The band was labelled "where most men are"
@@ -1249,11 +1255,11 @@ function drawCurve(
     [0, SPREAD.median.toFixed(1)],
     [1, SPREAD.high.toFixed(1)],
   ] as Array<[number, string]>) {
-    ctx.fillText(label, xOf(z), baseline + 62);
+    ctx.fillText(label, xOf(z), baseline + AXIS_TICK_Y);
   }
   ctx.font = "500 11px Inter, Arial, sans-serif";
   ctx.fillStyle = "rgba(247,247,242,0.34)";
-  ctx.fillText("SCORE", W / 2, baseline + 84);
+  ctx.fillText("SCORE", W / 2, baseline + AXIS_UNIT_Y);
 
   // TWO STAGES, and the order is the argument.
   //
@@ -1316,11 +1322,22 @@ function drawCurve(
       ctx.font = "300 64px Fraunces, Georgia, serif";
       ctx.letterSpacing = "0px";
       ctx.fillStyle = "#f7f7f2";
-      ctx.fillText(`TOP ${top}%`, W / 2, baseline + 96);
+      // Below the axis, not through it.
+      //
+      // This sat at baseline + 96. Sixty-four point Fraunces has a cap height
+      // around 46px, so the glyphs reached back to roughly baseline + 50 and
+      // were drawn straight over the scale numbers at +62 and the word SCORE at
+      // +84 — the axis was legible in every frame except the one frame the
+      // headline appears in, which is the frame people screenshot.
+      //
+      // Expressed against the axis it has to clear rather than as a new magic
+      // number, so moving the scale moves this with it.
+      const clearsAxis = AXIS_UNIT_Y + 12 + 46;
+      ctx.fillText(`TOP ${top}%`, W / 2, baseline + clearsAxis);
       ctx.font = "500 14px Inter, Arial, sans-serif";
       ctx.letterSpacing = "3px";
       ctx.fillStyle = "#7f8682";
-      ctx.fillText("OF THE REFERENCE SET", W / 2, baseline + 130);
+      ctx.fillText("OF THE REFERENCE SET", W / 2, baseline + clearsAxis + 34);
     }
   }
   ctx.restore();
