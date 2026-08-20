@@ -372,6 +372,35 @@ export const EXPERIMENTAL_SIDE_METRIC_IDS = new Set([
   "chinProjection",
   "foreheadSlope",
   "midfaceRatioSide",
+  // ramusMandible measures something the published figures do not.
+  //
+  // Its distribution (mean 0.72, sd 0.08) and bound (0.35-0.95) come from
+  // cephalometry, where Co-Go over Go-Me is read off a lateral RADIOGRAPH
+  // between BONE landmarks: the head of the condyle and the bony gonial angle,
+  // neither of which is visible on a photograph. This measures the surface
+  // instead — a skin point in front of the ear, the visible turn of the jaw —
+  // and those are not the same two points, so the ratio they produce is not the
+  // same quantity and had no business being scored against that norm.
+  //
+  // It went unnoticed because nothing ever measured it on a face we KNEW was
+  // placed correctly. Doing that now, against the three hand-corrected profiles
+  // in docs/SIDE_FIXTURES.md and recovering each photo's aspect from the one
+  // proportion anthropometry pins down (hairline-to-chin over nose-to-ear,
+  // about 1.37), gives 0.921, 0.990 and 1.384. Two of the three sit outside a
+  // bound meant to describe what a face CAN be, and the third barely scrapes
+  // in. A guard that rejects its own ground truth is measuring the wrong thing.
+  //
+  // What that cost: Confirm refused three consecutive correctly-placed profiles
+  // in a row, each time naming gonion, condylion and menton and telling the
+  // operator a point was in the wrong place. It was not. Every refusal was the
+  // app disagreeing with itself, and the operator was asked to fix it.
+  //
+  // Held out rather than re-fitted, because the honest number cannot be
+  // invented here: it needs side faces measured through THIS construction, and
+  // the corpus currently has none. Deriving a mean from three fixtures whose
+  // aspect ratios had to be solved for would be putting a made-up figure where
+  // a measured one belongs — which is how the wrong norm got here.
+  "ramusMandible",
 ]);
 
 export const SIDE_METRICS: MetricDef[] = ALL_SIDE_METRICS.filter(
