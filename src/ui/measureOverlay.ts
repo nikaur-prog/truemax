@@ -409,10 +409,22 @@ export function drawMeasurement(
       const v = P(seg.v);
       const a = P(seg.a);
       const b = P(seg.b);
-      // The two legs run out from the vertex, then the arc sweeps between them.
-      line(ctx, v, lerp(v, a, u));
-      line(ctx, v, lerp(v, b, u));
-      if (u > 0.55) arc(ctx, v, a, b, width, (u - 0.55) / 0.45);
+      // The legs run out from the vertex ONE AT A TIME, then the arc sweeps
+      // between them.
+      //
+      // They used to share a single `u`, so both grew together and the angle
+      // appeared as a finished V. Two elements drawn on one beat is a diagram
+      // being switched on; drawn on two it is an angle being constructed, and
+      // the second leg arriving against a stationary first is what makes the
+      // arc between them read as a measurement rather than a decoration. The
+      // reference channels never draw two parts of a figure simultaneously.
+      //
+      // Overlapped rather than strictly queued — the second starts before the
+      // first has landed — so this is still one gesture at speed.
+      const phase = anglePhases(u);
+      line(ctx, v, lerp(v, a, phase.legA));
+      if (phase.legB > 0) line(ctx, v, lerp(v, b, phase.legB));
+      if (phase.arc > 0) arc(ctx, v, a, b, width, phase.arc);
       if (seg.label && done) label(ctx, seg.label, v, fs, color);
     } else if (seg.kind === "rule") {
       // A rule spans the frame, so it opens from the middle outward.
@@ -465,6 +477,27 @@ function arc(ctx: CanvasRenderingContext2D, v: Pt2, a: Pt2, b: Pt2, width: numbe
 
 // How much of the timeline is spent staggering segment starts, as opposed to
 // all of them running together. 0 = simultaneous, 1 = strictly sequential.
+/**
+ * How far each part of an angle figure has been drawn, at overall progress `u`.
+ *
+ * The first leg, then the second, then the arc between them — overlapped, not
+ * queued. Both legs used to share `u` and grow together, which draws a finished
+ * V rather than an angle being constructed; the second leg arriving against a
+ * stationary first is what makes the arc read as a measurement being taken. The
+ * reference channels never draw two parts of one figure simultaneously.
+ *
+ * Its own function so the ordering is testable without a canvas, and so a later
+ * tweak to the constants cannot quietly reorder the construction.
+ */
+export function anglePhases(u: number): { legA: number; legB: number; arc: number } {
+  const unit = (n: number) => Math.max(0, Math.min(1, n));
+  return {
+    legA: unit(u / 0.55),
+    legB: unit((u - 0.30) / 0.55),
+    arc: unit((u - 0.72) / 0.28),
+  };
+}
+
 const STAGGER = 0.45;
 
 // Draw a measurement on, over `DRAW_MS`. Returns a handle so a fast hover down

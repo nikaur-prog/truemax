@@ -13,6 +13,7 @@ import {
   rollProgress,
   rollingDigits,
 } from "./rundownFrame.js";
+import { anglePhases } from "./measureOverlay.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
 
@@ -610,4 +611,44 @@ test("the value never resolves before its own measurement has finished drawing",
   assert.equal(rollProgress(b, b.drawAt! - 0.01), 0, "rolling before the line landed");
   assert.equal(rollProgress(b, b.drawAt!), 0);
   assert.ok(rollProgress(b, b.drawAt! + 0.5) >= 1, "still rolling long after the line landed");
+});
+
+// ---------------------------------------------------------------------------
+// Sequential construction of an angle figure.
+// ---------------------------------------------------------------------------
+
+test("an angle draws one leg, then the other, then the arc", () => {
+  // Both legs used to share the overall progress and grow together, which draws
+  // a finished V rather than an angle being constructed. The second leg
+  // arriving against a stationary first is what makes the arc between them read
+  // as a measurement being taken.
+  const early = anglePhases(0.15);
+  assert.ok(early.legA > 0, "first leg should be under way");
+  assert.equal(early.legB, 0, "second leg started with the first");
+  assert.equal(early.arc, 0, "arc swept before its legs existed");
+
+  const mid = anglePhases(0.6);
+  assert.ok(mid.legB > 0, "second leg never started");
+  assert.ok(mid.legA > mid.legB, "the legs are drawing in lockstep");
+  assert.equal(mid.arc, 0, "arc swept before both legs had landed");
+
+  const late = anglePhases(0.85);
+  assert.ok(late.arc > 0, "arc never swept");
+});
+
+test("an angle is complete, and only complete, at full progress", () => {
+  // The retraction runs drawProgress back down and relies on every partial
+  // state being a strict subset of the true figure.
+  const done = anglePhases(1);
+  assert.equal(done.legA, 1);
+  assert.equal(done.legB, 1);
+  assert.equal(done.arc, 1);
+  const nearly = anglePhases(0.99);
+  assert.ok(nearly.arc < 1, "the arc finished before the beat did");
+  for (const u of [0, 0.25, 0.5, 0.75, 1]) {
+    const p = anglePhases(u);
+    for (const v of [p.legA, p.legB, p.arc]) {
+      assert.ok(v >= 0 && v <= 1, `phase out of range at u=${u}`);
+    }
+  }
 });
