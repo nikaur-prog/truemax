@@ -26,15 +26,25 @@
   "",
   "TWO FINDINGS THE TOOL HAS NOW SURFACED, both needing a measurement fix rather",
   "than a moved ideal:",
-  "  jawCheekRatio  — reads HIGH on all three faces, by 10.1% on average.",
+  "  jawCheekRatio  — reads HIGH by 10.1% on average, but across TWO PEOPLE",
+  "                    (Cavill twice, Bieber once), so it is suggestive and",
+  "                    not established. Rihanna or Gigi settles it either way.",
   "  jawFrontalAngle — held out twice for definition mismatch, and both times",
   "                    ours reads ~26deg high (Bieber 114.1 v 87.9, Cavill 123.1",
   "                    v 98.0). A mismatch that consistent is a construction we",
-  "                    can identify, not noise."
+  "                    can identify, not noise.",
+  "",
+  "COUNT PEOPLE, NOT CAPTURES. A `person` field groups repeat captures of one",
+  "face. Two photographs of one person share that person's bone structure, so a",
+  "construction that disagrees on their face disagrees on both — which reads as",
+  "two confirmations and is one. Counting captures let Bieber-plus-Cavill-twice",
+  "read as 'all 3 faces' when it was n=2. Set `person` on every new entry; it",
+  "defaults to `name` when absent, which is right for a face captured once."
  ],
  "faces": [
   {
    "name": "Justin Bieber",
+   "person": "Justin Bieber",
    "sex": "male",
    "capturedOn": "2026-08-20",
    "theirOverall": 6.58,
@@ -752,6 +762,7 @@
   },
   {
    "name": "Henry Cavill",
+   "person": "Henry Cavill",
    "sex": "male",
    "capturedOn": "2026-08-20",
    "theirOverall": 8.3,
@@ -1151,6 +1162,7 @@
   },
   {
    "name": "Henry Cavill (second capture)",
+   "person": "Henry Cavill",
    "sex": "male",
    "capturedOn": "2026-08-20",
    "theirOverall": 7.78,
