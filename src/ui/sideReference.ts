@@ -262,16 +262,36 @@ export interface ReferenceHandle {
   setFaceDir(dir: number): void;
 }
 
+// Whether the corner badge is dismissed, remembered across mounts for the
+// session. The badge sits over the photo, and a landmark that happens to land
+// underneath it cannot be grabbed — the badge takes the tap. So it has to be
+// hideable, and somebody working through fifty calibration profiles should not
+// have to dismiss it fifty times; by the third face the layout it teaches has
+// been learned anyway. Deliberately not persisted to storage: a new session is
+// a reasonable moment for the guide to come back.
+let badgeHidden = false;
+
 // Mounts the corner thumbnail into the photo frame. Tapping it opens the
-// labelled version over the whole screen; tapping that closes it.
+// labelled version over the whole screen; tapping that closes it. The × on the
+// badge collapses it to a small GUIDE pill, so a point underneath becomes
+// reachable; the pill brings it back.
 export function mountSideReference(frame: HTMLElement, faceDir: number): ReferenceHandle {
   let dir = faceDir;
-  const badge = document.createElement("button");
-  badge.type = "button";
+  const badge = document.createElement("div");
   badge.className = "sref-badge";
-  badge.setAttribute("aria-label", "Show where each landmark belongs");
-  badge.innerHTML = `${svg(false, dir)}<span>GUIDE</span>`;
-  frame.appendChild(badge);
+
+  const pill = document.createElement("button");
+  pill.type = "button";
+  pill.className = "sref-show";
+  pill.textContent = "GUIDE";
+  pill.setAttribute("aria-label", "Show the landmark guide");
+
+  const setHidden = (next: boolean) => {
+    badgeHidden = next;
+    badge.classList.toggle("hidden", next);
+    pill.classList.toggle("hidden", !next);
+  };
+  pill.onclick = () => setHidden(false);
 
   let overlay: HTMLDivElement | null = null;
   const close = () => {
@@ -303,17 +323,29 @@ export function mountSideReference(frame: HTMLElement, faceDir: number): Referen
       if (event.target === overlay || (event.target as HTMLElement).closest(".sref-close")) close();
     });
   };
-  badge.addEventListener("click", open);
+  // The badge is a <div> holding two buttons rather than a button itself,
+  // because the hide control cannot be a button nested inside another one.
+  const renderBadge = () => {
+    badge.innerHTML = `<button type="button" class="sref-open" aria-label="Show where each landmark belongs">${svg(false, dir)}<span>GUIDE</span></button>
+      <button type="button" class="sref-hide" aria-label="Hide the guide">×</button>`;
+    badge.querySelector<HTMLButtonElement>(".sref-open")!.onclick = open;
+    badge.querySelector<HTMLButtonElement>(".sref-hide")!.onclick = () => setHidden(true);
+  };
+  renderBadge();
+  frame.appendChild(badge);
+  frame.appendChild(pill);
+  setHidden(badgeHidden);
 
   return {
     destroy() {
       close();
       badge.remove();
+      pill.remove();
     },
     setFaceDir(next: number) {
       if (next === dir) return;
       dir = next;
-      badge.innerHTML = `${svg(false, dir)}<span>GUIDE</span>`;
+      renderBadge();
     },
   };
 }

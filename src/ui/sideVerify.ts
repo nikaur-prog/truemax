@@ -839,12 +839,32 @@ export function mountVerifier(
     const ctx = magnifierCanvas.getContext("2d")!;
     const displayPatch = Math.max(34, Math.min(54, r.width * 0.12));
     const sourceSize = displayPatch * (photo.width / Math.max(1, r.width));
-    const sx = Math.max(0, Math.min(photo.width - sourceSize, point.x - sourceSize / 2));
-    const sy = Math.max(0, Math.min(photo.height - sourceSize, point.y - sourceSize / 2));
+    // The patch is centred on the POINT, unconditionally. It used to be clamped
+    // to stay inside the photo, which broke the lens exactly where it is needed
+    // most: canonicalisation turns every profile to face image-right, so on a
+    // tight crop the nose and lips sit near the frame edge — there the clamped
+    // patch stopped following the point, and the crosshair, fixed at the lens
+    // centre, showed a pixel up to half a patch away from where the dot really
+    // was. Off-photo area now just renders as the lens background instead.
+    const sx = point.x - sourceSize / 2;
+    const sy = point.y - sourceSize / 2;
     ctx.clearRect(0, 0, 180, 180);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(photo, sx, sy, sourceSize, sourceSize, 0, 0, 180, 180);
+    // Clipped by hand rather than handing drawImage an out-of-bounds source
+    // rect, whose handling is the kind of thing engines have disagreed on.
+    const cx0 = Math.max(0, sx);
+    const cy0 = Math.max(0, sy);
+    const cx1 = Math.min(photo.width, sx + sourceSize);
+    const cy1 = Math.min(photo.height, sy + sourceSize);
+    if (cx1 > cx0 && cy1 > cy0) {
+      const k = 180 / sourceSize;
+      ctx.drawImage(
+        photo,
+        cx0, cy0, cx1 - cx0, cy1 - cy0,
+        (cx0 - sx) * k, (cy0 - sy) * k, (cx1 - cx0) * k, (cy1 - cy0) * k,
+      );
+    }
     ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
     ctx.lineWidth = 2;
     ctx.beginPath();
