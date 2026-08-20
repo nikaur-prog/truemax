@@ -110,7 +110,9 @@ test("strengths run together, then one clean turn into the flaws", () => {
   // direction rather than left to work it out from the adjectives.
   const turn = metrics.find((b, i) => i > 0 && !b.positive && metrics[i - 1].positive);
   assert.ok(turn, "no turn from strengths into flaws");
-  assert.match(turn.line, /^Now the flaws\./);
+  // "The flaws." rather than the older "Now the flaws." — same audible pivot,
+  // one connective shorter, matching the verdict-first copy pass.
+  assert.match(turn.line, /^The flaws\./);
 });
 
 test("an impossible measurement never gets a sentence", () => {
@@ -146,7 +148,14 @@ test("the score beat never states a number without the distribution", () => {
   const said = ending.map((b) => b.line).join(" ");
   assert.match(said, /5\.4 out of 10/);
   assert.match(said, /Two thirds of men measure between/);
-  assert.match(said, /5\.0 is the exact middle/);
+  assert.match(said, /5\.0 is dead average/);
+
+  // And no rarity conversion is ever spoken. "That's 1 in 20" restated the
+  // percentile in the one vocabulary that collides with how the audience
+  // already uses the scale, and a nineteen-face corpus cannot support the
+  // "1 in 100,000" the audience means by a 7 — so neither number is said.
+  // The curve badge carries the percentile, scoped by the curve it sits on.
+  assert.ok(!/1 in \d/.test(said), "a rarity conversion is being spoken again");
 
   // And they must be contiguous. Splitting the number from its distribution is
   // only safe while nothing can appear between them — a context or CTA beat

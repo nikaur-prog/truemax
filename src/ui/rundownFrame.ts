@@ -250,7 +250,9 @@ export function regionCrop(
 
   // Height wanted for this band, with headroom so the band is not flush to the
   // frame edge, then width derived from the output aspect.
-  const bandH = faceH * (bottom - top) * 1.16;
+  // 1.22, up from 1.16: the tick-ends of a full-width measurement were
+  // landing flush against the frame edge.
+  const bandH = faceH * (bottom - top) * 1.22;
   let sh = Math.max(bandH, 1);
   let sw = sh * aspect;
   // A floor on how tight the crop may get, so an extreme zoom on a narrow band
@@ -306,7 +308,11 @@ export function regionCrop(
   // lips and chin all render the identical frame. The camera stops moving. A
   // per-beat expansion costs nothing on the beats that do not need it.
   if (mustContain) {
-    const pad = 0.16; // room for the label chip, which sits outside the span
+    // 0.32, doubled from 0.16. The chip is not a point at the end of the
+    // span, it is ~180px of label BEYOND the end of the span, and at 0.16 a
+    // full-width measurement's chip rendered half outside the frame — the
+    // exact clip this block exists to prevent.
+    const pad = 0.32;
     const needW = (mustContain.x1 - mustContain.x0) * photo.width * (1 + pad * 2);
     const needH = (mustContain.y1 - mustContain.y0) * photo.height * (1 + pad * 2);
     if (needW > sw || needH > sh) {
@@ -465,7 +471,10 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   // run-up began BEFORE the beat did, and the line was already part drawn on
   // its first frame. Rare, and exactly the kind of thing that looks like the
   // renderer is a frame out.
-  const DRAW = 0.5;
+  // 0.38, down from 0.5. At the new narration rate a half-second run-up ate
+  // most of a short clause; the line should land just before its number is
+  // spoken, not draw through the whole sentence.
+  const DRAW = 0.38;
   const from = Math.max(beat.start, beat.drawAt - DRAW);
   const span = Math.max(0.001, beat.drawAt - from);
   const drawn = clamp01((t - from) / span);
@@ -788,7 +797,6 @@ export function drawRundownFrame(
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
   drawLedger(ctx, input, beat, t);
-  drawCaption(ctx, beat, input, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, H);
   // Last, over everything: the whole frame resolves, chrome included, the way
@@ -1492,7 +1500,9 @@ function drawOverlayForBeat(
 // ledger and the number never disagree about whether a trait helped.
 // ---------------------------------------------------------------------------
 const LEDGER_MAX = 5;
-const LEDGER_PITCH = 36;
+// 27, down from 36 with the type: five entries now span 128px where they
+// spanned 180.
+const LEDGER_PITCH = 27;
 const LEDGER_REVEAL = 0.4;
 
 function ledgerEntries(
@@ -1537,10 +1547,17 @@ function drawLedger(
   // Anchored just inside the top-left safe corner, stacking down — up and out
   // of the face. It used to end at 42% of the frame height, which put the
   // list straight across the eyes of every portrait.
-  const y0 = SAFE_TOP + 14;
+  // Higher than SAFE_TOP and smaller than it was, deliberately. SAFE_TOP is
+  // where TikTok's own chrome ends, and the ledger used to start below it in
+  // 27px type — five entries ran to the middle of the forehead and sat over
+  // the face on every close-up. At 20px starting 40px into the margin the
+  // whole stack ends above the brow line; the top few pixels may brush the
+  // chrome on some devices, which is the right trade — the list is context,
+  // the face is the video.
+  const y0 = SAFE_TOP - 40;
   ctx.save();
   ctx.textAlign = "left";
-  ctx.font = "700 27px Inter, Arial, sans-serif";
+  ctx.font = "700 20px Inter, Arial, sans-serif";
   const newest = entries[entries.length - 1];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
@@ -1566,52 +1583,16 @@ function drawLedger(
   ctx.restore();
 }
 
-// ---------------------------------------------------------------------------
-// The kicker: ONE thing per beat, and only when the beat has one.
+// The mid-frame value kicker is GONE, and the section that drew it with it.
 //
-// The rolling transcript is gone entirely. The narration already reads the
-// sentence out loud; text chasing it word by word covered the face all video
-// and doubled information nothing needed doubled. What a beat is allowed to
-// put mid-frame is its single most important fact: for a measurement beat,
-// the measured value itself — which the voice says once and nothing else on
-// screen shows (the chip on the face carries the population average, the
-// bottom bar carries the score). It lands when the line finishes drawing,
-// because a value appearing before its evidence is backwards, and leaves
-// with the beat.
-// ---------------------------------------------------------------------------
-function drawCaption(
-  ctx: CanvasRenderingContext2D,
-  beat: TimedBeat,
-  input: RundownInput,
-  t: number,
-  W: number,
-  H: number,
-): void {
-  const id = beat.beat.metricId;
-  const metric = id ? input.metrics.get(id) : undefined;
-  if (!metric) return;
-
-  const kicker = `${metric.value.toFixed(metric.def.decimals)}${metric.def.unit}`;
-  // Sized on the FINAL string, drawn as the rolling one, so the type does not
-  // resize itself mid-roll.
-  const shown = rollingDigits(kicker, rollProgress(beat, t));
-  const pop = smoother(clamp01((drawProgress(beat, t) - 0.92) / 0.08));
-  const endFade = smoother(clamp01((beat.start + beat.duration - t) / 0.15));
-  const a = pop * endFade;
-  if (a <= 0.01) return;
-
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.letterSpacing = "0px";
-  ctx.font = fitFont(ctx, kicker, W - SAFE_LEFT * 2 - 40, 46, 30, (px) => `700 ${px}px Inter, Arial, sans-serif`);
-  const y = H - SAFE_BOTTOM - 88 + (1 - pop) * 8;
-  ctx.globalAlpha = a;
-  ctx.shadowColor = "rgba(0,0,0,.92)";
-  ctx.shadowBlur = 22;
-  ctx.fillStyle = "#f7f7f2";
-  ctx.fillText(shown, W / 2, y);
-  ctx.restore();
-}
+// It repeated, in 46px type across the middle of the frame, a number that was
+// already on screen twice: once in the chip riding the measurement line and
+// once implied by the score in the bottom bar. Three renderings of one value
+// per beat, and the big one sat over the face. The overlay drawing the line
+// and the chip on it IS the caption; anything restating it is cover.
+//
+// rollingDigits and rollProgress stay exported below — the chip's own number
+// roll uses the same helpers and the tests pin their behaviour.
 
 // ---------------------------------------------------------------------------
 // The number roll.

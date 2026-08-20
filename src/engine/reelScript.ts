@@ -5,7 +5,7 @@ import { REGION_NAMES } from "./scoring.js";
 import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
 import { reliabilityOf } from "./reliability.js";
-import { SPREAD, rarityShort, spreadLine } from "./rarity.js";
+import { SPREAD, spreadLine } from "./rarity.js";
 import { PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
 
 // ---------------------------------------------------------------------------
@@ -328,22 +328,29 @@ type GroupKind = "positive" | "negative" | "side" | "side-negative";
 // The list is cycled by position rather than picked at random: the fault the
 // last version shipped was three consecutive sentences opening "There is also",
 // and a fixed cycle cannot produce that where a random pick eventually will.
+// Trimmed to the has-forms. "On top of that" and "There's also" were connective
+// filler — heard back to back in a real export they read as a narrator stalling,
+// and every one of them delays the signal word the clause now leads with.
 const OPENERS: Record<GroupKind, (subject: string, pronoun: string) => string[]> = {
   positive: (subject, p) => [
     `${subject} has`,
+    `${capitalize(p)} has`,
     `${capitalize(p)} also has`,
-    `On top of that, ${p} has`,
-    `Then there's`,
     `And ${p} has`,
   ],
   negative: (_s, p) => [
-    `Now the flaws. ${capitalize(p)} has`,
-    "There's also",
+    `The flaws. ${capitalize(p)} has`,
+    `${capitalize(p)} also has`,
     `And ${p} has`,
-    "Then there's",
   ],
-  side: (_s, p) => [`From the side, ${p} has`, "In profile there's", `And ${p} has`],
-  "side-negative": (_s, p) => ["The profile isn't perfect. He has", "There's also", `And ${p} has`],
+  side: (_s, p) => [`From the side, ${p} has`, `${capitalize(p)} also has`, `And ${p} has`],
+  // The first opener used to hardcode "He has", which printed a masculine
+  // pronoun over any woman whose profile carried a flaw.
+  "side-negative": (_s, p) => [
+    `The profile isn't perfect. ${capitalize(p)} has`,
+    `${capitalize(p)} also has`,
+    `And ${p} has`,
+  ],
 };
 
 // One measurement to a sentence.
@@ -601,15 +608,34 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // seconds ago. The same fact as a shaded band with a line standing outside
     // it is understood before it is read. This is the frame the whole format
     // has been building an argument for, and it was narration over a face.
+    // NO "1 in N" IS SAID, on purpose, and this is a scoring-integrity line
+    // rather than a style one.
+    //
+    // "That's 1 in 20" was the percentile restated as a rarity, and it is the
+    // single claim in the video that collides hardest with how the audience
+    // already uses the scale. In the community this format speaks to, a 7 is
+    // a one-in-a-huge-number face; our 7.1 meant "top 5% of a 258-photo
+    // reference set". Both readings heard together sound like a lie, and the
+    // fix is NOT to print the folklore number — a corpus of nineteen rated
+    // faces cannot distinguish one-in-a-thousand from one-in-a-million, and
+    // claiming it would be inventing a measurement, which is the one thing
+    // this product must never do.
+    //
+    // So the spoken claim is only what the data supports: the shape of the
+    // crowd and where this face stands in it. The percentile badge stays on
+    // screen, scoped to the reference set by the curve it is printed on. The
+    // deeper repair is the rated-corpus recalibration: once the score is
+    // fitted to ratings where a 7 is reserved for near-nobody, the number
+    // itself compresses and the collision disappears at the source.
     {
       kind: "curve",
-      line: `That's ${rarityShort(report.overallPercentile).toLowerCase()}. ${spreadLine(report.sex)}`,
+      line: spreadLine(report.sex),
       percentile: report.overallPercentile,
       badge: `${ord(pct)} percentile`,
     },
     {
       kind: "curve",
-      line: `${SPREAD.median.toFixed(1)} is the exact middle, and that shaded band is where most of them are.`,
+      line: `${SPREAD.median.toFixed(1)} is dead average. That band is most of them.`,
       percentile: report.overallPercentile,
     },
   ];
