@@ -1,0 +1,57 @@
+{
+  "$comment": [
+    "Paired measurements: the SAME quantity on the SAME face, measured by TrueMax",
+    "and read off a competitor's own UI. Nothing here is their code, model or",
+    "formula — every `theirs` value is a number their product displayed to a",
+    "paying user, which is what any customer can read off the screen.",
+    "",
+    "This file exists to answer ONE question: does our pipeline measure the same",
+    "thing they do, and if not, is our disagreement systematic. It is deliberately",
+    "NOT a calibration set. Fitting anything to their SCORES would be reverse-",
+    "engineering their scoring by regression, which is the thing we said we would",
+    "not do, merely done statistically instead of by reading code. Their scores are",
+    "recorded for context and are never a target.",
+    "",
+    "Add a face by appending to `faces`. Rows only need `ours` and `theirs` in the",
+    "SAME units — convert on the way in and say so in `note`. Run:",
+    "  node tools/benchmark-agreement.mjs"
+  ],
+  "faces": [
+    {
+      "name": "Henry Cavill",
+      "sex": "male",
+      "capturedOn": "2026-08-20",
+      "theirOverall": 8.3,
+      "theirGeometryOnly": 6.54,
+      "ourOverall": 5.3,
+      "rows": [
+        {
+          "metric": "canthalTilt",
+          "unit": "°",
+          "ours": 6.0,
+          "theirs": 6.7,
+          "theirScore": 10.0,
+          "ourScore": 7.3
+        },
+        {
+          "metric": "noseIntercanthal",
+          "unit": "×",
+          "ours": 1.14,
+          "theirs": 1.14,
+          "theirScore": 10.0,
+          "ourScore": null,
+          "note": "not scored by us"
+        },
+        {
+          "metric": "jawCheekRatio",
+          "unit": "",
+          "ours": 0.991,
+          "theirs": 0.894,
+          "theirScore": 10.0,
+          "ourScore": 4.2,
+          "note": "theirs displayed as 89.4%, converted to a ratio"
+        }
+      ]
+    }
+  ]
+}
