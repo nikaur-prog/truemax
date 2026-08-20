@@ -62,7 +62,24 @@
   "be lifting a coefficient out of their scoring formula, which is the whole thing we said",
   "we would not do. Our weighting has to come from our own corpus — from which split",
   "actually predicts our own human ratings — and if that lands near 0.6 it will be because",
-  "our faces put it there."
+  "our faces put it there.",
+  "",
+  "WHY OUR OVERALL SCORE SITS BELOW THEIRS ON EVERY FACE — and why that is not a bug.",
+  "",
+  "Their per-metric score answers 'how close is this to the ideal band'. Inside the band is",
+  "10/10. Ours answers a different question: what POPULATION RANK does that closeness",
+  "represent — the share of people who sit farther from the ideal than you do. Being inside",
+  "the band earns the rank of being inside the band, which for a wide band is not top marks.",
+  "",
+  "Bieber's gonial angle is the clean illustration. We measure 120.1, they measure 120.2 —",
+  "a tenth of a degree apart. They score it 10.0. We score it 6.8, and that 6.8 is not an",
+  "error: it is 'in band, and roughly one person in five is closer to ideal than you'.",
+  "",
+  "Both are defensible; they are not the same statistic. It explains the whole gap on every",
+  "face so far (ours 5.5 / 5.3 / 4.5 against theirs 6.45 / 6.54 / 8.41) without any of our",
+  "measurements being wrong, and it is the reason chasing their headline number would be",
+  "the wrong repair. What it does oblige us to do is say plainly in the UI which of the two",
+  "claims a TrueMax score is making."
  ],
  "faces": [
   {
@@ -1482,7 +1499,7 @@
     "front": "top 0.06%",
     "side": "bottom 36%"
    },
-   "ourOverall": null,
+   "ourOverall": 6.3,
    "ourFront": null,
    "ourSide": null,
    "note": [
@@ -1814,6 +1831,373 @@
     "UNCERTAIN READING, unchanged: Rihanna's Total Facial Width to Height range is recorded",
     "1.05-1.82, but every other range translates rigidly and 1.05-1.62 would preserve Cavill's",
     "width of 0.57 exactly. Probably a misread of 1.62."
+   ],
+   "theirSideCards": {
+    "$note": [
+     "Read from opened cards, so ideal and range are trustworthy. These are the first SIDE",
+     "bands captured for a woman, and the first side bands captured with their ideal ranges",
+     "at all — the Bieber side pass recorded values and scores but not bands."
+    ],
+    "confirmed": [
+     {
+      "card": "Gonial Angle",
+      "value": 125.1,
+      "unit": "deg",
+      "ideal": [
+       118,
+       124
+      ],
+      "range": [
+       95.3,
+       146.7
+      ],
+      "score": 9.7
+     },
+     {
+      "card": "Nasolabial Angle",
+      "value": 76.4,
+      "unit": "deg",
+      "ideal": [
+       89,
+       106
+      ],
+      "range": [
+       52,
+       143
+      ],
+      "score": 4.3
+     },
+     {
+      "card": "Nasofrontal Angle",
+      "value": 133.2,
+      "unit": "deg",
+      "ideal": [
+       136,
+       148
+      ],
+      "range": [
+       95,
+       189
+      ],
+      "score": 9.4
+     },
+     {
+      "card": "Ramus to Mandible Ratio",
+      "value": 0.58,
+      "unit": "x",
+      "ideal": [
+       0.55,
+       0.68
+      ],
+      "range": [
+       -0.27,
+       1.5
+      ],
+      "score": 10
+     },
+     {
+      "card": "Mandibular Plane Angle",
+      "value": 21,
+      "unit": "deg",
+      "ideal": [
+       16,
+       25
+      ],
+      "range": [
+       -4.7,
+       43.3
+      ],
+      "score": 10
+     },
+     {
+      "card": "Facial Convexity (Glabella)",
+      "value": 181.1,
+      "unit": "deg",
+      "ideal": [
+       166,
+       171
+      ],
+      "range": [
+       148.3,
+       188.7
+      ],
+      "score": 1.8
+     },
+     {
+      "card": "Total Facial Convexity",
+      "value": 155.6,
+      "unit": "deg",
+      "ideal": [
+       143,
+       150
+      ],
+      "range": [
+       121.1,
+       171.9
+      ],
+      "score": 6.9
+     },
+     {
+      "card": "Submental Cervical Angle",
+      "value": 102.3,
+      "unit": "deg",
+      "ideal": [
+       94,
+       106
+      ],
+      "range": [
+       56,
+       144
+      ],
+      "score": 10
+     }
+    ]
+   },
+   "sideFindings": [
+    "THE SIDE BANDS MOVE BY SEX TOO, and rigidly, exactly like the front ones.",
+    "",
+    "  Nasolabial Angle   male 97-114 (from the Bieber pass)   female 89-106",
+    "                     width 17 both. A clean -8.0 translation.",
+    "",
+    "That matters for task #58 in a way the front cards do not, because it can be checked",
+    "against our own definitions rather than just noted.",
+    "",
+    "OUR NASOLABIAL SEX DIRECTION IS THE OPPOSITE OF THEIRS. src/engine/sideMetrics.ts holds",
+    "male ideal 95, female ideal 103 — female HIGHER. Their bands put the female band LOWER",
+    "than the male one. One of the two is backwards.",
+    "",
+    "DO NOT RESOLVE THIS BY COPYING THEM. The conventional clinical statement is that the",
+    "female nasolabial angle is the more obtuse of the two, which is the direction OURS",
+    "already has. On this metric their arrangement is the surprising one, and adopting it",
+    "because it came off a competitor's screen would be replacing a defensible norm with an",
+    "undefended one. Recorded as a disagreement to resolve from evidence, not as a target.",
+    "",
+    "WHERE THE OTHER FOUR LAND. Gonial angle is the encouraging one: their female band is",
+    "118-124, centre 121, against our female ideal of 122. One degree apart. Ramus to",
+    "mandible, theirs 0.55-0.68 against our female ideal 0.73, is close but ours sits above",
+    "their band. Mandibular plane, theirs 16-25 against our female ideal 22, sits inside."
+   ],
+   "rows": [
+    {
+     "metric": "canthalTilt",
+     "unit": "deg",
+     "ours": 6.08,
+     "theirs": 8.6,
+     "theirScore": 10,
+     "ourScore": null,
+     "note": "THIRD person running: ours reads low on canthal tilt every time"
+    },
+    {
+     "metric": "eyeSeparationRatio",
+     "unit": "%",
+     "ours": 51.5,
+     "theirs": 48.3,
+     "theirScore": 10,
+     "ourScore": null,
+     "note": "second person, ours high again (+2.4pp on Cavill, +3.2pp here)"
+    },
+    {
+     "metric": "eyeAspectRatio",
+     "unit": "x",
+     "ours": 2.978,
+     "theirs": 2.68,
+     "theirScore": 9.4,
+     "ourScore": null,
+     "note": "ours stored as height/width; inverted to their width/height orientation"
+    },
+    {
+     "metric": "fwhr",
+     "unit": "x",
+     "ours": 2.187,
+     "theirs": 1.92,
+     "theirScore": 8.8,
+     "ourScore": null,
+     "note": "second person, ours high again (+4.2% on Cavill, +13.9% here)"
+    },
+    {
+     "metric": "midfaceRatio",
+     "unit": "x",
+     "ours": 1.29,
+     "theirs": 1.12,
+     "theirScore": 10,
+     "ourScore": null
+    },
+    {
+     "metric": "gonialProxy",
+     "unit": "deg",
+     "ours": 147.38,
+     "theirs": 148.7,
+     "theirScore": 7.7,
+     "ourScore": null,
+     "note": "OPPOSITE direction to Cavill (+4.1 there, -1.3 here) — scatter, not bias"
+    },
+    {
+     "metric": "lipRatio",
+     "unit": "x",
+     "ours": 1.4,
+     "theirs": 1.32,
+     "theirScore": 9.9,
+     "ourScore": null,
+     "note": "second person, ours high both times"
+    },
+    {
+     "metric": "facialIndex",
+     "unit": "x",
+     "ours": 1.326,
+     "theirs": 1.37,
+     "theirScore": 9.1,
+     "ourScore": null,
+     "note": "second person, ours low both times"
+    },
+    {
+     "metric": "noseMouthRatio",
+     "unit": "x",
+     "ours": 0.758,
+     "theirs": 0.813,
+     "theirScore": 0.9,
+     "ourScore": null,
+     "note": "their Mouth:Nose 1.23 inverted to our nose-over-mouth orientation"
+    },
+    {
+     "metric": "intercanthalEyeWidth",
+     "unit": "x",
+     "ours": 1.274,
+     "theirs": 1.14,
+     "theirScore": 8.3,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "held out on Bieber too; ours high both times but by very different amounts"
+    },
+    {
+     "metric": "browTilt",
+     "unit": "deg",
+     "ours": -1.36,
+     "theirs": 10.2,
+     "theirScore": 9.9,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "TWICE now, and consistently: ours reads 12.2 low on Bieber and 11.6 low here. A near-constant offset of about -11.9 degrees looks like a sign or baseline convention, not scatter"
+    },
+    {
+     "metric": "philtrumChinRatio",
+     "unit": "x",
+     "ours": 4.047,
+     "theirs": 2.18,
+     "theirScore": 10,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "ours high both people but by 0.62 and 1.87 — not a constant offset"
+    },
+    {
+     "metric": "topThirdEst",
+     "unit": "%",
+     "ours": 19.95,
+     "theirs": 33.2,
+     "theirScore": 9.6,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "ours is an estimate; the mesh carries no trichion"
+    },
+    {
+     "metric": "lowerFacePct",
+     "unit": "%",
+     "ours": 52.93,
+     "theirs": 35.1,
+     "theirScore": null,
+     "ourScore": null,
+     "definitionConfirmed": false,
+     "note": "different vertical span; not their Lower Third"
+    },
+    {
+     "metric": "gonialAngle",
+     "unit": "deg",
+     "ours": 102.7,
+     "theirs": 125.1,
+     "theirScore": 9.7,
+     "ourScore": null,
+     "view": "side",
+     "definitionConfirmed": false,
+     "note": "22.4 degrees apart on a metric that agreed to 0.1 on Bieber"
+    },
+    {
+     "metric": "nasolabialAngle",
+     "unit": "deg",
+     "ours": 124.85,
+     "theirs": 76.4,
+     "theirScore": 4.3,
+     "ourScore": null,
+     "view": "side",
+     "definitionConfirmed": false,
+     "note": "48.4 degrees apart; agreed to 2.0 on Bieber"
+    },
+    {
+     "metric": "nasofrontalAngle",
+     "unit": "deg",
+     "ours": 145.03,
+     "theirs": 133.2,
+     "theirScore": 9.4,
+     "ourScore": null,
+     "view": "side",
+     "definitionConfirmed": false,
+     "note": "11.8 apart; agreed to 0.3 on Bieber"
+    },
+    {
+     "metric": "ramusMandible",
+     "unit": "x",
+     "ours": 0.712,
+     "theirs": 0.58,
+     "theirScore": 10,
+     "ourScore": null,
+     "view": "side",
+     "definitionConfirmed": false
+    },
+    {
+     "metric": "facialConvexity",
+     "unit": "deg",
+     "ours": 165.42,
+     "theirs": 181.1,
+     "theirScore": 1.8,
+     "ourScore": null,
+     "view": "side",
+     "definitionConfirmed": false
+    },
+    {
+     "metric": "totalFacialConvexity",
+     "unit": "deg",
+     "ours": 140.65,
+     "theirs": 155.6,
+     "theirScore": 6.9,
+     "ourScore": null,
+     "view": "side",
+     "definitionConfirmed": false
+    }
+   ],
+   "sideCaptureWarning": [
+    "EVERY SIDE ROW IS HELD OUT. THE OPERATOR REPORTS THAT THE AUTO-SEEDED SIDE POINTS WERE",
+    "BADLY PLACED ON EVERY SIDE SCAN IN THIS FILE AND WERE NEVER HAND-CORRECTED.",
+    "",
+    "That statement governs. An earlier draft of this note blamed the photograph — her side",
+    "image is a smiling three-quarter turn rather than a profile, which would also wreck the",
+    "measurements — but the person who ran the scans has better information than an inference",
+    "drawn from a thumbnail, and uncorrected seeding explains it without needing the pose.",
+    "Both may be true. Neither is separable from this data.",
+    "",
+    "The size of it: on Bieber our side numbers and theirs agreed to within a couple of",
+    "degrees (gonial 0.1 apart, nasofrontal 0.3, nasolabial 2.0). Here the same three are",
+    "22.4, 11.8 and 48.4 apart.",
+    "",
+    "THIS UNDERMINES TASK #58 RATHER THAN SUPPORTING IT. #58 concluded from the Bieber",
+    "pairings that our side LANDMARKS were sound and our side IDEALS were the problem. That",
+    "conclusion assumed the Bieber points were well placed. If no side scan was ever",
+    "corrected, Bieber's agreement was luck rather than evidence, and the conclusion rests on",
+    "one uncorrected scan that happened to land well. Treat #58 as unproven, not as settled.",
+    "",
+    "AND IT BLOCKS THE FORTY-FACE RUN. Forty faces captured with uncorrected side points",
+    "would produce forty faces of unusable side measurements, and re-deriving the side ideals",
+    "from them would move every band to fit a landmark error. That is worse than leaving the",
+    "priors alone, because the result would look calibrated. See task #57 — the auto-seed has",
+    "to be fixed, or hand-correction made part of the calibration flow, BEFORE the run rather",
+    "than after it."
    ]
   }
  ]
