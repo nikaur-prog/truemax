@@ -57,8 +57,30 @@ export type RatingSource =
 export interface RatedFace {
   id: string;
   sex: Sex;
-  /** What a human says the face is worth, 1–10. The thing being fitted TO. */
-  rating: number;
+  /**
+   * What a human says the face is worth, 1–10. The thing being fitted TO.
+   *
+   * NULL MEANS "MEASURED, NOT RATED", and such a row is deliberately still
+   * worth capturing.
+   *
+   * The rating cannot be made optional in the sense of "the engine will work it
+   * out" — the engine's own score is what the rating is used to CHECK, so
+   * fitting to it would be fitting the engine to its own output and would teach
+   * nothing. There is no calibration without a human number.
+   *
+   * But a face with no rating is not worthless, because it still carries two
+   * things that need no rating at all: coverage for metrics no rated face
+   * happens to have, and a side profile whose landmark corrections train the
+   * auto-placement. Forcing a number out of somebody who does not have one is
+   * how a corpus fills with hesitant 5s, and a corpus of hesitant 5s cannot
+   * settle anything — the nine men already in it span 4.5 to 6.1 and are
+   * useless for exactly that reason.
+   *
+   * So: rate the faces you are sure about, skip the ones you are not. A
+   * confident 3 and a confident 8 are worth more than five uncertain 5s, and
+   * an unrated row still does the other half of the job.
+   */
+  rating: number | null;
   /** What the engine said at capture time. Kept for the disagreement column. */
   scored: number;
   /**
@@ -128,7 +150,7 @@ export function measurementsOf(...reports: Report[]): Record<string, number> {
 
 export function addRatedFace(
   report: Report,
-  rating: number,
+  rating: number | null,
   // Required, and deliberately not defaulted. A default would be answered by
   // whoever wrote the call site rather than by whoever typed the number, which
   // is the wrong person to ask.
@@ -189,9 +211,14 @@ export function confirmOwnRating(id: string): RatedFace[] {
  * would look like data loss rather than a deliberate hold.
  */
 export function splitByProvenance(faces: RatedFace[]): { own: RatedFace[]; withheld: RatedFace[] } {
+  // An unrated row is not "withheld" in the provenance sense — there is no
+  // borrowed number to worry about — but it is equally unfittable, because
+  // there is nothing to fit TO. Both land outside `own` for the same practical
+  // reason and the set list tells them apart in its own copy.
+  const fittable = (f: RatedFace) => f.ratedBy === "self" && f.rating !== null;
   return {
-    own: faces.filter((f) => f.ratedBy === "self"),
-    withheld: faces.filter((f) => f.ratedBy !== "self"),
+    own: faces.filter(fittable),
+    withheld: faces.filter((f) => !fittable(f)),
   };
 }
 
@@ -216,6 +243,7 @@ export function clearCalibrationSet(): void {
 export function corpusJSON(faces: RatedFace[]): string {
   return `${JSON.stringify(
     {
+      // Every row here passed the fittable check, so `rating` is a number.
       faces: splitByProvenance(faces).own.map((f) => ({
         id: f.id,
         sex: f.sex,
@@ -275,8 +303,8 @@ const WANT_SPREAD = 3.5;
 export function setHealth(faces: RatedFace[], sex: Sex): SetHealth {
   const mine = faces.filter((f) => f.sex === sex);
   const count = mine.length;
-  const ratings = mine.map((f) => f.rating);
-  const spread = count > 1 ? Math.max(...ratings) - Math.min(...ratings) : 0;
+  const ratings = mine.map((f) => f.rating).filter((r): r is number => r !== null);
+  const spread = ratings.length > 1 ? Math.max(...ratings) - Math.min(...ratings) : 0;
   const enough = count >= WANT_PER_SEX && spread >= WANT_SPREAD;
   let note: string;
   if (!count) note = `no ${sex === "male" ? "men" : "women"} yet`;

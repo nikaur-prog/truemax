@@ -37,6 +37,7 @@ import {
   setHealth,
   splitByProvenance,
 } from "./engine/calibrationSet.js";
+import type { RatedFace } from "./engine/calibrationSet.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
@@ -776,6 +777,7 @@ function renderRatingStep(r: Report): void {
         <input type="text" id="q-cal-label" placeholder="Label (optional, never exported)"
                maxlength="40" autocomplete="off" />
         <button type="button" class="btn pri" id="q-cal-save">Lock it in</button>
+        <button type="button" class="btn gho" id="q-cal-skip">Not sure — skip</button>
       </div>
       <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale —
       a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
@@ -788,6 +790,11 @@ function renderRatingStep(r: Report): void {
       competitor's read of the same face open in the next tab. Fitting our weights to
       another product's scores is reverse-engineering its formula with arithmetic, so a
       borrowed number is kept with the face and left out of the corpus export.</p>
+      <p class="q-cal-hint">Skipping is a real answer, not a failure. A face saved
+      without a rating still carries its measurements and its side corrections — it
+      just sits out of the agreement fit. A corpus full of hesitant 5s settles nothing;
+      the nine men already in it span 4.5 to 6.1 and are useless for that exact reason.
+      Rate the ones you are sure about.</p>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
@@ -796,6 +803,18 @@ function renderRatingStep(r: Report): void {
   const external = document.getElementById("q-cal-external") as HTMLInputElement;
   const msg = document.getElementById("q-cal-msg")!;
   num.focus();
+  const store = (rating: number | null) => {
+    addRatedFace(
+      r,
+      rating,
+      external.checked ? "external" : "self",
+      label.value.trim() || undefined,
+      pendingSide ?? undefined,
+    );
+    const held = pendingSide;
+    clearPending();
+    renderVerdictStep(r, rating, held);
+  };
   const commit = () => {
     const rating = Number(num.value);
     if (!(rating >= 1 && rating <= 10)) {
@@ -803,40 +822,48 @@ function renderRatingStep(r: Report): void {
       num.focus();
       return;
     }
-    addRatedFace(
-      r,
-      Math.round(rating * 10) / 10,
-      external.checked ? "external" : "self",
-      label.value.trim() || undefined,
-      pendingSide ?? undefined,
-    );
-    const held = pendingSide;
-    clearPending();
-    renderVerdictStep(r, Math.round(rating * 10) / 10, held);
+    store(Math.round(rating * 10) / 10);
   };
   document.getElementById("q-cal-save")!.onclick = commit;
+  // Skip stores the face with no rating. It is not a cancel — the measurements
+  // and any side corrections are exactly as valuable as they were, and losing
+  // them because nobody could name a number would be the wrong trade.
+  document.getElementById("q-cal-skip")!.onclick = () => store(null);
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
-function renderVerdictStep(r: Report, rating: number, side: Report | null = null): void {
+function renderVerdictStep(r: Report, rating: number | null, side: Report | null = null): void {
   const withSide = side !== null;
-  const gap = r.overall - rating;
+  const gap = rating === null ? null : r.overall - rating;
   // Named rather than left as a number. "−2.3" is a figure; "the engine is
   // two points below you on this face" is the thing worth acting on, and the
   // whole set is a list of these.
+  //
+  // A skipped face has no disagreement to name, and inventing one by showing
+  // the engine's number alone would quietly turn this screen into the thing
+  // the skip exists to avoid: a place where the engine's opinion becomes the
+  // reference. It says what was stored and nothing else.
   const verdict =
-    Math.abs(gap) < 0.6 ? "agrees with you" : gap > 0 ? "is too generous here" : "is too harsh here";
+    gap === null
+      ? null
+      : Math.abs(gap) < 0.6 ? "agrees with you" : gap > 0 ? "is too generous here" : "is too harsh here";
   el.calStep.textContent = "Saved";
   el.calBody.innerHTML = `
     <div class="q-cal-verdict">
-      <div class="q-cal-pair">
-        <div><span>YOU</span><b>${rating.toFixed(1)}</b></div>
+      ${
+        gap === null
+          ? `<p class="q-cal-said">Stored without a rating. Its measurements${
+              withSide ? " and side corrections are" : " are"
+            } kept; it sits out of the agreement fit.</p>`
+          : `<div class="q-cal-pair">
+        <div><span>YOU</span><b>${rating!.toFixed(1)}</b></div>
         <div class="q-cal-gap">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</div>
         <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
       </div>
       <p class="q-cal-said">It ${verdict}.${
         withSide ? " Front and side both stored." : ""
-      }</p>
+      }</p>`
+      }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
         <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
@@ -874,6 +901,17 @@ function renderVerdictStep(r: Report, rating: number, side: Report | null = null
     renderFaceSlots();
   };
   document.getElementById("q-cal-list")!.onclick = () => renderCalibrationSet();
+}
+
+/**
+ * How far the engine is from the human, for sorting. Unrated rows sort last.
+ *
+ * -1 rather than 0, so a face nobody rated sits below one the engine agrees
+ * with exactly. Both are "nothing to look at here", but only one of them is
+ * evidence of that.
+ */
+function gapOf(f: RatedFace): number {
+  return f.rating === null ? -1 : Math.abs(f.scored - f.rating);
 }
 
 function renderCalibrationSet(): void {
@@ -936,25 +974,34 @@ function renderCalibrationSet(): void {
           ? `<div class="q-cal-rows">
               <div class="q-cal-row q-cal-head"><span>FACE</span><span>YOU</span><span>ENGINE</span><span>GAP</span><span></span></div>
               ${[...faces]
-                .sort((a, b) => Math.abs(b.scored - b.rating) - Math.abs(a.scored - a.rating))
+                // Unrated rows sort last rather than crashing the comparator.
+                // They have no disagreement to rank by, which is the whole
+                // point of the column.
+                .sort((a, b) => gapOf(b) - gapOf(a))
                 .map((f) => {
-                  const gap = f.scored - f.rating;
-                  // Three states, and the middle one is the whole point: a row
-                  // whose provenance nobody recorded is not the same as a row
-                  // known to be the operator's own, and must not read like one.
+                  const gap = f.rating === null ? null : f.scored - f.rating;
+                  // Four states now. The middle two are the whole point: a row
+                  // whose provenance nobody recorded is not the same as one
+                  // known to be the operator's own, and a row with no rating at
+                  // all is a third thing again — not suspect, just not fittable.
                   const flag =
-                    f.ratedBy === "self"
-                      ? ""
-                      : f.ratedBy === "external"
-                        ? ` <em class="q-cal-flag">borrowed</em>`
-                        : ` <em class="q-cal-flag">unknown</em>`;
-                  return `<div class="q-cal-row${f.ratedBy === "self" ? "" : " held"}">
+                    f.rating === null
+                      ? ` <em class="q-cal-flag">unrated</em>`
+                      : f.ratedBy === "self"
+                        ? ""
+                        : f.ratedBy === "external"
+                          ? ` <em class="q-cal-flag">borrowed</em>`
+                          : ` <em class="q-cal-flag">unknown</em>`;
+                  const fittable = f.ratedBy === "self" && f.rating !== null;
+                  return `<div class="q-cal-row${fittable ? "" : " held"}">
                     <span>${f.label ? escapeHtml(f.label) : f.id}${flag}</span>
-                    <span>${f.rating.toFixed(1)}</span>
+                    <span>${f.rating === null ? "—" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
-                    <span class="${Math.abs(gap) >= 1.5 ? "bad" : ""}">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</span>
+                    <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
+                      gap === null ? "—" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
+                    }</span>
                     <span class="q-cal-acts">${
-                      f.ratedBy === undefined
+                      f.ratedBy === undefined && f.rating !== null
                         ? `<button type="button" class="linkish" data-mine="${f.id}">mine</button>`
                         : ""
                     }<button type="button" class="linkish" data-drop="${f.id}">remove</button></span>

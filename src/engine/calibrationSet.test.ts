@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { corpusJSON, measurementsOf, splitByProvenance } from "./calibrationSet.js";
+import { corpusJSON, measurementsOf, setHealth, splitByProvenance } from "./calibrationSet.js";
 import type { RatedFace } from "./calibrationSet.js";
 import type { Report } from "./types.js";
 
@@ -94,4 +94,33 @@ test("the export carries no provenance field of its own", () => {
   // no place to put it.
   const out = JSON.parse(corpusJSON([face("m1", "self")]));
   assert.deepEqual(Object.keys(out.faces[0]).sort(), ["id", "measurements", "rating", "sex"]);
+});
+
+test("an unrated face is stored but never exported", () => {
+  // Skipping is a real answer. The measurements and any side corrections are
+  // exactly as valuable as they were — what is missing is the thing being
+  // fitted TO, so the row cannot join the fit and must not silently do so.
+  const out = JSON.parse(corpusJSON([{ ...face("m1", "self"), rating: null }]));
+  assert.deepEqual(out.faces, []);
+});
+
+test("unrated rows are held, not treated as borrowed", () => {
+  const faces = [
+    { ...face("m1", "self"), rating: null },
+    face("m2", "self"),
+    face("m3", "external"),
+  ];
+  const { own, withheld } = splitByProvenance(faces);
+  assert.deepEqual(own.map((f) => f.id), ["m2"]);
+  // Both land outside `own`, for different reasons — one has no number, the
+  // other has the wrong one. The set list tells them apart in its own copy.
+  assert.deepEqual(withheld.map((f) => f.id), ["m1", "m3"]);
+});
+
+test("spread ignores unrated faces rather than reading them as zero", () => {
+  // The trap: a null rating coerces to 0 in arithmetic, which would have made
+  // any set containing a skipped face look like it spanned the whole scale.
+  const rated = (id: string, rating: number | null): RatedFace => ({ ...face(id, "self"), rating });
+  const health = setHealth([rated("m1", 4), rated("m2", 6), rated("m3", null)], "male");
+  assert.equal(health.spread, 2);
 });

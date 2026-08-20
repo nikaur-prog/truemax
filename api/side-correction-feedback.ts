@@ -262,18 +262,37 @@ export async function POST(request: Request): Promise<Response> {
     // ceiling is enough for genuine correction retries while preventing a
     // signed-in client from turning the private review bucket into file
     // storage. Duplicate retries above remain idempotent and do not count.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: recentCount, error: countError } = await admin
-      .from("side_landmark_feedback")
-      .select("id", { count: "exact", head: true })
+    //
+    // STAFF ARE EXEMPT, and the reason is that the cap had exactly the wrong
+    // shape for the one person it should never have applied to. A calibration
+    // session is somebody sitting down and correcting fifty profiles in a row.
+    // analyze-side-feedback.mjs will not emit an offset for a landmark until it
+    // has 25 corrections OF THAT LANDMARK, so a 25-a-day account ceiling caps a
+    // sitting at roughly one landmark's worth — the limit bit hardest on the
+    // only work that makes the seeding better.
+    //
+    // Same gate as the /quick endpoints: a row in app_admins, granted by hand
+    // in the SQL editor. Non-staff behaviour is unchanged, including the 429.
+    const { data: staff } = await admin
+      .from("app_admins")
+      .select("user_id")
       .eq("user_id", user.id)
-      .gte("created_at", since);
-    if (countError) throw new Error(`Feedback rate check failed: ${countError.message}`);
-    if ((recentCount ?? 0) >= MAX_SUBMISSIONS_PER_24_HOURS) {
-      return json(
-        { error: "Feedback limit reached for today. Your analysis can still continue." },
-        429,
-      );
+      .maybeSingle<{ user_id: string }>();
+
+    if (!staff) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count: recentCount, error: countError } = await admin
+        .from("side_landmark_feedback")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", since);
+      if (countError) throw new Error(`Feedback rate check failed: ${countError.message}`);
+      if ((recentCount ?? 0) >= MAX_SUBMISSIONS_PER_24_HOURS) {
+        return json(
+          { error: "Feedback limit reached for today. Your analysis can still continue." },
+          429,
+        );
+      }
     }
 
     const storagePath = `${user.id}/${metadata.submissionId}.jpg`;
