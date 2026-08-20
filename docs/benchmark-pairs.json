@@ -459,6 +459,36 @@
           "ourScore": 7.7,
           "view": "side",
           "note": "their Total Facial Convexity, opened card. 1.3 degrees apart \u2014 and again the scores are 7.7 against 9.70 on a measurement both products agree about"
+        },
+        {
+          "metric": "gonialAngle",
+          "unit": "deg",
+          "ours": 120.1,
+          "theirs": 120.2,
+          "theirScore": 10.0,
+          "ourScore": 6.8,
+          "view": "side",
+          "note": "their Gonial Angle. ONE TENTH OF A DEGREE apart, and 3.2 points apart on what it is worth"
+        },
+        {
+          "metric": "nasolabialAngle",
+          "unit": "deg",
+          "ours": 114.0,
+          "theirs": 112.0,
+          "theirScore": 10.0,
+          "ourScore": 2.4,
+          "view": "side",
+          "note": "their Nasolabial Angle. Two degrees apart and SEVEN AND A HALF POINTS apart on the score \u2014 their ideal band is 97-114, which contains our value outright"
+        },
+        {
+          "metric": "ramusMandible",
+          "unit": "x",
+          "ours": 0.69,
+          "theirs": 0.66,
+          "theirScore": 10.0,
+          "ourScore": 2.1,
+          "view": "side",
+          "note": "their Ramus to Mandible Ratio. Ours is stored the other way up (1.45 as ramus-over-mandible); inverted to their orientation it is 0.690 against 0.66"
         }
       ],
       "theirSideCards": {
@@ -590,6 +620,62 @@
             "value": 16.9,
             "unit": "deg",
             "score": 10.0
+          },
+          {
+            "card": "Gonial Angle",
+            "value": 120.2,
+            "unit": "deg",
+            "ideal": [
+              115.0,
+              121.0
+            ],
+            "range": [
+              92.3,
+              143.7
+            ],
+            "score": 10.0
+          },
+          {
+            "card": "Nasolabial Angle",
+            "value": 112.0,
+            "unit": "deg",
+            "ideal": [
+              97.0,
+              114.0
+            ],
+            "range": [
+              60.0,
+              151.0
+            ],
+            "score": 10.0
+          },
+          {
+            "card": "Ramus to Mandible Ratio",
+            "value": 0.66,
+            "unit": "x",
+            "ideal": [
+              0.62,
+              0.75
+            ],
+            "range": [
+              -0.2,
+              1.87
+            ],
+            "score": 10.0
+          },
+          {
+            "card": "Mandibular Plane Angle",
+            "value": 20.0,
+            "unit": "deg",
+            "ideal": [
+              15.0,
+              22.0
+            ],
+            "range": [
+              -5.7,
+              42.7
+            ],
+            "score": 10.0
           }
         ],
         "chipReadOnly": [
@@ -613,32 +699,38 @@
           "direct counterpart in computeSideMetrics."
         ],
         "$finding": [
-          "THE SIDE GAP LOOKS LIKE SCORING, NOT MEASUREMENT.",
+          "SETTLED, ACROSS FIVE SIDE METRICS: WE MEASURE THE SAME FACE AND SCORE IT DIFFERENTLY.",
           "",
-          "Nasofrontal is the one clean same-units comparison so far: their 134.7 against our 134.4,",
-          "three tenths of a degree. Their score for it is 7.45. Ours is 5.2. Two products agreeing",
-          "about a measurement to within a rounding error and disagreeing by 2.2 points about what it",
-          "is worth is an ideal-placement problem, not a landmark problem.",
+          "  metric                ours    theirs   apart   our score  their score",
+          "  gonialAngle           120.1   120.2    0.08%   6.8        10.0",
+          "  nasofrontalAngle      134.4   134.7    0.22%   5.2        7.45",
+          "  totalFacialConvexity  139.9   138.6    0.94%   7.7        9.70",
+          "  nasolabialAngle       114.0   112.0    1.79%   2.4        10.0",
+          "  ramusMandible         0.690   0.66     4.55%   2.1        10.0",
+          "  ------------------------------------------------------------------",
+          "  mean                                   1.52%              +4.6 points",
           "",
-          "That inverts the working assumption. The side was being treated as our weakest MEASUREMENT",
-          "-- bad seed, hand placement, 21.9 degree nasolabial swing -- and those are all still real",
-          "for repeatability. But the 8.23 against our 6.8 may be mostly where our side ideals sit.",
+          "Mean measurement disagreement 1.5 percent. Mean score disagreement 4.6 points out of ten.",
+          "A gonial angle one tenth of a degree apart scores 6.8 against 10.0.",
           "",
-          "COVERAGE IS THE OTHER HALF: their side tab carries about 33 rows against our 16. Ten of the",
-          "rows confirmed here are quantities we do not measure at all -- Z Angle, Nasal Tip Angle,",
-          "Mentolabial Angle, Anterior Facial Depth, Nose Tip Rotation, Facial Depth to Height,",
-          "Orbital Vector, Browridge Inclination, Holdaway H Line, Burstone lines. More rows also",
-          "means any single noisy one matters less to their total than ours does to ours.",
+          "Nasolabial is the clearest single case in either product. We measure 114.0 and score it",
+          "2.4 out of 10. Their ideal band is 97.0 to 114.0 \u2014 our measured value sits INSIDE their",
+          "ideal band, at its edge, and we score it in the bottom quarter. Same for ramusMandible:",
+          "our 0.690 inverted is inside their 0.62-0.75 band and we give it 2.1.",
           "",
-          "STILL NEEDED, and these two are worth more than any other card in either product:",
-          "  Gonial Angle -- the list chip reads 120.1, and our Bieber gonial angle is also 120.1.",
-          "    If an opened card confirms that, it is an exact agreement on the single most important",
-          "    jaw measurement, while their score for it is 10.0 and ours is 6.8.",
-          "  Nasolabial Angle -- chip reads about 111.8 against our 114.0.",
+          "OUR SIDE LANDMARKS ARE NOT THE PROBLEM. Our side IDEALS are. The 8.23 against our 6.8 is",
+          "where our side norms sit, not how badly we place points.",
           "",
-          "NOT PAIRABLE AS THEY STAND: their lip E-line and S-line positions are millimetres, ours are",
-          "a percentage of face height, and converting needs a scale we do not have from a screenshot.",
-          "Their Nasal Projection is a ratio to the nose base; ours is a percentage of face height."
+          "This does not clear the side of everything. #54's repeatability problem is a separate",
+          "complaint and still real \u2014 a nasolabial that swings 21.9 degrees between two photographs",
+          "of one person is unreliable regardless of where its ideal sits. But a well-placed ideal on",
+          "a noisy measurement beats a misplaced ideal on the same noisy measurement, and the ideals",
+          "are the cheaper half.",
+          "",
+          "WHAT MUST NOT HAPPEN NEXT: adopting their bands. Their 97-114 nasolabial band is their",
+          "number. Ours has to be re-derived from our own reference set. What this table licenses is",
+          "knowing WHICH side ideals to re-derive first, in this order: nasolabialAngle,",
+          "ramusMandible, gonialAngle."
         ]
       }
     },
