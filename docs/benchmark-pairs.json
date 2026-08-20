@@ -39,7 +39,30 @@
   "construction that disagrees on their face disagrees on both — which reads as",
   "two confirmations and is one. Counting captures let Bieber-plus-Cavill-twice",
   "read as 'all 3 faces' when it was n=2. Set `person` on every new entry; it",
-  "defaults to `name` when absent, which is right for a face captured once."
+  "defaults to `name` when absent, which is right for a face captured once.",
+  "",
+  "THEIR BANDS ARE PER-PERSON. Constant across two captures of one face, different between",
+  "Cavill and Rihanna on all four shared metrics. Sex is the likely axis and their own card",
+  "copy argues for it. Gigi Hadid is the control that separates sex from ethnicity: same",
+  "sex as Rihanna, different ethnicity. Record the ideal and range on every card from here",
+  "on — the bands turned out to carry as much information as the values.",
+  "",
+  "Whatever that comes back as, it stays an observation. TrueMax does not infer ethnicity",
+  "from a photograph and does not vary its standards by it.",
+  "",
+  "AN OBSERVATION WE MAY RECORD AND MAY NOT USE. On the two faces that expose Harmony",
+  "alongside its own front and side figures, their headline Harmony sits at a fixed point",
+  "between them — front weighted 0.614 on Bieber, 0.617 on Rihanna. The two agree to three",
+  "decimal places while the ORDERING reverses (Bieber's side beats his front, Rihanna's",
+  "front beats her side), which is what makes it a regularity rather than a coincidence of",
+  "one face.",
+  "",
+  "Recording it is fair: it is arithmetic on four numbers their UI shows a paying customer.",
+  "ADOPTING it is not. Setting our front/side weight to 0.615 because theirs is 0.615 would",
+  "be lifting a coefficient out of their scoring formula, which is the whole thing we said",
+  "we would not do. Our weighting has to come from our own corpus — from which split",
+  "actually predicts our own human ratings — and if that lands near 0.6 it will be because",
+  "our faces put it there."
  ],
  "faces": [
   {
@@ -1423,11 +1446,151 @@
     "140.0-142.5 in 115.5-167.0, Lateral Canthal Tilt 6.0-7.7 in -4.3-18.0, Eye Separation",
     "45.7-46.8 in 37.4-55.1. Only the measured value and the score moved.",
     "",
-    "That is direct evidence on the open question of whether they hold different ideals for",
-    "different people. Across two captures of one face the bands never move, so a band is a",
-    "property of the METRIC and not of the person being measured. It does not by itself rule",
-    "out per-group ideals - one face cannot - but it removes the mechanism by which a band",
-    "could be chosen per capture."
+    "WHAT THIS ESTABLISHES, AND WHAT IT DOES NOT. Two captures of one person: the bands do",
+    "not move between photographs. That is real and useful — a band is not recomputed per",
+    "capture, so a score change between two shots of one face is the MEASUREMENT moving.",
+    "",
+    "This entry previously went further and said a band is a property of the metric rather",
+    "than of the person. That was wrong, and could not have been right: two captures of one",
+    "man cannot show a band moving between people. See the Rihanna entry — every band she",
+    "shares with Cavill sits somewhere else."
+   ]
+  },
+  {
+   "name": "Rihanna",
+   "person": "Rihanna",
+   "sex": "female",
+   "capturedOn": "2026-08-20",
+   "theirOverall": 7.1,
+   "theirPillars": {
+    "harmony": 6.82,
+    "angularity": 7.2,
+    "dimorphism": 7.6,
+    "features": 6.82
+   },
+   "theirPillarPercentiles": {
+    "harmony": "top 8%",
+    "angularity": "top 3.4%",
+    "dimorphism": "top 1.3%",
+    "features": "top 8%"
+   },
+   "theirHarmonyByView": {
+    "front": 8.41,
+    "side": 4.26
+   },
+   "theirHarmonyByViewPercentiles": {
+    "front": "top 0.06%",
+    "side": "bottom 36%"
+   },
+   "ourOverall": null,
+   "ourFront": null,
+   "ourSide": null,
+   "note": [
+    "THE FIRST WOMAN IN THIS FILE, and the first face whose ideal bands can be compared",
+    "against a man's. See cardNote — the bands MOVED, which falsifies something recorded",
+    "here earlier.",
+    "",
+    "No TrueMax measurements yet, so no pairings. Their cards are recorded so the band",
+    "comparison can be made now; the rows follow when a diagnostics dump exists.",
+    "",
+    "Their front/side split is the mirror image of Bieber's: front 8.41 (top 0.06%) against",
+    "side 4.26 (bottom 36%). Bieber was front 5.33, side 8.23. Whatever their side view",
+    "measures, it is not tracking their front view — which is worth knowing before we",
+    "assume a single face-quality factor explains both of ours."
+   ],
+   "theirCards": [
+    {
+     "card": "Face Width to Height Ratio",
+     "value": 1.92,
+     "unit": "x",
+     "ideal": [
+      1.98,
+      2.02
+     ],
+     "range": [
+      1.57,
+      2.45
+     ],
+     "score": 8.8
+    },
+    {
+     "card": "Total Facial Width to Height Ratio",
+     "value": 1.37,
+     "unit": "x",
+     "ideal": [
+      1.32,
+      1.35
+     ],
+     "range": [
+      1.05,
+      1.82
+     ],
+     "score": 9.1
+    },
+    {
+     "card": "Top Third",
+     "value": 33.2,
+     "unit": "%",
+     "ideal": [
+      30.4,
+      32.6
+     ],
+     "range": [
+      20.2,
+      42.6
+     ],
+     "score": 9.6
+    },
+    {
+     "card": "Middle Third",
+     "value": 31.7,
+     "unit": "%",
+     "ideal": [
+      31.8,
+      33.8
+     ],
+     "range": [
+      22.8,
+      43
+     ],
+     "score": 9.9
+    }
+   ],
+   "cardNoteExtra": "Thirds overlay also reads Lower Third 35.1%; its own card not yet captured.",
+   "cardNote": [
+    "CORRECTION TO WHAT THIS FILE PREVIOUSLY RECORDED. After the two Cavill captures it said",
+    "a band is a property of the METRIC and not of the person, because the bands did not",
+    "move between his two photographs. That was true of the observation and wrong as a",
+    "generalisation: two captures of one man cannot show a band moving between PEOPLE.",
+    "",
+    "Every band shared with Cavill moves for Rihanna, all four in the same direction:",
+    "",
+    "  metric                        Cavill (m)            Rihanna (f)",
+    "  Face Width to Height          ideal 1.96-2.00       ideal 1.98-2.02",
+    "                                range 1.55-2.41       range 1.57-2.45",
+    "  Total Facial Width to Height  ideal 1.34-1.37       ideal 1.32-1.35",
+    "                                range 1.07-1.64       range 1.05-1.82",
+    "  Top Third                     ideal 30.0-32.0       ideal 30.4-32.6",
+    "                                range 19.8-42.2       range 20.2-42.6",
+    "  Middle Third                  ideal 31.4-33.6       ideal 31.8-33.8",
+    "                                range 22.2-42.6       range 22.8-43.0",
+    "",
+    "So their bands ARE per-person in some way. Sex is the obvious candidate and their own",
+    "card copy supports it: Total Facial Width to Height says 'slightly longer faces benefit",
+    "males, while shorter ones suit females', and Rihanna's band for it is indeed the lower",
+    "of the two. Face Width to Height says 'higher ratios are preferred for males' — though",
+    "there the female band is the HIGHER one, which does not match their own copy.",
+    "",
+    "ONE MAN AND ONE WOMAN CANNOT SEPARATE SEX FROM ANYTHING ELSE ABOUT THEM. Gigi Hadid is",
+    "the control: another woman, different ethnicity. Identical bands to Rihanna means the",
+    "bands are sex-specific. Different bands means they vary by something else, and their",
+    "Lateral Canthal Tilt copy — 'more common and favorable in females and certain ethnic",
+    "groups' — says what that something else would probably be.",
+    "",
+    "EITHER RESULT IS AN OBSERVATION, NOT A DESIGN. TrueMax does not infer ethnicity from a",
+    "photograph and does not hold different attractiveness standards by ethnicity. Finding",
+    "that a competitor does would not change that; it would only tell us why a number of",
+    "theirs differs from ours on a given face."
    ]
   }
  ]
