@@ -8,6 +8,7 @@ import {
   fitFont,
   overlayAlpha,
   overlayVisible,
+  toneColour,
   regionCrop,
 } from "./rundownFrame.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
@@ -506,4 +507,43 @@ test("the figure is gone before a cutaway takes the frame", () => {
   // And it was still fully up a moment before it started withdrawing, so the
   // fix did not simply move the whole animation earlier.
   assert.ok(drawProgress(b, handover - 0.6) > 0.999, "retracted far too early");
+});
+
+// ---------------------------------------------------------------------------
+// The colour grammar.
+// ---------------------------------------------------------------------------
+
+// Only the two fields toneColour reads. Building a whole ScoredMetric here
+// would assert nothing extra and would break every time the type grows.
+const toned = (conformance: number, zEff = 0) =>
+  ({ conformance, zEff }) as unknown as Parameters<typeof toneColour>[0];
+
+test("a measurement inside its band is painted as ideal, whatever its rank", () => {
+  // The whole point of moving off zEff. A metric can sit dead-centre ideal and
+  // still out-rank only half the population, because being near ideal is
+  // common — the old rule painted that neutral white.
+  assert.equal(toneColour(toned(1, -0.4)), "#8ff3e0");
+  assert.equal(toneColour(toned(1, 2.0)), "#8ff3e0");
+});
+
+test("nothing renders in the neutral middle any more", () => {
+  // 49.3% of the corpus's 627 metrics used to land in a white that carried no
+  // verdict, so half of any rundown was visual filler. Every value on either
+  // side of the band now says something.
+  const ideal = toneColour(toned(1));
+  for (const c of [0.999, 0.9, 0.6, 0.3, 0]) {
+    assert.notEqual(toneColour(toned(c)), ideal, `conformance ${c} read as ideal`);
+    assert.notEqual(toneColour(toned(c)), "#f7f7f2", `conformance ${c} read as neutral`);
+  }
+});
+
+test("out of band ramps with distance rather than shouting equally", () => {
+  // 22.5% of corpus metrics sit just outside their band and 15.6% sit far
+  // outside. One flat warning colour for both would misreport which to work on.
+  const red = (c: string) => Number(c.match(/\d+/g)![0]);
+  const green = (c: string) => Number(c.match(/\d+/g)![1]);
+  const near = toneColour(toned(0.95));
+  const far = toneColour(toned(0.05));
+  assert.ok(green(far) < green(near), "far outside should be the hotter colour");
+  assert.ok(red(far) >= red(near) - 1, "the ramp should not cool off with distance");
 });

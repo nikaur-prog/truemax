@@ -1529,7 +1529,12 @@ function drawLedger(
     const e = entries[i];
     const last = i === entries.length - 1;
     const colour = toneColour(e.metric);
-    const sign = e.metric.zEff >= 0.5 ? "+" : e.metric.zEff <= -0.5 ? "−" : "·";
+    // Same reading as the colour, so the sign and the ink can never disagree.
+    // The old middle band drew a "·" in neutral white; under the band reading
+    // there is no middle — a measurement is either inside its tolerance or it
+    // is not — so the dot is gone and every entry states a verdict. See
+    // toneColour.
+    const sign = e.metric.conformance >= 1 ? "+" : "−";
     // The newest entry rises in; the ones before it step back as it arrives,
     // on the newcomer's own clock so the hand-off is one motion.
     const settle = smoother(e.reveal);
@@ -1672,10 +1677,36 @@ function titleFor(beat: TimedBeat, name: string): string {
 // Colour carries the same judgement the sentence does, so the two cannot
 // disagree on screen. Green for a strength, warm for a weakness, and the same
 // two colours the rest of the product already uses.
-function toneColour(metric: ScoredMetric): string {
-  if (metric.zEff >= 0.5) return "#8ff3e0";
-  if (metric.zEff <= -0.5) return "#e8a17a";
-  return "#f7f7f2";
+/**
+ * The colour grammar: is this measurement holding the face back, or not.
+ *
+ * Keyed to `conformance` (spec: inside its tolerance band?) rather than to
+ * `zEff` (rank: does it out-rank half the population?). Those are different
+ * questions, and the rank one was the wrong one to paint with. Its thresholds
+ * at ±0.5 sd put HALF of every corpus metric — 49.3% of 627 — into a neutral
+ * white that says nothing, so half of any rundown rendered as visual filler.
+ *
+ * On the same 627 the band reading splits 46.9% in / 53.1% out: an even,
+ * legible contrast where every element on screen carries a verdict. Crucially
+ * the two rules never contradict — zero metrics are in band yet ranked weak,
+ * and zero are out of band yet ranked strong — so this only ever resolves the
+ * old neutral middle. Nothing that used to read positive can turn negative.
+ *
+ * Out of band ramps with distance instead of being one flat warning colour:
+ * 22.5% of metrics sit just outside and 15.6% sit far outside, and a video that
+ * shouts equally at both is lying about which one to work on.
+ */
+export function toneColour(metric: ScoredMetric): string {
+  if (metric.conformance >= 1) return "#8ff3e0";
+  // 1 → just outside, muted. 0 → far outside, saturated.
+  const out = clamp01(1 - metric.conformance);
+  return mixHex("#e8c98a", "#e8894f", smoother(out));
+}
+
+function mixHex(a: string, b: string, t: number): string {
+  const ch = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  const c = (i: number) => Math.round(lerp(ch(a, i), ch(b, i), clamp01(t)));
+  return `rgb(${c(0)}, ${c(1)}, ${c(2)})`;
 }
 
 function bandFor(metric: ScoredMetric): string {

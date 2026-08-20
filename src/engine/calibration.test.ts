@@ -263,3 +263,32 @@ test("a metric inside its tolerance band is reported as ideal, not merely ranked
     }
   }
 });
+
+test("the band reading and the rank reading never contradict each other", () => {
+  // The rundown paints its colour grammar from `conformance` (inside the
+  // tolerance band?) rather than from `zEff` (out-ranks half the population?).
+  // That is only a safe swap because the two never disagree in SIGN: switching
+  // must resolve the old neutral middle and nothing else, never turn a
+  // measurement that read positive into one that reads negative.
+  //
+  // Measured across the whole rated corpus when the change was made: 0 metrics
+  // in band yet ranked weak, 0 out of band yet ranked strong, out of 627. If a
+  // future ideal or tolerance moves far enough to break that, the video would
+  // start contradicting the report, and this is where it surfaces.
+  const metrics = FACES.flatMap((f) => scoreFrontMeasurements(f.measurements, f.sex).metrics);
+  assert.ok(metrics.length > 300, "corpus too small for this to mean anything");
+
+  const inBandButWeak = metrics.filter((m) => m.conformance >= 1 && m.zEff <= -0.5);
+  const outOfBandButStrong = metrics.filter((m) => m.conformance < 1 && m.zEff >= 0.5);
+
+  assert.equal(
+    inBandButWeak.length,
+    0,
+    `in band but ranked weak: ${inBandButWeak.map((m) => m.def.id).join(", ")}`,
+  );
+  assert.equal(
+    outOfBandButStrong.length,
+    0,
+    `out of band but ranked strong: ${outOfBandButStrong.map((m) => m.def.id).join(", ")}`,
+  );
+});
