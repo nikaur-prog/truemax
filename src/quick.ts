@@ -28,19 +28,24 @@ import { spokenSeconds } from "./engine/reelScript.js";
 import {
   addRatedFace,
   clearCalibrationSet,
+  confirmOwnRating,
   corpusJSON,
   loadCalibrationSet,
   missingCoverage,
   sideCount,
   removeRatedFace,
   setHealth,
+  splitByProvenance,
 } from "./engine/calibrationSet.js";
+import type { RatedFace } from "./engine/calibrationSet.js";
+import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
 import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
+import { mergeReports } from "./engine/scoring.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -712,9 +717,31 @@ function renderFaceSlots(): void {
       // see, which is the right flow for scanning yourself and the wrong one for
       // working through a folder of photographs.
       method: "upload",
-      onDone: (report) => {
+      onDone: (report, points, faceDir, review) => {
         closeSideFlow();
         pendingSide = report;
+        // Send the correction, if the operator consented to sharing it.
+        //
+        // This slot used to take the report and drop the other three arguments,
+        // which meant every landmark dragged into place here was thrown away.
+        // That is the wrong way round: a calibration session is precisely where
+        // somebody sits and corrects profile after profile, so it is the richest
+        // source of training signal the seeding will ever get, and it was the
+        // one place not feeding it.
+        //
+        // Fire-and-forget. Nothing on this screen waits for it and a failed
+        // upload must not cost the operator the scan they just corrected — the
+        // measurements are already in `report` and go into the set regardless.
+        // `feedback` is null unless the operator consented — createSideFeedbackIntent
+        // returns null in that case — so its existence IS the permission.
+        if (review.feedback) {
+          void submitSideCorrectionFeedback(review.photo, points, faceDir, review.feedback)
+            .then((result) => {
+              if (!result.ok && !result.rateLimited) {
+                console.warn("Side correction feedback was not sent:", result.message);
+              }
+            });
+        }
         el.cal.classList.remove("hidden");
         renderFaceSlots();
       },
@@ -750,17 +777,44 @@ function renderRatingStep(r: Report): void {
         <input type="text" id="q-cal-label" placeholder="Label (optional, never exported)"
                maxlength="40" autocomplete="off" />
         <button type="button" class="btn pri" id="q-cal-save">Lock it in</button>
+        <button type="button" class="btn gho" id="q-cal-skip">Not sure — skip</button>
       </div>
       <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale —
       a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
       how the men in the current corpus ended up useless.</p>
+      <label class="q-cal-prov">
+        <input type="checkbox" id="q-cal-external" />
+        <span>This number came off another app's analysis, not out of my own head.</span>
+      </label>
+      <p class="q-cal-hint">Worth naming because it is easy to do by accident with a
+      competitor's read of the same face open in the next tab. Fitting our weights to
+      another product's scores is reverse-engineering its formula with arithmetic, so a
+      borrowed number is kept with the face and left out of the corpus export.</p>
+      <p class="q-cal-hint">Skipping is a real answer, not a failure. A face saved
+      without a rating still carries its measurements and its side corrections — it
+      just sits out of the agreement fit. A corpus full of hesitant 5s settles nothing;
+      the nine men already in it span 4.5 to 6.1 and are useless for that exact reason.
+      Rate the ones you are sure about.</p>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
   const num = document.getElementById("q-cal-num") as HTMLInputElement;
   const label = document.getElementById("q-cal-label") as HTMLInputElement;
+  const external = document.getElementById("q-cal-external") as HTMLInputElement;
   const msg = document.getElementById("q-cal-msg")!;
   num.focus();
+  const store = (rating: number | null) => {
+    addRatedFace(
+      r,
+      rating,
+      external.checked ? "external" : "self",
+      label.value.trim() || undefined,
+      pendingSide ?? undefined,
+    );
+    const held = pendingSide;
+    clearPending();
+    renderVerdictStep(r, rating, held);
+  };
   const commit = () => {
     const rating = Number(num.value);
     if (!(rating >= 1 && rating <= 10)) {
@@ -768,43 +822,79 @@ function renderRatingStep(r: Report): void {
       num.focus();
       return;
     }
-    addRatedFace(
-      r,
-      Math.round(rating * 10) / 10,
-      label.value.trim() || undefined,
-      pendingSide ?? undefined,
-    );
-    const held = pendingSide;
-    clearPending();
-    renderVerdictStep(r, Math.round(rating * 10) / 10, held !== null);
+    store(Math.round(rating * 10) / 10);
   };
   document.getElementById("q-cal-save")!.onclick = commit;
+  // Skip stores the face with no rating. It is not a cancel — the measurements
+  // and any side corrections are exactly as valuable as they were, and losing
+  // them because nobody could name a number would be the wrong trade.
+  document.getElementById("q-cal-skip")!.onclick = () => store(null);
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
-function renderVerdictStep(r: Report, rating: number, withSide = false): void {
-  const gap = r.overall - rating;
+function renderVerdictStep(r: Report, rating: number | null, side: Report | null = null): void {
+  const withSide = side !== null;
+  const gap = rating === null ? null : r.overall - rating;
   // Named rather than left as a number. "−2.3" is a figure; "the engine is
   // two points below you on this face" is the thing worth acting on, and the
   // whole set is a list of these.
+  //
+  // A skipped face has no disagreement to name, and inventing one by showing
+  // the engine's number alone would quietly turn this screen into the thing
+  // the skip exists to avoid: a place where the engine's opinion becomes the
+  // reference. It says what was stored and nothing else.
   const verdict =
-    Math.abs(gap) < 0.6 ? "agrees with you" : gap > 0 ? "is too generous here" : "is too harsh here";
+    gap === null
+      ? null
+      : Math.abs(gap) < 0.6 ? "agrees with you" : gap > 0 ? "is too generous here" : "is too harsh here";
   el.calStep.textContent = "Saved";
   el.calBody.innerHTML = `
     <div class="q-cal-verdict">
-      <div class="q-cal-pair">
-        <div><span>YOU</span><b>${rating.toFixed(1)}</b></div>
+      ${
+        gap === null
+          ? `<p class="q-cal-said">Stored without a rating. Its measurements${
+              withSide ? " and side corrections are" : " are"
+            } kept; it sits out of the agreement fit.</p>`
+          : `<div class="q-cal-pair">
+        <div><span>YOU</span><b>${rating!.toFixed(1)}</b></div>
         <div class="q-cal-gap">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</div>
         <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
       </div>
       <p class="q-cal-said">It ${verdict}.${
         withSide ? " Front and side both stored." : ""
-      }</p>
+      }</p>`
+      }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
+        <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
         <button class="btn gho" id="q-cal-list">See the set</button>
       </div>
     </div>`;
+  // The captured face as pasteable text, both views, at the one moment both
+  // are in hand.
+  //
+  // Calibrate has had front and side slots since #46, and no way to get the
+  // NUMBERS back out of it — the diagnostics button lives on the analysis
+  // results panel, which is a different mode holding a different report. So the
+  // one screen in the product that captures a verified profile could not export
+  // it, and an external comparison of a side measurement meant reading region
+  // cards off a screenshot. That is how a side pairing gets mis-matched to the
+  // wrong metric.
+  //
+  // Merged rather than front-only when both are present, because a merged
+  // report carries BOTH views' metrics (mergeReports concatenates them) and its
+  // header prints the two view scores separately. Front-only when that is all
+  // there is, which the dump then says explicitly rather than leaving the
+  // reader to notice an absence.
+  const diag = document.getElementById("q-cal-diag") as HTMLButtonElement | null;
+  if (diag) {
+    diag.onclick = async () => {
+      const full = side ? mergeReports(r, side) : r;
+      const copied = await copyDiagnostics(full, "");
+      diag.textContent = copied ? "Copied" : "Copy from the box";
+      window.setTimeout(() => (diag.textContent = "Copy diagnostics"), 2600);
+    };
+  }
   document.getElementById("q-cal-next")!.onclick = () => {
     resetSexAsk();
     clearPending();
@@ -813,16 +903,31 @@ function renderVerdictStep(r: Report, rating: number, withSide = false): void {
   document.getElementById("q-cal-list")!.onclick = () => renderCalibrationSet();
 }
 
+/**
+ * How far the engine is from the human, for sorting. Unrated rows sort last.
+ *
+ * -1 rather than 0, so a face nobody rated sits below one the engine agrees
+ * with exactly. Both are "nothing to look at here", but only one of them is
+ * evidence of that.
+ */
+function gapOf(f: RatedFace): number {
+  return f.rating === null ? -1 : Math.abs(f.scored - f.rating);
+}
+
 function renderCalibrationSet(): void {
   // The set is the one screen with no face in flight, so arriving here always
   // ends the current one.
   resetSexAsk();
   const faces = loadCalibrationSet();
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
-  const health = (["male", "female"] as const).map((sex) => setHealth(faces, sex));
-  const missing = missingCoverage(faces);
-  const sides = sideCount(faces);
-  const missingSide = missingCoverage(faces, "side");
+  // Everything below counts only what may be fitted against. A withheld row is
+  // still a scan worth keeping, but reporting it as progress towards a usable
+  // corpus would overstate what the export can actually deliver.
+  const { own, withheld } = splitByProvenance(faces);
+  const health = (["male", "female"] as const).map((sex) => setHealth(own, sex));
+  const missing = missingCoverage(own);
+  const sides = sideCount(own);
+  const missingSide = missingCoverage(own, "side");
 
   el.calBody.innerHTML = `
     <div class="q-cal-set">
@@ -847,7 +952,7 @@ function renderCalibrationSet(): void {
         sides === 0
           ? `No face carries a side profile yet, so all ${missingSide.length} side
              measurements are still on a prior. Add one from the Side slot.`
-          : `${sides} of ${faces.length} carr${sides === 1 ? "ies" : "y"} a side profile${
+          : `${sides} of ${own.length} carr${sides === 1 ? "ies" : "y"} a side profile${
               missingSide.length
                 ? `, ${missingSide.length} side measurement${
                     missingSide.length === 1 ? "" : "s"
@@ -856,19 +961,50 @@ function renderCalibrationSet(): void {
             }.`
       }</p>
       ${
+        withheld.length
+          ? `<p class="q-cal-missing">${withheld.length} row${withheld.length === 1 ? "" : "s"}
+             held out of the export — the rating is not marked as your own. A row marked
+             <b>borrowed</b> stays out for good; a row marked <b>unknown</b> predates the
+             provenance field and one tap on "mine" clears it, but only do that for a number
+             you remember writing yourself.</p>`
+          : ""
+      }
+      ${
         faces.length
           ? `<div class="q-cal-rows">
               <div class="q-cal-row q-cal-head"><span>FACE</span><span>YOU</span><span>ENGINE</span><span>GAP</span><span></span></div>
               ${[...faces]
-                .sort((a, b) => Math.abs(b.scored - b.rating) - Math.abs(a.scored - a.rating))
+                // Unrated rows sort last rather than crashing the comparator.
+                // They have no disagreement to rank by, which is the whole
+                // point of the column.
+                .sort((a, b) => gapOf(b) - gapOf(a))
                 .map((f) => {
-                  const gap = f.scored - f.rating;
-                  return `<div class="q-cal-row">
-                    <span>${f.label ? escapeHtml(f.label) : f.id}</span>
-                    <span>${f.rating.toFixed(1)}</span>
+                  const gap = f.rating === null ? null : f.scored - f.rating;
+                  // Four states now. The middle two are the whole point: a row
+                  // whose provenance nobody recorded is not the same as one
+                  // known to be the operator's own, and a row with no rating at
+                  // all is a third thing again — not suspect, just not fittable.
+                  const flag =
+                    f.rating === null
+                      ? ` <em class="q-cal-flag">unrated</em>`
+                      : f.ratedBy === "self"
+                        ? ""
+                        : f.ratedBy === "external"
+                          ? ` <em class="q-cal-flag">borrowed</em>`
+                          : ` <em class="q-cal-flag">unknown</em>`;
+                  const fittable = f.ratedBy === "self" && f.rating !== null;
+                  return `<div class="q-cal-row${fittable ? "" : " held"}">
+                    <span>${f.label ? escapeHtml(f.label) : f.id}${flag}</span>
+                    <span>${f.rating === null ? "—" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
-                    <span class="${Math.abs(gap) >= 1.5 ? "bad" : ""}">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</span>
-                    <button type="button" class="linkish" data-drop="${f.id}">remove</button>
+                    <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
+                      gap === null ? "—" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
+                    }</span>
+                    <span class="q-cal-acts">${
+                      f.ratedBy === undefined && f.rating !== null
+                        ? `<button type="button" class="linkish" data-mine="${f.id}">mine</button>`
+                        : ""
+                    }<button type="button" class="linkish" data-drop="${f.id}">remove</button></span>
                   </div>`;
                 })
                 .join("")}
@@ -877,7 +1013,9 @@ function renderCalibrationSet(): void {
       }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-add">Add a face</button>
-        <button class="btn gho" id="q-cal-copy"${faces.length ? "" : " disabled"}>Copy corpus JSON</button>
+        <button class="btn gho" id="q-cal-copy"${own.length ? "" : " disabled"}>Copy corpus JSON${
+          withheld.length ? ` (${own.length} of ${faces.length})` : ""
+        }</button>
         <button class="btn gho" id="q-cal-clear"${faces.length ? "" : " disabled"}>Clear the set</button>
       </div>
       <p class="q-cal-hint">Copy pastes straight over src/engine/calibration/corpus.json.
@@ -892,6 +1030,9 @@ function renderCalibrationSet(): void {
   };
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-drop]")) {
     button.onclick = () => { removeRatedFace(button.dataset.drop!); renderCalibrationSet(); };
+  }
+  for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-mine]")) {
+    button.onclick = () => { confirmOwnRating(button.dataset.mine!); renderCalibrationSet(); };
   }
   const msg = document.getElementById("q-cal-msg")!;
   document.getElementById("q-cal-copy")!.onclick = async () => {

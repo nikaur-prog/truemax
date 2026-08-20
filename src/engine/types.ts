@@ -53,6 +53,23 @@ export interface MetricDef {
   // limit; deliberately far wider than the reference spread, so this catches
   // impossible values and never an unusual one. See scoreMetric.
   plausible?: [number, number];
+  /**
+   * TOLERANCE: how far either side of the ideal still counts as ideal, in
+   * population sd. Band metrics only.
+   *
+   * Scoring used to treat the ideal as a POINT — `|value − ideal| / sd`, zero
+   * only on an exact match — so every deviation cost immediately and a face
+   * had to hit 31 exact numbers to score well. Nobody does, which is why good
+   * faces converged on mediocre: a benchmark scan of one well-regarded face
+   * put it 3.0 points below a competing product, and the measurements agreed
+   * to two decimals while the scores did not (docs/BENCHMARK_CAVILL.md).
+   *
+   * A tolerance band is the standard shape for scoring against a spec, and it
+   * is also the honest one: this engine cannot resolve differences smaller
+   * than its own measurement noise, so it must not pretend to rank them.
+   * Inside the band a metric is simply ideal.
+   */
+  tolerance?: number;
   // The landmarks this measurement is built from, so an implausible value can
   // name what to re-check rather than saying "something is wrong".
   points?: string[];
@@ -66,6 +83,23 @@ export interface ScoredMetric {
   percentile: number; // Φ(zEff) · 100 — "better than X% of population"
   markerPct: number; // Φ(z) · 100 — position of the raw value in the population, for range bars
   score: number; // 0–10, 5.0 = population median
+  /**
+   * How close to ideal this measurement is, 0 to 1, where 1 means "inside the
+   * tolerance band — nothing to fix here". See scoring.conformance.
+   *
+   * Deliberately NOT the same quantity as `score`. `score` is a rank: 5.0 is
+   * the population median and 7.3 means "closer to ideal than 73% of people".
+   * `conformance` is a spec reading: is this feature holding the face back at
+   * all. A face can be dead-on ideal and still only out-rank 73% of the
+   * population, because being near ideal is common — both numbers are true and
+   * they answer different questions. Reporting the rank alone is what made a
+   * measurement that agreed with an external benchmark to within 0.7 of a
+   * degree read as a 7.3 against their 10.0 (docs/BENCHMARK_CAVILL.md).
+   *
+   * Use conformance to decide what to WORK ON, score to say where someone
+   * STANDS.
+   */
+  conformance: number;
   idealRange: [number, number]; // display range for UI bars
   // The value fell outside anatomical possibility, so it is a placement error
   // rather than a face. Excluded from every aggregate and shown as needing a

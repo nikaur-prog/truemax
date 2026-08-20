@@ -250,7 +250,9 @@ export function regionCrop(
 
   // Height wanted for this band, with headroom so the band is not flush to the
   // frame edge, then width derived from the output aspect.
-  const bandH = faceH * (bottom - top) * 1.16;
+  // 1.22, up from 1.16: the tick-ends of a full-width measurement were
+  // landing flush against the frame edge.
+  const bandH = faceH * (bottom - top) * 1.22;
   let sh = Math.max(bandH, 1);
   let sw = sh * aspect;
   // A floor on how tight the crop may get, so an extreme zoom on a narrow band
@@ -306,7 +308,11 @@ export function regionCrop(
   // lips and chin all render the identical frame. The camera stops moving. A
   // per-beat expansion costs nothing on the beats that do not need it.
   if (mustContain) {
-    const pad = 0.16; // room for the label chip, which sits outside the span
+    // 0.32, doubled from 0.16. The chip is not a point at the end of the
+    // span, it is ~180px of label BEYOND the end of the span, and at 0.16 a
+    // full-width measurement's chip rendered half outside the frame — the
+    // exact clip this block exists to prevent.
+    const pad = 0.32;
     const needW = (mustContain.x1 - mustContain.x0) * photo.width * (1 + pad * 2);
     const needH = (mustContain.y1 - mustContain.y0) * photo.height * (1 + pad * 2);
     if (needW > sw || needH > sh) {
@@ -465,7 +471,10 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   // run-up began BEFORE the beat did, and the line was already part drawn on
   // its first frame. Rare, and exactly the kind of thing that looks like the
   // renderer is a frame out.
-  const DRAW = 0.5;
+  // 0.38, down from 0.5. At the new narration rate a half-second run-up ate
+  // most of a short clause; the line should land just before its number is
+  // spoken, not draw through the whole sentence.
+  const DRAW = 0.38;
   const from = Math.max(beat.start, beat.drawAt - DRAW);
   const span = Math.max(0.001, beat.drawAt - from);
   const drawn = clamp01((t - from) / span);
@@ -788,7 +797,6 @@ export function drawRundownFrame(
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
   drawLedger(ctx, input, beat, t);
-  drawCaption(ctx, beat, input, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, H);
   // Last, over everything: the whole frame resolves, chrome included, the way
@@ -1234,6 +1242,12 @@ function drawCurve(
 
   ctx.textAlign = "center";
 
+  // Where the axis sits below the curve's baseline. Named because the headline
+  // percentile has to be placed clear of it, and two independent magic numbers
+  // are how those two ended up drawn on top of each other.
+  const AXIS_TICK_Y = 62;
+  const AXIS_UNIT_Y = 84;
+
   // The scale, along the bottom.
   //
   // A curve with no axis is a shape. The band was labelled "where most men are"
@@ -1249,11 +1263,11 @@ function drawCurve(
     [0, SPREAD.median.toFixed(1)],
     [1, SPREAD.high.toFixed(1)],
   ] as Array<[number, string]>) {
-    ctx.fillText(label, xOf(z), baseline + 62);
+    ctx.fillText(label, xOf(z), baseline + AXIS_TICK_Y);
   }
   ctx.font = "500 11px Inter, Arial, sans-serif";
   ctx.fillStyle = "rgba(247,247,242,0.34)";
-  ctx.fillText("SCORE", W / 2, baseline + 84);
+  ctx.fillText("SCORE", W / 2, baseline + AXIS_UNIT_Y);
 
   // TWO STAGES, and the order is the argument.
   //
@@ -1316,11 +1330,22 @@ function drawCurve(
       ctx.font = "300 64px Fraunces, Georgia, serif";
       ctx.letterSpacing = "0px";
       ctx.fillStyle = "#f7f7f2";
-      ctx.fillText(`TOP ${top}%`, W / 2, baseline + 96);
+      // Below the axis, not through it.
+      //
+      // This sat at baseline + 96. Sixty-four point Fraunces has a cap height
+      // around 46px, so the glyphs reached back to roughly baseline + 50 and
+      // were drawn straight over the scale numbers at +62 and the word SCORE at
+      // +84 — the axis was legible in every frame except the one frame the
+      // headline appears in, which is the frame people screenshot.
+      //
+      // Expressed against the axis it has to clear rather than as a new magic
+      // number, so moving the scale moves this with it.
+      const clearsAxis = AXIS_UNIT_Y + 12 + 46;
+      ctx.fillText(`TOP ${top}%`, W / 2, baseline + clearsAxis);
       ctx.font = "500 14px Inter, Arial, sans-serif";
       ctx.letterSpacing = "3px";
       ctx.fillStyle = "#7f8682";
-      ctx.fillText("OF THE REFERENCE SET", W / 2, baseline + 130);
+      ctx.fillText("OF THE REFERENCE SET", W / 2, baseline + clearsAxis + 34);
     }
   }
   ctx.restore();
@@ -1475,7 +1500,9 @@ function drawOverlayForBeat(
 // ledger and the number never disagree about whether a trait helped.
 // ---------------------------------------------------------------------------
 const LEDGER_MAX = 5;
-const LEDGER_PITCH = 36;
+// 27, down from 36 with the type: five entries now span 128px where they
+// spanned 180.
+const LEDGER_PITCH = 27;
 const LEDGER_REVEAL = 0.4;
 
 function ledgerEntries(
@@ -1520,16 +1547,28 @@ function drawLedger(
   // Anchored just inside the top-left safe corner, stacking down — up and out
   // of the face. It used to end at 42% of the frame height, which put the
   // list straight across the eyes of every portrait.
-  const y0 = SAFE_TOP + 14;
+  // Higher than SAFE_TOP and smaller than it was, deliberately. SAFE_TOP is
+  // where TikTok's own chrome ends, and the ledger used to start below it in
+  // 27px type — five entries ran to the middle of the forehead and sat over
+  // the face on every close-up. At 20px starting 40px into the margin the
+  // whole stack ends above the brow line; the top few pixels may brush the
+  // chrome on some devices, which is the right trade — the list is context,
+  // the face is the video.
+  const y0 = SAFE_TOP - 40;
   ctx.save();
   ctx.textAlign = "left";
-  ctx.font = "700 27px Inter, Arial, sans-serif";
+  ctx.font = "700 20px Inter, Arial, sans-serif";
   const newest = entries[entries.length - 1];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const last = i === entries.length - 1;
     const colour = toneColour(e.metric);
-    const sign = e.metric.zEff >= 0.5 ? "+" : e.metric.zEff <= -0.5 ? "−" : "·";
+    // Same reading as the colour, so the sign and the ink can never disagree.
+    // The old middle band drew a "·" in neutral white; under the band reading
+    // there is no middle — a measurement is either inside its tolerance or it
+    // is not — so the dot is gone and every entry states a verdict. See
+    // toneColour.
+    const sign = e.metric.conformance >= 1 ? "+" : "−";
     // The newest entry rises in; the ones before it step back as it arrives,
     // on the newcomer's own clock so the hand-off is one motion.
     const settle = smoother(e.reveal);
@@ -1544,48 +1583,72 @@ function drawLedger(
   ctx.restore();
 }
 
-// ---------------------------------------------------------------------------
-// The kicker: ONE thing per beat, and only when the beat has one.
+// The mid-frame value kicker is GONE, and the section that drew it with it.
 //
-// The rolling transcript is gone entirely. The narration already reads the
-// sentence out loud; text chasing it word by word covered the face all video
-// and doubled information nothing needed doubled. What a beat is allowed to
-// put mid-frame is its single most important fact: for a measurement beat,
-// the measured value itself — which the voice says once and nothing else on
-// screen shows (the chip on the face carries the population average, the
-// bottom bar carries the score). It lands when the line finishes drawing,
-// because a value appearing before its evidence is backwards, and leaves
-// with the beat.
+// It repeated, in 46px type across the middle of the frame, a number that was
+// already on screen twice: once in the chip riding the measurement line and
+// once implied by the score in the bottom bar. Three renderings of one value
+// per beat, and the big one sat over the face. The overlay drawing the line
+// and the chip on it IS the caption; anything restating it is cover.
+//
+// rollingDigits and rollProgress stay exported below — the chip's own number
+// roll uses the same helpers and the tests pin their behaviour.
+
 // ---------------------------------------------------------------------------
-function drawCaption(
-  ctx: CanvasRenderingContext2D,
-  beat: TimedBeat,
-  input: RundownInput,
-  t: number,
-  W: number,
-  H: number,
-): void {
-  const id = beat.beat.metricId;
-  const metric = id ? input.metrics.get(id) : undefined;
-  if (!metric) return;
+// The number roll.
+//
+// A measured value that is simply THERE reads as a caption. One that arrives
+// unresolved and settles reads as a machine finishing its arithmetic, and it
+// is the cheapest expensive-looking gesture in the reference videos — their
+// facial thirds visibly pass through 51/51/57 and 37/36/32 before landing on
+// 34/34/32, and their harmony donut counts 35 → 51 → 64 → 87.
+//
+// Two rules it has to obey here:
+//
+//   Deterministic. Frames are rendered for export, and the same beat rendered
+//   twice must produce the same pixels, so there is no Math.random in this —
+//   the digit is a hash of its position and the quantised step.
+//
+//   After the evidence, never before. The roll starts at drawAt, the instant
+//   the line finishes drawing. A value resolving while its own measurement is
+//   still being constructed is the backwards version of this.
+// ---------------------------------------------------------------------------
 
-  const kicker = `${metric.value.toFixed(metric.def.decimals)}${metric.def.unit}`;
-  const pop = smoother(clamp01((drawProgress(beat, t) - 0.92) / 0.08));
-  const endFade = smoother(clamp01((beat.start + beat.duration - t) / 0.15));
-  const a = pop * endFade;
-  if (a <= 0.01) return;
+const ROLL = 0.45;
 
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.letterSpacing = "0px";
-  ctx.font = fitFont(ctx, kicker, W - SAFE_LEFT * 2 - 40, 46, 30, (px) => `700 ${px}px Inter, Arial, sans-serif`);
-  const y = H - SAFE_BOTTOM - 88 + (1 - pop) * 8;
-  ctx.globalAlpha = a;
-  ctx.shadowColor = "rgba(0,0,0,.92)";
-  ctx.shadowBlur = 22;
-  ctx.fillStyle = "#f7f7f2";
-  ctx.fillText(kicker, W / 2, y);
-  ctx.restore();
+export function rollProgress(beat: TimedBeat, t: number): number {
+  if (beat.drawAt === undefined) return 1;
+  return clamp01((t - beat.drawAt) / ROLL);
+}
+
+/**
+ * `final` with its digits scrambled, settling left to right as `p` runs 0→1.
+ *
+ * Only digits move. The decimal point, the minus and the unit hold still,
+ * because a string whose punctuation dances is a glitch rather than a readout.
+ * Leading digits lock first, the way an odometer settles, so the magnitude is
+ * readable before the precision is.
+ */
+export function rollingDigits(final: string, p: number): string {
+  if (p >= 1) return final;
+  const digits: number[] = [];
+  for (let i = 0; i < final.length; i++) {
+    if (final[i] >= "0" && final[i] <= "9") digits.push(i);
+  }
+  if (!digits.length) return final;
+
+  // Quantised so the digits visibly STEP. Rolling per frame at 60fps is a
+  // grey blur that reads as a rendering fault, not as counting.
+  const STEPS = 9;
+  const step = Math.floor(clamp01(p) * STEPS);
+  const out = final.split("");
+  for (let k = 0; k < digits.length; k++) {
+    if (p >= (k + 1) / digits.length) continue;
+    const i = digits[k];
+    const h = (i * 2654435761 + step * 40503 + final.length * 97) >>> 0;
+    out[i] = String(h % 10);
+  }
+  return out.join("");
 }
 
 // The bottom bar. Fixed position, every frame, because a value that moves is a
@@ -1672,10 +1735,36 @@ function titleFor(beat: TimedBeat, name: string): string {
 // Colour carries the same judgement the sentence does, so the two cannot
 // disagree on screen. Green for a strength, warm for a weakness, and the same
 // two colours the rest of the product already uses.
-function toneColour(metric: ScoredMetric): string {
-  if (metric.zEff >= 0.5) return "#8ff3e0";
-  if (metric.zEff <= -0.5) return "#e8a17a";
-  return "#f7f7f2";
+/**
+ * The colour grammar: is this measurement holding the face back, or not.
+ *
+ * Keyed to `conformance` (spec: inside its tolerance band?) rather than to
+ * `zEff` (rank: does it out-rank half the population?). Those are different
+ * questions, and the rank one was the wrong one to paint with. Its thresholds
+ * at ±0.5 sd put HALF of every corpus metric — 49.3% of 627 — into a neutral
+ * white that says nothing, so half of any rundown rendered as visual filler.
+ *
+ * On the same 627 the band reading splits 46.9% in / 53.1% out: an even,
+ * legible contrast where every element on screen carries a verdict. Crucially
+ * the two rules never contradict — zero metrics are in band yet ranked weak,
+ * and zero are out of band yet ranked strong — so this only ever resolves the
+ * old neutral middle. Nothing that used to read positive can turn negative.
+ *
+ * Out of band ramps with distance instead of being one flat warning colour:
+ * 22.5% of metrics sit just outside and 15.6% sit far outside, and a video that
+ * shouts equally at both is lying about which one to work on.
+ */
+export function toneColour(metric: ScoredMetric): string {
+  if (metric.conformance >= 1) return "#8ff3e0";
+  // 1 → just outside, muted. 0 → far outside, saturated.
+  const out = clamp01(1 - metric.conformance);
+  return mixHex("#e8c98a", "#e8894f", smoother(out));
+}
+
+function mixHex(a: string, b: string, t: number): string {
+  const ch = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  const c = (i: number) => Math.round(lerp(ch(a, i), ch(b, i), clamp01(t)));
+  return `rgb(${c(0)}, ${c(1)}, ${c(2)})`;
 }
 
 function bandFor(metric: ScoredMetric): string {

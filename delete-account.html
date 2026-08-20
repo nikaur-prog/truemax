@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delete your account · TrueMax</title>
+    <meta name="description" content="How to delete your TrueMax account and everything attached to it, from inside the app or by email. What is removed, what is kept, and how long it takes." />
+    <meta name="theme-color" content="#141518" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <!--
+    WHY THIS PAGE EXISTS AS A PAGE.
+
+    Account deletion has always worked from inside the app (api/delete-account.ts),
+    and the privacy policy said so. That is enough for Apple, and it is not enough
+    for Google Play, which requires a route somebody can reach WITHOUT installing
+    the app and WITHOUT signing in — and asks for its URL as a required field on
+    the Data Safety form.
+
+    The requirement is more sensible than it sounds. Somebody who has already
+    uninstalled, or who cannot get back into their account, has no in-app path
+    left, and "delete it from the app you no longer have" is not an answer. So
+    this page names both routes and states what happens either way.
+
+    It deliberately does NOT contain a form. A page that accepts an email address
+    and promises deletion, with no way to prove the sender owns that address, is
+    an invitation to delete somebody else's account. The email route is manual on
+    purpose, because verifying identity is the slow part and it should be.
+  -->
+  <body class="legal-page">
+    <header class="topbar">
+      <a class="wordmark" href="/">TRUE<b>MAX</b></a>
+      <a class="auth-scan-link" href="/">Scan your face →</a>
+    </header>
+
+    <main class="legal-shell">
+      <p class="legal-kicker">TrueMax</p>
+      <h1>Delete your account</h1>
+      <p class="legal-meta">Last updated 20 August 2026</p>
+
+      <div class="legal-summary">
+        <h2>The short version</h2>
+        <p>
+          <b>Open TrueMax, tap your account, and choose Delete account.</b> It
+          takes effect immediately and needs nothing from us.
+        </p>
+        <p>
+          <b>If you cannot reach the app</b> — you have uninstalled it, or you are
+          locked out — email
+          <a href="mailto:privacy@truemax.app">privacy@truemax.app</a> from the
+          address on the account and we will do it for you.
+        </p>
+      </div>
+
+      <h2>What gets deleted</h2>
+      <p>
+        Everything tied to the account, and that is a shorter list than most apps
+        because most of TrueMax never leaves your phone in the first place:
+      </p>
+      <ul>
+        <li>the account itself, and your sign-in;</li>
+        <li>your saved scans and score history held against it;</li>
+        <li>your subscription record — cancel the subscription itself first if it
+          is still active, or you will keep being charged for a plan attached to
+          an account that no longer exists;</li>
+        <li>any side-profile feedback images you chose to share, which are queued
+          for removal and deleted within 30 days.</li>
+      </ul>
+
+      <h2>What was never ours to delete</h2>
+      <p>
+        Your front photograph is not uploaded to us under any circumstance — the
+        measurement engine runs inside your browser, on your own device. Scan
+        history on the device is stored locally, so deleting the app removes it.
+        Neither of those is something we can delete for you, because neither was
+        ever sent to us. See the <a href="/privacy">privacy policy</a> for the
+        full account of what is and is not collected.
+      </p>
+
+      <h2>How long it takes</h2>
+      <p>
+        Deleting from inside the app is immediate. An emailed request is answered
+        within 30 days and usually much sooner; we will confirm when it is done.
+        Shared side-profile images are removed within 30 days either way, because
+        they are deleted on a scheduled sweep rather than one at a time.
+      </p>
+
+      <h2>Why there is no form here</h2>
+      <p>
+        A page that took an email address and deleted the matching account would
+        let anyone delete anyone's. Proving that a request came from the person
+        who owns the account is the part that matters, so the email route is
+        handled by a person. Write from the address on the account and it is
+        straightforward.
+      </p>
+
+      <p class="legal-nav">
+        <a href="/privacy">Privacy Policy →</a>
+      </p>
+    </main>
+
+    <p class="foot">TRUEMAX · ON-DEVICE MEASUREMENT ENGINE · TRUEMAX.APP</p>
+  </body>
+</html>

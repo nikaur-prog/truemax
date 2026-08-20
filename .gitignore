@@ -28,3 +28,6 @@ supabase/.temp/
 
 # Local visual exports created by the renderer and frame-check tools.
 exports/
+
+# Contact sheets from tools/rundown-sheet.mjs — regenerate, never commit.
+.rundown-sheet/

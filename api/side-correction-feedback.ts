@@ -12,7 +12,21 @@ const MAX_BODY_BYTES = 2_500_000;
 const MAX_REVOKE_BODY_BYTES = 2_000;
 const MAX_PHOTO_BYTES = 2_000_000;
 const MAX_METADATA_CHARS = 40_000;
-const MAX_SUBMISSIONS_PER_24_HOURS = 5;
+/**
+ * Per-account ceiling on stored corrections, rolling 24 hours.
+ *
+ * Raised from 5. The cap exists so a signed-in client cannot turn the private
+ * review bucket into file storage, and 5 served that — but it also throttled
+ * the one thing the bucket is FOR. analyze-side-feedback.mjs will not emit a
+ * calibration offset for a landmark until it has 25 corrections, so at five a
+ * day the auto-placement could not be taught faster than five days per
+ * landmark, and the people correcting most (the ones whose corrections are
+ * worth most) hit the wall first and saw a vague failure for it.
+ *
+ * 25 clears the analyser's own bar in a single sitting and still bounds the
+ * worst case at roughly 50MB per account per day.
+ */
+const MAX_SUBMISSIONS_PER_24_HOURS = 25;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Listing never returns the photo path, hashes, landmarks, notes or review
@@ -248,18 +262,37 @@ export async function POST(request: Request): Promise<Response> {
     // ceiling is enough for genuine correction retries while preventing a
     // signed-in client from turning the private review bucket into file
     // storage. Duplicate retries above remain idempotent and do not count.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: recentCount, error: countError } = await admin
-      .from("side_landmark_feedback")
-      .select("id", { count: "exact", head: true })
+    //
+    // STAFF ARE EXEMPT, and the reason is that the cap had exactly the wrong
+    // shape for the one person it should never have applied to. A calibration
+    // session is somebody sitting down and correcting fifty profiles in a row.
+    // analyze-side-feedback.mjs will not emit an offset for a landmark until it
+    // has 25 corrections OF THAT LANDMARK, so a 25-a-day account ceiling caps a
+    // sitting at roughly one landmark's worth — the limit bit hardest on the
+    // only work that makes the seeding better.
+    //
+    // Same gate as the /quick endpoints: a row in app_admins, granted by hand
+    // in the SQL editor. Non-staff behaviour is unchanged, including the 429.
+    const { data: staff } = await admin
+      .from("app_admins")
+      .select("user_id")
       .eq("user_id", user.id)
-      .gte("created_at", since);
-    if (countError) throw new Error(`Feedback rate check failed: ${countError.message}`);
-    if ((recentCount ?? 0) >= MAX_SUBMISSIONS_PER_24_HOURS) {
-      return json(
-        { error: "Feedback limit reached for today. Your analysis can still continue." },
-        429,
-      );
+      .maybeSingle<{ user_id: string }>();
+
+    if (!staff) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count: recentCount, error: countError } = await admin
+        .from("side_landmark_feedback")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", since);
+      if (countError) throw new Error(`Feedback rate check failed: ${countError.message}`);
+      if ((recentCount ?? 0) >= MAX_SUBMISSIONS_PER_24_HOURS) {
+        return json(
+          { error: "Feedback limit reached for today. Your analysis can still continue." },
+          429,
+        );
+      }
     }
 
     const storagePath = `${user.id}/${metadata.submissionId}.jpg`;

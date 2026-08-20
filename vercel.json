@@ -4,6 +4,7 @@
     { "source": "/quick", "destination": "/quick.html" },
     { "source": "/calib", "destination": "/calib.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/delete-account", "destination": "/delete-account.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/brand", "destination": "/brand.html" }
   ],

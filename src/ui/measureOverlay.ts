@@ -34,11 +34,11 @@ interface Pt2 {
 // resolves them against the raw landmark list.
 const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   fwhr: (m) => [
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, label: `${m.value.toFixed(2)}×` },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, label: `${m.value.toFixed(2)}×` },
     { kind: "span", a: mid(LM.EYE_R_TOP, LM.EYE_L_TOP), b: LM.LIP_TOP, color: WARM },
   ],
   jawCheekRatio: (m) => [
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
     { kind: "span", a: LM.GONION_R, b: LM.GONION_L, label: `${m.value.toFixed(3)}` },
   ],
   gonialProxy: (m) => [
@@ -66,7 +66,7 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   eyeSeparationRatio: (m) => [
     { kind: "span", a: LM.IRIS_R, b: LM.IRIS_L, label: `${m.value.toFixed(3)}` },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
   ],
   intercanthalEyeWidth: (m) => [
     { kind: "span", a: LM.EYE_R_INNER, b: LM.EYE_L_INNER, label: `${m.value.toFixed(2)}×` },
@@ -74,7 +74,7 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   fifthsEyeRatio: (m) => [
     { kind: "span", a: LM.EYE_R_OUTER, b: LM.EYE_R_INNER, label: `${m.value.toFixed(3)}` },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
   ],
   noseMouthRatio: (m) => [
     { kind: "span", a: 98, b: 327, label: `${m.value.toFixed(2)}×` },
@@ -129,14 +129,14 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   facialIndex: (m) => [
     { kind: "span", a: LM.FOREHEAD_TOP, b: LM.MENTON, label: `${m.value.toFixed(2)}` },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
   ],
   midfaceRatio: (m) => [
     { kind: "span", a: LM.IRIS_R, b: LM.IRIS_L, label: `${m.value.toFixed(2)}` },
     { kind: "span", a: mid(LM.IRIS_R, LM.IRIS_L), b: LM.LIP_TOP, color: WARM },
   ],
   cheekboneHeight: (m) => [
-    { kind: "rule", y: LM.MALAR_R, label: `${m.value.toFixed(2)}` },
+    { kind: "rule", y: LM.ZYGION_R, label: `${m.value.toFixed(2)}` },
     { kind: "span", a: mid(LM.IRIS_R, LM.IRIS_L), b: LM.MENTON, color: WARM },
   ],
   midlineDeviation: (m) => [
@@ -153,7 +153,7 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   mirrorDeviation: (m) => [
     { kind: "axis", x: mid(LM.IRIS_R, LM.IRIS_L) },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, label: `${m.value.toFixed(1)}%` },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, label: `${m.value.toFixed(1)}%` },
   ],
 };
 
@@ -409,11 +409,23 @@ export function drawMeasurement(
       const v = P(seg.v);
       const a = P(seg.a);
       const b = P(seg.b);
-      // The two legs run out from the vertex, then the arc sweeps between them.
-      line(ctx, v, lerp(v, a, u));
-      line(ctx, v, lerp(v, b, u));
-      if (u > 0.55) arc(ctx, v, a, b, width, (u - 0.55) / 0.45);
-      if (seg.label && done) label(ctx, seg.label, v, fs, color);
+      // The legs run out from the vertex ONE AT A TIME, then the arc sweeps
+      // between them.
+      //
+      // They used to share a single `u`, so both grew together and the angle
+      // appeared as a finished V. Two elements drawn on one beat is a diagram
+      // being switched on; drawn on two it is an angle being constructed, and
+      // the second leg arriving against a stationary first is what makes the
+      // arc between them read as a measurement rather than a decoration. The
+      // reference channels never draw two parts of a figure simultaneously.
+      //
+      // Overlapped rather than strictly queued — the second starts before the
+      // first has landed — so this is still one gesture at speed.
+      const phase = anglePhases(u);
+      line(ctx, v, lerp(v, a, phase.legA));
+      if (phase.legB > 0) line(ctx, v, lerp(v, b, phase.legB));
+      if (phase.arc > 0) arc(ctx, v, a, b, width, phase.arc);
+      if (seg.label && done) label(ctx, seg.label, angleLabelAt(v, a, b, width, fs), fs, color);
     } else if (seg.kind === "rule") {
       // A rule spans the frame, so it opens from the middle outward.
       const p = P(seg.y);
@@ -451,20 +463,124 @@ function tick(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2, lw: number): void {
 }
 
 // `u` sweeps the arc from its first leg toward its second.
+/**
+ * How big the angle's arc should be, in pixels.
+ *
+ * It was a flat `width * 0.045` — about thirteen pixels against legs two
+ * hundred long, which on a phone is a hook you have to go looking for. The arc
+ * is the element that says "this is an ANGLE" rather than two lines that happen
+ * to meet, so it is the last thing that should be the least visible.
+ *
+ * Scaled to the SHORTER leg so it stays in proportion on a figure of any size,
+ * and bounded so a very long leg cannot swallow the face and a very short one
+ * cannot vanish.
+ */
+export function arcRadius(
+  v: Pt2,
+  a: Pt2,
+  b: Pt2,
+  width: number,
+): number {
+  const legs = Math.min(Math.hypot(a.x - v.x, a.y - v.y), Math.hypot(b.x - v.x, b.y - v.y));
+  return Math.max(width * 0.05, Math.min(width * 0.14, legs * 0.3));
+}
+
+/**
+ * Where an angle's value chip goes: outside the vertex, along the bisector
+ * pointing AWAY from the figure.
+ *
+ * It used to sit exactly on the vertex, which is where the arc is, so the one
+ * element that identifies the figure as an angle was covered by the number at
+ * the precise moment both were on screen. Only visible by rendering it — the
+ * geometry tests all passed.
+ *
+ * Away from the legs rather than between them, because between them is the
+ * face. On a jaw angle the legs run up from the chin, so this drops the chip
+ * below the chin and into empty frame; on a gonial angle it sits back toward
+ * the ear. label() still clamps the result inside the canvas.
+ */
+export function angleLabelAt(v: Pt2, a: Pt2, b: Pt2, width: number, fs: number): Pt2 {
+  const unit = (p: Pt2) => {
+    const d = Math.hypot(p.x - v.x, p.y - v.y) || 1;
+    return { x: (p.x - v.x) / d, y: (p.y - v.y) / d };
+  };
+  const ua = unit(a);
+  const ub = unit(b);
+  let bx = ua.x + ub.x;
+  let by = ua.y + ub.y;
+  const len = Math.hypot(bx, by);
+  // Legs pointing exactly opposite each other have no bisector — a straight
+  // line is not an angle to label, but it must not produce NaN either.
+  if (len < 1e-6) return { x: v.x, y: v.y + arcRadius(v, a, b, width) + fs };
+  bx /= len;
+  by /= len;
+  const out = arcRadius(v, a, b, width) + fs * 1.25;
+  return { x: v.x - bx * out, y: v.y - by * out };
+}
+
+/**
+ * The signed sweep from bearing `a1` to bearing `a2`, the short way round —
+ * so an angle figure always marks the INTERIOR angle between its two legs.
+ *
+ * The previous version sorted the two bearings and swept low to high, which is
+ * the interior angle only while the pair does not straddle the atan2
+ * discontinuity at ±π. A gonial angle on one side of the face does straddle it,
+ * and there the arc looped the wrong way around the vertex and out through its
+ * own leg. It survived because the arc was thirteen pixels wide; drawing it at a
+ * readable size made it obvious immediately.
+ *
+ * Always at most half a turn, so the result is never the reflex angle.
+ */
+export function interiorSweep(a1: number, a2: number): number {
+  let d = a2 - a1;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
 function arc(ctx: CanvasRenderingContext2D, v: Pt2, a: Pt2, b: Pt2, width: number, u = 1): void {
-  const r = width * 0.045;
+  const r = arcRadius(v, a, b, width);
   const a1 = Math.atan2(a.y - v.y, a.x - v.x);
   const a2 = Math.atan2(b.y - v.y, b.x - v.x);
-  const lo = Math.min(a1, a2);
-  const hi = Math.max(a1, a2);
+  // Always the INTERIOR angle: sweep from the first leg to the second the
+  // short way round.
+  //
+  // It used to sort the two bearings and sweep lo→hi, which is only the
+  // interior angle when the pair does not straddle the atan2 discontinuity at
+  // ±π. When it does — and a gonial angle on one side of the face does — it
+  // drew the reflex angle instead: an arc looping the wrong way around the
+  // vertex and out through its own leg. Invisible for as long as the radius was
+  // thirteen pixels, obvious the moment the arc was drawn at a readable size.
+  const d = interiorSweep(a1, a2);
   const t = Math.max(0, Math.min(1, u));
   ctx.beginPath();
-  ctx.arc(v.x, v.y, r, lo, lo + (hi - lo) * t, Math.abs(a1 - a2) > Math.PI);
+  ctx.arc(v.x, v.y, r, a1, a1 + d * t, d < 0);
   ctx.stroke();
 }
 
 // How much of the timeline is spent staggering segment starts, as opposed to
 // all of them running together. 0 = simultaneous, 1 = strictly sequential.
+/**
+ * How far each part of an angle figure has been drawn, at overall progress `u`.
+ *
+ * The first leg, then the second, then the arc between them — overlapped, not
+ * queued. Both legs used to share `u` and grow together, which draws a finished
+ * V rather than an angle being constructed; the second leg arriving against a
+ * stationary first is what makes the arc read as a measurement being taken. The
+ * reference channels never draw two parts of one figure simultaneously.
+ *
+ * Its own function so the ordering is testable without a canvas, and so a later
+ * tweak to the constants cannot quietly reorder the construction.
+ */
+export function anglePhases(u: number): { legA: number; legB: number; arc: number } {
+  const unit = (n: number) => Math.max(0, Math.min(1, n));
+  return {
+    legA: unit(u / 0.55),
+    legB: unit((u - 0.30) / 0.55),
+    arc: unit((u - 0.72) / 0.28),
+  };
+}
+
 const STAGGER = 0.45;
 
 // Draw a measurement on, over `DRAW_MS`. Returns a handle so a fast hover down

@@ -36,6 +36,10 @@ export default defineConfig({
         // anything and by an app-store reviewer following a bare URL.
         privacy: resolve(import.meta.dirname, "privacy.html"),
         terms: resolve(import.meta.dirname, "terms.html"),
+        // Required by Play: an account-deletion route reachable without the app
+        // and without signing in. Same no-script rule as the two above — the
+        // person who needs it may have already uninstalled.
+        deleteAccount: resolve(import.meta.dirname, "delete-account.html"),
         // The logo pack has been sitting in public/brand since launch with
         // nothing linking to it. This is the page that hands it over.
         brand: resolve(import.meta.dirname, "brand.html"),

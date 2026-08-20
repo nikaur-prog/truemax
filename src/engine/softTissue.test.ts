@@ -43,7 +43,7 @@ function face(bulge: number): NormalizedLandmark[] {
   put(LM.NASION, 500, 380); put(LM.SUBNASALE, 500, 560);
 
   // Structure: cheekbones at ±170, jaw corners at ±140 and lower.
-  put(LM.MALAR_R, 330, 450); put(LM.MALAR_L, 670, 450);
+  put(LM.ZYGION_R, 330, 450); put(LM.ZYGION_L, 670, 450);
   put(LM.GONION_R, 360, 640); put(LM.GONION_L, 640, 640);
 
   // The silhouette. Widest point level with the cheekbones, mid-cheek halfway

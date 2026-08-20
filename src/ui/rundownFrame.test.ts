@@ -8,8 +8,12 @@ import {
   fitFont,
   overlayAlpha,
   overlayVisible,
+  toneColour,
   regionCrop,
+  rollProgress,
+  rollingDigits,
 } from "./rundownFrame.js";
+import { anglePhases, angleLabelAt, arcRadius, interiorSweep } from "./measureOverlay.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
 
@@ -506,4 +510,199 @@ test("the figure is gone before a cutaway takes the frame", () => {
   // And it was still fully up a moment before it started withdrawing, so the
   // fix did not simply move the whole animation earlier.
   assert.ok(drawProgress(b, handover - 0.6) > 0.999, "retracted far too early");
+});
+
+// ---------------------------------------------------------------------------
+// The colour grammar.
+// ---------------------------------------------------------------------------
+
+// Only the two fields toneColour reads. Building a whole ScoredMetric here
+// would assert nothing extra and would break every time the type grows.
+const toned = (conformance: number, zEff = 0) =>
+  ({ conformance, zEff }) as unknown as Parameters<typeof toneColour>[0];
+
+test("a measurement inside its band is painted as ideal, whatever its rank", () => {
+  // The whole point of moving off zEff. A metric can sit dead-centre ideal and
+  // still out-rank only half the population, because being near ideal is
+  // common — the old rule painted that neutral white.
+  assert.equal(toneColour(toned(1, -0.4)), "#8ff3e0");
+  assert.equal(toneColour(toned(1, 2.0)), "#8ff3e0");
+});
+
+test("nothing renders in the neutral middle any more", () => {
+  // 49.3% of the corpus's 627 metrics used to land in a white that carried no
+  // verdict, so half of any rundown was visual filler. Every value on either
+  // side of the band now says something.
+  const ideal = toneColour(toned(1));
+  for (const c of [0.999, 0.9, 0.6, 0.3, 0]) {
+    assert.notEqual(toneColour(toned(c)), ideal, `conformance ${c} read as ideal`);
+    assert.notEqual(toneColour(toned(c)), "#f7f7f2", `conformance ${c} read as neutral`);
+  }
+});
+
+test("out of band ramps with distance rather than shouting equally", () => {
+  // 22.5% of corpus metrics sit just outside their band and 15.6% sit far
+  // outside. One flat warning colour for both would misreport which to work on.
+  const red = (c: string) => Number(c.match(/\d+/g)![0]);
+  const green = (c: string) => Number(c.match(/\d+/g)![1]);
+  const near = toneColour(toned(0.95));
+  const far = toneColour(toned(0.05));
+  assert.ok(green(far) < green(near), "far outside should be the hotter colour");
+  assert.ok(red(far) >= red(near) - 1, "the ramp should not cool off with distance");
+});
+
+// ---------------------------------------------------------------------------
+// The number roll.
+// ---------------------------------------------------------------------------
+
+test("a rolled value settles on the truth", () => {
+  assert.equal(rollingDigits("134.4°", 1), "134.4°");
+  assert.equal(rollingDigits("134.4°", 1.5), "134.4°");
+});
+
+test("only the digits move", () => {
+  // Punctuation that dances reads as a glitch, not as a readout.
+  for (const p of [0, 0.2, 0.5, 0.8, 0.99]) {
+    const out = rollingDigits("-12.5%", p);
+    assert.equal(out.length, 6);
+    assert.equal(out[0], "-");
+    assert.equal(out[3], ".");
+    assert.equal(out[5], "%");
+  }
+});
+
+test("leading digits lock before trailing ones", () => {
+  // Magnitude readable before precision, the way an odometer settles.
+  const final = "134.4°";
+  // Four digits, so the first locks a quarter of the way through.
+  const late = rollingDigits(final, 0.8);
+  assert.equal(late.slice(0, 3), "134", "leading digits should be settled by 0.8");
+  const early = rollingDigits(final, 0.05);
+  assert.notEqual(early, final, "nothing should be settled this early");
+});
+
+test("the roll is deterministic — the same frame renders the same twice", () => {
+  // Frames are rendered for export. A Math.random in here would make two runs
+  // of the same beat produce different video.
+  for (const p of [0.1, 0.33, 0.47, 0.62, 0.9]) {
+    assert.equal(rollingDigits("87.6%", p), rollingDigits("87.6%", p));
+  }
+});
+
+test("the roll steps rather than blurring", () => {
+  // At 60fps an unquantised roll is a grey smear that reads as a fault. Across
+  // a 0.45s roll there should be a small number of distinct states, not one per
+  // frame.
+  const seen = new Set<string>();
+  for (let f = 0; f <= 27; f++) seen.add(rollingDigits("134.4°", f / 27));
+  assert.ok(seen.size > 3, `too static: only ${seen.size} states`);
+  assert.ok(seen.size <= 14, `not quantised: ${seen.size} states across the roll`);
+});
+
+test("the value never resolves before its own measurement has finished drawing", () => {
+  // A number settling while the line that justifies it is still being
+  // constructed is this gesture played backwards.
+  const timeline = buildTimeline([
+    { kind: "metric", line: "a canthal tilt of 6.4 degrees, so the outer corner sits above the inner", metricId: "canthalTilt" },
+    { kind: "cta", line: "Go and get yours." },
+  ]);
+  const b = timeline.beats[0];
+  assert.ok(b.drawAt !== undefined);
+  assert.equal(rollProgress(b, b.drawAt! - 0.01), 0, "rolling before the line landed");
+  assert.equal(rollProgress(b, b.drawAt!), 0);
+  assert.ok(rollProgress(b, b.drawAt! + 0.5) >= 1, "still rolling long after the line landed");
+});
+
+// ---------------------------------------------------------------------------
+// Sequential construction of an angle figure.
+// ---------------------------------------------------------------------------
+
+test("an angle draws one leg, then the other, then the arc", () => {
+  // Both legs used to share the overall progress and grow together, which draws
+  // a finished V rather than an angle being constructed. The second leg
+  // arriving against a stationary first is what makes the arc between them read
+  // as a measurement being taken.
+  const early = anglePhases(0.15);
+  assert.ok(early.legA > 0, "first leg should be under way");
+  assert.equal(early.legB, 0, "second leg started with the first");
+  assert.equal(early.arc, 0, "arc swept before its legs existed");
+
+  const mid = anglePhases(0.6);
+  assert.ok(mid.legB > 0, "second leg never started");
+  assert.ok(mid.legA > mid.legB, "the legs are drawing in lockstep");
+  assert.equal(mid.arc, 0, "arc swept before both legs had landed");
+
+  const late = anglePhases(0.85);
+  assert.ok(late.arc > 0, "arc never swept");
+});
+
+test("an angle is complete, and only complete, at full progress", () => {
+  // The retraction runs drawProgress back down and relies on every partial
+  // state being a strict subset of the true figure.
+  const done = anglePhases(1);
+  assert.equal(done.legA, 1);
+  assert.equal(done.legB, 1);
+  assert.equal(done.arc, 1);
+  const nearly = anglePhases(0.99);
+  assert.ok(nearly.arc < 1, "the arc finished before the beat did");
+  for (const u of [0, 0.25, 0.5, 0.75, 1]) {
+    const p = anglePhases(u);
+    for (const v of [p.legA, p.legB, p.arc]) {
+      assert.ok(v >= 0 && v <= 1, `phase out of range at u=${u}`);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The angle's arc and its label.
+// ---------------------------------------------------------------------------
+
+test("an angle marks the interior angle, never the reflex one", () => {
+  // The old version sorted the two bearings and swept low to high, which is
+  // only the interior angle while the pair does not straddle atan2's ±π
+  // discontinuity. A gonial angle on one side of the face does straddle it, and
+  // there the arc looped around the vertex and out through its own leg.
+  const straddles: Array<[number, number]> = [
+    [3.0, -3.0],
+    [-3.05, 3.05],
+    [Math.PI - 0.1, -Math.PI + 0.1],
+  ];
+  for (const [a1, a2] of straddles) {
+    const d = interiorSweep(a1, a2);
+    assert.ok(Math.abs(d) <= Math.PI + 1e-9, `reflex sweep for ${a1},${a2}`);
+    assert.ok(Math.abs(d) < 0.3, `swept the long way round for ${a1},${a2}`);
+  }
+  // And it still lands exactly on the second leg in the ordinary case.
+  assert.ok(Math.abs(interiorSweep(0, 1.2) - 1.2) < 1e-9);
+  assert.ok(Math.abs(interiorSweep(1.2, 0) + 1.2) < 1e-9);
+});
+
+test("the arc is scaled to the figure, and bounded at both ends", () => {
+  // A flat radius made the arc a hook you had to go looking for on a big
+  // figure, and an unbounded one would swallow the face on a bigger one.
+  const v = { x: 150, y: 260 };
+  const near = arcRadius(v, { x: 130, y: 245 }, { x: 170, y: 245 }, 300);
+  const far = arcRadius(v, { x: 40, y: 60 }, { x: 260, y: 60 }, 300);
+  assert.ok(far > near, "the arc should grow with the figure");
+  assert.ok(near >= 300 * 0.05, "arc collapsed on a small figure");
+  assert.ok(far <= 300 * 0.14, "arc swallowed the frame on a large one");
+});
+
+test("the value chip sits clear of the arc, outside the figure", () => {
+  // It used to be drawn ON the vertex — which is where the arc is — so the one
+  // element identifying the figure as an angle was covered by its own number.
+  const v = { x: 150, y: 258 };
+  const a = { x: 54, y: 102 };
+  const b = { x: 246, y: 102 };
+  const at = angleLabelAt(v, a, b, 300, 5);
+  const r = arcRadius(v, a, b, 300);
+  assert.ok(Math.hypot(at.x - v.x, at.y - v.y) > r, "chip lands inside the arc");
+  // Legs run upward from the chin, so the chip belongs below it — away from the
+  // face, not between the legs where the face is.
+  assert.ok(at.y > v.y, "chip placed into the figure rather than away from it");
+});
+
+test("a straight line does not produce a NaN label position", () => {
+  const at = angleLabelAt({ x: 100, y: 100 }, { x: 0, y: 100 }, { x: 200, y: 100 }, 300, 5);
+  assert.ok(Number.isFinite(at.x) && Number.isFinite(at.y));
 });

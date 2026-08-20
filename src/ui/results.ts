@@ -1,4 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { copyDiagnostics } from "./diagnostics.js";
 import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring.js";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
@@ -310,9 +311,14 @@ function showPhoto(which: "front" | "side"): void {
   if (!canvas) return;
 
   if (which === "side" && ctx.sidePhoto) {
-    // Last-resort fallback only: with a frontPhoto handed in by the caller the
-    // clone never runs, because cloning the pane trusts the pane.
-    frontPhoto = frontPhoto ?? cloneCanvas(canvas);
+    // No fallback clone of the pane here. It used to read `frontPhoto ??
+    // cloneCanvas(canvas)`, which on any path that reached this point with the
+    // profile already on the pane adopted the PROFILE as the front photograph —
+    // permanently, for the rest of the report. Switching back to Front then
+    // showed the side shot captioned FRONT, with the front mesh and the front
+    // region zooms drawn over it. The caller owns the front capture (Ctx.
+    // frontPhoto, from PendingFront.photo); if it is missing, Front is simply
+    // unavailable, which is visibly broken rather than quietly wrong.
     paint(canvas, ctx.sidePhoto);
     ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);
     if (label) label.textContent = "SIDE";
@@ -330,14 +336,10 @@ function showPhoto(which: "front" | "side"): void {
     shownPhoto = "front";
   }
 }
+// Always the front capture handed in by the caller, never a copy of the shared
+// pane. Deleting the clone-the-pane helper that used to back this is the point:
+// there is no longer a way for the profile to become "the front photograph".
 let frontPhoto: HTMLCanvasElement | null = null;
-function cloneCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = src.width;
-  c.height = src.height;
-  c.getContext("2d")!.drawImage(src, 0, 0);
-  return c;
-}
 function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
   dst.width = src.width;
   dst.height = src.height;
@@ -637,6 +639,7 @@ function showOverall(): void {
              <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
                <button class="btn gho" id="btn-share">Share card</button></div>`
       }
+      <div class="navrow"><button class="btn gho" id="btn-diag">Copy diagnostics</button></div>
       ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
@@ -651,6 +654,23 @@ function showOverall(): void {
   // starting over.
   const refBtn = document.getElementById("ref-switch");
   if (refBtn) refBtn.onclick = () => ctx?.onSexChange?.(r.sex === "male" ? "female" : "male");
+  // The whole scan as pasteable text, front and side together.
+  //
+  // It already existed on /quick and only there, which is front-only by design
+  // — so the one number an external comparison needs most, the side, could not
+  // be got out of the app at all without screenshotting eight region cards. The
+  // merged report already carries both views' metrics, so this is the same dump
+  // reaching the screen that has both.
+  const diagBtn = document.getElementById("btn-diag") as HTMLButtonElement | null;
+  if (diagBtn) {
+    diagBtn.onclick = async () => {
+      const copied = await copyDiagnostics(r, "");
+      // Says which of the two things happened. "Copied" over a clipboard write
+      // that silently failed is the one outcome that wastes somebody's scan.
+      diagBtn.textContent = copied ? "Copied" : "Copy from the box";
+      window.setTimeout(() => (diagBtn.textContent = "Copy diagnostics"), 2600);
+    };
+  }
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");

@@ -40,6 +40,14 @@ try {
   await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
 
   const scan = async (manifestName, outputName) => {
+    // The photo archives are gitignored, so a fresh checkout has whichever
+    // ones were restored into .calib and not the others. Skipping a missing
+    // archive with a clear line beats crashing, which used to abandon the
+    // archives that ARE present because of one that is not.
+    if (!existsSync(`${DATA}${manifestName}`)) {
+      console.log(`skip ${manifestName}: not in ${DATA} — nothing to rescan for ${outputName}`);
+      return;
+    }
     const manifest = JSON.parse(readFileSync(`${DATA}${manifestName}`, "utf8"));
     const results = [];
     for (const [index, { name, sex, file }] of manifest.entries()) {

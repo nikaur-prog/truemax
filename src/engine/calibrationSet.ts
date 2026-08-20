@@ -29,13 +29,70 @@ import { scopedStorageKey } from "./scanScope.js";
 
 const KEY = "tm.calibration.v1";
 
+/**
+ * Where the number in `rating` came from.
+ *
+ * This exists because it went wrong once, quietly, and could not be spotted
+ * afterwards from the data. A face was scanned while another product's analysis
+ * of the same face was open in the next tab, and that product's score — 7.78,
+ * rounded to 7.8 — was typed into the rating box instead of a gut answer.
+ *
+ * Nothing about the resulting row looks wrong. It is a plausible number next to
+ * a real measurement set, and it would have sat in the corpus indefinitely.
+ *
+ * What it would have done, though, is turn the corpus into a regression onto
+ * that product's scoring formula. Fitting our weights to their outputs is
+ * reverse-engineering their scoring — the same act as reading their source,
+ * carried out with arithmetic instead — and it is out of bounds. One row is
+ * enough to start pulling the fit that way, and forty would settle it.
+ *
+ * So provenance is recorded rather than assumed, and only `self` is exported.
+ */
+export type RatingSource =
+  /** The operator's own judgement of the face, given before seeing any score. */
+  | "self"
+  /** Another product's score, or any number derived from one. Never exported. */
+  | "external";
+
 export interface RatedFace {
   id: string;
   sex: Sex;
-  /** What a human says the face is worth, 1–10. The thing being fitted TO. */
-  rating: number;
+  /**
+   * What a human says the face is worth, 1–10. The thing being fitted TO.
+   *
+   * NULL MEANS "MEASURED, NOT RATED", and such a row is deliberately still
+   * worth capturing.
+   *
+   * The rating cannot be made optional in the sense of "the engine will work it
+   * out" — the engine's own score is what the rating is used to CHECK, so
+   * fitting to it would be fitting the engine to its own output and would teach
+   * nothing. There is no calibration without a human number.
+   *
+   * But a face with no rating is not worthless, because it still carries two
+   * things that need no rating at all: coverage for metrics no rated face
+   * happens to have, and a side profile whose landmark corrections train the
+   * auto-placement. Forcing a number out of somebody who does not have one is
+   * how a corpus fills with hesitant 5s, and a corpus of hesitant 5s cannot
+   * settle anything — the nine men already in it span 4.5 to 6.1 and are
+   * useless for exactly that reason.
+   *
+   * So: rate the faces you are sure about, skip the ones you are not. A
+   * confident 3 and a confident 8 are worth more than five uncertain 5s, and
+   * an unrated row still does the other half of the job.
+   */
+  rating: number | null;
   /** What the engine said at capture time. Kept for the disagreement column. */
   scored: number;
+  /**
+   * Where `rating` came from.
+   *
+   * Optional, because rows written before this field existed cannot say. Those
+   * are treated as unknown rather than as `self`: the one row known to be
+   * contaminated predates the field, so defaulting to `self` would bless
+   * exactly the case this was built for. Unknown rows are held out of the
+   * export until somebody confirms them by hand.
+   */
+  ratedBy?: RatingSource;
   /** Optional label. Never exported — it is only there to find a row again. */
   label?: string;
   measurements: Record<string, number>;
@@ -93,7 +150,11 @@ export function measurementsOf(...reports: Report[]): Record<string, number> {
 
 export function addRatedFace(
   report: Report,
-  rating: number,
+  rating: number | null,
+  // Required, and deliberately not defaulted. A default would be answered by
+  // whoever wrote the call site rather than by whoever typed the number, which
+  // is the wrong person to ask.
+  ratedBy: RatingSource,
   label?: string,
   // The side scan, when the operator supplied one. Its metrics are merged into
   // the same row: one face, one human rating, everything that could be measured
@@ -111,6 +172,7 @@ export function addRatedFace(
     sex: report.sex,
     rating,
     scored: report.overall,
+    ratedBy,
     ...(label ? { label } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
@@ -124,6 +186,42 @@ export function removeRatedFace(id: string): RatedFace[] {
   return faces;
 }
 
+/**
+ * Marks one row as the operator's own judgement.
+ *
+ * The escape hatch for rows written before provenance was recorded. Those are
+ * real work — a scan and a rating each — and throwing them away to enforce a
+ * field added afterwards would be the wrong trade. But the confirmation has to
+ * be a deliberate per-row act by the person who typed the number, which is why
+ * there is no "confirm all".
+ */
+export function confirmOwnRating(id: string): RatedFace[] {
+  const faces = loadCalibrationSet().map((f) => (f.id === id ? { ...f, ratedBy: "self" as const } : f));
+  save(faces);
+  return faces;
+}
+
+/**
+ * Splits the set into what may be fitted against and what may not.
+ *
+ * `withheld` is not an error state. A row can be there because it carries
+ * another product's score, which is a permanent exclusion, or because it
+ * predates the provenance field, which one tap fixes. Either way it stays in
+ * the set — the measurements are still worth having, and a row that vanished
+ * would look like data loss rather than a deliberate hold.
+ */
+export function splitByProvenance(faces: RatedFace[]): { own: RatedFace[]; withheld: RatedFace[] } {
+  // An unrated row is not "withheld" in the provenance sense — there is no
+  // borrowed number to worry about — but it is equally unfittable, because
+  // there is nothing to fit TO. Both land outside `own` for the same practical
+  // reason and the set list tells them apart in its own copy.
+  const fittable = (f: RatedFace) => f.ratedBy === "self" && f.rating !== null;
+  return {
+    own: faces.filter(fittable),
+    withheld: faces.filter((f) => !fittable(f)),
+  };
+}
+
 export function clearCalibrationSet(): void {
   save([]);
 }
@@ -134,11 +232,19 @@ export function clearCalibrationSet(): void {
  * Labels are dropped. They are there so a row can be recognised while rating,
  * and a corpus checked into a repository should not carry a note about whose
  * face somebody thought a photograph was.
+ *
+ * Rows whose rating is not the operator's own are dropped too, and silently as
+ * far as the JSON goes — the count is reported next to the button instead, so
+ * the exported file is exactly the set of rows that may be fitted against and
+ * nothing has to be remembered at paste time. `ratedBy` itself is not exported:
+ * everything that survives the filter is `self` by construction, so writing the
+ * field into every row would say nothing.
  */
 export function corpusJSON(faces: RatedFace[]): string {
   return `${JSON.stringify(
     {
-      faces: faces.map((f) => ({
+      // Every row here passed the fittable check, so `rating` is a number.
+      faces: splitByProvenance(faces).own.map((f) => ({
         id: f.id,
         sex: f.sex,
         rating: f.rating,
@@ -178,6 +284,10 @@ export function sideCount(faces: RatedFace[]): number {
  * thirty-one directions, and nothing in the tooling said so until the numbers
  * came out flat. Counting faces is not enough — a set is only useful to the
  * degree its ratings SPREAD, so that is what this reports.
+ *
+ * Feed it `splitByProvenance(faces).own`. A withheld row contributes nothing to
+ * the fit, so counting it here would report progress towards twenty-five that
+ * the export cannot deliver.
  */
 export interface SetHealth {
   sex: Sex;
@@ -193,8 +303,8 @@ const WANT_SPREAD = 3.5;
 export function setHealth(faces: RatedFace[], sex: Sex): SetHealth {
   const mine = faces.filter((f) => f.sex === sex);
   const count = mine.length;
-  const ratings = mine.map((f) => f.rating);
-  const spread = count > 1 ? Math.max(...ratings) - Math.min(...ratings) : 0;
+  const ratings = mine.map((f) => f.rating).filter((r): r is number => r !== null);
+  const spread = ratings.length > 1 ? Math.max(...ratings) - Math.min(...ratings) : 0;
   const enough = count >= WANT_PER_SEX && spread >= WANT_SPREAD;
   let note: string;
   if (!count) note = `no ${sex === "male" ? "men" : "women"} yet`;

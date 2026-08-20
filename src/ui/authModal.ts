@@ -18,6 +18,7 @@ import { renderAuthForm } from "./authForm.js";
 import type { AuthMode } from "./authForm.js";
 import { announceMembershipBrand } from "./membershipBrand.js";
 import { openTrialFunnel } from "./onboardingFunnel.js";
+import { isNativeApp } from "../engine/platform.js";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.
@@ -305,15 +306,44 @@ async function renderMembership(
           ? "Stripe has not confirmed the subscription yet. Reopen your account in a moment."
           : "Free includes scanning, results and device-local progress.";
 
+    // NO BILLING BUTTON INSIDE THE WRAPPED APP.
+    //
+    // The offer screen already checks isNativeApp and the purchase chrome is
+    // hidden by a .native-app CSS rule, but this button was in neither list, so
+    // it was the one purchase surface still reachable in the native build — and
+    // the more dangerous of the two states:
+    //
+    //   "Manage billing" redirects to Stripe's hosted portal, which is an
+    //   external purchasing mechanism for a digital subscription. That is the
+    //   straightforward version of what App Review rejects.
+    //
+    //   "Explore plans" opened the trial funnel, which then detects the native
+    //   platform and closes itself — so the button did nothing at all. Not a
+    //   rejection, but a dead control in the account screen, which a reviewer
+    //   is quite likely to tap.
+    //
+    // Native gets the STATUS and no control. No link either: the entitlement is
+    // read from the server and works in the app regardless of where it was
+    // bought, so there is nothing a person needs to do from here.
+    const native = isNativeApp();
     node.innerHTML = `
       <span class="acct-tier">${active ? `TRUEMAX ${planName.toUpperCase()}` : "FREE"}</span>
       <b>${active ? `${planName} membership` : billingProblem ? "Billing needs attention" : "Free plan"}</b>
       <p>${detail}</p>
-      <button type="button" class="btn ${active || billingProblem ? "gho" : "pri"} acct-billing">
+      ${
+        native
+          ? `<p class="acct-msg">${
+              active || billingProblem
+                ? "Your membership is managed from the account you subscribed with, and applies here automatically."
+                : ""
+            }</p>`
+          : `<button type="button" class="btn ${active || billingProblem ? "gho" : "pri"} acct-billing">
         ${active || billingProblem ? "Manage billing" : "Explore plans"}
-      </button>`;
+      </button>`
+      }`;
 
-    const button = node.querySelector(".acct-billing") as HTMLButtonElement;
+    const button = node.querySelector(".acct-billing") as HTMLButtonElement | null;
+    if (!button) return;
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.textContent = active || billingProblem ? "Opening billing…" : "Preparing plans…";

@@ -3,8 +3,9 @@ import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js"
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
 import type { QualityCheck } from "./engine/quality.js";
-import { analyze, REGION_NAMES } from "./engine/scoring.js";
-import { POSE_CALIBRATION, buildGeometry } from "./engine/geometry.js";
+import { analyze, analyzeFrames, REGION_NAMES } from "./engine/scoring.js";
+import type { CaptureFrame } from "./engine/scoring.js";
+import { POSE_CALIBRATION, buildGeometry, landmarkIntegrityIssues } from "./engine/geometry.js";
 import { extractShape, shapeSubset } from "./engine/shape.js";
 import { compareAndStore, readAllHistory, scanStorageKey } from "./engine/history.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
@@ -785,12 +786,32 @@ el.btnCamera.addEventListener("click", async () => {
     return;
   }
   const generation = ++scanGeneration;
-  const shot = cam.capture();
+  // A BURST, not a shutter.
+  //
+  // The weighted mean reliability of the front metrics is 0.351, and a third of
+  // the score's weight sits on ten measurements whose reliability is under
+  // 0.15 — two photographs of one person disagree about them as much as two
+  // different people do. Combining k frames whose noise is independent turns
+  // reliability into 1 - (1-r)/k: 0.35 at one frame, 0.78 at three, 0.87 at
+  // five. Nothing else available to us moves consistency that far.
+  //
+  // Spread over ~1.1s rather than taken as a burst, and that is the whole
+  // design. Five frames grabbed in 200ms share one pose and one expression, so
+  // their errors are the SAME error and almost nothing cancels; the subject has
+  // to have moved slightly between them for the noise to be independent. Pose
+  // is the dominant source here — fwhr reads 0.00 reliability precisely because
+  // it tracks pose rather than bone.
+  //
+  // The first frame is still the photograph the user sees and everything else
+  // is measured against; the rest exist only to be measured. If any of them
+  // fail to grab, the scan degrades to exactly what it did before.
+  const burst = await captureBurst(cam);
+  const shot = burst[0] ?? null;
   // Remember that the front came from the camera, so the side step defaults to
   // the camera too rather than making the user switch capture method mid-flow.
   captureMethod = "camera";
   await closeCamera();
-  if (shot) await handleCanvas(shot, 1, generation, token);
+  if (shot) await handleCanvas(shot, 1, generation, token, burst.slice(1));
   else scanSession.reset();
 });
 
@@ -905,11 +926,40 @@ async function handleFile(file: File, expectedGeneration = scanGeneration): Prom
   await handleCanvas(src, exifOrientation, generation, token);
 }
 
+// How many frames a camera capture collects, and over how long.
+//
+// Five is where the reliability curve 1 - (1-r)/k stops paying for itself: it
+// takes 0.35 to 0.87, and a sixth frame would add 0.01 for another 220ms of
+// somebody holding still. The span matters more than the count — see the
+// comment at the shutter.
+const BURST_FRAMES = 5;
+const BURST_MS = 1100;
+
+async function captureBurst(handle: { capture(): HTMLCanvasElement | null }): Promise<HTMLCanvasElement[]> {
+  const out: HTMLCanvasElement[] = [];
+  for (let i = 0; i < BURST_FRAMES; i++) {
+    const frame = handle.capture();
+    if (frame) out.push(frame);
+    if (i < BURST_FRAMES - 1) {
+      await new Promise((r) => setTimeout(r, BURST_MS / (BURST_FRAMES - 1)));
+    }
+  }
+  return out;
+}
+
 async function handleCanvas(
   src: HTMLCanvasElement,
   exifOrientation = 1,
   generation = scanGeneration,
   token = scanSession.currentToken(),
+  /**
+   * Further frames of the SAME capture, to be measured but never shown.
+   *
+   * Only the camera path has these. A chosen file is one photograph and always
+   * will be, so uploads keep single-frame behaviour and the reliability gain is
+   * a reason to use the camera rather than a silent difference between them.
+   */
+  extraFrames: HTMLCanvasElement[] = [],
 ): Promise<void> {
   if (!token || !scanIsCurrent(token, generation)) return;
   void exifOrientation;
@@ -983,6 +1033,25 @@ async function handleCanvas(
       issues: [...new Set([...quality.issues, ...warnings])],
     },
     autoNote: `Scored against ${selectedSex} norms`,
+    // frontShot was copied off the pane above, before anything else could draw
+    // on it. This is the only moment in the flow where #photo-canvas is
+    // guaranteed to hold the front capture and nothing else.
+    photo: frontShot,
+    // The rest of the burst, measured here while the detector is warm and the
+    // canvases are still alive. Frames whose mesh fails integrity are dropped
+    // rather than carried: a frame that produced a broken face is not a second
+    // opinion, it is a second problem, and the median is only worth taking over
+    // measurements that were all valid.
+    extraFrames: extraFrames.flatMap((canvas) => {
+      try {
+        const r = detectStable(canvas);
+        const lm = r.faceLandmarks?.[0];
+        if (!lm || landmarkIntegrityIssues(lm).length) return [];
+        return [{ landmarks: lm, width: canvas.width, height: canvas.height, source: canvas }];
+      } catch {
+        return [];
+      }
+    }),
   };
 
   // The main product is two photographs: front, then side, then one analysis of
@@ -1008,6 +1077,28 @@ interface PendingFront {
   height: number;
   quality: QualityCheck;
   autoNote: string;
+  /**
+   * The front capture, as its OWN canvas, copied at the moment it was accepted.
+   *
+   * Not optional, and deliberately not recovered later by reading #photo-canvas.
+   * That pane is shared: the scan animation swaps the profile onto it, the side
+   * flow draws on it, and a resume repaints it. Every previous attempt at this
+   * cloned whatever the pane happened to hold at some later instant, and every
+   * one of them eventually cloned the SIDE photograph — which is how the front
+   * tabs came to render front landmarks, front region zooms and a 468-point
+   * mesh over a profile labelled FRONT. Twice now the fix has been to move the
+   * clone earlier; moving it earlier only narrows the window. Owning the pixels
+   * here closes it.
+   */
+  photo: HTMLCanvasElement;
+  /**
+   * Further measured frames of the same capture, beyond the one shown.
+   *
+   * Empty for an uploaded photograph, which is one frame and always will be.
+   * See analyzeFrames for why these exist and why they are combined at the
+   * measurement layer rather than the landmark layer.
+   */
+  extraFrames: CaptureFrame[];
 }
 let pending: PendingFront | null = null;
 // The verified side points, kept so a change of reference population can
@@ -1072,6 +1163,15 @@ async function submitConsentedSideFeedback(generation = scanGeneration): Promise
   if (result.ok) {
     side.feedbackSubmitted = true;
     feedbackDeliveryNote = { ok: true, message: "Optional side-landmark feedback sent privately" };
+  } else if (result.rateLimited) {
+    // A limit is not a failure, and saying "could not be sent" for one is a lie
+    // that costs us the corrections we most want. Somebody working through a
+    // run of profiles used to see the same vague line on every submission past
+    // the cap, with no way to tell that the earlier ones had landed.
+    feedbackDeliveryNote = {
+      ok: true,
+      message: "Enough side-landmark feedback shared today — this one was not needed",
+    };
   } else {
     feedbackDeliveryNote = {
       ok: false,
@@ -1089,18 +1189,22 @@ async function runFullAnalysis(
   if (!pending || !token || !scanSession.isCurrent(token)) return;
   if (!scanSession.transition(token, "analyzing")) return;
   const generation = scanGeneration;
-  const { landmarks, width, height, quality, autoNote } = pending;
+  const { landmarks, width, height, quality, autoNote, photo: frontShot } = pending;
   // The scan sequence only narrates the side view when there is one. Front-only
   // is now a complete result rather than an unfinished one, so its loading bar
   // must not claim to be reading a profile that was never taken.
   const stages = sideReport ? SCAN_STAGES : SCAN_STAGES.filter((s) => s.view === "front");
   el.main.classList.remove("hidden");
-  // The front photo, kept so the scan can switch back to it after showing the
-  // profile being measured.
-  const frontShot = document.createElement("canvas");
-  frontShot.width = el.photoCanvas.width;
-  frontShot.height = el.photoCanvas.height;
-  frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
+  // The front capture comes from `pending`, which has owned its own copy since
+  // the moment it was accepted. It used to be cloned off el.photoCanvas right
+  // here — and this function can run a second time (sign-in mid-scan resumes
+  // it), by which point the pane may be showing the profile. See PendingFront.
+  //
+  // Paint it too, so the pane always agrees with the FRONT caption underneath
+  // regardless of what the previous run, or the side flow, left behind.
+  el.photoCanvas.width = frontShot.width;
+  el.photoCanvas.height = frontShot.height;
+  el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
@@ -1156,7 +1260,13 @@ async function runFullAnalysis(
   await reveal.done;
   if (!scanIsCurrent(token, generation) || !pending) return;
 
-  const front = analyze(landmarks, width, height, selectedSex, frontShot);
+  // The shown frame first, then the rest of the burst. analyzeFrames falls
+  // straight through to analyze when there is only one, so an uploaded photo
+  // takes exactly the path it always did.
+  const front = analyzeFrames(
+    [{ landmarks, width, height, source: frontShot }, ...pending.extraFrames],
+    selectedSex,
+  );
   // Front-only is a real result: mergeReports already returns the front report
   // untouched when the side is absent, so the same call covers both and the
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
@@ -1281,7 +1391,12 @@ async function runFullAnalysis(
           lastSide = {
             points,
             faceDir,
-            photo: lastSide?.photo,
+            // The reviewed copy the flow now hands back, falling back to the
+            // one captured earlier in this scan. Preferring the handoff means
+            // the photo submitted with a correction is exactly the photo the
+            // correction was made on, rather than whatever the earlier step
+            // happened to leave behind.
+            photo: review.photo ?? lastSide?.photo,
             automaticPoints: review.automaticPoints,
             seedMethod: review.seedMethod,
             feedback: review.feedback ?? undefined,
@@ -1469,8 +1584,13 @@ async function resumePendingAfterAuth(): Promise<void> {
   resumePendingStarted = true;
   const token = scanSession.resume(`user:${user.id}`, saved.scanId);
 
+  // Decoded into a canvas this scan OWNS, then copied onto the shared pane —
+  // rather than decoded straight onto the pane and read back later. The pane is
+  // repainted by the scan animation and by the side flow; pending.photo must
+  // survive both. See PendingFront.
+  const frontShot = document.createElement("canvas");
   const frontOk = await drawStoredPhoto(
-    el.photoCanvas,
+    frontShot,
     saved.front.photo,
     saved.front.width,
     saved.front.height,
@@ -1481,6 +1601,9 @@ async function resumePendingAfterAuth(): Promise<void> {
     resetToUpload();
     return;
   }
+  el.photoCanvas.width = frontShot.width;
+  el.photoCanvas.height = frontShot.height;
+  el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
 
   let sidePhoto: HTMLCanvasElement | undefined;
   if (saved.side.photo) {
@@ -1505,6 +1628,12 @@ async function resumePendingAfterAuth(): Promise<void> {
     height: saved.front.height,
     quality: saved.front.quality,
     autoNote: saved.front.autoNote,
+    photo: frontShot,
+    // A resumed scan has only the one stored photograph. Storing the whole
+    // burst would multiply what a paused scan keeps on the device by five for a
+    // gain that is gone the moment the frames are measured — so a resume scores
+    // from one frame and says so by simply having none.
+    extraFrames: [],
   };
   lastSide = {
     points: saved.side.points,

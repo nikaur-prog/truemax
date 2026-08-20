@@ -32,7 +32,7 @@ function derive(g: Geom): Derived {
     g,
     interEye: g.interEye,
     eyeMid: mid(g.eyeR, g.eyeL),
-    bizygo: dist(p(LM.MALAR_R), p(LM.MALAR_L)),
+    bizygo: dist(p(LM.ZYGION_R), p(LM.ZYGION_L)),
     bigonial: dist(p(LM.GONION_R), p(LM.GONION_L)),
     mouthW: dist(p(LM.MOUTH_R), p(LM.MOUTH_L)),
     noseW: Math.max(...alarXs) - Math.min(...alarXs),
@@ -117,8 +117,10 @@ export const COMPUTERS: Record<string, Computer> = {
 
   cheekboneHeight: (d) => {
     const p = d.g.pt.bind(d.g);
-    const zygoY = (p(LM.MALAR_R).y + p(LM.MALAR_L).y) / 2;
-    return (zygoY - d.eyeMid.y) / (p(LM.MENTON).y - d.eyeMid.y);
+    // MALAR, not ZYGION: this is where the cheekbone sits, not how wide the
+    // face is there. See the landmark block in geometry.ts.
+    const malarY = (p(LM.MALAR_R).y + p(LM.MALAR_L).y) / 2;
+    return (malarY - d.eyeMid.y) / (p(LM.MENTON).y - d.eyeMid.y);
   },
 
   // Buccal fullness: how far the visible cheek bows out of the line between the
@@ -414,8 +416,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "eyes", pillar: "Features", weight: 1.1,
     direction: { male: "band", female: "higher" }, fixability: 0,
     dist: {
-      male: { mean: 0.4685, sd: 0.01379, ideal: 0.47105 },
-      female: { mean: 0.4821, sd: 0.00964, ideal: 0.49174 },
+      male: { mean: 0.4217, sd: 0.0169, ideal: 0.42483 },
+      female: { mean: 0.439, sd: 0.01557, ideal: 0.45457 },
     },
   }),
   M({
@@ -452,8 +454,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "midface", pillar: "Dimorphism", weight: 1.2,
     direction: { male: "higher", female: "lower" }, fixability: 0.3,
     dist: {
-      male: { mean: 1.992, sd: 0.2298, ideal: 1.9395 },
-      female: { mean: 2.1205, sd: 0.195, ideal: 2.1575 },
+      male: { mean: 2.246, sd: 0.2179, ideal: 2.1962 },
+      female: { mean: 2.314, sd: 0.1838, ideal: 2.3489 },
     },
   }),
   M({
@@ -488,8 +490,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "midface", pillar: "Angularity", weight: 0.9,
     direction: "lower", fixability: 0.85,
     dist: {
-      male: { mean: 0, sd: 1.6 },
-      female: { mean: 0.4, sd: 1.6 },
+      male: { mean: 1.338, sd: 0.209 },
+      female: { mean: 1.24, sd: 0.224 },
     },
     // A cheek outline more than a tenth of the face's width off the chord is
     // not a cheek, it is a landmark that has slid onto an ear or a collar.
@@ -539,8 +541,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "jaw", pillar: "Angularity", weight: 1.2,
     direction: "lower", fixability: 0.5,
     dist: {
-      male: { mean: 1.0091, sd: 0.02357 },
-      female: { mean: 0.98935, sd: 0.01853 },
+      male: { mean: 0.912, sd: 0.01601 },
+      female: { mean: 0.9013, sd: 0.01557 },
     },
   }),
   M({
@@ -726,8 +728,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "proportions", pillar: "Harmony", weight: 0.9,
     direction: "higher", fixability: 0,
     dist: {
-      male: { mean: 0.2014, sd: 0.01112, ideal: 0.20905 },
-      female: { mean: 0.21005, sd: 0.00993, ideal: 0.21675 },
+      male: { mean: 0.1802, sd: 0.01127, ideal: 0.18795 },
+      female: { mean: 0.1894, sd: 0.00875, ideal: 0.1953 },
     },
   }),
   M({
@@ -735,8 +737,8 @@ export const METRICS: MetricDef[] = [
     view: "front", region: "proportions", pillar: "Harmony", weight: 1.0,
     direction: { male: "band", female: "higher" }, fixability: 0.2,
     dist: {
-      male: { mean: 1.319, sd: 0.0667, ideal: 1.3305 },
-      female: { mean: 1.303, sd: 0.0593, ideal: 1.3125 },
+      male: { mean: 1.183, sd: 0.0652, ideal: 1.1942 },
+      female: { mean: 1.185, sd: 0.0608, ideal: 1.1947 },
     },
   }),
 

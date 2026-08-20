@@ -72,6 +72,57 @@ Until then, the UI should describe the result as an experimental measurement
 profile, use broad bands rather than false decimal precision, and keep the
 profile result separate from the front headline.
 
+## How many rated faces, and what each one buys
+
+Written down because "collect more faces" is not an instruction anybody can act
+on, and because the honest answer is smaller than it sounds.
+
+Measured on the current corpus (19 faces) with a Fisher-z interval, holding r at
+its present value and varying only n:
+
+| n | 95% CI on r | width |
+|---|---|---|
+| 19 (today) | 0.40 – 0.89 | **0.49** |
+| 39 | 0.53 – 0.85 | 0.32 |
+| 69 (+50) | 0.59 – 0.82 | **0.23** |
+| 119 | 0.62 – 0.80 | 0.18 |
+
+**Fifty front faces halves the uncertainty. They do not raise r.** What they buy
+is the ability to tell whether a change helped, which at n=19 is impossible: the
+interval spans "good" and "mediocre" at the same time. Nine men alone sit at
+[0.12, 0.94], which is no information at all.
+
+Returns fall off sharply past ~70. Another fifty on top buys 0.05. Fifty is the
+right number; a hundred is not twice as good.
+
+**Fifty SIDE faces are worth more, because side coverage is zero.** Not thin —
+zero. Every side ideal in `sideMetrics.ts` is a prior recentred on five profiles
+of one person, and the comment above `ALL_SIDE_METRICS` says so. Fifty corrected
+profiles moves the side half of the product from guess to measurement. That is
+conditional on the landmarks being hand-corrected: fifty uncorrected profiles
+are fifty measurements of where an auto-seeder guessed.
+
+### What no number of rated faces fixes
+
+1. **The soft-tissue class.** Three of the four pillars in the product we
+   benchmark against are vision judgements of skin and soft tissue we take no
+   measurement for. Their geometry-only figure for one face was 6.54 against a
+   headline of 8.3 — roughly 1.8 points that is a missing measurement class, not
+   a mis-fitted weight. Rated faces cannot create a measurement.
+2. **Test-retest reliability**, weighted mean 0.351 across the front metrics.
+   That is a property of the measurement, not of the corpus. One face has scored
+   8.0, 7.5, 7.4 and 5.4 across four photographs. Multi-frame capture is the fix
+   and is not yet confirmed end to end.
+3. **Construction bugs.** jawFrontalAngle reads about 26 degrees off a second
+   product on two people; browTilt measures to the brow tail where the
+   comparison measures to the peak; fwhr reads high in a direction its own
+   denominator cannot explain. Those are code, not data.
+
+So a fifty-and-fifty run makes the system MEASURABLE rather than automatically
+accurate. The accuracy comes from acting on what it then reveals — which is
+still the right order, because none of the three items above can be prioritised
+against each other while the interval is half a point wide.
+
 ## Safe FaceIQ comparison
 
 Use a small, licensed or consented benchmark suite to compare observable

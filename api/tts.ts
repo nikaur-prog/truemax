@@ -64,7 +64,10 @@ const DEFAULT_MODEL = "eleven_multilingual_v2";
 // own pauses, and the beat of air spokenSeconds leaves at the end of each line
 // stops landing — which is what makes a rundown read as a list being recited
 // rather than as somebody talking.
-const VOICE_SPEED = 1.12;
+// 1.18, up from 1.12 — watched back, 1.12 still read as measured rather than
+// confident. Still under the 1.2 ceiling above, so the end-of-line pauses that
+// keep this sounding like talking rather than reciting survive.
+const VOICE_SPEED = 1.18;
 
 export async function POST(request: Request): Promise<Response> {
   try {

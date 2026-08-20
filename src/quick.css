@@ -534,6 +534,13 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 #q-cal-num { width: 108px; font: 300 26px var(--serif); text-align: center; }
 #q-cal-label { flex: 1; min-width: 160px; }
 .q-cal-hint { margin: 14px 0 0; max-width: 520px; color: var(--mut); font-size: 12.5px; line-height: 1.6; }
+/* Provenance sits between the number and the reason, because it is a question
+   about the number and is only answerable before the reason is read. */
+.q-cal-prov {
+  display: flex; align-items: flex-start; gap: 9px; max-width: 520px; margin: 16px 0 0;
+  font-size: 13px; line-height: 1.5; cursor: pointer;
+}
+.q-cal-prov input { margin: 2px 0 0; width: 16px; height: 16px; flex: none; accent-color: var(--warm, #c07a4a); }
 .q-cal-msg { min-height: 18px; margin: 8px 0 0; color: var(--warm, #c07a4a); font-size: 12.5px; }
 
 /* The disagreement, which is the only thing this screen is for. */
@@ -557,9 +564,17 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 
 .q-cal-rows { margin-bottom: 20px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .q-cal-row {
-  display: grid; grid-template-columns: 1fr 52px 62px 52px 62px; gap: 8px;
+  display: grid; grid-template-columns: 1fr 52px 62px 52px 96px; gap: 8px;
   align-items: center; padding: 9px 14px; font-size: 13px;
 }
+/* A held row is dimmed rather than hidden. It is still a real scan and still
+   worth seeing next to the others; it just cannot be fitted against. */
+.q-cal-row.held { opacity: .58; }
+.q-cal-flag {
+  font: 600 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--warm, #c07a4a); font-style: normal;
+}
+.q-cal-acts { display: flex; gap: 10px; justify-content: flex-end; }
 .q-cal-row + .q-cal-row { border-top: 1px solid var(--line); }
 .q-cal-head { font: 600 9.5px var(--mono); letter-spacing: .14em; color: var(--mut); background: var(--card); }
 .q-cal-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -572,5 +587,6 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 @media (max-width: 560px) {
   .q-cal-rate, .q-cal-verdict, .q-cal-set { padding: 16px 20px 26px; }
   .q-cal-health { flex-direction: column; }
-  .q-cal-row { grid-template-columns: 1fr 44px 52px 44px 56px; font-size: 12px; padding: 8px 11px; }
+  .q-cal-row { grid-template-columns: 1fr 44px 52px 44px 86px; font-size: 12px; padding: 8px 11px; }
+  .q-cal-acts { gap: 8px; }
 }
