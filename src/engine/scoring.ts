@@ -677,6 +677,130 @@ export function scoreFrontMeasurements(
   return report;
 }
 
+/** One measured frame, and the shape descriptor that frame implies. */
+function frontRaw(
+  landmarks: NormalizedLandmark[],
+  width: number,
+  height: number,
+  sex: Sex,
+  source?: CanvasImageSource,
+): { raw: Record<string, number>; shapeZ: number | null } {
+  const g = buildGeometry(landmarks, width, height);
+  const raw = computeRawMetrics(g);
+  if (source) {
+    const hair = findHairline(source, landmarks, width, height);
+    if (hair) raw.foreheadRatio = hair.foreheadRatio;
+  }
+  return { raw, shapeZ: shapeZScore(extractShape(g), sex) };
+}
+
+function medianOf(xs: number[]): number {
+  const s = xs.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!s.length) return NaN;
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * Combine several frames' measurements into one, metric by metric.
+ *
+ * Per metric INDEPENDENTLY, so a frame that failed to yield one measurement
+ * still contributes every other one — a refused hairline read costs that
+ * metric on that frame, not the frame.
+ *
+ * Median rather than mean: a frame caught mid-blink or mid-turn should be
+ * discarded outright, not averaged in. That is the whole reason a burst of
+ * five is not simply five times better than one — see analyzeFrames.
+ */
+export function medianMeasurements(
+  records: Array<Record<string, number>>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const ids = new Set(records.flatMap((r) => Object.keys(r)));
+  for (const id of ids) out[id] = medianOf(records.map((r) => r[id]));
+  return out;
+}
+
+/** A frame of a live capture: the mesh, its dimensions, and its pixels. */
+export interface CaptureFrame {
+  landmarks: NormalizedLandmark[];
+  width: number;
+  height: number;
+  source?: CanvasImageSource;
+}
+
+/**
+ * Score a face from SEVERAL frames, taking the per-metric median.
+ *
+ * Why this exists, in one number: the weighted mean reliability of the front
+ * metrics is 0.351, and a THIRD of the score's weight sits on ten measurements
+ * whose reliability is under 0.15 — two photographs of one person disagree
+ * about them as much as two different people do. That is why one face has
+ * scored 8.0, 7.5, 7.4 and 5.4 across four photographs.
+ *
+ * Reliability is `1 − σ²within / σ²population`. Averaging k frames whose noise
+ * is INDEPENDENT divides σ²within by k, so reliability becomes `1 − (1−r)/k`:
+ * 0.35 at one frame, 0.78 at three, 0.87 at five. Nothing else available to us
+ * moves consistency that far.
+ *
+ * Three things this gets right, and each of them is the reason it is not
+ * simpler:
+ *
+ *   MEDIAN OF MEASUREMENTS, not of landmarks. Across frames the head moves, so
+ *   landmark coordinates are not comparable between them and a positional
+ *   median would blur a moving face into a smear. The metrics are ratios and
+ *   angles that survive the movement, so they are the layer where frames can be
+ *   combined. Distinct from consensus.detectStable, which medians landmarks
+ *   across fixed transforms of ONE image to cancel detector jitter; that runs
+ *   per frame, underneath this, and cancels a different noise source.
+ *
+ *   MEDIAN, not mean. One frame caught mid-blink or mid-pose should be
+ *   discarded, not averaged in.
+ *
+ *   PER METRIC, independently. A frame that fails to yield one measurement
+ *   still contributes every other one, so a single bad hairline read does not
+ *   cost the whole frame.
+ *
+ * The gain depends entirely on the frames being independent. Five frames from a
+ * 200ms burst share one pose and one expression, so their errors are the same
+ * error and almost nothing cancels. The capture has to span enough time for the
+ * subject to move slightly; pose is the dominant noise source here — `fwhr`
+ * reads 0.00 reliability precisely because it tracks pose rather than bone.
+ * A caller handing this a burst will get determinism and very little accuracy.
+ */
+export function analyzeFrames(frames: CaptureFrame[], sex: Sex): Report {
+  if (!frames.length) throw new Error("A scan needs at least one frame.");
+  if (frames.length === 1) {
+    const f = frames[0];
+    return analyze(f.landmarks, f.width, f.height, sex, f.source);
+  }
+
+  const measured = frames.map((f) => frontRaw(f.landmarks, f.width, f.height, sex, f.source));
+  const raw = medianMeasurements(measured.map((x) => x.raw));
+  const invalid = METRICS
+    .filter((m) => m.view === "front" && !PIXEL_METRICS.has(m.id))
+    .filter((m) => !Number.isFinite(raw[m.id]))
+    .map((m) => m.id);
+  // Only when EVERY frame failed to produce it. One bad frame is what this is
+  // for; a metric missing from all of them is still a broken mesh.
+  if (invalid.length) throw new Error(`Face scan produced invalid measurements: ${invalid.join(", ")}`);
+
+  // Null when no frame produced an outline descriptor at all — the same "not
+  // measured" the single-frame path passes down, not a zero.
+  const shapes = measured.map((x) => x.shapeZ).filter((z): z is number => z != null);
+  const shapeZ = shapes.length ? medianOf(shapes) : null;
+  const scored = METRICS.filter((m) => m.view === "front").map((def) =>
+    scoreMetric(def, raw[def.id], sex),
+  );
+  const report = buildReport(scored, sex, undefined, shapeZ);
+  const lift = new Map<string, number>();
+  for (const m of scored) {
+    if (m.def.fixability > 0 && m.zEff < Z_CLAMP) lift.set(m.def.id, m.def.fixability * 0.9);
+  }
+  report.potential = Math.max(report.overall, buildReport(scored, sex, lift, shapeZ).overall);
+  return report;
+}
+
 export function analyze(
   landmarks: NormalizedLandmark[],
   width: number,
@@ -694,12 +818,7 @@ export function analyze(
    */
   source?: CanvasImageSource,
 ): Report {
-  const g = buildGeometry(landmarks, width, height);
-  const raw = computeRawMetrics(g);
-  if (source) {
-    const hair = findHairline(source, landmarks, width, height);
-    if (hair) raw.foreheadRatio = hair.foreheadRatio;
-  }
+  const { raw, shapeZ } = frontRaw(landmarks, width, height, sex, source);
   // Pixel-derived measurements are allowed to be missing; landmark ones are
   // not. A landmark metric that cannot be computed means the mesh itself is
   // broken and nothing downstream is trustworthy, whereas a refused hairline
@@ -709,7 +828,6 @@ export function analyze(
     .filter((m) => !Number.isFinite(raw[m.id]))
     .map((m) => m.id);
   if (invalid.length) throw new Error(`Face scan produced invalid measurements: ${invalid.join(", ")}`);
-  const shapeZ = shapeZScore(extractShape(g), sex);
 
   const scored = METRICS.filter((m) => m.view === "front").map((def) =>
     scoreMetric(def, raw[def.id], sex),
