@@ -1575,6 +1575,9 @@ function drawCaption(
   if (!metric) return;
 
   const kicker = `${metric.value.toFixed(metric.def.decimals)}${metric.def.unit}`;
+  // Sized on the FINAL string, drawn as the rolling one, so the type does not
+  // resize itself mid-roll.
+  const shown = rollingDigits(kicker, rollProgress(beat, t));
   const pop = smoother(clamp01((drawProgress(beat, t) - 0.92) / 0.08));
   const endFade = smoother(clamp01((beat.start + beat.duration - t) / 0.15));
   const a = pop * endFade;
@@ -1589,8 +1592,65 @@ function drawCaption(
   ctx.shadowColor = "rgba(0,0,0,.92)";
   ctx.shadowBlur = 22;
   ctx.fillStyle = "#f7f7f2";
-  ctx.fillText(kicker, W / 2, y);
+  ctx.fillText(shown, W / 2, y);
   ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The number roll.
+//
+// A measured value that is simply THERE reads as a caption. One that arrives
+// unresolved and settles reads as a machine finishing its arithmetic, and it
+// is the cheapest expensive-looking gesture in the reference videos — their
+// facial thirds visibly pass through 51/51/57 and 37/36/32 before landing on
+// 34/34/32, and their harmony donut counts 35 → 51 → 64 → 87.
+//
+// Two rules it has to obey here:
+//
+//   Deterministic. Frames are rendered for export, and the same beat rendered
+//   twice must produce the same pixels, so there is no Math.random in this —
+//   the digit is a hash of its position and the quantised step.
+//
+//   After the evidence, never before. The roll starts at drawAt, the instant
+//   the line finishes drawing. A value resolving while its own measurement is
+//   still being constructed is the backwards version of this.
+// ---------------------------------------------------------------------------
+
+const ROLL = 0.45;
+
+export function rollProgress(beat: TimedBeat, t: number): number {
+  if (beat.drawAt === undefined) return 1;
+  return clamp01((t - beat.drawAt) / ROLL);
+}
+
+/**
+ * `final` with its digits scrambled, settling left to right as `p` runs 0→1.
+ *
+ * Only digits move. The decimal point, the minus and the unit hold still,
+ * because a string whose punctuation dances is a glitch rather than a readout.
+ * Leading digits lock first, the way an odometer settles, so the magnitude is
+ * readable before the precision is.
+ */
+export function rollingDigits(final: string, p: number): string {
+  if (p >= 1) return final;
+  const digits: number[] = [];
+  for (let i = 0; i < final.length; i++) {
+    if (final[i] >= "0" && final[i] <= "9") digits.push(i);
+  }
+  if (!digits.length) return final;
+
+  // Quantised so the digits visibly STEP. Rolling per frame at 60fps is a
+  // grey blur that reads as a rendering fault, not as counting.
+  const STEPS = 9;
+  const step = Math.floor(clamp01(p) * STEPS);
+  const out = final.split("");
+  for (let k = 0; k < digits.length; k++) {
+    if (p >= (k + 1) / digits.length) continue;
+    const i = digits[k];
+    const h = (i * 2654435761 + step * 40503 + final.length * 97) >>> 0;
+    out[i] = String(h % 10);
+  }
+  return out.join("");
 }
 
 // The bottom bar. Fixed position, every frame, because a value that moves is a

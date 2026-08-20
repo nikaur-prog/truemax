@@ -10,6 +10,8 @@ import {
   overlayVisible,
   toneColour,
   regionCrop,
+  rollProgress,
+  rollingDigits,
 } from "./rundownFrame.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
@@ -546,4 +548,66 @@ test("out of band ramps with distance rather than shouting equally", () => {
   const far = toneColour(toned(0.05));
   assert.ok(green(far) < green(near), "far outside should be the hotter colour");
   assert.ok(red(far) >= red(near) - 1, "the ramp should not cool off with distance");
+});
+
+// ---------------------------------------------------------------------------
+// The number roll.
+// ---------------------------------------------------------------------------
+
+test("a rolled value settles on the truth", () => {
+  assert.equal(rollingDigits("134.4°", 1), "134.4°");
+  assert.equal(rollingDigits("134.4°", 1.5), "134.4°");
+});
+
+test("only the digits move", () => {
+  // Punctuation that dances reads as a glitch, not as a readout.
+  for (const p of [0, 0.2, 0.5, 0.8, 0.99]) {
+    const out = rollingDigits("-12.5%", p);
+    assert.equal(out.length, 6);
+    assert.equal(out[0], "-");
+    assert.equal(out[3], ".");
+    assert.equal(out[5], "%");
+  }
+});
+
+test("leading digits lock before trailing ones", () => {
+  // Magnitude readable before precision, the way an odometer settles.
+  const final = "134.4°";
+  // Four digits, so the first locks a quarter of the way through.
+  const late = rollingDigits(final, 0.8);
+  assert.equal(late.slice(0, 3), "134", "leading digits should be settled by 0.8");
+  const early = rollingDigits(final, 0.05);
+  assert.notEqual(early, final, "nothing should be settled this early");
+});
+
+test("the roll is deterministic — the same frame renders the same twice", () => {
+  // Frames are rendered for export. A Math.random in here would make two runs
+  // of the same beat produce different video.
+  for (const p of [0.1, 0.33, 0.47, 0.62, 0.9]) {
+    assert.equal(rollingDigits("87.6%", p), rollingDigits("87.6%", p));
+  }
+});
+
+test("the roll steps rather than blurring", () => {
+  // At 60fps an unquantised roll is a grey smear that reads as a fault. Across
+  // a 0.45s roll there should be a small number of distinct states, not one per
+  // frame.
+  const seen = new Set<string>();
+  for (let f = 0; f <= 27; f++) seen.add(rollingDigits("134.4°", f / 27));
+  assert.ok(seen.size > 3, `too static: only ${seen.size} states`);
+  assert.ok(seen.size <= 14, `not quantised: ${seen.size} states across the roll`);
+});
+
+test("the value never resolves before its own measurement has finished drawing", () => {
+  // A number settling while the line that justifies it is still being
+  // constructed is this gesture played backwards.
+  const timeline = buildTimeline([
+    { kind: "metric", line: "a canthal tilt of 6.4 degrees, so the outer corner sits above the inner", metricId: "canthalTilt" },
+    { kind: "cta", line: "Go and get yours." },
+  ]);
+  const b = timeline.beats[0];
+  assert.ok(b.drawAt !== undefined);
+  assert.equal(rollProgress(b, b.drawAt! - 0.01), 0, "rolling before the line landed");
+  assert.equal(rollProgress(b, b.drawAt!), 0);
+  assert.ok(rollProgress(b, b.drawAt! + 0.5) >= 1, "still rolling long after the line landed");
 });
