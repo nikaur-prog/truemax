@@ -568,12 +568,44 @@ function placeBackPoints(points: SidePoints, f: HeadFrame, headW: number): void 
 
 // Head width — nose tip back to ear canal — from a rough estimate of it. Both
 // callers have something that scales with head width and neither has the width
-// itself; the clamp is against the estimator degenerating (a near-frontal mesh
-// puts the oval point almost on top of the nose, which would otherwise divide
-// out to an enormous head). The bounds are deliberately wide: they exist to
-// catch a broken measurement, not to argue with a real face.
-function headWidthFrom(estimate: number, headH: number): number {
-  return Math.max(headH * 0.3, Math.min(headH * 1.1, estimate));
+// itself, and both estimators can degenerate: a near-frontal mesh puts the oval
+// point almost on top of the nose, and a silhouette trace can catch a wall.
+//
+// This used to CLAMP to [0.3, 1.1] x head height, described as deliberately
+// wide bounds that catch a broken measurement without arguing with a real face.
+// The first half was true and the second half was the bug. 0.3 is not a wide
+// bound, it is a head that does not exist — nothing has a nose-to-ear depth
+// three tenths of its hairline-to-chin height — so a degenerate estimate was
+// not caught by the floor, it was RESHAPED into a confidently wrong head and
+// passed on as a measurement.
+//
+// It surfaces on ramus : mandible, because the template places gonion and
+// menton 0.635 head-widths apart along the facing axis and condylion almost
+// directly above gonion. Squash the width and the mandibular body shortens
+// while the ramus does not, so the ratio climbs: 0.79 at a real head, 1.07 at
+// half width, 1.50 at the old floor. That is what refused three correctly
+// placed profiles in a row, each time naming the points the operator had put in
+// exactly the right places.
+//
+// So an estimate outside the range real heads occupy is now DISCARDED for the
+// population figure rather than dragged to an edge. Falling back says "this
+// could not be measured, use the average"; clamping says "this measured 0.3",
+// which is a claim about a face rather than about a failed estimator. Every
+// point placed from it is one the review screen asks the operator to check
+// anyway, so a sane average is the right thing to hand them.
+const HEAD_DEPTH_OVER_HEIGHT = 0.73; // ~13.5cm nose-to-ear over ~18.5cm hairline-to-chin
+const HEAD_DEPTH_MIN = 0.62;
+const HEAD_DEPTH_MAX = 0.88;
+
+// Exported so the range it can produce can be asserted directly. The bug this
+// replaces was invisible to a test that scored one head, because the fault was
+// not in that head — it was in how far from it the seeder was allowed to wander.
+export function headWidthFrom(estimate: number, headH: number): number {
+  const ratio = estimate / headH;
+  if (!Number.isFinite(ratio) || ratio < HEAD_DEPTH_MIN || ratio > HEAD_DEPTH_MAX) {
+    return headH * HEAD_DEPTH_OVER_HEIGHT;
+  }
+  return estimate;
 }
 
 function median(a: number[]): number {
