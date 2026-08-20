@@ -77,7 +77,7 @@ test("side landmark guard accepts anatomy and blocks obvious missing-point error
   );
   assert.match(
     sidePointIntegrityIssues({ ...validSide, condylion: { x: 72, y: 310 } }, 240, 360, 1)[0],
-    /Jaw top/,
+    /Jaw hinge/,
   );
 });
 

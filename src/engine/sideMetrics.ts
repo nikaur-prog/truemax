@@ -21,7 +21,13 @@ export const SIDE_POINTS = [
   { id: "pogonion", label: "Chin front", hint: "Furthest-forward point of the chin" },
   { id: "menton", label: "Chin bottom", hint: "Lowest point of the chin" },
   { id: "gonion", label: "Jaw corner", hint: "The angle where the jaw turns upward" },
-  { id: "condylion", label: "Jaw top", hint: "Just in front of the ear canal" },
+  // "Jaw top" was the wrong name and it cost a measurement. The top of the
+  // visible jaw region is the temple, so that is where people put it — 26mm
+  // above the ear notch, on skull rather than on jaw, which inflated the ramus
+  // arm enough to push ramus : mandible outside anatomical bounds on every
+  // face. This point is a JOINT: the knuckle the jaw pivots on, level with the
+  // ear canal and just in front of it.
+  { id: "condylion", label: "Jaw hinge", hint: "The pivot just in front of the ear canal, level with it" },
   { id: "cervicale", label: "Neck point", hint: "Where the under-chin meets the neck" },
   { id: "tragion", label: "Ear notch", hint: "Notch at the front of the ear" },
 ] as const;
@@ -57,7 +63,7 @@ export function sidePointIntegrityIssues(
   if (!(faceH > 1)) issues.push("Nose bridge and chin bottom overlap");
   if (p.nasion.y >= p.subnasale.y) issues.push("Nose bridge must sit above the nose base");
   if (p.subnasale.y >= p.labialeInferius.y) issues.push("The lip points are out of vertical order");
-  if (p.condylion.y >= p.gonion.y) issues.push("Jaw top must sit above the jaw corner");
+  if (p.condylion.y >= p.gonion.y) issues.push("Jaw hinge must sit above the jaw corner");
   // Nose and ear must be meaningfully separated across the frame. What this
   // must NOT do is check which SIDE the nose is on: that is the definition of
   // which way the face points, so testing it against a separately-detected

@@ -326,7 +326,28 @@ export const TEMPLATE: Record<SidePointId, [number, number]> = {
   pogonion: [-0.159, 0.942],
   menton: [-0.305, 0.988],
   gonion: [-0.940, 0.810],
-  condylion: [-0.927, 0.297],
+  // CORRECTED from the fitted 0.297, which put this 26mm ABOVE the ear notch —
+  // up on the temple rather than on the jaw.
+  //
+  // The fixtures really did measure 0.297, and they were placed by a person
+  // reading the label. The label said "Jaw top", and the top of the visible jaw
+  // region is the temple, so that is where it went. It has since been renamed
+  // to "Jaw hinge" for exactly this reason.
+  //
+  // Why the fitted number loses to anatomy here: the condyle is the knuckle the
+  // jaw pivots on, and it sits immediately in front of the ear canal at about
+  // the canal's own height. It cannot be 26mm up the side of the skull, because
+  // there is no jaw there. Held against tragion at 0.435, this sits 3mm above
+  // and 0.073 head-widths (~1cm) forward, which is where the joint is.
+  //
+  // What it was costing: ramus : mandible is condylion->gonion over
+  // gonion->menton, so a condylion 26mm too high lengthens the top arm and
+  // nothing else. This template — our own average head — scored 1.034 against a
+  // plausible bound of 0.35-0.95, meaning the Confirm guard rejected the
+  // reference profile the seeder is built from, and therefore very nearly every
+  // real face put through it. At the corrected height the same template scores
+  // 0.79, inside one sd of the 0.72 norm. sideTemplate.test.ts now holds this.
+  condylion: [-0.927, 0.420],
   cervicale: [-0.678, 0.969],
   tragion: [-1.0, 0.435],
 };
