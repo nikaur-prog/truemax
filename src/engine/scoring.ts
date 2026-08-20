@@ -149,6 +149,100 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
+// ---------------------------------------------------------------------------
+// The tolerance band: how far off the ideal still counts as ideal.
+//
+// Scoring used to treat the ideal as a POINT — |value - ideal| / sd, zero only
+// on an exact match — so every deviation cost something and a face had to hit
+// thirty-one exact numbers to score well. Nobody does that, which is why good
+// faces converged on mediocre. The external benchmark made it visible: our
+// canthal tilt and a competing product's agreed to within 0.7 of a degree and
+// scored 7.3 against 10.0 (docs/BENCHMARK_CAVILL.md).
+//
+// The width is not a taste judgement and it is not copied from anywhere. It is
+// this engine's own measured repeatability. RELIABILITY is
+// 1 - (within-person sd / population sd)², measured across 90 photos of 14
+// people, so the within-person sd — how far one face's own measurement wanders
+// between two photographs of it — is sqrt(1 - reliability) population sd. That
+// is the resolution limit of the measurement, and ranking differences smaller
+// than it is not scoring, it is reading noise.
+//
+// So a metric that reproduces well (browTilt, 0.70) gets a narrow band and is
+// held to it, and one that barely reproduces at all (jawFrontalAngle, 0.10)
+// gets a wide one, because it has not earned the right to a strong opinion.
+//
+// The floor stops a hypothetically perfect metric from becoming a point target
+// again; the ceiling stops a worthless one from calling every face ideal. A
+// metric can override with `tolerance` when there is a real anatomical reason
+// for a band of a particular width.
+const TOL_MIN = 0.25;
+const TOL_MAX = 1.0;
+
+export function toleranceOf(def: MetricDef): number {
+  if (def.tolerance != null) return clamp(def.tolerance, 0, TOL_MAX);
+  return clamp(Math.sqrt(Math.max(0, 1 - reliabilityOf(def.id))), TOL_MIN, TOL_MAX);
+}
+
+// How fast the score falls once a value leaves its band.
+//
+// Anchored to the plausibility bounds rather than chosen: `plausible` is the
+// point where a value stops being a face and becomes a misplaced landmark, so
+// it is the natural zero of a 0-10 feature score. K = -ln(0.001) puts
+// conformance at 0.001 exactly there, and the shoulder in between follows from
+// that with nothing left to tune.
+const CONFORM_K = 6.9;
+
+// Where a metric's own falloff runs out, in population sd either side of the
+// band. Anything without declared plausibility bounds gets ±3 sd, which is the
+// span the reference photographs actually cover.
+const DEFAULT_REACH_SD = 3;
+
+/**
+ * How close this measurement is to its ideal, 0 to 1, where 1 means "inside
+ * the band — nothing to fix here".
+ *
+ * Distinct from zEff, and the distinction is the point. Conformance answers
+ * "is this feature holding the face back", which is what a metric card is for
+ * and what a plan ranks from. zEff answers "where does this face rank on this
+ * measurement", which is what the aggregate needs. Being in band is common, so
+ * the honest answers to those two questions are different numbers, and
+ * collapsing them into one is what made a dead-on measurement read as 7.3.
+ */
+export function conformance(def: MetricDef, value: number, sex: Sex): number {
+  if (!Number.isFinite(value)) return 0;
+  const d = distFor(def, sex);
+  const direction = directionFor(def, sex);
+  const [lo, hi] = idealBand(def, value, sex);
+  const excess = value < lo ? lo - value : value > hi ? value - hi : 0;
+  if (excess <= 0) return 1;
+  // Reach on the side the value actually fell, so an asymmetric plausibility
+  // window is not averaged into a symmetric one.
+  const edge = value < lo
+    ? (def.plausible ? def.plausible[0] : d.mean - DEFAULT_REACH_SD * d.sd)
+    : (def.plausible ? def.plausible[1] : d.mean + DEFAULT_REACH_SD * d.sd);
+  const reach = Math.max(0.5 * d.sd, Math.abs(value < lo ? lo - edge : edge - hi));
+  const f = excess / reach;
+  // "lower"/"higher" metrics have no far side to fall off — being further in
+  // the good direction is not a defect — so the band edge on that side is the
+  // end of the scale rather than the start of a penalty. Handled by idealBand
+  // returning an open edge, so nothing extra is needed here.
+  void direction;
+  return Math.exp(-CONFORM_K * f * f);
+}
+
+// The band, in raw metric units. For "band" metrics it is the ideal plus or
+// minus the tolerance; for the monotone directions it is open-ended on the
+// good side, because there is no such thing as too little asymmetry.
+function idealBand(def: MetricDef, _value: number, sex: Sex): [number, number] {
+  const d = distFor(def, sex);
+  const direction = directionFor(def, sex);
+  if (direction === "lower") return [-Infinity, d.mean - 0.3 * d.sd];
+  if (direction === "higher") return [d.mean + 0.3 * d.sd, Infinity];
+  const ideal = d.ideal ?? d.mean;
+  const tol = toleranceOf(def) * d.sd;
+  return [ideal - tol, ideal + tol];
+}
+
 function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
   const d = distFor(def, sex);
   const z = (value - d.mean) / d.sd;
@@ -184,9 +278,17 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
       // sitting FARTHER from the ideal than this value, converted back to a
       // standard-normal z. This makes zEff exactly N(0,1) across the
       // population — no inflation by construction.
+      //
+      // The distance is measured from the EDGE of the tolerance band, not from
+      // the ideal point. Everything inside the band is the same distance —
+      // zero — so it all lands on one plateau, and that plateau is the rank of
+      // "in band" rather than the rank of "exactly ideal". Those are different
+      // claims and only the first one is true of a face that merely sits close.
+      // See toleranceOf for where the width comes from.
       const ideal = d.ideal ?? d.mean;
       const m = (ideal - d.mean) / d.sd; // ideal's offset from the mean
-      const c = Math.abs(value - ideal) / d.sd; // this face's distance
+      const raw = Math.abs(value - ideal) / d.sd; // this face's distance
+      const c = Math.max(toleranceOf(def), raw);
       const fracCloser = phi(m + c) - phi(m - c);
       zEff = probit(clamp(1 - fracCloser, 0.0005, 0.9995));
       break;
@@ -197,13 +299,17 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
   // travelling as NaN through anything that reads it before the weighting.
   zEff = Number.isFinite(zEff) ? clamp(zEff, -Z_CLAMP, Z_CLAMP) : 0;
 
-  const ideal = d.ideal ?? d.mean;
+  // The band the UI draws is now the band the scoring actually uses, rather
+  // than a separate ±0.6 sd cosmetic window that agreed with it by accident.
+  // A reader who sits inside the green stripe and is told they lost points for
+  // it has been shown two different definitions of "ideal".
+  const [bandLo, bandHi] = idealBand(def, value, sex);
   const idealRange: [number, number] =
     direction === "lower"
-      ? [Math.max(0, d.mean - 1.5 * d.sd), d.mean - 0.3 * d.sd]
+      ? [Math.max(0, d.mean - 1.5 * d.sd), bandHi]
       : direction === "higher"
-        ? [d.mean + 0.3 * d.sd, d.mean + 1.5 * d.sd]
-        : [ideal - 0.6 * d.sd, ideal + 0.6 * d.sd];
+        ? [bandLo, d.mean + 1.5 * d.sd]
+        : [bandLo, bandHi];
 
   return {
     def,
@@ -213,6 +319,7 @@ function scoreMetric(def: MetricDef, value: number, sex: Sex): ScoredMetric {
     percentile: Math.round(phi(zEff) * 1000) / 10,
     markerPct: Math.round(phi(z) * 1000) / 10,
     score: zToScore(zEff),
+    conformance: implausible ? 0 : conformance(def, value, sex),
     idealRange,
     ...(implausible ? { implausible: true } : {}),
   };

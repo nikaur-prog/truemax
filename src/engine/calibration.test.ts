@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import corpus from "./calibration/corpus.json" with { type: "json" };
-import { METRICS } from "./metrics.js";
+import { METRICS, directionFor } from "./metrics.js";
 import { scoreFrontMeasurements } from "./scoring.js";
 import type { Direction, Sex } from "./types.js";
 
@@ -170,31 +170,96 @@ function leaveOneOut(): { id: string; sex: Sex; rating: number; overall: number 
 
 test("agreement survives on faces the directions were not fitted to", () => {
   const held = leaveOneOut();
+
+  // Both sexes are asserted here, which they have not always been.
+  //
+  // A separate test used to sit below this one pinning the men BELOW 0.6, on
+  // the reasoning that nine men whose ratings bunch between 4.5 and 6.1 cannot
+  // support thirty-one fitted directions — held out they correlated about
+  // −0.1, and averaging that into a pooled figure would have read as progress
+  // where there was none. That test asked to be deleted the day the men
+  // cleared 0.6, and the tolerance band cleared it: 0.70 held out, from a
+  // standing start of roughly zero.
+  //
+  // Why a scoring curve moved the men and not the women is not mysterious. The
+  // old curve scored distance from a point ideal in population sd, so on a
+  // narrow male distribution every ordinary face was several sd from ideal on
+  // something and the ranking came out of noise. Giving each metric a band as
+  // wide as its own measurement error stops the engine ranking differences it
+  // cannot reproduce, and what is left is signal. See scoring.toleranceOf.
+  //
+  // The thresholds sit below the measured values on purpose. At n=9 a single
+  // face moves r by more than the margin, so these are a floor against
+  // regression, not a claim about the population.
   const women = held.filter((h) => h.sex === "female");
   const rW = corr(women.map((h) => h.rating), women.map((h) => h.overall));
-  assert.ok(rW >= 0.6, `women, held out: r=${rW.toFixed(2)}, expected ≥0.6`);
+  assert.ok(rW >= 0.65, `women, held out: r=${rW.toFixed(2)}, expected ≥0.65`);
+
+  const men = held.filter((h) => h.sex === "male");
+  const rM = corr(men.map((h) => h.rating), men.map((h) => h.overall));
+  assert.ok(rM >= 0.5, `men, held out: r=${rM.toFixed(2)}, expected ≥0.5`);
 
   const rAll = corr(held.map((h) => h.rating), held.map((h) => h.overall));
-  assert.ok(rAll >= 0.35, `all faces, held out: r=${rAll.toFixed(2)}, expected ≥0.35`);
+  assert.ok(rAll >= 0.6, `all faces, held out: r=${rAll.toFixed(2)}, expected ≥0.6`);
 });
 
-test("the male half of the corpus is still too thin to have fixed", () => {
-  // Not a passing grade dressed up as one. Held out, the men correlate about
-  // −0.1 — the calibration did essentially nothing for them, and this test
-  // exists so that stays visible instead of being averaged into a pooled figure
-  // that looks like progress.
+test("a metric inside its tolerance band is reported as ideal, not merely ranked", () => {
+  // The defect the band exists to fix, stated as an invariant.
   //
-  // The cause is countable: nine men, whose ratings bunch between 4.5 and 6.1,
-  // against thirty-one directions to choose. There is no fit that survives
-  // that, and none should be claimed. What it needs is more male faces spread
-  // across the range, not more tuning.
+  // A face measured within its own repeatability of the ideal used to be told
+  // it out-ranked some fraction of the population and nothing else — which is
+  // true, and which reads as a mark against a feature that has nothing wrong
+  // with it. An external benchmark made the size of that visible: a canthal
+  // tilt agreeing with a competing product to within 0.7 of a degree scored
+  // 7.3 against their 10.0 (docs/BENCHMARK_CAVILL.md).
   //
-  // Flip this assertion the day the men clear 0.6 — deleting it then is the
-  // point of it being here.
-  const men = leaveOneOut().filter((h) => h.sex === "male");
-  const r = corr(men.map((h) => h.rating), men.map((h) => h.overall));
+  // Conformance answers the other question. Both numbers stay, because they
+  // are both true and they are not the same question.
+  const scored = FACES.flatMap((f) =>
+    scoreFrontMeasurements(f.measurements, f.sex).metrics.map((m) => ({ m, sex: f.sex })),
+  ).map(({ m, sex }) => Object.assign(m, { sex }));
+
+  // In band is conformance EXACTLY 1, not approximately. The plateau is flat by
+  // construction — every value inside the band is the same distance from it,
+  // namely none — so a 0.9999 is a value sitting just OUTSIDE the band, and
+  // treating the two as the same thing is what a tolerance band exists to stop.
+  const inBand = scored.filter((m) => m.conformance === 1);
+  assert.ok(inBand.length > 0, "no measurement in the corpus lands inside its band");
   assert.ok(
-    r < 0.6,
-    `men now hold up out of sample (r=${r.toFixed(2)}) — fold them into the main assertion and delete this test`,
+    inBand.length < scored.length,
+    "every measurement is in band — the bands are too wide to distinguish anything",
   );
+
+  // Outside the band conformance is strictly below 1 and never negative, and
+  // the falloff reaches near zero only at the edge of anatomical plausibility.
+  for (const m of scored) {
+    assert.ok(
+      m.conformance >= 0 && m.conformance <= 1,
+      `${m.def.id} conformance ${m.conformance} out of range`,
+    );
+  }
+
+  // The band is what the UI draws, so a reader inside the green stripe must
+  // never be told they lost points for it.
+  //
+  // Only "band" metrics are checked both ways. For "lower" and "higher" the
+  // band is open-ended on the good side while the drawn range is a readable
+  // window capped at 1.5 sd, so a value can legitimately sit past the far edge
+  // of the stripe — that is being further into the good direction, not a
+  // disagreement. What must hold for those is the near edge: in band means at
+  // or beyond where the stripe starts.
+  for (const m of inBand) {
+    const [lo, hi] = m.idealRange;
+    const d = directionFor(m.def, m.sex);
+    if (d === "band") {
+      assert.ok(
+        m.value >= lo - 1e-9 && m.value <= hi + 1e-9,
+        `${m.def.id} scores as in band (${m.value}) but draws its range as ${lo}–${hi}`,
+      );
+    } else if (d === "higher") {
+      assert.ok(m.value >= lo - 1e-9, `${m.def.id} in band at ${m.value} but stripe starts at ${lo}`);
+    } else if (d === "lower") {
+      assert.ok(m.value <= hi + 1e-9, `${m.def.id} in band at ${m.value} but stripe ends at ${hi}`);
+    }
+  }
 });
