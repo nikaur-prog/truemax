@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SIDE_METRICS, SIDE_POINTS, computeSideMetrics } from "./sideMetrics.js";
+import { SIDE_METRICS, SIDE_POINTS, computeSideMetrics, faceDirFromPoints } from "./sideMetrics.js";
 import type { SidePointId, SidePoints } from "./sideMetrics.js";
 import { TEMPLATE, headWidthFrom } from "../ui/sideVerify.js";
 
@@ -135,6 +135,76 @@ test("a head width that no head has is refused, not clamped to the edge", () => 
   // A believable estimate is still respected — this must not flatten every
   // head to the average.
   assert.equal(headWidthFrom(V * 0.8, V), V * 0.8);
+});
+
+// ---------------------------------------------------------------------------
+// The bounds, against faces we KNOW were placed correctly.
+//
+// Everything above tests the template. This tests the bounds, and it is the
+// check whose absence let a guard reject its own ground truth three times in
+// front of an operator who was doing nothing wrong.
+//
+// The other plausibility test uses a hand-authored profile. That fixture was
+// drawn to satisfy the bounds, so it can only confirm they agree with the
+// drawing — it cannot notice that real faces disagree. These are the actual
+// hand-corrected exports from docs/SIDE_FIXTURES.md: thirteen points dragged
+// into place on real photographs by a person looking at them.
+//
+// The coordinates are normalised against each photo's own width and height,
+// and those dimensions were not recorded, so the aspect has to be recovered
+// before the geometry means anything — at 1:1 a fixture reads 0.77 and at 9:16
+// the same numbers read 1.29. It is recovered from the one proportion
+// anthropometry pins down: hairline-to-chin over nose-tip-to-ear-canal, about
+// 18.5cm to 13.5cm on an adult head.
+// ---------------------------------------------------------------------------
+
+const GROUND_TRUTH: Record<string, Record<string, [number, number]>> = {
+  E: {"trichion":[0.3486,0.3469],"glabella":[0.3406,0.4212],"nasion":[0.3405,0.4594],"pronasale":[0.2995,0.5484],"subnasale":[0.3254,0.562],"labialeSuperius":[0.3094,0.5857],"labialeInferius":[0.3139,0.6352],"pogonion":[0.341,0.6926],"menton":[0.3517,0.7045],"gonion":[0.5836,0.6551],"condylion":[0.6216,0.477],"cervicale":[0.477,0.7036],"tragion":[0.6159,0.5222]},
+  F: {"trichion":[0.3392,0.3217],"glabella":[0.2958,0.3916],"nasion":[0.3047,0.433],"pronasale":[0.2456,0.4889],"subnasale":[0.277,0.5293],"labialeSuperius":[0.2606,0.5579],"labialeInferius":[0.2599,0.6124],"pogonion":[0.2733,0.6683],"menton":[0.3454,0.697],"gonion":[0.5482,0.6357],"condylion":[0.5641,0.4633],"cervicale":[0.4728,0.6983],"tragion":[0.5833,0.5178]},
+  G: {"trichion":[0.2794,0.4203],"glabella":[0.2727,0.4823],"nasion":[0.2824,0.5103],"pronasale":[0.2433,0.5929],"subnasale":[0.278,0.6134],"labialeSuperius":[0.2683,0.6418],"labialeInferius":[0.2898,0.6874],"pogonion":[0.3024,0.7405],"menton":[0.3585,0.7549],"gonion":[0.5468,0.6891],"condylion":[0.5024,0.4911],"cervicale":[0.4677,0.745],"tragion":[0.6045,0.5846]},
+};
+
+function atRecoveredAspect(set: Record<string, [number, number]>): SidePoints {
+  const build = (aspect: number): SidePoints => {
+    const p = {} as SidePoints;
+    for (const [id, [x, y]] of Object.entries(set)) {
+      p[id as SidePointId] = { x: x * 1000, y: y * 1000 * aspect };
+    }
+    return p;
+  };
+  let best = { aspect: 1, err: Infinity };
+  for (let aspect = 0.5; aspect <= 3; aspect += 0.005) {
+    const p = build(aspect);
+    const height = Math.hypot(p.trichion.x - p.menton.x, p.trichion.y - p.menton.y);
+    const depth = Math.hypot(p.pronasale.x - p.tragion.x, p.pronasale.y - p.tragion.y);
+    const err = Math.abs(height / depth - 18.5 / 13.5);
+    if (err < best.err) best = { aspect, err };
+  }
+  return build(best.aspect);
+}
+
+test("no bound rejects a profile a human placed correctly", () => {
+  const rejected: string[] = [];
+  for (const [name, set] of Object.entries(GROUND_TRUTH)) {
+    const measured = computeSideMetrics(atRecoveredAspect(set), faceDirFromPoints(atRecoveredAspect(set)));
+    for (const def of SIDE_METRICS) {
+      if (!def.plausible) continue;
+      const value = measured[def.id];
+      if (!Number.isFinite(value) || value < def.plausible[0] || value > def.plausible[1]) {
+        rejected.push(
+          `set ${name}: ${def.id} = ${value.toFixed(3)} outside [${def.plausible.join(", ")}]`,
+        );
+      }
+    }
+  }
+  assert.deepEqual(
+    rejected,
+    [],
+    `a bound rejects hand-placed ground truth, so it does not describe this ` +
+      `construction:\n  ${rejected.join("\n  ")}\n` +
+      `Hold the metric out of scoring until its norm can be re-derived from our ` +
+      `own measurements. Do NOT widen the bound to a number that makes this pass.`,
+  );
 });
 
 test("the template's jaw proportions read as a jaw", () => {

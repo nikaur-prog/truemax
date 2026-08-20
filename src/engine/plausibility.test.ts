@@ -8,6 +8,14 @@ import type { SidePoints } from "./sideMetrics.js";
 // A profile facing image-right, laid out to roughly human proportions. Not a
 // real scan — the point is that every measurement built from it lands inside
 // its plausible bounds, so the guard cannot be firing on ordinary faces.
+//
+// READ THE LIMIT OF THIS FIXTURE BEFORE TRUSTING IT. It is hand-authored, and
+// it was authored to satisfy the bounds, so it can only ever confirm that the
+// bounds agree with the drawing. It passed happily for as long as
+// ramusMandible's bound rejected real hand-corrected profiles, because a
+// synthetic face drawn to fit cannot notice that real ones do not. Bounds are
+// checked against actual ground truth in sideTemplate.test.ts; this file tests
+// the mechanism, not the numbers.
 function realisticProfile(): SidePoints {
   return {
     trichion: { x: 300, y: 100 },
@@ -33,21 +41,26 @@ test("an ordinary profile trips no plausibility bound", () => {
 });
 
 // The failure this guard was built for: gonion dragged down the neck, which
-// lengthens condylion→gonion and shortens gonion→menton at the same time and
-// pushes the ramus ratio toward 1.0.
+// closes the angle at the jaw corner until it is sharper than any mandible.
+//
+// This used to assert on ramusMandible, which has since been held out of
+// scoring — its bound described a radiographic measurement rather than the
+// surface landmarks placed here, and rejected correctly-placed faces. The
+// BEHAVIOUR under test is unchanged: a point dragged somewhere impossible is
+// caught and excluded rather than quietly scored.
 test("a jaw corner placed down the neck is caught, not scored", () => {
   const points = realisticProfile();
-  points.gonion = { x: 250, y: 430 };
+  points.gonion = { x: 268, y: 452 };
   const report = analyzeSide(points, 1, "male");
-  const ramus = report.metrics.find((m) => m.def.id === "ramusMandible");
-  assert.ok(ramus, "ramusMandible should still be measured and displayed");
-  assert.equal(ramus!.implausible, true, "an impossible ramus ratio must be flagged");
+  const gonial = report.metrics.find((m) => m.def.id === "gonialAngle");
+  assert.ok(gonial, "gonialAngle should still be measured and displayed");
+  assert.equal(gonial!.implausible, true, "an impossible gonial angle must be flagged");
 });
 
 test("an excluded measurement cannot drag the jaw score down", () => {
   const good = analyzeSide(realisticProfile(), 1, "male");
   const points = realisticProfile();
-  points.gonion = { x: 250, y: 430 };
+  points.gonion = { x: 268, y: 452 };
   const bad = analyzeSide(points, 1, "male");
 
   const jawOf = (r: typeof good) => r.regions.find((x) => x.region === "jaw")!;

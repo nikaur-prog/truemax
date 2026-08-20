@@ -636,9 +636,23 @@ function mountVerify(
         e.cap.textContent = "CHECK LANDMARKS";
         const names = impossible.map((m) => m.def.name.toLowerCase());
         const points = [...new Set(impossible.flatMap((m) => m.def.points ?? []))];
+        // The measured value and the bound it broke, in the message itself.
+        //
+        // The refusal used to say only that something was outside what a face
+        // can be. That is enough to stop a bad scan and nowhere near enough to
+        // tell the two possible causes apart: a misplaced point, or a bound
+        // that does not describe this measurement. Those need opposite fixes,
+        // and without the number the only way to tell them apart was to read
+        // coordinates off a screenshot and work backwards — which is how a
+        // guard that rejected its own ground truth survived three reports.
+        const readings = impossible.map((m) => {
+          const bound = m.def.plausible;
+          const value = m.value.toFixed(m.def.decimals);
+          return bound ? `${m.def.name} ${value} (expected ${bound[0]}–${bound[1]})` : `${m.def.name} ${value}`;
+        });
         const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
         if (hint) {
-          hint.textContent = `${names.join(" and ")} came out outside what a face can be — check ${
+          hint.textContent = `${readings.join("; ")} — check ${
             points.length ? points.join(", ") : "the points behind it"
           }`;
           hint.classList.add("show");
