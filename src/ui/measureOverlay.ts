@@ -34,11 +34,11 @@ interface Pt2 {
 // resolves them against the raw landmark list.
 const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   fwhr: (m) => [
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, label: `${m.value.toFixed(2)}×` },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, label: `${m.value.toFixed(2)}×` },
     { kind: "span", a: mid(LM.EYE_R_TOP, LM.EYE_L_TOP), b: LM.LIP_TOP, color: WARM },
   ],
   jawCheekRatio: (m) => [
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
     { kind: "span", a: LM.GONION_R, b: LM.GONION_L, label: `${m.value.toFixed(3)}` },
   ],
   gonialProxy: (m) => [
@@ -66,7 +66,7 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   eyeSeparationRatio: (m) => [
     { kind: "span", a: LM.IRIS_R, b: LM.IRIS_L, label: `${m.value.toFixed(3)}` },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
   ],
   intercanthalEyeWidth: (m) => [
     { kind: "span", a: LM.EYE_R_INNER, b: LM.EYE_L_INNER, label: `${m.value.toFixed(2)}×` },
@@ -74,7 +74,7 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   fifthsEyeRatio: (m) => [
     { kind: "span", a: LM.EYE_R_OUTER, b: LM.EYE_R_INNER, label: `${m.value.toFixed(3)}` },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
   ],
   noseMouthRatio: (m) => [
     { kind: "span", a: 98, b: 327, label: `${m.value.toFixed(2)}×` },
@@ -129,14 +129,14 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   facialIndex: (m) => [
     { kind: "span", a: LM.FOREHEAD_TOP, b: LM.MENTON, label: `${m.value.toFixed(2)}` },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, color: WARM },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, color: WARM },
   ],
   midfaceRatio: (m) => [
     { kind: "span", a: LM.IRIS_R, b: LM.IRIS_L, label: `${m.value.toFixed(2)}` },
     { kind: "span", a: mid(LM.IRIS_R, LM.IRIS_L), b: LM.LIP_TOP, color: WARM },
   ],
   cheekboneHeight: (m) => [
-    { kind: "rule", y: LM.MALAR_R, label: `${m.value.toFixed(2)}` },
+    { kind: "rule", y: LM.ZYGION_R, label: `${m.value.toFixed(2)}` },
     { kind: "span", a: mid(LM.IRIS_R, LM.IRIS_L), b: LM.MENTON, color: WARM },
   ],
   midlineDeviation: (m) => [
@@ -153,7 +153,7 @@ const RECIPES: Record<string, (m: ScoredMetric) => Seg[]> = {
   ],
   mirrorDeviation: (m) => [
     { kind: "axis", x: mid(LM.IRIS_R, LM.IRIS_L) },
-    { kind: "span", a: LM.MALAR_R, b: LM.MALAR_L, label: `${m.value.toFixed(1)}%` },
+    { kind: "span", a: LM.ZYGION_R, b: LM.ZYGION_L, label: `${m.value.toFixed(1)}%` },
   ],
 };
 

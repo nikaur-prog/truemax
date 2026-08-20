@@ -30,7 +30,11 @@ import type { CameraHandle } from "./camera.js";
 // a heuristic. The review screen is the accuracy gate: TrueMax estimates the
 // points, then the user corrects them before any side score is calculated.
 
-const MAX_DIM = 1000;
+// Raised from 1000. The review screen now draws the photo up to ~1300px wide on
+// a desktop, and at 1000 the canvas was being upscaled to fill it — soft edges
+// exactly where somebody is trying to put a landmark on a feature boundary. The
+// cost is a slightly slower seed pass on one image, which is not on any hot path.
+const MAX_DIM = 1400;
 
 interface SideCtx {
   scanId: string;
@@ -442,6 +446,30 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
 
 // Shared by the first pass and by a later correction, so the two cannot drift
 // apart in what dragging a point does.
+/**
+ * Give the photo as much of the screen as it can take without scrolling.
+ *
+ * Thirteen landmarks are dragged into position on this picture, and precision
+ * scales with how big it is drawn. The layout used to give it a fixed 44% of a
+ * 1080px column — about 450 pixels of face — which is enough to confirm a good
+ * placement and not enough to repair a bad one.
+ *
+ * The cap has to be applied to the FRAME rather than to the canvas. The two
+ * overlays that draw the points and the guide lines are `position: absolute;
+ * inset: 0` on the frame, so they follow the frame's box exactly. Capping the
+ * canvas instead would letterbox it inside a taller frame and every point would
+ * sit off the feature it names by half the difference.
+ *
+ * Width is derived from the photo's own aspect ratio so the height cap lands
+ * where intended: a 3:4 portrait gets a narrower frame than a square crop, and
+ * both end up the same height on screen.
+ */
+function fitFrameToViewport(frame: HTMLElement, w: number, h: number): void {
+  if (!(w > 0 && h > 0)) return;
+  const maxH = window.innerHeight * 0.78;
+  frame.style.maxWidth = `${Math.round((w / h) * maxH)}px`;
+}
+
 function mountVerify(
   photo: HTMLCanvasElement,
   seed: SidePlacementSeed,
@@ -458,6 +486,7 @@ function mountVerify(
   const h = e.canvas.height;
   e.drop.classList.add("hidden");
   e.cap.textContent = caption;
+  fitFrameToViewport(e.frame, w, h);
 
   const automaticPoints = cloneSidePoints(seed.automaticPoints ?? seed.points);
   const seedMethod = seed.method ?? "existing";
@@ -476,6 +505,9 @@ function mountVerify(
   // complaint — not re-asked at confirm.
   let flaggedWrong = false;
   let consentAnswer: boolean | null = null;
+  // Set once the "nothing was moved" prompt has been shown, so the second press
+  // goes through. Scoped per mounted photo, so the next face asks again.
+  let untouchedAcknowledged = false;
 
   const showReviewActions = () => {
     // Editable from the first frame. The old flow parked the points behind an
@@ -548,6 +580,71 @@ function mountVerify(
     try {
       const correctedPoints = cloneSidePoints(verifier.points);
       const report = analyzeSide(verifier.points, faceDir, ctx.sex);
+
+      // A measurement outside anatomical bounds is a misplaced point, and this
+      // is the last moment it can be caught.
+      //
+      // sidePointIntegrityIssues above checks the POINTS against each other —
+      // ordering, spacing, facing. It cannot see a pair that is individually
+      // reasonable and jointly impossible. A Cavill capture exported a ramus to
+      // mandible ratio of 1.19 against a bound of 0.35-0.95, meaning the two
+      // arms of the jaw came out nearly equal length, which no mandible is; and
+      // a nasofrontal angle of 83.6 against a bound of 95-170. Both passed the
+      // point checks, both landed in an export that looked entirely ordinary,
+      // and neither was noticed until the numbers were read one by one weeks
+      // later.
+      //
+      // The engine already knows — scoreMetric sets `implausible` and drops the
+      // metric from every aggregate. It just was not telling anybody. This says
+      // it, names the measurement, and refuses to store the scan until the
+      // points behind it have been moved.
+      const impossible = report.metrics.filter((m) => m.implausible);
+      if (impossible.length) {
+        if (confirmButton) confirmButton.disabled = false;
+        e.cap.textContent = "CHECK LANDMARKS";
+        const names = impossible.map((m) => m.def.name.toLowerCase());
+        const points = [...new Set(impossible.flatMap((m) => m.def.points ?? []))];
+        const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
+        if (hint) {
+          hint.textContent = `${names.join(" and ")} came out outside what a face can be — check ${
+            points.length ? points.join(", ") : "the points behind it"
+          }`;
+          hint.classList.add("show");
+        }
+        e.panelCopy.innerHTML = `<h2 class="side-title">One of these cannot be right</h2>
+          <p class="side-sub">The ${names.join(" and ")} measured outside the range a human
+          face occupies, which means a point is in the wrong place rather than that this is an
+          unusual profile. ${points.length
+            ? `Check <b>${points.join("</b>, <b>")}</b>.`
+            : ""}</p>
+          <p class="side-review-note">Storing it anyway would put a number in the calibration
+          set that describes where a point landed, not the face.</p>`;
+        return;
+      }
+
+      // Confirming a seed nobody touched.
+      //
+      // Allowed, because a good automatic placement should not have to be
+      // nudged to be accepted — but it takes a second press, and the copy says
+      // what is being accepted. Every side scan in the benchmark file was
+      // confirmed untouched, and their measurements disagree with an
+      // independent product by 22, 12 and 48 degrees on metrics that agreed to
+      // within two degrees on the one capture that happened to seed well.
+      if (!movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
+        untouchedAcknowledged = true;
+        if (confirmButton) {
+          confirmButton.disabled = false;
+          confirmButton.textContent = "Confirm as-is";
+        }
+        e.panelCopy.innerHTML = `<h2 class="side-title">Nothing was moved</h2>
+          <p class="side-sub">These are the automatic positions exactly as they were estimated.
+          The five behind the face — jaw corner, ear and the neck point — are inferred from an
+          average head rather than found in the photo, so they are the ones that drift.</p>
+          <p class="side-review-note">If they are genuinely right, press Confirm as-is. If you
+          have not looked yet, this is the moment — a side score built on a guessed jaw corner
+          measures the guess.</p>`;
+        return;
+      }
 
       // Consent, asked only when there is something to learn.
       //

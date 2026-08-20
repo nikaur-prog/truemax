@@ -46,10 +46,51 @@ export const LM = {
   LIP_LOWER_INNER: 14, // stomion lower
   LIP_BOTTOM: 17, // labiale inferius (vermilion bottom center)
   // Face contour
-  // Approximate malar prominence. MediaPipe has no true skeletal
-  // "zygion" landmark; 116/345 sit on the upper lateral cheek consistently.
-  // The old 234/454 pair is the widest face-oval/sideburn pair and was
-  // incorrectly labelled as cheekbone width.
+  //
+  // BIZYGOMATIC WIDTH. This reverses an earlier change, so the reasoning it
+  // overturns is kept: 116/345 were chosen because MediaPipe has no skeletal
+  // "zygion" landmark and 234/454 were judged to be the face-oval/sideburn
+  // pair rather than the cheekbone. The soft-tissue worry there is real. The
+  // conclusion was still wrong, for three reasons that were not available at
+  // the time.
+  //
+  //   1. The published definition is the SILHOUETTE, not the skeleton. In the
+  //      facial-width-to-height literature bizygomatic width is the maximum
+  //      horizontal distance from the left facial boundary to the right — a
+  //      boundary measurement taken from a photograph, which is exactly what
+  //      the face oval gives and what an inset cheek point does not.
+  //
+  //   2. Measured, over 60 reference faces (tools/bizygo-check.mjs): 116/345
+  //      span 89.2% of the face at their own height, mean and median within
+  //      0.2 points of each other. That is not an approximation of the width,
+  //      it is a consistent 10.8% underestimate of it.
+  //
+  //   3. Two metrics that divide by it read high against an independent
+  //      product by 10.1% and 6.0%, which is what a denominator that short
+  //      produces.
+  //
+  // 234/454 rather than the widest pair on the oval. 127/356 is marginally
+  // wider (1.165 against 1.160 in eye-to-chin units) but sits at height 0.078,
+  // barely below the eye line, where the silhouette really is temple and
+  // sideburn. 234/454 sits at 0.199 — the same height as the pair being
+  // replaced, so this changes WHERE ACROSS the face we measure and not how
+  // far down, which is the single thing that was wrong. Its width also varies
+  // slightly LESS across faces in relative terms (5.16% against 5.36%), so
+  // the hair worry does not show up in the numbers.
+  //
+  // Named for what it is now. The old name invited the old mistake back.
+  ZYGION_R: 234,
+  ZYGION_L: 454,
+  // The malar prominence, kept, because two different questions want two
+  // different points and collapsing them is what went wrong the first time.
+  //
+  //   How WIDE is the face here?  The silhouette. ZYGION.
+  //   How HIGH is the cheekbone?  The prominence itself. MALAR.
+  //
+  // cheekboneHeight is (malar.y - eyeMid.y) / (menton.y - eyeMid.y) — a
+  // vertical position with no width in it. Pointing it at the silhouette pair
+  // instead moved it 41% on men and 12% on women, which is not a correction of
+  // anything, just a different measurement wearing the same name.
   MALAR_R: 116,
   MALAR_L: 345,
   GONION_R: 58,

@@ -48,16 +48,33 @@ const spearman = (a: number[], b: number[]) => corr(ranks(a), ranks(b));
 
 const scoreAll = (faces: Face[]) => faces.map((f) => scoreFrontMeasurements(f.measurements, f.sex).overall);
 
-// Metrics added to the engine AFTER these nineteen faces were captured.
+// Metrics with NO rated evidence behind them. Their direction and their
+// distribution are a prior and nothing more.
 //
-// The corpus is a record of what was measured on a given day, so it cannot
-// contain a measurement that did not exist yet, and a new metric must not be
-// able to fail this file just by being new. What it must also not do is go
-// unnoticed: an entry here is a metric with NO rated evidence behind it, so its
-// direction and its distribution are a prior and nothing more.
+// The corpus is a record of what was measured on a given day, and there are two
+// ways a metric ends up absent from it:
 //
-// Remove a name from this list by re-scanning the corpus, not by deleting it.
-const MEASURED_AFTER_CORPUS = new Set(["cheekFullness", "foreheadRatio"]);
+//   ADDED LATER   — the metric did not exist when these faces were captured.
+//                   cheekFullness, foreheadRatio.
+//
+//   REDEFINED     — the metric existed, but its construction changed, so the
+//                   stored numbers describe a quantity the engine no longer
+//                   computes. Keeping them would be worse than dropping them:
+//                   they look like evidence and are measurements of something
+//                   else. The five below all divide by bizygomatic width, which
+//                   moved from landmarks 116/345 to 234/454 after 116/345 were
+//                   measured at 89.2% of the face's actual width. Their values
+//                   sat about 10% off the new definition and were being scored
+//                   against distributions re-fitted to it, which pinned 9% of
+//                   all metric scores against the influence clamp — that is how
+//                   this was caught rather than shipped.
+//
+// A name leaves this list by RE-SCANNING the faces, never by deleting it. The
+// forty-face calibration run is what clears the second group.
+const MEASURED_AFTER_CORPUS = new Set([
+  "cheekFullness", "foreheadRatio",
+  "eyeSeparationRatio", "fwhr", "jawCheekRatio", "fifthsEyeRatio", "facialIndex",
+]);
 
 test("the corpus is intact and every face carries every front measurement", () => {
   assert.equal(FACES.length, 19);

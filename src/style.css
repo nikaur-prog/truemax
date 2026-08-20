@@ -778,9 +778,25 @@ body.funnel-open { overflow: hidden; }
 .btn.gho { background: var(--card); border: 1px solid var(--line); }
 
 /* ---------- side profile: verify step ---------- */
-#v-side { max-width: 1080px; margin: 26px auto 90px; padding: 0 26px; }
-.side-inner { display: grid; grid-template-columns: 44% 1fr; gap: 34px; align-items: start; }
-.side-photo .face-frame { background: #101113; }
+/* The photo is the work surface, so it gets the room.
+   It used to be 44% of a 1080px column — about 450px of picture to drag
+   thirteen landmarks around inside, which is fine for confirming a good
+   placement and useless for fixing a bad one. The panel beside it is a
+   paragraph of instructions and four buttons; it does not need half the page.
+   Now the photo takes roughly two thirds of a much wider column, and is capped
+   by viewport height so a portrait shot cannot run off the bottom. */
+#v-side { max-width: 1560px; margin: 26px auto 90px; padding: 0 26px; }
+.side-inner {
+  display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.85fr);
+  gap: 34px; align-items: start;
+}
+/* The canvas keeps `width: 100%` so it fills whatever the frame allows, and the
+   frame's max-width is set in JS from the photo's own aspect ratio — see
+   fitFrameToViewport in sideFlow.ts. Capping the canvas height directly instead
+   would letterbox it inside the frame, and #side-lines and #side-verify are
+   `position: absolute; inset: 0` on the FRAME, so they would drift off the face
+   by half the letterboxing. Sizing the frame keeps every layer on the same box. */
+.side-photo .face-frame { background: #101113; margin: 0 auto; }
 #side-canvas { width: 100%; height: auto; display: block; }
 #side-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #side-verify { position: absolute; inset: 0; }
