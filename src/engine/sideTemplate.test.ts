@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { SIDE_METRICS, SIDE_POINTS, computeSideMetrics } from "./sideMetrics.js";
 import type { SidePointId, SidePoints } from "./sideMetrics.js";
-import { TEMPLATE } from "../ui/sideVerify.js";
+import { TEMPLATE, headWidthFrom } from "../ui/sideVerify.js";
 
 // ---------------------------------------------------------------------------
 // The guard may not reject our own reference head.
@@ -35,11 +35,14 @@ import { TEMPLATE } from "../ui/sideVerify.js";
 const U = 135;
 const V = 185;
 
-function templateHead(): SidePoints {
+// headWidth defaults to a real one. placeBackPoints scales u by the ESTIMATED
+// head width and v by the head height, so passing it explicitly is what lets
+// the range test below walk every head the seeder is able to emit.
+function templateHead(headWidth = U): SidePoints {
   const pts = {} as SidePoints;
   for (const { id } of SIDE_POINTS) {
     const [u, v] = TEMPLATE[id as SidePointId];
-    pts[id as SidePointId] = { x: 400 + u * U, y: 100 + v * V };
+    pts[id as SidePointId] = { x: 400 + u * headWidth, y: 100 + v * V };
   }
   return pts;
 }
@@ -78,6 +81,60 @@ test("the jaw hinge sits at the ear canal, not up on the temple", () => {
     condU > tragU,
     "the jaw hinge must sit FORWARD of the ear notch — the condyle is anterior to the canal",
   );
+});
+
+test("no head width the estimator can return produces a rejected head", () => {
+  // THE TEST THAT WAS MISSING, and the reason a real fix did not fix anything.
+  //
+  // The check above scores the template at ONE head width — a realistic one —
+  // and passed while the app went on refusing correct placements. The template
+  // is only half of a seeded head: placeBackPoints scales the u axis by an
+  // ESTIMATED head width, so the shape that reaches the guard depends on a
+  // number measured per photo, and that estimate can fail. Squash the width and
+  // the mandibular body shortens while the ramus does not.
+  //
+  // Testing one point in a range says nothing about the range. So this walks
+  // every width headWidthFrom is capable of returning, including from estimates
+  // that are degenerate, absent or absurd, and requires the whole span to
+  // survive the same guard the operator meets.
+  const estimates = [
+    0, 1, -50, Number.NaN, Number.POSITIVE_INFINITY,
+    ...Array.from({ length: 40 }, (_, i) => V * (0.05 + i * 0.05)),
+  ];
+  const failures: string[] = [];
+  for (const estimate of estimates) {
+    const width = headWidthFrom(estimate, V);
+    const measured = computeSideMetrics(templateHead(width), -1);
+    for (const def of SIDE_METRICS) {
+      if (!def.plausible) continue;
+      const value = measured[def.id];
+      if (!Number.isFinite(value) || value < def.plausible[0] || value > def.plausible[1]) {
+        failures.push(
+          `estimate ${estimate} -> width ${(width / V).toFixed(2)}x height: ` +
+            `${def.id} = ${value.toFixed(3)} outside [${def.plausible.join(", ")}]`,
+        );
+      }
+    }
+  }
+  assert.deepEqual(failures.slice(0, 6), [], failures.slice(0, 6).join("\n  "));
+});
+
+test("a head width that no head has is refused, not clamped to the edge", () => {
+  // Clamping a degenerate estimate to the boundary is what made the failure
+  // silent: 0.3x height is not a narrow head, it is not a head, and reshaping
+  // the template to it produced a confident measurement of nothing. Anything
+  // outside the range real heads occupy must come back as the population
+  // figure instead.
+  for (const nonsense of [0, V * 0.1, V * 3, Number.NaN]) {
+    const ratio = headWidthFrom(nonsense, V) / V;
+    assert.ok(
+      ratio >= 0.62 && ratio <= 0.88,
+      `an estimate of ${nonsense} produced ${ratio.toFixed(2)}x head height`,
+    );
+  }
+  // A believable estimate is still respected — this must not flatten every
+  // head to the average.
+  assert.equal(headWidthFrom(V * 0.8, V), V * 0.8);
 });
 
 test("the template's jaw proportions read as a jaw", () => {
