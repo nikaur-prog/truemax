@@ -13,7 +13,7 @@ import {
   rollProgress,
   rollingDigits,
 } from "./rundownFrame.js";
-import { anglePhases } from "./measureOverlay.js";
+import { anglePhases, angleLabelAt, arcRadius, interiorSweep } from "./measureOverlay.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
 
@@ -651,4 +651,58 @@ test("an angle is complete, and only complete, at full progress", () => {
       assert.ok(v >= 0 && v <= 1, `phase out of range at u=${u}`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// The angle's arc and its label.
+// ---------------------------------------------------------------------------
+
+test("an angle marks the interior angle, never the reflex one", () => {
+  // The old version sorted the two bearings and swept low to high, which is
+  // only the interior angle while the pair does not straddle atan2's ±π
+  // discontinuity. A gonial angle on one side of the face does straddle it, and
+  // there the arc looped around the vertex and out through its own leg.
+  const straddles: Array<[number, number]> = [
+    [3.0, -3.0],
+    [-3.05, 3.05],
+    [Math.PI - 0.1, -Math.PI + 0.1],
+  ];
+  for (const [a1, a2] of straddles) {
+    const d = interiorSweep(a1, a2);
+    assert.ok(Math.abs(d) <= Math.PI + 1e-9, `reflex sweep for ${a1},${a2}`);
+    assert.ok(Math.abs(d) < 0.3, `swept the long way round for ${a1},${a2}`);
+  }
+  // And it still lands exactly on the second leg in the ordinary case.
+  assert.ok(Math.abs(interiorSweep(0, 1.2) - 1.2) < 1e-9);
+  assert.ok(Math.abs(interiorSweep(1.2, 0) + 1.2) < 1e-9);
+});
+
+test("the arc is scaled to the figure, and bounded at both ends", () => {
+  // A flat radius made the arc a hook you had to go looking for on a big
+  // figure, and an unbounded one would swallow the face on a bigger one.
+  const v = { x: 150, y: 260 };
+  const near = arcRadius(v, { x: 130, y: 245 }, { x: 170, y: 245 }, 300);
+  const far = arcRadius(v, { x: 40, y: 60 }, { x: 260, y: 60 }, 300);
+  assert.ok(far > near, "the arc should grow with the figure");
+  assert.ok(near >= 300 * 0.05, "arc collapsed on a small figure");
+  assert.ok(far <= 300 * 0.14, "arc swallowed the frame on a large one");
+});
+
+test("the value chip sits clear of the arc, outside the figure", () => {
+  // It used to be drawn ON the vertex — which is where the arc is — so the one
+  // element identifying the figure as an angle was covered by its own number.
+  const v = { x: 150, y: 258 };
+  const a = { x: 54, y: 102 };
+  const b = { x: 246, y: 102 };
+  const at = angleLabelAt(v, a, b, 300, 5);
+  const r = arcRadius(v, a, b, 300);
+  assert.ok(Math.hypot(at.x - v.x, at.y - v.y) > r, "chip lands inside the arc");
+  // Legs run upward from the chin, so the chip belongs below it — away from the
+  // face, not between the legs where the face is.
+  assert.ok(at.y > v.y, "chip placed into the figure rather than away from it");
+});
+
+test("a straight line does not produce a NaN label position", () => {
+  const at = angleLabelAt({ x: 100, y: 100 }, { x: 0, y: 100 }, { x: 200, y: 100 }, 300, 5);
+  assert.ok(Number.isFinite(at.x) && Number.isFinite(at.y));
 });

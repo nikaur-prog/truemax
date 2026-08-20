@@ -425,7 +425,7 @@ export function drawMeasurement(
       line(ctx, v, lerp(v, a, phase.legA));
       if (phase.legB > 0) line(ctx, v, lerp(v, b, phase.legB));
       if (phase.arc > 0) arc(ctx, v, a, b, width, phase.arc);
-      if (seg.label && done) label(ctx, seg.label, v, fs, color);
+      if (seg.label && done) label(ctx, seg.label, angleLabelAt(v, a, b, width, fs), fs, color);
     } else if (seg.kind === "rule") {
       // A rule spans the frame, so it opens from the middle outward.
       const p = P(seg.y);
@@ -463,15 +463,98 @@ function tick(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2, lw: number): void {
 }
 
 // `u` sweeps the arc from its first leg toward its second.
+/**
+ * How big the angle's arc should be, in pixels.
+ *
+ * It was a flat `width * 0.045` — about thirteen pixels against legs two
+ * hundred long, which on a phone is a hook you have to go looking for. The arc
+ * is the element that says "this is an ANGLE" rather than two lines that happen
+ * to meet, so it is the last thing that should be the least visible.
+ *
+ * Scaled to the SHORTER leg so it stays in proportion on a figure of any size,
+ * and bounded so a very long leg cannot swallow the face and a very short one
+ * cannot vanish.
+ */
+export function arcRadius(
+  v: Pt2,
+  a: Pt2,
+  b: Pt2,
+  width: number,
+): number {
+  const legs = Math.min(Math.hypot(a.x - v.x, a.y - v.y), Math.hypot(b.x - v.x, b.y - v.y));
+  return Math.max(width * 0.05, Math.min(width * 0.14, legs * 0.3));
+}
+
+/**
+ * Where an angle's value chip goes: outside the vertex, along the bisector
+ * pointing AWAY from the figure.
+ *
+ * It used to sit exactly on the vertex, which is where the arc is, so the one
+ * element that identifies the figure as an angle was covered by the number at
+ * the precise moment both were on screen. Only visible by rendering it — the
+ * geometry tests all passed.
+ *
+ * Away from the legs rather than between them, because between them is the
+ * face. On a jaw angle the legs run up from the chin, so this drops the chip
+ * below the chin and into empty frame; on a gonial angle it sits back toward
+ * the ear. label() still clamps the result inside the canvas.
+ */
+export function angleLabelAt(v: Pt2, a: Pt2, b: Pt2, width: number, fs: number): Pt2 {
+  const unit = (p: Pt2) => {
+    const d = Math.hypot(p.x - v.x, p.y - v.y) || 1;
+    return { x: (p.x - v.x) / d, y: (p.y - v.y) / d };
+  };
+  const ua = unit(a);
+  const ub = unit(b);
+  let bx = ua.x + ub.x;
+  let by = ua.y + ub.y;
+  const len = Math.hypot(bx, by);
+  // Legs pointing exactly opposite each other have no bisector — a straight
+  // line is not an angle to label, but it must not produce NaN either.
+  if (len < 1e-6) return { x: v.x, y: v.y + arcRadius(v, a, b, width) + fs };
+  bx /= len;
+  by /= len;
+  const out = arcRadius(v, a, b, width) + fs * 1.25;
+  return { x: v.x - bx * out, y: v.y - by * out };
+}
+
+/**
+ * The signed sweep from bearing `a1` to bearing `a2`, the short way round —
+ * so an angle figure always marks the INTERIOR angle between its two legs.
+ *
+ * The previous version sorted the two bearings and swept low to high, which is
+ * the interior angle only while the pair does not straddle the atan2
+ * discontinuity at ±π. A gonial angle on one side of the face does straddle it,
+ * and there the arc looped the wrong way around the vertex and out through its
+ * own leg. It survived because the arc was thirteen pixels wide; drawing it at a
+ * readable size made it obvious immediately.
+ *
+ * Always at most half a turn, so the result is never the reflex angle.
+ */
+export function interiorSweep(a1: number, a2: number): number {
+  let d = a2 - a1;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
 function arc(ctx: CanvasRenderingContext2D, v: Pt2, a: Pt2, b: Pt2, width: number, u = 1): void {
-  const r = width * 0.045;
+  const r = arcRadius(v, a, b, width);
   const a1 = Math.atan2(a.y - v.y, a.x - v.x);
   const a2 = Math.atan2(b.y - v.y, b.x - v.x);
-  const lo = Math.min(a1, a2);
-  const hi = Math.max(a1, a2);
+  // Always the INTERIOR angle: sweep from the first leg to the second the
+  // short way round.
+  //
+  // It used to sort the two bearings and sweep lo→hi, which is only the
+  // interior angle when the pair does not straddle the atan2 discontinuity at
+  // ±π. When it does — and a gonial angle on one side of the face does — it
+  // drew the reflex angle instead: an arc looping the wrong way around the
+  // vertex and out through its own leg. Invisible for as long as the radius was
+  // thirteen pixels, obvious the moment the arc was drawn at a readable size.
+  const d = interiorSweep(a1, a2);
   const t = Math.max(0, Math.min(1, u));
   ctx.beginPath();
-  ctx.arc(v.x, v.y, r, lo, lo + (hi - lo) * t, Math.abs(a1 - a2) > Math.PI);
+  ctx.arc(v.x, v.y, r, a1, a1 + d * t, d < 0);
   ctx.stroke();
 }
 
