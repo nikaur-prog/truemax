@@ -45,7 +45,12 @@
         { "card": "Middle Third", "value": 35.9, "unit": "%", "ideal": [31.4, 33.4], "range": [22.2, 42.6], "score": 6.5 },
         { "card": "Lower Third", "value": 38.0, "unit": "%", "ideal": [33.9, 37.0], "range": [26.2, 44.7], "score": 8.8 },
         { "card": "Total Facial Width to Height Ratio", "value": 1.40, "unit": "x", "ideal": [1.34, 1.37], "range": [1.07, 1.64], "score": 8.3 },
-        { "card": "Midface Ratio", "value": 0.97, "unit": "x", "ideal": [0.97, 1.00], "range": [0.62, 1.35], "score": 10.0 }
+        { "card": "Midface Ratio", "value": 0.97, "unit": "x", "ideal": [0.97, 1.00], "range": [0.62, 1.35], "score": 10.0 },
+        { "card": "Bigonial width", "value": 86.5, "unit": "%", "ideal": [87.5, 91.5], "range": [68.6, 110.4], "score": 9.7 },
+        { "card": "Face Width to Height Ratio", "value": 1.65, "unit": "x", "ideal": [1.96, 2.00], "range": [1.55, 2.41], "score": 0.7 },
+        { "card": "Jaw Slope", "value": 145.5, "unit": "deg", "ideal": [140.0, 142.5], "range": [115.5, 167.0], "score": 8.5 },
+        { "card": "One Eye Apart Test", "value": 0.98, "unit": "x", "ideal": [0.95, 1.00], "range": [0.87, 1.38], "score": 10.0 },
+        { "card": "Jaw Frontal Angle", "value": 87.9, "unit": "deg", "ideal": [86.5, 92.5], "range": [54.8, 124.2], "score": 10.0 }
       ],
       "cardNote": [
         "Their ideal bands and axis ranges on these five cards are IDENTICAL to the same cards on",
@@ -75,6 +80,52 @@
           "theirScore": 8.3,
           "ourScore": 6.4,
           "note": "their card titled Total Facial Width to Height Ratio, described on the card as height-to-width"
+        },
+        {
+          "metric": "jawCheekRatio",
+          "unit": "",
+          "ours": 0.950,
+          "theirs": 0.865,
+          "theirScore": 9.7,
+          "ourScore": 6.2,
+          "note": "their Bigonial width, displayed as 86.5%, converted to a ratio"
+        },
+        {
+          "metric": "gonialProxy",
+          "unit": "deg",
+          "ours": 145.3,
+          "theirs": 145.5,
+          "theirScore": 8.5,
+          "ourScore": 6.3,
+          "note": "their Jaw Slope; agreement to 0.2 degrees, the closest pairing recorded so far"
+        },
+        {
+          "metric": "jawFrontalAngle",
+          "unit": "deg",
+          "ours": 114.1,
+          "theirs": 87.9,
+          "theirScore": 10.0,
+          "ourScore": 6.4,
+          "definitionConfirmed": false,
+          "note": [
+            "HELD AS UNCONFIRMED. Their card draws what looks like the same construction — a V at",
+            "the chin subtended by the two jaw corners — but 114.1 against 87.9 is a 30% gap, far",
+            "larger than any other pairing here, and a difference that size is more often two",
+            "definitions than one disagreement. Their ideal band is 86.5-92.5, which our value could",
+            "not reach under any placement, so if the definitions DO match this is either a real",
+            "measurement fault of ours or an ideal in the wrong place. Worth resolving directly",
+            "rather than averaging into a bias estimate: excluded from the audit until then."
+          ]
+        },
+        {
+          "metric": "intercanthalEyeWidth",
+          "unit": "x",
+          "ours": 1.17,
+          "theirs": 0.98,
+          "theirScore": 10.0,
+          "ourScore": 6.4,
+          "definitionConfirmed": false,
+          "note": "their One Eye Apart Test, described as eye spacing relative to palpebral width, which is this metric — but a 19% gap wants confirming before it counts as bias"
         }
       ]
     },

@@ -35,9 +35,17 @@ if (!faces.length) {
 
 // Group every paired row by metric.
 const byMetric = new Map();
+const unconfirmed = [];
 for (const face of faces) {
   for (const row of face.rows ?? []) {
     if (!Number.isFinite(row.ours) || !Number.isFinite(row.theirs)) continue;
+    // A pairing whose two sides may not be the same quantity cannot contribute
+    // to a bias estimate. Averaging a definition mismatch in with genuine
+    // disagreements invents an offset and buries the real ones underneath it.
+    if (row.definitionConfirmed === false) {
+      unconfirmed.push({ metric: row.metric, face: face.name, ours: row.ours, theirs: row.theirs });
+      continue;
+    }
     if (!byMetric.has(row.metric)) byMetric.set(row.metric, []);
     byMetric.get(row.metric).push({ ...row, face: face.name });
   }
@@ -86,6 +94,14 @@ for (const face of faces) {
     + (face.theirGeometryOnly != null
         ? `, theirs ${face.theirGeometryOnly} (geometry only; pillar shows ${face.theirOverall})`
         : face.theirOverall != null ? `, theirs ${face.theirOverall}` : ""));
+}
+
+if (unconfirmed.length) {
+  console.log("\nHeld out — the two sides may not be measuring the same thing:");
+  for (const u of unconfirmed) {
+    console.log(`  ${pad(u.metric, 22)} ${u.face}: ours ${u.ours} vs theirs ${u.theirs}`);
+  }
+  console.log("  Resolve each by construction, not by averaging it into a bias estimate.");
 }
 
 if (!flagged.length) {
