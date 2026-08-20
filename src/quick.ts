@@ -37,6 +37,7 @@ import {
   setHealth,
   splitByProvenance,
 } from "./engine/calibrationSet.js";
+import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
 import { openProducer } from "./ui/quickProducer.js";
@@ -715,9 +716,31 @@ function renderFaceSlots(): void {
       // see, which is the right flow for scanning yourself and the wrong one for
       // working through a folder of photographs.
       method: "upload",
-      onDone: (report) => {
+      onDone: (report, points, faceDir, review) => {
         closeSideFlow();
         pendingSide = report;
+        // Send the correction, if the operator consented to sharing it.
+        //
+        // This slot used to take the report and drop the other three arguments,
+        // which meant every landmark dragged into place here was thrown away.
+        // That is the wrong way round: a calibration session is precisely where
+        // somebody sits and corrects profile after profile, so it is the richest
+        // source of training signal the seeding will ever get, and it was the
+        // one place not feeding it.
+        //
+        // Fire-and-forget. Nothing on this screen waits for it and a failed
+        // upload must not cost the operator the scan they just corrected — the
+        // measurements are already in `report` and go into the set regardless.
+        // `feedback` is null unless the operator consented — createSideFeedbackIntent
+        // returns null in that case — so its existence IS the permission.
+        if (review.feedback) {
+          void submitSideCorrectionFeedback(review.photo, points, faceDir, review.feedback)
+            .then((result) => {
+              if (!result.ok && !result.rateLimited) {
+                console.warn("Side correction feedback was not sent:", result.message);
+              }
+            });
+        }
         el.cal.classList.remove("hidden");
         renderFaceSlots();
       },

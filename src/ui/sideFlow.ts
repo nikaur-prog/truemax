@@ -56,6 +56,21 @@ export interface SidePlacementReview {
   automaticPoints: SidePoints;
   seedMethod: SideSeedMethod;
   feedback: SideFeedbackIntent | null;
+  /**
+   * The reviewed photograph, as an OWNED copy taken at the moment of confirm.
+   *
+   * A correction is only worth anything paired with the picture it corrects, and
+   * until now the flow kept the canvas to itself. The main scan happened to have
+   * its own copy from an earlier step, so it could submit feedback; the Calibrate
+   * side slot had no such step and therefore threw every correction away —
+   * somebody could drag thirteen landmarks into place on fifty profiles and the
+   * seeding would learn nothing from any of them.
+   *
+   * Copied rather than handed over, for the same reason the front capture is:
+   * `#side-canvas` is reused by the next photograph, so a reference would be
+   * repainted underneath whoever held it.
+   */
+  photo: HTMLCanvasElement;
 }
 
 interface SidePlacementSeed {
@@ -666,10 +681,16 @@ function mountVerify(
         seedMethod,
       );
       e.cap.textContent = "ANALYZED";
+      const reviewed = document.createElement("canvas");
+      reviewed.width = e.canvas.width;
+      reviewed.height = e.canvas.height;
+      reviewed.getContext("2d")?.drawImage(e.canvas, 0, 0);
+
       ctx.onDone(report, correctedPoints, faceDir, {
         automaticPoints,
         seedMethod,
         feedback,
+        photo: reviewed,
       });
     } catch (err) {
       if (confirmButton) confirmButton.disabled = false;

@@ -1391,7 +1391,12 @@ async function runFullAnalysis(
           lastSide = {
             points,
             faceDir,
-            photo: lastSide?.photo,
+            // The reviewed copy the flow now hands back, falling back to the
+            // one captured earlier in this scan. Preferring the handoff means
+            // the photo submitted with a correction is exactly the photo the
+            // correction was made on, rather than whatever the earlier step
+            // happened to leave behind.
+            photo: review.photo ?? lastSide?.photo,
             automaticPoints: review.automaticPoints,
             seedMethod: review.seedMethod,
             feedback: review.feedback ?? undefined,
