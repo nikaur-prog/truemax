@@ -1163,6 +1163,15 @@ async function submitConsentedSideFeedback(generation = scanGeneration): Promise
   if (result.ok) {
     side.feedbackSubmitted = true;
     feedbackDeliveryNote = { ok: true, message: "Optional side-landmark feedback sent privately" };
+  } else if (result.rateLimited) {
+    // A limit is not a failure, and saying "could not be sent" for one is a lie
+    // that costs us the corrections we most want. Somebody working through a
+    // run of profiles used to see the same vague line on every submission past
+    // the cap, with no way to tell that the earlier ones had landed.
+    feedbackDeliveryNote = {
+      ok: true,
+      message: "Enough side-landmark feedback shared today — this one was not needed",
+    };
   } else {
     feedbackDeliveryNote = {
       ok: false,

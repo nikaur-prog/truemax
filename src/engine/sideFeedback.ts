@@ -7,6 +7,18 @@ export interface SideFeedbackSubmitResult {
   ok: boolean;
   submissionId?: string;
   message?: string;
+  /**
+   * The server accepted the request and declined to store it, because this
+   * account has hit its daily ceiling.
+   *
+   * Distinct from every other failure on purpose. A rate limit means "your
+   * correction was fine, we already have enough from you today"; a network
+   * failure means "we lost it, try again". Both used to print the same
+   * "could not be sent" line, so somebody correcting a run of profiles saw
+   * what looked like a broken upload and had no way to tell that the first
+   * few had in fact landed.
+   */
+  rateLimited?: boolean;
 }
 
 export interface SharedSideFeedback {
@@ -133,9 +145,16 @@ export async function submitSideCorrectionFeedback(
       submissionId?: string;
       error?: string;
     };
-    if (!response.ok) return { ok: false, message: result.error || "Feedback could not be sent." };
+    if (!response.ok) {
+      return {
+        ok: false,
+        rateLimited: response.status === 429,
+        message: result.error || "Feedback could not be sent.",
+      };
+    }
     return { ok: true, submissionId: result.submissionId };
   } catch {
+    // A thrown fetch is a network failure and nothing else — never a limit.
     return { ok: false, message: "Feedback could not be sent. Your analysis will continue." };
   }
 }

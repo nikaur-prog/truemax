@@ -12,7 +12,21 @@ const MAX_BODY_BYTES = 2_500_000;
 const MAX_REVOKE_BODY_BYTES = 2_000;
 const MAX_PHOTO_BYTES = 2_000_000;
 const MAX_METADATA_CHARS = 40_000;
-const MAX_SUBMISSIONS_PER_24_HOURS = 5;
+/**
+ * Per-account ceiling on stored corrections, rolling 24 hours.
+ *
+ * Raised from 5. The cap exists so a signed-in client cannot turn the private
+ * review bucket into file storage, and 5 served that — but it also throttled
+ * the one thing the bucket is FOR. analyze-side-feedback.mjs will not emit a
+ * calibration offset for a landmark until it has 25 corrections, so at five a
+ * day the auto-placement could not be taught faster than five days per
+ * landmark, and the people correcting most (the ones whose corrections are
+ * worth most) hit the wall first and saw a vague failure for it.
+ *
+ * 25 clears the analyser's own bar in a single sitting and still bounds the
+ * worst case at roughly 50MB per account per day.
+ */
+const MAX_SUBMISSIONS_PER_24_HOURS = 25;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Listing never returns the photo path, hashes, landmarks, notes or review
