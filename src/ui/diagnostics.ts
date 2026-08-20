@@ -33,6 +33,21 @@ export function diagnosticsText(report: Report, label: string): string {
   lines.push(`face: ${label || "(unnamed)"}`);
   lines.push(`scored against: ${report.sex === "male" ? "men" : "women"}`);
   lines.push(`overall: ${n(report.overall, 1)}  ·  percentile ${n(report.overallPercentile, 1)}  ·  potential ${n(report.potential, 1)}`);
+  // The two views separately, when both were measured.
+  //
+  // Absent from this dump until now, and it is the figure an external
+  // comparison most needs: a merged overall is a correlated aggregation of two
+  // z-scores, so it cannot be read back as "roughly the front". Comparing a
+  // competitor's front-only figure against our merged one, or inferring our
+  // front from our merged and our side, both invent the number that matters.
+  if (report.views) {
+    lines.push(
+      `front: ${n(report.views.front.score, 1)} (pct ${n(report.views.front.percentile, 1)})` +
+        `  ·  side: ${n(report.views.side.score, 1)} (pct ${n(report.views.side.percentile, 1)})`,
+    );
+  } else {
+    lines.push(`views: front only — no side profile in this scan`);
+  }
   lines.push("");
 
   lines.push(`REGIONS`);
