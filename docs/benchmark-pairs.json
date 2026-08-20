@@ -18,6 +18,31 @@
   ],
   "faces": [
     {
+      "name": "Justin Bieber",
+      "sex": "male",
+      "capturedOn": "2026-08-20",
+      "theirOverall": 6.58,
+      "theirGeometryOnly": 6.45,
+      "theirPillars": { "harmony": 6.45, "angularity": 7.5, "dimorphism": 5.29, "features": 7.33 },
+      "theirHarmonyByView": { "front": 5.33, "side": 8.23 },
+      "ourOverall": 5.5,
+      "ourSide": 6.8,
+      "ourFront": null,
+      "note": [
+        "Their Harmony pillar splits by view, which Cavill's capture did not show, and it is the",
+        "most useful number either product has produced so far: front 5.33 against side 8.23 on",
+        "one face. Our merged overall is 5.5 with the side at 6.8, so our front sits BELOW 5.5 —",
+        "the results screen does display a front-only figure but it was not in the capture, so it",
+        "is recorded as unknown rather than inferred. Read the front comparison only once that",
+        "number is in hand.",
+        "",
+        "No paired metric rows yet: their per-card values were not captured, only the pillar",
+        "figures and the qualitative strength/improvement lists, which are deviations rather than",
+        "measurements and cannot be paired against ours."
+      ],
+      "rows": []
+    },
+    {
       "name": "Henry Cavill",
       "sex": "male",
       "capturedOn": "2026-08-20",
