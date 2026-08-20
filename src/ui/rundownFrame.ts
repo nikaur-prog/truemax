@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
-import { beatNear, wordStarts } from "../engine/rundownTimeline.js";
+import { beatNear } from "../engine/rundownTimeline.js";
 import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
 import { SPREAD } from "../engine/rarity.js";
 
@@ -343,7 +343,14 @@ export function regionCrop(
   // not do is cut through the features.
   const headW = faceW * 1.04;
   const headH = faceH * (1 + CROWN) * 1.04;
-  const HEAD_FIT = 0.86;
+  // Raised from 0.86 after real exports: at 0.86 the crop was allowed to cut
+  // 14% of the head, and on tight source photographs that 14% was the top of
+  // the skull and the chin — the two cuts a viewer reads as a broken renderer.
+  // The whole head, every beat. The camera still moves: bands recentre the
+  // frame vertically where the photograph has room, and the push-in carries
+  // the rest. What is genuinely lost is the tight close-up, and that trade is
+  // deliberate — the subject of every beat is a face, not a texture.
+  const HEAD_FIT = 1.0;
   if (sw < headW * HEAD_FIT || sh < headH * HEAD_FIT) {
     sw = Math.max(sw, headW * HEAD_FIT, headH * HEAD_FIT * aspect);
     sh = sw / aspect;
@@ -775,13 +782,13 @@ export function drawRundownFrame(
   // where he lands against everyone, and what to do about it — and neither
   // reads while a face is still competing for the eye.
   if (beat.beat.kind === "card") drawCard(ctx, input, beat, t, W, H);
-  if (beat.beat.kind === "curve") drawCurve(ctx, beat, t, W, H, input.name);
+  if (beat.beat.kind === "curve") drawCurve(ctx, input, beat, t, W, H, input.name);
   if (beat.beat.kind === "search") drawSearchBar(ctx, beat, t, W, H);
   // The caption is drawn on every beat including the card. It collided with the
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
-  drawLedger(ctx, input, beat, t, H);
-  drawCaption(ctx, beat, t, W, H);
+  drawLedger(ctx, input, beat, t);
+  drawCaption(ctx, beat, input, t, W, H);
   drawBottomBar(ctx, input, beat, W, H);
   drawWatermark(ctx, H);
   // Last, over everything: the whole frame resolves, chrome included, the way
@@ -1122,13 +1129,20 @@ function drawCard(
 // ---------------------------------------------------------------------------
 function drawCurve(
   ctx: CanvasRenderingContext2D,
+  input: RundownInput,
   beat: TimedBeat,
   t: number,
   W: number,
   H: number,
   name: string,
 ): void {
-  const p = beatProgress(beat, t);
+  // Keyed to the FIRST curve beat, exactly as cardSettle is keyed to the
+  // first card beat and for the same reason: there are two curve beats — the
+  // badge and the crowd — and each ran its own entrance, so the same curve
+  // visibly drew itself twice in a row. It is one state narrated over two
+  // sentences; the entrance belongs to the state.
+  const firstCurve = input.timeline.beats.find((b) => b.beat.kind === "curve") ?? beat;
+  const p = beatProgress(firstCurve, t);
   const pct = clamp01((beat.beat.percentile ?? 50) / 100);
 
   const left = W * 0.12;
@@ -1487,18 +1501,26 @@ function drawLedger(
   input: RundownInput,
   beat: TimedBeat,
   t: number,
-  H: number,
 ): void {
   // The closing compositions own their whole frame; the ledger's job is done
-  // by the scorecard there anyway.
+  // by the scorecard there anyway. And it ends WITH the analysis: the last
+  // metric beat is the last thing it may draw over. It kept running through
+  // the sign-off ("Who should we measure next?") in a real export, which put
+  // the full trait list over the one frame that is not about the subject.
   const kind = beat.beat.kind;
   if (kind === "card" || kind === "curve" || kind === "search") return;
+  let lastMetricEnd = -Infinity;
+  for (const b of input.timeline.beats) {
+    if (b.beat.kind === "metric") lastMetricEnd = b.start + b.duration;
+  }
+  if (t > lastMetricEnd) return;
   const entries = ledgerEntries(input, t);
   if (!entries.length) return;
 
-  // Stacked down the left edge, ending well above the caption band. Newest
-  // last, the way the sentence order went.
-  const y0 = H * 0.42 - (entries.length - 1) * LEDGER_PITCH;
+  // Anchored just inside the top-left safe corner, stacking down — up and out
+  // of the face. It used to end at 42% of the frame height, which put the
+  // list straight across the eyes of every portrait.
+  const y0 = SAFE_TOP + 14;
   ctx.save();
   ctx.textAlign = "left";
   ctx.font = "700 27px Inter, Arial, sans-serif";
@@ -1523,60 +1545,46 @@ function drawLedger(
 }
 
 // ---------------------------------------------------------------------------
-// The caption: ONE word at a time.
+// The kicker: ONE thing per beat, and only when the beat has one.
 //
-// The paged two-line caption put a paragraph on the face. On a full-bleed
-// portrait every pixel of text is a pixel of subject, and a viewer who wants
-// the sentence has the narration reading it to them already. One word, big,
-// replaced as the voice reaches the next, is the whole job: it tracks the
-// read, it never covers more than a sliver of the frame, and it cannot fall
-// behind because there is nothing to catch up on.
-//
-// Timing comes from wordStarts in rundownTimeline — the same fractions the
-// keystroke cues fire on — so the tick, the glyph and the voice agree about
-// where in the beat a word lives.
+// The rolling transcript is gone entirely. The narration already reads the
+// sentence out loud; text chasing it word by word covered the face all video
+// and doubled information nothing needed doubled. What a beat is allowed to
+// put mid-frame is its single most important fact: for a measurement beat,
+// the measured value itself — which the voice says once and nothing else on
+// screen shows (the chip on the face carries the population average, the
+// bottom bar carries the score). It lands when the line finishes drawing,
+// because a value appearing before its evidence is backwards, and leaves
+// with the beat.
 // ---------------------------------------------------------------------------
-// A small lead, because a caption that lands exactly with the voice reads as
-// late: the word is heard before it is read, so the glyph needs to already be
-// there when the sound arrives.
-const CAPTION_LEAD = 0.12;
-
 function drawCaption(
   ctx: CanvasRenderingContext2D,
   beat: TimedBeat,
+  input: RundownInput,
   t: number,
   W: number,
   H: number,
 ): void {
-  const full = beat.beat.line;
-  if (!full) return;
-  const words = full.split(/\s+/).filter(Boolean);
-  if (!words.length) return;
+  const id = beat.beat.metricId;
+  const metric = id ? input.metrics.get(id) : undefined;
+  if (!metric) return;
 
-  const starts = wordStarts(full);
-  const progress = clamp01((t - beat.start + CAPTION_LEAD) / Math.max(0.001, beat.duration));
-  let index = 0;
-  while (index + 1 < starts.length && progress >= starts[index + 1]) index++;
-
-  // Pop in fast, hold, and leave with the beat rather than word by word —
-  // a word that fades out before its successor arrives reads as a dropout.
-  const pop = smoother(clamp01((progress - starts[index]) * beat.duration / 0.12));
+  const kicker = `${metric.value.toFixed(metric.def.decimals)}${metric.def.unit}`;
+  const pop = smoother(clamp01((drawProgress(beat, t) - 0.92) / 0.08));
   const endFade = smoother(clamp01((beat.start + beat.duration - t) / 0.15));
+  const a = pop * endFade;
+  if (a <= 0.01) return;
 
   ctx.save();
   ctx.textAlign = "center";
   ctx.letterSpacing = "0px";
-  // Sized to the word, so a long word never leaves the frame and a short one
-  // is allowed to be big.
-  ctx.font = fitFont(ctx, words[index], W - SAFE_LEFT * 2 - 40, 46, 30, (px) => `700 ${px}px Inter, Arial, sans-serif`);
+  ctx.font = fitFont(ctx, kicker, W - SAFE_LEFT * 2 - 40, 46, 30, (px) => `700 ${px}px Inter, Arial, sans-serif`);
   const y = H - SAFE_BOTTOM - 88 + (1 - pop) * 8;
-  ctx.globalAlpha = pop * endFade;
-  // A shadow rather than a plate or a band: one word does not need a stage,
-  // and the band the old caption carried was most of what hid the face.
+  ctx.globalAlpha = a;
   ctx.shadowColor = "rgba(0,0,0,.92)";
   ctx.shadowBlur = 22;
   ctx.fillStyle = "#f7f7f2";
-  ctx.fillText(words[index], W / 2, y);
+  ctx.fillText(kicker, W / 2, y);
   ctx.restore();
 }
 

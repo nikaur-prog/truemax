@@ -1203,6 +1203,11 @@ async function runFullAnalysis(
     report,
     delta,
     landmarks,
+    // The clean front capture, as its own canvas. The results screen used to
+    // recover this by cloning whatever #photo-canvas happened to display,
+    // which after a side-profile flow was the SIDE photograph — so the front
+    // tabs drew front measurements over a profile labelled FRONT.
+    frontPhoto: frontShot,
     photoW: width,
     photoH: height,
     // How far off level the front capture was, for the honesty note on the

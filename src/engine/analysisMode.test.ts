@@ -237,9 +237,9 @@ test("polite is the default, so an unasked caller gets ordinary English", () => 
   // people who never opted into anything. "Chopped" is the joke this audience
   // came for and it is also the word that decides a stranger scrolling past
   // that this is a red-pill account rather than a measurement tool.
-  assert.equal(verdictForPercentile(5).word, "Room to grow");
-  assert.equal(verdictForPercentile(5, "male").word, "Room to grow");
-  assert.equal(verdictForPercentile(85).word, "Great-looking");
+  assert.equal(verdictForPercentile(5).word, "Room to improve");
+  assert.equal(verdictForPercentile(5, "male").word, "Room to improve");
+  assert.equal(verdictForPercentile(85).word, "Very attractive");
   assert.equal(verdictForPercentile(96, "female").word, "Beautiful");
 });
 
@@ -248,10 +248,10 @@ test("the polite ladder is the words a person would actually say", () => {
   // slang anywhere on it at any height.
   const at = (pct: number, sex: "male" | "female" = "male") =>
     verdictForPercentile(pct, sex, "polite").word;
-  assert.equal(at(45), "Average-looking");
-  assert.equal(at(55), "Nice-looking");
-  assert.equal(at(70), "Good-looking");
-  assert.equal(at(85), "Great-looking");
+  assert.equal(at(45), "Okay-looking");
+  assert.equal(at(55), "Above average");
+  assert.equal(at(70), "Attractive");
+  assert.equal(at(85), "Very attractive");
   assert.equal(at(96), "Handsome");
   assert.equal(at(96, "female"), "Beautiful");
   assert.equal(at(99.5), "Very handsome");

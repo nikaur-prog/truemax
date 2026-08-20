@@ -51,28 +51,6 @@ const MIN_BEAT = 1.6;
 // and without a gap the video has no rhythm and no room to move the crop.
 const GAP = 0.35;
 
-/**
- * Where each word of a line starts, as a fraction 0..1 of the spoken span,
- * weighted by character length so long words hold longer than short ones.
- *
- * The single source of word timing: the caption renderer shows word i from
- * wordStarts(line)[i], and the keystroke cue for word i fires at the same
- * fraction. One function, so the tick and the glyph cannot drift apart —
- * previously the caption paged on its own arithmetic while the keys fired on
- * character counts, and the two disagreed about where in the beat a word was.
- */
-export function wordStarts(line: string): number[] {
-  const words = line.split(/\s+/).filter(Boolean);
-  const total = words.reduce((a, w) => a + w.length + 1, 0) || 1;
-  const out: number[] = [];
-  let acc = 0;
-  for (const w of words) {
-    out.push(acc / total);
-    acc += w.length + 1;
-  }
-  return out;
-}
-
 // Where in a beat the measurement finishes drawing itself, as a fraction.
 //
 // The line must be on the face while the sentence about it is still being said.
@@ -337,16 +315,10 @@ export function fitTimeline(
 function cuesFor(timed: TimedBeat[]): SfxCue[] {
   const sfx: SfxCue[] = [];
   for (const b of timed) {
-    // One tick per WORD, at the moment that word pops. The caption shows a
-    // single word at a time now, so a per-character rattle was a sound with no
-    // picture: dozens of keystrokes against one glyph appearing. One soft tick
-    // per pop is the whole texture the effect ever provided, minus the machine
-    // gun — and it comes from the same wordStarts the renderer reads, so the
-    // tick and the glyph land on the same frame by construction.
-    const span = Math.max(0.001, b.duration - GAP);
-    for (const s of wordStarts(b.beat.line)) {
-      sfx.push({ at: b.start + s * span, kind: "key" });
-    }
+    // No keystroke cues any more. The rolling caption they accompanied is
+    // gone — one kicker per beat needs no typewriter — and ticks with no
+    // glyphs are noise under the voice. The click stays: it marks the
+    // measurement landing, which still happens.
     if (b.drawAt !== undefined) sfx.push({ at: b.drawAt, kind: "click" });
     // No sound on the curve.
     //

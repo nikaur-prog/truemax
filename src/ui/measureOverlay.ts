@@ -503,14 +503,22 @@ function label(
   ctx.textBaseline = "middle";
   const w = ctx.measureText(text).width + fs * 0.7;
   const h = fs * 1.55;
-  const y = at.y;
+  // Clamped inside the canvas. A span that reaches the edge of the photograph
+  // put its pill PAST the edge — the pill is drawn at the span's end — and a
+  // half-pill reading "vg 3.0°" shipped in a real export. The pill slides
+  // inward instead; the line it belongs to still touches the true endpoint,
+  // which is what anchors it.
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  const x = Math.max(w / 2 + 2, Math.min(cw - w / 2 - 2, at.x));
+  const y = Math.max(h / 2 + 2, Math.min(ch - h / 2 - 2, at.y));
   ctx.shadowBlur = 6;
   ctx.fillStyle = "rgba(16,17,19,0.82)";
-  roundRect(ctx, at.x - w / 2, y - h / 2, w, h, h / 2);
+  roundRect(ctx, x - w / 2, y - h / 2, w, h, h / 2);
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = color;
-  ctx.fillText(text, at.x, y);
+  ctx.fillText(text, x, y);
 }
 
 function roundRect(
