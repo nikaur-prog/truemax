@@ -676,12 +676,50 @@ let pendingSide: Report | null = null;
 // seeder; only one of the two was confirmable.
 let shareStatus = "";
 
+// The failed upload itself, held so a Retry button can resend it.
+//
+// Reporting a failure fixed the SILENT half of the problem and left the loss:
+// the photo-and-points pair exists only in memory at that moment, so a status
+// line saying "not shared" was an honest note on data that was already gone.
+// A dropped connection between faces should cost one tap, not a correction.
+// One deep — a second failure overwrites the first — because holding a queue
+// of consented photos in memory indefinitely is a bigger liability than
+// re-dragging one profile.
+let failedUpload: {
+  photo: HTMLCanvasElement;
+  points: Parameters<typeof submitSideCorrectionFeedback>[1];
+  faceDir: number;
+  feedback: NonNullable<Parameters<typeof submitSideCorrectionFeedback>[3]>;
+} | null = null;
+
 function setShareStatus(text: string): void {
   shareStatus = text;
   // Painted in place when the slots screen is up; renderFaceSlots prints the
   // stored copy otherwise, so an outcome that lands mid-navigation still shows.
   const line = document.getElementById("q-slot-share");
   if (line) line.textContent = text;
+  const retry = document.getElementById("q-slot-retry");
+  if (retry) retry.classList.toggle("hidden", !failedUpload);
+}
+
+// Sends one correction and narrates the result. Shared by the first attempt
+// and the Retry button, so the two cannot drift in what an outcome means.
+function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
+  failedUpload = null;
+  setShareStatus("Sharing the corrected side privately…");
+  void submitSideCorrectionFeedback(upload.photo, upload.points, upload.faceDir, upload.feedback)
+    .then((result) => {
+      if (result.ok) {
+        setShareStatus("Side correction shared — it will teach the automatic placement.");
+      } else if (result.rateLimited) {
+        // Retrying a limit would return the same answer all day, so nothing is
+        // kept: the correction is declined, not lost in transit.
+        setShareStatus("Daily sharing limit reached — this correction stayed on this device.");
+      } else {
+        failedUpload = upload;
+        setShareStatus(`Correction NOT shared — ${result.message ?? "the upload failed"}. The face itself is saved.`);
+      }
+    });
 }
 
 function clearPending(): void {
@@ -722,6 +760,7 @@ function renderFaceSlots(): void {
     face still carries every front metric. Both together is what lets a side
     measurement ever be checked against a human rating.</p>
     <p class="q-cal-hint" id="q-slot-share" role="status">${shareStatus}</p>
+    <button type="button" class="btn gho${failedUpload ? "" : " hidden"}" id="q-slot-retry">Retry sending the correction</button>
     <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
 
   document.getElementById("q-slot-front")!.onclick = () => {
@@ -756,21 +795,9 @@ function renderFaceSlots(): void {
         // `feedback` is null unless the operator consented — createSideFeedbackIntent
         // returns null in that case — so its existence IS the permission.
         if (review.feedback) {
-          setShareStatus("Sharing the corrected side privately…");
-          void submitSideCorrectionFeedback(review.photo, points, faceDir, review.feedback)
-            .then((result) => {
-              if (result.ok) {
-                setShareStatus("Side correction shared — it will teach the automatic placement.");
-              } else if (result.rateLimited) {
-                setShareStatus("Daily sharing limit reached — this correction stayed on this device.");
-              } else {
-                // The measurements are saved either way; what did not travel is
-                // the photo-plus-points pair the seeder learns from, and there
-                // is no retry, so saying nothing here is losing data silently.
-                setShareStatus(`Correction NOT shared — ${result.message ?? "the upload failed"}. The face itself is saved.`);
-              }
-            });
+          sendCorrection({ photo: review.photo, points, faceDir, feedback: review.feedback });
         } else {
+          failedUpload = null;
           setShareStatus("");
         }
         el.cal.classList.remove("hidden");
@@ -789,6 +816,10 @@ function renderFaceSlots(): void {
     // since that is the figure the corpus is fitted against.
     const primary = pendingFront ?? pendingSide;
     if (primary) renderRatingStep(primary);
+  };
+
+  document.getElementById("q-slot-retry")!.onclick = () => {
+    if (failedUpload) sendCorrection(failedUpload);
   };
 
   document.getElementById("q-slot-back")!.onclick = () => {
