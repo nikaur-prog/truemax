@@ -664,6 +664,26 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
 let pendingFront: Report | null = null;
 let pendingSide: Report | null = null;
 
+// The last correction upload's fate, shown in the slots panel.
+//
+// The upload is fire-and-forget by design — a failed send must never cost the
+// operator the scan — but its outcome used to go to the console, which on the
+// phone this runs on is nowhere. During a fifty-face calibration session that
+// is the difference between believing fifty corrections were collected and
+// knowing it: a persistent auth or network failure would have lost every one
+// of them silently while the measurements kept saving and everything looked
+// fine. The measurements are the corpus; the corrections are what teaches the
+// seeder; only one of the two was confirmable.
+let shareStatus = "";
+
+function setShareStatus(text: string): void {
+  shareStatus = text;
+  // Painted in place when the slots screen is up; renderFaceSlots prints the
+  // stored copy otherwise, so an outcome that lands mid-navigation still shows.
+  const line = document.getElementById("q-slot-share");
+  if (line) line.textContent = text;
+}
+
 function clearPending(): void {
   pendingFront = null;
   pendingSide = null;
@@ -701,6 +721,7 @@ function renderFaceSlots(): void {
     <p class="q-cal-hint">Either view on its own is worth having — a front-only
     face still carries every front metric. Both together is what lets a side
     measurement ever be checked against a human rating.</p>
+    <p class="q-cal-hint" id="q-slot-share" role="status">${shareStatus}</p>
     <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
 
   document.getElementById("q-slot-front")!.onclick = () => {
@@ -735,12 +756,22 @@ function renderFaceSlots(): void {
         // `feedback` is null unless the operator consented — createSideFeedbackIntent
         // returns null in that case — so its existence IS the permission.
         if (review.feedback) {
+          setShareStatus("Sharing the corrected side privately…");
           void submitSideCorrectionFeedback(review.photo, points, faceDir, review.feedback)
             .then((result) => {
-              if (!result.ok && !result.rateLimited) {
-                console.warn("Side correction feedback was not sent:", result.message);
+              if (result.ok) {
+                setShareStatus("Side correction shared — it will teach the automatic placement.");
+              } else if (result.rateLimited) {
+                setShareStatus("Daily sharing limit reached — this correction stayed on this device.");
+              } else {
+                // The measurements are saved either way; what did not travel is
+                // the photo-plus-points pair the seeder learns from, and there
+                // is no retry, so saying nothing here is losing data silently.
+                setShareStatus(`Correction NOT shared — ${result.message ?? "the upload failed"}. The face itself is saved.`);
               }
             });
+        } else {
+          setShareStatus("");
         }
         el.cal.classList.remove("hidden");
         renderFaceSlots();
@@ -770,14 +801,14 @@ function renderRatingStep(r: Report): void {
   el.calStep.textContent = "Your rating";
   el.calBody.innerHTML = `
     <div class="q-cal-rate">
-      <p class="q-cal-ask">Before you see what it said — what is this face, out of ten?</p>
+      <p class="q-cal-ask">Before you see what it said — what is this face, out of ten?
+      Leave it empty if you are not sure; the face saves either way.</p>
       <div class="q-cal-input">
         <input type="number" id="q-cal-num" min="1" max="10" step="0.1" inputmode="decimal"
-               placeholder="6.4" autocomplete="off" />
+               placeholder="Optional" autocomplete="off" />
         <input type="text" id="q-cal-label" placeholder="Label (optional, never exported)"
                maxlength="40" autocomplete="off" />
-        <button type="button" class="btn pri" id="q-cal-save">Lock it in</button>
-        <button type="button" class="btn gho" id="q-cal-skip">Not sure — skip</button>
+        <button type="button" class="btn pri" id="q-cal-save">Save face</button>
       </div>
       <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale —
       a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
@@ -807,7 +838,11 @@ function renderRatingStep(r: Report): void {
     addRatedFace(
       r,
       rating,
-      external.checked ? "external" : "self",
+      // Provenance describes the NUMBER. With no number there is nothing
+      // borrowed, so a skipped rating is recorded as `self` regardless of the
+      // checkbox — an "external" tag on an absent value would read as a row
+      // needing scrubbing when there is nothing in it to scrub.
+      rating !== null && external.checked ? "external" : "self",
       label.value.trim() || undefined,
       pendingSide ?? undefined,
     );
@@ -815,20 +850,26 @@ function renderRatingStep(r: Report): void {
     clearPending();
     renderVerdictStep(r, rating, held);
   };
+  // One button, and it always stores. The old shape — a primary button that
+  // ERRORED on an empty box, with skipping exiled to a second button — made
+  // the rating feel mandatory, and a face lost because nobody could name a
+  // number would be the wrong trade: the measurements and any side corrections
+  // are exactly as valuable without one. Empty means unrated; a typed value
+  // still has to be a real rating before it is kept.
   const commit = () => {
+    if (!num.value.trim()) {
+      store(null);
+      return;
+    }
     const rating = Number(num.value);
     if (!(rating >= 1 && rating <= 10)) {
-      msg.textContent = "A number between 1 and 10.";
+      msg.textContent = "A number between 1 and 10 — or leave it empty to save without one.";
       num.focus();
       return;
     }
     store(Math.round(rating * 10) / 10);
   };
   document.getElementById("q-cal-save")!.onclick = commit;
-  // Skip stores the face with no rating. It is not a cancel — the measurements
-  // and any side corrections are exactly as valuable as they were, and losing
-  // them because nobody could name a number would be the wrong trade.
-  document.getElementById("q-cal-skip")!.onclick = () => store(null);
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
