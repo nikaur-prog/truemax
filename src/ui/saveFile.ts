@@ -85,17 +85,95 @@ function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+// Whether the browser still considers us inside a user gesture.
+//
+// navigator.share() only works within moments of a real tap, and that is the
+// difference between the image saves and the video saves on a phone. A PNG is
+// encoded in milliseconds, so share() runs inside the tap that asked for it. An
+// MP4 renders frame by frame for tens of seconds, so by the time the file
+// exists the tap that asked for it has expired — share() then throws
+// NotAllowedError, the catch fell through to the <a download> path, and iOS
+// Safari treats a blob-URL download badly enough that the export simply
+// vanished. A working encoder, a written file, and nothing on the phone.
+//
+// Browsers without the API return true, which routes into the direct share()
+// attempt whose catch handles a stale gesture anyway — the query is an
+// optimisation of WHEN to ask for a fresh tap, not the safety net itself.
+function hasFreshActivation(): boolean {
+  const activation = navigator.userActivation;
+  return activation ? activation.isActive : true;
+}
+
+// One fresh tap, so the share sheet is legal again.
+//
+// The dialog exists because the alternative was silence: the OS will not open a
+// share sheet on a spent gesture, and no amount of code can restore one. What
+// it can do is ask for a new one — a single button whose click handler calls
+// share() synchronously inside the click. "Download instead" degrades to the
+// anchor path deliberately, for the person who wanted the file in Files after
+// all. Dismissing (Escape) resolves "cancelled": they were offered the file
+// and declined it, which is the same outcome as dismissing the sheet itself.
+//
+// Reuses the side-feedback dialog classes, which live in style.css and are
+// loaded by both pages that save files, so this carries no CSS of its own.
+function shareWithFreshTap(file: File): Promise<SaveOutcome | "fallback"> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "side-feedback-backdrop";
+    const video = file.type.startsWith("video/");
+    backdrop.innerHTML = `<section class="side-feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="save-ready-title">
+      <span class="klabel">RENDER FINISHED</span>
+      <h2 id="save-ready-title">Your ${video ? "video" : "file"} is ready</h2>
+      <p>The render outlived the tap that started it, and the share sheet needs a
+      fresh one. ${video ? "“Save Video” in the sheet puts it straight in your camera roll." : ""}</p>
+      <div class="side-feedback-actions">
+        <button type="button" class="btn gho" data-choice="download">Download instead</button>
+        <button type="button" class="btn pri" data-choice="share">Save or share</button>
+      </div>
+    </section>`;
+    document.body.appendChild(backdrop);
+    let done = false;
+    const finish = (outcome: SaveOutcome | "fallback") => {
+      if (done) return;
+      done = true;
+      backdrop.remove();
+      resolve(outcome);
+    };
+    backdrop.querySelector<HTMLButtonElement>('[data-choice="download"]')!.onclick = () => finish("fallback");
+    const share = backdrop.querySelector<HTMLButtonElement>('[data-choice="share"]')!;
+    share.onclick = () => {
+      // Called directly in the click handler — this is the entire point.
+      navigator.share({ files: [file] }).then(
+        () => finish("shared"),
+        (error) => finish(isAbort(error) ? "cancelled" : "fallback"),
+      );
+    };
+    backdrop.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish("cancelled");
+    });
+    share.focus();
+  });
+}
+
 export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcome> {
   const file = new File([blob], filename, { type: blob.type });
 
   if (willShare(file)) {
-    try {
-      await navigator.share({ files: [file] });
-      return "shared";
-    } catch (error) {
-      if (isAbort(error)) return "cancelled";
-      // Anything else (a share target that failed, a policy block) falls
-      // through to the download path rather than stranding the file.
+    if (hasFreshActivation()) {
+      try {
+        await navigator.share({ files: [file] });
+        return "shared";
+      } catch (error) {
+        if (isAbort(error)) return "cancelled";
+        // A stale gesture the API failed to report, or a share target that
+        // fell over. One fresh tap fixes the first and costs the second
+        // nothing; only if that also declines does the download run.
+        const retried = await shareWithFreshTap(file);
+        if (retried !== "fallback") return retried;
+      }
+    } else {
+      const offered = await shareWithFreshTap(file);
+      if (offered !== "fallback") return offered;
     }
   }
 
