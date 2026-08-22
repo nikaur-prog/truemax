@@ -3,7 +3,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "../engine/analysisMode.js";
-import { saveFile } from "./saveFile.js";
+import { exportName, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
 
 // Which cut to render.
@@ -109,7 +109,7 @@ export async function downloadQuickVideo(
   if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
   const outcome = await saveFile(
     new Blob([target.buffer], { type: format.mimeType }),
-    `truemax-${variant}-${Date.now()}.mp4`,
+    exportName("reel", "mp4", variant),
   );
   onProgress?.(1);
   return outcome;

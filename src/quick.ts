@@ -42,7 +42,7 @@ import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
 import { openProducer } from "./ui/quickProducer.js";
-import { canShareFiles, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
+import { canShareFiles, exportName, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -2210,7 +2210,7 @@ async function downloadScoreCard(
     });
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("The card would not encode.");
-    const outcome = await saveFile(blob, `truemax-card-${from ? "before-" : ""}${Date.now()}.png`);
+    const outcome = await saveFile(blob, exportName("card", "png", from ? "before" : "after"));
     if (btn) {
       btn.textContent =
         outcome === "cancelled"
@@ -2386,7 +2386,7 @@ async function downloadCard(): Promise<void> {
     const url = await toPng(el.stage, { pixelRatio: 2, backgroundColor: bg, cacheBust: true });
     // Same route as the videos: on a phone the share sheet puts this in the
     // camera roll, where a still meant for a post actually needs to be.
-    await saveFile(await (await fetch(url)).blob(), `truemax-scan-${Date.now()}.png`);
+    await saveFile(await (await fetch(url)).blob(), exportName("scan", "png"));
   } catch {
     if (btn) btn.textContent = "Couldn't render";
   } finally {
@@ -2531,7 +2531,7 @@ function showAiPair(name: string, before: string, after: string): void {
     button.onclick = async () => {
       const which = button.dataset.save === "after" ? after : before;
       const blob = await (await fetch(which)).blob();
-      await saveFile(blob, `truemax-${button.dataset.save}-${Date.now()}.png`);
+      await saveFile(blob, exportName("card", "png", button.dataset.save));
     };
   }
   host.scrollIntoView({ behavior: "smooth", block: "start" });

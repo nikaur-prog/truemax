@@ -37,6 +37,60 @@
 
 export type SaveOutcome = "shared" | "downloaded" | "opened" | "cancelled";
 
+// ---------------------------------------------------------------------------
+// What a saved file is called.
+//
+// A browser cannot choose which folder a download lands in — that is the OS's
+// decision and every file goes to the same one. The only lever the app has is
+// the NAME, and the old names wasted it: `truemax-1755738291043.png` says
+// nothing a person can read, sits next to `truemax-rundown-...mp4` and
+// `truemax-card-...png` under three different naming schemes, and leaves a
+// folder that can only be sorted by hand.
+//
+// So every export now agrees on one shape:
+//
+//   truemax-<kind>-[label-]YYYY-MM-DD-HHMM.<ext>
+//
+// The kind comes first because that is what a filter or a sorting rule keys
+// on, and it is a fixed vocabulary rather than whatever the call site felt
+// like. The timestamp is local wall-clock rather than epoch milliseconds:
+// the person filing these lives in a timezone and remembers "the ones I made
+// on Tuesday night", not 1755738291043. It also sorts correctly as text, which
+// epoch does only by accident of digit count.
+// ---------------------------------------------------------------------------
+
+/** The fixed vocabulary. One folder per kind, if somebody wants folders. */
+export type ExportKind =
+  /** A finished vertical video: the analysis breakdown or a produced reel. */
+  | "reel"
+  /** The narrated walk down one face. */
+  | "rundown"
+  /** A score card / verdict still. */
+  | "card"
+  /** The scanned photograph with its landmarks. */
+  | "scan";
+
+function two(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+export function exportName(kind: ExportKind, ext: string, label?: string): string {
+  const now = new Date();
+  const stamp =
+    `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}` +
+    `-${two(now.getHours())}${two(now.getMinutes())}`;
+  const tag = label ? slugify(label) : "";
+  return ["truemax", kind, tag, stamp].filter(Boolean).join("-") + `.${ext}`;
+}
+
 const DIRECT_KEY = "truemax.saveDirect";
 
 /**

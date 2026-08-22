@@ -6,7 +6,7 @@ import { alignTimeline, buildTimeline, fitTimeline } from "../engine/rundownTime
 import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
 import { drawRundownFrame } from "./rundownFrame.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
-import { saveFile } from "./saveFile.js";
+import { exportName, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
 
 // ---------------------------------------------------------------------------
@@ -312,7 +312,7 @@ export async function downloadRundownVideo(
   onProgress?.(0.98, "Saving");
   const outcome = await saveFile(
     new Blob([target.buffer], { type: format.mimeType }),
-    `truemax-rundown-${slug(options.name)}-${Date.now()}.mp4`,
+    exportName("rundown", "mp4", options.name),
   );
   onProgress?.(1, "Done");
   return { outcome, beats, duration: audio.duration, narrated: Boolean(voice) };
@@ -340,10 +340,6 @@ function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
   });
 }
 
-function slug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40) || "face";
-}
+// The local slug is gone: exportName in saveFile.ts slugifies its own label,
+// so keeping a second copy here would be two spellings of one rule waiting to
+// disagree about what an apostrophe does.
