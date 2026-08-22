@@ -313,6 +313,7 @@ export async function downloadRundownVideo(
   const outcome = await saveFile(
     new Blob([target.buffer], { type: format.mimeType }),
     exportName("rundown", "mp4", options.name),
+    "rundown",
   );
   onProgress?.(1, "Done");
   return { outcome, beats, duration: audio.duration, narrated: Boolean(voice) };

@@ -110,6 +110,7 @@ export async function downloadQuickVideo(
   const outcome = await saveFile(
     new Blob([target.buffer], { type: format.mimeType }),
     exportName("reel", "mp4", variant),
+    "reel",
   );
   onProgress?.(1);
   return outcome;

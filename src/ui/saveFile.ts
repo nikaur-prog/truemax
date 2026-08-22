@@ -35,7 +35,7 @@
 // and the person pressing the button knows better than the heuristic does.
 // ---------------------------------------------------------------------------
 
-export type SaveOutcome = "shared" | "downloaded" | "opened" | "cancelled";
+export type SaveOutcome = "shared" | "downloaded" | "opened" | "cancelled" | "filed";
 
 // ---------------------------------------------------------------------------
 // What a saved file is called.
@@ -209,8 +209,27 @@ function shareWithFreshTap(file: File): Promise<SaveOutcome | "fallback"> {
   });
 }
 
-export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcome> {
+export async function saveFile(
+  blob: Blob,
+  filename: string,
+  // The category, when the caller knows it. Only used to pick the subfolder
+  // inside a chosen save location — every other path ignores it, so callers
+  // that have not been updated keep working unchanged.
+  kind?: ExportKind,
+): Promise<SaveOutcome> {
   const file = new File([blob], filename, { type: blob.type });
+
+  // A folder the operator picked wins over a download, on the desktops that
+  // can offer one. Checked before the share sheet only in the sense that the
+  // share sheet is phone-only and this is not — the two never contend.
+  if (kind && !isHandheld()) {
+    const { fileIntoSaveFolder } = await import("./saveLocation.js");
+    const filed = await fileIntoSaveFolder(blob, filename, kind);
+    if (filed.ok) return "filed";
+    // "unset" is the ordinary case for anybody who never picked a folder, and
+    // "permission"/"failed" are cases where a download is the right answer
+    // rather than an error message. All three fall through.
+  }
 
   if (willShare(file)) {
     if (hasFreshActivation()) {
