@@ -166,7 +166,24 @@ export function addRatedFace(
 ): RatedFace[] {
   const faces = loadCalibrationSet();
   const sexPrefix = report.sex === "male" ? "m" : "w";
-  const n = faces.filter((f) => f.sex === report.sex).length + 1;
+  // One past the HIGHEST id in use, not one past the count.
+  //
+  // Counting breaks the moment a row is deleted, which is the normal way to
+  // work: scan a face, notice the photo was turned or the points were wrong,
+  // remove it, scan the next one. From m1, m2, m3, deleting m2 leaves a count
+  // of two, so the next man is also called m3 — two different faces, one id,
+  // in a set whose whole purpose is to be exported and fitted against. Nothing
+  // downstream would have complained; the duplicate would just quietly become
+  // whichever row was read last.
+  //
+  // Ids are never reused after this, so a set can have gaps. That is the
+  // correct trade: a gap is a deletion anybody can see, and a collision is a
+  // silent merge nobody can.
+  const used = faces
+    .filter((f) => f.sex === report.sex)
+    .map((f) => Number.parseInt(f.id.slice(1), 10))
+    .filter((value) => Number.isFinite(value));
+  const n = (used.length ? Math.max(...used) : 0) + 1;
   faces.push({
     id: `${sexPrefix}${n}`,
     sex: report.sex,
