@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { SIDE_METRICS, SIDE_POINTS, computeSideMetrics, faceDirFromPoints } from "./sideMetrics.js";
 import type { SidePointId, SidePoints } from "./sideMetrics.js";
-import { TEMPLATE, headWidthFrom } from "../ui/sideVerify.js";
+import { TEMPLATE, headWidthFrom, keepSeedReachable } from "../ui/sideVerify.js";
 
 // ---------------------------------------------------------------------------
 // The guard may not reject our own reference head.
@@ -205,6 +205,30 @@ test("no bound rejects a profile a human placed correctly", () => {
       `Hold the metric out of scoring until its norm can be re-derived from our ` +
       `own measurements. Do NOT widen the bound to a number that makes this pass.`,
   );
+});
+
+test("a seeded point can never start outside reach", () => {
+  // The failure: a misread facing hands sanitizeSeed's robust fit a negative
+  // slope, the fit rightly declines, and its clamp — which lived inside the
+  // fit — declined with it. Points seeded past the border were then clipped
+  // by the frame's overflow: hidden, so the operator could watch Confirm name
+  // a point as outside the photo and had no way to touch it. Every seed now
+  // passes through keepSeedReachable unconditionally; this pins what it
+  // guarantees, including that a point ON the border is pulled in far enough
+  // for the whole ring to be a tap target.
+  const wild = templateHead();
+  wild.tragion = { x: 5000, y: -300 };
+  wild.gonion = { x: 1000, y: 640 }; // exactly on the right border
+  wild.cervicale = { x: -80, y: 9000 };
+  const reachable = keepSeedReachable(wild, 1000, 640);
+  for (const { id } of SIDE_POINTS) {
+    const p = reachable[id];
+    assert.ok(p.x >= 10 && p.x <= 990, `${id} x=${p.x} is not grabbable in a 1000-wide frame`);
+    assert.ok(p.y >= 10 && p.y <= 630, `${id} y=${p.y} is not grabbable in a 640-tall frame`);
+  }
+  // A point already well inside moves not at all — this is containment, not
+  // a layout pass.
+  assert.deepEqual(reachable.pronasale, wild.pronasale);
 });
 
 test("the template's jaw proportions read as a jaw", () => {

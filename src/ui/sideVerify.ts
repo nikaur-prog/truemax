@@ -669,6 +669,34 @@ function sanitizeSeed(
   return { points: out, faceDir };
 }
 
+// Every seeded point must end up grabbable, unconditionally.
+//
+// sanitizeSeed is ALLOWED to decline: its robust fit needs points that agree
+// with each other, and a misread facing hands it a negative slope, which it
+// rightly refuses to fit rather than mirror the template onto. But its clamp
+// was inside that fit, so declining also meant not clamping — and the photo
+// frame is overflow: hidden, so a point seeded past the border was drawn
+// nowhere and could not be touched. The operator could see Confirm name the
+// point as "outside the photo" and had no way to reach it; the only exit was
+// retaking a perfectly good picture.
+//
+// The margin keeps the whole ring inside the frame rather than just its
+// centre — a handle bisected by the border is half a tap target. This bounds
+// only where a point STARTS; dragging can still place one wherever the
+// operator says it belongs, right up to the edge.
+export function keepSeedReachable(points: SidePoints, w: number, h: number): SidePoints {
+  const mx = Math.max(10, w * 0.02);
+  const my = Math.max(10, h * 0.02);
+  const out = {} as SidePoints;
+  for (const id of Object.keys(points) as SidePointId[]) {
+    out[id] = {
+      x: Math.min(w - mx, Math.max(mx, points[id].x)),
+      y: Math.min(h - my, Math.max(my, points[id].y)),
+    };
+  }
+  return out;
+}
+
 // Entry point. Real landmarks when the detector can still see the face, the
 // silhouette trace when it cannot — and either way, the template pass above
 // catches any single point that came back somewhere impossible.
@@ -689,8 +717,10 @@ export function seedSidePoints(
   // named anatomy and the trace is measuring an outline.
   const useMesh = mesh !== null && meshScore >= silhouetteScore;
   const seed = useMesh ? mesh! : silhouette;
+  const cleaned = sanitizeSeed(seed, canvas.width, canvas.height);
   return {
-    ...sanitizeSeed(seed, canvas.width, canvas.height),
+    points: keepSeedReachable(cleaned.points, canvas.width, canvas.height),
+    faceDir: cleaned.faceDir,
     method: useMesh ? "mesh" : "silhouette",
     confidence: Math.max(0, useMesh ? meshScore : silhouetteScore),
   };
