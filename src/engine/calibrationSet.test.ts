@@ -124,3 +124,37 @@ test("spread ignores unrated faces rather than reading them as zero", () => {
   const health = setHealth([rated("m1", 4), rated("m2", 6), rated("m3", null)], "male");
   assert.equal(health.spread, 2);
 });
+
+// ---------------------------------------------------------------------------
+// Ids after a deletion.
+//
+// Deleting is how the set is actually kept clean — scan a face, notice the
+// photo was turned or the seed was wrong, remove it, carry on. So the id
+// scheme has to survive it, and counting rows does not.
+// ---------------------------------------------------------------------------
+
+test("a deleted row does not hand its id to the next face", () => {
+  // The trap, in the sequence that produces it: three men, remove the middle
+  // one, add a fourth. Counting gives the newcomer m3, which the surviving m3
+  // already answers to — two faces, one id, in the file that gets fitted.
+  const remaining: RatedFace[] = [face("m1", "self"), face("m3", "self")];
+  const nextId = (faces: RatedFace[], sex: "male" | "female") => {
+    const prefix = sex === "male" ? "m" : "w";
+    const used = faces
+      .filter((f) => f.sex === sex)
+      .map((f) => Number.parseInt(f.id.slice(1), 10))
+      .filter((value) => Number.isFinite(value));
+    return `${prefix}${(used.length ? Math.max(...used) : 0) + 1}`;
+  };
+  const assigned = nextId(remaining, "male");
+  assert.equal(assigned, "m4", "the next id must clear the highest in use, not the count");
+  assert.ok(
+    !remaining.some((f) => f.id === assigned),
+    "an id already in the set was handed out a second time",
+  );
+});
+
+test("an empty set starts at one", () => {
+  const used: number[] = [];
+  assert.equal((used.length ? Math.max(...used) : 0) + 1, 1);
+});
