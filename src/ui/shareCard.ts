@@ -1,4 +1,5 @@
 import type { Report } from "../engine/types.js";
+import { exportName } from "./saveFile.js";
 
 // Shareable result card. This is the distribution mechanic: a screenshot
 // people post without being asked. Rendered to canvas so it can be saved or
@@ -104,7 +105,7 @@ export async function renderShareCard(
 
 export function downloadCard(canvas: HTMLCanvasElement): void {
   const link = document.createElement("a");
-  link.download = `truemax-${Date.now()}.png`;
+  link.download = exportName("card", "png");
   link.href = canvas.toDataURL("image/png");
   link.click();
 }

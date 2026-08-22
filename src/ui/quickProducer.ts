@@ -3,7 +3,7 @@ import type { Sex } from "../engine/types.js";
 import type { QuickExportScores } from "./quickVideoExport.js";
 import { quickVideoDuration, renderQuickVideoFrame } from "./quickVideoExport.js";
 import { showCaptionStep } from "./captionStep.js";
-import { canShareFiles, saveFile } from "./saveFile.js";
+import { canShareFiles, exportName, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
 import { track } from "../engine/track.js";
 
@@ -772,7 +772,7 @@ async function buildVideo(
   // posted from the device that made it.
   return saveFile(
     new Blob([target.buffer], { type: format.mimeType }),
-    `truemax-tiktok-${Date.now()}.mp4`,
+    exportName("reel", "mp4", "tiktok"),
   );
 }
 
