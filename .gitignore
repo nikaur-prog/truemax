@@ -19,6 +19,36 @@ calib/*
 .reel-cache/
 .vercel
 
+# Working footage, and anything the app exported that got dropped in here.
+#
+# This repo is public, and the files in question are VIDEO OF PEOPLE'S FACES —
+# source clips for edits, rendered rundowns, scan stills. None of it belongs in
+# a public history, and none of it is recoverable once pushed: a later delete
+# removes it from the working tree and leaves it in every clone.
+#
+# It nearly happened. Sorting exports into ~/TrueMax on a case-insensitive
+# filesystem created those folders INSIDE this repo, because macOS treats
+# ~/TrueMax and ~/truemax as one directory, and they landed untracked next to
+# package.json. Loose fatthor-*.mp4 clips and a clips/ folder were already
+# sitting there for the same reason: the repo root is where you happen to be
+# standing when a file arrives.
+#
+# Videos are ignored wholesale — no video file is tracked in this repo and none
+# should be. Images are NOT, because the brand marks and demo portraits under
+# public/ are legitimately versioned; face images are covered by calib/ above.
+*.mp4
+*.mov
+*.m4v
+*.webm
+clips/
+
+# The export folders, in every casing the sorter might produce.
+[Rr]eels/
+[Rr]undowns/
+[Ss]cans/
+[Uu]nsorted/
+Verdict?cards/
+
 # Vite's dependency-optimiser cache. Written into the repo root whenever the
 # dev server runs, including from the headless frame-check harness, so it turns
 # up as an untracked directory after any session that looked at a rendered
