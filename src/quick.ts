@@ -828,6 +828,52 @@ function renderFaceSlots(): void {
   };
 }
 
+/**
+ * The "where do exports go" line.
+ *
+ * Only shown where the browser can actually honour it — Chromium on a desktop.
+ * Safari, Firefox and every phone keep the behaviour they had, and see no
+ * control at all, because a disabled button that explains itself is a worse
+ * answer than a setting that is simply not offered.
+ *
+ * The folder is chosen ONCE. Everything after that is written into it without a
+ * dialog, into a subfolder per kind, which is the entire point: a save prompt
+ * per file would be worse than Downloads for anybody exporting thirty clips in
+ * an evening.
+ */
+async function wireSaveFolder(): Promise<void> {
+  const row = document.getElementById("q-folder-row");
+  const state = document.getElementById("q-folder-state");
+  const pick = document.getElementById("q-folder-pick");
+  const clear = document.getElementById("q-folder-clear");
+  if (!row || !state || !pick || !clear) return;
+
+  const { canChooseSaveFolder, chooseSaveFolder, clearSaveFolder, saveFolderName } =
+    await import("./ui/saveLocation.js");
+  if (!canChooseSaveFolder()) return;
+  row.classList.remove("hidden");
+
+  const paint = (name: string | null) => {
+    state.textContent = name
+      ? `Exports go to ${name}, sorted into Reels, Rundowns, Verdict cards and Scans.`
+      : "Exports go to Downloads.";
+    pick.textContent = name ? "Change folder" : "Choose a folder";
+    clear.classList.toggle("hidden", !name);
+  };
+  paint(await saveFolderName());
+
+  pick.onclick = async () => {
+    // Called straight from the click: the picker is gated on a user gesture,
+    // and awaiting anything first would spend it.
+    const name = await chooseSaveFolder();
+    if (name) paint(name);
+  };
+  clear.onclick = async () => {
+    await clearSaveFolder();
+    paint(null);
+  };
+}
+
 function renderRatingStep(r: Report): void {
   el.calStep.textContent = "Your rating";
   el.calBody.innerHTML = `
@@ -1379,6 +1425,15 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <input type="checkbox" id="q-direct" ${savesDirectly() ? "checked" : ""} />
       <span>Download files straight away, no share sheet</span>
     </label>
+    <!-- Point the exports at a folder, once.
+         Hidden where the browser cannot do it (Safari, Firefox, every phone),
+         because a control that explains why it is disabled is worse than no
+         control. wireSaveFolder fills the line in and unhides it. -->
+    <p class="q-direct hidden" id="q-folder-row">
+      <span id="q-folder-state">Exports go to Downloads.</span>
+      <button type="button" class="btn gho q-folder-btn" id="q-folder-pick">Choose a folder</button>
+      <button type="button" class="btn gho q-folder-btn hidden" id="q-folder-clear">Use Downloads</button>
+    </p>
     <div class="prod-caption hidden" id="q-caption"></div>`;
 
   // Stagger index for the drop, so the cards arrive in reading order rather
@@ -1454,6 +1509,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       if (dl) dl.textContent = canShareFiles("image/png") ? "Save image" : "Download image";
     };
   }
+
+  void wireSaveFolder();
 
   const before = beforeSource();
   if (before && beforeScan) {
@@ -2210,7 +2267,7 @@ async function downloadScoreCard(
     });
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("The card would not encode.");
-    const outcome = await saveFile(blob, exportName("card", "png", from ? "before" : "after"));
+    const outcome = await saveFile(blob, exportName("card", "png", from ? "before" : "after"), "card");
     if (btn) {
       btn.textContent =
         outcome === "cancelled"
@@ -2386,7 +2443,7 @@ async function downloadCard(): Promise<void> {
     const url = await toPng(el.stage, { pixelRatio: 2, backgroundColor: bg, cacheBust: true });
     // Same route as the videos: on a phone the share sheet puts this in the
     // camera roll, where a still meant for a post actually needs to be.
-    await saveFile(await (await fetch(url)).blob(), exportName("scan", "png"));
+    await saveFile(await (await fetch(url)).blob(), exportName("scan", "png"), "scan");
   } catch {
     if (btn) btn.textContent = "Couldn't render";
   } finally {
@@ -2531,7 +2588,7 @@ function showAiPair(name: string, before: string, after: string): void {
     button.onclick = async () => {
       const which = button.dataset.save === "after" ? after : before;
       const blob = await (await fetch(which)).blob();
-      await saveFile(blob, exportName("card", "png", button.dataset.save));
+      await saveFile(blob, exportName("card", "png", button.dataset.save), "card");
     };
   }
   host.scrollIntoView({ behavior: "smooth", block: "start" });

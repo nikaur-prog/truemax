@@ -601,3 +601,9 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
   .q-cal-row { grid-template-columns: 1fr 44px 52px 44px 86px; font-size: 12px; padding: 8px 11px; }
   .q-cal-acts { gap: 8px; }
 }
+
+/* Where exports are written. Hidden entirely on browsers that cannot honour it
+   — see wireSaveFolder — so this only ever styles a control that works. */
+#q-folder-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#q-folder-state { flex: 1 1 100%; }
+.q-folder-btn { padding: 4px 10px; font-size: 12px; min-width: 0; }

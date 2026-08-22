@@ -773,6 +773,7 @@ async function buildVideo(
   return saveFile(
     new Blob([target.buffer], { type: format.mimeType }),
     exportName("reel", "mp4", "tiktok"),
+    "reel",
   );
 }
 
