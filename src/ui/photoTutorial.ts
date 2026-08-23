@@ -57,6 +57,20 @@ export interface Step {
   kind: "dont" | "do";
   title: string;
   caption: string;
+  /**
+   * A short muted clip to play instead of the still, with `src` as its poster.
+   *
+   * Only one thing in either tutorial genuinely needs motion — the profile
+   * turn, where the mistake is stopping partway and a still cannot show
+   * stopping. Everything else is a frame you are being asked to match, and a
+   * still is the better teacher for that.
+   *
+   * The still is not a fallback of last resort, it is the poster: the clip
+   * fades in over it, so a device that will not autoplay, a slow connection,
+   * or a missing file all leave the step showing the right picture rather
+   * than a black rectangle.
+   */
+  video?: string;
 }
 
 // The captions are the tutorial; the pictures make them land. If an image is
@@ -191,6 +205,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
            against the stage floats in the black margin above it. -->
       <div class="tut-shot">
         <img id="tut-img" alt="" />
+        <video id="tut-vid" muted playsinline loop preload="none"></video>
         <div class="tut-mark" id="tut-mark"></div>
       </div>
     </div>
@@ -207,6 +222,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
   document.body.appendChild(wrap);
 
   const img = wrap.querySelector<HTMLImageElement>("#tut-img")!;
+  const vid = wrap.querySelector<HTMLVideoElement>("#tut-vid")!;
   const mark = wrap.querySelector<HTMLElement>("#tut-mark")!;
   const title = wrap.querySelector<HTMLElement>("#tut-title")!;
   const caption = wrap.querySelector<HTMLElement>("#tut-caption")!;
@@ -219,6 +235,20 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
     // the caption is the lesson and can carry the step on its own.
     img.classList.remove("ready");
     img.src = step.src;
+    // The clip lives over the poster and only reveals itself once it is
+    // actually playing, so autoplay being refused is indistinguishable from
+    // there never having been a clip.
+    vid.classList.remove("ready");
+    vid.pause();
+    if (step.video) {
+      vid.src = step.video;
+      void vid.play().catch(() => {
+        /* autoplay refused — the poster is already the right picture */
+      });
+    } else if (vid.getAttribute("src")) {
+      vid.removeAttribute("src");
+      vid.load();
+    }
     mark.textContent = step.kind === "do" ? "✓" : "✕";
     mark.className = `tut-mark ${step.kind}`;
     title.textContent = step.title;
@@ -236,6 +266,8 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
 
   img.addEventListener("load", () => img.classList.add("ready"));
   img.addEventListener("error", () => img.classList.remove("ready"));
+  vid.addEventListener("playing", () => vid.classList.add("ready"));
+  vid.addEventListener("error", () => vid.classList.remove("ready"));
 
   const go = (next: number) => {
     index = Math.max(0, Math.min(steps.length - 1, next));
@@ -246,6 +278,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
     if (closed) return;
     closed = true;
     if (timer) clearTimeout(timer);
+    vid.pause();
     setTutorialSuppressed(view, never2.checked);
     document.removeEventListener("keydown", key);
     wrap.remove();
