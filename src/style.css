@@ -1477,6 +1477,9 @@ body.funnel-open { overflow: hidden; }
   font-family: var(--serif); font-weight: 300; font-size: clamp(64px, 15vw, 92px);
   line-height: 0.92; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
 }
+/* The digits are wrapped so a count-up can rewrite them without deleting the
+   "/10" beside them. It is an <i> only because it is the shortest tag going. */
+.dash-hero-num i { font-style: normal; }
 .dash-hero-num small { font-size: 0.26em; color: var(--mut); margin-left: 3px; letter-spacing: 0; }
 .dash-hero-delta { font-size: 13px; font-weight: 600; margin-top: 5px; }
 .dash-hero-delta.up { color: #2f9e73; }

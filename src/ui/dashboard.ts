@@ -14,6 +14,7 @@ import { REEL } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
+import { countUp } from "./countUp.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -183,6 +184,7 @@ export function openDashboard(opts: {
     </nav>`;
 
   document.body.appendChild(overlay);
+  countHero(overlay);
   document.getElementById("dash-scan")!.onclick = () => {
     close();
     opts.onScan();
@@ -227,6 +229,21 @@ export function close(): void {
 //
 // The greeting survives, at the size a greeting deserves.
 // ---------------------------------------------------------------------------
+// The hero score counts up rather than appearing already written.
+//
+// The delay lands it just after the hero's own entry animation (--d: 60ms,
+// 620ms long), so the number starts moving as the block finishes arriving
+// rather than racing it. The digits live in an <i> because the element also
+// carries a "/10" in a <small> that writing textContent would delete, and
+// .dash-hero-num is already tabular-nums so nothing shifts width while it runs.
+function countHero(root: HTMLElement): void {
+  const num = root.querySelector<HTMLElement>(".dash-hero-num");
+  const digits = num?.querySelector<HTMLElement>("i");
+  const to = Number(num?.dataset.to);
+  if (!digits || !Number.isFinite(to)) return; // the empty state has no number
+  countUp(digits, to, { delay: 420 });
+}
+
 function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): string {
   const line = trend(scans);
   if (!scans.length || !line) {
@@ -256,7 +273,7 @@ function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): strin
     <div class="dash-hero-row">
       <div class="dash-hero-fig">
         <span class="dash-hero-eyebrow">YOUR AVERAGE · VS ${sex === "male" ? "MEN" : "WOMEN"}</span>
-        <b class="dash-hero-num">${line.average.toFixed(1)}<small>/10</small></b>
+        <b class="dash-hero-num" data-to="${line.average.toFixed(1)}"><i>${line.average.toFixed(1)}</i><small>/10</small></b>
         <span class="dash-hero-delta ${tone}">${escapeHtml(deltaText)}</span>
       </div>
       ${scans.length > 1 ? `<div class="dash-hero-trend">${line.svg}</div>` : ""}
