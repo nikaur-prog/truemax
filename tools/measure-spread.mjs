@@ -15,7 +15,7 @@
 //   If the spread is wide but uncorrelated with capture quality, then a single
 //   photograph cannot place an individual and no amount of re-sourcing fixes
 //   the reel — only saying so does.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 
@@ -78,7 +78,7 @@ function commonsFiles(name) {
 
 const server = spawn("npx", ["vite", "preview", "--port", "4398", "--strictPort"], { cwd: APP, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 3500));
-const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const b = await launchChromium();
 const all = [];
 try {
   const page = await b.newPage();

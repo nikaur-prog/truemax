@@ -12,7 +12,7 @@
 //   node tools/rundown-sheet.mjs [photo.jpg]
 //
 // Output lands in .rundown-sheet/ (gitignored).
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 
@@ -27,7 +27,7 @@ console.log(`Rendering from ${PHOTO}`);
 
 const server = spawn("npx", ["vite", "--port", "4253", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 5000));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 let result;
 try {

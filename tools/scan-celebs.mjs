@@ -1,6 +1,6 @@
 // Measure every fetched portrait with the real engine via the direct hook,
 // recording metrics plus capture quality for gating.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -10,7 +10,7 @@ const manifest = JSON.parse(readFileSync(DATA + "manifest.json", "utf8"));
 
 const server = spawn("npx", ["vite", "preview", "--port", "4182", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 const results = [];
 try {

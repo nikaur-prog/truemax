@@ -16,7 +16,7 @@
 // numbers only told us where to look.
 //
 //   node tools/bizygo-check.mjs
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 
@@ -29,7 +29,7 @@ console.log(`Measuring ${files.length} faces...`);
 
 const server = spawn("npx", ["vite", "--port", "4251", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 5000));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 let rows;
 try {

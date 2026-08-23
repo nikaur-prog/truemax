@@ -28,7 +28,7 @@
 // shimmering — a per-frame sampler would reselect different points each frame.
 //
 // Run: node tools/cloud-points.mjs
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 
@@ -39,7 +39,7 @@ const TARGET = 64; // points drawn; the greedy pass stops here
 const files = readdirSync(PHOTOS).filter((f) => f.endsWith(".jpg")).slice(0, 18);
 const server = spawn("npx", ["vite", "--port", "4247", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 4000));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 let result;
 try {

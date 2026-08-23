@@ -20,7 +20,7 @@
 //
 //   If they hold up, the genre is not the problem and the metric set simply
 //   does not separate these two groups, which is a much deeper finding.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 
@@ -68,7 +68,7 @@ function candidates(name) {
 
 const server = spawn("npx", ["vite", "preview", "--port", "4394", "--strictPort"], { cwd: APP, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 3500));
-const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const b = await launchChromium();
 const rows = [];
 try {
   const page = await b.newPage();

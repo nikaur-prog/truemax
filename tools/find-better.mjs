@@ -2,7 +2,7 @@
 // search Wikimedia Commons for alternative photos, scan each, and keep the
 // most frontal + most neutral one. Capture quality drives measurement
 // quality, so this is worth the extra fetches.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn, execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 
@@ -38,7 +38,7 @@ function commonsCandidates(name, limit = 6) {
 
 const server = spawn("npx", ["vite", "preview", "--port", "4178", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 const improved = [];
 
 try {
