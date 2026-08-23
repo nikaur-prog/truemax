@@ -52,7 +52,26 @@ export type RatingSource =
   /** The operator's own judgement of the face, given before seeing any score. */
   | "self"
   /** Another product's score, or any number derived from one. Never exported. */
-  | "external";
+  | "external"
+  /**
+   * A rating changed AFTER this engine's number was on screen. Never exported.
+   *
+   * The reason the rating box comes before the verdict is that a blind number
+   * is the only kind worth fitting to. The verdict screen then prints YOU 4.5
+   * against ENGINE 5.4, and the honest human reaction to that is to wonder
+   * whether the engine had a point — which is exactly when a 4.5 becomes a 5.4
+   * and the corpus quietly stops being evidence.
+   *
+   * Fitting to numbers the engine suggested is worse than fitting to a
+   * competitor's: at least a competitor is an independent opinion. This is the
+   * engine grading its own homework and scoring full marks, and it would show
+   * up as agreement improving while nothing about the measurements got better.
+   *
+   * So the edit is allowed and the row is kept — it is still a real face with
+   * real measurements, and unrated rows are already useful. What it stops being
+   * is a target.
+   */
+  | "revised";
 
 export interface RatedFace {
   id: string;
@@ -193,6 +212,32 @@ export function addRatedFace(
     ...(label ? { label } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
+  save(faces);
+  return faces;
+}
+
+/**
+ * Change a rating that is already stored.
+ *
+ * Two reasons somebody edits a number, and they are not the same act:
+ *
+ *   MIS-ENTRY — the intended answer was always 5.4 and the keypad produced
+ *   4.5. Nothing was learned from the engine, the blind judgement is intact,
+ *   and the row stays fittable. `keepsProvenance` is true.
+ *
+ *   SECOND THOUGHTS — the verdict screen showed the engine's number and the
+ *   answer moved toward it. That is anchoring, the rating is no longer
+ *   independent evidence, and the row is marked `revised` and held out of the
+ *   export. `keepsProvenance` is false.
+ *
+ * The distinction cannot be detected from here — both arrive as "this number
+ * should be different" — so it is asked at the call site, of the only person
+ * who knows which happened.
+ */
+export function reviseRating(id: string, rating: number, keepsProvenance: boolean): RatedFace[] {
+  const faces = loadCalibrationSet().map((f) =>
+    f.id === id ? { ...f, rating, ratedBy: (keepsProvenance ? "self" : "revised") as RatingSource } : f,
+  );
   save(faces);
   return faces;
 }
