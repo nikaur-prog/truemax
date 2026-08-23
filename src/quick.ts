@@ -29,6 +29,7 @@ import {
   addRatedFace,
   clearCalibrationSet,
   confirmOwnRating,
+  reviseRating,
   corpusJSON,
   loadCalibrationSet,
   missingCoverage,
@@ -829,6 +830,69 @@ function renderFaceSlots(): void {
 }
 
 /**
+ * Changing a rating that is already stored.
+ *
+ * The screen asks WHY, and it is not bureaucracy. By the time a row exists the
+ * verdict screen has already printed the engine's number beside the human one,
+ * so every edit happens with that number known — and a rating that moved toward
+ * it is no longer independent evidence. Fitting to it would be the engine
+ * marking its own homework: agreement would improve while nothing about the
+ * measurements got better, which is the one failure that looks like success.
+ *
+ * A genuine mis-entry is a different act and stays fittable, because the
+ * intended answer was never influenced by anything. Only the person who typed
+ * it can tell those apart, so they are asked plainly rather than guessed at.
+ */
+function renderRatingEdit(id: string): void {
+  const face = loadCalibrationSet().find((f) => f.id === id);
+  if (!face) return renderCalibrationSet();
+
+  el.calStep.textContent = "Change a rating";
+  el.calBody.innerHTML = `
+    <div class="q-cal-rate">
+      <p class="q-cal-ask">${face.label ? escapeHtml(face.label) : face.id} —
+      you said ${face.rating === null ? "nothing" : face.rating.toFixed(1)},
+      the engine said ${face.scored.toFixed(1)}.</p>
+      <div class="q-cal-input">
+        <input type="number" id="q-edit-num" min="1" max="10" step="0.1" inputmode="decimal"
+               value="${face.rating ?? ""}" autocomplete="off" />
+      </div>
+      <p class="q-cal-hint">Why is it changing? This decides whether the row can still
+      be fitted against, and it is the whole reason the rating box comes before the
+      verdict.</p>
+      <div class="q-actions">
+        <button type="button" class="btn pri" id="q-edit-typo">I mistyped it</button>
+        <button type="button" class="btn gho" id="q-edit-mind">I changed my mind</button>
+      </div>
+      <p class="q-cal-hint"><b>Mistyped</b> means the number you meant was always this one —
+      nothing was learned from the engine, so the row stays in the fit.
+      <b>Changed my mind</b> means the engine's number moved yours. That is worth keeping as a
+      record and worth nothing as a target: a corpus fitted to numbers the engine suggested
+      would agree with itself perfectly and measure nothing. The row is kept, marked, and left
+      out of the export.</p>
+      <p class="q-cal-msg" id="q-edit-msg" role="status"></p>
+      <button type="button" class="q-slot-back" id="q-edit-back">Back to the set</button>
+    </div>`;
+
+  const num = document.getElementById("q-edit-num") as HTMLInputElement;
+  const msg = document.getElementById("q-edit-msg")!;
+  num.focus();
+  const commit = (keepsProvenance: boolean) => {
+    const rating = Number(num.value);
+    if (!(rating >= 1 && rating <= 10)) {
+      msg.textContent = "A number between 1 and 10.";
+      num.focus();
+      return;
+    }
+    reviseRating(id, Math.round(rating * 10) / 10, keepsProvenance);
+    renderCalibrationSet();
+  };
+  document.getElementById("q-edit-typo")!.onclick = () => commit(true);
+  document.getElementById("q-edit-mind")!.onclick = () => commit(false);
+  document.getElementById("q-edit-back")!.onclick = () => renderCalibrationSet();
+}
+
+/**
  * The "where do exports go" line.
  *
  * Only shown where the browser can actually honour it — Chromium on a desktop.
@@ -1109,7 +1173,9 @@ function renderCalibrationSet(): void {
                         ? ""
                         : f.ratedBy === "external"
                           ? ` <em class="q-cal-flag">borrowed</em>`
-                          : ` <em class="q-cal-flag">unknown</em>`;
+                          : f.ratedBy === "revised"
+                            ? ` <em class="q-cal-flag">revised after the score</em>`
+                            : ` <em class="q-cal-flag">unknown</em>`;
                   const fittable = f.ratedBy === "self" && f.rating !== null;
                   return `<div class="q-cal-row${fittable ? "" : " held"}">
                     <span>${f.label ? escapeHtml(f.label) : f.id}${flag}</span>
@@ -1122,7 +1188,7 @@ function renderCalibrationSet(): void {
                       f.ratedBy === undefined && f.rating !== null
                         ? `<button type="button" class="linkish" data-mine="${f.id}">mine</button>`
                         : ""
-                    }<button type="button" class="linkish" data-drop="${f.id}">remove</button></span>
+                    }<button type="button" class="linkish" data-edit="${f.id}">rating</button><button type="button" class="linkish" data-drop="${f.id}">remove</button></span>
                   </div>`;
                 })
                 .join("")}
@@ -1151,6 +1217,9 @@ function renderCalibrationSet(): void {
   }
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-mine]")) {
     button.onclick = () => { confirmOwnRating(button.dataset.mine!); renderCalibrationSet(); };
+  }
+  for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-edit]")) {
+    button.onclick = () => renderRatingEdit(button.dataset.edit!);
   }
   const msg = document.getElementById("q-cal-msg")!;
   document.getElementById("q-cal-copy")!.onclick = async () => {

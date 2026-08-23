@@ -158,3 +158,36 @@ test("an empty set starts at one", () => {
   const used: number[] = [];
   assert.equal((used.length ? Math.max(...used) : 0) + 1, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Revising a rating that is already stored.
+//
+// By the time a row exists the verdict screen has printed the engine's number
+// beside the human one, so every edit happens with that number known. An edit
+// that moved toward it is the engine marking its own homework: agreement would
+// improve while nothing about the measurements got better.
+// ---------------------------------------------------------------------------
+
+test("a rating changed after seeing the score is kept but never fitted", () => {
+  const revised: RatedFace = { ...face("m1", "self"), rating: 5.4, ratedBy: "revised" };
+  const { own, withheld } = splitByProvenance([revised, face("m2", "self")]);
+  assert.deepEqual(own.map((f) => f.id), ["m2"], "a revised rating must not reach the fit");
+  assert.deepEqual(withheld.map((f) => f.id), ["m1"], "and must not vanish either");
+  assert.deepEqual(JSON.parse(corpusJSON([revised])).faces, []);
+});
+
+test("a mistyped rating stays fittable, because nothing was learned from the engine", () => {
+  // The distinction the edit screen asks about. Same act mechanically, opposite
+  // meaning: the intended answer was always this one.
+  const corrected: RatedFace = { ...face("m1", "self"), rating: 5.4 };
+  assert.deepEqual(splitByProvenance([corrected]).own.map((f) => f.id), ["m1"]);
+});
+
+test("spread still reads a revised row, which is a set-health question not a fit one", () => {
+  // setHealth describes what has been COLLECTED, so a row held out of the
+  // export still counts toward whether the ends of the scale are covered.
+  const at = (id: string, rating: number, ratedBy: RatedFace["ratedBy"]): RatedFace =>
+    ({ ...face(id, ratedBy), rating });
+  const health = setHealth([at("m1", 3, "revised"), at("m2", 8, "self")], "male");
+  assert.equal(health.spread, 5);
+});
