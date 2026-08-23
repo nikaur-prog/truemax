@@ -197,6 +197,14 @@ const el = {
 // inference turned out to be 58.8% accurate on held-out faces against a 54.1%
 // base rate, while the choice itself moves the score by a median of 0.70 points
 // and up to 4.50. sexPref.ts has the measurements. One tap beats that.
+// The caption lives in a span beside an inline SVG, so writing textContent on
+// the button itself would silently delete the icon. Every caption change goes
+// through here instead.
+function setCameraLabel(text: string): void {
+  const label = document.getElementById("btn-camera-label");
+  if (label) label.textContent = text;
+}
+
 let selectedSex: Sex = storedSex() ?? "male";
 // Whether the reference population is a real choice yet, or still the silent
 // default. A face app is used mostly by young men, so "male" is the right
@@ -311,6 +319,29 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
 
 // The idle frame runs the demo reel — real scans of public-domain portraits.
 mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
+
+// Shrink the docked demo once the page starts scrolling, so the pinned way-in
+// yields the screen without leaving it. Skipped while the camera is live: that
+// screen is not a scrolling context and a mid-capture resize would fight the
+// framing guide.
+{
+  const dock = document.getElementById("capture-dock");
+  if (dock) {
+    let raf = 0;
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          if (el.stage.classList.contains("live-cam")) return;
+          dock.classList.toggle("shrunk", window.scrollY > 60);
+        });
+      },
+      { passive: true },
+    );
+  }
+}
 el.ovalFrame.classList.add("showing-reel");
 
 // A build without accounts still needs an explicit anonymous owner. When Auth
@@ -364,22 +395,33 @@ refpop.addEventListener("click", (e) => {
 });
 paintRefPop();
 
-// The gate: no scan runs against an unchosen population. If the choice has not
-// been made, the full-screen man/woman chooser is shown and the scan proceeds
-// only once it is picked. Chosen once, remembered forever, never asked again.
+// The gate: no scan runs against an unchosen population — and the question is
+// asked at the start of EVERY scan, not once per browser.
+//
+// It used to be chosen once and remembered forever, which is the right policy
+// for a personal device and exactly wrong for how this app actually spreads: a
+// phone handed across a table. The owner answers "man" on day one, and every
+// friend who scans on that phone afterwards is scored against the male
+// reference without ever being shown the question — a woman quietly told where
+// she ranks among men, which the chooser itself calls a 0.7-to-4.5-point error.
+// That is precisely what happened in the first live test.
+//
+// The cost is one tap per scan, against a flow that involves posing for two
+// photographs; the previous answer is highlighted so the owner's repeat scans
+// are a single confirm. The stored choice still seeds the results-screen
+// toggle and the guide, it just no longer answers for the next face.
 function ensureSex(then: () => void): void {
-  if (sexChosen) {
-    then();
-    return;
-  }
-  openSexChooser((sex) => {
-    selectedSex = sex;
-    sexChosen = true;
-    storeSex(sex);
-    paintRefPop();
-    showGuide(sex);
-    then();
-  });
+  openSexChooser(
+    (sex) => {
+      selectedSex = sex;
+      sexChosen = true;
+      storeSex(sex);
+      paintRefPop();
+      showGuide(sex);
+      then();
+    },
+    storedSex() ?? undefined,
+  );
 }
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
@@ -656,7 +698,7 @@ async function openCamera(): Promise<void> {
         // available as soon as a face exists; the remaining checks are advice
         // and confidence context, not a dead end.
         el.btnCamera.disabled = !c.gates.face;
-        if (!autoFront?.armed()) el.btnCamera.textContent = c.ready ? "Capture" : "Capture anyway";
+        if (!autoFront?.armed()) setCameraLabel(c.ready ? "Capture" : "Capture anyway");
         autoFront?.update(c.ready);
       },
     });
@@ -672,13 +714,13 @@ async function openCamera(): Promise<void> {
       onTick: (remaining) => {
         if (remaining == null) {
           el.camHint.classList.remove("counting");
-          el.btnCamera.textContent = "Capture";
+          setCameraLabel("Capture");
           return;
         }
         el.camHint.classList.add("counting");
         el.camHintTitle.textContent = `Hold still · ${remaining}`;
         el.camHintDetail.textContent = "Taking it automatically · space to take it now";
-        el.btnCamera.textContent = `Capturing in ${remaining}`;
+        setCameraLabel(`Capturing in ${remaining}`);
       },
       onFire: () => el.btnCamera.click(),
     });
@@ -707,7 +749,7 @@ async function openCamera(): Promise<void> {
     holdHintUntil = performance.now() + HINT_HOLD_MS;
     el.camLight.classList.remove("hidden");
     el.btnCancel.classList.remove("hidden");
-    el.btnCamera.textContent = "Capture";
+    setCameraLabel("Capture");
     el.btnCamera.disabled = true;
 
     // Put the preview back at the top of the viewport.
@@ -758,7 +800,7 @@ async function closeCamera(): Promise<void> {
   el.camLight.classList.add("hidden");
   el.btnCancel.classList.add("hidden");
   el.btnNoGlasses.classList.add("hidden");
-  el.btnCamera.textContent = "Use camera";
+  setCameraLabel("Use camera");
   el.btnCamera.disabled = false;
   el.camHintTitle.textContent = "Take a photo, or upload one";
   el.camHintDetail.textContent = "The camera preview will guide your framing";
@@ -1766,6 +1808,11 @@ if (isAuthAvailable()) {
   clearExpiredPendingAnalysis();
   let previousUserId: string | null | undefined;
   onAuthChange((user) => {
+    // Acquisition copy is for people who have not signed up. A member scrolling
+    // under their own capture stage does not need to be re-sold the free score
+    // or walked through what an account is for — style.css hides the proof and
+    // journey sections behind this class.
+    document.body.classList.toggle("is-member", Boolean(user));
     const nextUserId = user?.id ?? null;
     const identityChanged = previousUserId !== undefined && previousUserId !== nextUserId;
     if (identityChanged) {

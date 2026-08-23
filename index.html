@@ -58,7 +58,12 @@
         </p>
       </details>
 
-      <!-- Capture stage: live preview when the camera is on, oval prompt when not -->
+      <!-- Capture stage: live preview when the camera is on, oval prompt when not.
+           The dock keeps the demo and the two capture buttons pinned while the
+           proof sections scroll underneath on a phone — the ask from the first
+           live test was that the way IN never scrolls away. Scrolling shrinks
+           the demo so it yields the screen without leaving it. -->
+      <div class="capture-dock" id="capture-dock">
       <div class="stage" id="capture-stage">
         <div class="oval-frame" id="oval-frame">
           <video id="cam-video" playsinline muted></video>
@@ -95,9 +100,10 @@
         </div>
 
         <div class="cam-actions">
-          <button class="btn pri shutter" id="btn-camera">Use camera</button>
-          <button class="btn gho" id="btn-upload">Upload a photo</button>
+          <button class="btn pri shutter" id="btn-camera"><span id="btn-camera-label">Use camera</span><svg class="btn-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+          <button class="btn gho" id="btn-upload"><span>Upload a photo</span><svg class="btn-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
         </div>
+      </div>
         <!-- Filled in by script, and only on a device that actually has a
              keyboard and a pointer. Telling a phone to press Cmd-V is worse
              than saying nothing. -->
