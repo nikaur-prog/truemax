@@ -4027,13 +4027,23 @@ body.is-member .journey { display: none; }
    that made it worth keeping. */
 .tut-flash {
   position: absolute; inset: 0; z-index: 3; border-radius: 14px;
-  background: #fff; opacity: 0; pointer-events: none;
+  opacity: 0; pointer-events: none;
+  /* The light comes from the handset, so it falls off from the handset. A
+     full-frame wash reads as a scene transition, not as a camera firing. */
+  background: radial-gradient(
+    circle at var(--fx, 50%) var(--fy, 35%),
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(255, 255, 255, 0.9) 4%,
+    rgba(255, 255, 255, 0.5) 11%,
+    rgba(255, 255, 255, 0.16) 21%,
+    rgba(255, 255, 255, 0) 34%
+  );
 }
 .tut-flash.fire { animation: tut-shutter 0.42s ease-out; }
 @keyframes tut-shutter {
-  0% { opacity: 0; }
-  8% { opacity: 0.92; }
-  100% { opacity: 0; }
+  0% { opacity: 0; transform: scale(0.82); }
+  8% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.12); }
 }
 .tut-cue.hidden { display: none; }
 @media (prefers-reduced-motion: reduce) {
