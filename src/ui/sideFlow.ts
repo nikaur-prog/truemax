@@ -1,9 +1,10 @@
 import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
-import { faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
+import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
 import type { VerifyHandle } from "./sideVerify.js";
@@ -35,6 +36,10 @@ import type { CameraHandle } from "./camera.js";
 // exactly where somebody is trying to put a landmark on a feature boundary. The
 // cost is a slightly slower seed pass on one image, which is not on any hot path.
 const MAX_DIM = 1400;
+
+// The walkthrough's step order is SIDE_POINTS order; the crop renderer needs
+// the id for a step index without reaching into the verifier's internals.
+const SIDE_POINT_IDS = SIDE_POINTS.map((s) => s.id);
 
 interface SideCtx {
   scanId: string;
@@ -552,13 +557,31 @@ function mountVerify(
   const showGuidedActions = () => {
     verifier?.setEditable(true);
     e.cap.textContent = "PLACE THE POINTS";
+    // The photographic "it goes here" patch, when the reference exists. Loaded
+    // once per mount; a missing or unshipped image just means the step shows
+    // its words alone, which is what it always did.
+    let guideImage: HTMLImageElement | null = null;
+    if (guidePhotoReady()) {
+      guideImage = new Image();
+      guideImage.src = GUIDE_PHOTO_URL;
+    }
     const paint = (index: number, total: number) => {
       const { label, hint } = verifier!.guidedCurrent();
       e.panelCopy.innerHTML = `<h2 class="side-title">${label}</h2>
         <p class="side-sub">${hint}. Tap where it belongs on the photo — hold and drag to
         fine-tune with the lens. If the ring is already right, just press next.</p>
+        ${guideImage ? `<div class="side-refcrop"><canvas id="side-refcrop"></canvas><span>On a real face, it sits here</span></div>` : ""}
         <p class="side-review-note">Point ${index + 1} of ${total}. The five behind the face
         are guesses from an average head, so they are the ones that usually need the tap.</p>`;
+      if (guideImage) {
+        const crop = document.getElementById("side-refcrop") as HTMLCanvasElement | null;
+        const id = SIDE_POINT_IDS[index];
+        const render = () => {
+          if (crop && guideImage!.naturalWidth) drawGuideCrop(crop, guideImage!, id, verifier!.faceDir);
+        };
+        if (guideImage.complete) render();
+        else guideImage.onload = render;
+      }
       const counter = document.getElementById("side-gcount");
       if (counter) counter.textContent = `${index + 1} / ${total}`;
       const next = document.getElementById("side-gnext");

@@ -3811,3 +3811,15 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    stranger; a member has been convinced. See onAuthChange in main.ts. */
 body.is-member .proof,
 body.is-member .journey { display: none; }
+
+/* The photographic "it sits here" patch under a walkthrough step. */
+.side-refcrop { margin: 12px 0 14px; }
+.side-refcrop canvas {
+  display: block; width: 148px; height: 148px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--card);
+}
+.side-refcrop span {
+  display: block; margin-top: 6px; font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: 0.1em; color: var(--mut);
+  text-transform: uppercase;
+}
