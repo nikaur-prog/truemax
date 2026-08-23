@@ -3989,3 +3989,16 @@ body.is-member .journey { display: none; }
   .tut-bars i.live b { animation: none; width: 100%; }
   .tut-stage img { transition: none; }
 }
+
+/* A tutorial step that moves. The clip sits exactly over its poster and only
+   becomes visible once it is genuinely playing, so a refused autoplay, a slow
+   connection or a missing file all leave the still on screen instead of a
+   black rectangle. */
+.tut-shot { position: relative; }
+.tut-stage video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; border-radius: 14px; display: block;
+  opacity: 0; transition: opacity 0.28s ease; pointer-events: none;
+}
+.tut-stage video.ready { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .tut-stage video { transition: none; } }
