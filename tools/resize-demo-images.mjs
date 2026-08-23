@@ -26,11 +26,16 @@
 // vite preview, the same way build-demo-reel.mjs does.
 import { chromium } from "playwright";
 import { spawn, execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync } from "node:fs";
 import sharp from "sharp";
 import { REEL } from "../src/ui/demoReelData.js";
 
-const APP_DIR = "/home/user/truemax";
+// Derived from this file's own location, not hardcoded. It used to be an
+// absolute sandbox path, which meant the tool ran only on the one machine it
+// was written on and died with ERR_MODULE_NOT_FOUND-style confusion anywhere
+// else — including the laptop that actually has the network access this needs.
+const APP_DIR = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const OUT_IMG = `${APP_DIR}/public/demo`;
 const CACHE = `${APP_DIR}/.reel-cache`;
 const UA = "TrueMax/0.2 (demo reel builder; support@ascendnz.online)";
