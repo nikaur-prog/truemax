@@ -136,6 +136,15 @@ await new Promise((r) => setTimeout(r, 3500));
 const browser = await launchChromium();
 
 const report = [];
+// Printed as each face resolves, not held to the end. This run is slow by
+// design -- it paces itself under Wikimedia's rate limit -- so a crash or a
+// Ctrl-C at face eight of nine would otherwise throw away everything it had
+// already established.
+const line = (name, status, wrote) => {
+  report.push({ name, status, wrote });
+  console.log(`${wrote ? "ok  " : "SKIP"} ${String(name).padEnd(20)} ${status}`);
+};
+
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4207/");
@@ -145,7 +154,7 @@ try {
     const measured = [];
     const cands = await candidatesFor(face.name);
     if (!cands.length) {
-      report.push({ name: face.name, status: throttled ? "no candidates — the Commons API is rate-limiting this IP" : "no shippable candidates on Commons", wrote: false });
+      line(face.name, throttled ? "no candidates — the Commons API is rate-limiting this IP" : "no shippable candidates on Commons", false);
       continue;
     }
     for (const c of cands) {
@@ -169,7 +178,7 @@ try {
     }
 
     if (!measured.length) {
-      report.push({ name: face.name, status: "no candidates measurable", wrote: false });
+      line(face.name, "no candidates measurable", false);
       continue;
     }
     measured.sort((a, b) => a.cost - b.cost);
@@ -179,10 +188,7 @@ try {
     // same engine gives the same number; a different number means a different
     // photograph, and the landmark data on file no longer describes it.
     if (Math.abs(pick.overall - face.overall) > 0.05) {
-      report.push({
-        name: face.name, status: `picked a different photo (${pick.overall.toFixed(1)} vs stored ${face.overall.toFixed(1)}) — left alone`,
-        wrote: false,
-      });
+      line(face.name, `picked a different photo (${pick.overall.toFixed(1)} vs stored ${face.overall.toFixed(1)}) — left alone`, false);
       continue;
     }
 
@@ -209,18 +215,17 @@ try {
         .jpeg({ quality: 82, mozjpeg: true })
         .toFile(`${OUT_IMG}/${face.slug}.jpg`);
     }
-    report.push({
-      name: face.name,
-      status: `${before.width}x${before.height} -> ${outW}x${outH}` + (scale < 1 ? ` (source crop only ${w}x${h})` : ""),
-      wrote: !DRY,
-    });
+    line(
+      face.name,
+      `${before.width}x${before.height} -> ${outW}x${outH}` + (scale < 1 ? ` (source crop only ${w}x${h})` : ""),
+      !DRY,
+    );
   }
 } finally {
   await browser.close();
   server.kill();
 }
 
-for (const r of report) console.log(`${r.wrote ? "ok  " : "SKIP"} ${r.name.padEnd(20)} ${r.status}`);
 if (throttled) {
   console.log(`\n${throttled} request(s) were rate-limited by Wikimedia. That is per source IP, and a shared`);
   console.log("cloud egress can be throttled past the point of usefulness — run this from a normal");
