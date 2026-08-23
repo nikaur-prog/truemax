@@ -4002,3 +4002,40 @@ body.is-member .journey { display: none; }
 }
 .tut-stage video.ready { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .tut-stage video { transition: none; } }
+
+/* The turn cue. Drawn over the clip rather than burned into it: a generated
+   video renders text badly, and a DOM overlay stays crisp and can be corrected
+   without paying to regenerate footage. */
+.tut-cue {
+  position: absolute; left: 50%; top: 5%; transform: translateX(-50%);
+  width: 46%; max-width: 190px; z-index: 2;
+  opacity: 0; transition: opacity 0.25s ease; pointer-events: none;
+}
+.tut-cue.on { opacity: 1; }
+.tut-cue path { fill: none; stroke-linecap: round; }
+.tut-cue-track { stroke: rgba(255, 255, 255, 0.25); stroke-width: 2.2; }
+.tut-cue-sweep { stroke: #8ff3e0; stroke-width: 2.8; }
+.tut-cue-head { fill: #8ff3e0; }
+.tut-cue-num {
+  fill: #fff; font-family: var(--mono); font-size: 13px; font-weight: 600;
+  text-anchor: middle; paint-order: stroke; stroke: rgba(6, 20, 17, 0.75); stroke-width: 3px;
+}
+@media (prefers-reduced-motion: reduce) { .tut-cue { transition: none; } }
+
+/* The shutter. Drawn rather than filmed: the clip is the one the shot was
+   approved on, and regenerating it to add a flash would re-roll the framing
+   that made it worth keeping. */
+.tut-flash {
+  position: absolute; inset: 0; z-index: 3; border-radius: 14px;
+  background: #fff; opacity: 0; pointer-events: none;
+}
+.tut-flash.fire { animation: tut-shutter 0.42s ease-out; }
+@keyframes tut-shutter {
+  0% { opacity: 0; }
+  8% { opacity: 0.92; }
+  100% { opacity: 0; }
+}
+.tut-cue.hidden { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tut-flash.fire { animation: none; }
+}

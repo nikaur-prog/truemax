@@ -42,3 +42,41 @@ test("the front and side tutorials are different tutorials", () => {
   assert.ok(front.every((s) => s.includes("front")));
   assert.ok(side.every((s) => s.includes("side")));
 });
+
+test("a step with motion declares a coherent timeline", () => {
+  // The cue and the shutter are driven off the clip's own currentTime, so
+  // their numbers are claims about the footage. A cue that ends after the
+  // clip, or a shutter that fires during the turn, animates against what the
+  // person is actually watching.
+  const CLIP_SECONDS = 5; // every tutorial clip is generated at five seconds
+  for (const view of VIEWS) {
+    for (const step of tutorialSteps(view)) {
+      if (!step.video) {
+        assert.equal(step.cue, undefined, "a cue without a clip has nothing to track");
+        assert.equal(step.flash, undefined, "a shutter without a clip has nothing to fire on");
+        continue;
+      }
+      assert.match(step.video, /^\/tutorial\/[a-z-]+\.mp4$/, `${step.video} is not a tutorial clip`);
+      if (step.cue) {
+        assert.ok(step.cue.start >= 0, "the cue cannot start before the clip");
+        assert.ok(step.cue.end > step.cue.start, "the cue must move forwards");
+        assert.ok(step.cue.end <= CLIP_SECONDS, "the cue cannot outlast the clip");
+      }
+      if (step.flash !== undefined) {
+        assert.ok(step.flash > 0 && step.flash <= CLIP_SECONDS, "the shutter must fire inside the clip");
+        if (step.cue) {
+          assert.ok(step.flash >= step.cue.end, "the shutter fires after the turn, not during it");
+        }
+      }
+    }
+  }
+});
+
+test("the clip lands on the step that teaches the turn", () => {
+  // Motion belongs on the one step a still cannot teach, and nowhere else.
+  const withVideo = VIEWS.flatMap((v) => tutorialSteps(v).filter((s) => s.video));
+  assert.equal(withVideo.length, 1, "exactly one step should carry a clip");
+  assert.equal(withVideo[0].kind, "do", "the clip shows the correct capture, not a mistake");
+  const side = tutorialSteps("side");
+  assert.equal(side[side.length - 1].video, withVideo[0].video, "and it is the side tutorial's last step");
+});

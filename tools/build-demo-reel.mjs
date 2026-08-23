@@ -155,7 +155,10 @@ try {
       if (!path) continue;
       let m;
       try {
-        const b64 = execFileSync("base64", ["-w0", path], { encoding: "utf8", maxBuffer: 8e7 });
+        // Encoded in-process. Shelling out to `base64 -w0` is GNU-only: BSD
+        // base64 on macOS rejects -w and prints its usage, which showed up as
+        // every candidate silently failing to measure.
+        const b64 = readFileSync(path).toString("base64");
         m = await page.evaluate(async ([u, s]) => {
           const r = await window.__truemaxMeasure(u, s);
           if (!r.faceFound) return null;
