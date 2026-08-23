@@ -2,6 +2,7 @@ import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
 import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import { GuidedAdvance } from "./guidedAdvance.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady } from "./sideGuidePhoto.js";
@@ -556,6 +557,7 @@ function mountVerify(
   // is still the final state; this is a different door into it.
   const showGuidedActions = () => {
     verifier?.setEditable(true);
+    e.layer.querySelector(".gnext-in")?.remove();
     e.cap.textContent = "PLACE THE POINTS";
     // The photographic "it goes here" patch, when the reference exists. Loaded
     // once per mount; a missing or unshipped image just means the step shows
@@ -565,11 +567,36 @@ function mountVerify(
       guideImage = new Image();
       guideImage.src = GUIDE_PHOTO_URL;
     }
-    const paint = (index: number, total: number) => {
+    // The advance control lives INSIDE the photo, just above the name of the
+    // point it is asking about, because that is where the eye already is: a
+    // button under the frame means looking away from the ring to press it and
+    // back again to see what happened.
+    //
+    // How much confirmation each step still needs lives in GuidedAdvance; this
+    // only paints what that says.
+    const inFrame = document.createElement("button");
+    inFrame.type = "button";
+    inFrame.className = "gnext-in";
+    inFrame.id = "side-gnext-in";
+    // It sits over the photo, so it must not read as photo — see the matching
+    // guard in the verifier's pointerdown.
+    inFrame.dataset.verifyChrome = "1";
+    inFrame.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    e.layer.appendChild(inFrame);
+    const advance = new GuidedAdvance();
+
+    const paintButton = () => {
+      const { ready, text } = advance.view();
+      inFrame.classList.toggle("ready", ready);
+      inFrame.textContent = text;
+    };
+
+    const paint = (index: number, total: number, moved = false) => {
       const { label, hint } = verifier!.guidedCurrent();
       e.panelCopy.innerHTML = `<h2 class="side-title">${label}</h2>
         <p class="side-sub">${hint}. Tap where it belongs on the photo — hold and drag to
-        fine-tune with the lens. If the ring is already right, just press next.</p>
+        fine-tune with the lens. Moving it counts as your answer. If it is already right,
+        the button asks you once to say so.</p>
         ${guideImage ? `<div class="side-refcrop"><canvas id="side-refcrop"></canvas><span>On a real face, it sits here</span></div>` : ""}
         <p class="side-review-note">Point ${index + 1} of ${total}. The five behind the face
         are guesses from an average head, so they are the ones that usually need the tap.</p>`;
@@ -584,21 +611,33 @@ function mountVerify(
       }
       const counter = document.getElementById("side-gcount");
       if (counter) counter.textContent = `${index + 1} / ${total}`;
-      const next = document.getElementById("side-gnext");
-      if (next) next.textContent = index === total - 1 ? "Finish" : "Next point";
+      advance.step(index, total, moved);
+      paintButton();
     };
+    // Back and "all at once" stay under the photo, where they were. Only the
+    // advance moved: it is the one control pressed thirteen times.
+    // Back, the counter, and the escape hatch. The advance is not here any
+    // more, so this row must not stretch two buttons to full width to fill the
+    // gap it left.
+    e.actions.classList.add("guided-row");
     e.actions.innerHTML = `
       <button class="btn gho" id="side-gback" type="button" aria-label="Previous point">‹</button>
       <span class="side-gcount" id="side-gcount"></span>
-      <button class="btn pri" id="side-gnext" type="button">Next point</button>
       <button class="btn cancel" id="side-gall" type="button">All points at once</button>`;
     document.getElementById("side-gback")!.onclick = () => verifier?.guidedBack();
-    document.getElementById("side-gnext")!.onclick = () => verifier?.guidedNext();
     document.getElementById("side-gall")!.onclick = () => {
+      inFrame.remove();
       verifier?.endGuided();
       showReviewActions();
     };
-    verifier!.startGuided(paint, () => showReviewActions());
+    inFrame.onclick = () => {
+      if (advance.press() === "confirm") paintButton();
+      else verifier?.guidedNext();
+    };
+    verifier!.startGuided(paint, () => {
+      inFrame.remove();
+      showReviewActions();
+    });
   };
 
   const showReviewActions = () => {
@@ -607,6 +646,8 @@ function mountVerify(
     // the wrong dot and drag it — did nothing until you found the mode switch.
     // A control that looks draggable must drag.
     verifier?.setEditable(true);
+    e.layer.querySelector(".gnext-in")?.remove();
+    e.actions.classList.remove("guided-row");
     e.cap.textContent = "REVIEW LANDMARKS";
     const low = (seed.confidence ?? 1) < 0.7;
     e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
