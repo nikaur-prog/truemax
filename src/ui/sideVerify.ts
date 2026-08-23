@@ -15,6 +15,24 @@ export interface VerifyHandle {
   faceDir: number; // +1 subject faces image-right, -1 image-left
   setEditable(editable: boolean): void;
   reset(points: SidePoints): void;
+  /**
+   * Walk the thirteen points one at a time instead of presenting all of them.
+   *
+   * Thirteen simultaneous rings on a bad seed reads as a wall of work, and in
+   * the first live test people simply declined to start it. One highlighted
+   * point with a name, a hint and a count reads as a step — and the mechanic
+   * changes with it: while guided, a tap ANYWHERE on the photo places the
+   * current point there (drag to fine-tune), so nobody has to first catch a
+   * mis-seeded dot that may be nowhere near where it belongs.
+   *
+   * onStep fires on entry and every navigation; onFinish when the last point
+   * is accepted. endGuided drops back to free editing at any time.
+   */
+  startGuided(onStep: (index: number, total: number) => void, onFinish: () => void): void;
+  guidedNext(): void;
+  guidedBack(): void;
+  guidedCurrent(): { label: string; hint: string };
+  endGuided(): void;
   destroy(): void;
 }
 
@@ -908,12 +926,31 @@ export function mountVerifier(
 
   let editable = false;
   let dragging: SidePointId | null = null;
+  let guided: { index: number; onStep: (index: number, total: number) => void; onFinish: () => void } | null = null;
   const toPhoto = (clientX: number, clientY: number): Pt => {
     const r = host.getBoundingClientRect();
     return {
       x: ((clientX - r.left) / r.width) * photo.width,
       y: ((clientY - r.top) / r.height) * photo.height,
     };
+  };
+
+  // The visual state of a walkthrough: every ring but the current one fades and
+  // stops taking pointer events, so a tap lands on the PHOTO and places the
+  // current point instead of accidentally grabbing a neighbour.
+  const paintGuided = () => {
+    host.classList.toggle("is-guided", Boolean(guided));
+    for (const [id, handle] of handles) {
+      handle.classList.toggle("gdim", Boolean(guided) && SIDE_POINTS[guided!.index].id !== id);
+      handle.classList.toggle("gfocus", Boolean(guided) && SIDE_POINTS[guided!.index].id === id);
+    }
+    if (guided) {
+      const spec = SIDE_POINTS[guided.index];
+      labelEl.textContent = `${spec.label} — ${spec.hint}`;
+      labelEl.classList.add("show");
+    } else {
+      labelEl.classList.remove("show");
+    }
   };
 
   const paintMagnifier = (id: SidePointId) => {
@@ -967,6 +1004,30 @@ export function mountVerifier(
   const down = (e: PointerEvent) => {
     if (!editable) return;
     const target = (e.target as HTMLElement).closest<HTMLElement>(".vpoint");
+    if (guided) {
+      // Tap-to-place. The whole point of the walkthrough is that nobody has to
+      // catch a mis-seeded dot: wherever the finger lands IS the new position
+      // of the current point, and holding drags it from there with the lens up.
+      // A tap that starts on the current ring itself keeps its position and
+      // just begins a drag, so a nudge is still a nudge.
+      const id = SIDE_POINTS[guided.index].id;
+      dragging = id;
+      if (!target || target.dataset.id !== id) {
+        const p = toPhoto(e.clientX, e.clientY);
+        points[id] = {
+          x: Math.max(0, Math.min(photo.width, p.x)),
+          y: Math.max(0, Math.min(photo.height, p.y)),
+        };
+        place();
+        onChange(points);
+      }
+      handles.get(id)?.classList.add("grabbing");
+      paintMagnifier(id);
+      magnifier.classList.add("show");
+      host.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
     if (!target) return;
     dragging = target.dataset.id as SidePointId;
     target.classList.add("grabbing");
@@ -994,6 +1055,9 @@ export function mountVerifier(
     dragging = null;
     labelEl.classList.remove("show");
     magnifier.classList.remove("show");
+    // In a walkthrough the step's name stays on screen between touches — it is
+    // the instruction, not a drag tooltip.
+    if (guided) paintGuided();
   };
 
   // Long-pressing a landmark is the drag gesture. Chrome on Android reads the
@@ -1031,6 +1095,38 @@ export function mountVerifier(
       for (const { id } of SIDE_POINTS) points[id] = copy[id];
       place();
       onChange(points);
+    },
+    startGuided(onStep, onFinish) {
+      guided = { index: 0, onStep, onFinish };
+      paintGuided();
+      onStep(0, SIDE_POINTS.length);
+    },
+    guidedNext() {
+      if (!guided) return;
+      if (guided.index >= SIDE_POINTS.length - 1) {
+        const finish = guided.onFinish;
+        guided = null;
+        paintGuided();
+        finish();
+        return;
+      }
+      guided.index += 1;
+      paintGuided();
+      guided.onStep(guided.index, SIDE_POINTS.length);
+    },
+    guidedBack() {
+      if (!guided || guided.index === 0) return;
+      guided.index -= 1;
+      paintGuided();
+      guided.onStep(guided.index, SIDE_POINTS.length);
+    },
+    guidedCurrent() {
+      const spec = SIDE_POINTS[guided?.index ?? 0];
+      return { label: spec.label, hint: spec.hint };
+    },
+    endGuided() {
+      guided = null;
+      paintGuided();
     },
     destroy() {
       host.removeEventListener("contextmenu", blockMenu);

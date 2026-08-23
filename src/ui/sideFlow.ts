@@ -541,6 +541,43 @@ function mountVerify(
   // goes through. Scoped per mounted photo, so the next face asks again.
   let untouchedAcknowledged = false;
 
+  // The walkthrough: one point at a time, tap to place, next.
+  //
+  // The first live test found the failure plainly: a fresh seed shows thirteen
+  // rings, several of them visibly wrong, and the honest read of that screen is
+  // "this is a lot of work" — so people declined to start. The same thirteen
+  // corrections framed as "Nose tip. Tap it. Next." get done, because each step
+  // is one decision and the count is visibly shrinking. The free-editing screen
+  // is still the final state; this is a different door into it.
+  const showGuidedActions = () => {
+    verifier?.setEditable(true);
+    e.cap.textContent = "PLACE THE POINTS";
+    const paint = (index: number, total: number) => {
+      const { label, hint } = verifier!.guidedCurrent();
+      e.panelCopy.innerHTML = `<h2 class="side-title">${label}</h2>
+        <p class="side-sub">${hint}. Tap where it belongs on the photo — hold and drag to
+        fine-tune with the lens. If the ring is already right, just press next.</p>
+        <p class="side-review-note">Point ${index + 1} of ${total}. The five behind the face
+        are guesses from an average head, so they are the ones that usually need the tap.</p>`;
+      const counter = document.getElementById("side-gcount");
+      if (counter) counter.textContent = `${index + 1} / ${total}`;
+      const next = document.getElementById("side-gnext");
+      if (next) next.textContent = index === total - 1 ? "Finish" : "Next point";
+    };
+    e.actions.innerHTML = `
+      <button class="btn gho" id="side-gback" type="button" aria-label="Previous point">‹</button>
+      <span class="side-gcount" id="side-gcount"></span>
+      <button class="btn pri" id="side-gnext" type="button">Next point</button>
+      <button class="btn cancel" id="side-gall" type="button">All points at once</button>`;
+    document.getElementById("side-gback")!.onclick = () => verifier?.guidedBack();
+    document.getElementById("side-gnext")!.onclick = () => verifier?.guidedNext();
+    document.getElementById("side-gall")!.onclick = () => {
+      verifier?.endGuided();
+      showReviewActions();
+    };
+    verifier!.startGuided(paint, () => showReviewActions());
+  };
+
   const showReviewActions = () => {
     // Editable from the first frame. The old flow parked the points behind an
     // "Edit point placement" button, which meant the natural gesture — grab
@@ -561,12 +598,14 @@ function mountVerify(
         </svg>
       </button>
       <button class="btn gho" id="side-back">Retake picture</button>
+      <button class="btn gho" id="side-guided">One by one</button>
       <button class="btn gho" id="side-wrong">Points are wrong</button>
       <button class="btn pri" id="side-go">Confirm</button>`;
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
       drawGuides(e.lines, automaticPoints, w, h);
     };
+    document.getElementById("side-guided")!.onclick = () => showGuidedActions();
     document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
     document.getElementById("side-go")!.onclick = () => void confirmPlacement();
     document.getElementById("side-wrong")!.onclick = async () => {
@@ -587,6 +626,12 @@ function mountVerify(
         <p class="side-review-note">The circular arrow under the photo resets every point to the automatic placement.</p>`;
     };
   };
+
+  // A fresh seed opens IN the walkthrough; a placement being re-opened for
+  // corrections goes straight to the free-editing review, because those points
+  // have already been through the walk once and the person came back for one
+  // or two of them, not all thirteen.
+  const startInGuidedMode = seedMethod !== "existing";
 
   const confirmPlacement = async () => {
     if (!verifier) return;
@@ -734,7 +779,8 @@ function mountVerify(
     }
   };
 
-  showReviewActions();
+  if (startInGuidedMode) showGuidedActions();
+  else showReviewActions();
 }
 
 function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
