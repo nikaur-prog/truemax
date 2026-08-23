@@ -7,7 +7,13 @@ import { analyze, analyzeFrames, REGION_NAMES } from "./engine/scoring.js";
 import type { CaptureFrame } from "./engine/scoring.js";
 import { POSE_CALIBRATION, buildGeometry, landmarkIntegrityIssues } from "./engine/geometry.js";
 import { extractShape, shapeSubset } from "./engine/shape.js";
-import { compareAndStore, readAllHistory, scanStorageKey } from "./engine/history.js";
+import {
+  compareAndStore,
+  readAllComparableHistory,
+  readAllHistory,
+  scanStorageKey,
+} from "./engine/history.js";
+import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
@@ -357,6 +363,51 @@ function syncLandingHistory(): void {
   landingHistory?.classList.toggle("hidden", !hasHistory());
 }
 syncLandingHistory();
+
+// The rotating headline. See ui/landingHeadline.ts for which lines exist and
+// why none of them claims a result.
+//
+// The counter is an unscoped key on purpose. It records how many times this
+// browser has opened the page and nothing else — no score, no identity, nothing
+// that would mean anything to a second person on the same device — so scoping
+// it per owner would buy no privacy and would instead restart the rotation
+// every time somebody signs in, which is the one moment the page most wants to
+// look like it has moved on.
+const VISIT_KEY = "truemax:landing-visits";
+
+function nextVisit(): number {
+  try {
+    const seen = Number(localStorage.getItem(VISIT_KEY) ?? 0);
+    const next = Number.isFinite(seen) ? Math.abs(Math.trunc(seen)) + 1 : 1;
+    localStorage.setItem(VISIT_KEY, String(next % 1000));
+    return next - 1; // this visit's index; a first-ever visit is 0
+  } catch {
+    return 0; // private mode, storage disabled — always the opening line
+  }
+}
+
+// Read once per page load, not per auth change: signing in should re-personalise
+// the current headline, not advance to the next one.
+const thisVisit = nextVisit();
+
+function syncLandingHeadline(name: string | null): void {
+  const h1 = document.querySelector<HTMLElement>("#v-upload h1");
+  if (!h1) return;
+  const scans = readAllComparableHistory();
+  const newest = scans[0]; // readAllComparableHistory hands them back newest first
+  const daysSinceLastScan = newest
+    ? Math.floor((Date.now() - new Date(newest.date).getTime()) / 86_400_000)
+    : null;
+  paintHeadline(
+    h1,
+    pickHeadline({
+      name,
+      scanCount: scans.length,
+      daysSinceLastScan: Number.isFinite(daysSinceLastScan!) ? daysSinceLastScan : null,
+      visit: thisVisit,
+    }),
+  );
+}
 landingHistory?.addEventListener("click", () => openHistory());
 
 // Accounts light up only when Supabase keys are set in the build environment.
@@ -1886,6 +1937,11 @@ if (isAuthAvailable()) {
     }
     previousUserId = nextUserId;
     syncLandingHistory();
+    // Repainted here rather than at module load because both halves of the
+    // headline — the name and the scan history — only exist once the session
+    // has resolved. Until then the static markup stands, and the static markup
+    // is the visit-0 line, so there is no flash of a wrong headline.
+    syncLandingHeadline(user ? displayName(user) : null);
     void refreshHomeBrand(user);
     // A new account has answered nothing yet. Asking here — rather than at the
     // first moment the app needs a name or an age — means the questions arrive
@@ -1904,4 +1960,7 @@ if (isAuthAvailable()) {
   });
 } else {
   paintHomeBrand("guest");
+  // No-accounts build: nobody can ever be named, so the headline rotates
+  // through the signed-out set only.
+  syncLandingHeadline(null);
 }
