@@ -25,13 +25,24 @@ export interface VerifyHandle {
    * current point there (drag to fine-tune), so nobody has to first catch a
    * mis-seeded dot that may be nowhere near where it belongs.
    *
-   * onStep fires on entry and every navigation; onFinish when the last point
-   * is accepted. endGuided drops back to free editing at any time.
+   * onStep fires on entry, on every navigation, and again the moment the
+   * current point is first moved. `moved` says which of those it is, and the
+   * caller uses it to decide how much confirmation the step still needs:
+   * somebody who has just dragged a ring onto a feature has already told us
+   * where it goes, and asking them to confirm it afterwards is asking the same
+   * question twice. Somebody who has touched nothing has told us nothing, and
+   * a single tap of "next" on a wrong seed is exactly the accident the
+   * walkthrough exists to prevent.
+   *
+   * onFinish fires when the last point is accepted. endGuided drops back to
+   * free editing at any time.
    */
-  startGuided(onStep: (index: number, total: number) => void, onFinish: () => void): void;
+  startGuided(onStep: (index: number, total: number, moved: boolean) => void, onFinish: () => void): void;
   guidedNext(): void;
   guidedBack(): void;
   guidedCurrent(): { label: string; hint: string };
+  /** Where the walkthrough is, for a caller repainting outside an onStep. */
+  guidedStep(): { index: number; total: number; moved: boolean };
   endGuided(): void;
   destroy(): void;
 }
@@ -926,7 +937,40 @@ export function mountVerifier(
 
   let editable = false;
   let dragging: SidePointId | null = null;
-  let guided: { index: number; onStep: (index: number, total: number) => void; onFinish: () => void } | null = null;
+  let guided: {
+    index: number;
+    onStep: (index: number, total: number, moved: boolean) => void;
+    onFinish: () => void;
+    // Where this step's point sat when the step opened, and whether it has
+    // since been moved off that spot by more than a fingertip's slop.
+    from: Pt;
+    moved: boolean;
+  } | null = null;
+
+  // Big enough that resting a thumb on a ring is not a correction, small enough
+  // that a deliberate nudge is. Scaled to the photo so it means the same thing
+  // at any resolution.
+  const MOVE_SLOP = Math.max(3, 0.004 * Math.max(photo.width, photo.height));
+
+  // Called after any edit while guided. The first real move flips the step's
+  // state and repaints once; later moves in the same step change nothing.
+  const noteGuidedMove = () => {
+    if (!guided || guided.moved) return;
+    const p = points[SIDE_POINTS[guided.index].id];
+    if (Math.hypot(p.x - guided.from.x, p.y - guided.from.y) < MOVE_SLOP) return;
+    guided.moved = true;
+    guided.onStep(guided.index, SIDE_POINTS.length, true);
+  };
+
+  const enterGuidedStep = (index: number) => {
+    if (!guided) return;
+    guided.index = index;
+    const p = points[SIDE_POINTS[index].id];
+    guided.from = { x: p.x, y: p.y };
+    guided.moved = false;
+    paintGuided();
+    guided.onStep(index, SIDE_POINTS.length, false);
+  };
   const toPhoto = (clientX: number, clientY: number): Pt => {
     const r = host.getBoundingClientRect();
     return {
@@ -1003,6 +1047,13 @@ export function mountVerifier(
 
   const down = (e: PointerEvent) => {
     if (!editable) return;
+    // Controls drawn INSIDE the frame are not the photograph. Without this, a
+    // tap on the walkthrough's advance button is also a tap-to-place, so the
+    // act of saying "this point is right" moves it to wherever the button is —
+    // and the pointer capture taken below then swallows the click, so the
+    // button does not even fire. Anything mounted over the photo must opt out
+    // by marking itself, and this is the one place that has to honour it.
+    if ((e.target as HTMLElement).closest("[data-verify-chrome]")) return;
     const target = (e.target as HTMLElement).closest<HTMLElement>(".vpoint");
     if (guided) {
       // Tap-to-place. The whole point of the walkthrough is that nobody has to
@@ -1020,6 +1071,7 @@ export function mountVerifier(
         };
         place();
         onChange(points);
+        noteGuidedMove();
       }
       handles.get(id)?.classList.add("grabbing");
       paintMagnifier(id);
@@ -1048,6 +1100,7 @@ export function mountVerifier(
     place();
     paintMagnifier(dragging);
     onChange(points);
+    noteGuidedMove();
   };
   const up = () => {
     if (!dragging) return;
@@ -1097,9 +1150,9 @@ export function mountVerifier(
       onChange(points);
     },
     startGuided(onStep, onFinish) {
-      guided = { index: 0, onStep, onFinish };
-      paintGuided();
-      onStep(0, SIDE_POINTS.length);
+      const first = points[SIDE_POINTS[0].id];
+      guided = { index: 0, onStep, onFinish, from: { x: first.x, y: first.y }, moved: false };
+      enterGuidedStep(0);
     },
     guidedNext() {
       if (!guided) return;
@@ -1110,19 +1163,22 @@ export function mountVerifier(
         finish();
         return;
       }
-      guided.index += 1;
-      paintGuided();
-      guided.onStep(guided.index, SIDE_POINTS.length);
+      enterGuidedStep(guided.index + 1);
     },
     guidedBack() {
       if (!guided || guided.index === 0) return;
-      guided.index -= 1;
-      paintGuided();
-      guided.onStep(guided.index, SIDE_POINTS.length);
+      enterGuidedStep(guided.index - 1);
     },
     guidedCurrent() {
       const spec = SIDE_POINTS[guided?.index ?? 0];
       return { label: spec.label, hint: spec.hint };
+    },
+    guidedStep() {
+      return {
+        index: guided?.index ?? 0,
+        total: SIDE_POINTS.length,
+        moved: guided?.moved ?? false,
+      };
     },
     endGuided() {
       guided = null;
