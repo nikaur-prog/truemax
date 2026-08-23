@@ -1,6 +1,6 @@
 // Measure every alternate photo too, so the tuner can evaluate cross-photo
 // convergence offline without re-running the browser.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -20,7 +20,7 @@ for (const [p, files] of Object.entries(groups)) {
 
 const server = spawn("npx", ["vite", "preview", "--port", "4184", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 const out = [];
 try {
   const page = await browser.newPage();

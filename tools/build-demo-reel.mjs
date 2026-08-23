@@ -34,7 +34,7 @@
 // whose licence it cannot read, and records the photographer and licence for
 // every one it keeps. The reel renders that credit. Do not remove it — losing
 // the credit is what turns a free image into an infringing one.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -137,7 +137,7 @@ function captureCost(m) {
 
 const server = spawn("npx", ["vite", "preview", "--port", "4205", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 3500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 const entries = [];
 const audit = [];

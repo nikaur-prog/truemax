@@ -1,7 +1,7 @@
 // Sweep POSE_CALIBRATION.zScale and pick the value that minimizes score
 // disagreement across different photos of the same person. Uses the direct
 // measure hook, so each scan is a few hundred milliseconds.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 
@@ -26,7 +26,7 @@ const dataUrl = (f) => `data:image/jpeg;base64,${readFileSync(f).toString("base6
 
 const server = spawn("npx", ["vite", "preview", "--port", "4181", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 try {
   const page = await browser.newPage();

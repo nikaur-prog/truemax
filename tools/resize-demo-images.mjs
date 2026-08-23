@@ -24,7 +24,7 @@
 //
 // Requires a built dist/ (npm run build) — it drives the real engine through
 // vite preview, the same way build-demo-reel.mjs does.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync } from "node:fs";
@@ -133,7 +133,7 @@ function download(c) {
 mkdirSync(CACHE, { recursive: true });
 const server = spawn("npx", ["vite", "preview", "--port", "4207", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 3500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 const report = [];
 try {

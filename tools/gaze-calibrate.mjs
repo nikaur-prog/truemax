@@ -6,7 +6,7 @@
 // threshold should sit at the far tail of that distribution, tight enough to
 // catch someone reading their own image but loose enough that a good shot
 // never gets held back by it.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -23,7 +23,7 @@ const server = spawn("npx", ["vite", "preview", "--port", "4207", "--strictPort"
   stdio: "ignore",
 });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 const rows = [];
 try {

@@ -9,7 +9,7 @@
 // of lighting; "how evenly does this face reflect light" might BE the lighting.
 // That is the question this tool exists to answer, before any of it is wired
 // into the overall score.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -26,7 +26,7 @@ const server = spawn("npx", ["vite", "preview", "--port", "4217", "--strictPort"
   stdio: "ignore",
 });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 const scan = async (page, rows) => {
   const out = [];

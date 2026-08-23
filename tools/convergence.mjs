@@ -4,7 +4,7 @@
 // sets are full of group shots where the detector locks onto a different
 // person entirely — including those silently measures strangers against each
 // other and makes the engine look far less stable than it is.
-import { chromium } from "playwright";
+import { launchChromium } from "./launchChromium.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -21,7 +21,7 @@ for (const r of rows) (groups[r.person ?? r.name] ??= []).push(r);
 
 const server = spawn("npx", ["vite", "preview", "--port", "4188", "--strictPort"], { cwd: APP_DIR, stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const browser = await launchChromium();
 
 try {
   const page = await browser.newPage();
