@@ -4,32 +4,46 @@ import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
+import type { Streak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
+import type { GreetingCtx } from "./greeting.js";
+import { trend } from "./dashTrend.js";
 import { loadPhotos } from "../engine/photoStore.js";
 import { openHistory } from "./historyView.js";
 import { REEL } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
-import { mountDemoReel } from "./demoReel.js";
 import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
 //
-// It offers exactly two things, which is the whole point of it: scan your face,
-// or look up a celebrity. Under those sits your own history, so returning is
-// about seeing the line move rather than taking a cold first scan. The premium
-// surface (the Max coach, goal tracking, the wishlist) hangs off this same
-// screen. The server entitlement can now brand the dashboard as Max, but a
-// conversational assistant is still a separate product surface; this module
-// does not fake one with generic copy.
+// Restructured around one question: what is a returning user here to find out?
+// The answer is their number and whether it has moved, and the old layout put
+// both of those a screen and a half down a phone, under a greeting, a quote and
+// two navigation cards. The largest element on the page was a salutation, which
+// is the least informative thing on it.
+//
+// So the order is now: the score, its trend, what Max reads into it, where the
+// face is strong and weak, then the scans. Navigation is not content and does
+// not get a card — it lives in a bar fixed to the bottom of the screen, in the
+// thumb's reach, which is also the only arrangement that survives being wrapped
+// as a native app.
+//
+// Two things this screen used to do only on a desktop it now does everywhere.
+// The scan-row photos were behind `:hover`, so on a phone — the platform this
+// is actually used on — they did not exist. And the region bars ran 0-10 with
+// every score landing between 3.9 and 5.9, so eight bars of near-identical
+// length said "everything about this face is the same". They are still drawn on
+// the honest 0-10 scale, with the person's own average marked, because the fix
+// for an unreadable chart is never to rescale its axis until the differences
+// look bigger.
 //
 // Reached from the wordmark. First load still goes straight to capture so the
 // TikTok funnel is one tap from a scan, not two.
 // ---------------------------------------------------------------------------
 
 let overlay: HTMLDivElement | null = null;
-let reel: ReturnType<typeof mountDemoReel> | null = null;
 let dashboardBrand: Exclude<MembershipBrand, "guest"> = "member";
 
 // Two half-faces sharing one outline: a squarer, heavier-browed left half and a
@@ -133,59 +147,40 @@ export function openDashboard(opts: {
             </svg>
           </button>` : ""}
         </div>
-        <h1 class="dash-anim" style="--d:70ms">${escapeHtml(headline(ctx))}</h1>
-        <p class="dash-anim" style="--d:170ms">${escapeHtml(subline(ctx))}</p>
-        ${streakChip(streak)}
-        ${followUpCard(scans)}
       </header>
 
-      <div class="dash-actions">
-        <div class="dash-slot scan-slot dash-anim" style="--d:260ms">
-          <button class="dash-card pri" id="dash-scan">
-            <span class="dash-ic">${SPLIT_FACE}</span>
-            <b>Scan your face</b>
-            <span>Front and side, measured on your device</span>
-          </button>
-          <div class="dash-drop">
-            <div class="dash-drop-in">
-              <div class="dash-reel">
-                <canvas id="dash-reel-canvas"></canvas>
-                <div class="dash-reel-cap">
-                  <b id="dash-reel-score"></b><span id="dash-reel-name"></span>
-                </div>
-              </div>
-              <p>A real scan running on this device. Side-point feedback is shared only when you explicitly choose it.</p>
-            </div>
-          </div>
-        </div>
-        <div class="dash-slot dash-anim" style="--d:330ms">
-          <button class="dash-card" id="dash-celeb">
-            <span class="dash-ic gold">★</span>
-            <b>Search a celebrity</b>
-            <span>See how the numbers read on a famous face</span>
-          </button>
-          <div class="dash-drop">
-            <div class="dash-drop-in">
-              <b>${faces.length} faces measured</b>
-              <div class="dash-fan">
-                ${faces
-                  .slice(0, 6)
-                  .map(
-                    (f, i) => `<div class="dash-fan-card" style="--i:${i}">
-                      <img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />
-                      <span>${f.overall.toFixed(1)}</span>
-                    </div>`,
-                  )
-                  .join("")}
-              </div>
-              <p>The same measurements, on faces people already have a number for.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
+      ${heroBlock(scans, ctx, streak)}
+      ${followUpCard(scans)}
       ${scanSection(scans, allScans.length - scans.length)}
-    </div>`;
+      ${faces.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
+        <span class="dash-faces-fan">
+          ${faces.slice(0, 5).map((f) => `<img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />`).join("")}
+        </span>
+        <span class="dash-faces-copy">
+          <b>${faces.length} famous faces, measured the same way</b>
+          <em>See where your numbers sit against theirs →</em>
+        </span>
+      </button>` : ""}
+    </div>
+
+    <nav class="dash-bar" aria-label="TrueMax">
+      <button class="dash-bar-btn" id="dash-bar-scans" type="button">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 17.5 8.5 11l4 4L21 6"/><path d="M21 11V6h-5"/>
+        </svg>
+        <span>Scans</span>
+      </button>
+      <button class="dash-bar-scan" id="dash-scan" type="button">
+        <span class="dash-bar-ic">${SPLIT_FACE}</span>
+        <span>${scans.length ? "New scan" : "Scan your face"}</span>
+      </button>
+      <button class="dash-bar-btn" id="dash-celeb" type="button">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.6 14.4 9l5.6.5-4.3 3.8 1.3 5.6L12 15.9 6.9 18.9l1.3-5.6L4 9.5 9.6 9z"/>
+        </svg>
+        <span>Faces</span>
+      </button>
+    </nav>`;
 
   document.body.appendChild(overlay);
   document.getElementById("dash-scan")!.onclick = () => {
@@ -193,6 +188,8 @@ export function openDashboard(opts: {
     opts.onScan();
   };
   document.getElementById("dash-celeb")!.onclick = () => openCelebSearch();
+  overlay.querySelector("#dash-celeb-strip")?.addEventListener("click", () => openCelebSearch());
+  overlay.querySelector("#dash-bar-scans")?.addEventListener("click", () => openHistory());
   // The dashboard stays open behind it: settings is a panel over your own
   // screen, not a place you get sent to and have to navigate back from.
   overlay.querySelector("#dash-settings")?.addEventListener("click", () => opts.onSettings?.());
@@ -202,74 +199,83 @@ export function openDashboard(opts: {
   for (const row of overlay.querySelectorAll<HTMLElement>(".dash-scan-row")) {
     row.onclick = () => openHistory();
   }
-  wireScanHovers(overlay);
+  wireScanRows(overlay);
   wireMaxInteractions(overlay.querySelector<HTMLElement>(".maxread-face"));
-
-  // The scan card's dropdown runs the real reel — the same engine output the
-  // landing plays — rather than describing the steps in words. Mounted lazily
-  // on first hover so a dashboard nobody hovers never starts an animation loop
-  // or decodes nine portraits.
-  const scanSlot = overlay.querySelector<HTMLElement>(".dash-slot");
-  if (scanSlot) {
-    const mountOnce = () => {
-      if (reel) return;
-      const c = overlay?.querySelector<HTMLCanvasElement>("#dash-reel-canvas");
-      const s = overlay?.querySelector<HTMLElement>("#dash-reel-score");
-      const n = overlay?.querySelector<HTMLElement>("#dash-reel-name");
-      if (c && s && n) reel = mountDemoReel(c, s, n);
-    };
-    scanSlot.addEventListener("pointerenter", mountOnce);
-    scanSlot.addEventListener("focusin", mountOnce);
-  }
-  startFanCycle(overlay, faces);
 }
 
 export function close(): void {
-  reel?.stop();
-  reel = null;
-  if (fanTimer) clearInterval(fanTimer);
-  fanTimer = null;
   overlay?.remove();
   overlay = null;
 }
 
-// The fan cycles: one card at a time flips to a face that is not currently
-// shown. One at a time, on a stagger, because six cards changing together reads
-// as the panel reloading rather than as a deck being dealt through.
-let fanTimer: ReturnType<typeof setInterval> | null = null;
-function startFanCycle(root: HTMLElement, faces: ReturnType<typeof applyShim>): void {
-  const cards = Array.from(root.querySelectorAll<HTMLElement>(".dash-fan-card"));
-  if (cards.length < 2 || faces.length <= cards.length) return;
-  let next = cards.length; // first face not already on screen
-  let which = 0;
-  if (fanTimer) clearInterval(fanTimer);
-  fanTimer = setInterval(() => {
-    // Only animate while the panel is actually open; a hidden dropdown flipping
-    // cards is work nobody can see.
-    const slot = cards[0].closest(".dash-slot");
-    if (!slot?.matches(":hover, :focus-within")) return;
+// ---------------------------------------------------------------------------
+// The hero: the number, whether it moved, and the shape of the run.
+//
+// This is the whole reason somebody opens the app twice, so it is the first
+// thing on the screen and the only thing that gets a large type size.
+//
+// The figure is the AVERAGE, not the latest scan, and that is a measurement
+// decision rather than a design one: a single photograph carries about
+// DISPLAY_NOISE points of spread, so "your score" taken from the most recent
+// picture is substantially a statement about that picture. The mean over
+// several is the first number on this screen that describes a face.
+//
+// The delta underneath is the latest scan against the mean of the ones before
+// it, and it says so in words when it is smaller than the instrument can
+// resolve. An app that renders every wobble as a green arrow is training
+// people to read noise as progress.
+//
+// The greeting survives, at the size a greeting deserves.
+// ---------------------------------------------------------------------------
+function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): string {
+  const line = trend(scans);
+  if (!scans.length || !line) {
+    return `<section class="dash-hero empty dash-anim" style="--d:60ms">
+      <h1>${escapeHtml(headline(ctx))}</h1>
+      <p>${escapeHtml(subline(ctx))}</p>
+    </section>`;
+  }
+  const sex = scans[0].sex;
+  const delta = line.delta;
+  const tone = delta === null || line.withinNoise ? "flat" : delta > 0 ? "up" : "down";
+  // Against the mean of the scans BEFORE it, not against the one before it:
+  // "did it move since Tuesday" can be answered by one unlucky photograph,
+  // "where do I usually land" cannot.
+  const deltaText =
+    delta === null
+      ? "Your first scan on this device"
+      : line.withinNoise
+        ? `Latest scan ${signed(delta)} on your average · inside the noise`
+        : `Latest scan ${signed(delta)} on your average`;
 
-    const card = cards[which % cards.length];
-    const face = faces[next % faces.length];
-    which++;
-    next++;
-    card.classList.add("flipping");
-    // Swap at the midpoint of the flip, while the card is edge-on and its face
-    // is not visible — otherwise the change happens in full view and the flip
-    // looks like a separate, pointless spin.
-    setTimeout(() => {
-      const img = card.querySelector("img");
-      const val = card.querySelector("span");
-      if (img) img.src = `/demo/${face.slug}.jpg`;
-      if (val) val.textContent = face.overall.toFixed(1);
-    }, 260);
-    setTimeout(() => card.classList.remove("flipping"), 560);
-  }, 1400);
+  return `<section class="dash-hero dash-anim" style="--d:60ms">
+    <div class="dash-hero-top">
+      <p class="dash-hero-hello">${escapeHtml(headline(ctx))}</p>
+      ${streakChip(streak)}
+    </div>
+    <div class="dash-hero-row">
+      <div class="dash-hero-fig">
+        <span class="dash-hero-eyebrow">YOUR AVERAGE · VS ${sex === "male" ? "MEN" : "WOMEN"}</span>
+        <b class="dash-hero-num">${line.average.toFixed(1)}<small>/10</small></b>
+        <span class="dash-hero-delta ${tone}">${escapeHtml(deltaText)}</span>
+      </div>
+      ${scans.length > 1 ? `<div class="dash-hero-trend">${line.svg}</div>` : ""}
+    </div>
+    <div class="dash-hero-meta">
+      <span>${scans.length} SCAN${scans.length > 1 ? "S" : ""}</span>
+      ${scans.length > 1 ? `<span>SHADED BAND = CAMERA NOISE, NOT YOUR FACE</span>` : ""}
+    </div>
+  </section>`;
+}
+
+function signed(v: number): string {
+  const r = Math.round(v * 10) / 10;
+  return `${r >= 0 ? "+" : ""}${r.toFixed(1)}`;
 }
 
 // Only shown once there is a run worth naming. A "0 week streak" is a way of
 // telling somebody they have failed at something they had not started.
-function streakChip(s: { alive: boolean; weeks: number }): string {
+function streakChip(s: Streak): string {
   if (!s.alive || s.weeks < 2) return "";
   return `<span class="dash-streak">${s.weeks} WEEK STREAK</span>`;
 }
@@ -292,9 +298,14 @@ function scanSection(scans: StoredScan[], legacyCount = 0): string {
       </div>
     </section>`;
   }
-  const best = Math.max(...scans.map((s) => s.overall));
   const avg = scans.reduce((s, x) => s + x.overall, 0) / scans.length;
   const recent = scans.slice(0, 5);
+  // Several scans in one day is the normal case while somebody is testing, and
+  // then a column of identical dates tells them nothing. The list runs newest
+  // first, so the FIRST row of each day carries the date and the rest of that
+  // day carry their times.
+  const sameDayAsAbove = (i: number) =>
+    i > 0 && new Date(recent[i].date).toDateString() === new Date(recent[i - 1].date).toDateString();
   return `<div class="dash-cols">
     ${profilePanel(scans, avg)}
     <section class="dash-scans dash-anim" style="--d:480ms">
@@ -302,13 +313,8 @@ function scanSection(scans: StoredScan[], legacyCount = 0): string {
         <h2>Your scans</h2>
         ${scans.length > 5 ? `<button class="linkish" id="dash-history">View all ${scans.length} →</button>` : ""}
       </div>
-      <div class="dash-stats">
-        <div><b>${scans.length}</b><span>SCANS</span></div>
-        <div><b>${avg.toFixed(1)}</b><span>AVERAGE</span></div>
-        <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
-      </div>
       <div class="dash-scan-list">
-        ${recent.map((s) => scanRow(s)).join("")}
+        ${recent.map((s, i) => scanRow(s, scans[i + 1], sameDayAsAbove(i))).join("")}
       </div>
     </section>
   </div>`;
@@ -347,24 +353,30 @@ function profilePanel(scans: StoredScan[], avg: number): string {
       : null;
 
   return `<aside class="dash-profile dash-anim" style="--d:410ms">
-    <h2>Your profile</h2>
-    <div class="dash-prof-score">
-      <b>${avg.toFixed(1)}</b>
-      <span>AVERAGE OF ${scans.length} SCAN${scans.length > 1 ? "S" : ""}</span>
+    <div class="dash-prof-head">
+      <h2>Region by region</h2>
+      ${means.length ? `<span class="dash-prof-tickkey">▏ your average</span>` : ""}
     </div>
-    <p class="dash-prof-note">Scored against ${sex === "male" ? "men" : "women"}. Averaged across
-      every comparable scan on this device, because one photograph carries about ${DISPLAY_NOISE.toFixed(1)} points of noise on its own.</p>
     ${
       means.length
         ? `<div class="dash-prof-bars">
             ${means
-              .map(
-                (m) => `<div class="dash-prof-row">
+              .map((m) => {
+                // Bars stay on the honest 0-10 scale. What makes the
+                // differences legible is the tick at the person's own average:
+                // "Jaw 4.5" and "Proportions 6.0" both fill about half a 0-10
+                // bar, but they sit visibly either side of the mark. Rescaling
+                // the axis until the gaps look bigger is the trick every
+                // stock-chart screenshot uses, and it is not available here.
+                const above = m.mean >= avg;
+                return `<div class="dash-prof-row ${above ? "above" : "below"}">
                   <span>${REGION_LABEL[m.region] ?? m.region}</span>
-                  <i><b style="width:${Math.max(3, Math.min(100, m.mean * 10))}%"></b></i>
+                  <i style="--avg:${Math.max(0, Math.min(100, avg * 10))}%">
+                    <b style="width:${Math.max(3, Math.min(100, m.mean * 10))}%"></b>
+                  </i>
                   <em>${m.mean.toFixed(1)}</em>
-                </div>`,
-              )
+                </div>`;
+              })
               .join("")}
           </div>
           <div class="dash-prof-ends">
@@ -373,16 +385,16 @@ function profilePanel(scans: StoredScan[], avg: number): string {
           </div>`
         : ""
     }
-    ${
-      spread != null
-        ? `<p class="dash-prof-note">Your scans vary by ${spread.toFixed(1)} points either side of that
-           average. Anything inside that band is the camera, not your face.</p>`
-        : ""
-    }
+    <p class="dash-prof-note">Scored against ${sex === "male" ? "men" : "women"}, and averaged across every
+      comparable scan on this device — one photograph carries about ${DISPLAY_NOISE.toFixed(1)} points of noise on its own.${
+        spread != null
+          ? ` Yours vary by ${spread.toFixed(1)} points either side of the average, and anything inside that band is the camera.`
+          : ""
+      }</p>
   </aside>`;
 }
 
-function scanRow(s: StoredScan): string {
+function scanRow(s: StoredScan, prev: StoredScan | undefined, sameDay: boolean): string {
   const when = new Date(s.date);
   const date = when.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -391,10 +403,20 @@ function scanRow(s: StoredScan): string {
     .sort((a, b) => (b[1] as number) - (a[1] as number));
   const stat = (label: string, v: string) => `<div><span>${label}</span><b>${v}</b></div>`;
   const storageKey = scanStorageKey(s);
+  // Against the scan below it in the list. A move smaller than the calibrated
+  // spread between two photographs of one face is labelled as such rather than
+  // coloured, because colouring it would be the app agreeing it means something.
+  const d = prev ? Math.round((s.overall - prev.overall) * 10) / 10 : null;
+  const chip =
+    d === null
+      ? `<span class="dash-scan-chip first">first</span>`
+      : Math.abs(d) < DISPLAY_NOISE
+        ? `<span class="dash-scan-chip flat">${signed(d)} · noise</span>`
+        : `<span class="dash-scan-chip ${d > 0 ? "up" : "down"}">${signed(d)}</span>`;
   return `<div class="dash-scan-slot">
-    <button class="dash-scan-row" data-scan-key="${storageKey}">
-      <span class="dash-scan-date">${date}</span>
-      <span class="dash-scan-sex">${s.sex === "male" ? "VS MEN" : "VS WOMEN"}</span>
+    <button class="dash-scan-row" data-scan-key="${storageKey}" aria-expanded="false">
+      <span class="dash-scan-date">${sameDay ? time : date}</span>
+      ${chip}
       <span class="dash-scan-score">${s.overall.toFixed(1)}<small>/10</small></span>
     </button>
     <div class="dash-scan-pop">
@@ -414,12 +436,19 @@ function scanRow(s: StoredScan): string {
   </div>`;
 }
 
-// Thumbnails are fetched only when a row is actually hovered, and only once.
-// Reading every scan's photo up front would mean a dozen IndexedDB round trips
-// and a dozen decoded images for a panel most people never open.
-function wireScanHovers(root: HTMLElement): void {
+// Tap to expand, on every device.
+//
+// This panel used to open on `:hover` alone. On a phone — which is where this
+// app is used — that meant the row was a button that did nothing, and the
+// thumbnails of your own scans were desktop-only. Opening is now an explicit
+// tap that also works with a keyboard, and the row reports its state.
+//
+// Thumbnails are still fetched only on first open, and only once: reading every
+// scan's photo up front would be a dozen IndexedDB round trips and a dozen
+// decoded images for a panel most people never open.
+function wireScanRows(root: HTMLElement): void {
   for (const slot of root.querySelectorAll<HTMLElement>(".dash-scan-slot")) {
-    const row = slot.querySelector<HTMLElement>(".dash-scan-row");
+    const row = slot.querySelector<HTMLButtonElement>(".dash-scan-row");
     const shots = slot.querySelector<HTMLElement>(".dash-pop-shots");
     if (!row || !shots) continue;
     let loaded = false;
@@ -437,8 +466,11 @@ function wireScanHovers(root: HTMLElement): void {
           (p.side ? `<div class="dash-pop-shot"><img src="${p.side}" alt="" /><span>SIDE</span></div>` : "");
       });
     };
-    slot.addEventListener("pointerenter", load);
-    slot.addEventListener("focusin", load);
+    row.addEventListener("click", () => {
+      const open = slot.classList.toggle("is-open");
+      row.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) load();
+    });
   }
 }
 
