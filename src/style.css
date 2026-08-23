@@ -3903,3 +3903,89 @@ body.is-member .journey { display: none; }
   font-size: 9.5px; letter-spacing: 0.1em; color: var(--mut);
   text-transform: uppercase;
 }
+
+/* The pre-capture tutorial --------------------------------------------------
+   The ask, then the pictures. Full-bleed and story-paced, because the lesson
+   is the photographs and everything else on screen is in their way. */
+.tut-ask {
+  position: fixed; inset: 0; z-index: 400; display: grid; place-items: center;
+  padding: 20px; background: rgba(12, 14, 16, 0.55);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: tut-fade 0.18s ease;
+}
+@keyframes tut-fade { from { opacity: 0; } }
+.tut-ask-panel {
+  background: var(--card); border: 1px solid var(--line); border-radius: 22px;
+  padding: 26px 24px 20px; max-width: 400px; width: 100%;
+  box-shadow: 0 30px 70px rgba(10, 12, 14, 0.3);
+}
+.tut-ask-panel h2 { font-family: var(--serif); font-weight: 300; font-size: 25px; margin: 0 0 8px; }
+.tut-ask-panel p { color: var(--mut); font-size: 14px; line-height: 1.55; margin: 0 0 20px; }
+.tut-ask-actions { display: flex; gap: 10px; }
+.tut-ask-actions .btn { flex: 1; }
+.tut-never {
+  display: flex; align-items: center; gap: 9px; margin-top: 16px;
+  font-size: 12.5px; color: var(--mut); cursor: pointer; user-select: none;
+}
+.tut-never input { width: 16px; height: 16px; accent-color: var(--ink); cursor: pointer; flex: none; }
+
+.tut {
+  position: fixed; inset: 0; z-index: 400; background: #0c0e10; color: #fff;
+  display: grid; grid-template-rows: auto 1fr auto auto;
+  padding: calc(10px + env(safe-area-inset-top)) 0 calc(14px + env(safe-area-inset-bottom));
+  animation: tut-fade 0.2s ease;
+}
+/* Story bars: how much of this is left, without a number. */
+.tut-bars { display: flex; gap: 4px; padding: 0 14px 10px; }
+.tut-bars i { flex: 1; height: 2.5px; border-radius: 2px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.tut-bars i b { display: block; height: 100%; width: 0; background: #fff; border-radius: 2px; }
+.tut-bars i.done b { width: 100%; }
+.tut-bars i.live b { animation: tut-fill 3.4s linear forwards; }
+@keyframes tut-fill { from { width: 0; } to { width: 100%; } }
+/* Deliberately a word, not a glyph: an X here would be the second X on the
+   screen, and the other one is the verdict on the photograph. */
+.tut-close {
+  position: absolute; top: calc(14px + env(safe-area-inset-top)); right: 14px; z-index: 3;
+  border: none; cursor: pointer; border-radius: 99px; padding: 7px 14px;
+  background: rgba(255, 255, 255, 0.14); color: #fff;
+  font: 600 12.5px/1 var(--sans, inherit); letter-spacing: 0.02em;
+}
+.tut-stage { position: relative; overflow: hidden; display: grid; place-items: center; min-height: 0; padding: 0 14px; }
+.tut-shot { position: relative; display: flex; max-width: 100%; max-height: 100%; min-height: 0; }
+.tut-stage img {
+  max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0;
+  transition: opacity 0.28s ease; border-radius: 14px; display: block;
+}
+.tut-stage img.ready { opacity: 1; }
+/* The verdict mark. Big, high-contrast, and in the same corner every time, so
+   the eye learns where to check rather than hunting for it. */
+.tut-mark {
+  position: absolute; top: 10px; left: 10px; z-index: 2;
+  width: 42px; height: 42px; border-radius: 99px; display: grid; place-items: center;
+  font-size: 24px; font-weight: 700; line-height: 1; color: #fff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  animation: tut-pop 0.32s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+.tut-mark.dont { background: #c0432b; }
+.tut-mark.do { background: #16a97a; }
+@keyframes tut-pop { from { transform: scale(0.4); opacity: 0; } }
+.tut-copy { padding: 16px 22px 4px; text-align: center; }
+.tut-copy b { display: block; font-family: var(--serif); font-weight: 300; font-size: clamp(23px, 5.4vw, 30px); margin-bottom: 7px; }
+.tut-copy p { font-size: 14px; line-height: 1.55; color: rgba(255, 255, 255, 0.72); margin: 0 auto; max-width: 44ch; }
+.tut-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 16px 20px 0; flex-wrap: wrap;
+}
+.tut .tut-never { color: rgba(255, 255, 255, 0.62); margin-top: 0; }
+.tut .tut-never input { accent-color: #16a97a; }
+.tut-foot .btn { flex: 0 0 auto; }
+/* Invisible tap targets over the left and right thirds — the gesture people
+   already have from every story feed. They sit UNDER the footer controls. */
+.tut-tap { position: absolute; top: 0; bottom: 140px; width: 32%; border: none; background: none; cursor: pointer; z-index: 1; }
+.tut-tap.back { left: 0; }
+.tut-tap.fwd { right: 0; width: 68%; }
+@media (prefers-reduced-motion: reduce) {
+  .tut, .tut-ask, .tut-mark { animation: none; }
+  .tut-bars i.live b { animation: none; width: 100%; }
+  .tut-stage img { transition: none; }
+}

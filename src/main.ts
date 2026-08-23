@@ -53,6 +53,7 @@ import { estimateGaze } from "./engine/gaze.js";
 import { openQuiz } from "./ui/goalsQuiz.js";
 import { analyzeSkin } from "./engine/skin.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
+import { offerTutorial } from "./ui/photoTutorial.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
 import { headCoveringRejection } from "./engine/photoEligibility.js";
@@ -448,8 +449,11 @@ el.btnUpload.addEventListener("click", () => {
     if (generation !== scanGeneration) return;
     ensureSex(() => {
       if (generation !== scanGeneration) return;
-      filePickerGeneration = generation;
-      el.fileInput.click();
+      offerTutorial("front", () => {
+        if (generation !== scanGeneration) return;
+        filePickerGeneration = generation;
+        el.fileInput.click();
+      });
     });
   });
 });
@@ -816,7 +820,13 @@ el.btnCamera.addEventListener("click", async () => {
     void ensureScanAllowed(() => {
       if (generation !== scanGeneration) return;
       ensureSex(() => {
-        if (generation === scanGeneration) void openCamera();
+        if (generation !== scanGeneration) return;
+        // After the reference population is settled and before the camera
+        // opens: the tutorial is about the photograph, so it belongs at the
+        // last moment where the photograph does not exist yet.
+        offerTutorial("front", () => {
+          if (generation === scanGeneration) void openCamera();
+        });
       });
     });
     return;
@@ -1697,7 +1707,7 @@ function startSide(): void {
   if (!token || !scanSession.transition(token, "side")) return;
   feedbackDeliveryNote = null;
   el.main.classList.add("hidden");
-  openSideCapture({
+  const openSide = () => openSideCapture({
     scanId: token.scanId,
     sex: selectedSex,
     // Carry the front's capture method so the side does not make the user
@@ -1738,6 +1748,10 @@ function startSide(): void {
       await gateAnalysis(sideReport, token);
     },
   });
+  // The profile is the shot people get wrong most, so it gets its own offer
+  // and its own memory of the answer: somebody who has the front down may
+  // still be turning only halfway.
+  offerTutorial("side", openSide);
 }
 
 function renderQualityChips(q: QualityCheck, autoNote = ""): void {
