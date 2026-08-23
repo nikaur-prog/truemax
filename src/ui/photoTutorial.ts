@@ -71,6 +71,21 @@ export interface Step {
    * than a black rectangle.
    */
   video?: string;
+  /**
+   * The window, in seconds within the clip, during which the subject is
+   * turning — and over which the app draws the turn cue.
+   *
+   * The cue is drawn HERE rather than baked into the footage for two reasons.
+   * A generated clip renders text and graphics badly, so a "90" burned into it
+   * comes out as a smear; and a cue that lives in the DOM stays crisp, scales
+   * with the frame, and can be corrected without paying to regenerate a video.
+   *
+   * It is driven off the video's own currentTime rather than a CSS animation
+   * of the same length, because the clip loops and any independent timeline
+   * drifts out of phase with it within a few passes — an arrow sweeping while
+   * the head is already still teaches the opposite of the point.
+   */
+  cue?: { start: number; end: number };
 }
 
 // The captions are the tutorial; the pictures make them land. If an image is
@@ -206,6 +221,12 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
       <div class="tut-shot">
         <img id="tut-img" alt="" />
         <video id="tut-vid" muted playsinline loop preload="none"></video>
+        <svg class="tut-cue" id="tut-cue" viewBox="0 0 100 60" aria-hidden="true">
+          <path class="tut-cue-track" d="M 18 44 A 32 32 0 0 1 82 44" />
+          <path class="tut-cue-sweep" id="tut-cue-sweep" d="M 18 44 A 32 32 0 0 1 82 44" />
+          <circle class="tut-cue-head" id="tut-cue-head" r="3.4" cx="18" cy="44" />
+          <text class="tut-cue-num" id="tut-cue-num" x="50" y="40">0&#176;</text>
+        </svg>
         <div class="tut-mark" id="tut-mark"></div>
       </div>
     </div>
@@ -223,6 +244,47 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
 
   const img = wrap.querySelector<HTMLImageElement>("#tut-img")!;
   const vid = wrap.querySelector<HTMLVideoElement>("#tut-vid")!;
+  const cue = wrap.querySelector<SVGElement>("#tut-cue")!;
+  const cueSweep = wrap.querySelector<SVGPathElement>("#tut-cue-sweep")!;
+  const cueHead = wrap.querySelector<SVGCircleElement>("#tut-cue-head")!;
+  const cueNum = wrap.querySelector<SVGTextElement>("#tut-cue-num")!;
+  let cueFrame = 0;
+
+  // The arc is a half-circle of radius 32 centred at (50,44) in the SVG's own
+  // 100x60 box. Progress 0 sits at its left end, 1 at its right, and the dash
+  // offset reveals exactly that much of it — so the sweep, the travelling dot
+  // and the degree readout are all one number and cannot disagree.
+  const ARC_LEN = Math.PI * 32;
+  const paintCue = (progress: number) => {
+    const t = Math.max(0, Math.min(1, progress));
+    cueSweep.style.strokeDasharray = String(ARC_LEN);
+    cueSweep.style.strokeDashoffset = String(ARC_LEN * (1 - t));
+    const angle = Math.PI * (1 - t);
+    cueHead.setAttribute("cx", (50 + 32 * Math.cos(angle)).toFixed(2));
+    cueHead.setAttribute("cy", (44 - 32 * Math.sin(angle)).toFixed(2));
+    cueNum.textContent = `${Math.round(t * 90)}\u00B0`;
+  };
+  // Exposed for the harness: the cue has to be checkable without a playable
+  // video, which is exactly the thing this environment cannot provide.
+  (wrap as unknown as Record<string, unknown>).__paintCue = paintCue;
+
+  const runCue = (step: Step) => {
+    cancelAnimationFrame(cueFrame);
+    if (!step.cue || !step.video) {
+      cue.classList.remove("on");
+      return;
+    }
+    const { start, end } = step.cue;
+    const tick = () => {
+      // Only while the clip is genuinely running: over a poster, a sweeping
+      // arrow is claiming a turn that is not happening.
+      const live = !vid.paused && vid.readyState >= 2 && vid.classList.contains("ready");
+      cue.classList.toggle("on", live);
+      if (live) paintCue((vid.currentTime - start) / Math.max(0.001, end - start));
+      cueFrame = requestAnimationFrame(tick);
+    };
+    tick();
+  };
   const mark = wrap.querySelector<HTMLElement>("#tut-mark")!;
   const title = wrap.querySelector<HTMLElement>("#tut-title")!;
   const caption = wrap.querySelector<HTMLElement>("#tut-caption")!;
@@ -249,6 +311,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
       vid.removeAttribute("src");
       vid.load();
     }
+    runCue(step);
     mark.textContent = step.kind === "do" ? "✓" : "✕";
     mark.className = `tut-mark ${step.kind}`;
     title.textContent = step.title;
@@ -278,6 +341,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
     if (closed) return;
     closed = true;
     if (timer) clearTimeout(timer);
+    cancelAnimationFrame(cueFrame);
     vid.pause();
     setTutorialSuppressed(view, never2.checked);
     document.removeEventListener("keydown", key);
