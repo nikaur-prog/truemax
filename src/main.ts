@@ -427,15 +427,46 @@ function ensureSex(then: () => void): void {
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
+// The engine line speaks only when the wait belongs to the user.
+//
+// It used to say "ENGINE READY · 478-POINT MODEL LOADED" to everyone who
+// opened the page, which is a sentence for whoever built the thing rather than
+// whoever is using it: the point count is not a claim anyone outside can check,
+// and a model that has loaded asks nothing of them. Silence is the correct
+// report for a component that is working.
+//
+// Two cases are still worth a line, and both are the user's problem: a load
+// slow enough that an unlabelled pause reads as a broken page, and a load that
+// failed. The timer covers the first without putting a flash of copy on every
+// fast connection.
+const SLOW_ENGINE_MS = 2500;
+
+function showEngineNote(text: string, tone?: "error"): void {
+  el.engineStatus.textContent = text;
+  el.engineStatus.classList.remove("hidden");
+  if (tone) el.engineStatus.classList.add(tone);
+}
+
+function clearEngineNote(): void {
+  el.engineStatus.textContent = "";
+  el.engineStatus.classList.add("hidden");
+  el.engineStatus.classList.remove("error");
+}
+
+const slowEngineNote = window.setTimeout(
+  () => showEngineNote("LOADING ANALYSIS ENGINE · ONE MOMENT"),
+  SLOW_ENGINE_MS,
+);
+
 initLandmarker()
   .then(() => {
-    el.engineStatus.textContent = "ENGINE READY · 478-POINT MODEL LOADED";
-    el.engineStatus.classList.add("ready");
+    window.clearTimeout(slowEngineNote);
+    clearEngineNote();
   })
   .catch((err) => {
+    window.clearTimeout(slowEngineNote);
     console.error(err);
-    el.engineStatus.textContent = "ENGINE FAILED TO LOAD · REFRESH TO RETRY";
-    el.engineStatus.classList.add("error");
+    showEngineNote("ENGINE FAILED TO LOAD · REFRESH TO RETRY", "error");
   });
 
 let filePickerGeneration = 0;
@@ -741,7 +772,7 @@ async function openCamera(): Promise<void> {
     window.addEventListener("keydown", frontKeyHandler);
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
-    // Headline and hints collapse so the preview can take the space — the
+    // Headline and sub collapse so the preview can take the space — the
     // camera becomes the subject the moment it is granted.
     el.upload.classList.add("camera-live");
     // Starts on the male silhouette and morphs once the shape vote settles —
@@ -759,8 +790,8 @@ async function openCamera(): Promise<void> {
     // Put the preview back at the top of the viewport.
     //
     // Nothing here calls scrollIntoView, and that is the point — the scroll is
-    // the browser's, not ours. The headline, the sub and the hints all collapse
-    // to max-height 0 the moment `camera-live` lands, which removes several
+    // the browser's, not ours. The headline and the sub both collapse to
+    // max-height 0 the moment `camera-live` lands, which removes several
     // hundred pixels from ABOVE the button somebody has just tapped. Scroll
     // anchoring then does exactly what it is designed to do and holds that
     // button where their thumb left it, which on a phone drags the camera up
@@ -939,12 +970,12 @@ const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
 async function handleFile(file: File, expectedGeneration = scanGeneration): Promise<void> {
   if (expectedGeneration !== scanGeneration) return;
   if (!isReady()) {
-    el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
+    showEngineNote("ENGINE STILL LOADING · ONE MOMENT");
     return;
   }
   const token = beginScan("upload");
   if (!token) {
-    el.engineStatus.textContent = "SESSION STILL LOADING · TRY AGAIN IN A MOMENT";
+    showEngineNote("SESSION STILL LOADING · TRY AGAIN IN A MOMENT");
     return;
   }
   const generation = ++scanGeneration;
@@ -955,8 +986,7 @@ async function handleFile(file: File, expectedGeneration = scanGeneration): Prom
     image = await loadImage(file);
   } catch (err) {
     if (!scanIsCurrent(token, generation)) return;
-    el.engineStatus.textContent = (err as Error).message.toUpperCase();
-    el.engineStatus.classList.add("error");
+    showEngineNote((err as Error).message.toUpperCase(), "error");
     return;
   }
   if (!scanIsCurrent(token, generation)) return;

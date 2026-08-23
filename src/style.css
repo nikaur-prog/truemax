@@ -199,17 +199,6 @@ body {
 .q-lib-del:hover { color: var(--warm, #c07a4a); border-color: var(--warm, #c07a4a); }
 .q-lib-note { margin: 6px 0 0; font-size: 11px; color: var(--mut); }
 
-/* Capture tips: contained pills rather than loose centred text. Four short
-   instructions floating unattached in the middle of a page read as leftover
-   copy; the same four inside bordered chips read as a checklist. */
-.hints { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 26px; }
-.hints div {
-  display: flex; gap: 7px; align-items: center;
-  padding: 6px 12px; border: 1px solid var(--line); border-radius: 99px;
-  background: var(--card); font-size: 12px; color: var(--mut);
-}
-.hints i { width: 4px; height: 4px; border-radius: 99px; background: var(--acc); flex: none; }
-
 /* ---------------------------------------------------------------------------
    The proof band.
 
@@ -281,8 +270,9 @@ body {
   margin-bottom: 6px;
 }
 .proof-item p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--mut); }
+/* Only ever seen when something is slow or broken (see main.ts), so there is
+   no "ready" colour any more — a working engine says nothing at all. */
 .engine-status { font-family: var(--mono); font-size: 11.5px; color: var(--mut); margin-top: 26px; min-height: 18px; }
-.engine-status.ready { color: var(--acc); }
 .engine-status.error { color: var(--warm); }
 
 /* ---------- two-pane results ---------- */
@@ -1096,10 +1086,9 @@ body.funnel-open { overflow: hidden; }
    this keeps the two from fighting mid-transition. */
 #v-upload.camera-live, #v-upload.camera-live * { overflow-anchor: none; }
 #v-upload.camera-live h1,
-#v-upload.camera-live .sub,
-#v-upload.camera-live .hints { max-height: 0; opacity: 0; margin: 0; overflow: hidden;
+#v-upload.camera-live .sub { max-height: 0; opacity: 0; margin: 0; overflow: hidden;
   transition: opacity 0.3s ease, max-height 0.5s cubic-bezier(.22,1,.36,1), margin 0.4s ease; }
-#v-upload h1, #v-upload .sub, #v-upload .hints { max-height: 400px; opacity: 1;
+#v-upload h1, #v-upload .sub { max-height: 400px; opacity: 1;
   transition: opacity 0.4s ease 0.1s, max-height 0.5s cubic-bezier(.22,1,.36,1); }
 @media (max-width: 760px) {
   #capture-stage.live-cam { width: min(100%, 62vh); }
@@ -1753,7 +1742,6 @@ body.funnel-open { overflow: hidden; }
 
 /* Very short windows (phone landscape, tiny laptop): drop the lines nobody
    re-reads so the shutter stays on screen. Harmless display toggles only. */
-@media (max-height: 640px) { .hints { display: none; } }
 @media (max-height: 520px) { .sub-note, .sub-more { display: none; } }
 
 /* Dev-only affordance on the side verifier (?dev=1). Deliberately plain and

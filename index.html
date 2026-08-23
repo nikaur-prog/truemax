@@ -144,23 +144,14 @@
         <p class="refpop-why">Every percentile is measured against this group. You can change it on your results.</p>
       </fieldset>
 
-      <!-- Two different kinds of statement used to sit in one loose row of
-           dotted text: instructions for taking the photo, and a promise about
-           what happens to it. They read as one undifferentiated list, which
-           made the promise — the most important sentence on the page — look
-           like a fifth tip about lighting. Split, and each given the weight it
-           has earned. -->
-      <div class="hints">
-        <div><i></i>Look straight at the lens</div>
-        <div><i></i>Neutral expression</div>
-        <!-- All three sit across something the scan measures: frames cross the
-             eye and brow metrics, a brim shadows the upper face, a hood pulls
-             in at the jaw. Only glasses are detectable once the camera is
-             running (see occlusion.ts), so asking here is the whole defence
-             for the other two. -->
-        <div><i></i>Glasses, hats and hoods off</div>
-        <div><i></i>Original, unfiltered photo</div>
-      </div>
+      <!-- The row of photo tips that used to sit here — look at the lens,
+           neutral expression, glasses and hats off, unfiltered — is now the
+           tutorial that runs before the capture (photoTutorial.ts), where it
+           is shown rather than listed and arrives at the moment it is worth
+           reading. Two copies of the same four instructions on one screen made
+           the tutorial look like a repeat of something already dismissed, and
+           the live camera still says the accessory line itself when the
+           preview opens. -->
 
       <!-- Four things this product can say that the category cannot, and every
            one has to survive being checked, because the page argues that we
@@ -230,7 +221,15 @@
           is no surgery anywhere in that number, which is the point of it.
         </p>
       </section>
-      <p class="engine-status" id="engine-status">Loading analysis engine…</p>
+      <!-- Ships hidden and stays hidden when nothing is wrong. This line used
+           to announce "ENGINE READY · 478-POINT MODEL LOADED" to every visitor,
+           which is a sentence written for whoever built the thing: the model
+           and its point count are not a claim anyone outside can check, and
+           nothing is being asked of them. What the line is genuinely for is the
+           two cases where the wait is the user's problem — a load slow enough
+           to look broken, and a load that failed — and main.ts reveals it for
+           exactly those. -->
+      <p class="engine-status hidden" id="engine-status"></p>
       <button class="hist-entry hidden" id="landing-history">View your scan history →</button>
     </section>
 
