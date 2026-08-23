@@ -33,14 +33,22 @@ calib/*
 # sitting there for the same reason: the repo root is where you happen to be
 # standing when a file arrives.
 #
-# Videos are ignored wholesale — no video file is tracked in this repo and none
-# should be. Images are NOT, because the brand marks and demo portraits under
-# public/ are legitimately versioned; face images are covered by calib/ above.
+# Videos are ignored by default, because the thing this rule exists to stop is
+# a recording of somebody's face landing in a PUBLIC repo — and clips arrive in
+# the repo root by accident, not by decision. Images are NOT ignored: the brand
+# marks and demo portraits under public/ are legitimately versioned, and face
+# images are covered by calib/ above.
 *.mp4
 *.mov
 *.m4v
 *.webm
 clips/
+
+# The one deliberate exception. public/tutorial/ holds generated instructional
+# footage — nobody's real face — that has to ship for the tutorial to play.
+# Anything added here is a decision, which is exactly what the blanket rule
+# above is protecting against everywhere else.
+!public/tutorial/*.mp4
 
 # The export folders, in every casing the sorter might produce.
 [Rr]eels/

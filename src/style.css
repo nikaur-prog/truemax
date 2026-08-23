@@ -4021,3 +4021,21 @@ body.is-member .journey { display: none; }
   text-anchor: middle; paint-order: stroke; stroke: rgba(6, 20, 17, 0.75); stroke-width: 3px;
 }
 @media (prefers-reduced-motion: reduce) { .tut-cue { transition: none; } }
+
+/* The shutter. Drawn rather than filmed: the clip is the one the shot was
+   approved on, and regenerating it to add a flash would re-roll the framing
+   that made it worth keeping. */
+.tut-flash {
+  position: absolute; inset: 0; z-index: 3; border-radius: 14px;
+  background: #fff; opacity: 0; pointer-events: none;
+}
+.tut-flash.fire { animation: tut-shutter 0.42s ease-out; }
+@keyframes tut-shutter {
+  0% { opacity: 0; }
+  8% { opacity: 0.92; }
+  100% { opacity: 0; }
+}
+.tut-cue.hidden { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tut-flash.fire { animation: none; }
+}

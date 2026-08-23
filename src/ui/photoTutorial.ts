@@ -86,6 +86,14 @@ export interface Step {
    * the head is already still teaches the opposite of the point.
    */
   cue?: { start: number; end: number };
+  /**
+   * The moment, in seconds within the clip, that the shutter fires.
+   *
+   * Drawn rather than filmed, for the same reason as the cue and one more: the
+   * clip is the one the shot was approved on, and regenerating it to add a
+   * flash would re-roll the framing that made it worth keeping.
+   */
+  flash?: number;
 }
 
 // The captions are the tutorial; the pictures make them land. If an image is
@@ -137,8 +145,14 @@ const STEPS: Record<TutorialView, Step[]> = {
     },
     {
       src: "/tutorial/side-do.jpg", kind: "do",
+      video: "/tutorial/side-turn.mp4",
+      // The clip runs 0-1s square on, 1-3s turning, 3-5s phone raised toward
+      // the lens. The cue tracks the turn; the shutter fires once the phone is
+      // up and steady.
+      cue: { start: 1, end: 3 },
+      flash: 4.2,
       title: "This is the one",
-      caption: "A full ninety degrees, one ear toward the camera, head level, mouth closed, and the whole head from crown to neck in frame.",
+      caption: "Turn your head a full ninety degrees \u2014 one ear to the camera, chin level \u2014 and hold still. The phone stays where it is; only your head moves.",
     },
   ],
 };
@@ -227,6 +241,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
           <circle class="tut-cue-head" id="tut-cue-head" r="3.4" cx="18" cy="44" />
           <text class="tut-cue-num" id="tut-cue-num" x="50" y="40">0&#176;</text>
         </svg>
+        <div class="tut-flash" id="tut-flash"></div>
         <div class="tut-mark" id="tut-mark"></div>
       </div>
     </div>
@@ -248,6 +263,8 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
   const cueSweep = wrap.querySelector<SVGPathElement>("#tut-cue-sweep")!;
   const cueHead = wrap.querySelector<SVGCircleElement>("#tut-cue-head")!;
   const cueNum = wrap.querySelector<SVGTextElement>("#tut-cue-num")!;
+  const flash = wrap.querySelector<HTMLElement>("#tut-flash")!;
+  let flashedThisPass = false;
   let cueFrame = 0;
 
   // The arc is a half-circle of radius 32 centred at (50,44) in the SVG's own
@@ -270,17 +287,35 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
 
   const runCue = (step: Step) => {
     cancelAnimationFrame(cueFrame);
-    if (!step.cue || !step.video) {
+    flash.classList.remove("fire");
+    flashedThisPass = false;
+    if (!step.video || (!step.cue && step.flash === undefined)) {
       cue.classList.remove("on");
       return;
     }
-    const { start, end } = step.cue;
+    const { start, end } = step.cue ?? { start: 0, end: 1 };
+    if (!step.cue) cue.classList.add("hidden");
+    else cue.classList.remove("hidden");
     const tick = () => {
       // Only while the clip is genuinely running: over a poster, a sweeping
       // arrow is claiming a turn that is not happening.
       const live = !vid.paused && vid.readyState >= 2 && vid.classList.contains("ready");
       cue.classList.toggle("on", live);
-      if (live) paintCue((vid.currentTime - start) / Math.max(0.001, end - start));
+      if (live) {
+        paintCue((vid.currentTime - start) / Math.max(0.001, end - start));
+        // The shutter, fired off the same clock as the cue so it lands on the
+        // frame it is meant to. The clip loops, so the latch is cleared when
+        // playback wraps back past the flash point rather than on a timer.
+        if (step.flash !== undefined) {
+          if (vid.currentTime < step.flash) flashedThisPass = false;
+          else if (!flashedThisPass) {
+            flashedThisPass = true;
+            flash.classList.remove("fire");
+            void flash.offsetWidth; // restart the animation
+            flash.classList.add("fire");
+          }
+        }
+      }
       cueFrame = requestAnimationFrame(tick);
     };
     tick();
