@@ -87,13 +87,23 @@ export interface Step {
    */
   cue?: { start: number; end: number };
   /**
-   * The moment, in seconds within the clip, that the shutter fires.
+   * The shutter: when it fires, and WHERE the phone is in the frame.
    *
-   * Drawn rather than filmed, for the same reason as the cue and one more: the
+   * The position matters because the light comes from the phone, not from the
+   * room. A full-frame white wash is a scene transition; a burst at the handset
+   * with a falloff is a camera going off, and the difference is the whole
+   * reason the beat is there.
+   *
+   * x and y are fractions of the frame. They are config rather than constants
+   * because the clip cannot be decoded in every environment that edits this
+   * file, so the position has to be nudgeable from the outside by whoever CAN
+   * watch it.
+   *
+   * Drawn rather than filmed for the same reason as the cue, and one more: the
    * clip is the one the shot was approved on, and regenerating it to add a
    * flash would re-roll the framing that made it worth keeping.
    */
-  flash?: number;
+  flash?: { at: number; x: number; y: number };
 }
 
 // The captions are the tutorial; the pictures make them land. If an image is
@@ -150,7 +160,9 @@ const STEPS: Record<TutorialView, Step[]> = {
       // the lens. The cue tracks the turn; the shutter fires once the phone is
       // up and steady.
       cue: { start: 1, end: 3 },
-      flash: 4.2,
+      // The handset sits a touch left of centre, a third down, once the arm is
+      // extended toward the lens. Nudge x/y here if the clip is ever recut.
+      flash: { at: 4.2, x: 0.51, y: 0.33 },
       title: "This is the one",
       caption: "Turn your head a full ninety degrees \u2014 one ear to the camera, chin level \u2014 and hold still. The phone stays where it is; only your head moves.",
     },
@@ -289,7 +301,11 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
     cancelAnimationFrame(cueFrame);
     flash.classList.remove("fire");
     flashedThisPass = false;
-    if (!step.video || (!step.cue && step.flash === undefined)) {
+    if (step.flash) {
+      flash.style.setProperty("--fx", `${(step.flash.x * 100).toFixed(1)}%`);
+      flash.style.setProperty("--fy", `${(step.flash.y * 100).toFixed(1)}%`);
+    }
+    if (!step.video || (!step.cue && !step.flash)) {
       cue.classList.remove("on");
       return;
     }
@@ -306,8 +322,8 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
         // The shutter, fired off the same clock as the cue so it lands on the
         // frame it is meant to. The clip loops, so the latch is cleared when
         // playback wraps back past the flash point rather than on a timer.
-        if (step.flash !== undefined) {
-          if (vid.currentTime < step.flash) flashedThisPass = false;
+        if (step.flash) {
+          if (vid.currentTime < step.flash.at) flashedThisPass = false;
           else if (!flashedThisPass) {
             flashedThisPass = true;
             flash.classList.remove("fire");

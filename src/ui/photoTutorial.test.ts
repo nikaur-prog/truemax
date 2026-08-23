@@ -62,11 +62,15 @@ test("a step with motion declares a coherent timeline", () => {
         assert.ok(step.cue.end > step.cue.start, "the cue must move forwards");
         assert.ok(step.cue.end <= CLIP_SECONDS, "the cue cannot outlast the clip");
       }
-      if (step.flash !== undefined) {
-        assert.ok(step.flash > 0 && step.flash <= CLIP_SECONDS, "the shutter must fire inside the clip");
+      if (step.flash) {
+        assert.ok(step.flash.at > 0 && step.flash.at <= CLIP_SECONDS, "the shutter must fire inside the clip");
         if (step.cue) {
-          assert.ok(step.flash >= step.cue.end, "the shutter fires after the turn, not during it");
+          assert.ok(step.flash.at >= step.cue.end, "the shutter fires after the turn, not during it");
         }
+        // The burst is centred on the handset, so an off-frame centre would
+        // put the light source outside the picture it is supposed to come from.
+        assert.ok(step.flash.x > 0 && step.flash.x < 1, `flash x ${step.flash.x} is outside the frame`);
+        assert.ok(step.flash.y > 0 && step.flash.y < 1, `flash y ${step.flash.y} is outside the frame`);
       }
     }
   }
