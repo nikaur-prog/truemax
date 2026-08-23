@@ -27,6 +27,35 @@ test("guide points, when present, cover every landmark and stay inside the image
   );
 });
 
+test("the guide points run down the face in anatomical order", () => {
+  if (!GUIDE_POINTS) return;
+  // A transposed pair is the failure mode hand-placed data actually has, and
+  // it is invisible in a diff of thirteen number pairs. Down the profile:
+  const order = [
+    "trichion", "glabella", "nasion", "pronasale", "subnasale",
+    "labialeSuperius", "labialeInferius", "pogonion", "menton",
+  ] as const;
+  for (let i = 1; i < order.length; i++) {
+    const above = GUIDE_POINTS[order[i - 1]];
+    const below = GUIDE_POINTS[order[i]];
+    assert.ok(below[1] > above[1], `${order[i]} must sit below ${order[i - 1]}`);
+  }
+  assert.ok(GUIDE_POINTS.cervicale[1] > GUIDE_POINTS.menton[1], "the neck point is below the chin");
+});
+
+test("the jaw joint sits in front of the ear notch, at about its height", () => {
+  if (!GUIDE_POINTS) return;
+  const [tx, ty] = GUIDE_POINTS.tragion;
+  const [cx, cy] = GUIDE_POINTS.condylion;
+  assert.ok(cx > tx, "the condyle is forward of the notch, not behind it");
+  // "Level with the ear canal" — the whole point of the renamed label. A
+  // condylion up on the temple is the bug that made ramus : mandible reject
+  // real faces, so the reference must not teach it.
+  assert.ok(Math.abs(cy - ty) < 0.03, `condylion sits ${(cy - ty).toFixed(3)} off the notch's height`);
+  assert.ok(GUIDE_POINTS.gonion[1] > cy, "the jaw corner is below the hinge");
+  assert.ok(GUIDE_POINTS.gonion[0] > cx, "the jaw corner is forward of the hinge");
+});
+
 test("a crop is clamped inside the image and never degenerate", () => {
   for (const point of [[0.5, 0.5], [0.02, 0.03], [0.98, 0.97]] as Array<[number, number]>) {
     const { x, y, size } = guideCrop(point, 900, 1200);
