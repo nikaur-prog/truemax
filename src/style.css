@@ -1458,6 +1458,38 @@ body.funnel-open { overflow: hidden; }
    The number, whether it moved, and the shape of the run. First on the screen
    and the only thing that gets a large type size, because it is the reason
    anybody opens the app a second time. */
+/* Screens that open on top of the dashboard arrive rather than appear.
+   Scans, Faces and a celebrity's detail are all full-screen overlays appended
+   to the body, and they used to replace the screen between one frame and the
+   next — which reads as the app reloading, not as navigating. A short rise
+   with the fade says the new screen came from somewhere and, more usefully,
+   says the one underneath is still there. The dashboard itself is excluded:
+   it already staggers its own contents in, and animating the container as
+   well would move everything twice.
+
+   The container only fades and the content inside it rises. Translating the
+   container instead would drag its edges too, and since these are opaque and
+   pinned to inset:0 that opens a strip of whatever is underneath along the
+   bottom for the length of the animation. */
+.dash.celeb-search, .dash.celeb-detail, .hist-overlay {
+  animation: screen-fade 0.28s ease-out;
+}
+.dash.celeb-search .dash-inner,
+.dash.celeb-detail .dash-inner,
+.hist-overlay .hist-panel {
+  animation: screen-rise 0.38s cubic-bezier(0.16, 0.84, 0.3, 1);
+}
+@keyframes screen-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes screen-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash.celeb-search, .dash.celeb-detail, .hist-overlay,
+  .dash.celeb-search .dash-inner, .dash.celeb-detail .dash-inner,
+  .hist-overlay .hist-panel { animation: none; }
+}
+
 .dash-hero { margin: 4px 0 26px; }
 .dash-hero-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .dash-hero-hello {
