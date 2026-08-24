@@ -42,6 +42,7 @@ import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from 
 import { mountDemoReel } from "./ui/demoReel.js";
 import { closeHistory, openHistory } from "./ui/historyView.js";
 import { loadPhotos } from "./engine/photoStore.js";
+import { createSettler } from "./engine/captureSettle.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
@@ -871,13 +872,20 @@ async function openCamera(): Promise<void> {
         // is already live, so nothing is being hidden.
         // Not while the countdown owns the hint — it has just written it, and
         // the two would flash against each other every frame.
+        // Settled, not raw. The lamp and the bar below still track every frame
+        // — they are continuous readouts and should be — but the sentence and
+        // its colour only change when a reading has repeated. See
+        // engine/captureSettle.ts for why: a face on the boundary between two
+        // checks used to strobe the colour and, because the box is sized by its
+        // own text, pulse the box in and out at the same time.
+        const shown = frontSettle.settle({ status: c.status, hint: c.hint, detail: c.detail });
         if (performance.now() >= holdHintUntil && !autoFront?.armed()) {
-          el.camHintTitle.textContent = c.hint;
-          el.camHintDetail.textContent = c.detail;
+          el.camHintTitle.textContent = shown.hint;
+          el.camHintDetail.textContent = shown.detail;
         }
         el.camHint.classList.toggle("ready", c.ready);
-        el.camHint.classList.toggle("red", c.status === "red");
-        el.camHint.classList.toggle("amber", c.status === "amber");
+        el.camHint.classList.toggle("red", shown.status === "red");
+        el.camHint.classList.toggle("amber", shown.status === "amber");
         el.camLamp.className = `lamp ${c.status === "green" ? "green" : c.status}`;
         el.camLampFill.className = c.status === "green" ? "green" : c.status;
         el.camLampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
@@ -902,6 +910,7 @@ async function openCamera(): Promise<void> {
     // The front gets the same hands-off shutter as the side. It matters less
     // here — you can see the screen — but a photo taken while reaching for a
     // button is a photo that moved, and that is true of both views.
+    const frontSettle = createSettler();
     autoFront = createAutoCapture({
       onTick: (remaining) => {
         if (remaining == null) {

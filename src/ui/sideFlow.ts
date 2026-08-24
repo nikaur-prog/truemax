@@ -2,6 +2,7 @@ import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
 import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
@@ -41,6 +42,9 @@ const MAX_DIM = 1400;
 // The walkthrough's step order is SIDE_POINTS order; the crop renderer needs
 // the id for a step index without reaching into the verifier's internals.
 const SIDE_POINT_IDS = SIDE_POINTS.map((s) => s.id);
+
+// One per module: only one side capture screen exists at a time.
+const sideSettle = createSettler();
 
 interface SideCtx {
   scanId: string;
@@ -285,13 +289,18 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         // has just written it. Only the two text lines are skipped — the lamp
         // and the shutter below must keep updating, or the frame freezes
         // visually at the exact moment it is about to fire.
+        // Settled, not raw — see engine/captureSettle.ts. The lamp underneath
+        // still tracks every frame; the sentence and its colour wait for a
+        // reading to repeat, so a face sitting on the boundary between two
+        // checks stops strobing the screen.
+        const shown = sideSettle.settle({ status: c.status, hint: c.hint, detail: c.detail });
         if (!auto?.armed()) {
-          e.hintTitle.textContent = c.hint;
-          e.hintDetail.textContent = c.detail;
+          e.hintTitle.textContent = shown.hint;
+          e.hintDetail.textContent = shown.detail;
         }
         e.hint.classList.toggle("ready", c.ready);
-        e.hint.classList.toggle("red", c.status === "red");
-        e.hint.classList.toggle("amber", c.status === "amber");
+        e.hint.classList.toggle("red", shown.status === "red");
+        e.hint.classList.toggle("amber", shown.status === "amber");
         e.lamp.className = `lamp ${c.status === "green" ? "green" : c.status}`;
         e.lampFill.className = c.status === "green" ? "green" : c.status;
         e.lampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;

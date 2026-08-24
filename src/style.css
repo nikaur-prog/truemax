@@ -1072,7 +1072,14 @@ body.funnel-open { overflow: hidden; }
    slab roughly a third of the frame tall landing squarely over the eyes and
    nose — the exact region the person is trying to line up. Narrower, tighter,
    and the two lines share one row where they fit. */
-.cam-hint { text-align: center; align-self: center; max-width: 78%;
+/* A FIXED width, not a content-sized one. The box used to be sized by whatever
+   sentence was in it, so every change of coaching also changed its width — and
+   with the guide re-evaluated per camera frame that meant the box breathing in
+   and out while the colour strobed. Settling the readings (captureSettle.ts)
+   fixed the strobe; this fixes the resize, so the two lines swap inside a box
+   that stays put. */
+.cam-hint { text-align: center; align-self: center; width: 78%; max-width: 78%;
+  min-height: 40px; display: flex; flex-direction: column; justify-content: center;
   padding: 6px 13px; border-radius: 12px;
   background: rgba(16,17,19,0.55); backdrop-filter: blur(10px);
   box-shadow: 0 6px 24px rgba(0,0,0,0.22); }
