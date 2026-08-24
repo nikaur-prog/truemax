@@ -161,6 +161,16 @@ if (import.meta.env.DEV) {
   if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
     queueMicrotask(() => void openTrialFunnelPreview(preview !== "offer-minor", preview !== "funnel"));
   }
+  // The dashboard is behind a sign-in, so the only way to look at it during
+  // development — or to drive its tabs in a browser check — was to hold a real
+  // account. Dev builds only: Vite folds import.meta.env.DEV to false for
+  // production, so this whole block is removed from the shipped bundle.
+  if (preview === "dash") {
+    activateScanOwner(null);
+    queueMicrotask(() =>
+      openDashboard({ onScan: () => {}, name: "Sam", membership: "member" }),
+    );
+  }
 }
 
 const el = {

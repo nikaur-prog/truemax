@@ -1458,6 +1458,49 @@ body.funnel-open { overflow: hidden; }
    The number, whether it moved, and the shape of the run. First on the screen
    and the only thing that gets a large type size, because it is the reason
    anybody opens the app a second time. */
+/* The three tabs -----------------------------------------------------------
+   Only one panel is in the document flow at a time (the others carry `hidden`),
+   so the host does not need a height and nothing has to be positioned
+   absolutely — which in turn means each panel keeps its natural height and the
+   page scrolls normally. The slide is on the incoming panel only; running one
+   on the way out as well would need both mounted at once and a fixed height,
+   and buys a cue nobody consciously registers.
+
+   The direction is the direction of travel in the bar, which is the cue that
+   makes the tabs read as places laid out side by side rather than as a menu. */
+.dash-view { animation: none; }
+/* The Scans panel is the same markup the floating overlay uses, and there its
+   heavy drop shadow reads as a card lifted off a dimmed page. Inside a tab there
+   is nothing to lift off, so it loses the shadow and the inset and simply is the
+   screen. */
+.dash-view[data-view="scans"] .hist-panel {
+  width: 100%; background: none; box-shadow: none; border-radius: 0; padding: 0;
+}
+.dash-view.from-right { animation: view-from-right 0.32s cubic-bezier(0.16, 0.84, 0.3, 1); }
+.dash-view.from-left { animation: view-from-left 0.32s cubic-bezier(0.16, 0.84, 0.3, 1); }
+@keyframes view-from-right {
+  from { opacity: 0; transform: translateX(22px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes view-from-left {
+  from { opacity: 0; transform: translateX(-22px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-view.from-right, .dash-view.from-left { animation: none; }
+}
+
+/* The selected tab. The bar had no selected state at all before, because
+   nothing it opened stayed on this screen long enough to have one. */
+.dash-bar-btn[aria-selected="true"] { color: var(--ink); }
+.dash-bar-btn[aria-selected="true"] svg { stroke-width: 2.1; }
+.dash-bar-btn { position: relative; }
+.dash-bar-btn[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 50%; bottom: -1px;
+  width: 16px; height: 2px; margin-left: -8px; border-radius: 2px;
+  background: var(--acc);
+}
+
 /* Screens that open on top of the dashboard arrive rather than appear.
    Scans, Faces and a celebrity's detail are all full-screen overlays appended
    to the body, and they used to replace the screen between one frame and the
@@ -1471,10 +1514,9 @@ body.funnel-open { overflow: hidden; }
    container instead would drag its edges too, and since these are opaque and
    pinned to inset:0 that opens a strip of whatever is underneath along the
    bottom for the length of the animation. */
-.dash.celeb-search, .dash.celeb-detail, .hist-overlay {
+.dash.celeb-detail, .hist-overlay {
   animation: screen-fade 0.28s ease-out;
 }
-.dash.celeb-search .dash-inner,
 .dash.celeb-detail .dash-inner,
 .hist-overlay .hist-panel {
   animation: screen-rise 0.38s cubic-bezier(0.16, 0.84, 0.3, 1);
@@ -1485,8 +1527,8 @@ body.funnel-open { overflow: hidden; }
   to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dash.celeb-search, .dash.celeb-detail, .hist-overlay,
-  .dash.celeb-search .dash-inner, .dash.celeb-detail .dash-inner,
+  .dash.celeb-detail, .hist-overlay,
+  .dash.celeb-detail .dash-inner,
   .hist-overlay .hist-panel { animation: none; }
 }
 

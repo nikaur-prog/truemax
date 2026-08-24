@@ -119,62 +119,77 @@ export function closeHistory(): void {
   activeHistory = null;
 }
 
-export function openHistory(): void {
-  closeHistory();
+// The panel's own contents, without the overlay around them.
+//
+// The dashboard mounts this inline as its Scans tab; the landing page still
+// wants the floating overlay. Splitting the markup from the container is what
+// lets one live in both places without either growing a mode flag.
+//
+// `closable` is the only difference: inside a tab there is nothing to close, and
+// a ✕ in the corner of a tab is an invitation to lose your place.
+export function historyPanelMarkup(opts: { closable: boolean }): string {
   const allScans = readAllHistory();
   const scans = readAllComparableHistory();
   const legacyCount = allScans.length - scans.length;
-  const wrap = document.createElement("div");
-  activeHistory = wrap;
-  wrap.className = "hist-overlay";
+  const close = opts.closable ? `<button class="hist-close" aria-label="Close">✕</button>` : "";
 
   if (!scans.length) {
-    wrap.innerHTML = `<div class="hist-panel">
-      <button class="hist-close" aria-label="Close">✕</button>
+    return `<div class="hist-panel">
+      ${close}
       <h2>Your scans</h2>
       <p class="hist-empty">${legacyCount
         ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous scoring calibration and will not be mixed into the new trend. Take a new scan to start the calibrated history.`
         : "No scans yet. Your history builds here as you scan, week by week, all on this device."}</p>
     </div>`;
-  } else {
-    const avg = mean(scans.map((s) => s.overall));
-    const best = Math.max(...scans.map((s) => s.overall));
-    wrap.innerHTML = `<div class="hist-panel">
-      <button class="hist-close" aria-label="Close">✕</button>
-      <h2>Your scans</h2>
-      <div class="hist-stats">
-        <div><b>${scans.length}</b><span>SCANS</span></div>
-        <div><b>${avg.toFixed(1)}</b><span>YOUR AVERAGE</span></div>
-        <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
-      </div>
-      ${scans.length >= 2 ? trendSVG(scans) : ""}
-      <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.
-        A dot inside it has not really moved — same face, different photo. Only dots clear of the
-        band are a change worth reading.</p>
-      ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
-      <div class="hist-list">${rows(scans)}</div>
-      <p class="hist-foot">Stored on this device only for this profile: numbers and a thumbnail of each photo.
-        Nothing here was ever uploaded, and clearing your browser data clears it.
-        <button class="linkish" id="hist-clear-photos">Delete this profile's stored photos</button></p>
-    </div>`;
   }
 
-  // Anything stored has to be removable. The numbers stay — they are what the
-  // trend is made of, and they are not the sensitive part.
-  const clearBtn = wrap.querySelector<HTMLButtonElement>("#hist-clear-photos");
-  if (clearBtn) {
-    let armed = false;
-    clearBtn.onclick = async () => {
-      if (!armed) {
-        armed = true;
-        clearBtn.textContent = "Tap again to delete this profile's stored photos";
-        return;
-      }
-      clearBtn.disabled = true;
-      await clearAllPhotos();
-      clearBtn.textContent = "Photos deleted";
-    };
-  }
+  const avg = mean(scans.map((s) => s.overall));
+  const best = Math.max(...scans.map((s) => s.overall));
+  return `<div class="hist-panel">
+    ${close}
+    <h2>Your scans</h2>
+    <div class="hist-stats">
+      <div><b>${scans.length}</b><span>SCANS</span></div>
+      <div><b>${avg.toFixed(1)}</b><span>YOUR AVERAGE</span></div>
+      <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
+    </div>
+    ${scans.length >= 2 ? trendSVG(scans) : ""}
+    <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.
+      A dot inside it has not really moved — same face, different photo. Only dots clear of the
+      band are a change worth reading.</p>
+    ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
+    <div class="hist-list">${rows(scans)}</div>
+    <p class="hist-foot">Stored on this device only for this profile: numbers and a thumbnail of each photo.
+      Nothing here was ever uploaded, and clearing your browser data clears it.
+      <button class="linkish" id="hist-clear-photos">Delete this profile's stored photos</button></p>
+  </div>`;
+}
+
+// Anything stored has to be removable. The numbers stay — they are what the
+// trend is made of, and they are not the sensitive part.
+export function wireHistoryPanel(root: ParentNode): void {
+  const clearBtn = root.querySelector<HTMLButtonElement>("#hist-clear-photos");
+  if (!clearBtn) return;
+  let armed = false;
+  clearBtn.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      clearBtn.textContent = "Tap again to delete this profile's stored photos";
+      return;
+    }
+    clearBtn.disabled = true;
+    await clearAllPhotos();
+    clearBtn.textContent = "Photos deleted";
+  };
+}
+
+export function openHistory(): void {
+  closeHistory();
+  const wrap = document.createElement("div");
+  activeHistory = wrap;
+  wrap.className = "hist-overlay";
+  wrap.innerHTML = historyPanelMarkup({ closable: true });
+  wireHistoryPanel(wrap);
 
   function close(): void {
     wrap.remove();
