@@ -198,10 +198,37 @@ export function offerTutorial(view: TutorialView, then: () => void): void {
   wrap.className = "tut-ask";
   wrap.innerHTML = `
     <div class="tut-ask-panel" role="dialog" aria-modal="true" aria-labelledby="tut-ask-h">
-      <h2 id="tut-ask-h">${view === "front" ? "Taking the front photo" : "Taking the side profile"}</h2>
+      <h2 id="tut-ask-h">${view === "front"
+        ? "Would you like a tutorial on how to take the front-on photo for best results?"
+        : "Would you like a tutorial on how to take the side profile for best results?"}</h2>
       <p>${view === "front"
         ? "Twenty seconds on what ruins a front photo, and what a good one looks like."
         : "The profile is the shot people get wrong most. Twenty seconds on why."}</p>
+      <!-- One right, one wrong, before anybody has committed to watching. The
+           question above is abstract until you have seen the difference it is
+           asking about; two photographs answer "is this worth twenty seconds?"
+           faster than the sentence does. -->
+      ${view === "front"
+        ? `<div class="tut-egs">
+            <figure class="tut-eg good">
+              <img src="/tutorial/front-good.jpg" alt="A correctly taken front photo: square to the lens, level, evenly lit" loading="lazy" />
+              <figcaption><span class="tut-eg-mark">✓</span>Square, level, evenly lit</figcaption>
+            </figure>
+            <figure class="tut-eg bad">
+              <img src="/tutorial/front-bad.jpg" alt="A poorly taken front photo: tilted, shot from below, half in shadow" loading="lazy" />
+              <figcaption><span class="tut-eg-mark">✕</span>Tilted, from below, half shadowed</figcaption>
+            </figure>
+          </div>`
+        : `<div class="tut-egs">
+            <figure class="tut-eg good">
+              <img src="/tutorial/side-do.jpg" alt="A correctly taken side profile: a full ninety degrees, chin level" loading="lazy" />
+              <figcaption><span class="tut-eg-mark">✓</span>A full quarter turn, chin level</figcaption>
+            </figure>
+            <figure class="tut-eg bad">
+              <img src="/tutorial/side-partial.jpg" alt="A poorly taken side profile: only half turned, so both eyes are still visible" loading="lazy" />
+              <figcaption><span class="tut-eg-mark">✕</span>Half turned — both eyes showing</figcaption>
+            </figure>
+          </div>`}
       <div class="tut-ask-actions">
         <button class="btn pri" id="tut-yes" type="button">Show me</button>
         <button class="btn gho" id="tut-no" type="button">Skip</button>

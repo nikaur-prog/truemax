@@ -77,6 +77,13 @@
           <!-- Guidance rides on top of the feed rather than under it, so the
                instruction and the thing it is about are in one glance and the
                frame keeps its height. -->
+          <!-- The way back into the tutorial, always. "Don't show me this
+               again" is answered once, often before anyone knows what they are
+               declining, and without this it is a one-way door: there is no
+               other route to the walkthrough from the capture screen. Small,
+               out of the frame's centre, and it costs nothing to ignore. -->
+          <button class="cam-info" id="cam-info" type="button" aria-label="How to take this photo">i</button>
+
           <div class="cam-hud">
             <div class="cam-hint" id="cam-hint">
               <b id="cam-hint-title">Take a photo, or upload one</b>
@@ -315,7 +322,14 @@
                 </svg>
                 <span class="turn-word">Turn your head to the <b>left</b></span>
               </div>
-              <div class="cam-hud">
+              <!-- The way back into the tutorial, always. "Don't show me this
+               again" is answered once, often before anyone knows what they are
+               declining, and without this it is a one-way door: there is no
+               other route to the walkthrough from the capture screen. Small,
+               out of the frame's centre, and it costs nothing to ignore. -->
+          <button class="cam-info" id="side-info" type="button" aria-label="How to take this photo">i</button>
+
+          <div class="cam-hud">
                 <div class="cam-hint" id="side-hint">
                   <b id="side-hint-title">Turn to the side</b>
                   <span id="side-hint-detail">One ear toward the lens</span>

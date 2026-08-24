@@ -59,7 +59,7 @@ import type { FrameCheck } from "./engine/captureGuide.js";
 import { estimateGaze } from "./engine/gaze.js";
 import { analyzeSkin } from "./engine/skin.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
-import { offerTutorial } from "./ui/photoTutorial.js";
+import { offerTutorial, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
 import { headCoveringRejection } from "./engine/photoEligibility.js";
@@ -397,6 +397,16 @@ if (!isAuthAvailable()) activateScanOwner(null);
 const RECENT_ON_LANDING = 3;
 const landingRecent = document.getElementById("landing-recent");
 const landingRecentRow = document.getElementById("landing-recent-row");
+// The tutorial is reachable from the capture frame whether or not it was
+// suppressed — playTutorial rather than offerTutorial, because someone who has
+// just tapped an "i" has already answered the question offerTutorial asks.
+document.getElementById("cam-info")?.addEventListener("click", () => {
+  playTutorial("front", tutorialSuppressed("front"), () => {});
+});
+document.getElementById("side-info")?.addEventListener("click", () => {
+  playTutorial("side", tutorialSuppressed("side"), () => {});
+});
+
 const landingHistory = document.getElementById("landing-history");
 
 let recentPaintToken = 0;

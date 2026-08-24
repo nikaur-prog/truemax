@@ -246,17 +246,17 @@ export function maxStickerMarkup(): string {
 // spinner is the one place where "no animation at all" would be worse than a
 // static mark, and a face that is simply there reads as patient rather than
 // broken.
-// No "concerned" and no "sad": a loader is not a status report, and a face
-// that looks worried while you wait suggests something has gone wrong when
-// nothing has. He thinks, brightens, thinks again — which is what the software
-// is actually doing.
+// Happy and excited only. A loader is not a status report: a worried or
+// thinking face while you wait suggests something has gone wrong, or that the
+// software is struggling, when neither is true. He is pleased to be here and
+// pleased about what is coming, and nothing else.
 //
 // FOUR of them, and that number is load-bearing. The keyframes in style.css
 // hand each face over at 25% of the cycle, which is 1/4 exactly; a fifth mood
 // here without a matching keyframe edit would leave a gap of empty box between
 // two of the faces. The check below fails the build's type pass rather than
 // leaving that to be noticed on a slow connection.
-const LOADER_MOODS = ["happy", "thinking", "excited", "thinking"] as const satisfies readonly MaxMood[];
+const LOADER_MOODS = ["happy", "excited", "happy", "excited"] as const satisfies readonly MaxMood[];
 const LOADER_FACES: 4 = LOADER_MOODS.length;
 
 export function maxLoaderMarkup(label = "Loading"): string {

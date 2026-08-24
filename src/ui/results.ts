@@ -36,7 +36,7 @@ import { scaleTrigger, showScalePrimer, wireScaleNote } from "./scaleNote.js";
 import { rarityLine as scaleRarityLine, rarityShort } from "../engine/rarity.js";
 import type { AnalysisMode } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
-import { maxCharacterMarkup } from "./maxCharacter.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
@@ -368,15 +368,22 @@ function showSide(): void {
 // Verdict and Basic for the profile, mirroring the front's shallow modes. Same
 // ladder, same grid markup, side numbers — presentation only, nothing here
 // computes a score.
+// Same correction as showShallow: a Max subscription buys Max's read and the
+// curve, so neither is withheld because the depth switch is set to Verdict or
+// Basic.
 function showSideShallow(mode: AnalysisMode, report: Report): void {
   const inner = mode === "verdict" ? sideVerdictHTML(report) : sideBasicHTML(report);
+  const forMax = maxAccess && adultUser;
   body().innerHTML = `<div class="reveal">
     ${inner}
+    ${forMax ? maxAnalysisHTML(report, null, "side") : ""}
+    ${forMax ? populationBlock(report) : ""}
     ${modeSwitcher(mode)}
     ${sideNav()}
   </div>`;
   wireModeSwitcher(showSide);
   wireSideNav();
+  wireMaxInteractions(body().querySelector<HTMLElement>(".maxan-face"));
   const lead = body().querySelector<HTMLElement>(".basic-n");
   if (lead) {
     const target = Number(lead.dataset.count);
@@ -623,9 +630,7 @@ function showOverall(): void {
         )
         .join("")}
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex, false, { score: r.overall, rank: rankShort(r.overallPercentile) })}
-        ${curveLegend()}
-        <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
+      ${populationBlock(r)}
       ${
         // Until the profile is in, adding it IS the next step — so it is the
         // primary button. A scan is not finished at one view, and burying that
@@ -1432,13 +1437,26 @@ function showImprove(): void {
 // anything — see engine/analysisMode.ts. The depth switch changes how much is
 // said, never what is true.
 // ---------------------------------------------------------------------------
+// Verdict and Basic are presentation depths, not plan tiers — anyone can pick
+// either, and Basic is the default. Which meant a paying Max subscriber opened
+// a tab LABELLED "Max's analysis" (see buildTabs) that contained nothing from
+// Max, and no population curve, because both of those were only ever rendered
+// on the Full branch. They were paying for a name on a tab.
+//
+// Max's read and the curve now follow the subscription rather than the depth
+// setting. Depth still decides how much of the METRICS someone sees, which is
+// what it was always for; it does not decide whether the thing they bought
+// shows up.
 function showShallow(mode: AnalysisMode): void {
   if (!ctx) return;
   const r = ctx.report;
   const inner = mode === "verdict" ? verdictHTML() : basicHTML();
+  const forMax = maxAccess && adultUser;
 
   body().innerHTML = `<div class="reveal">
     ${inner}
+    ${forMax ? maxAnalysisHTML(r, ctx.delta ?? null) : ""}
+    ${forMax ? populationBlock(r) : ""}
     ${modeSwitcher(mode)}
     <div class="navrow">
       <button class="btn gho" id="btn-new">New photo</button>
@@ -1448,6 +1466,7 @@ function showShallow(mode: AnalysisMode): void {
   </div>`;
 
   wireModeSwitcher();
+  wireMaxInteractions(body().querySelector<HTMLElement>(".maxan-face"));
   // The headline counts up here too. It used to render a literal "0" and wait
   // for an animation that only ever ran in full mode, so Basic — now the
   // default depth — showed every user a score of zero.
@@ -1464,6 +1483,15 @@ function showShallow(mode: AnalysisMode): void {
     const card = await renderShareCard(r, photo);
     await shareCard(card, r.overall);
   };
+}
+
+// Where this face sits in the measured population. One definition, used by the
+// Full view and — since a Max subscription is meant to include it — by Verdict
+// and Basic too.
+function populationBlock(r: Report): string {
+  return `<div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex, false, { score: r.overall, rank: rankShort(r.overallPercentile) })}
+    ${curveLegend()}
+    <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>`;
 }
 
 function verdictHTML(): string {
