@@ -1,5 +1,6 @@
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
+import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
 
 // The landing reel shows display scores rather than the engine's output, for
 // the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
@@ -73,6 +74,7 @@ export function mountDemoReel(
   let start = 0;
   let raf = 0;
   let stopped = false;
+  let shownAny = false;
 
   const frame = (now: number) => {
     if (stopped) return;
@@ -84,7 +86,12 @@ export function mountDemoReel(
 
     const w = canvas.clientWidth || canvas.width;
     const h = canvas.clientHeight || canvas.height;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    // Capped at 3, not 2. This canvas is around 300x375 CSS pixels, so even
+    // full density is barely a megapixel — nothing here is worth trading
+    // sharpness for. At the old cap of 2 a modern phone rendered the most
+    // prominent surface on the landing page at two thirds of its screen's
+    // resolution, which is most visible on the hairline overlay text.
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
     if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
       canvas.width = w * dpr;
       canvas.height = h * dpr;
@@ -97,15 +104,54 @@ export function mountDemoReel(
     const fadeOut = t > T.out ? Math.max(0, (T.hold - t) / (T.hold - T.out)) : 1;
     const alpha = Math.min(fadeIn, fadeOut);
 
-    if (img.complete && img.naturalWidth) {
-      ctx.globalAlpha = alpha;
-      const s = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-      const dw = img.naturalWidth * s;
-      const dh = img.naturalHeight * s;
-      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-      ctx.globalAlpha = 1;
+    // Cover-fit with a slow push-in. Four per cent over the whole beat is
+    // under a pixel a frame — not readable as movement, which is the point.
+    // A still photograph behind a moving overlay reads as a screenshot with
+    // animation played on top of it; the same photograph drifting very slightly
+    // reads as a camera pointed at someone.
+    const drawCover = (source: HTMLImageElement, zoom: number, a: number) => {
+      if (!source.complete || !source.naturalWidth) return;
+      const s = Math.max(w / source.naturalWidth, h / source.naturalHeight) * zoom;
+      const dw = source.naturalWidth * s;
+      const dh = source.naturalHeight * s;
+      ctx.globalAlpha = a;
+      ctx.drawImage(source, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    };
+
+    // The outgoing face used to fade to nothing and the incoming one to fade up
+    // from nothing, which puts a washed-out half-empty card on screen at both
+    // ends of every face. Whichever face this one is fading against is drawn
+    // underneath at full opacity instead, so the two genuinely cross and the
+    // card is never showing the page background through a photograph.
+    if (REEL.length > 1) {
+      const under =
+        // Nothing preceded the very first face, so it still fades up from the
+        // card rather than crossing with a face nobody has seen.
+        fadeIn < 1
+          ? shownAny
+            ? images[(idx - 1 + REEL.length) % REEL.length]
+            : null
+          : fadeOut < 1
+            ? images[(idx + 1) % REEL.length]
+            : null;
+      if (under) drawCover(under, 1, 1);
     }
+    drawCover(img, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
     ctx.globalAlpha = alpha;
+
+    // Overlay text is white and the photograph underneath it is not reliably
+    // dark — a lit forehead put "MEASURING" at almost no contrast. Two scrims
+    // rather than one flat wash, so the middle of the face stays untouched.
+    const topScrim = ctx.createLinearGradient(0, 0, 0, 72);
+    topScrim.addColorStop(0, "rgba(10,11,13,0.55)");
+    topScrim.addColorStop(1, "rgba(10,11,13,0)");
+    ctx.fillStyle = topScrim;
+    ctx.fillRect(0, 0, w, 72);
+    const botScrim = ctx.createLinearGradient(0, h - 120, 0, h);
+    botScrim.addColorStop(0, "rgba(10,11,13,0)");
+    botScrim.addColorStop(1, "rgba(10,11,13,0.72)");
+    ctx.fillStyle = botScrim;
+    ctx.fillRect(0, h - 120, w, 120);
 
     // ---- points sweep -----------------------------------------------------
     const swept = ease(seg(t, T.scan[0], T.scan[1]));
@@ -177,31 +223,18 @@ export function mountDemoReel(
     // ---- region callouts --------------------------------------------------
     if (t >= T.regions[0]) {
       const outs = calloutsFor(face);
-      const taken: Array<[number, number, boolean]> = [];
+      const placed = placeCallouts(outs, w, h);
       outs.forEach((r, i) => {
         const appear = seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
         if (appear <= 0) return;
         ctx.globalAlpha = alpha * appear;
-        const ax = r.x * w;
-        const ay = r.y * h;
-        // Label sits on whichever side has room, so it never covers the face
-        const left = ax > w * 0.5;
-        const lx = left ? Math.max(10, ax - 74 - 26) : Math.min(w - 84, ax + 26);
-        let ly = Math.max(14, Math.min(h - 96, ay - 9));
-        // Slide down past anything already occupying this column
-        for (let guard = 0; guard < 8; guard++) {
-          const clash = taken.find(([ty, by, tl]) => tl === left && ly < by + 6 && ly + 26 > ty - 6);
-          if (!clash) break;
-          ly = clash[1] + 12;
-        }
-        ly = Math.max(14, Math.min(h - 96, ly));
-        taken.push([ly, ly + 26, left]);
+        const { ax, ay, lx, ly, left } = placed[i]!;
 
         ctx.strokeStyle = "rgba(143,243,224,0.85)";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(ax, ay);
-        ctx.lineTo(left ? lx + 74 : lx, ly + 9);
+        ctx.lineTo(left ? lx + LABEL_W : lx, ly + 9);
         ctx.stroke();
         ctx.fillStyle = "#8FF3E0";
         ctx.beginPath();
@@ -210,7 +243,7 @@ export function mountDemoReel(
 
         ctx.fillStyle = "rgba(16,17,19,0.72)";
         ctx.beginPath();
-        ctx.roundRect(lx, ly - 4, 74, 26, 7);
+        ctx.roundRect(lx, ly - 4, LABEL_W, LABEL_H, 7);
         ctx.fill();
         ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.62)";
@@ -241,6 +274,7 @@ export function mountDemoReel(
     if (t >= T.hold) {
       idx = (idx + 1) % REEL.length;
       start = now;
+      shownAny = true;
     }
     raf = requestAnimationFrame(frame);
   };

@@ -21,7 +21,7 @@ const out = [];
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4184/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
   for (const [person, files] of Object.entries(groups)) {
     const sex = sexOf2[person] ?? "male";
     for (const f of files) {

@@ -9,11 +9,12 @@ import { headline, nextVisit, subline } from "./greeting.js";
 import type { GreetingCtx } from "./greeting.js";
 import { trend } from "./dashTrend.js";
 import { loadPhotos } from "../engine/photoStore.js";
-import { openHistory } from "./historyView.js";
+import { historyPanelMarkup, wireHistoryPanel } from "./historyView.js";
 import { REEL } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
+import { countUp } from "./countUp.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -149,32 +150,44 @@ export function openDashboard(opts: {
         </div>
       </header>
 
-      ${heroBlock(scans, ctx, streak)}
-      ${followUpCard(scans)}
-      ${scanSection(scans, allScans.length - scans.length)}
-      ${faces.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
-        <span class="dash-faces-fan">
-          ${faces.slice(0, 5).map((f) => `<img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />`).join("")}
-        </span>
-        <span class="dash-faces-copy">
-          <b>${faces.length} famous faces, measured the same way</b>
-          <em>See where your numbers sit against theirs →</em>
-        </span>
-      </button>` : ""}
+      <div class="dash-views" id="dash-views">
+        <section class="dash-view is-active" data-view="home" role="tabpanel" aria-labelledby="dash-bar-home">
+          ${heroBlock(scans, ctx, streak)}
+          ${followUpCard(scans)}
+          ${scanSection(scans, allScans.length - scans.length)}
+          ${faces.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
+            <span class="dash-faces-fan">
+              ${faces.slice(0, 5).map((f) => `<img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />`).join("")}
+            </span>
+            <span class="dash-faces-copy">
+              <b>${faces.length} famous faces, measured the same way</b>
+              <em>See where your numbers sit against theirs →</em>
+            </span>
+          </button>` : ""}
+        </section>
+        <section class="dash-view" data-view="scans" role="tabpanel" aria-labelledby="dash-bar-scans" hidden></section>
+        <section class="dash-view" data-view="faces" role="tabpanel" aria-labelledby="dash-bar-faces" hidden></section>
+      </div>
     </div>
 
-    <nav class="dash-bar" aria-label="TrueMax">
-      <button class="dash-bar-btn" id="dash-bar-scans" type="button">
+    <nav class="dash-bar" role="tablist" aria-label="TrueMax">
+      <button class="dash-bar-btn" id="dash-bar-scans" data-goto="scans" type="button" role="tab" aria-selected="false">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 17.5 8.5 11l4 4L21 6"/><path d="M21 11V6h-5"/>
         </svg>
         <span>Scans</span>
       </button>
+      <button class="dash-bar-btn dash-bar-home" id="dash-bar-home" data-goto="home" type="button" role="tab" aria-selected="true">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 10.6 12 4l8 6.6"/><path d="M6 9.6V20h12V9.6"/>
+        </svg>
+        <span>Home</span>
+      </button>
       <button class="dash-bar-scan" id="dash-scan" type="button">
         <span class="dash-bar-ic">${SPLIT_FACE}</span>
-        <span>${scans.length ? "New scan" : "Scan your face"}</span>
+        <span>${scans.length ? "New scan" : "Scan"}</span>
       </button>
-      <button class="dash-bar-btn" id="dash-celeb" type="button">
+      <button class="dash-bar-btn" id="dash-bar-faces" data-goto="faces" type="button" role="tab" aria-selected="false">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 3.6 14.4 9l5.6.5-4.3 3.8 1.3 5.6L12 15.9 6.9 18.9l1.3-5.6L4 9.5 9.6 9z"/>
         </svg>
@@ -183,29 +196,115 @@ export function openDashboard(opts: {
     </nav>`;
 
   document.body.appendChild(overlay);
+  countHero(overlay);
+  currentView = "home";
   document.getElementById("dash-scan")!.onclick = () => {
     close();
     opts.onScan();
   };
-  document.getElementById("dash-celeb")!.onclick = () => openCelebSearch();
-  overlay.querySelector("#dash-celeb-strip")?.addEventListener("click", () => openCelebSearch());
-  overlay.querySelector("#dash-bar-scans")?.addEventListener("click", () => openHistory());
+  for (const btn of overlay.querySelectorAll<HTMLElement>("[data-goto]")) {
+    btn.onclick = () => showView(btn.dataset.goto as ViewName);
+  }
+  overlay.querySelector("#dash-celeb-strip")?.addEventListener("click", () => showView("faces"));
   // The dashboard stays open behind it: settings is a panel over your own
   // screen, not a place you get sent to and have to navigate back from.
   overlay.querySelector("#dash-settings")?.addEventListener("click", () => opts.onSettings?.());
   // Rebuilding the plan means revisiting the goals, which is what the quiz is.
   overlay.querySelector("#dash-replan")?.addEventListener("click", () => opts.onSettings?.());
-  overlay.querySelector("#dash-history")?.addEventListener("click", () => openHistory());
+  overlay.querySelector("#dash-history")?.addEventListener("click", () => showView("scans"));
   for (const row of overlay.querySelectorAll<HTMLElement>(".dash-scan-row")) {
-    row.onclick = () => openHistory();
+    row.onclick = () => showView("scans");
   }
   wireScanRows(overlay);
   wireMaxInteractions(overlay.querySelector<HTMLElement>(".maxread-face"));
 }
 
+// --- the three tabs --------------------------------------------------------
+//
+// These are tabs now, which they were not before. Scans and Faces each used to
+// append a separate full-screen overlay on top of the dashboard, at a z-index
+// that covered the bottom bar itself — so the bar vanished the moment you used
+// it, there was nothing to show as selected, and getting back meant finding a ✕.
+// That is a stack of modals wearing a tab bar.
+//
+// One host, three panels, one bar that stays put and says where you are.
+//
+// The order is the order in the bar, and the transition slides in the direction
+// of travel: going right moves the outgoing panel left. That is the one cue
+// that makes a tab bar feel like a place rather than a menu, because it tells
+// you the panels are laid out side by side and you are moving along them.
+export type ViewName = "home" | "scans" | "faces";
+
+let currentView: ViewName = "home";
+// Each panel remembers where it was scrolled to. Coming back to Home and
+// landing at the top of a page you had read half of is the thing that gives a
+// web app away.
+const scrollMemory = new Map<ViewName, number>();
+
+export function activeView(): ViewName | null {
+  return overlay ? currentView : null;
+}
+
+// Which way a move between two tabs travels: 1 rightwards, -1 leftwards.
+//
+// Read off the bar rather than held in a constant beside it. A hand-maintained
+// VIEW_ORDER is a second copy of the tab order, and the failure mode when the
+// two drift is a transition that slides the wrong way — which nobody files a
+// bug about and everybody feels. Reading the DOM makes disagreement impossible
+// instead of merely testable.
+function viewDirection(from: ViewName, to: ViewName): number {
+  if (!overlay) return 1;
+  const order = [...overlay.querySelectorAll<HTMLElement>("[data-goto]")].map((b) => b.dataset.goto);
+  return Math.sign(order.indexOf(to) - order.indexOf(from));
+}
+
+// Built on first visit rather than up front, so opening the dashboard does not
+// pay for two screens nobody has asked for yet.
+function fillView(name: ViewName, panel: HTMLElement): void {
+  if (panel.dataset.filled) return;
+  panel.dataset.filled = "1";
+  if (name === "scans") {
+    panel.innerHTML = historyPanelMarkup({ closable: false });
+    wireHistoryPanel(panel);
+  } else if (name === "faces") {
+    panel.innerHTML = facesMarkup();
+    wireFaces(panel);
+  }
+}
+
+export function showView(name: ViewName): void {
+  if (!overlay) return;
+  const host = overlay.querySelector<HTMLElement>("#dash-views");
+  const next = overlay.querySelector<HTMLElement>(`.dash-view[data-view="${name}"]`);
+  const prev = overlay.querySelector<HTMLElement>(`.dash-view[data-view="${currentView}"]`);
+  if (!host || !next || !prev || name === currentView) return;
+
+  scrollMemory.set(currentView, overlay.scrollTop);
+  const dir = viewDirection(currentView, name);
+  fillView(name, next);
+
+  prev.hidden = true;
+  prev.classList.remove("is-active");
+  next.hidden = false;
+  next.classList.add("is-active");
+  // Restarting the animation means clearing the class and forcing a reflow;
+  // without the read the browser coalesces both writes and nothing plays.
+  next.classList.remove("from-left", "from-right");
+  void next.offsetWidth;
+  next.classList.add(dir > 0 ? "from-right" : "from-left");
+
+  currentView = name;
+  for (const btn of overlay.querySelectorAll<HTMLElement>("[data-goto]")) {
+    btn.setAttribute("aria-selected", btn.dataset.goto === name ? "true" : "false");
+  }
+  overlay.scrollTop = scrollMemory.get(name) ?? 0;
+}
+
 export function close(): void {
   overlay?.remove();
   overlay = null;
+  currentView = "home";
+  scrollMemory.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +326,21 @@ export function close(): void {
 //
 // The greeting survives, at the size a greeting deserves.
 // ---------------------------------------------------------------------------
+// The hero score counts up rather than appearing already written.
+//
+// The delay lands it just after the hero's own entry animation (--d: 60ms,
+// 620ms long), so the number starts moving as the block finishes arriving
+// rather than racing it. The digits live in an <i> because the element also
+// carries a "/10" in a <small> that writing textContent would delete, and
+// .dash-hero-num is already tabular-nums so nothing shifts width while it runs.
+function countHero(root: HTMLElement): void {
+  const num = root.querySelector<HTMLElement>(".dash-hero-num");
+  const digits = num?.querySelector<HTMLElement>("i");
+  const to = Number(num?.dataset.to);
+  if (!digits || !Number.isFinite(to)) return; // the empty state has no number
+  countUp(digits, to, { delay: 420 });
+}
+
 function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): string {
   const line = trend(scans);
   if (!scans.length || !line) {
@@ -256,7 +370,7 @@ function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): strin
     <div class="dash-hero-row">
       <div class="dash-hero-fig">
         <span class="dash-hero-eyebrow">YOUR AVERAGE · VS ${sex === "male" ? "MEN" : "WOMEN"}</span>
-        <b class="dash-hero-num">${line.average.toFixed(1)}<small>/10</small></b>
+        <b class="dash-hero-num" data-to="${line.average.toFixed(1)}"><i>${line.average.toFixed(1)}</i><small>/10</small></b>
         <span class="dash-hero-delta ${tone}">${escapeHtml(deltaText)}</span>
       </div>
       ${scans.length > 1 ? `<div class="dash-hero-trend">${line.svg}</div>` : ""}
@@ -474,40 +588,30 @@ function wireScanRows(root: HTMLElement): void {
   }
 }
 
-// --- celebrity search ------------------------------------------------------
+// --- the Faces tab ---------------------------------------------------------
 
-let celebEl: HTMLDivElement | null = null;
-
-export function openCelebSearch(): void {
-  celebEl?.remove();
+// Content only, so it can be mounted inside a tab. A celebrity's full breakdown
+// is still a stacked overlay: it is a drill-down into one face, not a peer of
+// the three tabs, and giving it a tab of its own would put a bottom-bar
+// destination behind whichever card you happened to tap.
+function facesMarkup(): string {
   const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
-  celebEl = document.createElement("div");
-  celebEl.className = "dash celeb-search";
-  celebEl.innerHTML = `
-    <div class="dash-inner">
-      <button class="hist-close" aria-label="Close">✕</button>
-      <header class="dash-head">
-        <button class="wordmark celeb-home ${brandClass(dashboardBrand)}" type="button" title="Back to the dashboard">${logoMarkup()}</button>
-        <h1>Celebrities</h1>
-        <p>How the same measurements read on a face people already have a number for. Search a name, or browse.</p>
-      </header>
-      <input class="celeb-q" id="celeb-q" placeholder="Search a name" autocomplete="off" />
-      <div class="celeb-grid" id="celeb-grid">${faces.map(celebCard).join("")}</div>
-      <p class="celeb-empty hidden" id="celeb-empty">No one by that name in the set yet.</p>
-    </div>`;
+  return `
+    <header class="dash-head">
+      <h1>Celebrities</h1>
+      <p>How the same measurements read on a face people already have a number for. Search a name, or browse.</p>
+    </header>
+    <input class="celeb-q" id="celeb-q" placeholder="Search a name" autocomplete="off" />
+    <div class="celeb-grid" id="celeb-grid">${faces.map(celebCard).join("")}</div>
+    <p class="celeb-empty hidden" id="celeb-empty">No one by that name in the set yet.</p>`;
+}
 
-  document.body.appendChild(celebEl);
-  const closeCeleb = () => {
-    celebEl?.remove();
-    celebEl = null;
-  };
-  celebEl.querySelector(".hist-close")!.addEventListener("click", closeCeleb);
-  // The wordmark means the same thing everywhere: go home. Here home is the
-  // dashboard sitting underneath, so this only has to close the overlay.
-  celebEl.querySelector(".celeb-home")!.addEventListener("click", closeCeleb);
-  const q = celebEl.querySelector("#celeb-q") as HTMLInputElement;
-  const grid = celebEl.querySelector("#celeb-grid")!;
-  const empty = celebEl.querySelector("#celeb-empty")!;
+function wireFaces(root: ParentNode): void {
+  const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
+  const q = root.querySelector<HTMLInputElement>("#celeb-q");
+  const grid = root.querySelector("#celeb-grid");
+  const empty = root.querySelector("#celeb-empty");
+  if (!q || !grid || !empty) return;
   q.oninput = () => {
     const term = q.value.trim().toLowerCase();
     let shown = 0;
@@ -524,7 +628,11 @@ export function openCelebSearch(): void {
       if (f) openCelebDetail(f);
     });
   }
-  q.focus();
+}
+
+/** Open the dashboard on its Faces tab. Kept for callers outside this module. */
+export function openCelebSearch(): void {
+  showView("faces");
 }
 
 // The full breakdown for one face: the same pillars and per-region scores the

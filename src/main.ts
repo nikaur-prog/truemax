@@ -7,7 +7,13 @@ import { analyze, analyzeFrames, REGION_NAMES } from "./engine/scoring.js";
 import type { CaptureFrame } from "./engine/scoring.js";
 import { POSE_CALIBRATION, buildGeometry, landmarkIntegrityIssues } from "./engine/geometry.js";
 import { extractShape, shapeSubset } from "./engine/shape.js";
-import { compareAndStore, readAllHistory, scanStorageKey } from "./engine/history.js";
+import {
+  compareAndStore,
+  readAllComparableHistory,
+  readAllHistory,
+  scanStorageKey,
+} from "./engine/history.js";
+import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
@@ -154,6 +160,16 @@ if (import.meta.env.DEV) {
   const preview = new URLSearchParams(location.search).get("preview");
   if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
     queueMicrotask(() => void openTrialFunnelPreview(preview !== "offer-minor", preview !== "funnel"));
+  }
+  // The dashboard is behind a sign-in, so the only way to look at it during
+  // development — or to drive its tabs in a browser check — was to hold a real
+  // account. Dev builds only: Vite folds import.meta.env.DEV to false for
+  // production, so this whole block is removed from the shipped bundle.
+  if (preview === "dash") {
+    activateScanOwner(null);
+    queueMicrotask(() =>
+      openDashboard({ onScan: () => {}, name: "Sam", membership: "member" }),
+    );
   }
 }
 
@@ -357,6 +373,51 @@ function syncLandingHistory(): void {
   landingHistory?.classList.toggle("hidden", !hasHistory());
 }
 syncLandingHistory();
+
+// The rotating headline. See ui/landingHeadline.ts for which lines exist and
+// why none of them claims a result.
+//
+// The counter is an unscoped key on purpose. It records how many times this
+// browser has opened the page and nothing else — no score, no identity, nothing
+// that would mean anything to a second person on the same device — so scoping
+// it per owner would buy no privacy and would instead restart the rotation
+// every time somebody signs in, which is the one moment the page most wants to
+// look like it has moved on.
+const VISIT_KEY = "truemax:landing-visits";
+
+function nextVisit(): number {
+  try {
+    const seen = Number(localStorage.getItem(VISIT_KEY) ?? 0);
+    const next = Number.isFinite(seen) ? Math.abs(Math.trunc(seen)) + 1 : 1;
+    localStorage.setItem(VISIT_KEY, String(next % 1000));
+    return next - 1; // this visit's index; a first-ever visit is 0
+  } catch {
+    return 0; // private mode, storage disabled — always the opening line
+  }
+}
+
+// Read once per page load, not per auth change: signing in should re-personalise
+// the current headline, not advance to the next one.
+const thisVisit = nextVisit();
+
+function syncLandingHeadline(name: string | null): void {
+  const h1 = document.querySelector<HTMLElement>("#v-upload h1");
+  if (!h1) return;
+  const scans = readAllComparableHistory();
+  const newest = scans[0]; // readAllComparableHistory hands them back newest first
+  const daysSinceLastScan = newest
+    ? Math.floor((Date.now() - new Date(newest.date).getTime()) / 86_400_000)
+    : null;
+  paintHeadline(
+    h1,
+    pickHeadline({
+      name,
+      scanCount: scans.length,
+      daysSinceLastScan: Number.isFinite(daysSinceLastScan!) ? daysSinceLastScan : null,
+      visit: thisVisit,
+    }),
+  );
+}
 landingHistory?.addEventListener("click", () => openHistory());
 
 // Accounts light up only when Supabase keys are set in the build environment.
@@ -427,15 +488,62 @@ function ensureSex(then: () => void): void {
 
 document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
+// The engine line speaks only when the wait belongs to the user.
+//
+// It used to say "ENGINE READY · 478-POINT MODEL LOADED" to everyone who
+// opened the page, which is a sentence for whoever built the thing rather than
+// whoever is using it: the point count is not a claim anyone outside can check,
+// and a model that has loaded asks nothing of them. Silence is the correct
+// report for a component that is working.
+//
+// Two cases are still worth a line, and both are the user's problem: a load
+// slow enough that an unlabelled pause reads as a broken page, and a load that
+// failed. The timer covers the first without putting a flash of copy on every
+// fast connection.
+const SLOW_ENGINE_MS = 2500;
+
+function showEngineNote(text: string, tone?: "error"): void {
+  el.engineStatus.textContent = text;
+  el.engineStatus.classList.remove("hidden");
+  if (tone) el.engineStatus.classList.add(tone);
+}
+
+function clearEngineNote(): void {
+  el.engineStatus.textContent = "";
+  el.engineStatus.classList.add("hidden");
+  el.engineStatus.classList.remove("error");
+}
+
+const slowEngineNote = window.setTimeout(
+  () => showEngineNote("LOADING ANALYSIS ENGINE · ONE MOMENT"),
+  SLOW_ENGINE_MS,
+);
+
+// The machine-readable half of the same fact, for the measurement tools in
+// tools/ that drive this page in a headless browser and have to know when the
+// landmarker is usable.
+//
+// They used to wait on `#engine-status.ready` — the class behind a line of
+// user-facing copy. Which meant the tools were coupled to a sentence, and
+// hiding that sentence silently broke twenty-one of them at once: every tool
+// sat at its selector until it timed out, with nothing in the failure naming
+// the real cause. A state attribute is not something anyone will delete for
+// being jargon, because it is not shown to anybody.
+function markEngine(state: "ready" | "failed"): void {
+  document.documentElement.dataset.engine = state;
+}
+
 initLandmarker()
   .then(() => {
-    el.engineStatus.textContent = "ENGINE READY · 478-POINT MODEL LOADED";
-    el.engineStatus.classList.add("ready");
+    window.clearTimeout(slowEngineNote);
+    clearEngineNote();
+    markEngine("ready");
   })
   .catch((err) => {
+    window.clearTimeout(slowEngineNote);
     console.error(err);
-    el.engineStatus.textContent = "ENGINE FAILED TO LOAD · REFRESH TO RETRY";
-    el.engineStatus.classList.add("error");
+    showEngineNote("ENGINE FAILED TO LOAD · REFRESH TO RETRY", "error");
+    markEngine("failed");
   });
 
 let filePickerGeneration = 0;
@@ -741,7 +849,7 @@ async function openCamera(): Promise<void> {
     window.addEventListener("keydown", frontKeyHandler);
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
-    // Headline and hints collapse so the preview can take the space — the
+    // Headline and sub collapse so the preview can take the space — the
     // camera becomes the subject the moment it is granted.
     el.upload.classList.add("camera-live");
     // Starts on the male silhouette and morphs once the shape vote settles —
@@ -759,8 +867,8 @@ async function openCamera(): Promise<void> {
     // Put the preview back at the top of the viewport.
     //
     // Nothing here calls scrollIntoView, and that is the point — the scroll is
-    // the browser's, not ours. The headline, the sub and the hints all collapse
-    // to max-height 0 the moment `camera-live` lands, which removes several
+    // the browser's, not ours. The headline and the sub both collapse to
+    // max-height 0 the moment `camera-live` lands, which removes several
     // hundred pixels from ABOVE the button somebody has just tapped. Scroll
     // anchoring then does exactly what it is designed to do and holds that
     // button where their thumb left it, which on a phone drags the camera up
@@ -939,12 +1047,12 @@ const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
 async function handleFile(file: File, expectedGeneration = scanGeneration): Promise<void> {
   if (expectedGeneration !== scanGeneration) return;
   if (!isReady()) {
-    el.engineStatus.textContent = "ENGINE STILL LOADING · ONE MOMENT";
+    showEngineNote("ENGINE STILL LOADING · ONE MOMENT");
     return;
   }
   const token = beginScan("upload");
   if (!token) {
-    el.engineStatus.textContent = "SESSION STILL LOADING · TRY AGAIN IN A MOMENT";
+    showEngineNote("SESSION STILL LOADING · TRY AGAIN IN A MOMENT");
     return;
   }
   const generation = ++scanGeneration;
@@ -955,8 +1063,7 @@ async function handleFile(file: File, expectedGeneration = scanGeneration): Prom
     image = await loadImage(file);
   } catch (err) {
     if (!scanIsCurrent(token, generation)) return;
-    el.engineStatus.textContent = (err as Error).message.toUpperCase();
-    el.engineStatus.classList.add("error");
+    showEngineNote((err as Error).message.toUpperCase(), "error");
     return;
   }
   if (!scanIsCurrent(token, generation)) return;
@@ -1856,6 +1963,11 @@ if (isAuthAvailable()) {
     }
     previousUserId = nextUserId;
     syncLandingHistory();
+    // Repainted here rather than at module load because both halves of the
+    // headline — the name and the scan history — only exist once the session
+    // has resolved. Until then the static markup stands, and the static markup
+    // is the visit-0 line, so there is no flash of a wrong headline.
+    syncLandingHeadline(user ? displayName(user) : null);
     void refreshHomeBrand(user);
     // A new account has answered nothing yet. Asking here — rather than at the
     // first moment the app needs a name or an age — means the questions arrive
@@ -1874,4 +1986,7 @@ if (isAuthAvailable()) {
   });
 } else {
   paintHomeBrand("guest");
+  // No-accounts build: nobody can ever be named, so the headline rotates
+  // through the signed-out set only.
+  syncLandingHeadline(null);
 }

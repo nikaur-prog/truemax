@@ -73,7 +73,7 @@ const rows = [];
 try {
   const page = await b.newPage();
   await page.goto("http://localhost:4394/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 60000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 60000 });
 
   for (const [name, sex] of REF) {
     let n = 0;

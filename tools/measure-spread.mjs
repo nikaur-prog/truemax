@@ -83,7 +83,7 @@ const all = [];
 try {
   const page = await b.newPage();
   await page.goto("http://localhost:4398/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 60000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 60000 });
 
   for (const person of WHO) {
     const files = commonsFiles(person.name);

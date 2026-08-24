@@ -26,7 +26,7 @@ const browser = await launchChromium();
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4188/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
 
   const spreads = [];
   for (const [person, files] of Object.entries(groups)) {

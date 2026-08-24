@@ -29,7 +29,7 @@ const rows = [];
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4207/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 60000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 60000 });
 
   for (const { name, sex, file } of FACES) {
     const url = `data:image/jpeg;base64,${readFileSync(file).toString("base64")}`;

@@ -1,3 +1,4 @@
+import { countUp } from "./countUp.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { copyDiagnostics } from "./diagnostics.js";
 import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring.js";
@@ -379,7 +380,7 @@ function showSideShallow(mode: AnalysisMode, report: Report): void {
   const lead = body().querySelector<HTMLElement>(".basic-n");
   if (lead) {
     const target = Number(lead.dataset.count);
-    if (Number.isFinite(target)) countUp(lead, target, Number(lead.dataset.decimals ?? "1"), 60);
+    if (Number.isFinite(target)) countUp(lead, target, { decimals: Number(lead.dataset.decimals ?? "1"), delay: 60 });
   }
 }
 
@@ -1044,7 +1045,7 @@ function animateOverview(root: HTMLElement): void {
     for (const number of item.querySelectorAll<HTMLElement>("[data-count]")) {
       const target = Number(number.dataset.count);
       const decimals = Number(number.dataset.decimals ?? "1");
-      if (Number.isFinite(target)) countUp(number, target, decimals, delay);
+      if (Number.isFinite(target)) countUp(number, target, { decimals, delay });
     }
     for (const bar of item.querySelectorAll<HTMLElement>(".pbar i")) {
       const finish = () => {
@@ -1056,30 +1057,6 @@ function animateOverview(root: HTMLElement): void {
   });
 }
 
-function countUp(el: HTMLElement, target: number, decimals: number, delay: number): void {
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  const finish = () => {
-    el.textContent = target.toFixed(decimals);
-  };
-  if (reduced) {
-    finish();
-    return;
-  }
-
-  const duration = 720;
-  setTimeout(() => {
-    const start = performance.now();
-    const step = (now: number) => {
-      if (!el.isConnected) return;
-      const progress = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      el.textContent = (target * eased).toFixed(decimals);
-      if (progress < 1) requestAnimationFrame(step);
-      else finish();
-    };
-    requestAnimationFrame(step);
-  }, delay);
-}
 
 // ---------------- region ----------------
 // A real, unreadable version of the panel behind the wall. Built from this
@@ -1477,7 +1454,7 @@ function showShallow(mode: AnalysisMode): void {
   const lead = body().querySelector<HTMLElement>(".basic-n");
   if (lead) {
     const target = Number(lead.dataset.count);
-    if (Number.isFinite(target)) countUp(lead, target, Number(lead.dataset.decimals ?? "1"), 60);
+    if (Number.isFinite(target)) countUp(lead, target, { decimals: Number(lead.dataset.decimals ?? "1"), delay: 60 });
   }
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());

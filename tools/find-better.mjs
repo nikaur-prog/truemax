@@ -44,7 +44,7 @@ const improved = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   await page.goto("http://localhost:4178/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
 
   for (const name of targets) {
     const sex = sexOf[name] ?? "male";
@@ -81,7 +81,7 @@ try {
         if (c < best.cost) best = { cost: c, scan: out, src: url };
       } catch {
         await page.reload();
-        await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+        await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
       }
     }
 

@@ -37,7 +37,7 @@ const browser = await chromium.launch({ executablePath: CHROME, headless: true }
 try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${PORT}/`);
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
 
   const scan = async (manifestName, outputName) => {
     // The photo archives are gitignored, so a fresh checkout has whichever

@@ -1,3 +1,4 @@
+import { countUp, prefersReducedMotion } from "./countUp.js";
 import { percentileLine } from "./templates.js";
 import { verdictFor } from "../engine/analysisMode.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
@@ -72,7 +73,7 @@ export function renderScoreStrip(report: Report): void {
 
   const number = strip.querySelector<HTMLElement>(".ss-n")!;
   const rank = strip.querySelector<HTMLElement>(".ss-rank")!;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const reduced = prefersReducedMotion();
 
   // percentileLine already contains the ranking; pairing it with rankShort
   // printed "Top 39% of men · Top 39%", which is the same fact stated twice.
@@ -81,7 +82,7 @@ export function renderScoreStrip(report: Report): void {
     number.textContent = report.overall.toFixed(1);
     rank.textContent = rankText;
   } else {
-    countTo(number, report.overall, 760);
+    countUp(number, report.overall, { duration: 760 });
     // The ranking starts typing as the count-up lands, so the two read as one
     // movement rather than as two animations competing for the same eye.
     typeInto(rank, rankText, 620);
@@ -90,20 +91,6 @@ export function renderScoreStrip(report: Report): void {
   detach = watchScroll(pane);
 }
 
-function countTo(el: HTMLElement, target: number, duration: number): void {
-  const start = performance.now();
-  const step = (now: number): void => {
-    if (!el.isConnected) return;
-    const p = Math.min(1, (now - start) / duration);
-    // Cubic ease-out: fast to roughly the right number, then settling, which
-    // is what makes a counter read as measurement rather than as a slot
-    // machine coming to rest.
-    el.textContent = (target * (1 - Math.pow(1 - p, 3))).toFixed(1);
-    if (p < 1) requestAnimationFrame(step);
-    else el.textContent = target.toFixed(1);
-  };
-  requestAnimationFrame(step);
-}
 
 function typeInto(el: HTMLElement, text: string, delay: number): void {
   // The height is claimed before the first character so the strip does not

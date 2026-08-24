@@ -45,7 +45,7 @@ const top = { male: [], female: [] };
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4190/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
 
   const collect = async (list, bucket, filterTopTier) => {
     for (const row of list) {

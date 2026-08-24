@@ -45,7 +45,7 @@ let result;
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4247/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 90000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 90000 });
 
   result = await page.evaluate(
     async ([imgs, target]) => {
