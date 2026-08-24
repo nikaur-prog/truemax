@@ -77,6 +77,13 @@ function traitOf(id: string): string {
   return TRAITS[id] ?? "a measured proportion of the face";
 }
 
+// The detail view opens one measurement at a time and leads with what it IS,
+// so the trait phrases get a public door. Same fallback, same guarantee: no
+// metric id can ever put the word "undefined" on the page.
+export function metricTrait(id: string): string {
+  return traitOf(id);
+}
+
 // "About 100% of faces score higher" is not a measurement, it is a rounding
 // artefact. The reference set is a sample: it cannot establish that literally
 // every face scores higher, and a round 100 reads as a verdict rather than as

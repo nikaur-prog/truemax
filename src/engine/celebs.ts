@@ -237,6 +237,17 @@ export const CELEBS: CelebEntry[] = [
     metrics: { canthalTilt: 0.72, eyeAspectRatio: 0.395, eyeSeparationRatio: 0.4943, intercanthalEyeWidth: 1.268, browPosition: 0.4199, browTilt: 0.65, fwhr: 1.839, midfaceRatio: 0.995, cheekboneHeight: 0.124, jawCheekRatio: 0.9955, gonialProxy: 144.69, jawFrontalAngle: 98.58, chinHeightRatio: 0.646, philtrumChinRatio: 2.843, chinWidthRatio: 0.521, lowerFacePct: 48.93, noseMouthRatio: 0.774, noseIntercanthal: 1.085, nasalIndex: 0.765, lipRatio: 1.571, mouthIPD: 0.785, lipHeightLowerThird: 32.46, mouthCornerTilt: 8.77, topThirdEst: 15.11, middleLowerBalance: 1.044, fifthsEyeRatio: 0.2182, facialIndex: 1.282, mirrorDeviation: 9.8, canthalAsymmetry: 1.85, eyeMouthParallel: 0.7, midlineDeviation: 1.69 } },
 ];
 
+/**
+ * The percentile a measurement must reach before a comparison is offered.
+ *
+ * Exported because the UI has to STATE this rule, and stating it from memory
+ * is how the detail view came to promise "at or above average" over a matcher
+ * that actually admits the 40th percentile — a reader in that gap saw a
+ * "Bottom 45%" chip beside a tab full of matches whose stated precondition
+ * they did not meet.
+ */
+export const CELEB_MATCH_MIN_PCT = 40;
+
 export interface CelebMatch {
   name: string;
   metricName: string;
@@ -255,7 +266,7 @@ export function regionMatches(
 ): CelebMatch[] {
   const pool = CELEBS.filter((c) => c.sex === sex);
   const eligible = userMetrics.filter(
-    (m) => m.def.region === region && m.percentile >= 40,
+    (m) => m.def.region === region && m.percentile >= CELEB_MATCH_MIN_PCT,
   );
   if (!pool.length || !eligible.length) return [];
 

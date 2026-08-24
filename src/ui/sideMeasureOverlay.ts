@@ -1,6 +1,7 @@
 import type { Pt } from "../engine/geometry.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import type { ScoredMetric } from "../engine/types.js";
+import { compositeDeparting, snapshotIfMatching } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 
 // ---------------------------------------------------------------------------
@@ -177,16 +178,64 @@ export function animateSideMeasurement(
   h: number,
   metric: ScoredMetric,
 ): OverlayFade {
+  // The departing figure dissolves under the arriving one — same reasoning and
+  // same helpers as animateMeasurement in measureOverlay.ts.
+  const from = snapshotIfMatching(canvas, w, h);
   let raf = 0;
   let start = 0;
   const frame = (now: number) => {
     if (!start) start = now;
     const t = Math.min(1, (now - start) / DRAW_MS);
     drawSideMeasurement(canvas, points, w, h, metric, t);
+    compositeDeparting(canvas, from, t);
     if (t < 1) raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
   return { cancel: () => cancelAnimationFrame(raf) };
+}
+
+/**
+ * The normalized box a side metric's construction occupies on its photograph,
+ * so a zoom can frame the actual measurement rather than a region guess. Same
+ * job as measurementBounds() for the front; undefined when there is no recipe.
+ */
+export function sideMeasurementBounds(
+  metric: ScoredMetric,
+  points: SidePoints,
+  w: number,
+  h: number,
+): { x0: number; y0: number; x1: number; y1: number } | undefined {
+  const recipe = RECIPES[metric.def.id];
+  if (!recipe || !w || !h) return undefined;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  const add = (p: Pt) => {
+    x0 = Math.min(x0, p.x / w);
+    y0 = Math.min(y0, p.y / h);
+    x1 = Math.max(x1, p.x / w);
+    y1 = Math.max(y1, p.y / h);
+  };
+  for (const prim of recipe(points, metric, h)) {
+    if (prim.kind === "span") {
+      add(prim.a);
+      add(prim.b);
+    } else if (prim.kind === "angle") {
+      add(prim.v);
+      add(prim.a);
+      add(prim.b);
+    } else if (prim.kind === "drop") {
+      add(prim.p);
+      add(prim.la);
+      add(prim.lb);
+    } else {
+      add(prim.a);
+      add(prim.b);
+      add(prim.through);
+    }
+  }
+  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : undefined;
 }
 
 // --- drawing primitives (pixel space) --------------------------------------
