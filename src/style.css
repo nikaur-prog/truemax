@@ -1907,9 +1907,76 @@ body.funnel-open { overflow: hidden; }
 .hist-note { margin: 6px 0 18px; }
 .hist-foot { margin-top: 16px; }
 .hist-list { display: flex; flex-direction: column; }
+/* A button now — each row reopens the scan it names. It carries no button
+   chrome because it is a row in a list, not a control in a form; the chevron
+   and the hover are what say it is pressable. */
 .hist-row {
-  display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 1fr auto auto auto auto; align-items: center; gap: 12px;
   padding: 11px 2px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0;
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background 0.12s ease;
+}
+.hist-row:hover { background: rgba(0, 0, 0, 0.028); }
+.hist-go { color: var(--mut, #6b7280); font-size: 17px; line-height: 1; }
+.hist-row:hover .hist-go { color: var(--acc, #107a57); }
+
+/* The recalled scan. It reuses .hist-overlay for the scrim and .hist-panel for
+   the card, so it lands the same way the history list does. */
+.recall-panel { max-width: 620px; }
+.recall-when {
+  display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--mut, #6b7280); margin-bottom: 10px;
+}
+.recall-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.recall-score {
+  font-family: var(--serif); font-weight: 300; font-size: 46px; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.recall-score small { font-size: 0.3em; color: var(--mut, #6b7280); margin-left: 2px; }
+.recall-rank {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--acc, #107a57);
+  background: var(--acc-soft); padding: 4px 9px; border-radius: 999px;
+}
+.recall-shots { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.recall-shot { margin: 0; }
+.recall-shot img {
+  display: block; width: clamp(84px, 24vw, 120px); aspect-ratio: 1 / 1.2;
+  object-fit: cover; border-radius: 12px; border: 1px solid var(--line);
+}
+.recall-shot figcaption {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  color: var(--mut, #6b7280); margin-top: 5px;
+}
+.recall-note { font-size: 12.5px; line-height: 1.55; color: var(--mut, #6b7280); margin: 12px 0 0; }
+.recall-old { background: var(--soft); border-radius: 12px; padding: 12px 14px; }
+.recall-foot { margin-top: 18px; }
+
+.recall-pillars { display: flex; gap: 10px; margin: 18px 0 6px; flex-wrap: wrap; }
+.recall-pillar { flex: 1 1 90px; }
+.recall-pillar b { display: block; font-family: var(--serif); font-weight: 300; font-size: 24px; }
+.recall-pillar span {
+  display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.12em;
+  color: var(--mut, #6b7280); margin-bottom: 5px;
+}
+.recall-pillar i { display: block; height: 3px; background: var(--line); border-radius: 99px; }
+.recall-pillar em { display: block; height: 3px; background: var(--acc); border-radius: 99px; }
+
+/* Same 0-10 axis and the same average tick as the dashboard, because rescaling
+   an axis until differences look bigger is the thing this product does not do. */
+.recall-bars { margin-top: 18px; display: grid; gap: 7px; }
+.recall-bar { display: grid; grid-template-columns: 84px 1fr 34px; align-items: center; gap: 10px; }
+.recall-bar span { font-size: 12.5px; color: var(--mut, #6b7280); }
+.recall-bar i {
+  position: relative; display: block; height: 6px; border-radius: 99px; background: var(--soft);
+}
+.recall-bar i b { display: block; height: 100%; border-radius: 99px; background: var(--acc); }
+.recall-bar i::after {
+  content: ""; position: absolute; top: -3px; bottom: -3px; left: var(--avg, 50%);
+  width: 1px; background: var(--mut, #6b7280); opacity: 0.5;
+}
+.recall-bar em {
+  font-style: normal; font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right;
 }
 .hist-date { color: var(--mut, #6b7280); font-size: 13px; }
 .hist-score { font-variant-numeric: tabular-nums; font-size: 17px; }

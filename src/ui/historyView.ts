@@ -1,6 +1,7 @@
 import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory } from "../engine/history.js";
 import type { StoredScan } from "../engine/history.js";
 import { clearAllPhotos } from "../engine/photoStore.js";
+import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
 
 // ---------------------------------------------------------------------------
 // The history view: every scan owned by the active device-local identity, as a
@@ -91,12 +92,16 @@ function rows(scans: StoredScan[]): string {
           : Math.abs(d) < NOISE_SD
             ? `<span class="hist-chip flat">${d >= 0 ? "+" : ""}${d.toFixed(1)} · within noise</span>`
             : `<span class="hist-chip ${d > 0 ? "up" : "down"}">${d >= 0 ? "+" : ""}${d.toFixed(1)}</span>`;
-      return `<div class="hist-row">
+      // A button, because it opens the scan. It was a div for as long as the
+      // list was read-only, and a row of numbers you cannot press is where a
+      // history stops being a record and becomes a chart legend.
+      return `<button type="button" class="hist-row" data-recall="${i}">
         <span class="hist-date">${fmtDate(s.date)}</span>
         <span class="hist-score">${s.overall.toFixed(1)}<small>/10</small></span>
         ${chip}
         <span class="hist-sex">${s.sex === "male" ? "vs men" : "vs women"}</span>
-      </div>`;
+        <span class="hist-go" aria-hidden="true">›</span>
+      </button>`;
     })
     .join("");
 }
@@ -168,6 +173,18 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
 // Anything stored has to be removable. The numbers stay — they are what the
 // trend is made of, and they are not the sensitive part.
 export function wireHistoryPanel(root: ParentNode): void {
+  // Rows reopen the scan they name. The index is into the same newest-first
+  // array the markup was built from, so the row and its predecessor — the one
+  // its movement chip is measured against — are both to hand.
+  const scans = readAllComparableHistory();
+  for (const row of root.querySelectorAll<HTMLElement>("[data-recall]")) {
+    row.onclick = () => {
+      const i = Number(row.dataset.recall);
+      const scan = scans[i];
+      if (scan) openScanRecall(scan, scans[i + 1]);
+    };
+  }
+
   const clearBtn = root.querySelector<HTMLButtonElement>("#hist-clear-photos");
   if (!clearBtn) return;
   let armed = false;
@@ -200,7 +217,11 @@ export function openHistory(): void {
     }
   }
   function esc(ev: KeyboardEvent): void {
-    if (ev.key === "Escape") close();
+    // A recalled scan opens ON TOP of this list, and both listen on document,
+    // so one Escape used to close both — you pressed it to leave the scan and
+    // landed back on the dashboard instead of on the list you came from.
+    // Escape closes the topmost thing only.
+    if (ev.key === "Escape" && !isScanRecallOpen()) close();
   }
   activeHistoryCleanup = close;
   wrap.addEventListener("click", (e) => {

@@ -24,6 +24,26 @@ export interface StoredScan {
   // Missing means the scan predates score calibration versioning. Scores from
   // different versions must never be joined into one trend or delta.
   scoreVersion?: number;
+
+  // Enough to REOPEN a scan rather than only chart it.
+  //
+  // The row used to carry the overall and the per-region scores and nothing
+  // else, which is all a trend line needs and nowhere near enough to show
+  // somebody the scan again: no percentile, so no curve and no standing; no
+  // pillars, so no breakdown. Reopening an old scan could only ever have shown
+  // the number it already showed in the list.
+  //
+  // These four are the smallest addition that makes a past scan re-readable.
+  // Deliberately NOT the full metric array — that is roughly forty objects per
+  // scan against a 120-entry cap in localStorage, and the drill-down it would
+  // buy needs landmarks and a photograph the store does not keep anyway.
+  //
+  // All optional, because every scan already on a device predates them. Anything
+  // reading these must handle their absence rather than assume a fresh install.
+  overallPercentile?: number;
+  pillars?: Partial<Record<string, number>>;
+  regionPercentiles?: Partial<Record<RegionId, number>>;
+  potential?: number;
 }
 
 export interface ScanDelta {
@@ -166,6 +186,10 @@ export function compareAndStore(report: Report, scanId = createScanId()): ScanDe
     overall: report.overall,
     regions: Object.fromEntries(report.regions.map((r) => [r.region, r.score])),
     scoreVersion: CURRENT_SCORE_VERSION,
+    overallPercentile: report.overallPercentile,
+    pillars: { ...report.pillars },
+    regionPercentiles: Object.fromEntries(report.regions.map((r) => [r.region, r.percentile])),
+    potential: report.potential,
   };
   // Average is taken over PRIOR scans, before this one is appended, so a fresh
   // scan is compared to where the face usually lands rather than to itself.
