@@ -2651,7 +2651,11 @@ body.auth-modal-open { overflow: hidden; }
    character whose body language contradicts his face is worse than one with
    no body language at all. */
 .mx-mood-excited .mx-bob { animation-duration: 1.5s; }
-.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out 3; }
+/* The excited arrival wave used to run at 0.55s three times over, which is a
+   flap — and being mood-scoped it quietly overrode the slow wave everywhere
+   Max is excited, which is most of a results screen. Same motion, same speed
+   as every other wave he does. */
+.mx-mood-excited .mx-arm { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 2; }
 .mx-mood-concerned .mx-bob { animation-duration: 5s; }
 .mx-mood-thinking .mx-pupils { animation: mx-ponder 4s ease-in-out infinite; }
 @keyframes mx-ponder { 0%, 100% { transform: translate(-2px, -2.4px); } 50% { transform: translate(-3px, -1px); } }
@@ -2748,8 +2752,18 @@ body.auth-modal-open { overflow: hidden; }
    So he waves on arrival, twice, and then puts his hand down for good. After
    that the wave is a RESPONSE — hover him and he waves back once. */
 .mx-arm { transform-origin: 118px 94px; }
-.mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 2; }
-.mx-svg:hover .mx-arm { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
+.mx-arm.waving { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 2; }
+/* Hovering ANY of his surfaces waves, not just the drawing itself. He is
+   usually a 34px face beside a paragraph, so requiring the pointer to land on
+   the SVG's own box meant the greeting almost never fired — the thing people
+   actually point at is the card or the button he sits in. */
+.mx-svg:hover .mx-arm,
+.maxan:hover .mx-arm,
+.maxread:hover .mx-arm,
+.maxchat-head:hover .mx-arm,
+.max-pop:hover .mx-arm,
+.askmax:hover .mx-arm,
+[data-max-wave]:hover .mx-arm { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 1; }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves
    against the VIEW-BOX, so "center top" was the top of his skull and every
@@ -2777,19 +2791,43 @@ body.auth-modal-open { overflow: hidden; }
    three times, and goes back DOWN. Both ends sit at zero rotation, which is the
    hanging pose the path is drawn in, so the animation cannot leave him with an
    arm stuck in the air however it is interrupted. */
+/* A slow, whole-arm wave rather than a fast flap.
+   The old one snapped to -116deg in 16% of a 1.9s cycle and then oscillated
+   six times, which at that speed is a flap — the motion of a hand shaken from
+   the wrist. A wave people read as a greeting comes from the shoulder: the arm
+   RISES, holds, sways twice, and is lowered deliberately. The translate is the
+   shoulder lifting with it; without it the arm pivots on a joint that stays
+   pinned and the whole thing reads as mechanical. */
 @keyframes mx-wave {
-  0% { transform: rotate(0); }
-  16% { transform: rotate(-116deg); }
-  30% { transform: rotate(-140deg); }
-  44% { transform: rotate(-106deg); }
-  58% { transform: rotate(-140deg); }
-  72% { transform: rotate(-108deg); }
-  84% { transform: rotate(-128deg); }
-  100% { transform: rotate(0); }
+  0% { transform: translate(0, 0) rotate(0); }
+  22% { transform: translate(1px, -5px) rotate(-124deg); }
+  38% { transform: translate(1px, -6px) rotate(-142deg); }
+  54% { transform: translate(1px, -5px) rotate(-116deg); }
+  70% { transform: translate(1px, -6px) rotate(-140deg); }
+  84% { transform: translate(1px, -4px) rotate(-120deg); }
+  100% { transform: translate(0, 0) rotate(0); }
 }
 /* Long rest, one small twitch: the idle version, and nothing like a full wave.
    An arm that lifts to shoulder height every six seconds unprompted is a tic. */
 @keyframes mx-wave-idle { 0%, 88%, 100% { transform: rotate(0); } 93% { transform: rotate(-14deg); } }
+/* He blinks in the excited expression too.
+   The star eyes replace the light bars, and the eyelids are hidden with them —
+   so in the one mood he wears most often on a results screen he was a face
+   that never blinked, which is what makes a character read as a graphic
+   instead of as someone in the room. Stars cannot have a lid drawn over them
+   without looking like a shutter, so the blink is the stars themselves
+   squashing shut on the same 5.2s cycle as the real lids. */
+.mx-mood-excited .mx-eye-stars {
+  transform-box: fill-box; transform-origin: center;
+  animation: mx-star-blink 5.2s ease-in-out infinite;
+}
+@keyframes mx-star-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95%, 97% { transform: scaleY(0.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mx-mood-excited .mx-eye-stars { animation: none; }
+}
 @keyframes mx-blink { 0%, 92%, 100% { transform: scaleY(0); } 95%, 97% { transform: scaleY(1); } }
 @keyframes mx-glance { 0%, 62%, 100% { transform: translateX(0); } 70%, 80% { transform: translateX(-3.4px); } }
 @keyframes mx-twinkle { 0%, 100% { opacity: 0; transform: scale(.4); } 45% { opacity: 1; transform: scale(1); } }
