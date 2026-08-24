@@ -2564,6 +2564,29 @@ body.auth-modal-open { overflow: hidden; }
   color: #8ff3e0; font: 7.5px var(--mono); letter-spacing: .16em; cursor: pointer;
 }
 .sref-show:hover { border-color: #8ff3e0; }
+/* Retake, on the photograph, opposite the guide. See retakeGlyph.ts for why it
+   is here rather than in the row of buttons underneath. */
+.retake-glyph {
+  position: absolute; right: 10px; bottom: 10px; z-index: 3;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 11px 6px 9px; border: 1px solid rgba(255,255,255,.28);
+  border-radius: 999px; background: rgba(12,20,18,.62); backdrop-filter: blur(8px);
+  color: #8ff3e0; cursor: pointer; line-height: 1;
+  transition: border-color .2s, transform .2s;
+}
+.retake-glyph span { font: 7.5px var(--mono); letter-spacing: .16em; }
+.retake-glyph:hover { border-color: #8ff3e0; transform: scale(1.04); }
+.retake-glyph svg { transition: transform .3s ease; }
+.retake-glyph:hover svg { transform: rotate(-90deg); }
+/* A full revolution on press, so the tap is acknowledged before the screen
+   changes under it. */
+.retake-glyph.spun svg { animation: retake-spin .55s cubic-bezier(.4,0,.2,1); }
+@keyframes retake-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .retake-glyph:hover { transform: none; }
+  .retake-glyph:hover svg, .retake-glyph.spun svg { animation: none; transform: none; }
+}
+
 .sref-outline { fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; opacity: .75; }
 .sref-dot { fill: none; stroke: currentColor; stroke-width: 1.6; }
 
@@ -4151,8 +4174,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 #side-actions.guided-row .btn { flex: 0 0 auto; width: auto; min-width: 0; }
 #side-actions.guided-row #side-gback { padding: 11px 0; min-width: 46px; }
 #side-actions.guided-row .side-gcount { flex: 1 1 auto; text-align: center; }
-#side-actions.guided-row #side-gall,
-#side-actions.guided-row #side-gretake {
+#side-actions.guided-row #side-gall {
   background: transparent; border: 1px solid var(--line); color: var(--mut);
   padding: 11px 14px; font-size: 13px; font-weight: 500;
 }

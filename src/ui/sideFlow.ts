@@ -9,6 +9,8 @@ import { mountVerifier, seedSidePoints } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
+import { mountRetakeGlyph } from "./retakeGlyph.js";
+import type { RetakeHandle } from "./retakeGlyph.js";
 import type { VerifyHandle } from "./sideVerify.js";
 import {
   cloneSidePoints,
@@ -95,6 +97,7 @@ interface SidePlacementSeed {
 
 let verifier: VerifyHandle | null = null;
 let reference: ReferenceHandle | null = null;
+let retake: RetakeHandle | null = null;
 let sideCam: CameraHandle | null = null;
 let auto: AutoCapture | null = null;
 let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -149,6 +152,9 @@ export function openSideCapture(ctx: SideCtx): void {
   // Or the guide badge stays pinned over the live camera preview.
   reference?.destroy();
   reference = null;
+  // Same for retake: it acts on a photograph, and there is not one yet.
+  retake?.destroy();
+  retake = null;
   markSideOpen(true);
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
@@ -413,6 +419,8 @@ export function close(): void {
   verifier = null;
   reference?.destroy();
   reference = null;
+  retake?.destroy();
+  retake = null;
   if (sidePaste) {
     document.removeEventListener("paste", sidePaste);
     sidePaste = null;
@@ -545,6 +553,12 @@ function mountVerify(
   // wrong way is harder to read than none.
   reference?.destroy();
   reference = mountSideReference(e.frame, seed.faceDir);
+  // And the way back out, in the opposite corner. Mounted once here rather
+  // than per step, so it is the same control in the same place whether you are
+  // thirteen taps into the walkthrough or looking at the whole set at once —
+  // which is the point of moving it out of the button rows below.
+  retake?.destroy();
+  retake = mountRetakeGlyph(e.frame, "Retake this photo", () => openSideCapture(ctx));
   drawGuides(e.lines, seed.points, w, h);
 
   // Whether the person told us the placement was wrong, and what they said to
@@ -647,18 +661,17 @@ function mountVerify(
     // more, so this row must not stretch two buttons to full width to fill the
     // gap it left.
     e.actions.classList.add("guided-row");
-    // Retake belongs here too. It was only in the review row, so anyone who
-    // noticed their photo was wrong DURING the walkthrough — which is exactly
-    // when you notice, because you are staring at it thirteen times — had no
-    // way out except finishing all thirteen points on a picture they were
-    // about to discard.
+    // Retake is not here. It was added to this row for a real reason — anyone
+    // who noticed their photo was wrong DURING the walkthrough, which is
+    // exactly when you notice, had no way out except finishing thirteen points
+    // on a picture they were about to discard — but a word in a row of words
+    // was the wrong shape for it. It is on the photograph now, bottom right,
+    // for the whole of both steps. See retakeGlyph.ts.
     e.actions.innerHTML = `
       <button class="btn gho" id="side-gback" type="button" aria-label="Previous point">‹</button>
       <span class="side-gcount" id="side-gcount"></span>
-      <button class="btn cancel" id="side-gretake" type="button">Retake</button>
       <button class="btn cancel" id="side-gall" type="button">All points at once</button>`;
     document.getElementById("side-gback")!.onclick = () => verifier?.guidedBack();
-    document.getElementById("side-gretake")!.onclick = () => openSideCapture(ctx);
     document.getElementById("side-gall")!.onclick = () => {
       inFrame.remove();
       verifier?.endGuided();
@@ -695,7 +708,6 @@ function mountVerify(
           <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
         </svg>
       </button>
-      <button class="btn gho" id="side-back">Retake picture</button>
       <button class="btn gho" id="side-guided">One by one</button>
       <button class="btn gho" id="side-wrong">Points are wrong</button>
       <button class="btn pri" id="side-go">Confirm</button>`;
@@ -704,7 +716,6 @@ function mountVerify(
       drawGuides(e.lines, automaticPoints, w, h);
     };
     document.getElementById("side-guided")!.onclick = () => showGuidedActions();
-    document.getElementById("side-back")!.onclick = () => openSideCapture(ctx);
     document.getElementById("side-go")!.onclick = () => void confirmPlacement();
     document.getElementById("side-wrong")!.onclick = async () => {
       // The complaint is the moment to ask, because the complaint is the
