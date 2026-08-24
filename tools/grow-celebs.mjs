@@ -208,8 +208,16 @@ const lines = added
   )
   .join("\n");
 
+// Anchored on the array's own terminator rather than on whatever declaration
+// happens to follow it. The first version keyed off "export interface
+// CelebMatch" coming next, and the moment an unrelated constant was added
+// between the two it refused to write — correctly, but for a reason that had
+// nothing to do with the array. The `];` at column zero after the CELEBS
+// declaration is the thing that is actually structural.
 const src = readFileSync(DB, "utf8");
-const marker = "\n];\n\nexport interface CelebMatch";
-if (!src.includes(marker)) throw new Error("celebs.ts no longer ends the array where this expects");
-writeFileSync(DB, src.replace(marker, `\n${lines}\n];\n\nexport interface CelebMatch`));
+const declAt = src.indexOf("export const CELEBS: CelebEntry[] = [");
+if (declAt < 0) throw new Error("celebs.ts no longer declares CELEBS where this expects");
+const endAt = src.indexOf("\n];", declAt);
+if (endAt < 0) throw new Error("could not find the end of the CELEBS array");
+writeFileSync(DB, `${src.slice(0, endAt)}\n${lines}${src.slice(endAt)}`);
 console.log(`\nAppended ${added.length} entries to src/engine/celebs.ts`);

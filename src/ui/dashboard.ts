@@ -1,4 +1,4 @@
-import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
+import { DISPLAY_NOISE, ownScans, readAllHistory, readOwnComparableHistory, scanStorageKey } from "../engine/history.js";
 import { followUp, regionNote } from "../engine/followUp.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
@@ -129,8 +129,10 @@ export function openDashboard(opts: {
   // different headline and a different quote rather than the same pair all day.
   nextVisit();
   const allScans = readAllHistory();
-  const scans = readAllComparableHistory();
-  const streak = computeStreak(allScans);
+  // Progress is the owner's own face. A friend who borrows the phone must not
+  // extend the owner's streak or bend their trend — see StoredScan.subject.
+  const scans = readOwnComparableHistory();
+  const streak = computeStreak(ownScans(allScans));
   const ctx = { name: opts.name ?? null, streak };
   const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
   overlay = document.createElement("div");

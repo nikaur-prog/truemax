@@ -1,4 +1,4 @@
-import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
+import { DISPLAY_NOISE, ownScans, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
 import type { StoredScan } from "../engine/history.js";
 import { clearAllPhotos, loadPhotos } from "../engine/photoStore.js";
 import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
@@ -129,7 +129,7 @@ function rows(scans: StoredScan[]): string {
         <span class="hist-date">${fmtDate(s.date)}</span>
         <span class="hist-score">${s.overall.toFixed(1)}<small>/10</small></span>
         ${chip}
-        <span class="hist-sex">${s.sex === "male" ? "vs men" : "vs women"}</span>
+        <span class="hist-sex">${s.subject ? `${escapeAttr(s.subject.name)} · ` : ""}${s.sex === "male" ? "vs men" : "vs women"}</span>
         <span class="hist-go" aria-hidden="true">›</span>
       </button>`;
     })
@@ -178,21 +178,28 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
     </div>`;
   }
 
-  const avg = mean(scans.map((s) => s.overall));
-  const best = Math.max(...scans.map((s) => s.overall));
+  // The chart, the average and the best are about the owner. The LIST below
+  // shows every scan taken on this device, guests included and labelled —
+  // hiding them would make four results vanish for somebody who deliberately
+  // scanned four friends.
+  const mine = ownScans(scans);
+  const guests = scans.length - mine.length;
+  const avg = mean(mine.map((s) => s.overall));
+  const best = mine.length ? Math.max(...mine.map((s) => s.overall)) : 0;
   return `<div class="hist-panel">
     ${close}
     <h2>Your scans</h2>
     <div class="hist-stats">
-      <div><b>${scans.length}</b><span>SCANS</span></div>
-      <div><b>${avg.toFixed(1)}</b><span>YOUR AVERAGE</span></div>
-      <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
+      <div><b>${mine.length}</b><span>YOUR SCANS</span></div>
+      <div><b>${mine.length ? avg.toFixed(1) : "—"}</b><span>YOUR AVERAGE</span></div>
+      <div><b>${mine.length ? best.toFixed(1) : "—"}</b><span>BEST</span></div>
     </div>
-    ${scans.length >= 2 ? trendSVG(scans) : ""}
+    ${mine.length >= 2 ? trendSVG(mine) : ""}
     <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.
       A dot inside it has not really moved — same face, different photo. Only dots clear of the
       band are a change worth reading.</p>
     ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
+    ${guests ? `<p class="hist-note">${guests} scan${guests === 1 ? " was" : "s were"} taken of someone else on this device. ${guests === 1 ? "It is" : "They are"} listed below but left out of your chart, your average and your streak.</p>` : ""}
     <div class="hist-list">${rows(scans)}</div>
     <p class="hist-foot">Stored on this device only for this profile: numbers and a thumbnail of each photo.
       Nothing here was ever uploaded, and clearing your browser data clears it.

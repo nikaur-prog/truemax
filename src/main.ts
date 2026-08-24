@@ -9,8 +9,8 @@ import { POSE_CALIBRATION, buildGeometry, landmarkIntegrityIssues } from "./engi
 import { extractShape, shapeSubset } from "./engine/shape.js";
 import {
   compareAndStore,
-  readAllComparableHistory,
   readAllHistory,
+  readOwnComparableHistory,
   scanStorageKey,
 } from "./engine/history.js";
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
@@ -50,6 +50,8 @@ import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js"
 import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.js";
 import { openSexChooser } from "./ui/sexChooser.js";
+import { openSubjectChooser } from "./ui/subjectChooser.js";
+import { loadProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
@@ -240,6 +242,9 @@ function setCameraLabel(text: string): void {
 }
 
 let selectedSex: Sex = storedSex() ?? "male";
+// Set when the current scan is of somebody other than the account holder, and
+// carried through to the stored row so progress can exclude it.
+let scanSubject: { name: string } | null = null;
 // Whether the reference population is a real choice yet, or still the silent
 // default. A face app is used mostly by young men, so "male" is the right
 // default to compute against — but computing a man a percentile "of women"
@@ -465,8 +470,10 @@ const thisVisit = nextVisit();
 function syncLandingHeadline(name: string | null): void {
   const h1 = document.querySelector<HTMLElement>("#v-upload h1");
   if (!h1) return;
-  const scans = readAllComparableHistory();
-  const newest = scans[0]; // readAllComparableHistory hands them back newest first
+  // The headline counts YOUR scans and dates YOUR last one. Scans taken of
+  // other people on this phone are records, not progress.
+  const scans = readOwnComparableHistory();
+  const newest = scans[0]; // handed back newest first
   const daysSinceLastScan = newest
     ? Math.floor((Date.now() - new Date(newest.date).getTime()) / 86_400_000)
     : null;
@@ -534,18 +541,66 @@ paintRefPop();
 // photographs; the previous answer is highlighted so the owner's repeat scans
 // are a single confirm. The stored choice still seeds the results-screen
 // toggle and the guide, it just no longer answers for the next face.
+// Who is being scanned, and only then which population to score against.
+//
+// A signed-in member is asked "is this you?" first, and answering "me" ends the
+// questions: the account already knows its own reference population from the
+// signup quiz, so a person scanning their own face walks straight to the
+// camera. That is the reward for answering once.
+//
+// "Someone else" collects a label for the scan and asks the population question
+// about THEM — and flags the scan so it stays off the owner's chart, average,
+// streak and everything Max says about their progress. See StoredScan.subject.
+//
+// A signed-out visitor skips the whole thing. There is no "you" to compare
+// against without an account, so the question would be one more screen between
+// a stranger and their first result.
 function ensureSex(then: () => void): void {
-  openSexChooser(
-    (sex) => {
-      selectedSex = sex;
-      sexChosen = true;
-      storeSex(sex);
-      paintRefPop();
-      showGuide(sex);
-      then();
-    },
-    storedSex() ?? undefined,
-  );
+  const askPopulation = (preselect: Sex | undefined, subject: { name: string } | null) => {
+    openSexChooser(
+      (sex) => {
+        selectedSex = sex;
+        sexChosen = true;
+        scanSubject = subject;
+        // A guest's answer is about the guest, so it must not overwrite the
+        // owner's remembered population.
+        if (!subject) storeSex(sex);
+        paintRefPop();
+        showGuide(sex);
+        then();
+      },
+      preselect,
+      undefined,
+      subject?.name,
+    );
+  };
+
+  const profile = loadProfile();
+  const member = document.body.classList.contains("is-member");
+  if (!member) {
+    askPopulation(storedSex() ?? undefined, null);
+    return;
+  }
+
+  openSubjectChooser((answer) => {
+    if (answer.self) {
+      const own = profile.sex ?? storedSex();
+      // Only skip the question when the account can actually answer it.
+      if (own) {
+        selectedSex = own;
+        sexChosen = true;
+        scanSubject = null;
+        storeSex(own);
+        paintRefPop();
+        showGuide(own);
+        then();
+        return;
+      }
+      askPopulation(undefined, null);
+      return;
+    }
+    askPopulation(undefined, { name: answer.subject.name });
+  });
 }
 
 
@@ -1071,6 +1126,7 @@ function resetToUpload(): void {
   pending = null;
   lastSide = null;
   captureMethod = null;
+  scanSubject = null;
   feedbackInFlight = null;
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
@@ -1500,7 +1556,7 @@ async function runFullAnalysis(
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
-  const delta = compareAndStore(report, token.scanId);
+  const delta = compareAndStore(report, token.scanId, scanSubject ?? undefined);
   // The weekly free-scan clock starts when an analysis finishes, not when a
   // photo is chosen — an abandoned capture must not cost the week's scan.
   recordScanRun();
@@ -1646,7 +1702,7 @@ async function runFullAnalysis(
       const f = analyze(landmarks, width, height, sex, frontShot);
       const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
       const merged = mergeReports(f, sd);
-      const rescoredDelta = compareAndStore(merged, token.scanId);
+      const rescoredDelta = compareAndStore(merged, token.scanId, scanSubject ?? undefined);
       renderQualityChips(quality, `Scored against ${sex} norms`);
       renderResults({ ...ctxArgs, report: merged, delta: rescoredDelta });
     },

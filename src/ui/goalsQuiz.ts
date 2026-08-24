@@ -1,6 +1,7 @@
 import { GOALS, QUIET_TOPICS, SKIN_CONCERNS, loadProfile, saveProfile } from "../engine/goals.js";
 import type { AdviceChannel, Profile } from "../engine/goals.js";
 import type { RegionId } from "../engine/types.js";
+import { ETHNICITY_OPTIONS } from "./subjectChooser.js";
 
 // ---------------------------------------------------------------------------
 // The quiz, split by moment.
@@ -163,10 +164,41 @@ const ENDGOAL_STEP: Step = {
   selected: () => new Set(),
 };
 
+// Asked once, at signup, so a scan of your own face never has to ask again.
+// Only shown while unanswered — a returning member is not re-interrogated.
+const ABOUT_STEP: Step = {
+  id: "about",
+  kicker: "ABOUT YOU",
+  question: "Which population should your face be scored against?",
+  note: "This is the single largest input you control: the same face scored against the other group moves by a median of 0.7 points and up to 4.5. Asked once here so every scan of your own face can skip it.",
+  render: (p) => `
+    <div class="q-row">
+      ${chip("Men", "male", "Scored against men")}
+      ${chip("Women", "female", "Scored against women")}
+    </div>
+    <label class="q-sublabel" for="q-eth">Background <em>optional</em></label>
+    <select class="q-input" id="q-eth">
+      <option value="">Prefer not to say</option>
+      ${ETHNICITY_OPTIONS.filter((o) => o !== "Prefer not to say")
+        .map((o) => `<option value="${o}"${p.ethnicity === o ? " selected" : ""}>${o}</option>`)
+        .join("")}
+    </select>
+    <p class="q-foot">The background question changes no measurement and selects no different standard — there is one scale, the same for everybody. It is recorded only so we can say honestly who our reference set actually covers.</p>`,
+  pick: (key, p) => {
+    if (key === "male" || key === "female") p.sex = key;
+  },
+  wire: (root, p) => {
+    const sel = root.querySelector<HTMLSelectElement>("#q-eth");
+    if (sel) sel.onchange = () => { p.ethnicity = sel.value || undefined; };
+  },
+  selected: (p) => new Set(p.sex ? [p.sex] : []),
+  when: (p) => !p.sex,
+};
+
 const PHASES: Record<Phase, Step[]> = {
-  pre: [GOALS_STEP],
+  pre: [ABOUT_STEP, GOALS_STEP],
   post: [BOUNDARIES_STEP, SKIN_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
-  all: [GOALS_STEP, BOUNDARIES_STEP, SKIN_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
+  all: [ABOUT_STEP, GOALS_STEP, BOUNDARIES_STEP, SKIN_STEP, ADVICE_STEP, DIET_STEP, ENDGOAL_STEP],
 };
 
 let host: HTMLElement | null = null;
