@@ -585,10 +585,28 @@ function mountVerify(
     e.layer.appendChild(inFrame);
     const advance = new GuidedAdvance();
 
+    // Three dots, bouncing out of phase, while a finger is down on the ring.
+    // Built as elements rather than an ellipsis character so each one can carry
+    // its own animation delay.
+    const DOTS = `<i class="gnext-dot"></i><i class="gnext-dot"></i><i class="gnext-dot"></i>`;
+
     const paintButton = () => {
-      const { ready, text } = advance.view();
+      const { ready, busy, text } = advance.view();
       inFrame.classList.toggle("ready", ready);
-      inFrame.textContent = text;
+      inFrame.classList.toggle("busy", busy);
+      if (busy) inFrame.innerHTML = DOTS;
+      else inFrame.textContent = text;
+      // The marker under the walkthrough goes green the moment the step is
+      // answered, so the photo and the button agree without being read
+      // separately.
+      e.layer.classList.toggle("step-answered", advance.answered());
+    };
+
+    // The verifier owns the pointer; it tells us when one is down on a ring so
+    // the button can stop offering something the finger is not free to take.
+    verifier!.onDragChange = (dragging) => {
+      advance.setDragging(dragging);
+      paintButton();
     };
 
     const paint = (index: number, total: number, moved = false) => {
@@ -620,11 +638,18 @@ function mountVerify(
     // more, so this row must not stretch two buttons to full width to fill the
     // gap it left.
     e.actions.classList.add("guided-row");
+    // Retake belongs here too. It was only in the review row, so anyone who
+    // noticed their photo was wrong DURING the walkthrough — which is exactly
+    // when you notice, because you are staring at it thirteen times — had no
+    // way out except finishing all thirteen points on a picture they were
+    // about to discard.
     e.actions.innerHTML = `
       <button class="btn gho" id="side-gback" type="button" aria-label="Previous point">‹</button>
       <span class="side-gcount" id="side-gcount"></span>
+      <button class="btn cancel" id="side-gretake" type="button">Retake</button>
       <button class="btn cancel" id="side-gall" type="button">All points at once</button>`;
     document.getElementById("side-gback")!.onclick = () => verifier?.guidedBack();
+    document.getElementById("side-gretake")!.onclick = () => openSideCapture(ctx);
     document.getElementById("side-gall")!.onclick = () => {
       inFrame.remove();
       verifier?.endGuided();
