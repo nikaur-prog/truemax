@@ -57,11 +57,19 @@ const OUT_H = 1100;
 // Same photograph, same width, same engine → same score and the SAME crop box,
 // which is what keeps the stored landmark data aligned with the new pixels.
 //
-// OUTPUT is cut from the 2600px download of the matched file, using the crop
-// geometry from the 1400 measurement. A head crop is roughly a third of a
-// portrait's width, so 2600 is what 880 of face actually needs.
+// OUTPUT is cut from a fresh download of the matched file, using the crop
+// geometry from the 1400 measurement.
+//
+// The output width is computed per face rather than fixed. A fixed 2600 was the
+// first attempt and it silently under-delivered on every face: the crop is a
+// sub-region, so a 2600px source with a head occupying a quarter of the frame
+// yields a 650px crop — smaller than the 880 being asked for, and the script
+// then correctly refused to upscale and shipped something no bigger than what
+// it replaced. What matters is the width of the CROP, so ask the source for
+// whatever width makes the crop land on target, with a ceiling for the rare
+// photograph where the face is a tiny part of a huge image.
 const MEASURE_W = 1400;
-const OUTPUT_W = 2600;
+const MAX_SOURCE_W = 8000;
 
 // Same cost function as the builder. Copied rather than imported because that
 // module runs a whole pipeline on import.
@@ -151,15 +159,21 @@ const report = [];
 // design -- it paces itself under Wikimedia's rate limit -- so a crash or a
 // Ctrl-C at face eight of nine would otherwise throw away everything it had
 // already established.
-const line = (name, status, wrote) => {
+// `ok` for written, `would` for a dry run that found a usable crop, `SKIP` for a
+// face genuinely being left alone. The first version printed SKIP for everything
+// in a dry run, including the faces it had matched and sized perfectly — which
+// reads as nine failures rather than as a preview, and is the opposite of what
+// a dry run is for.
+const line = (name, status, wrote, usable = wrote) => {
   report.push({ name, status, wrote });
-  console.log(`${wrote ? "ok  " : "SKIP"} ${String(name).padEnd(20)} ${status}`);
+  const tag = wrote ? "ok   " : usable ? "would" : "SKIP ";
+  console.log(`${tag} ${String(name).padEnd(20)} ${status}`);
 };
 
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4207/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 60000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 60000 });
 
   for (const face of REEL) {
     const measured = [];
@@ -193,7 +207,12 @@ try {
       // coincidence at one-decimal granularity; 130-odd landmark positions do
       // not. And because the stored points ARE the comparison target, a match
       // guarantees the new crop aligns with the callout data by construction.
-      const meta = await sharp(path).metadata();
+      let meta;
+      try {
+        meta = await sharp(path).metadata();
+      } catch {
+        continue; // not an image — a rate-limit page saved under a .jpg name
+      }
       const pad = 0.34;
       const x = Math.max(0, Math.round((m.box.x - m.box.w * pad) * meta.width));
       const y = Math.max(0, Math.round((m.box.y - m.box.h * pad * 1.1) * meta.height));
@@ -228,19 +247,32 @@ try {
     // The matched FILE, re-fetched at output width. The crop geometry comes
     // from the 1400px measurement as fractions, so it lands on the same pixels
     // regardless of what width Commons actually returns.
-    const info = await api({ action: "query", titles: `File:${pick.title}` }, OUTPUT_W);
+    // Ask for the width that makes the CROP reach OUT_W, not the width of the
+    // whole photograph. Commons hands back the file's native size when the
+    // request exceeds it, so overshooting is free.
+    const sourceW = Math.min(MAX_SOURCE_W, Math.ceil(OUT_W / Math.max(0.05, pick.frac.w)));
+    const info = await api({ action: "query", titles: `File:${pick.title}` }, sourceW);
     const ii = Object.values(info?.query?.pages ?? {})[0]?.imageinfo?.[0];
     const bigUrl = ii?.thumburl ?? ii?.url;
     if (!bigUrl) {
       line(face.name, "matched, but could not fetch the high-res rendition — left alone", false);
       continue;
     }
-    const bigPath = download({ ...pick, url: bigUrl }, OUTPUT_W);
+    const bigPath = download({ ...pick, url: bigUrl }, sourceW);
     if (!bigPath) {
       line(face.name, "matched, but the high-res download failed — left alone", false);
       continue;
     }
-    const big = await sharp(bigPath).metadata();
+    // A throttled request returns an HTML apology, and `download` will happily
+    // save it under a .jpg name. Reading it is where that shows up, and an
+    // uncaught throw here loses every face processed before it.
+    let big;
+    try {
+      big = await sharp(bigPath).metadata();
+    } catch {
+      line(face.name, "matched, but the download was not an image (rate-limited?) — left alone", false);
+      continue;
+    }
     const bx = Math.round(pick.frac.x * big.width);
     const by = Math.round(pick.frac.y * big.height);
     const bw = Math.min(big.width - bx, Math.round(pick.frac.w * big.width));
@@ -254,6 +286,14 @@ try {
     const outH = Math.round(OUT_H * scale);
 
     const before = await sharp(`${OUT_IMG}/${face.slug}.jpg`).metadata();
+    // A crop no bigger than what is already shipped is not worth writing: the
+    // whole point of this script is to stop shipping upscales, and replacing a
+    // 440-wide file with another 440-wide file just churns the repo.
+    const gain = outW > before.width;
+    if (!gain) {
+      line(face.name, `matched (${(pick.meanDist * 100).toFixed(2)}%) but the source is only ${bw}x${bh} — no better than the ${before.width}x${before.height} already shipped, left alone`, false);
+      continue;
+    }
     if (!DRY) {
       await sharp(bigPath).extract({ left: bx, top: by, width: bw, height: bh })
         .resize(outW, outH, { fit: "cover", kernel: "lanczos3" })
@@ -262,8 +302,9 @@ try {
     }
     line(
       face.name,
-      `${before.width}x${before.height} -> ${outW}x${outH} (landmark match ${(pick.meanDist * 100).toFixed(2)}%)` + (scale < 1 ? ` — source crop only ${bw}x${bh}` : ""),
+      `${before.width}x${before.height} -> ${outW}x${outH} (landmark match ${(pick.meanDist * 100).toFixed(2)}%)` + (scale < 1 ? ` — source caps the crop at ${bw}x${bh}` : ""),
       !DRY,
+      true,
     );
   }
 } finally {

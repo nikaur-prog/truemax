@@ -144,7 +144,7 @@ const audit = [];
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4205/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 60000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 60000 });
 
   for (const { name, sex } of ROSTER) {
     const cands = candidatesFor(name);

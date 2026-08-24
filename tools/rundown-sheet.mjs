@@ -34,7 +34,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on("console", (m) => { if (m.type() === "error") console.log("page error:", m.text().slice(0, 200)); });
   await page.goto("http://localhost:4253/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 90000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 90000 });
 
   result = await page.evaluate(async ([dataUrl, samples]) => {
     const { detect } = await import("/src/engine/landmarker.ts");

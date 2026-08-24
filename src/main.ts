@@ -519,15 +519,31 @@ const slowEngineNote = window.setTimeout(
   SLOW_ENGINE_MS,
 );
 
+// The machine-readable half of the same fact, for the measurement tools in
+// tools/ that drive this page in a headless browser and have to know when the
+// landmarker is usable.
+//
+// They used to wait on `#engine-status.ready` — the class behind a line of
+// user-facing copy. Which meant the tools were coupled to a sentence, and
+// hiding that sentence silently broke twenty-one of them at once: every tool
+// sat at its selector until it timed out, with nothing in the failure naming
+// the real cause. A state attribute is not something anyone will delete for
+// being jargon, because it is not shown to anybody.
+function markEngine(state: "ready" | "failed"): void {
+  document.documentElement.dataset.engine = state;
+}
+
 initLandmarker()
   .then(() => {
     window.clearTimeout(slowEngineNote);
     clearEngineNote();
+    markEngine("ready");
   })
   .catch((err) => {
     window.clearTimeout(slowEngineNote);
     console.error(err);
     showEngineNote("ENGINE FAILED TO LOAD · REFRESH TO RETRY", "error");
+    markEngine("failed");
   });
 
 let filePickerGeneration = 0;

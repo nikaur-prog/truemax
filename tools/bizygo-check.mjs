@@ -35,7 +35,7 @@ let rows;
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4251/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 90000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 90000 });
 
   rows = await page.evaluate(async (imgs) => {
     const { detect } = await import("/src/engine/landmarker.ts");

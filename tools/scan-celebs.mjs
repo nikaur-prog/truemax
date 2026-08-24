@@ -16,7 +16,7 @@ const results = [];
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4182/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
 
   for (const { name, sex, file } of manifest) {
     try {

@@ -50,7 +50,7 @@ let alts = [];
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4217/");
-  await page.waitForSelector("#engine-status.ready", { timeout: 60000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 60000 });
   pop = await scan(page, POP);
   alts = await scan(page, ALTS);
 } finally {

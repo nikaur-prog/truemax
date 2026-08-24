@@ -58,7 +58,7 @@ const bySex = { male: [], female: [] };
 try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${PORT}/`);
-  await page.waitForSelector("#engine-status.ready", { timeout: 30000 });
+  await page.waitForSelector("html[data-engine=\"ready\"]", { timeout: 30000 });
 
   for (const { name, sex, file } of pop) {
     try {
