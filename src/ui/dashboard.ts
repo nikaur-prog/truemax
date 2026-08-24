@@ -6,6 +6,7 @@ import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
 import type { Streak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
+import { loadAvatar } from "../engine/avatar.js";
 import type { GreetingCtx } from "./greeting.js";
 import { trend } from "./dashTrend.js";
 import { loadPhotos } from "../engine/photoStore.js";
@@ -143,12 +144,19 @@ export function openDashboard(opts: {
         <div class="dash-brand-row dash-anim" style="--d:0ms">
           <span class="wordmark dash-logo ${brandClass(dashboardBrand)}">${logoMarkup()}</span>
           ${dashboardBrand === "max" ? `<span class="max-ai-badge"><i></i>MAX AI · YOUR ASSISTANT</span>` : ""}
-          ${opts.onSettings ? `<button class="dash-settings" id="dash-settings" type="button" aria-label="Your profile and preferences">
-            <svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          ${opts.onSettings ? (() => {
+            // The profile button IS the person once a face exists: their own
+            // first scan, adopted automatically, changeable in settings. The
+            // gear remains the empty state rather than a letter — a product
+            // about faces has no business initialing anybody.
+            const face = loadAvatar();
+            return `<button class="dash-settings${face ? " has-face" : ""}" id="dash-settings" type="button" aria-label="Your profile and preferences">
+            ${face ? `<img src="${face}" alt="" />` : `<svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
               <circle cx="12" cy="12" r="3.1"/>
               <path d="M12 2.6v2.3M12 19.1v2.3M21.4 12h-2.3M4.9 12H2.6M18.6 5.4l-1.6 1.6M7 17l-1.6 1.6M18.6 18.6 17 17M7 7 5.4 5.4"/>
-            </svg>
-          </button>` : ""}
+            </svg>`}
+          </button>`;
+          })() : ""}
         </div>
       </header>
 

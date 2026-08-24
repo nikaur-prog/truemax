@@ -15,6 +15,7 @@ import {
 } from "./engine/history.js";
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
+import { maybeAdoptAvatar } from "./engine/avatar.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
@@ -171,7 +172,10 @@ if (import.meta.env.DEV) {
   if (preview === "dash") {
     activateScanOwner(null);
     queueMicrotask(() =>
-      openDashboard({ onScan: () => {}, name: "Sam", membership: "member" }),
+      // onSettings is a no-op here, but passing it makes the preview render
+      // the profile button — which is where the avatar lives, and the whole
+      // reason to look at this screen in a browser check.
+      openDashboard({ onScan: () => {}, name: "Sam", membership: "member", onSettings: () => {} }),
     );
   }
 }
@@ -1574,6 +1578,11 @@ async function runFullAnalysis(
       front: frontThumb ?? undefined,
       side: sideThumb ?? undefined,
     });
+    // The first front photo a member scans OF THEMSELVES becomes their
+    // profile picture. A guest's face must never become the owner's avatar,
+    // and an avatar already chosen is never overwritten from here — settings
+    // owns changes.
+    if (!scanSubject) maybeAdoptAvatar(frontShot);
     if (!scanSession.isCurrent(token, owner)) return;
     await pruneTo(readAllHistory().map(scanStorageKey));
   })();
