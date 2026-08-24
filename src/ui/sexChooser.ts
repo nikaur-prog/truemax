@@ -32,9 +32,14 @@ export function openSexChooser(onPick: (sex: Sex) => void, preselect?: Sex, onCa
   el = document.createElement("div");
   el.className = "sexpick";
   el.innerHTML = `
+    <!-- The paragraph that used to sit under this heading explained that the
+         choice moves the score by up to 4.5 points. True, and the reason the
+         question is asked at all rather than guessed — but it is an argument
+         with somebody who has not disagreed yet, on a screen whose whole job is
+         to take one tap. The two buttons already say what each one scores you
+         against, which is the part that changes what someone picks. -->
     <div class="sexpick-head">
-      <h2>Who should we score this face against?</h2>
-      <p>Every percentile is measured against this group, and it moves the number a lot — by 0.7 points typically and up to 4.5 at worst. Pick one to start.</p>
+      <h2>First, what gender is being analysed?</h2>
     </div>
     <button class="sexpick-cancel" type="button" aria-label="Cancel">Cancel</button>
     <div class="sexpick-split">

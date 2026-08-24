@@ -499,6 +499,43 @@ body.funnel-open { overflow: hidden; }
 .trial-actions .btn { flex: 1; min-height: 48px; }
 .trial-loading { min-height: 360px; place-items: center; align-content: center; padding: 48px; text-align: center; }
 .trial-loading .trial-close { position: absolute; margin: -280px 0 0 min(650px, 80vw); }
+/* The Max loader. See maxLoaderMarkup() in ui/maxCharacter.ts for why the
+   moods are stacked copies rather than a timer swapping classes: all of this is
+   CSS, so it keeps running when the main thread is busy — which is the only
+   condition under which anybody sees a loader at all.
+
+   Each face owns one slot of a shared cycle: it scales in, holds its
+   expression, spins, and morphs away, and the next one is already waiting on
+   its own delay. --i is the face's index and --n the number of faces, so the
+   markup can add a fifth mood without touching a keyframe. */
+.mx-load { position: relative; display: block; width: 86px; height: 90px; }
+.mx-load-face {
+  position: absolute; inset: 0; display: block; opacity: 0;
+  animation: mx-load-turn calc(var(--n) * 1.15s) cubic-bezier(.5,0,.5,1) infinite;
+  animation-delay: calc(var(--i) * 1.15s);
+}
+.mx-load-face .mx-svg { width: 100%; height: 100%; }
+@keyframes mx-load-turn {
+  /* Percentages are of the WHOLE cycle, so one face is visible for 1/n of it
+     and invisible for the rest. These are written for the FOUR faces in
+     LOADER_MOODS (maxCharacter.ts) — 100/4 = the 25% handoff below. Changing the
+     number of moods without changing these leaves a gap of empty box between
+     two faces; maxCharacter.ts has a type-level check that fails the build
+     rather than letting that ship. */
+  0%   { opacity: 0; transform: scale(.55) rotateY(-90deg); }
+  7%   { opacity: 1; transform: scale(1) rotateY(0deg); }
+  14%  { opacity: 1; transform: scale(1) rotateY(0deg); }
+  22%  { opacity: 1; transform: scale(.92) rotateY(300deg); }
+  25%  { opacity: 0; transform: scale(.5) rotateY(360deg); }
+  100% { opacity: 0; transform: scale(.5) rotateY(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* One still Max, held. Nothing moves, but the loader is still Max rather
+     than an empty box. */
+  .mx-load-face { animation: none; opacity: 0; }
+  .mx-load-face:first-child { opacity: 1; }
+}
+
 .trial-loader { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--acc); border-radius: 50%; animation: trial-spin .8s linear infinite; }
 @keyframes trial-spin { to { transform: rotate(360deg); } }
 
@@ -1176,18 +1213,6 @@ body.funnel-open { overflow: hidden; }
 .q-actions { flex-wrap: wrap; }
 .q-actions .btn { flex: 1 1 46%; }
 
-/* Entry point on the landing screen */
-.q-strip {
-  display: flex; align-items: center; gap: 12px; cursor: pointer;
-  margin-top: 26px; padding: 11px 16px 11px 14px;
-  border: 1px solid var(--line); border-radius: 99px; background: var(--card);
-  font-family: var(--sans); font-size: 13px; color: var(--ink);
-  transition: border-color 0.2s, transform 0.2s;
-}
-.q-strip:hover { border-color: var(--acc); transform: translateY(-1px); }
-.q-strip i { width: 5px; height: 5px; border-radius: 99px; background: var(--acc); flex: none; }
-.q-strip span { color: var(--mut); }
-#capture-stage.live-cam ~ .q-strip { display: none; }
 
 /* Goal context inside the plan */
 .goal-head { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; margin-bottom: 14px; }
@@ -1870,7 +1895,38 @@ body.funnel-open { overflow: hidden; }
 .hist-chip.down { background: rgba(192, 106, 84, 0.14); color: #c06a54; }
 .hist-chip.flat, .hist-chip.first { background: rgba(120, 130, 128, 0.12); color: var(--mut, #6b7280); }
 
-/* Landing entry point, only shown when there is something to see. */
+/* The last three scans on the landing, only shown when there is something to
+   see. This replaced a single "View your scan history →" link, which asked
+   someone to remember what was behind it before deciding to look; three faces
+   and three dates just answer that.
+
+   The score sits in the tile as the fallback, and stays underneath the photo
+   when there is one — a scan from before thumbnails shipped still has a number,
+   and a number is a better tile than an empty grey square. */
+.recent { margin-top: clamp(10px, 2svh, 22px); text-align: center; }
+.recent h2 {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--mut); font-weight: 500; margin: 0 0 10px;
+}
+.recent-row { display: flex; gap: 10px; justify-content: center; }
+.recent-card {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+}
+.recent-shot {
+  position: relative; display: grid; place-items: center; overflow: hidden;
+  width: clamp(56px, 17vw, 74px); aspect-ratio: 1 / 1.16;
+  border-radius: 12px; background: var(--soft); border: 1px solid var(--line);
+  transition: transform 0.14s ease, border-color 0.14s ease;
+}
+.recent-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.recent-shot b {
+  font-family: var(--serif); font-weight: 300; font-size: 19px; color: var(--mut);
+  font-variant-numeric: tabular-nums;
+}
+.recent-card:hover .recent-shot { transform: translateY(-2px); border-color: var(--acc); }
+.recent-when { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; color: var(--mut); }
+
 .hist-entry { background: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px;
   color: var(--acc, #107a57); margin-top: clamp(6px, 1.2svh, 14px); }
 .hist-entry:hover { text-decoration: underline; }
@@ -3834,7 +3890,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    where the last answer went, not a default — the reason it is being asked
    again is that this is a different face. */
 .sexpick-side.was::after {
-  content: "LAST TIME";
+  content: "USED LAST TIME";
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
   font-size: 10px; letter-spacing: 2px; opacity: .55; font-weight: 600;
 }
@@ -3934,17 +3990,38 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    sections scroll underneath, and the demo shrinks once scrolling starts. On a
    desktop everything fits one screen and pinning would just eat height. */
 @media (max-width: 760px) {
+  /* Full-bleed, because a sticky bar has to cover everything passing under it.
+     #v-upload centres its children inside 26px of padding, so the dock was only
+     as wide as the capture card and the page scrolled visibly through the two
+     gutters either side of it — cards and headings sliding up the margins while
+     the demo sat still in the middle. Stretching the dock and cancelling that
+     padding with a negative inline margin gives the background the full width
+     while the card inside stays where it was. */
   .capture-dock {
     position: sticky; top: 0; z-index: 30;
-    background: var(--bg); padding-top: 6px;
+    background: var(--bg); padding: 6px 26px 0;
+    align-self: stretch; margin-inline: -26px;
   }
+  .capture-dock .stage { margin-inline: auto; }
   .capture-dock::after {
     content: ""; position: absolute; left: 0; right: 0; bottom: -14px; height: 14px;
     background: linear-gradient(var(--bg), transparent); pointer-events: none;
   }
-  .capture-dock .oval-frame { margin: 0 auto; transition: max-width 0.35s ease; }
+  /* One curve and one duration across everything the shrink moves. The frame
+     was easing over 0.35s while the buttons under it jumped their 8px of margin
+     instantly, so the card arrived at its new size before the row below had
+     finished catching up — half of what read as choppiness was the two halves
+     not agreeing on when the move ended. */
+  .capture-dock .oval-frame,
+  .capture-dock .cam-actions {
+    transition: max-width 0.4s cubic-bezier(.22,1,.36,1), margin-top 0.4s cubic-bezier(.22,1,.36,1);
+  }
+  .capture-dock .oval-frame { margin: 0 auto; }
   .capture-dock.shrunk .oval-frame { max-width: 46vw; }
   .capture-dock.shrunk .cam-actions { margin-top: 8px; }
+  @media (prefers-reduced-motion: reduce) {
+    .capture-dock .oval-frame, .capture-dock .cam-actions { transition: none; }
+  }
 }
 
 /* Icons on the capture buttons sit after the words, vertically centred. */

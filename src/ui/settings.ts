@@ -1,3 +1,4 @@
+import { maxLoaderMarkup } from "./maxCharacter.js";
 import type { User } from "@supabase/supabase-js";
 import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.js";
 import {
@@ -95,7 +96,7 @@ export async function openSettings(user: User): Promise<void> {
   host = activeHost;
   activeHost.className = "trial-overlay settings-overlay";
   activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Your profile">
-    <div class="trial-loader"></div><p>Loading your profile…</p>
+    ${maxLoaderMarkup("Loading your profile")}<p>Loading your profile…</p>
   </div>`;
   document.body.appendChild(activeHost);
   document.body.classList.add("funnel-open");

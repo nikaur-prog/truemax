@@ -1,12 +1,10 @@
 import sharp from "sharp";
-import { maxCharacterMarkup } from "../src/ui/maxCharacter.js";
+import { markGlyph } from "./brandMark.mjs";
 
-// The 1200x630 link-preview card: the dark brand ground, the claim, and Max.
-const max = maxCharacterMarkup()
-  .replace('class="mx-svg mx-mood-happy" aria-hidden="true"', 'x="850" y="120" width="300" height="316"')
-  .replace(/<g class="mx-alt[^"]*">[\s\S]*?<\/g>/g, "")
-  .replace(/<path class="mx-alt[^"]*"[^>]*\/>/g, "")
-  .replace(/<rect[^>]*mx-lid[^>]*\/>/g, "");
+// The 1200x630 link-preview card: the dark brand ground, the claim, and the
+// mark. This used to be Max — see scripts/brandMark.mjs for why the mascot no
+// longer stands in for the logo on the images that represent the product.
+const mark = markGlyph({ x: 878, y: 168, size: 250 });
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -21,7 +19,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" v
   <text x="92" y="395" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="rgba(247,255,252,.62)">41 measurements · scored on your device · nothing uploaded</text>
   <rect x="92" y="452" width="330" height="64" rx="32" fill="#4bf5c5"/>
   <text x="257" y="494" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#071e19" text-anchor="middle">truemax.app</text>
-  ${max}
+  ${mark}
 </svg>`;
 await sharp(Buffer.from(svg)).png().toFile("public/og.png");
 console.log("public/og.png written");

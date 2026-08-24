@@ -19,6 +19,7 @@
 import sharp from "sharp";
 import { writeFileSync } from "node:fs";
 import { maxCharacterMarkup } from "../src/ui/maxCharacter.js";
+import { markGlyph } from "./brandMark.mjs";
 
 // The static rasteriser has no stylesheet, so every CSS-hidden part would
 // render at once: eyelids down over the eyes, the talking mouth on top of the
@@ -43,32 +44,30 @@ const GRADIENT = `<defs>
     </linearGradient>
   </defs>`;
 
-// Horizontally centred, sitting a touch above the vertical centre so the head
-// lands on the optical centre rather than the geometric one.
+// The profile picture is the MARK, not Max.
 //
-// Was 560 wide, and that was too timid by half. The safe-radius reasoning above
-// is right about the geometry and wrong about the SHAPE: it measured the corner
-// of Max's bounding BOX against the inscribed circle, but Max is an egg with
-// two stubby arms and his bounding-box corners are empty pixels. The circle
-// crop removes the square's corners, and Max's furthest real pixels — the widest
-// point of his body and the antenna tip — sit on the horizontal and vertical
-// axes, which is exactly where the circle is at its full 512 radius.
+// It used to be Max at 780px on the gradient, and the long note that used to
+// live here was all about how large to draw him so he stayed recognisable in a
+// 50-pixel TikTok avatar. That reasoning was sound and answering the wrong
+// question: this image is what the product is called, not who its mascot is,
+// and an account whose picture is a cartoon reads as a cartoon's account. The
+// mark also wins the legibility argument outright — an axis, a landmark and two
+// contours survive being 50 pixels wide, which is more than can be said for a
+// blue egg with two lighter smudges on it.
 //
-// So the old picture spent 45% of a profile photograph on empty gradient. That
-// does not read as breathing room at the size this is actually seen: a TikTok
-// avatar is about 50 pixels across, and 560/1024 of it left roughly twenty
-// pixels of character to recognise. At 780 the widest point lands near 390 from
-// the centre — still comfortably inside the safe radius — and Max is legible in
-// a comment thread, which is the entire job.
-const W = 780;
-const H = 822;
-const X = (1024 - W) / 2;
-const Y = 92;
+// Max keeps public/brand/max-avatar.*, below, which is a mascot asset and says
+// so. He also keeps every surface inside the app, and the loader.
+//
+// 620 of 1024 leaves the strokes clear of the circle crop the platforms apply,
+// without the timidity of the old 560: the mark's furthest pixels sit on the
+// axes, where the inscribed circle is at its full radius.
+const MARK = 620;
+const MARK_XY = (1024 - MARK) / 2;
 
 const profile = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   ${GRADIENT}
   <rect width="1024" height="1024" fill="url(#bg)"/>
-  ${restingMax(X, Y, W, H)}
+  ${markGlyph({ x: MARK_XY, y: MARK_XY, size: MARK })}
 </svg>`;
 writeFileSync("public/brand/truemax-profile.svg", profile);
 await sharp(Buffer.from(profile)).png().toFile("public/brand/truemax-profile.png");

@@ -12,7 +12,7 @@ import {
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { startTrialCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
-import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { maxCharacterMarkup, maxLoaderMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
 import { METRICS } from "../engine/metrics.js";
@@ -188,7 +188,7 @@ export async function openTrialFunnel(
   const alive = () => host === activeHost && activeHost.isConnected;
   activeHost.className = "trial-overlay";
   activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Build your TrueMax pathway">
-    <div class="trial-loader"></div><p>Preparing your pathway…</p>
+    ${maxLoaderMarkup("Preparing your pathway")}<p>Preparing your pathway…</p>
   </div>`;
   document.body.appendChild(activeHost);
   document.body.classList.add("funnel-open");
