@@ -124,6 +124,25 @@ function aheadOf(p: Pt, a: Pt, b: Pt, faceDir: number): number {
   return (((p.x - a.x) * vy - (p.y - a.y) * vx) / len) * faceDir;
 }
 
+// Holdaway's H angle: the angle at soft-tissue pogonion between soft-tissue
+// nasion and the upper lip — i.e. how far the H line (lip to chin) swings off
+// the facial plane (nasion to chin). It is the standard soft-tissue reading of
+// chin position, and unlike the cephalometric measures it is built entirely
+// from points a photograph shows and a person can verify.
+//
+// SIGNED, and that is not a detail. `angleAt` returns a magnitude, so an
+// over-projected chin — the lip falling BEHIND the facial plane, a Class III
+// profile — folds back and reads the same as a balanced one. Holdaway's own
+// convention is signed for exactly this reason, so the sign is taken from which
+// side of the nasion→pogonion line the upper lip sits on: positive is the
+// ordinary case (lip ahead of the plane, chin behind the lip), and larger means
+// more recessed.
+function hAngle(p: SidePoints, faceDir: number): number {
+  const magnitude = angleAt(p.pogonion, p.nasion, p.labialeSuperius);
+  const lipAhead = aheadOf(p.labialeSuperius, p.nasion, p.pogonion, faceDir);
+  return lipAhead >= 0 ? magnitude : -magnitude;
+}
+
 export function computeSideMetrics(p: SidePoints, faceDir: number): Record<string, number> {
   const faceH = dist(p.nasion, p.menton) || 1e-6;
 
@@ -136,6 +155,7 @@ export function computeSideMetrics(p: SidePoints, faceDir: number): Record<strin
 
     // Chin / projection
     chinProjection: (aheadOf(p.pogonion, p.nasion, p.subnasale, faceDir) / faceH) * 100,
+    chinRecession: hAngle(p, faceDir),
     facialConvexity: angleAt(p.subnasale, p.glabella, p.pogonion),
     totalFacialConvexity: angleAt(p.pronasale, p.glabella, p.pogonion),
 
@@ -277,6 +297,43 @@ const ALL_SIDE_METRICS: MetricDef[] = [
     // sits further forward, so every face reads recessed against it by
     // construction rather than by anatomy.
     dist: { male: { mean: -11, sd: 6, ideal: -8 }, female: { mean: -12, sd: 6, ideal: -10 } },
+  }),
+  S({
+    id: "chinRecession", name: "Chin recession (H angle)", unit: "°", decimals: 1,
+    view: "side", region: "chin", pillar: "Dimorphism", weight: 1.2,
+    direction: "band", fixability: 0.1,
+    // The chin region had NOTHING on the side. chinProjection is its only other
+    // member and it is held out below, so the one view that can actually see a
+    // chin was scoring the chin on front-face measurements alone — which is why
+    // "can it measure chin recession" is a fair question to ask of it.
+    //
+    // This one is safe to score where chinProjection is not, and the difference
+    // is the whole argument of the block above: the CONSTRUCTION matches the
+    // published one. Holdaway's H angle is measured between soft-tissue nasion,
+    // soft-tissue pogonion and labrale superius — the three points below, not
+    // three others borrowing their norm. Ideal is 10° for a balanced adult
+    // profile with roughly 7–15° the clinically acceptable band; reported adult
+    // means sit in the low-to-mid teens.
+    //
+    // Checked the way the recentred three should have been and were not. The
+    // seeder's own average head measures 12.2°, and the three clean hand-placed
+    // fixtures (E, F, G in docs/SIDE_FIXTURES.md, aspect recovered from the
+    // hairline-to-chin over nose-to-ear proportion) measure 13.5, 11.4 and
+    // 11.3. Four independent profiles inside the published band, none of them
+    // used to set these numbers. See chinRecession.test.ts, which pins it.
+    //
+    // THE SOFT PART, stated rather than buried: the 1° male/female split. Chin
+    // projection is genuinely dimorphic and fuller lips push the H angle up, so
+    // the direction is not invented — but the size of it is a reading of the
+    // literature, not a measurement of ours, and the sd is wide on purpose.
+    dist: { male: { mean: 13, sd: 4, ideal: 10 }, female: { mean: 14, sd: 4, ideal: 12 } },
+    // Signed, so both tails are reachable. A markedly chin-deficient profile
+    // reaches the high 20s and a strong Class III chin carries the upper lip
+    // behind the facial plane and goes negative. Past −15 or +40 the vertex is
+    // not on a chin: it is pogonion dragged onto the neck, or the lip point
+    // left up on the nose.
+    plausible: [-15, 40],
+    points: ["pogonion", "nasion", "labialeSuperius"],
   }),
   S({
     id: "facialConvexity", name: "Facial convexity (glabella)", unit: "°", decimals: 1,

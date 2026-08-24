@@ -54,6 +54,9 @@ const RECIPES: Record<string, (p: SidePoints, m: ScoredMetric, span: number) => 
   ],
   mandibularPlane: (p, m) => [{ kind: "vref", a: p.gonion, b: p.menton, through: p.menton, label: fmt(m) }],
   chinProjection: (p, m) => [{ kind: "drop", p: p.pogonion, la: p.nasion, lb: p.subnasale, label: fmt(m) }],
+  // The H angle opens at the chin, between the facial plane and the lip line,
+  // so the vertex is pogonion and the two arms are the points that define them.
+  chinRecession: (p, m) => [{ kind: "angle", v: p.pogonion, a: p.nasion, b: p.labialeSuperius, label: fmt(m) }],
   facialConvexity: (p, m) => [{ kind: "angle", v: p.subnasale, a: p.glabella, b: p.pogonion, label: fmt(m) }],
   totalFacialConvexity: (p, m) => [{ kind: "angle", v: p.pronasale, a: p.glabella, b: p.pogonion, label: fmt(m) }],
   nasofrontalAngle: (p, m) => [{ kind: "angle", v: p.nasion, a: p.glabella, b: p.pronasale, label: fmt(m) }],

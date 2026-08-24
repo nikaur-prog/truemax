@@ -57,6 +57,7 @@ const TRAITS: Record<string, string> = {
   submentalCervical: "the angle under the chin where it meets the neck",
   mandibularPlane: "the slope of the jawline from corner to chin",
   chinProjection: "how far the chin sits forward of the facial plane",
+  chinRecession: "how far the chin sits back from the line of the lips",
   facialConvexity: "the profile's bend from brow to nose base to chin",
   totalFacialConvexity: "the same bend measured to the nose tip instead",
   nasofrontalAngle: "the angle where the brow meets the bridge of the nose",

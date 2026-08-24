@@ -34,4 +34,11 @@ export const RELIABILITY_SEED: Record<string, number> = {
   // confident ones — but "confident" has not yet been checked against the same
   // person photographed twice, which is the only thing this number means.
   foreheadRatio: 0.25,
+  // Three hand-placed points, and one of them — labiale superius — is a soft
+  // landmark on a mobile feature: a relaxed mouth and a slightly set one put it
+  // in different places on the same face. The angle also opens at pogonion,
+  // which means the two arms are short and a small slip at the vertex swings
+  // the reading. Seeded below the other side constructions rather than at them
+  // until the repeat-photo corpus is regenerated with it in.
+  chinRecession: 0.25,
 };
