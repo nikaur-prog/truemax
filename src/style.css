@@ -499,6 +499,43 @@ body.funnel-open { overflow: hidden; }
 .trial-actions .btn { flex: 1; min-height: 48px; }
 .trial-loading { min-height: 360px; place-items: center; align-content: center; padding: 48px; text-align: center; }
 .trial-loading .trial-close { position: absolute; margin: -280px 0 0 min(650px, 80vw); }
+/* The Max loader. See maxLoaderMarkup() in ui/maxCharacter.ts for why the
+   moods are stacked copies rather than a timer swapping classes: all of this is
+   CSS, so it keeps running when the main thread is busy — which is the only
+   condition under which anybody sees a loader at all.
+
+   Each face owns one slot of a shared cycle: it scales in, holds its
+   expression, spins, and morphs away, and the next one is already waiting on
+   its own delay. --i is the face's index and --n the number of faces, so the
+   markup can add a fifth mood without touching a keyframe. */
+.mx-load { position: relative; display: block; width: 86px; height: 90px; }
+.mx-load-face {
+  position: absolute; inset: 0; display: block; opacity: 0;
+  animation: mx-load-turn calc(var(--n) * 1.15s) cubic-bezier(.5,0,.5,1) infinite;
+  animation-delay: calc(var(--i) * 1.15s);
+}
+.mx-load-face .mx-svg { width: 100%; height: 100%; }
+@keyframes mx-load-turn {
+  /* Percentages are of the WHOLE cycle, so one face is visible for 1/n of it
+     and invisible for the rest. These are written for the FOUR faces in
+     LOADER_MOODS (maxCharacter.ts) — 100/4 = the 25% handoff below. Changing the
+     number of moods without changing these leaves a gap of empty box between
+     two faces; maxCharacter.ts has a type-level check that fails the build
+     rather than letting that ship. */
+  0%   { opacity: 0; transform: scale(.55) rotateY(-90deg); }
+  7%   { opacity: 1; transform: scale(1) rotateY(0deg); }
+  14%  { opacity: 1; transform: scale(1) rotateY(0deg); }
+  22%  { opacity: 1; transform: scale(.92) rotateY(300deg); }
+  25%  { opacity: 0; transform: scale(.5) rotateY(360deg); }
+  100% { opacity: 0; transform: scale(.5) rotateY(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* One still Max, held. Nothing moves, but the loader is still Max rather
+     than an empty box. */
+  .mx-load-face { animation: none; opacity: 0; }
+  .mx-load-face:first-child { opacity: 1; }
+}
+
 .trial-loader { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--acc); border-radius: 50%; animation: trial-spin .8s linear infinite; }
 @keyframes trial-spin { to { transform: rotate(360deg); } }
 
@@ -1015,12 +1052,39 @@ body.funnel-open { overflow: hidden; }
 .hud-bottom { display: flex; flex-direction: column; gap: 9px; }
 
 .oval-frame.showing-reel:not(.live) .cam-hint { display: none; }
-.cam-hint { text-align: center; align-self: center; max-width: 92%;
-  padding: 9px 16px; border-radius: 14px;
+/* The replay affordance. Deliberately tiny and in the corner: it is insurance
+   against a "don't show me again" answered too early, not a control anybody
+   needs on the way to a photo. */
+.cam-info {
+  position: absolute; top: 10px; right: 10px; z-index: 4;
+  width: 26px; height: 26px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(12, 20, 18, 0.55); backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.9);
+  font: 600 13px/1 var(--serif, Georgia, serif); font-style: italic;
+  cursor: pointer; display: grid; place-items: center; padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.cam-info:hover { background: rgba(12, 20, 18, 0.8); border-color: rgba(255, 255, 255, 0.5); }
+
+/* Sized to sit ABOVE the face, not across it. It was capped at 92% of the
+   frame with a 14.5px title and a second line under it, which on a phone is a
+   slab roughly a third of the frame tall landing squarely over the eyes and
+   nose — the exact region the person is trying to line up. Narrower, tighter,
+   and the two lines share one row where they fit. */
+/* A FIXED width, not a content-sized one. The box used to be sized by whatever
+   sentence was in it, so every change of coaching also changed its width — and
+   with the guide re-evaluated per camera frame that meant the box breathing in
+   and out while the colour strobed. Settling the readings (captureSettle.ts)
+   fixed the strobe; this fixes the resize, so the two lines swap inside a box
+   that stays put. */
+.cam-hint { text-align: center; align-self: center; width: 78%; max-width: 78%;
+  min-height: 40px; display: flex; flex-direction: column; justify-content: center;
+  padding: 6px 13px; border-radius: 12px;
   background: rgba(16,17,19,0.55); backdrop-filter: blur(10px);
   box-shadow: 0 6px 24px rgba(0,0,0,0.22); }
-.cam-hint b { display: block; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; color: #fff; }
-.cam-hint span { font-size: 12px; color: rgba(255,255,255,0.72); }
+.cam-hint b { display: block; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: #fff; line-height: 1.25; }
+.cam-hint span { font-size: 11px; line-height: 1.3; color: rgba(255,255,255,0.72); }
 .cam-hint.ready b { color: #8ff3e0; }
 
 .cam-gates { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
@@ -1176,18 +1240,6 @@ body.funnel-open { overflow: hidden; }
 .q-actions { flex-wrap: wrap; }
 .q-actions .btn { flex: 1 1 46%; }
 
-/* Entry point on the landing screen */
-.q-strip {
-  display: flex; align-items: center; gap: 12px; cursor: pointer;
-  margin-top: 26px; padding: 11px 16px 11px 14px;
-  border: 1px solid var(--line); border-radius: 99px; background: var(--card);
-  font-family: var(--sans); font-size: 13px; color: var(--ink);
-  transition: border-color 0.2s, transform 0.2s;
-}
-.q-strip:hover { border-color: var(--acc); transform: translateY(-1px); }
-.q-strip i { width: 5px; height: 5px; border-radius: 99px; background: var(--acc); flex: none; }
-.q-strip span { color: var(--mut); }
-#capture-stage.live-cam ~ .q-strip { display: none; }
 
 /* Goal context inside the plan */
 .goal-head { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; margin-bottom: 14px; }
@@ -1855,9 +1907,76 @@ body.funnel-open { overflow: hidden; }
 .hist-note { margin: 6px 0 18px; }
 .hist-foot { margin-top: 16px; }
 .hist-list { display: flex; flex-direction: column; }
+/* A button now — each row reopens the scan it names. It carries no button
+   chrome because it is a row in a list, not a control in a form; the chevron
+   and the hover are what say it is pressable. */
 .hist-row {
-  display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 1fr auto auto auto auto; align-items: center; gap: 12px;
   padding: 11px 2px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0;
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background 0.12s ease;
+}
+.hist-row:hover { background: rgba(0, 0, 0, 0.028); }
+.hist-go { color: var(--mut, #6b7280); font-size: 17px; line-height: 1; }
+.hist-row:hover .hist-go { color: var(--acc, #107a57); }
+
+/* The recalled scan. It reuses .hist-overlay for the scrim and .hist-panel for
+   the card, so it lands the same way the history list does. */
+.recall-panel { max-width: 620px; }
+.recall-when {
+  display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--mut, #6b7280); margin-bottom: 10px;
+}
+.recall-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.recall-score {
+  font-family: var(--serif); font-weight: 300; font-size: 46px; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.recall-score small { font-size: 0.3em; color: var(--mut, #6b7280); margin-left: 2px; }
+.recall-rank {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--acc, #107a57);
+  background: var(--acc-soft); padding: 4px 9px; border-radius: 999px;
+}
+.recall-shots { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.recall-shot { margin: 0; }
+.recall-shot img {
+  display: block; width: clamp(84px, 24vw, 120px); aspect-ratio: 1 / 1.2;
+  object-fit: cover; border-radius: 12px; border: 1px solid var(--line);
+}
+.recall-shot figcaption {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  color: var(--mut, #6b7280); margin-top: 5px;
+}
+.recall-note { font-size: 12.5px; line-height: 1.55; color: var(--mut, #6b7280); margin: 12px 0 0; }
+.recall-old { background: var(--soft); border-radius: 12px; padding: 12px 14px; }
+.recall-foot { margin-top: 18px; }
+
+.recall-pillars { display: flex; gap: 10px; margin: 18px 0 6px; flex-wrap: wrap; }
+.recall-pillar { flex: 1 1 90px; }
+.recall-pillar b { display: block; font-family: var(--serif); font-weight: 300; font-size: 24px; }
+.recall-pillar span {
+  display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.12em;
+  color: var(--mut, #6b7280); margin-bottom: 5px;
+}
+.recall-pillar i { display: block; height: 3px; background: var(--line); border-radius: 99px; }
+.recall-pillar em { display: block; height: 3px; background: var(--acc); border-radius: 99px; }
+
+/* Same 0-10 axis and the same average tick as the dashboard, because rescaling
+   an axis until differences look bigger is the thing this product does not do. */
+.recall-bars { margin-top: 18px; display: grid; gap: 7px; }
+.recall-bar { display: grid; grid-template-columns: 84px 1fr 34px; align-items: center; gap: 10px; }
+.recall-bar span { font-size: 12.5px; color: var(--mut, #6b7280); }
+.recall-bar i {
+  position: relative; display: block; height: 6px; border-radius: 99px; background: var(--soft);
+}
+.recall-bar i b { display: block; height: 100%; border-radius: 99px; background: var(--acc); }
+.recall-bar i::after {
+  content: ""; position: absolute; top: -3px; bottom: -3px; left: var(--avg, 50%);
+  width: 1px; background: var(--mut, #6b7280); opacity: 0.5;
+}
+.recall-bar em {
+  font-style: normal; font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right;
 }
 .hist-date { color: var(--mut, #6b7280); font-size: 13px; }
 .hist-score { font-variant-numeric: tabular-nums; font-size: 17px; }
@@ -1870,7 +1989,38 @@ body.funnel-open { overflow: hidden; }
 .hist-chip.down { background: rgba(192, 106, 84, 0.14); color: #c06a54; }
 .hist-chip.flat, .hist-chip.first { background: rgba(120, 130, 128, 0.12); color: var(--mut, #6b7280); }
 
-/* Landing entry point, only shown when there is something to see. */
+/* The last three scans on the landing, only shown when there is something to
+   see. This replaced a single "View your scan history →" link, which asked
+   someone to remember what was behind it before deciding to look; three faces
+   and three dates just answer that.
+
+   The score sits in the tile as the fallback, and stays underneath the photo
+   when there is one — a scan from before thumbnails shipped still has a number,
+   and a number is a better tile than an empty grey square. */
+.recent { margin-top: clamp(10px, 2svh, 22px); text-align: center; }
+.recent h2 {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--mut); font-weight: 500; margin: 0 0 10px;
+}
+.recent-row { display: flex; gap: 10px; justify-content: center; }
+.recent-card {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+}
+.recent-shot {
+  position: relative; display: grid; place-items: center; overflow: hidden;
+  width: clamp(56px, 17vw, 74px); aspect-ratio: 1 / 1.16;
+  border-radius: 12px; background: var(--soft); border: 1px solid var(--line);
+  transition: transform 0.14s ease, border-color 0.14s ease;
+}
+.recent-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.recent-shot b {
+  font-family: var(--serif); font-weight: 300; font-size: 19px; color: var(--mut);
+  font-variant-numeric: tabular-nums;
+}
+.recent-card:hover .recent-shot { transform: translateY(-2px); border-color: var(--acc); }
+.recent-when { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; color: var(--mut); }
+
 .hist-entry { background: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px;
   color: var(--acc, #107a57); margin-top: clamp(6px, 1.2svh, 14px); }
 .hist-entry:hover { text-decoration: underline; }
@@ -2568,7 +2718,11 @@ body.auth-modal-open { overflow: hidden; }
    character whose body language contradicts his face is worse than one with
    no body language at all. */
 .mx-mood-excited .mx-bob { animation-duration: 1.5s; }
-.mx-mood-excited .mx-arm { animation: mx-wave .55s ease-in-out 3; }
+/* The excited arrival wave used to run at 0.55s three times over, which is a
+   flap — and being mood-scoped it quietly overrode the slow wave everywhere
+   Max is excited, which is most of a results screen. Same motion, same speed
+   as every other wave he does. */
+.mx-mood-excited .mx-arm { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 2; }
 .mx-mood-concerned .mx-bob { animation-duration: 5s; }
 .mx-mood-thinking .mx-pupils { animation: mx-ponder 4s ease-in-out infinite; }
 @keyframes mx-ponder { 0%, 100% { transform: translate(-2px, -2.4px); } 50% { transform: translate(-3px, -1px); } }
@@ -2665,8 +2819,18 @@ body.auth-modal-open { overflow: hidden; }
    So he waves on arrival, twice, and then puts his hand down for good. After
    that the wave is a RESPONSE — hover him and he waves back once. */
 .mx-arm { transform-origin: 118px 94px; }
-.mx-arm.waving { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 2; }
-.mx-svg:hover .mx-arm { animation: mx-wave 1.9s cubic-bezier(.32,.9,.35,1) 1; }
+.mx-arm.waving { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 2; }
+/* Hovering ANY of his surfaces waves, not just the drawing itself. He is
+   usually a 34px face beside a paragraph, so requiring the pointer to land on
+   the SVG's own box meant the greeting almost never fired — the thing people
+   actually point at is the card or the button he sits in. */
+.mx-svg:hover .mx-arm,
+.maxan:hover .mx-arm,
+.maxread:hover .mx-arm,
+.maxchat-head:hover .mx-arm,
+.max-pop:hover .mx-arm,
+.askmax:hover .mx-arm,
+[data-max-wave]:hover .mx-arm { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 1; }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves
    against the VIEW-BOX, so "center top" was the top of his skull and every
@@ -2694,19 +2858,43 @@ body.auth-modal-open { overflow: hidden; }
    three times, and goes back DOWN. Both ends sit at zero rotation, which is the
    hanging pose the path is drawn in, so the animation cannot leave him with an
    arm stuck in the air however it is interrupted. */
+/* A slow, whole-arm wave rather than a fast flap.
+   The old one snapped to -116deg in 16% of a 1.9s cycle and then oscillated
+   six times, which at that speed is a flap — the motion of a hand shaken from
+   the wrist. A wave people read as a greeting comes from the shoulder: the arm
+   RISES, holds, sways twice, and is lowered deliberately. The translate is the
+   shoulder lifting with it; without it the arm pivots on a joint that stays
+   pinned and the whole thing reads as mechanical. */
 @keyframes mx-wave {
-  0% { transform: rotate(0); }
-  16% { transform: rotate(-116deg); }
-  30% { transform: rotate(-140deg); }
-  44% { transform: rotate(-106deg); }
-  58% { transform: rotate(-140deg); }
-  72% { transform: rotate(-108deg); }
-  84% { transform: rotate(-128deg); }
-  100% { transform: rotate(0); }
+  0% { transform: translate(0, 0) rotate(0); }
+  22% { transform: translate(1px, -5px) rotate(-124deg); }
+  38% { transform: translate(1px, -6px) rotate(-142deg); }
+  54% { transform: translate(1px, -5px) rotate(-116deg); }
+  70% { transform: translate(1px, -6px) rotate(-140deg); }
+  84% { transform: translate(1px, -4px) rotate(-120deg); }
+  100% { transform: translate(0, 0) rotate(0); }
 }
 /* Long rest, one small twitch: the idle version, and nothing like a full wave.
    An arm that lifts to shoulder height every six seconds unprompted is a tic. */
 @keyframes mx-wave-idle { 0%, 88%, 100% { transform: rotate(0); } 93% { transform: rotate(-14deg); } }
+/* He blinks in the excited expression too.
+   The star eyes replace the light bars, and the eyelids are hidden with them —
+   so in the one mood he wears most often on a results screen he was a face
+   that never blinked, which is what makes a character read as a graphic
+   instead of as someone in the room. Stars cannot have a lid drawn over them
+   without looking like a shutter, so the blink is the stars themselves
+   squashing shut on the same 5.2s cycle as the real lids. */
+.mx-mood-excited .mx-eye-stars {
+  transform-box: fill-box; transform-origin: center;
+  animation: mx-star-blink 5.2s ease-in-out infinite;
+}
+@keyframes mx-star-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95%, 97% { transform: scaleY(0.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mx-mood-excited .mx-eye-stars { animation: none; }
+}
 @keyframes mx-blink { 0%, 92%, 100% { transform: scaleY(0); } 95%, 97% { transform: scaleY(1); } }
 @keyframes mx-glance { 0%, 62%, 100% { transform: translateX(0); } 70%, 80% { transform: translateX(-3.4px); } }
 @keyframes mx-twinkle { 0%, 100% { opacity: 0; transform: scale(.4); } 45% { opacity: 1; transform: scale(1); } }
@@ -3834,7 +4022,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    where the last answer went, not a default — the reason it is being asked
    again is that this is a different face. */
 .sexpick-side.was::after {
-  content: "LAST TIME";
+  content: "USED LAST TIME";
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
   font-size: 10px; letter-spacing: 2px; opacity: .55; font-weight: 600;
 }
@@ -3879,10 +4067,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   position: absolute; left: 50%; transform: translateX(-50%);
   bottom: 58px; z-index: 4;
   min-width: 62%; max-width: calc(100% - 24px);
-  padding: 13px 20px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(16, 17, 19, 0.94); color: #fff;
+  padding: 13px 20px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.22);
+  /* BLUE = asking. Black read as chrome — a bar sitting on the photo rather
+     than the one control on the screen — and it matched the caption strip
+     directly under it, so the two merged into a single dark block. */
+  background: #2563eb; color: #fff;
   font: 600 14.5px/1.2 var(--sans, inherit); letter-spacing: 0.01em;
-  cursor: pointer; box-shadow: 0 10px 28px rgba(8, 12, 11, 0.45);
+  cursor: pointer; box-shadow: 0 10px 28px rgba(37, 99, 235, 0.4);
   transition: background 0.22s ease, border-color 0.22s ease, color 0.22s ease, transform 0.12s ease;
 }
 .gnext-in:active { transform: translateX(-50%) scale(0.975); }
@@ -3890,15 +4081,46 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   background: #16a97a; border-color: #16a97a; color: #fff;
   box-shadow: 0 10px 28px rgba(22, 169, 122, 0.42);
 }
+/* Mid-drag. The button stops offering anything — see guidedAdvance.ts — and
+   shows three dots bouncing out of phase instead. It keeps its height so it
+   does not resize under a finger that is busy elsewhere on the photo. */
+.gnext-in.busy {
+  background: rgba(16, 17, 19, 0.94); border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 28px rgba(8, 12, 11, 0.45); cursor: default;
+  display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 45px;
+}
+.gnext-dot {
+  width: 7px; height: 7px; border-radius: 999px; background: #fff; display: block;
+  animation: gnext-bounce 0.9s ease-in-out infinite;
+}
+.gnext-dot:nth-child(2) { animation-delay: 0.15s; }
+.gnext-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes gnext-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .gnext-dot { animation: none; opacity: 0.85; } }
+
 @media (max-width: 420px) { .gnext-in { bottom: 52px; font-size: 13.5px; padding: 12px 16px; min-width: 72%; } }
 @media (prefers-reduced-motion: reduce) { .gnext-in { transition: none; } }
 
 .vpoint.gdim { opacity: 0.22; }
 .vpoint.gdim, .vpoint.gdim::before { pointer-events: none; }
+/* The point being worked on: a blue core inside a white ring while it is still
+   the question, green once the step has been answered. The white ring is what
+   makes either colour readable — these sit on a photograph of a face, and a
+   bare coloured dot disappears into skin, hair or shadow depending on where it
+   lands. The marker and the button change together (paintButton in
+   sideFlow.ts) so the two never disagree about whether the step is done. */
 .vpoint.gfocus i {
-  border-color: #fff; background: rgba(143, 243, 224, 0.35);
-  box-shadow: 0 0 0 4px rgba(143, 243, 224, 0.35), 0 0 18px rgba(143, 243, 224, 0.8);
+  border-color: #fff; background: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.3), 0 0 18px rgba(37, 99, 235, 0.72);
   animation: gpulse 1.1s ease-in-out infinite;
+}
+.verify-layer.step-answered .vpoint.gfocus i {
+  background: #16a97a;
+  box-shadow: 0 0 0 4px rgba(22, 169, 122, 0.3), 0 0 18px rgba(22, 169, 122, 0.72);
+  animation: none;
 }
 @keyframes gpulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
@@ -3917,14 +4139,20 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    which is right for a row of equal choices and wrong here: these are two
    minor controls either side of a count, and stretched to fill they read as
    two primary actions competing with the green button inside the photo. */
+/* Directly under the photo. `.navrow` carries a 20px top margin, which suits
+   the review row — it sits below a caption and wants the air — but leaves the
+   walkthrough strip looking orphaned from the image it controls, most of all on
+   a desktop where the photo column is tall and anything below it reads as a
+   separate section. */
 .navrow.guided-row,
 #side-actions.guided-row {
-  flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 10px;
+  flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px;
 }
 #side-actions.guided-row .btn { flex: 0 0 auto; width: auto; min-width: 0; }
 #side-actions.guided-row #side-gback { padding: 11px 0; min-width: 46px; }
 #side-actions.guided-row .side-gcount { flex: 1 1 auto; text-align: center; }
-#side-actions.guided-row #side-gall {
+#side-actions.guided-row #side-gall,
+#side-actions.guided-row #side-gretake {
   background: transparent; border: 1px solid var(--line); color: var(--mut);
   padding: 11px 14px; font-size: 13px; font-weight: 500;
 }
@@ -3934,17 +4162,38 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    sections scroll underneath, and the demo shrinks once scrolling starts. On a
    desktop everything fits one screen and pinning would just eat height. */
 @media (max-width: 760px) {
+  /* Full-bleed, because a sticky bar has to cover everything passing under it.
+     #v-upload centres its children inside 26px of padding, so the dock was only
+     as wide as the capture card and the page scrolled visibly through the two
+     gutters either side of it — cards and headings sliding up the margins while
+     the demo sat still in the middle. Stretching the dock and cancelling that
+     padding with a negative inline margin gives the background the full width
+     while the card inside stays where it was. */
   .capture-dock {
     position: sticky; top: 0; z-index: 30;
-    background: var(--bg); padding-top: 6px;
+    background: var(--bg); padding: 6px 26px 0;
+    align-self: stretch; margin-inline: -26px;
   }
+  .capture-dock .stage { margin-inline: auto; }
   .capture-dock::after {
     content: ""; position: absolute; left: 0; right: 0; bottom: -14px; height: 14px;
     background: linear-gradient(var(--bg), transparent); pointer-events: none;
   }
-  .capture-dock .oval-frame { margin: 0 auto; transition: max-width 0.35s ease; }
+  /* One curve and one duration across everything the shrink moves. The frame
+     was easing over 0.35s while the buttons under it jumped their 8px of margin
+     instantly, so the card arrived at its new size before the row below had
+     finished catching up — half of what read as choppiness was the two halves
+     not agreeing on when the move ended. */
+  .capture-dock .oval-frame,
+  .capture-dock .cam-actions {
+    transition: max-width 0.4s cubic-bezier(.22,1,.36,1), margin-top 0.4s cubic-bezier(.22,1,.36,1);
+  }
+  .capture-dock .oval-frame { margin: 0 auto; }
   .capture-dock.shrunk .oval-frame { max-width: 46vw; }
   .capture-dock.shrunk .cam-actions { margin-top: 8px; }
+  @media (prefers-reduced-motion: reduce) {
+    .capture-dock .oval-frame, .capture-dock .cam-actions { transition: none; }
+  }
 }
 
 /* Icons on the capture buttons sit after the words, vertically centred. */
@@ -3985,7 +4234,28 @@ body.is-member .journey { display: none; }
   box-shadow: 0 30px 70px rgba(10, 12, 14, 0.3);
 }
 .tut-ask-panel h2 { font-family: var(--serif); font-weight: 300; font-size: 25px; margin: 0 0 8px; }
-.tut-ask-panel p { color: var(--mut); font-size: 14px; line-height: 1.55; margin: 0 0 20px; }
+.tut-ask-panel p { color: var(--mut); font-size: 14px; line-height: 1.55; margin: 0 0 16px; }
+
+/* One right, one wrong, before anybody has agreed to watch anything. "Would
+   you like a tutorial" is abstract until you have seen the difference it is
+   about; two photographs answer "is this worth twenty seconds?" in less time
+   than the sentence above them takes to read. */
+.tut-egs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 18px; }
+.tut-eg { margin: 0; }
+.tut-eg img {
+  display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+  border-radius: 12px; border: 2px solid var(--line);
+}
+.tut-eg.good img { border-color: #2f9e73; }
+.tut-eg.bad img { border-color: #c06a54; }
+.tut-eg figcaption {
+  display: flex; align-items: flex-start; gap: 5px; margin-top: 7px;
+  font-size: 11.5px; line-height: 1.35; color: var(--mut);
+}
+.tut-eg-mark { font-weight: 700; flex: none; line-height: 1.25; }
+.tut-eg.good .tut-eg-mark { color: #2f9e73; }
+.tut-eg.bad .tut-eg-mark { color: #c06a54; }
+
 .tut-ask-actions { display: flex; gap: 10px; }
 .tut-ask-actions .btn { flex: 1; }
 .tut-never {

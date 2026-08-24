@@ -2,6 +2,7 @@ import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
 import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
@@ -41,6 +42,9 @@ const MAX_DIM = 1400;
 // The walkthrough's step order is SIDE_POINTS order; the crop renderer needs
 // the id for a step index without reaching into the verifier's internals.
 const SIDE_POINT_IDS = SIDE_POINTS.map((s) => s.id);
+
+// One per module: only one side capture screen exists at a time.
+const sideSettle = createSettler();
 
 interface SideCtx {
   scanId: string;
@@ -285,13 +289,18 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         // has just written it. Only the two text lines are skipped — the lamp
         // and the shutter below must keep updating, or the frame freezes
         // visually at the exact moment it is about to fire.
+        // Settled, not raw — see engine/captureSettle.ts. The lamp underneath
+        // still tracks every frame; the sentence and its colour wait for a
+        // reading to repeat, so a face sitting on the boundary between two
+        // checks stops strobing the screen.
+        const shown = sideSettle.settle({ status: c.status, hint: c.hint, detail: c.detail });
         if (!auto?.armed()) {
-          e.hintTitle.textContent = c.hint;
-          e.hintDetail.textContent = c.detail;
+          e.hintTitle.textContent = shown.hint;
+          e.hintDetail.textContent = shown.detail;
         }
         e.hint.classList.toggle("ready", c.ready);
-        e.hint.classList.toggle("red", c.status === "red");
-        e.hint.classList.toggle("amber", c.status === "amber");
+        e.hint.classList.toggle("red", shown.status === "red");
+        e.hint.classList.toggle("amber", shown.status === "amber");
         e.lamp.className = `lamp ${c.status === "green" ? "green" : c.status}`;
         e.lampFill.className = c.status === "green" ? "green" : c.status;
         e.lampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
@@ -585,10 +594,28 @@ function mountVerify(
     e.layer.appendChild(inFrame);
     const advance = new GuidedAdvance();
 
+    // Three dots, bouncing out of phase, while a finger is down on the ring.
+    // Built as elements rather than an ellipsis character so each one can carry
+    // its own animation delay.
+    const DOTS = `<i class="gnext-dot"></i><i class="gnext-dot"></i><i class="gnext-dot"></i>`;
+
     const paintButton = () => {
-      const { ready, text } = advance.view();
+      const { ready, busy, text } = advance.view();
       inFrame.classList.toggle("ready", ready);
-      inFrame.textContent = text;
+      inFrame.classList.toggle("busy", busy);
+      if (busy) inFrame.innerHTML = DOTS;
+      else inFrame.textContent = text;
+      // The marker under the walkthrough goes green the moment the step is
+      // answered, so the photo and the button agree without being read
+      // separately.
+      e.layer.classList.toggle("step-answered", advance.answered());
+    };
+
+    // The verifier owns the pointer; it tells us when one is down on a ring so
+    // the button can stop offering something the finger is not free to take.
+    verifier!.onDragChange = (dragging) => {
+      advance.setDragging(dragging);
+      paintButton();
     };
 
     const paint = (index: number, total: number, moved = false) => {
@@ -620,11 +647,18 @@ function mountVerify(
     // more, so this row must not stretch two buttons to full width to fill the
     // gap it left.
     e.actions.classList.add("guided-row");
+    // Retake belongs here too. It was only in the review row, so anyone who
+    // noticed their photo was wrong DURING the walkthrough — which is exactly
+    // when you notice, because you are staring at it thirteen times — had no
+    // way out except finishing all thirteen points on a picture they were
+    // about to discard.
     e.actions.innerHTML = `
       <button class="btn gho" id="side-gback" type="button" aria-label="Previous point">‹</button>
       <span class="side-gcount" id="side-gcount"></span>
+      <button class="btn cancel" id="side-gretake" type="button">Retake</button>
       <button class="btn cancel" id="side-gall" type="button">All points at once</button>`;
     document.getElementById("side-gback")!.onclick = () => verifier?.guidedBack();
+    document.getElementById("side-gretake")!.onclick = () => openSideCapture(ctx);
     document.getElementById("side-gall")!.onclick = () => {
       inFrame.remove();
       verifier?.endGuided();

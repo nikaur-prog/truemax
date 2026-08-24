@@ -228,6 +228,45 @@ export function maxStickerMarkup(): string {
   </span>`;
 }
 
+// The loading spinner, which is Max rather than a ring.
+//
+// A rotating border is the one piece of an interface that says nothing about
+// whose software you are waiting on. Max is drawn in code, so a loader made out
+// of him costs a few kilobytes rather than a GIF, stays crisp at any size, and
+// puts the character in front of people during the only moments the product has
+// nothing else to show them.
+//
+// The cycle: he pops in, holds an expression, spins, and morphs out — then the
+// next repeat comes back wearing a different face. The moods are stacked as
+// separate copies with staggered animation delays rather than being swapped by
+// a timer, so the whole thing is CSS and survives a busy main thread, which is
+// exactly the condition a loader exists for.
+//
+// Under prefers-reduced-motion the CSS holds a single still Max instead. A
+// spinner is the one place where "no animation at all" would be worse than a
+// static mark, and a face that is simply there reads as patient rather than
+// broken.
+// Happy and excited only. A loader is not a status report: a worried or
+// thinking face while you wait suggests something has gone wrong, or that the
+// software is struggling, when neither is true. He is pleased to be here and
+// pleased about what is coming, and nothing else.
+//
+// FOUR of them, and that number is load-bearing. The keyframes in style.css
+// hand each face over at 25% of the cycle, which is 1/4 exactly; a fifth mood
+// here without a matching keyframe edit would leave a gap of empty box between
+// two of the faces. The check below fails the build's type pass rather than
+// leaving that to be noticed on a slow connection.
+const LOADER_MOODS = ["happy", "excited", "happy", "excited"] as const satisfies readonly MaxMood[];
+const LOADER_FACES: 4 = LOADER_MOODS.length;
+
+export function maxLoaderMarkup(label = "Loading"): string {
+  const faces = LOADER_MOODS.map(
+    (mood, i) =>
+      `<span class="mx-load-face" style="--i:${i}; --n:${LOADER_FACES}">${maxCharacterMarkup({ mood })}</span>`,
+  ).join("");
+  return `<span class="mx-load" role="status" aria-live="polite" aria-label="${label}">${faces}</span>`;
+}
+
 // The ecstatic moment: jump, arm to the sky, a full spin, land. Triggered by
 // code when something genuinely worth celebrating happens — a measured
 // improvement, a finished streak — and self-cleaning, so surfaces can call it

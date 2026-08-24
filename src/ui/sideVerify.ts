@@ -11,6 +11,12 @@ import type { SideSilhouetteCheck } from "../engine/photoEligibility.js";
 // fallback only when no mesh survives. The user confirms either one.
 
 export interface VerifyHandle {
+  /**
+   * Called when a pointer goes down on a landmark and again when it lifts.
+   * The walkthrough uses it to stop the advance button offering something the
+   * finger is not free to take. Assigned by the caller after mounting.
+   */
+  onDragChange?: (dragging: boolean) => void;
   points: SidePoints;
   faceDir: number; // +1 subject faces image-right, -1 image-left
   setEditable(editable: boolean): void;
@@ -1076,6 +1082,7 @@ export function mountVerifier(
       handles.get(id)?.classList.add("grabbing");
       paintMagnifier(id);
       magnifier.classList.add("show");
+      api.onDragChange?.(true);
       host.setPointerCapture(e.pointerId);
       e.preventDefault();
       return;
@@ -1087,6 +1094,7 @@ export function mountVerifier(
     labelEl.classList.add("show");
     paintMagnifier(dragging);
     magnifier.classList.add("show");
+    api.onDragChange?.(true);
     host.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
@@ -1106,6 +1114,7 @@ export function mountVerifier(
     if (!dragging) return;
     handles.get(dragging)?.classList.remove("grabbing");
     dragging = null;
+    api.onDragChange?.(false);
     labelEl.classList.remove("show");
     magnifier.classList.remove("show");
     // In a walkthrough the step's name stays on screen between touches — it is
@@ -1139,7 +1148,10 @@ export function mountVerifier(
   };
   setEditable(false);
 
-  return {
+  // Assigned to a const first so the pointer handlers above can reach
+  // `onDragChange` — the walkthrough sets it after mounting, and the handlers
+  // close over the object rather than the value.
+  const api: VerifyHandle = {
     points,
     faceDir: seed.faceDir,
     setEditable,
@@ -1194,4 +1206,5 @@ export function mountVerifier(
       host.classList.remove("verify-layer");
     },
   };
+  return api;
 }

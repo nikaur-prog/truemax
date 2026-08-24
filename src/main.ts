@@ -40,7 +40,9 @@ import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
 import { mountDemoReel } from "./ui/demoReel.js";
-import { closeHistory, hasHistory, openHistory } from "./ui/historyView.js";
+import { closeHistory, openHistory } from "./ui/historyView.js";
+import { loadPhotos } from "./engine/photoStore.js";
+import { createSettler } from "./engine/captureSettle.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
@@ -56,10 +58,9 @@ import type { CameraHandle } from "./ui/camera.js";
 import { stillFrameStats } from "./engine/captureGuide.js";
 import type { FrameCheck } from "./engine/captureGuide.js";
 import { estimateGaze } from "./engine/gaze.js";
-import { openQuiz } from "./ui/goalsQuiz.js";
 import { analyzeSkin } from "./engine/skin.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
-import { offerTutorial } from "./ui/photoTutorial.js";
+import { offerTutorial, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
 import { headCoveringRejection } from "./engine/photoEligibility.js";
@@ -341,10 +342,25 @@ mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 // yields the screen without leaving it. Skipped while the camera is live: that
 // screen is not a scrolling context and a mid-capture resize would fight the
 // framing guide.
+//
+// One threshold made this choppy rather than smooth. A single 60px line means
+// any scroll that hovers around it — and a thumb-flick on a phone hovers around
+// everything on the way past — retriggers the shrink and the un-shrink against
+// each other, so a 0.35s transition never finishes before it is reversed. The
+// card visibly stutters, which is what reads as "choppy": not the animation
+// being too fast, but the animation being interrupted.
+//
+// Two thresholds fix it. It shrinks past 72 and only comes back under 32, so
+// the 40px in between is a gap the scroll has to genuinely cross rather than a
+// line it can vibrate on.
+const SHRINK_AT = 72;
+const RESTORE_AT = 32;
+
 {
   const dock = document.getElementById("capture-dock");
   if (dock) {
     let raf = 0;
+    let shrunk = false;
     window.addEventListener(
       "scroll",
       () => {
@@ -352,7 +368,11 @@ mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
         raf = requestAnimationFrame(() => {
           raf = 0;
           if (el.stage.classList.contains("live-cam")) return;
-          dock.classList.toggle("shrunk", window.scrollY > 60);
+          const y = window.scrollY;
+          const next = shrunk ? y > RESTORE_AT : y > SHRINK_AT;
+          if (next === shrunk) return; // nothing to write, nothing to reflow
+          shrunk = next;
+          dock.classList.toggle("shrunk", shrunk);
         });
       },
       { passive: true },
@@ -365,13 +385,75 @@ el.ovalFrame.classList.add("showing-reel");
 // is enabled, reads remain closed until INITIAL_SESSION resolves below.
 if (!isAuthAvailable()) activateScanOwner(null);
 
-// A returning visitor with scans on this device gets a way straight into their
-// history from the landing. Hidden entirely when there is nothing to show, so a
-// first-time visitor never sees a dead link.
+// A returning visitor with scans on this device sees the last three of them,
+// as pictures and dates, rather than a link to a screen that has them. Hidden
+// entirely when there is nothing to show, so a first-time visitor never sees a
+// dead link or an empty shelf.
+//
+// The photos are per-owner and live in IndexedDB, so this can only fill in once
+// identity has resolved — which is why it is called from the auth callback as
+// well as at boot. Scans taken before thumbnails shipped have no picture and
+// get their score in place of one; that is a real state, not an error, and it
+// is worth showing rather than hiding the row over.
+const RECENT_ON_LANDING = 3;
+const landingRecent = document.getElementById("landing-recent");
+const landingRecentRow = document.getElementById("landing-recent-row");
+// The tutorial is reachable from the capture frame whether or not it was
+// suppressed — playTutorial rather than offerTutorial, because someone who has
+// just tapped an "i" has already answered the question offerTutorial asks.
+document.getElementById("cam-info")?.addEventListener("click", () => {
+  playTutorial("front", tutorialSuppressed("front"), () => {});
+});
+document.getElementById("side-info")?.addEventListener("click", () => {
+  playTutorial("side", tutorialSuppressed("side"), () => {});
+});
+
 const landingHistory = document.getElementById("landing-history");
+
+let recentPaintToken = 0;
 function syncLandingHistory(): void {
-  landingHistory?.classList.toggle("hidden", !hasHistory());
+  const scans = readAllHistory().slice(0, RECENT_ON_LANDING);
+  landingRecent?.classList.toggle("hidden", scans.length === 0);
+  if (!landingRecentRow || !scans.length) return;
+
+  const token = ++recentPaintToken;
+  landingRecentRow.innerHTML = scans
+    .map(
+      (s) => `<button class="recent-card" data-key="${escapeAttr(scanStorageKey(s))}" type="button">
+        <span class="recent-shot"><b>${s.overall.toFixed(1)}</b></span>
+        <span class="recent-when">${shortDate(s.date)}</span>
+      </button>`,
+    )
+    .join("");
+
+  for (const card of landingRecentRow.querySelectorAll<HTMLElement>(".recent-card")) {
+    card.onclick = () => openHistory();
+    const shot = card.querySelector(".recent-shot");
+    const key = card.dataset.key;
+    if (!shot || !key) continue;
+    void loadPhotos(key).then((p) => {
+      // A later repaint may have replaced this row while the read was in
+      // flight; writing into a detached node would be harmless but writing
+      // into a REPLACED one would show the wrong face against the wrong date.
+      if (token !== recentPaintToken || !shot.isConnected) return;
+      const src = p?.front ?? p?.side;
+      if (src) shot.innerHTML = `<img src="${src}" alt="" />`;
+    });
+  }
 }
+
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function escapeAttr(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+  );
+}
+
 syncLandingHistory();
 
 // The rotating headline. See ui/landingHeadline.ts for which lines exist and
@@ -486,7 +568,6 @@ function ensureSex(then: () => void): void {
   );
 }
 
-document.getElementById("q-open")!.addEventListener("click", () => openQuiz(() => {}, "pre"));
 
 // The engine line speaks only when the wait belongs to the user.
 //
@@ -791,13 +872,20 @@ async function openCamera(): Promise<void> {
         // is already live, so nothing is being hidden.
         // Not while the countdown owns the hint — it has just written it, and
         // the two would flash against each other every frame.
+        // Settled, not raw. The lamp and the bar below still track every frame
+        // — they are continuous readouts and should be — but the sentence and
+        // its colour only change when a reading has repeated. See
+        // engine/captureSettle.ts for why: a face on the boundary between two
+        // checks used to strobe the colour and, because the box is sized by its
+        // own text, pulse the box in and out at the same time.
+        const shown = frontSettle.settle({ status: c.status, hint: c.hint, detail: c.detail });
         if (performance.now() >= holdHintUntil && !autoFront?.armed()) {
-          el.camHintTitle.textContent = c.hint;
-          el.camHintDetail.textContent = c.detail;
+          el.camHintTitle.textContent = shown.hint;
+          el.camHintDetail.textContent = shown.detail;
         }
         el.camHint.classList.toggle("ready", c.ready);
-        el.camHint.classList.toggle("red", c.status === "red");
-        el.camHint.classList.toggle("amber", c.status === "amber");
+        el.camHint.classList.toggle("red", shown.status === "red");
+        el.camHint.classList.toggle("amber", shown.status === "amber");
         el.camLamp.className = `lamp ${c.status === "green" ? "green" : c.status}`;
         el.camLampFill.className = c.status === "green" ? "green" : c.status;
         el.camLampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
@@ -822,6 +910,7 @@ async function openCamera(): Promise<void> {
     // The front gets the same hands-off shutter as the side. It matters less
     // here — you can see the screen — but a photo taken while reaching for a
     // button is a photo that moved, and that is true of both views.
+    const frontSettle = createSettler();
     autoFront = createAutoCapture({
       onTick: (remaining) => {
         if (remaining == null) {

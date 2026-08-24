@@ -105,7 +105,7 @@ export function openMaxChat(
   const form = host.querySelector<HTMLFormElement>(".maxchat-composer")!;
   const input = form.querySelector<HTMLInputElement>("input")!;
 
-  say(log, options.greeting ?? greeting(context));
+  speakGreeting(log, options.greeting ?? greeting(context));
   for (const s of SUGGESTIONS) {
     const chip = document.createElement("button");
     chip.type = "button";
@@ -147,8 +147,57 @@ export function openMaxChat(
   if (window.matchMedia("(pointer: fine)").matches) input.focus();
 }
 
-// A finished line from Max, with no typing animation. Used for the greeting and
-// for errors, where the delay would be theatre over a sentence nobody enjoys.
+// Max's opening line types itself out, ONCE.
+//
+// Everything else in this app that used to type has stopped, and for a good
+// reason: withholding a measurement you have already produced, one character
+// at a time, is theatre at the reader's expense. Max's greeting is the
+// exception because it is not a measurement — it is somebody speaking, and
+// speech arriving as a finished block is the thing that makes a chat window
+// feel like a form.
+//
+// Once. Closing the panel and opening it again shows the line already said,
+// because the second performance of a greeting is not a greeting, and having
+// to sit through it to get back to a conversation is worse than never having
+// had it. The flag is set when typing STARTS, so ducking out halfway does not
+// buy a replay either.
+let spokenGreeting: string | null = null;
+
+const SPEAK_MS_PER_CHAR = 16;
+
+function speakGreeting(log: HTMLElement, text: string): void {
+  const row = say(log, "", "max");
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  if (reduced || spokenGreeting === text) {
+    row.textContent = text;
+    spokenGreeting = text;
+    return;
+  }
+  spokenGreeting = text;
+
+  // Height is claimed up front so the composer below does not get shoved down
+  // a line at a time while he talks.
+  row.style.minHeight = "0px";
+  const measure = say(log, text, "max");
+  measure.style.visibility = "hidden";
+  measure.style.position = "absolute";
+  row.style.minHeight = `${measure.offsetHeight}px`;
+  measure.remove();
+
+  const start = performance.now();
+  const total = text.length * SPEAK_MS_PER_CHAR;
+  const step = (now: number) => {
+    if (!row.isConnected) return;
+    const p = Math.min(1, (now - start) / total);
+    row.textContent = text.slice(0, Math.round(text.length * p));
+    if (p < 1) requestAnimationFrame(step);
+    else row.style.minHeight = "";
+  };
+  requestAnimationFrame(step);
+}
+
+// A finished line from Max, with no typing animation. Used for replies and for
+// errors, where the delay would be theatre over a sentence nobody enjoys.
 function say(log: HTMLElement, text: string, kind = "max"): HTMLElement {
   const row = document.createElement("p");
   row.className = `maxchat-msg maxchat-${kind}`;

@@ -76,6 +76,19 @@ function traitOf(id: string): string {
   return TRAITS[id] ?? "a measured proportion of the face";
 }
 
+// "About 100% of faces score higher" is not a measurement, it is a rounding
+// artefact. The reference set is a sample: it cannot establish that literally
+// every face scores higher, and a round 100 reads as a verdict rather than as
+// the bottom of a range. Anything that rounds past 99 is reported as "more
+// than 99%", which is what the data actually supports.
+//
+// Exported so the region rarity line in results.ts says it the same way; two
+// copies of this rounding is how one of them ends up printing 100 again.
+export function scoreHigherText(percentile: number): string {
+  const above = 100 - percentile;
+  return above >= 99 ? "more than 99%" : `${Math.round(above)}%`;
+}
+
 export function fmt(m: ScoredMetric): string {
   return `${m.value.toFixed(m.def.decimals)}${m.def.unit}`;
 }
@@ -120,7 +133,7 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
   const s3 =
     r.percentile >= 50
       ? `Net position: ${r.score.toFixed(1)}/10, meaning roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
-      : `Net position: ${r.score.toFixed(1)}/10. About ${Math.round(100 - r.percentile)}% of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
+      : `Net position: ${r.score.toFixed(1)}/10. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
 
   return `${s1} ${s2} ${s3}`;
 }
@@ -155,6 +168,26 @@ export function rarityN(pct: number): number {
 // the chip beside it. Kept as a named export because four call sites read
 // better for it.
 export const rarityText = rarityPhrase;
+
+// Where this face sits, said in the direction that is actually true.
+//
+// The rarity phrasing is symmetric and the meaning is not. At the 1st
+// percentile "roughly 1 in 100 male profiles measure this way" is arithmetically
+// correct and reads as a compliment — it is the identical sentence the TOP 1%
+// gets, and next to a 3.6/10 it lands as though scoring badly were a
+// distinction. Rarity is only worth saying when being rare is the point, which
+// is above the median.
+//
+// Below it, the honest statement is the plain directional one: most people
+// score higher, and here is roughly how many. Same number, no spin in either
+// direction.
+export function populationLine(pct: number, sex: Sex, subject: string): string {
+  const group = sexNoun(sex);
+  if (pct >= 50) {
+    return `Roughly ${rarityText(pct)} ${group} ${subject} measure this way.`;
+  }
+  return `About ${scoreHigherText(pct)} of ${group} ${subject} score higher.`;
+}
 
 // The headline chip.
 //

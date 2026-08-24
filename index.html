@@ -41,10 +41,6 @@
     <!-- Capture / upload -->
     <section id="v-upload">
       <h1>Looks are no longer <em>subjective</em>.</h1>
-      <p class="sub">
-        478 points measured on your face, compared against real population data.
-        <span class="sub-note">Analysis runs on your device. Sharing side-point feedback is always optional.</span>
-      </p>
 
       <!-- The full list is what someone reads once and never again. Behind a
            disclosure it stops pushing the camera below the fold. -->
@@ -81,6 +77,13 @@
           <!-- Guidance rides on top of the feed rather than under it, so the
                instruction and the thing it is about are in one glance and the
                frame keeps its height. -->
+          <!-- The way back into the tutorial, always. "Don't show me this
+               again" is answered once, often before anyone knows what they are
+               declining, and without this it is a one-way door: there is no
+               other route to the walkthrough from the capture screen. Small,
+               out of the frame's centre, and it costs nothing to ignore. -->
+          <button class="cam-info" id="cam-info" type="button" aria-label="How to take this photo">i</button>
+
           <div class="cam-hud">
             <div class="cam-hint" id="cam-hint">
               <b id="cam-hint-title">Take a photo, or upload one</b>
@@ -120,10 +123,15 @@
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
 
-      <button class="q-strip" id="q-open">
-        <i></i><b>Personalise your plan</b>
-        <span>one quick question · optional</span>
-      </button>
+      <!-- What the scan is, now that the camera has been offered rather than
+           before it. This paragraph used to sit directly under the headline,
+           where it was the third block of prose someone had to get past to
+           reach the one control the page exists for. The claim is worth making
+           and worth reading; it is not worth making first. -->
+      <p class="sub">
+        478 points measured on your face, compared against real population data.
+        <span class="sub-note">Analysis runs on your device. Sharing side-point feedback is always optional.</span>
+      </p>
 
       <!-- Which reference population to score against. This was inferred from
            face shape until the inference was measured: 58.8% correct on
@@ -230,7 +238,17 @@
            to look broken, and a load that failed — and main.ts reveals it for
            exactly those. -->
       <p class="engine-status hidden" id="engine-status"></p>
-      <button class="hist-entry hidden" id="landing-history">View your scan history →</button>
+      <!-- The three most recent scans, as pictures and dates rather than as a
+           link to a screen that has them. "View your scan history →" asks
+           someone to remember what is behind it and then go and check; three
+           thumbnails answer the question the link was standing in for. Filled
+           by syncRecentScans() once the owner has resolved, because the photos
+           live in per-owner IndexedDB and there is nothing to show before that. -->
+      <div class="recent hidden" id="landing-recent">
+        <h2>Your last scans</h2>
+        <div class="recent-row" id="landing-recent-row"></div>
+        <button class="hist-entry" id="landing-history">View more →</button>
+      </div>
     </section>
 
     <!-- Two-pane results -->
@@ -304,7 +322,14 @@
                 </svg>
                 <span class="turn-word">Turn your head to the <b>left</b></span>
               </div>
-              <div class="cam-hud">
+              <!-- The way back into the tutorial, always. "Don't show me this
+               again" is answered once, often before anyone knows what they are
+               declining, and without this it is a one-way door: there is no
+               other route to the walkthrough from the capture screen. Small,
+               out of the frame's centre, and it costs nothing to ignore. -->
+          <button class="cam-info" id="side-info" type="button" aria-label="How to take this photo">i</button>
+
+          <div class="cam-hud">
                 <div class="cam-hint" id="side-hint">
                   <b id="side-hint-title">Turn to the side</b>
                   <span id="side-hint-detail">One ear toward the lens</span>

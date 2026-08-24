@@ -1,3 +1,4 @@
+import { maxLoaderMarkup } from "./maxCharacter.js";
 import type { User } from "@supabase/supabase-js";
 import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.js";
 import {
@@ -5,8 +6,7 @@ import {
   saveOnboardingProfile,
 } from "../engine/onboarding.js";
 import type { OnboardingProfile } from "../engine/onboarding.js";
-import { ANALYSIS_MODES, loadAnalysisMode, loadVerdictTone, saveAnalysisMode } from "../engine/analysisMode.js";
-import type { AnalysisMode } from "../engine/analysisMode.js";
+import { loadVerdictTone } from "../engine/analysisMode.js";
 import {
   listSideCorrectionFeedback,
   revokeSideCorrectionFeedback,
@@ -95,7 +95,7 @@ export async function openSettings(user: User): Promise<void> {
   host = activeHost;
   activeHost.className = "trial-overlay settings-overlay";
   activeHost.innerHTML = `<div class="trial-shell trial-loading" role="dialog" aria-modal="true" aria-label="Your profile">
-    <div class="trial-loader"></div><p>Loading your profile…</p>
+    ${maxLoaderMarkup("Loading your profile")}<p>Loading your profile…</p>
   </div>`;
   document.body.appendChild(activeHost);
   document.body.classList.add("funnel-open");
@@ -120,7 +120,6 @@ export async function openSettings(user: User): Promise<void> {
   if (host !== activeHost || !activeHost.isConnected) return;
 
   const local = loadProfile();
-  let mode = loadAnalysisMode();
   let busy = false;
   let dirty = false;
   let feedbackItems: SharedSideFeedback[] | null = null;
@@ -198,15 +197,16 @@ export async function openSettings(user: User): Promise<void> {
           </div>
         </section>
 
+        <!-- The depth chooser is gone; there is one analysis and it is the full
+             one. See the note at modeSwitcher in results.ts. The TONE control
+             stays, because how bluntly Max words things is a voice preference
+             rather than a depth one, and it now stands on its own. -->
         <section class="set-group">
-          <h3>How much you want to see</h3>
-          <div class="trial-choices compact" data-field="mode">
-            ${ANALYSIS_MODES.map((m) => chip(m.id, m.label, mode === m.id, m.blurb)).join("")}
-          </div>
-          ${mode === "verdict" ? `<div class="set-tone">
-            <span>One-word results are currently <b>${tone === "kind" ? "kept civil" : "straight up"}</b>.</span>
+          <h3>How Max words things</h3>
+          <div class="set-tone">
+            <span>Results are currently worded <b>${tone === "kind" ? "kept civil" : "straight up"}</b>.</span>
             <button type="button" class="linkish" id="set-tone">Change the wording</button>
-          </div>` : ""}
+          </div>
         </section>
 
         <section class="set-group" aria-labelledby="set-feedback-title">
@@ -237,15 +237,6 @@ export async function openSettings(user: User): Promise<void> {
           dirty = true;
           if (field === "goals") profile.primaryObjectives = toggle(profile.primaryObjectives, key);
           else if (field === "quiet") profile.quietTopics = toggle(profile.quietTopics, key);
-          else if (field === "mode") {
-            mode = key as AnalysisMode;
-            saveAnalysisMode(mode);
-            // Redrawn rather than patched, because switching into verdict mode
-            // has to reveal the tone control that sits under it.
-            readInputs();
-            draw();
-            return;
-          }
           const on = field === "goals"
             ? profile.primaryObjectives.includes(key)
             : profile.quietTopics.includes(key);

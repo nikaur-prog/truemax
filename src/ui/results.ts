@@ -16,25 +16,21 @@ import { animateMeasurement, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
-import { deltaReadingCopy, overviewCaveat, fmt, leverFor, lockedCopy, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.js";
+import { deltaReadingCopy, overviewCaveat, fmt, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
-import { REFERENCE_N } from "../engine/precision.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
-import { ANALYSIS_MODES, DEFAULT_VERDICT_TONE, basicScores, loadAnalysisMode, loadVerdictTone, saveAnalysisMode, verdictFor, verdictForPercentile } from "../engine/analysisMode.js";
-import { askVerdictTone } from "./tonePrompt.js";
-import { scaleTrigger, showScalePrimer, wireScaleNote } from "./scaleNote.js";
-// Aliased: this module already has a rarityLine for a REGION row, which says a
-// different thing ("across the jaw") than the headline one.
-import { rarityLine as scaleRarityLine, rarityShort } from "../engine/rarity.js";
-import type { AnalysisMode } from "../engine/analysisMode.js";
+import { showScalePrimer, wireScaleNote } from "./scaleNote.js";
+// The verdict VIEW is gone; the verdict TONE is not — it still sets how Max
+// speaks, which is a voice setting rather than a depth one.
+import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
 import { maxCharacterMarkup } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
@@ -42,7 +38,6 @@ import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
 import { mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
-import { JAW_POSE_WARN_DEG } from "../engine/quality.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
 interface Ctx {
@@ -353,71 +348,12 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
 function showSide(): void {
   if (!ctx?.sideReport) return;
   calmSide();
-  // The depth toggle applies to the profile too. Somebody who chose "one line"
-  // for the front did not choose "fifteen measurements" for the side; the
-  // preference is about them, not about which photograph is on screen.
-  const mode = loadAnalysisMode();
-  if (mode !== "full") {
-    showSideShallow(mode, ctx.sideReport);
-    return;
-  }
   renderSideInto(body(), ctx.sideReport);
   wireSideMeasurementTaps(ctx.sideReport);
 }
 
-// Verdict and Basic for the profile, mirroring the front's shallow modes. Same
-// ladder, same grid markup, side numbers — presentation only, nothing here
-// computes a score.
-function showSideShallow(mode: AnalysisMode, report: Report): void {
-  const inner = mode === "verdict" ? sideVerdictHTML(report) : sideBasicHTML(report);
-  body().innerHTML = `<div class="reveal">
-    ${inner}
-    ${modeSwitcher(mode)}
-    ${sideNav()}
-  </div>`;
-  wireModeSwitcher(showSide);
-  wireSideNav();
-  const lead = body().querySelector<HTMLElement>(".basic-n");
-  if (lead) {
-    const target = Number(lead.dataset.count);
-    if (Number.isFinite(target)) countUp(lead, target, { decimals: Number(lead.dataset.decimals ?? "1"), delay: 60 });
-  }
-}
 
-function sideVerdictHTML(report: Report): string {
-  const v = verdictForPercentile(report.overallPercentile, report.sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
-  return `<div class="verdict ${v.tone}">
-    <span class="verdict-label">SIDE PROFILE VERDICT</span>
-    <b class="verdict-word">${v.word}</b>
-    <p class="verdict-line">${v.line}</p>
-  </div>`;
-}
 
-function sideBasicHTML(report: Report): string {
-  const regions = report.regions.filter((r) => r.metrics.length);
-  const measured = regions.reduce((n, r) => n + r.metrics.length, 0);
-  const lead = Math.round(report.overall * 10) / 10;
-  return `<div class="basic">
-    <div class="basic-lead">
-      <span class="klabel">SIDE PROFILE ${scaleTrigger()}</span>
-      <b><span class="basic-n" data-count="${lead}" data-decimals="1">${lead.toFixed(1)}</span><small>/10</small></b>
-      <em class="basic-rarity">${scaleRarityLine(report.overallPercentile)}</em>
-    </div>
-    <div class="basic-grid">
-      ${regions
-        .map(
-          (r) => `<div class="basic-cell">
-        <span>${REGION_NAMES[r.region].toUpperCase()}</span>
-        <b>${r.score.toFixed(1)}<small>/10</small></b>
-        <i style="width:${Math.round(r.score * 10)}%"></i>
-        <em>${rarityShort(r.percentile)}</em>
-      </div>`,
-        )
-        .join("")}
-    </div>
-    <p class="basic-note">These are the same 0–10 profile scores shown in Full. Rarity captions separately show position against the ${report.sex} reference set. The full mode shows the ${measured} measurements these come from.</p>
-  </div>`;
-}
 
 // One region of the profile, reached from the side-specific tab row. Same shape
 // as a front region tab — measurements, comparisons, population position — with
@@ -568,14 +504,6 @@ function showOverall(): void {
   if (!ctx) return;
   const { report: r, delta } = ctx;
   setZoom(null);
-  // Verdict and Basic are whole-screen answers, not sections of the full one.
-  // Someone who picked "one line" and then has to scroll past the population
-  // curve to reach it did not get what they asked for.
-  const mode = loadAnalysisMode();
-  if (mode !== "full") {
-    showShallow(mode);
-    return;
-  }
   // Two chips when there is a running average: "vs last scan" answers whether
   // it moved since Tuesday, "vs average" answers where the face usually lands —
   // the steadier of the two against a noisy instrument.
@@ -623,9 +551,7 @@ function showOverall(): void {
         )
         .join("")}
       </div>
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex, false, { score: r.overall, rank: rankShort(r.overallPercentile) })}
-        ${curveLegend()}
-        <p class="rarity">Roughly <b>${rarityText(r.overallPercentile)}</b> ${r.sex} faces share this overall measurement profile.</p></div>
+      ${populationBlock(r)}
       ${
         // Until the profile is in, adding it IS the next step — so it is the
         // primary button. A scan is not finished at one view, and burying that
@@ -712,7 +638,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side") : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
-        <p class="rarity">Roughly <b>${rarityText(report.overallPercentile)}</b> ${report.sex} profiles measure this way.</p></div>
+        <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
       ${regions.map((r) => sideRegionDeck(r, report)).join("")}
       ${modeSwitcher("full")}
       ${sideNav()}
@@ -1169,7 +1095,7 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
 function rarityLine(r: RegionScore): string {
   return r.percentile >= 50
     ? `Roughly <b>${rarityText(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
-    : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here, and the drill-down above shows exactly why.`;
+    : `About <b>${scoreHigherText(r.percentile)}</b> of faces score higher here, and the drill-down above shows exactly why.`;
 }
 
 // Hovering a measurement row draws that exact measurement on the face. A number
@@ -1425,124 +1351,47 @@ function showImprove(): void {
   if (!profile.postDone && !gated) openQuiz(() => showImprove(), "post");
 }
 
-// ---------------------------------------------------------------------------
-// Verdict and Basic.
-//
-// Both render from the SAME report the full mode renders from. Neither computes
-// anything — see engine/analysisMode.ts. The depth switch changes how much is
-// said, never what is true.
-// ---------------------------------------------------------------------------
-function showShallow(mode: AnalysisMode): void {
-  if (!ctx) return;
-  const r = ctx.report;
-  const inner = mode === "verdict" ? verdictHTML() : basicHTML();
 
-  body().innerHTML = `<div class="reveal">
-    ${inner}
-    ${modeSwitcher(mode)}
-    <div class="navrow">
-      <button class="btn gho" id="btn-new">New photo</button>
-      <button class="btn pri" id="btn-share">Share card</button>
-    </div>
-    ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
-  </div>`;
-
-  wireModeSwitcher();
-  // The headline counts up here too. It used to render a literal "0" and wait
-  // for an animation that only ever ran in full mode, so Basic — now the
-  // default depth — showed every user a score of zero.
-  const lead = body().querySelector<HTMLElement>(".basic-n");
-  if (lead) {
-    const target = Number(lead.dataset.count);
-    if (Number.isFinite(target)) countUp(lead, target, { decimals: Number(lead.dataset.decimals ?? "1"), delay: 60 });
-  }
-  document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
-  document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
-  document.getElementById("btn-share")!.onclick = async () => {
-    if (!ctx) return;
-    const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
-    const card = await renderShareCard(r, photo);
-    await shareCard(card, r.overall);
-  };
+// Where this face sits in the measured population. One definition, used by the
+// Full view and — since a Max subscription is meant to include it — by Verdict
+// and Basic too.
+function populationBlock(r: Report): string {
+  return `<div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(r.overallPercentile, "overall", r.sex, false, { score: r.overall, rank: rankShort(r.overallPercentile) })}
+    ${curveLegend()}
+    <p class="rarity">${populationLine(r.overallPercentile, r.sex, "faces")}</p></div>`;
 }
 
-function verdictHTML(): string {
-  const v = verdictFor(ctx!.report, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
-  return `<div class="verdict ${v.tone}">
-    <span class="verdict-label">VERDICT</span>
-    <b class="verdict-word">${v.word}</b>
-    <p class="verdict-line">${v.line}</p>
-  </div>`;
-}
 
-function basicHTML(): string {
-  const scores = basicScores(ctx!.report);
-  const [lead, ...rest] = scores;
-  return `<div class="basic">
-    <div class="basic-lead">
-      <span class="klabel">OVERALL ${scaleTrigger()}</span>
-      <b><span class="basic-n" data-count="${lead.value}" data-decimals="1">${lead.value.toFixed(1)}</span><small>/10</small></b>
-      <em class="basic-rarity">${scaleRarityLine(lead.percentile)}</em>
-    </div>
-    <div class="basic-grid">
-      ${rest
-        .map(
-          (s) => `<div class="basic-cell">
-        <span>${s.label.toUpperCase()}</span>
-        <b>${s.value.toFixed(1)}<small>/10</small></b>
-        <i style="width:${s.value * 10}%"></i>
-        <em>${rarityShort(s.percentile)}</em>
-      </div>`,
-        )
-        .join("")}
-    </div>
-    <p class="basic-note">Every number uses the same 0–10 score shown in Full. The rarity line is a separate percentile position against the reference population.</p>
-    <p class="basic-note">Scores are rounded to one decimal. Population bands use a reference set of about ${REFERENCE_N} people per sex, so those bands are deliberately coarse.</p>
-    ${poseCaveat()}
-  </div>`;
-}
 
-// The honesty note under the Basic grid when the capture was visibly off
-// level. The engine corrects pose before measuring, but the correction is not
-// perfect and the residual lands hardest on the jaw and chin: a tucked or
-// tilted head genuinely narrows the measured jaw : cheek ratio and folds the
-// gonial region. Basic mode's whole job is a number with no context, so a
-// number taken from a tilted photo owes the reader this one sentence. The
-// SCORE is untouched — modes present, they never recompute.
-function poseCaveat(): string {
-  const off = ctx?.offAxisDeg ?? 0;
-  // The same threshold the capture screen nags at. It was a 6 written here and
-  // nothing at all at capture, so the app knew the jaw was compromised and only
-  // said so once the scan had been spent.
-  if (off < JAW_POSE_WARN_DEG) return "";
-  return `<p class="basic-note pose-warn">This capture was ${off.toFixed(0)}° off level. Jaw and chin are the numbers a tilted head drags first, so before trusting a low one there, retake with the camera at eye level and your head straight.</p>`;
-}
 
 // Present on every depth, including the full one, so changing your mind is
 // never a trip into settings.
-function modeSwitcher(current: AnalysisMode): string {
-  return `<div class="modeswitch" role="group" aria-label="How much detail to show">
-    ${ANALYSIS_MODES.map(
-      (m) => `<button type="button" class="ms-btn${m.id === current ? " on" : ""}" data-mode="${m.id}">
-        <b>${m.label}</b><span>${m.blurb}</span>
-      </button>`,
-    ).join("")}
-  </div>`;
+// ---------------------------------------------------------------------------
+// There is one view now, and it is the full one.
+//
+// Verdict and Basic were presentation depths a user picked for themselves, and
+// they cut across the product rather than along it. Someone on Basic saw a
+// single headline — and then tapped a region and landed in the full metric
+// drill-down anyway, comparative numbers and all, because the depth setting
+// never reached that screen. So the "simple" mode was simple exactly until the
+// first tap, and then it was the complicated one with no context to arrive
+// with. A setting that changes the first screen and not the second is not a
+// simpler product, it is two products sharing a paywall.
+//
+// It also quietly hid what people were paying for: the default was Basic, and
+// neither shallow view rendered Max's read or the population curve, so a Max
+// subscriber's default screen was a tab labelled "Max's analysis" containing
+// nothing from Max.
+//
+// The mode functions are gone. `analysisMode.ts` keeps verdictFor/basicScores
+// because the share card and the reel still use those summaries — they are
+// genuinely short formats, chosen by the surface rather than by a setting.
+// ---------------------------------------------------------------------------
+function modeSwitcher(_current?: unknown): string {
+  return "";
 }
 
-function wireModeSwitcher(rerender: () => void = showOverall): void {
-  for (const b of document.querySelectorAll<HTMLButtonElement>(".ms-btn")) {
-    b.onclick = async () => {
-      const mode = b.dataset.mode as AnalysisMode;
-      // The question belongs to the mode, not to the place it was chosen. A
-      // person who picked full analysis in the quiz and switches here months
-      // later has still never been asked.
-      if (mode === "verdict" && loadVerdictTone() === null) await askVerdictTone();
-      saveAnalysisMode(mode);
-      rerender();
-    };
-  }
-}
+function wireModeSwitcher(_rerender?: () => void): void {}
 
 // Whether this account has Max. Module state rather than a Ctx field because it
 // arrives LATE: the entitlement is a network read, and blocking the results
