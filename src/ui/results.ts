@@ -12,9 +12,11 @@ import { regionMatches } from "../engine/celebs.js";
 import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
-import { animateMeasurement, transitionMeasurement } from "./measureOverlay.js";
+import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
-import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.js";
+import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
+import { openMetricDetail } from "./metricDetail.js";
+import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
 import { deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
@@ -255,8 +257,11 @@ function setZoom(region: RegionId | null): void {
 
   if (region) {
     const z = zoomFor(region, ctx.landmarks);
-    ctx.zoomable.style.transformOrigin = `${z.originX}% ${z.originY}%`;
-    ctx.zoomable.style.transform = `scale(${z.scale})`;
+    // translate+scale rather than transform-origin+scale, because CSS tweens a
+    // transform and applies a changed origin INSTANTLY — every region change
+    // used to open with a sideways jump as the pivot teleported. One
+    // interpolable transform glides. See zoomTransform.ts.
+    applyZoom(ctx.zoomable, z);
     // The same point, handed to the shrunk layout as a crop.
     //
     // Once the pane collapses to a 96px strip the canvas is cropped by
@@ -272,7 +277,7 @@ function setZoom(region: RegionId | null): void {
     ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
     ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
   } else {
-    ctx.zoomable.style.transform = "none";
+    applyZoom(ctx.zoomable, IDENTITY_ZOOM);
     // Back to the framing that shows a whole face in a strip.
     ctx.zoomable.style.removeProperty("--crop-x");
     ctx.zoomable.style.removeProperty("--crop-y");
@@ -405,7 +410,6 @@ function revealBars(): void {
 // the profile photo, the same credibility gesture the front regions have. The
 // calm state is the thirteen verified points; leaving a row returns to them.
 let sideActive: string | null = null;
-let sidePinned: string | null = null;
 let sideFade: OverlayFade | null = null;
 function wireSideMeasurementTaps(report: Report): void {
   if (!ctx?.sidePoints || !ctx.sidePhoto) return;
@@ -414,18 +418,36 @@ function wireSideMeasurementTaps(report: Report): void {
   const h = ctx.sidePhoto.height;
   const metrics = report.regions.flatMap((r) => r.metrics);
   sideActive = null;
-  sidePinned = null;
   sideFade?.cancel();
   sideFade = null;
+  if (revert !== null) window.clearTimeout(revert);
+  revert = null;
 
   const hints = Array.from(document.querySelectorAll<HTMLElement>(".side-tap-hint"));
-  const setHints = (name: string | null, pinned: boolean) => {
+  const setHints = (name: string | null) => {
     for (const hint of hints) {
       hint.classList.toggle("on", !!name);
       hint.innerHTML = name
-        ? `<i>◱</i>Drawing <b>${name}</b>${pinned ? " (click again to release)" : ""}`
-        : `<i>◱</i>Hover a measurement to draw it on your profile`;
+        ? `<i>◱</i>Drawing <b>${name}</b> — tap to open`
+        : `<i>◱</i>Hover to draw it on your profile · tap to open`;
     }
+  };
+
+  const openDetail = (metric: ScoredMetric) => {
+    if (!ctx) return;
+    const region = report.regions.find((x) => x.region === metric.def.region);
+    if (!region) return;
+    const deck = region.metrics.filter(wasMeasured);
+    openMetricDetail({
+      region: region.region,
+      metrics: deck,
+      index: Math.max(0, deck.findIndex((m) => m.def.id === metric.def.id)),
+      sex: report.sex,
+      landmarks: ctx.landmarks,
+      frontPhoto: frontPhoto,
+      sidePhoto: ctx.sidePhoto ?? null,
+      sidePoints: ctx.sidePoints ?? null,
+    });
   };
 
   const show = (id: string | null) => {
@@ -435,13 +457,29 @@ function wireSideMeasurementTaps(report: Report): void {
     for (const other of document.querySelectorAll(".metric[data-side-metric]")) {
       other.classList.toggle("active", (other as HTMLElement).dataset.sideMetric === id);
     }
-    setHints(metric?.def.name ?? null, sidePinned === id && !!id);
+    setHints(metric?.def.name ?? null);
     sideFade?.cancel();
     if (metric) {
       sideFade = animateSideMeasurement(ctx.overlay, pts, w, h, metric);
+      const b = sideMeasurementBounds(metric, pts, w, h);
+      applyZoom(ctx.zoomable, b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
     } else {
       drawSidePoints();
+      applyZoom(ctx.zoomable, IDENTITY_ZOOM);
     }
+  };
+
+  // Same grace period as the front deck, for the same flicker.
+  const disarm = () => {
+    if (revert !== null) window.clearTimeout(revert);
+    revert = null;
+  };
+  const arm = () => {
+    disarm();
+    revert = window.setTimeout(() => {
+      revert = null;
+      show(null);
+    }, LEAVE_GRACE_MS);
   };
 
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-side-metric]")) {
@@ -449,17 +487,17 @@ function wireSideMeasurementTaps(report: Report): void {
     if (!hasSideOverlay(id)) continue;
     row.onpointerenter = (e) => {
       if (e.pointerType === "touch") return;
+      disarm();
       show(id);
     };
     row.onpointerleave = (e) => {
       if (e.pointerType === "touch") return;
-      show(sidePinned);
+      arm();
     };
     row.onclick = () => {
-      sidePinned = sidePinned === id ? null : id;
-      show(sidePinned ?? id);
+      disarm();
       const m = metrics.find((x) => x.def.id === id);
-      setHints(m?.def.name ?? null, sidePinned === id);
+      if (m) openDetail(m);
     };
   }
 }
@@ -744,7 +782,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
         .join("")}
       ${
         r.metrics.some((mm) => hasSideOverlay(mm.def.id))
-          ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover a measurement to draw it on your profile</button>`
+          ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover to draw it on your profile · tap to open</button>`
           : ""
       }
     </div>
@@ -1058,7 +1096,7 @@ function showRegion(id: RegionId): void {
             // The overlay is the credibility feature and it was invisible: a
             // 9px glyph at 55% opacity is not an affordance. Say it in words.
             r.metrics.length
-              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Hover a measurement to draw it on your face</button>`
+              ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Hover to draw it on your face · tap to open</button>`
               : ""
           }
           <div class="typebox" id="tw"></div>
@@ -1120,8 +1158,7 @@ function rarityLine(r: RegionScore): string {
 // Click still works and still pins, for two reasons that are not the same: a
 // touch screen has no hover at all, and on a mouse you sometimes want a
 // measurement to STAY drawn while you look away at the photo.
-let activeMetric: string | null = null; // hovered or pinned: what is drawn
-let pinnedMetric: string | null = null; // survives pointerleave
+let activeMetric: string | null = null; // hovered: what is drawn
 let fade: OverlayFade | null = null;
 // Pending "go back to the calm outline", armed on leave and disarmed on the
 // next enter. See the comment above the handlers for what it is defending.
@@ -1131,14 +1168,37 @@ let revert: number | null = null;
 // immediate.
 const LEAVE_GRACE_MS = 24;
 
-const HINT_IDLE = `<i>◱</i>Hover a measurement to draw it on your face`;
+const HINT_IDLE = `<i>◱</i>Hover to draw it on your face · tap to open`;
+
+// The camera leans onto the measurement being looked at.
+//
+// The region zoom frames a neighbourhood; the measurement's own bounds frame
+// the evidence. Only the transform moves — the overlay animation, the photo
+// swap and the shrunk-strip crop are all driven elsewhere — so this composes
+// with every path through show() and cannot double-run an animation. A null
+// metric puts the camera back on the region.
+function focusMeasurement(metric: ScoredMetric | null, region: RegionId, onSide: boolean): void {
+  if (!ctx) return;
+  if (metric && onSide && ctx.sidePoints && ctx.sidePhoto) {
+    const b = sideMeasurementBounds(metric, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height);
+    applyZoom(ctx.zoomable, b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
+    return;
+  }
+  if (metric) {
+    const b = measurementBounds(metric, ctx.landmarks);
+    if (b) {
+      applyZoom(ctx.zoomable, zoomToBounds(b, { fill: 0.55, min: 1.25, max: 2.6 }));
+      return;
+    }
+  }
+  applyZoom(ctx.zoomable, zoomFor(region, ctx.landmarks));
+}
 
 function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
   // Switching tabs re-renders the rows but used to leave this pointing at the
   // previous region's metric, so the first interaction after coming back
   // toggled the overlay OFF instead of on.
   activeMetric = null;
-  pinnedMetric = null;
   fade?.cancel();
   fade = null;
   // A revert armed on the tab being left must not fire over the new one.
@@ -1147,12 +1207,29 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
   const hint = document.getElementById("tap-hint");
   const rows: HTMLElement[] = [];
 
-  const setHint = (metric: ScoredMetric | null, pinned: boolean) => {
+  const setHint = (metric: ScoredMetric | null) => {
     if (!hint) return;
     hint.classList.toggle("on", !!metric);
     hint.innerHTML = metric
-      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>${pinned ? " (click again to release)" : ""}`
+      ? `<i>◱</i>Drawing <b>${metric.def.name}</b> — tap to open`
       : HINT_IDLE;
+  };
+
+  // The deck the detail view walks: what is measured, in the order shown.
+  const list = r.metrics.filter(wasMeasured);
+  const openDetail = (id: string | null) => {
+    if (!ctx || !list.length) return;
+    const at = id ? list.findIndex((m) => m.def.id === id) : 0;
+    openMetricDetail({
+      region,
+      metrics: list,
+      index: Math.max(0, at),
+      sex: ctx.report.sex,
+      landmarks: ctx.landmarks,
+      frontPhoto: frontPhoto,
+      sidePhoto: ctx.sidePhoto ?? null,
+      sidePoints: ctx.sidePoints ?? null,
+    });
   };
 
   // Every change of what is drawn goes through here, so the cross-fade cannot
@@ -1164,7 +1241,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     for (const other of document.querySelectorAll(".metric")) {
       other.classList.toggle("active", (other as HTMLElement).dataset.metric === id);
     }
-    setHint(metric ?? null, pinnedMetric === id && !!id);
+    setHint(metric ?? null);
     fade?.cancel();
 
     // A merged report puts the side metrics in their anatomical region, so the
@@ -1189,6 +1266,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
         ctx.sidePhoto.height,
         metric,
       );
+      focusMeasurement(metric, region, true);
       return;
     }
     showPhoto("front");
@@ -1204,6 +1282,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
           if (!ctx) return;
           drawCalm(target, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
         });
+    focusMeasurement(metric ?? null, region, false);
     shownRegion = region;
   };
 
@@ -1231,7 +1310,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     disarm();
     revert = window.setTimeout(() => {
       revert = null;
-      show(pinnedMetric);
+      show(null);
     }, LEAVE_GRACE_MS);
   };
 
@@ -1251,21 +1330,19 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
       if (e.pointerType === "touch") return;
       arm();
     };
+    // A tap OPENS the measurement. Pinning used to live here — keep the
+    // drawing while looking away — and the detail view supersedes it: the
+    // thing you pinned for is now a screen of its own, with the photograph,
+    // the norm and the comparisons on it. One row, one gesture, one meaning.
     row.onclick = () => {
       disarm();
-      pinnedMetric = pinnedMetric === id ? null : id;
-      show(pinnedMetric ?? id);
-      // `show` returns early when the drawing is already correct, which it
-      // usually is here — the row is under the cursor. The hint still has to
-      // change, because pinning is a state the drawing cannot express.
-      setHint(r.metrics.find((m) => m.def.id === id) ?? null, pinnedMetric === id);
+      openDetail(id);
     };
   }
 
-  // The hint is the affordance, so it has to do the thing it describes:
-  // demonstrate on the first measurement, and release whatever is pinned.
+  // The hint is the affordance, so it does the thing it describes.
   if (hint && rows.length) {
-    hint.onclick = () => (rows.find((x) => x.dataset.metric === (pinnedMetric ?? activeMetric)) ?? rows[0]).click();
+    hint.onclick = () => openDetail(activeMetric);
   }
 }
 

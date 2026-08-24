@@ -595,16 +595,57 @@ export function animateMeasurement(
   height: number,
   metric: ScoredMetric,
 ): OverlayFade {
+  // Whatever is on the canvas RIGHT NOW — the previous measurement, or the
+  // calm region outline — fades out underneath while the new figure draws on.
+  //
+  // Without this, moving from measurement A to measurement B blanked the
+  // overlay on B's first frame and rebuilt from nothing, so walking a list
+  // read as strobe-off, draw, strobe-off, draw. A departing figure dissolving
+  // under an arriving one is a single continuous gesture, and it is also still
+  // honest: the old lines only ever lose opacity, never move, so no geometry
+  // is shown anywhere it was not measured.
+  const from = snapshotIfMatching(canvas, width, height);
   let raf = 0;
   let start = 0;
   const frame = (now: number) => {
     if (!start) start = now;
     const t = Math.min(1, (now - start) / DRAW_MS);
     drawMeasurement(canvas, landmarks, width, height, metric, t);
+    compositeDeparting(canvas, from, t);
     if (t < 1) raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
   return { cancel: () => cancelAnimationFrame(raf) };
+}
+
+// The previous overlay content, captured only when the canvas is already at
+// the target size — a first draw, or a resize, has nothing worth fading from.
+export function snapshotIfMatching(
+  canvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+): HTMLCanvasElement | null {
+  if (canvas.width !== width || canvas.height !== height || !width || !height) return null;
+  const from = document.createElement("canvas");
+  from.width = width;
+  from.height = height;
+  from.getContext("2d")!.drawImage(canvas, 0, 0);
+  return from;
+}
+
+// Gone by 45% of the draw, so the new figure finishes on a clean field.
+export function compositeDeparting(
+  canvas: HTMLCanvasElement,
+  from: HTMLCanvasElement | null,
+  t: number,
+): void {
+  if (!from) return;
+  const alpha = Math.max(0, 1 - t / 0.45);
+  if (alpha <= 0) return;
+  const g = canvas.getContext("2d")!;
+  g.globalAlpha = alpha;
+  g.drawImage(from, 0, 0);
+  g.globalAlpha = 1;
 }
 
 function label(

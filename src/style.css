@@ -285,7 +285,12 @@ body {
 #v-main { display: grid; grid-template-columns: 38% 1fr; gap: 34px; max-width: 1240px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
 .pane-photo { position: sticky; top: 78px; }
 .face-frame { position: relative; border-radius: 22px; overflow: hidden; background: #101113; box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); line-height: 0; }
-.zoomable { transition: transform 0.34s cubic-bezier(0.32, 0, 0.15, 1); transform-origin: center; }
+/* The camera. Zooms are translate+scale about a fixed 0 0 origin (see
+   zoomTransform.ts), so this one transition tweens the whole move — pan and
+   zoom together — instead of scaling around a pivot that already jumped. A
+   little longer than the old 0.34s: it is now a camera move worth watching. */
+.zoomable { transition: transform 0.48s cubic-bezier(0.3, 0, 0.15, 1); transform-origin: 0 0; }
+@media (prefers-reduced-motion: reduce) { .zoomable { transition: none; } }
 .zoomable canvas { width: 100%; height: auto; display: block; }
 #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .sweep { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, #79e8d2, transparent); box-shadow: 0 0 16px #79e8d2; display: none; }
@@ -4412,3 +4417,131 @@ body.is-member .journey { display: none; }
 .metric.unmeasured { opacity: .72; cursor: default; }
 .metric.unmeasured .mrow span { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
 .unmeasured-why { margin: 6px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--mut); }
+
+/* The measurement detail view --------------------------------------------
+   One measurement, opened: the photograph zoomed to the feature with the
+   construction drawn on, the number against its norm, and the comparisons.
+   Phone-first: a sheet that owns the screen; on a desktop, a centred card
+   with the stage beside the reading. */
+.mdx-overlay {
+  position: fixed; inset: 0; z-index: 80;
+  display: grid; place-items: end center;
+  background: rgba(12, 14, 13, 0.55); backdrop-filter: blur(7px);
+  animation: mdx-dim .28s ease;
+}
+@keyframes mdx-dim { from { opacity: 0; } }
+.mdx-card {
+  width: 100%; max-width: 560px; max-height: 94dvh; overflow-y: auto;
+  background: var(--bg); border-radius: 22px 22px 0 0;
+  box-shadow: 0 -18px 60px rgba(10, 12, 11, 0.35);
+  animation: mdx-rise .38s cubic-bezier(0.26, 0.9, 0.32, 1);
+}
+@keyframes mdx-rise { from { transform: translateY(46px); opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) {
+  .mdx-overlay, .mdx-card { animation: none; }
+}
+@media (min-width: 900px) {
+  .mdx-overlay { place-items: center; padding: 28px; }
+  .mdx-card { max-width: 920px; border-radius: 22px; }
+  .mdx-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 0 26px; padding: 0 26px 26px; }
+  .mdx-stage { border-radius: 16px; }
+}
+
+.mdx-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 20px 14px;
+}
+.mdx-head > div { flex: 1; min-width: 0; }
+.mdx-eyebrow { font: 600 9.5px var(--mono); letter-spacing: .16em; color: var(--mut); display: block; }
+.mdx-title { font: 600 19px/1.25 var(--sans); letter-spacing: -0.01em; margin-top: 2px; }
+.mdx-count { font: 500 11px var(--mono); letter-spacing: .1em; color: var(--mut); flex: none; }
+.mdx-close {
+  flex: none; width: 34px; height: 34px; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%; background: var(--card);
+  color: var(--ink); font-size: 13px; cursor: pointer;
+}
+.mdx-close:hover { border-color: var(--ink); }
+
+/* The stage: the photograph, cropped by the frame, camera driven by the same
+   translate+scale zoom as the main pane so moves glide identically. */
+.mdx-stage {
+  position: relative; overflow: hidden; background: #101113;
+  height: clamp(280px, 44dvh, 440px);
+  /* Flex, not grid: the zoom element takes its HEIGHT from align-stretch and
+     its WIDTH from its aspect-ratio, so nothing in the chain depends on a
+     percentage height resolving. The grid version left the row content-sized,
+     the canvas's height:100% fell back to its intrinsic 1153px, and the stage
+     showed a window a third of the element wide — the camera aimed at the jaw
+     and the frame showed the brow. */
+  display: flex; justify-content: center; align-items: stretch;
+  transition: opacity .15s ease;
+}
+.mdx-stage.swap { opacity: 0; }
+.mdx-zoom {
+  position: relative;
+  transition: transform .55s cubic-bezier(0.3, 0, 0.15, 1);
+}
+@media (prefers-reduced-motion: reduce) { .mdx-zoom { transition: none; } }
+/* Both canvases fill the aspect-ratio box absolutely — replaced-element sizing
+   never enters into it. */
+.mdx-zoom canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.mdx-step {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 38px; height: 38px; display: grid; place-items: center;
+  border: 1px solid rgba(255,255,255,.28); border-radius: 50%;
+  background: rgba(12,20,18,.55); backdrop-filter: blur(6px);
+  color: #fff; font-size: 19px; line-height: 1; cursor: pointer;
+  transition: border-color .2s, opacity .2s;
+}
+.mdx-step:hover { border-color: #fff; }
+.mdx-step:disabled { opacity: .25; cursor: default; }
+.mdx-prev { left: 10px; }
+.mdx-next { right: 10px; }
+
+.mdx-info { padding: 18px 20px 26px; }
+@media (min-width: 900px) { .mdx-info { padding: 4px 0 0; } }
+.mdx-info.enter > * { animation: mdx-in .34s cubic-bezier(0.25, 0.7, 0.3, 1) backwards; }
+.mdx-info.enter > *:nth-child(2) { animation-delay: .04s; }
+.mdx-info.enter > *:nth-child(3) { animation-delay: .08s; }
+.mdx-info.enter > *:nth-child(4) { animation-delay: .12s; }
+@keyframes mdx-in { from { opacity: 0; transform: translateY(7px); } }
+@media (prefers-reduced-motion: reduce) { .mdx-info.enter > * { animation: none; } }
+
+.mdx-readout { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.mdx-value { font: 300 44px/1 var(--serif); letter-spacing: -0.01em; }
+.mdx-chip {
+  font: 600 10.5px var(--mono); letter-spacing: .08em;
+  padding: 5px 10px; border-radius: 99px; align-self: center;
+}
+.mdx-score { background: var(--acc-soft); color: var(--acc); }
+.mdx-rank { border: 1px solid var(--line); color: var(--mut); }
+.mdx-bar { margin: 16px 2px 4px; }
+
+.mdx-tabs { display: flex; gap: 6px; margin: 18px 0 12px; border-bottom: 1px solid var(--line); }
+.mdx-tab {
+  padding: 8px 12px 10px; border: 0; background: none; cursor: pointer;
+  font: 500 13px var(--sans); color: var(--mut);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mdx-tab.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.mdx-tabbody { font-size: 13.5px; line-height: 1.65; color: #3b3d41; min-height: 128px; }
+.mdx-trait { margin-bottom: 10px; }
+.mdx-trait::first-letter { text-transform: uppercase; }
+.mdx-norm { font-family: var(--mono); font-size: 12px; color: var(--mut); margin-bottom: 10px; }
+.mdx-norm b { color: var(--ink); }
+.mdx-pos b { color: var(--acc); }
+.mdx-flag {
+  margin-top: 12px; padding: 10px 12px; border-radius: 10px;
+  background: #f7ece7; color: #8a4a35; font-size: 12px; line-height: 1.55;
+}
+.mdx-flag.soft { background: var(--soft); color: var(--mut); }
+.mdx-celeb { display: flex; align-items: center; gap: 13px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.mdx-celeb:last-child { border-bottom: 0; }
+.mdx-ava {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--soft); color: var(--ink);
+  font: 600 15px var(--serif);
+}
+.mdx-celeb-nm { font-weight: 600; font-size: 13.5px; }
+.mdx-celeb-nm small { display: block; font-weight: 400; font-size: 11px; color: var(--mut); margin-top: 1px; }
+.mdx-none { font-size: 12.5px; color: var(--mut); }
