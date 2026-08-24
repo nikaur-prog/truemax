@@ -169,6 +169,26 @@ export function rarityN(pct: number): number {
 // better for it.
 export const rarityText = rarityPhrase;
 
+// Where this face sits, said in the direction that is actually true.
+//
+// The rarity phrasing is symmetric and the meaning is not. At the 1st
+// percentile "roughly 1 in 100 male profiles measure this way" is arithmetically
+// correct and reads as a compliment — it is the identical sentence the TOP 1%
+// gets, and next to a 3.6/10 it lands as though scoring badly were a
+// distinction. Rarity is only worth saying when being rare is the point, which
+// is above the median.
+//
+// Below it, the honest statement is the plain directional one: most people
+// score higher, and here is roughly how many. Same number, no spin in either
+// direction.
+export function populationLine(pct: number, sex: Sex, subject: string): string {
+  const group = sexNoun(sex);
+  if (pct >= 50) {
+    return `Roughly ${rarityText(pct)} ${group} ${subject} measure this way.`;
+  }
+  return `About ${scoreHigherText(pct)} of ${group} ${subject} score higher.`;
+}
+
 // The headline chip.
 //
 // Below the median this used to read "Top 99.1%", which is arithmetically true

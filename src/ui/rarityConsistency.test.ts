@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rarityText, scoreHigherText, topPctText } from "./templates.js";
+import { populationLine, rarityText, scoreHigherText, topPctText } from "./templates.js";
 import { oneInN, rarityPhrase } from "../engine/rarity.js";
 
 // The two ways this app states the same fact must state the same fact.
@@ -63,4 +63,39 @@ test("no region line ever claims 100% of faces score higher", () => {
   assert.equal(scoreHigherText(0), "more than 99%");
   assert.equal(scoreHigherText(0.4), "more than 99%");
   assert.equal(scoreHigherText(25), "75%");
+});
+
+test("rarity framing is never used to describe a below-median score", () => {
+  // The phrasing is symmetric and the meaning is not. At the 1st percentile,
+  // "roughly 1 in 100 male profiles measure this way" is arithmetically true
+  // and reads as a compliment — it is the identical sentence the TOP 1% gets,
+  // and next to a 3.6/10 it lands as though scoring badly were a distinction.
+  for (let pct = 0; pct < 50; pct += 0.5) {
+    const line = populationLine(pct, "male", "profiles");
+    assert.doesNotMatch(line, /1 in \d/, `${pct}: rarity framing below the median — "${line}"`);
+    assert.doesNotMatch(line, /measure this way/, `${pct}: still the rare-and-special sentence`);
+    assert.match(line, /score higher/, `${pct}: should state the direction plainly`);
+  }
+});
+
+test("above the median it still says how rare the reading is", () => {
+  for (let pct = 50; pct <= 100; pct += 0.5) {
+    const line = populationLine(pct, "male", "profiles");
+    assert.match(line, /measure this way/, `${pct}: lost the rarity statement — "${line}"`);
+  }
+});
+
+test("the two sides meet at the median without a gap or an overlap", () => {
+  // Exactly one of the two forms must apply at every percentile.
+  for (let pct = 0; pct <= 100; pct += 0.25) {
+    const line = populationLine(pct, "female", "faces");
+    const rare = /measure this way/.test(line);
+    const direction = /score higher/.test(line);
+    assert.ok(rare !== direction, `${pct}: produced ${rare && direction ? "both" : "neither"} form`);
+  }
+});
+
+test("the population line names the reference group it is comparing against", () => {
+  assert.match(populationLine(80, "male", "faces"), /male faces/);
+  assert.match(populationLine(20, "female", "profiles"), /female profiles/);
 });
