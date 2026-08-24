@@ -82,9 +82,11 @@ test("side landmark guard accepts anatomy and blocks obvious missing-point error
 });
 
 test("unvalidated profile constructions cannot enter a user score", () => {
-  // 9 since ramusMandible was held out: its norm and bound describe a
-  // radiographic bone measurement, not the surface landmarks we place.
-  assert.equal(SIDE_METRICS.length, 9);
+  // 10: nine, minus ramusMandible — whose norm and bound describe a radiographic
+  // bone measurement rather than the surface landmarks we place — plus
+  // chinRecession, which is scored precisely because its construction IS the
+  // published one. See the note on its definition.
+  assert.equal(SIDE_METRICS.length, 10);
   for (const metric of SIDE_METRICS) {
     assert.equal(EXPERIMENTAL_SIDE_METRIC_IDS.has(metric.id), false, metric.id);
   }

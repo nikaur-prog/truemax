@@ -89,6 +89,7 @@ test("the angles a profile is actually judged on survive any roll", () => {
     "gonialAngle",
     "nasolabialAngle",
     "nasofrontalAngle",
+    "chinRecession",
     "facialConvexity",
     "totalFacialConvexity",
     "nasalProjection",

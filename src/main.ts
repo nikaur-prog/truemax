@@ -174,6 +174,22 @@ if (import.meta.env.DEV) {
   }
 }
 
+// Dev only: run a real scan straight through to the results screen.
+//
+// `authEnv()` falls back to a built-in project when no keys are configured, so
+// isAuthAvailable() is true in every environment and a signed-out scan always
+// stops at the account gate. The consequence is not a minor inconvenience: it
+// means NO browser check has ever been able to reach the tabbed report, on any
+// machine, without someone holding a real account and typing a password into
+// it. Every region tab, every hover overlay and every population line in there
+// has therefore only ever been verified by reading the source.
+//
+// Same shape and the same guarantee as the dashboard preview above: Vite folds
+// import.meta.env.DEV to false for production, so this constant is `false` at
+// build time and the branch that reads it is dropped from the shipped bundle.
+const DEV_OPEN_REPORT =
+  import.meta.env.DEV && new URLSearchParams(location.search).get("preview") === "report";
+
 const el = {
   engineStatus: document.getElementById("engine-status")!,
   upload: document.getElementById("v-upload")!,
@@ -1703,7 +1719,17 @@ async function gateAnalysis(
   // if the modal itself cannot open.
   const user = await currentUser().catch(() => null);
   if (!scanIsCurrent(token, generation) || !pending) return;
-  if (!isAuthAvailable() || user) {
+  if (!isAuthAvailable() || user || DEV_OPEN_REPORT) {
+    if (DEV_OPEN_REPORT && !user) {
+      activateScanOwner(null);
+      // The gate is only the first door. Without an entitlement every region
+      // tab renders as the blurred preview, so a browser check that got past
+      // sign-in would still never see a real measurement row — which is where
+      // the overlay, the ideal window and the population line all live.
+      setMaxAccess(true);
+      setAdult(true);
+      setDepth("plan");
+    }
     const owner = activeScanOwner();
     if (owner && scanSession.snapshot().owner !== owner) scanSession.claim(token, owner);
     if (!scanSession.transition(token, "analyzing")) return;

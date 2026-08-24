@@ -243,6 +243,13 @@ export const PHRASES: Record<string, Phrase> = {
         ? `an over-projected chin at ${v} per cent`
         : `a recessed chin, ${v} per cent projection`,
   },
+  chinRecession: {
+    good: (v) => `a chin that holds its own line, H angle ${v} degrees`,
+    bad: (v, high) =>
+      high
+        ? `a chin that falls behind the lips, H angle ${v} degrees`
+        : `a chin running ahead of the lips, H angle ${v} degrees`,
+  },
   facialConvexity: {
     good: (v) => `a straight profile, convexity ${v} degrees`,
     bad: (v, high) =>
