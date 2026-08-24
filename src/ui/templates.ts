@@ -90,8 +90,29 @@ export function scoreHigherText(percentile: number): string {
   return above >= 99 ? "more than 99%" : `${Math.round(above)}%`;
 }
 
+// THE MEASUREMENT, OR THE HONEST ABSENCE OF ONE.
+//
+// `m.value.toFixed(...)` on its own is why the Midface tab rendered blank.
+// Pixel-derived measurements are allowed to be unavailable — hairline detection
+// refuses rather than guesses when there is no step to find, which is correct —
+// and scoreMetric marks those `implausible` and excludes them from every
+// aggregate. What nothing did was stop the row from trying to PRINT one. The
+// value is undefined, `.toFixed` throws, and the throw lands mid-innerHTML, so
+// the whole analysis pane comes back empty. foreheadRatio is the only exempted
+// metric and it lives in midface, which is why exactly one tab was dead.
+//
+// An em dash rather than a hidden row, and rather than a substituted number.
+// Dropping the row would make the same region show four measurements on one
+// photograph and five on the next with no explanation; inventing a value would
+// put a fabricated measurement in a product sold on not fabricating them.
 export function fmt(m: ScoredMetric): string {
+  if (!Number.isFinite(m.value)) return "—";
   return `${m.value.toFixed(m.def.decimals)}${m.def.unit}`;
+}
+
+/** Whether this metric produced a reading at all. */
+export function wasMeasured(m: ScoredMetric): boolean {
+  return Number.isFinite(m.value);
 }
 
 function fmtMean(m: ScoredMetric, sex: Sex): string {
@@ -114,10 +135,23 @@ const sexNoun = (sex: Sex) => (sex === "male" ? "male" : "female");
 // Region summary: strongest metric, weakest metric, rarity — 3 sentences,
 // each anchored to a computed number.
 export function regionSummary(r: RegionScore, sex: Sex): string {
-  const sorted = [...r.metrics].sort((a, b) => b.zEff - a.zEff);
+  // Only what was actually read. An unmeasured metric has a NaN z, which sorts
+  // unpredictably and can land at either end — so the sentence would name the
+  // one measurement that does not exist as the region's anchor or its drag, and
+  // print an em dash and an "NaNth percentile" alongside it.
+  const sorted = r.metrics.filter(wasMeasured).sort((a, b) => b.zEff - a.zEff);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
   const name = REGION_NAMES[r.region].toLowerCase();
+  // A region CAN now arrive with nothing in it: measurements that failed are
+  // dropped from the report rather than carried as undefined (see
+  // scoreFrontSet), and the side view scores no metric at all in some regions.
+  // `sorted[0].percentile` on an empty array is the same class of crash that
+  // took the Midface tab out, one line further along, so it is answered here
+  // rather than left to be discovered.
+  if (!best || !worst) {
+    return `Nothing in the ${name} could be measured on this photograph, so this region is not scored. It is excluded from the total rather than counted as a zero.`;
+  }
 
   let s1: string;
   if (best.percentile >= 55) {
@@ -192,16 +226,12 @@ export function populationLine(pct: number, sex: Sex, subject: string): string {
 
 // The headline chip.
 //
-// Below the median this used to read "Top 99.1%", which is arithmetically true
-// and lands as praise — a 3.5 that sits ahead of 0.9% of faces was announcing
-// itself as top-99%, directly contradicting the curve underneath it saying
-// "Ahead of 0.9%". Under the median the honest phrasing is the one the curve
-// already uses.
-export function topPctText(pct: number): string {
-  if (pct < 50) return pct < 1 ? "Ahead of <1%" : `Ahead of ${statedPct(pct)}%`;
-  const rest = 100 - statedPct(pct);
-  return rest < 1 ? "Top 1%" : `Top ${rest}%`;
-}
+// Below the median this once read "Top 99.1%", which is arithmetically true and
+// lands as praise — a 3.5 sitting ahead of 0.9% of faces announcing itself as
+// top-99%. That was replaced with "Ahead of 0.9%", which turned out to be the
+// same bug wearing a different word. It is now the same sentence the curve and
+// the view cards use, because there is one function for it — see `standing`.
+export const topPctText = rankShort;
 
 // ---------------------------------------------------------------------------
 // Reading a rescan.
@@ -401,19 +431,44 @@ export function leverFor(m: ScoredMetric): Lever {
 // directly beneath a "Top 53.4%" on the chart. Both were describing the same
 // face, one of them was arithmetically wrong, and a side view at the very
 // bottom of the reference set came out as "Bottom 0%".
-export function rankShort(pct: number): string {
+// THE ONE PLACE A STANDING IS PUT INTO WORDS.
+//
+// "Ahead of 1%" was the previous answer below the median, and it is arithmetically
+// true and it does not work. Beside a 3.5 it was read as a top-1% badge — the
+// same misreading, by the same person, that "Roughly 1 in 100 profiles measure
+// this way" produced, and for the same reason: "ahead" is a word with a
+// direction in it, and the direction it carries is up. A reader takes the tone
+// from the word and the number from the digit, and those two disagreed.
+//
+// So below the median the standing names the side of the distribution it is
+// actually on. "Bottom 1%" cannot be read as praise, which is the entire
+// requirement — the number is identical either way, and the only thing that
+// changes is that it can no longer be mistaken for its opposite.
+//
+// `statedPct` clamps to [1, 99], so "Bottom 0%" — the nonsense an earlier
+// separately-computed version printed for a face at the very bottom of the
+// reference set — is unreachable here by construction.
+function standing(pct: number): { top: boolean; pct: number } {
   const shown = statedPct(pct);
-  const rest = 100 - shown;
-  return rest > 50 ? `Ahead of ${shown}%` : `Top ${rest}%`;
+  return shown < 50 ? { top: false, pct: shown } : { top: true, pct: 100 - shown };
+}
+
+// The same rule as percentileLine, minus the group noun, for places with no
+// room for a sentence — the view cards and the curve callout.
+//
+// It has to be one function rather than two matching ones, because the first
+// version of the cards computed it separately and got a "Bottom 47%" sitting
+// directly beneath a "Top 53.4%" on the chart. Both were describing the same
+// face and one of them was arithmetically wrong.
+export function rankShort(pct: number): string {
+  const s = standing(pct);
+  return s.top ? `Top ${s.pct}%` : `Bottom ${s.pct}%`;
 }
 
 export function percentileLine(pct: number, sex: Sex): string {
-  const shown = statedPct(pct);
-  const rest = 100 - shown;
+  const s = standing(pct);
   const group = sex === "male" ? "men" : "women";
-  // Below the median, "top X%" is a strained way to say it, so say the true
-  // thing instead — it is the same number and it does not sound like spin.
-  return rest > 50 ? `Ahead of ${shown}% of ${group}` : `Top ${rest}% of ${group}`;
+  return s.top ? `Top ${s.pct}% of ${group}` : `Bottom ${s.pct}% of ${group}`;
 }
 
 // The overview's one caveat, stated the same way for everyone.

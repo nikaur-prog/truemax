@@ -4406,3 +4406,9 @@ body.is-member .journey { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .tut-flash.fire { animation: none; }
 }
+
+/* A measurement this photograph did not give. It keeps its row and says so —
+   see fmt() in templates.ts for why it is neither hidden nor guessed at. */
+.metric.unmeasured { opacity: .72; cursor: default; }
+.metric.unmeasured .mrow span { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
+.unmeasured-why { margin: 6px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--mut); }

@@ -51,7 +51,23 @@ export const GUIDE_POINTS: Record<SidePointId, [number, number]> | null = {
   nasion: [0.7309, 0.3936],
   pronasale: [0.8041, 0.5166],
   subnasale: [0.7461, 0.5483],
-  labialeSuperius: [0.7506, 0.605],
+  // Was [0.7506, 0.605], which was not on the upper lip at all — it was in the
+  // TROUGH between the two lips, so the walkthrough's crop showed the lip line
+  // and called it the upper lip.
+  //
+  // Found by tracing the silhouette instead of judging it by eye, which is what
+  // the earlier passes did and what let this survive two of them. The subject
+  // is shot against a flat light background, so the profile edge is the first
+  // non-background pixel walking each row in from the right, and the lips are
+  // then two local maxima with a trough between:
+  //
+  //   upper lip peak   y 0.5950   x 0.7530
+  //   trough           y 0.6054   x 0.7480   <- the old point
+  //   lower lip peak   y 0.6227   x 0.7630
+  //
+  // labialeInferius already sat within one pixel of its own maximum, which is
+  // the check that says the method is right and only this point was wrong.
+  labialeSuperius: [0.753, 0.595],
   labialeInferius: [0.7618, 0.6235],
   pogonion: [0.7697, 0.7017],
   menton: [0.7359, 0.751],

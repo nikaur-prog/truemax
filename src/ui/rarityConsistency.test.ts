@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { populationLine, rarityText, scoreHigherText, topPctText } from "./templates.js";
+import { percentileLine, populationLine, rankShort, rarityText, scoreHigherText, topPctText } from "./templates.js";
 import { oneInN, rarityPhrase } from "../engine/rarity.js";
 
 // The two ways this app states the same fact must state the same fact.
@@ -98,4 +98,53 @@ test("the two sides meet at the median without a gap or an overlap", () => {
 test("the population line names the reference group it is comparing against", () => {
   assert.match(populationLine(80, "male", "faces"), /male faces/);
   assert.match(populationLine(20, "female", "profiles"), /female profiles/);
+});
+
+// ---------------------------------------------------------------------------
+// The standing chip, below the median.
+//
+// "Ahead of 1%" sat next to a 3.5 and was read as a top-1% badge — the same
+// misreading the rarity sentence produced, for the same reason: "ahead" carries
+// a direction and the direction it carries is up.
+// ---------------------------------------------------------------------------
+
+test("a standing below the median names the bottom, never 'ahead'", () => {
+  // Stops short of 48: statedPct rounds to multiples of five, so 48 and 49 are
+  // the 50th percentile and correctly read "Top 50%".
+  for (const pct of [0, 0.4, 1, 5, 12.5, 30, 47]) {
+    const short = rankShort(pct);
+    assert.doesNotMatch(short, /Ahead|Top/, `rankShort(${pct}) = ${short}`);
+    assert.match(short, /^Bottom \d+%$/, `rankShort(${pct}) = ${short}`);
+    assert.equal(topPctText(pct), short, `topPctText disagreed at ${pct}`);
+    assert.doesNotMatch(percentileLine(pct, "male"), /Ahead|Top/);
+  }
+});
+
+test("a standing at or above the median still reads as a top slice", () => {
+  for (const pct of [50, 62, 88, 99, 99.8, 100]) {
+    assert.match(rankShort(pct), /^Top \d+%$/, `rankShort(${pct}) = ${rankShort(pct)}`);
+  }
+});
+
+test("the bottom of the reference set is never 'Bottom 0%'", () => {
+  // The nonsense an earlier separately-computed version printed. statedPct
+  // clamps to [1, 99], so this holds by construction — pinned because the
+  // clamp lives in another file.
+  for (const pct of [0, 0.001, 0.4]) {
+    assert.equal(rankShort(pct), "Bottom 1%");
+  }
+});
+
+test("the three standing phrasings cannot drift apart", () => {
+  // They were three functions saying the same thing three ways, and two of them
+  // were fixed on separate occasions while the third kept the old wording. They
+  // are one function now; this is what says so.
+  for (let pct = 0; pct <= 100; pct += 0.5) {
+    assert.equal(topPctText(pct), rankShort(pct), `disagreed at ${pct}`);
+    const line = percentileLine(pct, "female");
+    assert.ok(
+      line.startsWith(rankShort(pct)),
+      `percentileLine(${pct}) = "${line}" does not open with "${rankShort(pct)}"`,
+    );
+  }
 });

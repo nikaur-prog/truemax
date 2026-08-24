@@ -16,7 +16,7 @@ import { animateMeasurement, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
-import { deltaReadingCopy, overviewCaveat, fmt, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
+import { deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
@@ -1039,9 +1039,18 @@ function showRegion(id: RegionId): void {
           <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
-              (m, i) => `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+              (m, i) => wasMeasured(m)
+                ? `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
             <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-            <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`,
+            <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`
+                // Not measured on this photograph. It keeps its row and says so,
+                // rather than vanishing — the same region would otherwise show a
+                // different number of measurements from one scan to the next with
+                // no account of why. Not tappable and no range bar, because there
+                // is no reading to draw or to place.
+                : `<div class="metric unmeasured" data-unmeasured="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+            <div class="mrow"><b>${m.def.name}</b><span>not measured</span></div>
+            <p class="unmeasured-why">This photograph did not give a clear enough reading, so it is left out of the score rather than guessed at.</p></div>`,
             )
             .join("")}
           ${indicativeNote(r.metrics)}
@@ -1114,6 +1123,13 @@ function rarityLine(r: RegionScore): string {
 let activeMetric: string | null = null; // hovered or pinned: what is drawn
 let pinnedMetric: string | null = null; // survives pointerleave
 let fade: OverlayFade | null = null;
+// Pending "go back to the calm outline", armed on leave and disarmed on the
+// next enter. See the comment above the handlers for what it is defending.
+let revert: number | null = null;
+// One frame at 60Hz, rounded up. Long enough that the enter for the adjacent
+// row always beats it, short enough that leaving the list entirely reads as
+// immediate.
+const LEAVE_GRACE_MS = 24;
 
 const HINT_IDLE = `<i>◱</i>Hover a measurement to draw it on your face`;
 
@@ -1125,6 +1141,9 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
   pinnedMetric = null;
   fade?.cancel();
   fade = null;
+  // A revert armed on the tab being left must not fire over the new one.
+  if (revert !== null) window.clearTimeout(revert);
+  revert = null;
   const hint = document.getElementById("tap-hint");
   const rows: HTMLElement[] = [];
 
@@ -1188,6 +1207,34 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     shownRegion = region;
   };
 
+  // Leaving a row does NOT revert immediately, and that one change is the whole
+  // fix for the flicker.
+  //
+  // Moving the cursor from one measurement to the next fires leave-A before
+  // enter-B. Reverting on leave therefore meant every row-to-row move ran:
+  // cancel the drawing, start a cross-fade back to the calm region outline,
+  // cancel THAT one frame later, start the next drawing. Scanning down a list
+  // of eight measurements did it eight times, and what you saw was the overlay
+  // strobing between the calm face and a half-drawn line — never settling,
+  // never arriving, and visibly slower to answer the row you were actually on
+  // because it was busy undoing the row you had left.
+  //
+  // So a leave only ARMS the revert, and an enter disarms it. A→B goes straight
+  // from A's drawing to B's, one cross-fade, starting on the first pointer
+  // event over B. A→whitespace still reverts, one frame later, which nobody can
+  // perceive as a delay.
+  const disarm = () => {
+    if (revert !== null) window.clearTimeout(revert);
+    revert = null;
+  };
+  const arm = () => {
+    disarm();
+    revert = window.setTimeout(() => {
+      revert = null;
+      show(pinnedMetric);
+    }, LEAVE_GRACE_MS);
+  };
+
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
     const id = row.dataset.metric!;
     if (!r.metrics.some((m) => m.def.id === id)) continue;
@@ -1197,13 +1244,15 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     // immediately pin on the same press.
     row.onpointerenter = (e) => {
       if (e.pointerType === "touch") return;
+      disarm();
       show(id);
     };
     row.onpointerleave = (e) => {
       if (e.pointerType === "touch") return;
-      show(pinnedMetric);
+      arm();
     };
     row.onclick = () => {
+      disarm();
       pinnedMetric = pinnedMetric === id ? null : id;
       show(pinnedMetric ?? id);
       // `show` returns early when the drawing is already correct, which it
