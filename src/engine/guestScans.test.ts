@@ -45,7 +45,7 @@ test("an absent subject means the owner — every pre-existing row is theirs", (
   // anything but "the account holder", shipping this would erase everyone's
   // history from their own trend.
   const legacy = scan(5.5);
-  delete (legacy as Record<string, unknown>).subject;
+  delete (legacy as unknown as Record<string, unknown>).subject;
   assert.equal(ownScans([legacy]).length, 1);
 });
 
