@@ -70,7 +70,20 @@ export function zoomToBounds(
   const max = opts.max ?? 2.8;
   const spanX = Math.max(0.01, b.x1 - b.x0 + pad * 2);
   const spanY = Math.max(0.01, b.y1 - b.y0 + pad * 2);
-  const scale = Math.min(max, Math.max(min, fill / Math.max(spanX, spanY)));
+  const span = Math.max(spanX, spanY);
+  // THE FLOOR MUST NEVER CROP WHAT THE ZOOM EXISTS TO SHOW.
+  //
+  // `min` is there so a wide construction still reads as a deliberate camera
+  // move rather than a nudge. Applied bluntly it does the opposite: a span of
+  // 0.9 at min 1.35 puts 1.215 frames' worth of box inside one frame, so the
+  // ends of the very measurement being featured — and the value chip, which is
+  // drawn just past a line's end — sit outside the picture.
+  //
+  // 1/span is the largest scale that still contains the whole padded box, so
+  // the floor is capped there. `fill / span` is below it by construction
+  // (fill < 1), which is what leaves the margin the chips live in.
+  const noCrop = 1 / span;
+  const scale = Math.min(max, Math.max(fill / span, Math.min(min, noCrop)));
   return {
     scale,
     // Any origin inside the element keeps a scale > 1 covering the frame, so

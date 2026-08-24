@@ -15,8 +15,9 @@ import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
-import { openMetricDetail } from "./metricDetail.js";
+import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
+import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
 import { deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
@@ -438,16 +439,29 @@ function wireSideMeasurementTaps(report: Report): void {
     const region = report.regions.find((x) => x.region === metric.def.region);
     if (!region) return;
     const deck = region.metrics.filter(wasMeasured);
+    // Rows are wired for every metric with a recipe, but the deck holds only
+    // the measured ones — so a row whose value is non-finite is not in it.
+    // Math.max(0, -1) would open a DIFFERENT measurement under the tapped
+    // row's name; opening nothing is the honest outcome.
+    const at = deck.findIndex((m) => m.def.id === metric.def.id);
+    if (at < 0) return;
     openMetricDetail({
       region: region.region,
       metrics: deck,
-      index: Math.max(0, deck.findIndex((m) => m.def.id === metric.def.id)),
+      index: at,
       sex: report.sex,
       landmarks: ctx.landmarks,
       frontPhoto: frontPhoto,
       sidePhoto: ctx.sidePhoto ?? null,
       sidePoints: ctx.sidePoints ?? null,
     });
+  };
+
+  const aimSide = (z: ZoomSpec) => {
+    if (!ctx) return;
+    applyZoom(ctx.zoomable, z);
+    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
+    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
   };
 
   const show = (id: string | null) => {
@@ -462,10 +476,10 @@ function wireSideMeasurementTaps(report: Report): void {
     if (metric) {
       sideFade = animateSideMeasurement(ctx.overlay, pts, w, h, metric);
       const b = sideMeasurementBounds(metric, pts, w, h);
-      applyZoom(ctx.zoomable, b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
+      aimSide(b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
     } else {
       drawSidePoints();
-      applyZoom(ctx.zoomable, IDENTITY_ZOOM);
+      aimSide(IDENTITY_ZOOM);
     }
   };
 
@@ -481,6 +495,16 @@ function wireSideMeasurementTaps(report: Report): void {
       show(null);
     }, LEAVE_GRACE_MS);
   };
+
+  // The side hint advertises "tap to open" and, unlike the front one, was
+  // never wired — so the affordance did nothing on the deck where a phone has
+  // no hover to fall back on.
+  for (const hint of hints) {
+    hint.onclick = () => {
+      const m = metrics.find((x) => x.def.id === sideActive) ?? metrics.find((x) => hasSideOverlay(x.def.id));
+      if (m) openDetail(m);
+    };
+  }
 
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-side-metric]")) {
     const id = row.dataset.sideMetric!;
@@ -1179,19 +1203,30 @@ const HINT_IDLE = `<i>◱</i>Hover to draw it on your face · tap to open`;
 // metric puts the camera back on the region.
 function focusMeasurement(metric: ScoredMetric | null, region: RegionId, onSide: boolean): void {
   if (!ctx) return;
+  // Once the pane collapses to a 96px strip the transform is not what you are
+  // looking at — object-position is, driven by --crop-x/--crop-y (see the
+  // shrunk rules in style.css). setZoom writes them; this has to as well, or
+  // on a phone the camera "moves" while the strip keeps showing the region it
+  // was last given. Same spec, both channels.
+  const aim = (z: ZoomSpec) => {
+    if (!ctx) return;
+    applyZoom(ctx.zoomable, z);
+    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
+    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
+  };
   if (metric && onSide && ctx.sidePoints && ctx.sidePhoto) {
     const b = sideMeasurementBounds(metric, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height);
-    applyZoom(ctx.zoomable, b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
+    aim(b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
     return;
   }
   if (metric) {
     const b = measurementBounds(metric, ctx.landmarks);
     if (b) {
-      applyZoom(ctx.zoomable, zoomToBounds(b, { fill: 0.55, min: 1.25, max: 2.6 }));
+      aim(zoomToBounds(b, { fill: 0.55, min: 1.25, max: 2.6 }));
       return;
     }
   }
-  applyZoom(ctx.zoomable, zoomFor(region, ctx.landmarks));
+  aim(zoomFor(region, ctx.landmarks));
 }
 
 function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
@@ -1551,6 +1586,13 @@ let scansLeft = 0;
 // those callbacks from repainting another identity's screen. The next result
 // starts locked until its own reads complete.
 export function clearResultsIdentityState(): void {
+  // The detail view holds a COPY of the photograph and the landmarks it was
+  // opened with, so leaving it up across an identity change or a new scan
+  // would leave the previous person's face on screen over the next person's
+  // report. Everything else with that property — the gate, the dashboard, the
+  // history panel, Max's chat — is already torn down on this path; this was
+  // the one new surface that was not.
+  closeMetricDetail();
   ctx = null;
   maxAccess = false;
   adultUser = false;

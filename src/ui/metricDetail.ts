@@ -1,7 +1,8 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { REGION_NAMES, phi } from "../engine/scoring.js";
-import { distFor } from "../engine/metrics.js";
-import { regionMatches } from "../engine/celebs.js";
+import { directionFor, distFor } from "../engine/metrics.js";
+import { statedPct } from "../engine/precision.js";
+import { CELEB_MATCH_MIN_PCT, regionMatches } from "../engine/celebs.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import type { RegionId, ScoredMetric, Sex } from "../engine/types.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
@@ -71,6 +72,21 @@ let opts: MetricDetailOpts | null = null;
 let index = 0;
 let tab: "overview" | "celebs" = "overview";
 let shownStage: "side" | "front" | null = null;
+// The pending photograph swap, and the render it belongs to.
+//
+// The swap is deferred 150ms so the stage can dip through black, and the
+// timeout captured the metric, the view and the zoom. Untracked, a second
+// showAt inside that window — arrow-key autorepeat fires every ~30-50ms, and a
+// swipe-back or a double-tap on next/prev do it just as easily — let the older
+// callback land AFTER the newer one, painting the previous measurement's
+// photograph and drawing under the new metric's header. Cancelled on every new
+// render and on close, and version-guarded so a timer that somehow survives
+// still refuses to paint over a render it does not belong to.
+let swapTimer: number | null = null;
+let generation = 0;
+// Where focus came from, so closing puts a keyboard user back on their row
+// rather than at the top of the document.
+let opener: HTMLElement | null = null;
 
 export function isMetricDetailOpen(): boolean {
   return active !== null;
@@ -79,17 +95,33 @@ export function isMetricDetailOpen(): boolean {
 export function closeMetricDetail(): void {
   fade?.cancel();
   fade = null;
+  if (swapTimer !== null) window.clearTimeout(swapTimer);
+  swapTimer = null;
+  generation++;
   active?.remove();
   active = null;
   opts = null;
   shownStage = null;
   document.removeEventListener("keydown", onKey);
+  document.body.classList.remove("mdx-open");
+  // Restore focus only if it is still ours to move — if something else has
+  // taken it since, stealing it back would be the ruder bug.
+  const back = opener;
+  opener = null;
+  if (back?.isConnected && (document.activeElement === document.body || document.activeElement === null)) {
+    back.focus();
+  }
 }
 
 function onKey(ev: KeyboardEvent): void {
-  if (ev.key === "Escape") closeMetricDetail();
-  else if (ev.key === "ArrowRight") step(1);
-  else if (ev.key === "ArrowLeft") step(-1);
+  if (ev.key === "Escape") {
+    closeMetricDetail();
+  } else if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
+    // Without this each press both steps the deck AND scrolls the report
+    // behind the dialog, so the page the reader comes back to has moved.
+    ev.preventDefault();
+    step(ev.key === "ArrowRight" ? 1 : -1);
+  }
 }
 
 function step(delta: number): void {
@@ -100,12 +132,25 @@ function step(delta: number): void {
 
 // --- content ---------------------------------------------------------------
 
+// `idealRange` is documented as the DISPLAY range for the bar, and for the
+// monotone directions one of its edges is cosmetic: a "lower is better" metric
+// gets a low edge of mean − 1.5sd purely so the green stripe has somewhere to
+// start. Printing that edge as an ideal invents a floor the scoring does not
+// have — below it you keep scoring better, not worse. So only a band metric
+// gets a two-sided ideal quoted; the others are told the truth about their
+// direction and given the one edge that is real.
 function normLine(m: ScoredMetric, sex: Sex): string {
   const d = distFor(m.def, sex);
   const dec = m.def.decimals;
   const unit = m.def.unit || "";
   const group = sex === "male" ? "Male" : "Female";
-  return `${group} average <b>${d.mean.toFixed(dec)}${unit}</b> ± ${d.sd.toFixed(dec)} · ideal <b>${m.idealRange[0].toFixed(dec)}–${m.idealRange[1].toFixed(dec)}${unit}</b>`;
+  const avg = `${group} average <b>${d.mean.toFixed(dec)}${unit}</b> ± ${d.sd.toFixed(dec)}`;
+  const dir = directionFor(m.def, sex);
+  if (dir === "band") {
+    return `${avg} · ideal <b>${m.idealRange[0].toFixed(dec)}–${m.idealRange[1].toFixed(dec)}${unit}</b>`;
+  }
+  const edge = dir === "lower" ? m.idealRange[1] : m.idealRange[0];
+  return `${avg} · ${dir === "lower" ? "lower is better, from" : "higher is better, from"} <b>${edge.toFixed(dec)}${unit}</b>`;
 }
 
 function positionLine(m: ScoredMetric, sex: Sex): string {
@@ -113,17 +158,25 @@ function positionLine(m: ScoredMetric, sex: Sex): string {
   if (m.conformance >= 0.999) {
     return `Inside the ideal band — this feature is not holding the face back at all.`;
   }
-  return `Closer to the ideal than <b>${Math.round(m.percentile)}%</b> of ${group}.`;
+  // statedPct, like the chip beside it. Math.round put the same number on the
+  // screen twice at two precisions — "Bottom 45%" over "closer to the ideal
+  // than 43% of men" — and the finer of the two is a resolution a ~110-face
+  // reference set cannot support in the first place.
+  return `Closer to the ideal than <b>${statedPct(m.percentile)}%</b> of ${group}.`;
 }
 
 function overviewHTML(m: ScoredMetric, sex: Sex): string {
   const indicative = reliabilityOf(m.def.id) < RELIABLE_MIN;
+  // A flagged reading gets NO standing sentence. It used to print "closer to
+  // the ideal than N% of men" — a percentile computed from the very value the
+  // line underneath calls a misplaced point — so the card asserted a population
+  // position and then denied the measurement in the next breath.
   return `
     <p class="mdx-trait">It measures ${metricTrait(m.def.id)}.</p>
     <p class="mdx-norm">${normLine(m, sex)}</p>
-    <p class="mdx-pos">${positionLine(m, sex)}</p>
+    ${m.implausible ? "" : `<p class="mdx-pos">${positionLine(m, sex)}</p>`}
     ${m.implausible
-      ? `<p class="mdx-flag">This reading fell outside the range a face occupies, so it is treated as a misplaced point rather than a measurement — it moves nothing.</p>`
+      ? `<p class="mdx-flag">This reading fell outside the range a face occupies, so it is treated as a misplaced point rather than a measurement. It has no population position and it moves nothing — the landmarks behind it need re-checking.</p>`
       : ""}
     ${indicative && !m.implausible
       ? `<p class="mdx-flag soft">Shown, not scored: across many photos of the same people this one moves as much between two photos of one face as between two different faces, so it carries no weight.</p>`
@@ -131,9 +184,15 @@ function overviewHTML(m: ScoredMetric, sex: Sex): string {
 }
 
 function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
-  // The matcher's own eligibility rule — at or above average only — applied to
-  // exactly this metric, so a match here is "your X measures like theirs" and
-  // nothing vaguer.
+  // An impossible reading is not a measurement, so it cannot be matched
+  // against one. The matcher would happily oblige — its only test is
+  // percentile >= 40, and an out-of-bounds value still carries a percentile —
+  // so the gate has to be here.
+  if (m.implausible) {
+    return `<p class="mdx-none">No comparison is offered on a reading this far outside anatomical range: it describes where a point landed, not the face. Re-check the landmarks and it will match on the corrected value.</p>`;
+  }
+  // The matcher's eligibility rule, applied to exactly this metric, so a match
+  // is "your X measures like theirs" and nothing vaguer.
   const matches = regionMatches(region, [m], sex);
   if (matches.length) {
     return matches
@@ -143,9 +202,16 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
       )
       .join("");
   }
-  return m.percentile < 40
-    ? `<p class="mdx-none">Matches are only offered on measurements where you land at or above average, and this one sits below it. That restraint is the point — a flattering comparison you did not earn would make every other number worth less.</p>`
-    : `<p class="mdx-none">No reference face carries this measurement close enough to yours to claim honestly. The set grows with every analyzed face.</p>`;
+  // The two reasons are genuinely different and the copy has to match the
+  // code. CELEB_MATCH_MIN_PCT is the matcher's real threshold — the previous
+  // wording said "at or above average", which is a different number and put a
+  // "Bottom 45%" chip next to a tab full of matches. And the second branch is
+  // reached when no reference face carries this metric AT ALL (every profile
+  // metric, today), not because a distance check rejected them — the matcher
+  // has no proximity cap.
+  return m.percentile < CELEB_MATCH_MIN_PCT
+    ? `<p class="mdx-none">Comparisons are only offered where you place in the top ${100 - CELEB_MATCH_MIN_PCT}% on the measurement, and this one sits below that. A flattering comparison you did not earn would make every other number here worth less.</p>`
+    : `<p class="mdx-none">No reference face in the set carries this measurement yet, so there is nothing to compare against. The set grows with every analyzed face.</p>`;
 }
 
 function barHTML(m: ScoredMetric, sex: Sex): string {
@@ -210,7 +276,20 @@ function showAt(next: number): void {
   index = next;
   const m = opts.metrics[index];
   const view = stageViewFor(m, !!(opts.sidePhoto && opts.sidePoints), !!(opts.frontPhoto && opts.landmarks));
-  if (!view) return;
+  // A render supersedes any swap still pending from the last one.
+  if (swapTimer !== null) window.clearTimeout(swapTimer);
+  swapTimer = null;
+  const mine = ++generation;
+
+  // NO STAGE IS NOT NO CARD. This used to `return` before writing a single
+  // word, so a report whose front capture is unavailable — a documented state,
+  // not a hypothetical — opened a permanently blank sheet. The numbers do not
+  // need a photograph; only the drawing does.
+  if (!view) {
+    active.querySelector<HTMLElement>(".mdx-stage")!.classList.add("mdx-nostage");
+  } else {
+    active.querySelector<HTMLElement>(".mdx-stage")!.classList.remove("mdx-nostage");
+  }
 
   // Header
   active.querySelector(".mdx-count")!.textContent = `${index + 1} / ${opts.metrics.length}`;
@@ -221,23 +300,29 @@ function showAt(next: number): void {
   // Stage: pan the camera. Swapping photographs cannot pan, so that one case
   // dips through black instead — a cut, not a glitch.
   const zoomEl = active.querySelector<HTMLElement>(".mdx-zoom")!;
-  const spec = stageZoom(m, view);
-  if (view !== shownStage) {
-    const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
-    stage.classList.add("swap");
-    window.setTimeout(() => {
-      paintStage(view);
-      zoomEl.style.transition = "none";
+  if (view) {
+    const spec = stageZoom(m, view);
+    if (view !== shownStage) {
+      const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
+      stage.classList.add("swap");
+      swapTimer = window.setTimeout(() => {
+        swapTimer = null;
+        // The guard that makes the cancel above belt-and-braces rather than
+        // load-bearing: a timer from a superseded render refuses to paint.
+        if (mine !== generation || !active) return;
+        paintStage(view);
+        zoomEl.style.transition = "none";
+        applyZoom(zoomEl, spec);
+        drawMetric(m, view);
+        // Reflow so the no-transition zoom lands before transitions resume.
+        void zoomEl.offsetWidth;
+        zoomEl.style.transition = "";
+        stage.classList.remove("swap");
+      }, 150);
+    } else {
       applyZoom(zoomEl, spec);
       drawMetric(m, view);
-      // Reflow so the no-transition zoom lands before transitions resume.
-      void zoomEl.offsetWidth;
-      zoomEl.style.transition = "";
-      stage.classList.remove("swap");
-    }, 150);
-  } else {
-    applyZoom(zoomEl, spec);
-    drawMetric(m, view);
+    }
   }
 
   // Readout + tabs, re-entering with a small rise so the change reads.
@@ -248,7 +333,10 @@ function showAt(next: number): void {
   info.querySelector(".mdx-value")!.textContent = fmt(m);
   info.querySelector(".mdx-score")!.textContent = m.implausible ? "—" : m.score.toFixed(1);
   info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : rankShort(m.percentile);
-  info.querySelector<HTMLElement>(".mdx-barhost")!.innerHTML = barHTML(m, opts.sex);
+  // No population bar for an impossible reading — its marker sits at phi(z) of
+  // a value that is not a face, pinned to one end and presented as a position.
+  // The side deck already suppresses exactly this on its rows.
+  info.querySelector<HTMLElement>(".mdx-barhost")!.innerHTML = m.implausible ? "" : barHTML(m, opts.sex);
   renderTab();
 
   const prev = active.querySelector<HTMLButtonElement>(".mdx-prev")!;
@@ -309,8 +397,17 @@ export function openMetricDetail(o: MetricDetailOpts): void {
     </div>
   </div>`;
 
+  // Dismiss on the backdrop only when the gesture BEGAN there. A click fires
+  // on the common ancestor of its down and up targets, so a swipe that starts
+  // on the stage and releases past the card's edge — easy on a phone, and the
+  // narrower the card the easier — was landing as a backdrop click and closing
+  // the card mid-gesture.
+  let downOnBackdrop = false;
+  wrap.addEventListener("pointerdown", (e) => {
+    downOnBackdrop = e.target === wrap;
+  });
   wrap.addEventListener("click", (e) => {
-    if (e.target === wrap) closeMetricDetail();
+    if (e.target === wrap && downOnBackdrop) closeMetricDetail();
   });
   wrap.querySelector(".mdx-close")!.addEventListener("click", closeMetricDetail);
   wrap.querySelector(".mdx-prev")!.addEventListener("click", () => step(-1));
@@ -334,6 +431,9 @@ export function openMetricDetail(o: MetricDetailOpts): void {
   });
 
   document.addEventListener("keydown", onKey);
+  // The report behind a fixed dialog must not scroll under it.
+  document.body.classList.add("mdx-open");
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   document.body.appendChild(wrap);
 
   // First paint: land the stage without a transition, then let showAt animate.
