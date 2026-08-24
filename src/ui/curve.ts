@@ -78,8 +78,27 @@ export function curveSVG(
   const raw: number[] = [];
   for (let i = 0; i < 20; i++) raw.push(0.05 / Math.max(1e-3, q[i + 1] - q[i]));
   const d = smooth(smooth(raw));
-  const dMax = Math.max(...d) || 1;
-  const Y = (v: number) => BASE - (v / dMax) * (BASE - TOP);
+
+  // Scaled to a HIGH QUANTILE of the densities, not to their maximum.
+  //
+  // A metric that saturates — one where a chunk of the reference set piles up
+  // against a floor or a ceiling — puts two adjacent quantiles almost on top of
+  // each other, and 0.05 divided by almost nothing is enormous. Scaling to the
+  // max then meant that single degenerate bin became the whole chart: a needle
+  // at one edge with every real feature of the distribution flattened into the
+  // axis. It looked like a rendering bug and it was worse than one, because the
+  // shape it drew was not the shape of the data.
+  //
+  // Taking the 90th percentile of the bin densities instead lets the honest
+  // body of the distribution fill the height, and the spike simply clips.
+  // Anchored on the MEDIAN bin rather than the largest one. Putting the typical
+  // density at a fixed fraction of the height means the readable body of the
+  // distribution always fills the box and an extreme bin simply clips, instead
+  // of the extreme setting the scale and pressing everything else flat.
+  const sorted = [...d].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] || 1;
+  const dMax = median / 0.42;
+  const Y = (v: number) => BASE - Math.min(1, v / dMax) * (BASE - TOP);
 
   const pts: Array<[number, number]> = [[0, BASE]];
   for (let i = 0; i < 20; i++) pts.push([X((q[i] + q[i + 1]) / 2), Y(d[i])]);

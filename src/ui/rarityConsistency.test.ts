@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rarityText, topPctText } from "./templates.js";
+import { rarityText, scoreHigherText, topPctText } from "./templates.js";
 import { oneInN, rarityPhrase } from "../engine/rarity.js";
 
 // The two ways this app states the same fact must state the same fact.
@@ -50,4 +50,17 @@ test("both stop claiming resolution at the same place", () => {
   assert.equal(rarityText(99.4), "the top 1%");
   assert.equal(topPctText(99.4), "Top 1%");
   assert.equal(oneInN(99.4), 100);
+});
+
+test("no region line ever claims 100% of faces score higher", () => {
+  // A rounding artefact, not a measurement. The reference set is a sample: it
+  // cannot establish that literally every face scores higher, and a round 100
+  // reads as a verdict rather than as the bottom of a range.
+  for (let pct = 0; pct <= 100; pct += 0.1) {
+    const t = scoreHigherText(pct);
+    assert.doesNotMatch(t, /\b100%/, `percentile ${pct.toFixed(1)} printed ${t}`);
+  }
+  assert.equal(scoreHigherText(0), "more than 99%");
+  assert.equal(scoreHigherText(0.4), "more than 99%");
+  assert.equal(scoreHigherText(25), "75%");
 });

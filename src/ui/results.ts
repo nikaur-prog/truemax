@@ -16,7 +16,7 @@ import { animateMeasurement, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay } from "./sideMeasureOverlay.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
-import { deltaReadingCopy, overviewCaveat, fmt, leverFor, lockedCopy, percentileLine, rankShort, rarityText, regionSummary, topPctText } from "./templates.js";
+import { deltaReadingCopy, overviewCaveat, fmt, leverFor, lockedCopy, percentileLine, rankShort, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
@@ -1174,7 +1174,7 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
 function rarityLine(r: RegionScore): string {
   return r.percentile >= 50
     ? `Roughly <b>${rarityText(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
-    : `About <b>${Math.round(100 - r.percentile)}%</b> of faces score higher here, and the drill-down above shows exactly why.`;
+    : `About <b>${scoreHigherText(r.percentile)}</b> of faces score higher here, and the drill-down above shows exactly why.`;
 }
 
 // Hovering a measurement row draws that exact measurement on the face. A number
