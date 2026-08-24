@@ -1,6 +1,6 @@
-import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory } from "../engine/history.js";
+import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
 import type { StoredScan } from "../engine/history.js";
-import { clearAllPhotos } from "../engine/photoStore.js";
+import { clearAllPhotos, loadPhotos } from "../engine/photoStore.js";
 import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,29 @@ import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
 const NOISE_SD = DISPLAY_NOISE;
 
 const mean = (a: number[]): number => a.reduce((s, x) => s + x, 0) / (a.length || 1);
+
+const escapeAttr = (v: string): string =>
+  v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+// Paint each row's front and side thumbnails once the store answers.
+//
+// One pass over the rows on screen rather than a load per row as it scrolls:
+// the list is capped at 120 and a thumbnail is a few KB, so the whole set is
+// cheaper than the machinery for doing it lazily.
+function fillShots(root: ParentNode): void {
+  for (const slot of root.querySelectorAll<HTMLElement>(".hist-row[data-shots]")) {
+    const key = slot.dataset.shots;
+    const host = slot.querySelector<HTMLElement>(".hist-shots");
+    if (!key || !host) continue;
+    void loadPhotos(key).then((p) => {
+      if (!host.isConnected || !p) return;
+      host.innerHTML =
+        (p.front ? `<img src="${p.front}" alt="" />` : "") +
+        (p.side ? `<img class="side" src="${p.side}" alt="" />` : "");
+      host.classList.toggle("has", !!(p.front || p.side));
+    });
+  }
+}
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -95,7 +118,14 @@ function rows(scans: StoredScan[]): string {
       // A button, because it opens the scan. It was a div for as long as the
       // list was read-only, and a row of numbers you cannot press is where a
       // history stops being a record and becomes a chart legend.
-      return `<button type="button" class="hist-row" data-recall="${i}">
+      // The photographs, as a teaser. A list of dates and numbers gives no way
+      // to tell one scan from another — which of five scans in a week was the
+      // one in decent light? — and the app already holds a 320px thumbnail of
+      // each. They fill in after the row paints, because IndexedDB is async and
+      // a list must not wait on it; a scan with no stored photo simply keeps
+      // the empty slot, which is a real state and not an error.
+      return `<button type="button" class="hist-row" data-recall="${i}" data-shots="${escapeAttr(scanStorageKey(s))}">
+        <span class="hist-shots" aria-hidden="true"></span>
         <span class="hist-date">${fmtDate(s.date)}</span>
         <span class="hist-score">${s.overall.toFixed(1)}<small>/10</small></span>
         ${chip}
@@ -176,6 +206,7 @@ export function wireHistoryPanel(root: ParentNode): void {
   // Rows reopen the scan they name. The index is into the same newest-first
   // array the markup was built from, so the row and its predecessor — the one
   // its movement chip is measured against — are both to hand.
+  fillShots(root);
   const scans = readAllComparableHistory();
   for (const row of root.querySelectorAll<HTMLElement>("[data-recall]")) {
     row.onclick = () => {

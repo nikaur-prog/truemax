@@ -354,47 +354,11 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
 // The idle frame runs the demo reel — real scans of public-domain portraits.
 mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 
-// Shrink the docked demo once the page starts scrolling, so the pinned way-in
-// yields the screen without leaving it. Skipped while the camera is live: that
-// screen is not a scrolling context and a mid-capture resize would fight the
-// framing guide.
-//
-// One threshold made this choppy rather than smooth. A single 60px line means
-// any scroll that hovers around it — and a thumb-flick on a phone hovers around
-// everything on the way past — retriggers the shrink and the un-shrink against
-// each other, so a 0.35s transition never finishes before it is reversed. The
-// card visibly stutters, which is what reads as "choppy": not the animation
-// being too fast, but the animation being interrupted.
-//
-// Two thresholds fix it. It shrinks past 72 and only comes back under 32, so
-// the 40px in between is a gap the scroll has to genuinely cross rather than a
-// line it can vibrate on.
-const SHRINK_AT = 72;
-const RESTORE_AT = 32;
-
-{
-  const dock = document.getElementById("capture-dock");
-  if (dock) {
-    let raf = 0;
-    let shrunk = false;
-    window.addEventListener(
-      "scroll",
-      () => {
-        if (raf) return;
-        raf = requestAnimationFrame(() => {
-          raf = 0;
-          if (el.stage.classList.contains("live-cam")) return;
-          const y = window.scrollY;
-          const next = shrunk ? y > RESTORE_AT : y > SHRINK_AT;
-          if (next === shrunk) return; // nothing to write, nothing to reflow
-          shrunk = next;
-          dock.classList.toggle("shrunk", shrunk);
-        });
-      },
-      { passive: true },
-    );
-  }
-}
+// The docked demo neither pins nor shrinks. Both were tried, the resize was
+// re-tuned twice, and it still read as choppy on a real phone — a card that
+// changes size under a moving thumb is fighting the scroll rather than riding
+// it, and an interrupted 0.4s transition looks like jank whatever the
+// thresholds do. It keeps one size, the big one, and scrolls with the page.
 el.ovalFrame.classList.add("showing-reel");
 
 // A build without accounts still needs an explicit anonymous owner. When Auth

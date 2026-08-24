@@ -266,7 +266,12 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
   wrap.className = "tut";
   wrap.innerHTML = `
     <div class="tut-bars">${steps.map((_, i) => `<i data-bar="${i}"><b></b></i>`).join("")}</div>
-    <button class="tut-close" id="tut-close" type="button">Skip</button>
+    <!-- A gray ✕, outside the photograph. It used to say "Skip", and the
+         verdict mark on the photo used to be a lone red ✕ in a circle — so the
+         close control and the "this is wrong" mark were the same glyph, and
+         people read the verdict as an exit button. One gray ✕ off the picture
+         closes; the verdict on the picture now carries its word. -->
+    <button class="tut-close" id="tut-close" type="button" aria-label="Close the tutorial">✕</button>
     <div class="tut-stage">
       <!-- The mark pins to the PHOTOGRAPH, not to the stage. object-fit
            letterboxes the image inside the stage, so a badge positioned
@@ -390,7 +395,10 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
       vid.load();
     }
     runCue(step);
-    mark.textContent = step.kind === "do" ? "✓" : "✕";
+    // The word is the fix: "✕" alone reads as a close button, and a red
+    // circle in the corner of a photograph is exactly where apps put one.
+    // "Incorrect" cannot be misread as chrome.
+    mark.innerHTML = step.kind === "do" ? `Correct<i>✓</i>` : `Incorrect<i>✕</i>`;
     mark.className = `tut-mark ${step.kind}`;
     title.textContent = step.title;
     caption.textContent = step.caption;

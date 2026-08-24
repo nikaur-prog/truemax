@@ -1060,6 +1060,14 @@ body.funnel-open { overflow: hidden; }
 /* The replay affordance. Deliberately tiny and in the corner: it is insurance
    against a "don't show me again" answered too early, not a control anybody
    needs on the way to a photo. */
+/* The tutorial shortcut belongs to the CAPTURE screen, not the landing page.
+   On the idle landing the frame is showing the demo reel — somebody who has
+   not started a scan is being offered help with a photograph they have not
+   been asked for yet, next to a face that is not theirs. It appears when the
+   camera does. (The side flow keeps its own, because that screen only ever
+   exists mid-scan.) */
+#cam-info { display: none; }
+.stage.live-cam #cam-info { display: grid; }
 .cam-info {
   position: absolute; top: 10px; right: 10px; z-index: 4;
   width: 26px; height: 26px; border-radius: 999px;
@@ -1916,13 +1924,25 @@ body.funnel-open { overflow: hidden; }
    chrome because it is a row in a list, not a control in a form; the chevron
    and the hover are what say it is pressable. */
 .hist-row {
-  display: grid; grid-template-columns: 1fr auto auto auto auto; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: auto 1fr auto auto auto auto; align-items: center; gap: 12px;
   padding: 11px 2px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0;
   font: inherit; text-align: left; cursor: pointer;
   transition: background 0.12s ease;
 }
 .hist-row:hover { background: rgba(0, 0, 0, 0.028); }
+/* The two thumbnails, overlapped like a small stack — front in front, profile
+   peeking behind it. Reserved at its full width whether or not the photographs
+   exist, so rows with and without them stay in one column. */
+.hist-shots { display: flex; width: 46px; height: 34px; position: relative; flex: none; }
+.hist-shots img {
+  position: absolute; top: 0; width: 28px; height: 34px;
+  object-fit: cover; border-radius: 6px; background: var(--soft);
+  box-shadow: 0 1px 4px rgba(20, 21, 24, 0.16);
+}
+.hist-shots img:first-child { left: 0; z-index: 2; }
+.hist-shots img.side { left: 18px; z-index: 1; opacity: .85; }
+.hist-shots img:only-child { left: 9px; }
 .hist-go { color: var(--mut, #6b7280); font-size: 17px; line-height: 1; }
 .hist-row:hover .hist-go { color: var(--acc, #107a57); }
 
@@ -4196,31 +4216,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      the demo sat still in the middle. Stretching the dock and cancelling that
      padding with a negative inline margin gives the background the full width
      while the card inside stays where it was. */
-  .capture-dock {
-    position: sticky; top: 0; z-index: 30;
-    background: var(--bg); padding: 6px 26px 0;
-    align-self: stretch; margin-inline: -26px;
-  }
-  .capture-dock .stage { margin-inline: auto; }
-  .capture-dock::after {
-    content: ""; position: absolute; left: 0; right: 0; bottom: -14px; height: 14px;
-    background: linear-gradient(var(--bg), transparent); pointer-events: none;
-  }
-  /* One curve and one duration across everything the shrink moves. The frame
-     was easing over 0.35s while the buttons under it jumped their 8px of margin
-     instantly, so the card arrived at its new size before the row below had
-     finished catching up — half of what read as choppiness was the two halves
-     not agreeing on when the move ended. */
-  .capture-dock .oval-frame,
-  .capture-dock .cam-actions {
-    transition: max-width 0.4s cubic-bezier(.22,1,.36,1), margin-top 0.4s cubic-bezier(.22,1,.36,1);
-  }
+  /* The dock neither pins nor shrinks any more. It was sticky with a
+     scroll-driven resize, the resize was re-tuned twice and still read as
+     choppy on a real phone, and a card that changes size under a moving thumb
+     is fighting physics: interrupting a 0.4s transition mid-flight LOOKS like
+     jank no matter how the thresholds hysterise. So the demo keeps one size —
+     the big one — and simply scrolls with the page like everything else. */
   .capture-dock .oval-frame { margin: 0 auto; }
-  .capture-dock.shrunk .oval-frame { max-width: 46vw; }
-  .capture-dock.shrunk .cam-actions { margin-top: 8px; }
-  @media (prefers-reduced-motion: reduce) {
-    .capture-dock .oval-frame, .capture-dock .cam-actions { transition: none; }
-  }
 }
 
 /* Icons on the capture buttons sit after the words, vertically centred. */
@@ -4308,9 +4310,10 @@ body.is-member .journey { display: none; }
    screen, and the other one is the verdict on the photograph. */
 .tut-close {
   position: absolute; top: calc(14px + env(safe-area-inset-top)); right: 14px; z-index: 3;
-  border: none; cursor: pointer; border-radius: 99px; padding: 7px 14px;
-  background: rgba(255, 255, 255, 0.14); color: #fff;
-  font: 600 12.5px/1 var(--sans, inherit); letter-spacing: 0.02em;
+  width: 36px; height: 36px; display: grid; place-items: center;
+  border: none; cursor: pointer; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16); color: rgba(255, 255, 255, 0.85);
+  font: 500 15px/1 var(--sans, inherit);
 }
 .tut-stage { position: relative; overflow: hidden; display: grid; place-items: center; min-height: 0; padding: 0 14px; }
 .tut-shot { position: relative; display: flex; max-width: 100%; max-height: 100%; min-height: 0; }
@@ -4321,13 +4324,17 @@ body.is-member .journey { display: none; }
 .tut-stage img.ready { opacity: 1; }
 /* The verdict mark. Big, high-contrast, and in the same corner every time, so
    the eye learns where to check rather than hunting for it. */
+/* The verdict, worded. Top-left of the photograph, where a face never is —
+   the frame is a portrait and the face sits centre. */
 .tut-mark {
   position: absolute; top: 10px; left: 10px; z-index: 2;
-  width: 42px; height: 42px; border-radius: 99px; display: grid; place-items: center;
-  font-size: 24px; font-weight: 700; line-height: 1; color: #fff;
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 11px 8px 14px; border-radius: 99px;
+  font-size: 13.5px; font-weight: 700; letter-spacing: 0.03em; color: #fff;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
   animation: tut-pop 0.32s cubic-bezier(0.3, 1.5, 0.5, 1);
 }
+.tut-mark i { font-style: normal; font-size: 15px; line-height: 1; }
 .tut-mark.dont { background: #c0432b; }
 .tut-mark.do { background: #16a97a; }
 @keyframes tut-pop { from { transform: scale(0.4); opacity: 0; } }
@@ -4424,7 +4431,12 @@ body.is-member .journey { display: none; }
    Phone-first: a sheet that owns the screen; on a desktop, a centred card
    with the stage beside the reading. */
 .mdx-overlay {
-  position: fixed; inset: 0; z-index: 80;
+  /* Above Max's pet (80) and his chat (90). The pet mounts LATER when a slow
+     entitlement read resolves, which made it a later sibling at the same
+     z-index — painted over the modal backdrop and clickable, and one click
+     opened the chat on top of an open measurement. A reading surface loses to
+     nothing that wanders in. */
+  position: fixed; inset: 0; z-index: 95;
   display: grid; place-items: end center;
   background: rgba(12, 14, 13, 0.55); backdrop-filter: blur(7px);
   animation: mdx-dim .28s ease;
