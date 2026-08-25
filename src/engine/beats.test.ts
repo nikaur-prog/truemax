@@ -276,6 +276,67 @@ test("a drop outside the window is ignored rather than bending the edit", () => 
   assert.equal(plan.cuts.some((c) => c.onDrop), false);
 });
 
+test("no clip is ever silently lost to a drop placed early or late", () => {
+  // The bug this pins: a drop two beats into the window with five clips asked
+  // for before it gave three of them zero beats, and zero-beat clips are not
+  // rendered — five cuts appeared for eight attached clips, with a silent
+  // hole. The requested split is now honoured only as far as the beats can
+  // carry it, so every clip keeps at least one beat.
+  const grid = gridAt(120);
+  const early = planBeatCuts({ grid, clipCount: 8, beatsPerClip: 2, songStart: 0, dropAt: 1.0, clipsBeforeDrop: 5 });
+  assert.equal(early.cuts.length, 8, `early drop lost ${8 - early.cuts.length} clips`);
+  assert.ok(early.cuts.every((c) => c.beats >= 1));
+  assert.ok(early.cuts.some((c) => c.onDrop));
+  const late = planBeatCuts({ grid, clipCount: 8, beatsPerClip: 2, songStart: 0, dropAt: 7.5, clipsBeforeDrop: 2 });
+  assert.equal(late.cuts.length, 8, `late drop lost ${8 - late.cuts.length} clips`);
+  // And the cuts still tile: no gap, no overlap, ending at the stated duration.
+  for (let i = 1; i < early.cuts.length; i++) {
+    assert.ok(Math.abs(early.cuts[i].start - early.cuts[i - 1].end) < 1e-9);
+  }
+  assert.equal(early.cuts[0].start, 0);
+  assert.ok(Math.abs(early.cuts[early.cuts.length - 1].end - early.duration) < 1e-9);
+});
+
+test("a single clip ignores the drop instead of starting mid-window", () => {
+  // One clip has nothing to cut TO the drop from. Honouring it began the only
+  // clip at the drop, leaving dead air from the window's start to the reveal.
+  const plan = planBeatCuts({ grid: gridAt(120), clipCount: 1, beatsPerClip: 4, songStart: 0, dropAt: 1.0 });
+  assert.equal(plan.cuts.length, 1);
+  assert.equal(plan.cuts[0].start, 0);
+  assert.equal(plan.cuts[0].onDrop, undefined);
+});
+
+test("a fractional pace cannot run the last cut past the stated duration", () => {
+  // 6 x 3.4 beats claims 20.4 beats of duration while integer shares sum to
+  // 21 — the final cut overran the music window. The total is rounded first.
+  const plan = planBeatCuts({ grid: gridAt(120), clipCount: 6, beatsPerClip: 3.4, songStart: 0 });
+  const sum = plan.cuts.reduce((a, c) => a + c.beats, 0);
+  assert.equal(sum * (60 / 120), plan.duration);
+  assert.ok(Math.abs(plan.cuts[plan.cuts.length - 1].end - plan.duration) < 1e-9);
+});
+
+test("the detector is not tied to 44.1kHz", () => {
+  const sr = 48000;
+  const n = sr * 30;
+  const audio = new Float32Array(n);
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return (seed / 0xffffffff) * 2 - 1;
+  };
+  const period = 60 / 128;
+  for (let k = 0; k * period < 30; k++) {
+    const at = Math.round(k * period * sr);
+    const len = Math.round(sr * 0.025);
+    for (let i = 0; i < len && at + i < n; i++) {
+      audio[at + i] += rand() * (k % 4 === 0 ? 1 : 0.55) * Math.exp((-i / len) * 6);
+    }
+  }
+  const grid = analyzeBeats(audio, sr);
+  assert.ok(Math.abs(grid.bpm - 128) < 0.5, `48kHz read as ${grid.bpm.toFixed(2)}`);
+  assert.ok(grid.confidence > 0.5);
+});
+
 test("the window start snaps to a bar, so the music does not begin mid-phrase", () => {
   const grid = gridAt(120); // 0.5s beats, 2s bars
   const plan = planBeatCuts({ grid, clipCount: 4, beatsPerClip: 4, songStart: 5.3 });

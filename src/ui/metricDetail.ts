@@ -13,6 +13,7 @@ import { applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { zoomFor } from "./regions.js";
 import { fmt, metricTrait, rankShort } from "./templates.js";
+import { metricRead } from "../engine/metricReads.js";
 
 // ---------------------------------------------------------------------------
 // One measurement, opened.
@@ -144,7 +145,10 @@ function normLine(m: ScoredMetric, sex: Sex): string {
   const dec = m.def.decimals;
   const unit = m.def.unit || "";
   const group = sex === "male" ? "Male" : "Female";
-  const avg = `${group} average <b>${d.mean.toFixed(dec)}${unit}</b> ± ${d.sd.toFixed(dec)}`;
+  // toFixed on a mean that sits a hair under zero prints "-0.0", which reads
+  // as a typo rather than as a number.
+  const noNegZero = (s: string) => (/^-0(\.0+)?$/.test(s) ? s.slice(1) : s);
+  const avg = `${group} average <b>${noNegZero(d.mean.toFixed(dec))}${unit}</b> ± ${d.sd.toFixed(dec)}`;
   const dir = directionFor(m.def, sex);
   if (dir === "band") {
     return `${avg} · ideal <b>${m.idealRange[0].toFixed(dec)}–${m.idealRange[1].toFixed(dec)}${unit}</b>`;
@@ -171,9 +175,14 @@ function overviewHTML(m: ScoredMetric, sex: Sex): string {
   // the ideal than N% of men" — a percentile computed from the very value the
   // line underneath calls a misplaced point — so the card asserted a population
   // position and then denied the measurement in the next breath.
+  // The read only exists when the value leans at least half an sd off the
+  // average AND the metric's construction is settled — metricRead returns null
+  // otherwise, and null renders as nothing rather than as filler.
+  const read = m.implausible ? null : metricRead(m, sex);
   return `
     <p class="mdx-trait">It measures ${metricTrait(m.def.id)}.</p>
     <p class="mdx-norm">${normLine(m, sex)}</p>
+    ${read ? `<p class="mdx-read"><b>On your face:</b> ${read}.</p>` : ""}
     ${m.implausible ? "" : `<p class="mdx-pos">${positionLine(m, sex)}</p>`}
     ${m.implausible
       ? `<p class="mdx-flag">This reading fell outside the range a face occupies, so it is treated as a misplaced point rather than a measurement. It has no population position and it moves nothing — the landmarks behind it need re-checking.</p>`

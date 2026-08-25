@@ -157,19 +157,24 @@ export function planBeatCuts(opts: PlanOptions): BeatPlan {
   const start = nearestDownbeat(grid, opts.songStart);
 
   // At least one beat per clip either way: a clip that gets none is a clip the
-  // person attached and never sees.
+  // person attached and never sees. Rounded to whole beats whatever produced
+  // it — a fractional total cannot be tiled by whole-beat clips, and the
+  // integer shares then summed PAST the stated duration, running the last cut
+  // off the end of the music window it claimed to fill.
   const totalBeats = Math.max(
     clipCount,
-    opts.totalBeats != null ? Math.round(opts.totalBeats) : clipCount * beatsPerClip,
+    Math.round(opts.totalBeats != null ? opts.totalBeats : clipCount * beatsPerClip),
   );
   const cuts: ClipCut[] = [];
 
-  // No usable drop: one stretch, even share, remainder to the ends.
+  // No usable drop: one stretch, even share, remainder to the ends. A drop
+  // with a single clip is unusable too — there is nothing to cut TO it from,
+  // and honouring it started the only clip mid-window with dead air ahead.
   const dropBeat =
     opts.dropAt != null
       ? Math.round((opts.dropAt - start) / grid.period)
       : null;
-  const useDrop = dropBeat != null && dropBeat > 0 && dropBeat < totalBeats;
+  const useDrop = dropBeat != null && dropBeat > 0 && dropBeat < totalBeats && clipCount >= 2;
 
   const emit = (clipFrom: number, beatFrom: number, counts: number[], dropIndex?: number) => {
     let at = beatFrom;
@@ -192,10 +197,17 @@ export function planBeatCuts(opts: PlanOptions): BeatPlan {
     // Two solves. The split point is a beat, so neither half can drag the
     // reveal off it — the pre-drop clips fill exactly the beats before, the
     // post-drop clips exactly the beats after.
-    const before = Math.min(
-      Math.max(1, opts.clipsBeforeDrop ?? Math.floor(clipCount / 2)),
-      clipCount - 1,
-    );
+    //
+    // The requested split is honoured only as far as the beats can carry it.
+    // Each half must hold at least one beat PER CLIP it is given, or share()
+    // hands zero-beat clips back and the render silently loses them: a drop
+    // two beats in with five clips asked for before it produced five cuts for
+    // eight clips, with a hole where three of them should have been. The
+    // clamp below is always satisfiable — totalBeats >= clipCount and the
+    // drop is strictly inside the window, so [lo, hi] cannot be empty.
+    const lo = Math.max(1, clipCount - (totalBeats - dropBeat));
+    const hi = Math.min(clipCount - 1, dropBeat);
+    const before = Math.min(hi, Math.max(lo, opts.clipsBeforeDrop ?? Math.floor(clipCount / 2)));
     const after = clipCount - before;
     emit(0, 0, share(dropBeat, before));
     emit(before, dropBeat, share(totalBeats - dropBeat, after), 0);
