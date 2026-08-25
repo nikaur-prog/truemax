@@ -3273,6 +3273,67 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 }
 
 /* ---------------------------------------------------------------------------
+   Correcting the front landmarks.
+
+   Shares .vpoint, .verify-hint and .verify-magnifier with the side verifier —
+   the same gesture should look and feel the same on both halves of the scan.
+   Only the frame around them is different, because this one is a dialog over
+   the results rather than a step in a capture.
+   --------------------------------------------------------------------------- */
+.fedit {
+  position: fixed; inset: 0; z-index: 92; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: color-mix(in srgb, var(--ink) 46%, transparent);
+  backdrop-filter: blur(4px); animation: mc-fade .18s ease-out;
+}
+.fedit-sheet {
+  display: flex; flex-direction: column; gap: 12px;
+  width: min(520px, 100%); max-height: min(92vh, 900px); overflow: auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  animation: mc-rise .3s cubic-bezier(.24, .9, .3, 1);
+}
+.fedit-head { display: flex; align-items: flex-start; gap: 12px; }
+.fedit-head b { display: block; font-size: 15.5px; font-weight: 650; }
+.fedit-head small { display: block; font-size: 12px; color: var(--mut); line-height: 1.45; margin-top: 2px; }
+.fedit-x {
+  margin-left: auto; flex: none; width: 32px; height: 32px; border-radius: 99px;
+  border: 1px solid var(--line); background: var(--card); color: var(--mut);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+/* One row that scrolls, rather than wrapping. Six chips wrap to a ragged
+   second line on a narrow phone, and a lone "Jaw" under five others reads as
+   a layout accident rather than as a sixth equal choice. */
+.fedit-chips {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  margin: 0 -16px; padding: 0 16px;
+}
+.fedit-chips::-webkit-scrollbar { display: none; }
+.fedit-chip { flex: none; }
+.fedit-chip {
+  padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line);
+  background: var(--soft); color: var(--mut); font: 600 12px var(--sans); cursor: pointer;
+}
+.fedit-chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+/* The photo is the work surface, so it gets the room — and the handles are
+   positioned in percentages against this box, so the layer must match the
+   canvas exactly rather than merely covering it. */
+.fedit-stage { position: relative; border-radius: 14px; overflow: hidden; background: #000; }
+.fedit-photo { display: block; width: 100%; height: auto; }
+.fedit-layer { position: absolute; inset: 0; touch-action: none; -webkit-user-select: none; user-select: none; }
+/* Unlike the side verifier, this layer is always live: it opens BECAUSE
+   somebody wants to move a point, so there is no locked state to earn. */
+.fedit-layer .vpoint i { opacity: 1; }
+
+.fedit-note { font-size: 12px; line-height: 1.5; color: var(--mut); margin: 0; min-height: 2.4em; }
+.fedit-actions { display: flex; gap: 10px; }
+.fedit-actions .btn { flex: 1; }
+.fedit-actions .btn:disabled { opacity: .45; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .fedit, .fedit-sheet { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
    The Max tab on the dashboard.
    --------------------------------------------------------------------------- */
 
