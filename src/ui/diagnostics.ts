@@ -25,13 +25,54 @@ import { reliabilityOf } from "../engine/reliability.js";
 // amount of rescaling the aggregate will fix it.
 // ---------------------------------------------------------------------------
 
-export function diagnosticsText(report: Report, label: string): string {
+export interface DiagnosticsCapture {
+  /** Head pose the capture was taken at, before correction. */
+  yawDeg?: number;
+  pitchDeg?: number;
+  rollDeg?: number;
+  /** 0..1 from blendshapes. A smile skews every mouth and jaw metric. */
+  smileScore?: number;
+  /** ISO date of the scan, so two dumps can be ordered and dated. */
+  at?: string;
+  /** An id for the scan itself, so a duplicated paste is detectable. */
+  scanId?: string;
+}
+
+export function diagnosticsText(
+  report: Report,
+  label: string,
+  capture?: DiagnosticsCapture,
+): string {
   const lines: string[] = [];
   const n = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
 
   lines.push(`TRUEMAX SCAN DIAGNOSTICS`);
   lines.push(`face: ${label || "(unnamed)"}`);
   lines.push(`scored against: ${report.sex === "male" ? "men" : "women"}`);
+  // The conditions the photograph was taken under, which decide whether two
+  // dumps of the same person can be compared at all.
+  //
+  // Without these the dump is unusable for the one question it is most needed
+  // for. Repeatability — does a score change mean the face changed — is
+  // measured by scanning one person twice, and a scan taken at 20° of yaw or
+  // mid-smile differs from a level neutral one for reasons that have nothing
+  // to do with the face. tools/reliability.mjs already gates on exactly these
+  // numbers and could not read them here, so a badly-posed capture would have
+  // been averaged in silently and read as instability in the metric.
+  //
+  // Printed for every scan, not only bad ones: a line that appears only when
+  // something is wrong cannot be used to confirm that nothing was.
+  if (capture) {
+    const pose = [
+      capture.yawDeg === undefined ? null : `yaw ${n(capture.yawDeg, 1)}°`,
+      capture.pitchDeg === undefined ? null : `pitch ${n(capture.pitchDeg, 1)}°`,
+      capture.rollDeg === undefined ? null : `roll ${n(capture.rollDeg, 1)}°`,
+      capture.smileScore === undefined ? null : `smile ${n(capture.smileScore)}`,
+    ].filter(Boolean);
+    if (pose.length) lines.push(`capture: ${pose.join("  ·  ")}`);
+    if (capture.at) lines.push(`taken: ${capture.at}`);
+    if (capture.scanId) lines.push(`scan: ${capture.scanId}`);
+  }
   lines.push(`overall: ${n(report.overall, 1)}  ·  percentile ${n(report.overallPercentile, 1)}  ·  potential ${n(report.potential, 1)}`);
   // The two views separately, when both were measured.
   //
@@ -101,8 +142,12 @@ export function diagnosticsText(report: Report, label: string): string {
  * outcome worth guarding against — so the fallback shows the text and selects
  * it, which is the manual version of the same job.
  */
-export async function copyDiagnostics(report: Report, label: string): Promise<boolean> {
-  const text = diagnosticsText(report, label);
+export async function copyDiagnostics(
+  report: Report,
+  label: string,
+  capture?: DiagnosticsCapture,
+): Promise<boolean> {
+  const text = diagnosticsText(report, label, capture);
   try {
     await navigator.clipboard.writeText(text);
     return true;

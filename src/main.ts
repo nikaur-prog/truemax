@@ -1732,6 +1732,17 @@ async function runFullAnalysis(
     // Basic grid: a corrected pose is still the first suspect when a
     // pose-sensitive region reads far below everything else.
     offAxisDeg: Math.max(Math.abs(quality.yawDeg), Math.abs(quality.pitchDeg)),
+    // The conditions this photograph was taken under, carried into the
+    // diagnostics dump. Two scans of one person only mean something together
+    // if you can see whether one of them was taken at 20 degrees of yaw.
+    capture: {
+      yawDeg: quality.yawDeg,
+      pitchDeg: quality.pitchDeg,
+      rollDeg: quality.rollDeg,
+      smileScore: quality.smileScore,
+      at: new Date().toISOString(),
+      scanId: token.scanId,
+    },
     analysis: el.analysis,
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,

@@ -1,6 +1,7 @@
 import { countUp } from "./countUp.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { copyDiagnostics } from "./diagnostics.js";
+import type { DiagnosticsCapture } from "./diagnostics.js";
 import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring.js";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
@@ -88,6 +89,10 @@ interface Ctx {
   // photograph. Absent when there is nothing to edit against — a restored
   // scan with no landmark cloud in memory.
   onEditFront?: () => void;
+  // Pose, expression and date of the capture, for the diagnostics dump. Two
+  // dumps of the same person are only comparable if the conditions travel
+  // with them; see diagnostics.ts.
+  capture?: DiagnosticsCapture;
   // How far off level the front capture was, in degrees. The pose is corrected
   // before measurement, but the correction has residual error and the jaw and
   // chin take most of it — so beyond a few degrees the Basic grid says so
@@ -675,7 +680,7 @@ function showOverall(): void {
   const diagBtn = document.getElementById("btn-diag") as HTMLButtonElement | null;
   if (diagBtn) {
     diagBtn.onclick = async () => {
-      const copied = await copyDiagnostics(r, "");
+      const copied = await copyDiagnostics(r, "", ctx?.capture);
       // Says which of the two things happened. "Copied" over a clipboard write
       // that silently failed is the one outcome that wastes somebody's scan.
       diagBtn.textContent = copied ? "Copied" : "Copy from the box";
