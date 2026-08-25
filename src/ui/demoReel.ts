@@ -1,6 +1,7 @@
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
+import { reelContours } from "./reelMesh.js";
 
 // The landing reel shows display scores rather than the engine's output, for
 // the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
@@ -156,7 +157,42 @@ export function mountDemoReel(
     // ---- points sweep -----------------------------------------------------
     const swept = ease(seg(t, T.scan[0], T.scan[1]));
     const settled = t > T.scan[1];
-    for (const [px, py] of face.points) {
+
+    // The mesh, not a cloud.
+    //
+    // These were loose dots, and loose dots read as glitter over a photograph
+    // rather than as a model being fitted to a face. They were never loose:
+    // they are the vertices of the face oval, the eyes, the brows and the lips,
+    // and reelMesh rebuilds the edges between them from the same MediaPipe sets
+    // the point list itself is derived from.
+    //
+    // An edge is drawn only once BOTH its ends have been swept, so the outline
+    // assembles behind the scan line instead of appearing whole — the contour
+    // closing around an eye as the line passes it is the moment the animation
+    // is selling. Lines under the dots so the vertices stay the brightest thing.
+    const pts = face.points;
+    ctx.lineWidth = 1;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = `rgba(255,255,255,${settled ? 0.26 : 0.4})`;
+    for (const ring of reelContours()) {
+      ctx.beginPath();
+      let open = false;
+      // Closed rings: the wrap-around edge is the last-to-first pair, so the
+      // walk runs one past the end.
+      for (let k = 0; k <= ring.length; k++) {
+        const a = pts[ring[k % ring.length]];
+        if (!a || a[1] > swept) {
+          open = false;
+          continue;
+        }
+        if (open) ctx.lineTo(a[0] * w, a[1] * h);
+        else ctx.moveTo(a[0] * w, a[1] * h);
+        open = true;
+      }
+      ctx.stroke();
+    }
+
+    for (const [px, py] of pts) {
       if (py > swept) continue;
       const fresh = !settled && swept - py < 0.09;
       ctx.fillStyle = fresh ? "#8FF3E0" : `rgba(255,255,255,${settled ? 0.3 : 0.62})`;

@@ -9,12 +9,14 @@ import { POSE_CALIBRATION, buildGeometry, landmarkIntegrityIssues } from "./engi
 import { extractShape, shapeSubset } from "./engine/shape.js";
 import {
   compareAndStore,
-  readAllComparableHistory,
+  ownScans,
   readAllHistory,
+  readOwnComparableHistory,
   scanStorageKey,
 } from "./engine/history.js";
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
+import { maybeAdoptAvatar } from "./engine/avatar.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
@@ -50,6 +52,8 @@ import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js"
 import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.js";
 import { openSexChooser } from "./ui/sexChooser.js";
+import { openSubjectChooser } from "./ui/subjectChooser.js";
+import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
@@ -169,7 +173,10 @@ if (import.meta.env.DEV) {
   if (preview === "dash") {
     activateScanOwner(null);
     queueMicrotask(() =>
-      openDashboard({ onScan: () => {}, name: "Sam", membership: "member" }),
+      // onSettings is a no-op here, but passing it makes the preview render
+      // the profile button — which is where the avatar lives, and the whole
+      // reason to look at this screen in a browser check.
+      openDashboard({ onScan: () => {}, name: "Sam", membership: "member", onSettings: () => {} }),
     );
   }
 }
@@ -240,6 +247,15 @@ function setCameraLabel(text: string): void {
 }
 
 let selectedSex: Sex = storedSex() ?? "male";
+// Set when the current scan is of somebody other than the account holder, and
+// carried through to the stored row so progress can exclude it.
+let scanSubject: { name: string } | null = null;
+// Whether the "who is this?" question was actually put to a signed-in person
+// this scan. scanSubject === null is ambiguous on its own — it means "the
+// owner" AND "never asked" — and the difference matters at the account gate: a
+// scan captured signed-out never asked, and attributing it to whoever then
+// signs in would put a friend's face in the owner's history.
+let subjectAsked = false;
 // Whether the reference population is a real choice yet, or still the silent
 // default. A face app is used mostly by young men, so "male" is the right
 // default to compute against — but computing a man a percentile "of women"
@@ -354,47 +370,11 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
 // The idle frame runs the demo reel — real scans of public-domain portraits.
 mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
 
-// Shrink the docked demo once the page starts scrolling, so the pinned way-in
-// yields the screen without leaving it. Skipped while the camera is live: that
-// screen is not a scrolling context and a mid-capture resize would fight the
-// framing guide.
-//
-// One threshold made this choppy rather than smooth. A single 60px line means
-// any scroll that hovers around it — and a thumb-flick on a phone hovers around
-// everything on the way past — retriggers the shrink and the un-shrink against
-// each other, so a 0.35s transition never finishes before it is reversed. The
-// card visibly stutters, which is what reads as "choppy": not the animation
-// being too fast, but the animation being interrupted.
-//
-// Two thresholds fix it. It shrinks past 72 and only comes back under 32, so
-// the 40px in between is a gap the scroll has to genuinely cross rather than a
-// line it can vibrate on.
-const SHRINK_AT = 72;
-const RESTORE_AT = 32;
-
-{
-  const dock = document.getElementById("capture-dock");
-  if (dock) {
-    let raf = 0;
-    let shrunk = false;
-    window.addEventListener(
-      "scroll",
-      () => {
-        if (raf) return;
-        raf = requestAnimationFrame(() => {
-          raf = 0;
-          if (el.stage.classList.contains("live-cam")) return;
-          const y = window.scrollY;
-          const next = shrunk ? y > RESTORE_AT : y > SHRINK_AT;
-          if (next === shrunk) return; // nothing to write, nothing to reflow
-          shrunk = next;
-          dock.classList.toggle("shrunk", shrunk);
-        });
-      },
-      { passive: true },
-    );
-  }
-}
+// The docked demo neither pins nor shrinks. Both were tried, the resize was
+// re-tuned twice, and it still read as choppy on a real phone — a card that
+// changes size under a moving thumb is fighting the scroll rather than riding
+// it, and an interrupted 0.4s transition looks like jank whatever the
+// thresholds do. It keeps one size, the big one, and scrolls with the page.
 el.ovalFrame.classList.add("showing-reel");
 
 // A build without accounts still needs an explicit anonymous owner. When Auth
@@ -428,7 +408,10 @@ const landingHistory = document.getElementById("landing-history");
 
 let recentPaintToken = 0;
 function syncLandingHistory(): void {
-  const scans = readAllHistory().slice(0, RECENT_ON_LANDING);
+  // "Your last scans", literally: a guest's scan is a record in the history
+  // panel, labelled with their name — but this row has no labels, just a face
+  // and a score, and an unlabelled friend here read as the owner's own result.
+  const scans = ownScans(readAllHistory()).slice(0, RECENT_ON_LANDING);
   landingRecent?.classList.toggle("hidden", scans.length === 0);
   if (!landingRecentRow || !scans.length) return;
 
@@ -501,8 +484,10 @@ const thisVisit = nextVisit();
 function syncLandingHeadline(name: string | null): void {
   const h1 = document.querySelector<HTMLElement>("#v-upload h1");
   if (!h1) return;
-  const scans = readAllComparableHistory();
-  const newest = scans[0]; // readAllComparableHistory hands them back newest first
+  // The headline counts YOUR scans and dates YOUR last one. Scans taken of
+  // other people on this phone are records, not progress.
+  const scans = readOwnComparableHistory();
+  const newest = scans[0]; // handed back newest first
   const daysSinceLastScan = newest
     ? Math.floor((Date.now() - new Date(newest.date).getTime()) / 86_400_000)
     : null;
@@ -570,18 +555,115 @@ paintRefPop();
 // photographs; the previous answer is highlighted so the owner's repeat scans
 // are a single confirm. The stored choice still seeds the results-screen
 // toggle and the guide, it just no longer answers for the next face.
+// Who is being scanned, and only then which population to score against.
+//
+// A signed-in member is asked "is this you?" first, and answering "me" ends the
+// questions: the account already knows its own reference population from the
+// signup quiz, so a person scanning their own face walks straight to the
+// camera. That is the reward for answering once.
+//
+// "Someone else" collects a label for the scan and asks the population question
+// about THEM — and flags the scan so it stays off the owner's chart, average,
+// streak and everything Max says about their progress. See StoredScan.subject.
+//
+// A signed-out visitor skips the whole thing. There is no "you" to compare
+// against without an account, so the question would be one more screen between
+// a stranger and their first result.
 function ensureSex(then: () => void): void {
-  openSexChooser(
-    (sex) => {
-      selectedSex = sex;
-      sexChosen = true;
-      storeSex(sex);
-      paintRefPop();
-      showGuide(sex);
-      then();
-    },
-    storedSex() ?? undefined,
-  );
+  const askPopulation = (preselect: Sex | undefined, subject: { name: string } | null) => {
+    openSexChooser(
+      (sex) => {
+        selectedSex = sex;
+        sexChosen = true;
+        scanSubject = subject;
+        // A guest's answer is about the guest, so it must not overwrite the
+        // owner's remembered population.
+        if (!subject) storeSex(sex);
+        paintRefPop();
+        showGuide(sex);
+        then();
+      },
+      preselect,
+      undefined,
+      subject?.name,
+    );
+  };
+
+  const profile = loadProfile();
+  const member = document.body.classList.contains("is-member");
+  if (!member) {
+    askPopulation(storedSex() ?? undefined, null);
+    return;
+  }
+
+  openSubjectChooser((answer) => {
+    subjectAsked = true;
+    if (answer.self) {
+      // Only the ACCOUNT'S own stored answer can skip the question. The first
+      // version also fell back to the browser-global "last population used"
+      // key — which an anonymous visitor, another account on this browser, or
+      // a rescore of a guest's results all write — so "It's me" could silently
+      // score the owner against whatever face used the phone last, and then
+      // re-persist that wrong answer as theirs.
+      const own = profile.sex;
+      if (own) {
+        selectedSex = own;
+        sexChosen = true;
+        scanSubject = null;
+        storeSex(own);
+        paintRefPop();
+        showGuide(own);
+        then();
+        return;
+      }
+      // No answer on the account yet (the signup funnel predates the
+      // question). Ask once, and remember it ON THE ACCOUNT — so this is the
+      // last time a self-scan ever asks.
+      openSexChooser(
+        (sex) => {
+          saveProfile({ ...loadProfile(), sex });
+          selectedSex = sex;
+          sexChosen = true;
+          scanSubject = null;
+          storeSex(sex);
+          paintRefPop();
+          showGuide(sex);
+          then();
+        },
+        storedSex() ?? undefined,
+      );
+      return;
+    }
+    askPopulation(undefined, { name: answer.subject.name });
+  });
+}
+
+// The late form of the same question, for a scan captured with nobody signed
+// in: the subject chooser is member-gated, so the capture never asked, and the
+// person now signing in at the gate may not be the person in the photographs —
+// an owner whose session expired hands the phone over, a friend scans, the
+// owner logs back in to see the result. Asked before the analysis is
+// attributed, because the alternative is the friend's scan landing in the
+// owner's trend and, on an avatar-less account, the friend's face becoming
+// the owner's profile picture.
+//
+// Resolves false when they back out, which abandons the run — the same thing
+// backing out of the chooser means at capture time.
+function askLateSubject(): Promise<boolean> {
+  if (subjectAsked) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    openSubjectChooser(
+      (answer) => {
+        subjectAsked = true;
+        scanSubject = answer.self ? null : { name: answer.subject.name };
+        resolve(true);
+      },
+      () => {
+        resetToUpload();
+        resolve(false);
+      },
+    );
+  });
 }
 
 
@@ -1107,6 +1189,8 @@ function resetToUpload(): void {
   pending = null;
   lastSide = null;
   captureMethod = null;
+  scanSubject = null;
+  subjectAsked = false;
   feedbackInFlight = null;
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
@@ -1536,7 +1620,7 @@ async function runFullAnalysis(
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
-  const delta = compareAndStore(report, token.scanId);
+  const delta = compareAndStore(report, token.scanId, scanSubject ?? undefined);
   // The weekly free-scan clock starts when an analysis finishes, not when a
   // photo is chosen — an abandoned capture must not cost the week's scan.
   recordScanRun();
@@ -1548,13 +1632,26 @@ async function runFullAnalysis(
   void (async () => {
     const owner = activeScanOwner();
     if (!owner || !scanSession.isCurrent(token, owner)) return;
+    // Read BEFORE the await. scanSubject is module state that resetToUpload
+    // nulls, and the IndexedDB write below is a real gap — an owner tapping
+    // "New photo" mid-write must not turn a guest's scan into "not a guest".
+    const guest = scanSubject !== null;
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
       front: frontThumb ?? undefined,
       side: sideThumb ?? undefined,
     });
+    // Re-checked AFTER the await and BEFORE anything is written for the owner:
+    // the suspended closure can resume under a different signed-in account
+    // (cross-tab auth swaps the scope synchronously), and this scan's face
+    // must not become THAT account's anything.
     if (!scanSession.isCurrent(token, owner)) return;
+    // The first front photo a member scans OF THEMSELVES becomes their
+    // profile picture. A guest's face must never become the owner's avatar,
+    // and an avatar already chosen is never overwritten from here — settings
+    // owns changes.
+    if (!guest) maybeAdoptAvatar(frontShot);
     await pruneTo(readAllHistory().map(scanStorageKey));
   })();
 
@@ -1592,6 +1689,10 @@ async function runFullAnalysis(
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
+    // Who the scan is OF, so the results screen can stop speaking to the
+    // owner about a guest's numbers — "first scan on record" was rendered
+    // over a friend's face because a guest's delta is deliberately null.
+    subjectName: scanSubject?.name,
     // Same destination as "continue" — the plan chooser, which already handles
     // signed-out users and the under-18 rule. The upgrade button is not a
     // second, parallel billing path.
@@ -1676,13 +1777,16 @@ async function runFullAnalysis(
     // the numbers describing a group the header no longer names.
     onSexChange: (sex: Sex) => {
       selectedSex = sex;
-      storeSex(sex);
+      // A toggle on a GUEST's results is about the guest — it must not
+      // overwrite the browser's remembered population, which seeds the
+      // owner's next preselect.
+      if (!scanSubject) storeSex(sex);
       paintRefPop();
       if (!lastSide) return;
       const f = analyze(landmarks, width, height, sex, frontShot);
       const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
       const merged = mergeReports(f, sd);
-      const rescoredDelta = compareAndStore(merged, token.scanId);
+      const rescoredDelta = compareAndStore(merged, token.scanId, scanSubject ?? undefined);
       renderQualityChips(quality, `Scored against ${sex} norms`);
       renderResults({ ...ctxArgs, report: merged, delta: rescoredDelta });
     },
@@ -1732,6 +1836,11 @@ async function gateAnalysis(
     }
     const owner = activeScanOwner();
     if (owner && scanSession.snapshot().owner !== owner) scanSession.claim(token, owner);
+    // A signed-in account reached without the capture ever asking whose face
+    // this is (signed in from another tab mid-scan) is asked now, before the
+    // scan is attributed to anyone.
+    if (user && !(await askLateSubject())) return;
+    if (!scanIsCurrent(token, generation) || !pending) return;
     if (!scanSession.transition(token, "analyzing")) return;
     startConsentedSideFeedback();
     await runFullAnalysis(sideReport, token);
@@ -1818,6 +1927,11 @@ async function gateAnalysis(
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
         scanSession.claim(token, `user:${signedInUser.id}`);
+        // The capture ran signed out, so nobody was ever asked whose face
+        // this is — and the person signing in at the gate is not necessarily
+        // the person in the photographs (an owner's expired session, a
+        // friend's scan). Attribution happens only after the answer.
+        if (!(await askLateSubject())) return;
         startConsentedSideFeedback();
         await runFullAnalysis(sideReport, token);
       },
@@ -1894,7 +2008,6 @@ async function resumePendingAfterAuth(): Promise<void> {
 
   selectedSex = saved.sex;
   sexChosen = true;
-  storeSex(saved.sex);
   paintRefPop();
   pending = {
     landmarks: saved.front.landmarks,
@@ -1920,6 +2033,15 @@ async function resumePendingAfterAuth(): Promise<void> {
   closeSide();
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  // A resumed scan crossed a redirect, so whatever the subject chooser knew is
+  // gone with the page it was answered on — and this scan may have been
+  // captured before sign-in ever happened. Ask before attributing.
+  if (!(await askLateSubject())) return;
+  if (!scanIsCurrent(token, generation)) return;
+  // Remember the population only once it is known to be the OWNER's answer —
+  // a resumed scan can turn out to be a guest's, and the global key seeds the
+  // owner's next preselect.
+  if (!scanSubject) storeSex(saved.sex);
   startConsentedSideFeedback();
   await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex), token);
 }

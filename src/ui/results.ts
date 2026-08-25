@@ -53,6 +53,12 @@ interface Ctx {
   zoomable: HTMLElement;
   overlay: HTMLCanvasElement;
   onNewPhoto: () => void;
+  // Present when this scan is of somebody other than the account holder. The
+  // results screen mostly renders the same either way — the numbers are the
+  // numbers — but every line that speaks to the OWNER about THEIR progress
+  // has to know, because a guest's delta is deliberately null and null also
+  // means "your first scan".
+  subjectName?: string;
   // Opens the plan chooser. Absent on a build with no billing configured, in
   // which case the upgrade button simply is not rendered rather than dead.
   onUpgrade?: () => void;
@@ -86,6 +92,12 @@ interface Ctx {
 }
 
 let ctx: Ctx | null = null;
+
+// A guest's name is typed by whoever is holding the phone, so it is escaped
+// wherever it is printed. Local to this module for the same reason the other
+// small helpers here are: one function is cheaper than the import.
+const escapeHTML = (v: string): string =>
+  v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function renderResults(c: Ctx): void {
   ctx = c;
@@ -582,9 +594,9 @@ function showOverall(): void {
 
   body().innerHTML = `
     <div class="reveal overview-reveal">
-      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta) : ""}
+      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta, "front", ctx.subjectName) : ""}
       <div class="score-head">
-        <div><div class="klabel">${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
+        <div><div class="klabel">${ctx.subjectName ? `${escapeHTML(ctx.subjectName.toUpperCase())} · ` : ""}${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
               title="Score against the other reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button></div>
           <div class="big"><span id="cnt" data-count="${r.overall}" data-decimals="1">0.0</span><small> /10</small></div></div>
@@ -941,7 +953,7 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
 //
 // So the profile says nothing about movement rather than something untrue. The
 // front keeps the tracking line, where it is about the number directly above it.
-function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front"): string {
+function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
   const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
@@ -961,12 +973,18 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
     : "";
   // Suppressed entirely on the profile: "first scan on record" is false on a
   // rescan, and the real delta belongs to the overall number, not to this half.
+  //
+  // A guest's delta is null BY DESIGN — their scan is compared against nothing
+  // — so the null must not fall through to "first scan on record", which is a
+  // promise of a trend this scan will never join. Say what is actually true.
   const tracking =
     scope === "side"
       ? ""
-      : delta
-        ? deltaReadingCopy(delta)
-        : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
+      : guestName
+        ? `This is ${escapeHTML(guestName)}'s scan, so it is kept as its own record — off your history, your average and your trend.`
+        : delta
+          ? deltaReadingCopy(delta)
+          : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>

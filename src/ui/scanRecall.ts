@@ -66,8 +66,17 @@ function timeOf(iso: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-/** The move against the scan before it, or null when this is the first. */
+const escapeHTML = (v: string): string =>
+  v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+
+/**
+ * The move against the scan before it, or null when this is the first.
+ *
+ * A guest's scan gets nothing — not even "first scan", which would claim a
+ * sequence. It is one record of one face, compared against no one.
+ */
 function movement(scan: StoredScan, previous: StoredScan | undefined): string {
+  if (scan.subject) return "";
   if (!previous) return `<span class="hist-chip first">first scan</span>`;
   const d = Math.round((scan.overall - previous.overall) * 10) / 10;
   const sign = d >= 0 ? "+" : "";
@@ -123,13 +132,18 @@ export function openScanRecall(scan: StoredScan, previous?: StoredScan): RecallH
   const wrap = document.createElement("div");
   active = wrap;
   wrap.className = "hist-overlay recall-overlay";
-  wrap.innerHTML = `<div class="hist-panel recall-panel" role="dialog" aria-modal="true" aria-label="A scan you took on ${fullDate(scan.date)}">
+  // Whose face this is stays attached to it. The list labels a guest's row
+  // with their name, and losing that label the moment the row opened turned
+  // the full-detail view into "a scan you took" over somebody else's
+  // photographs.
+  const who = scan.subject ? `${escapeHTML(scan.subject.name)} · ` : "";
+  wrap.innerHTML = `<div class="hist-panel recall-panel" role="dialog" aria-modal="true" aria-label="${scan.subject ? `${escapeHTML(scan.subject.name)}'s scan from` : "A scan you took on"} ${fullDate(scan.date)}">
     <button class="hist-close" aria-label="Close">✕</button>
     <span class="recall-when">${fullDate(scan.date)} · ${timeOf(scan.date)}</span>
     <div class="recall-head">
       <b class="recall-score">${scan.overall.toFixed(1)}<small>/10</small></b>
       ${movement(scan, previous)}
-      <span class="hist-sex">${scan.sex === "male" ? "vs men" : "vs women"}</span>
+      <span class="hist-sex">${who}${scan.sex === "male" ? "vs men" : "vs women"}</span>
       ${hasStanding ? `<span class="recall-rank">${rankShort(pct!)}</span>` : ""}
     </div>
 

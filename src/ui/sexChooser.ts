@@ -16,6 +16,9 @@ import type { Sex } from "../engine/types.js";
 
 let el: HTMLDivElement | null = null;
 
+const escapeHTML = (v: string): string =>
+  v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 // `preselect` marks the previous answer when this is asked repeatedly, as it is
 // on /quick. It is a hint, not a default that can be tabbed past: the whole
 // point of asking again is that the last answer was about a different person.
@@ -27,7 +30,17 @@ let el: HTMLDivElement | null = null;
 // the question already answered. During a calibration session that is twenty
 // faces of friction. Escape, the backdrop and an explicit Cancel all take it
 // back, and the caller decides where "back" goes.
-export function openSexChooser(onPick: (sex: Sex) => void, preselect?: Sex, onCancel?: () => void): void {
+// `subjectName` names the person being scanned when it is not the account
+// holder. "First, what gender is being analysed?" is the right question when
+// the app has no idea whose face is coming; once somebody has said "I'm
+// scanning Sam", asking it in the abstract reads as though the previous answer
+// was not heard.
+export function openSexChooser(
+  onPick: (sex: Sex) => void,
+  preselect?: Sex,
+  onCancel?: () => void,
+  subjectName?: string,
+): void {
   close();
   el = document.createElement("div");
   el.className = "sexpick";
@@ -39,7 +52,7 @@ export function openSexChooser(onPick: (sex: Sex) => void, preselect?: Sex, onCa
          to take one tap. The two buttons already say what each one scores you
          against, which is the part that changes what someone picks. -->
     <div class="sexpick-head">
-      <h2>First, what gender is being analysed?</h2>
+      <h2>${subjectName ? `What gender is ${escapeHTML(subjectName)}?` : "First, what gender is being analysed?"}</h2>
     </div>
     <button class="sexpick-cancel" type="button" aria-label="Cancel">Cancel</button>
     <div class="sexpick-split">

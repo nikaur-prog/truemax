@@ -1,4 +1,4 @@
-import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
+import { DISPLAY_NOISE, ownScans, readAllComparableHistory, readAllHistory, readOwnComparableHistory, scanStorageKey } from "../engine/history.js";
 import { followUp, regionNote } from "../engine/followUp.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
@@ -6,6 +6,7 @@ import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
 import type { Streak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
+import { loadAvatar } from "../engine/avatar.js";
 import type { GreetingCtx } from "./greeting.js";
 import { trend } from "./dashTrend.js";
 import { loadPhotos } from "../engine/photoStore.js";
@@ -129,8 +130,16 @@ export function openDashboard(opts: {
   // different headline and a different quote rather than the same pair all day.
   nextVisit();
   const allScans = readAllHistory();
-  const scans = readAllComparableHistory();
-  const streak = computeStreak(allScans);
+  // Progress is the owner's own face. A friend who borrows the phone must not
+  // extend the owner's streak or bend their trend — see StoredScan.subject.
+  const scans = readOwnComparableHistory();
+  // Calibration decides "legacy", subject decides "guest" — two different
+  // exclusions, counted separately. Subtracting the owner-only list from
+  // everything lumped a friend's fresh scan in with "used the previous
+  // scoring calibration", which is a sentence about the wrong thing.
+  const allComparable = readAllComparableHistory();
+  const legacyCount = allScans.length - allComparable.length;
+  const streak = computeStreak(ownScans(allScans));
   const ctx = { name: opts.name ?? null, streak };
   const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
   overlay = document.createElement("div");
@@ -141,12 +150,19 @@ export function openDashboard(opts: {
         <div class="dash-brand-row dash-anim" style="--d:0ms">
           <span class="wordmark dash-logo ${brandClass(dashboardBrand)}">${logoMarkup()}</span>
           ${dashboardBrand === "max" ? `<span class="max-ai-badge"><i></i>MAX AI · YOUR ASSISTANT</span>` : ""}
-          ${opts.onSettings ? `<button class="dash-settings" id="dash-settings" type="button" aria-label="Your profile and preferences">
-            <svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          ${opts.onSettings ? (() => {
+            // The profile button IS the person once a face exists: their own
+            // first scan, adopted automatically, changeable in settings. The
+            // gear remains the empty state rather than a letter — a product
+            // about faces has no business initialing anybody.
+            const face = loadAvatar();
+            return `<button class="dash-settings${face ? " has-face" : ""}" id="dash-settings" type="button" aria-label="Your profile and preferences">
+            ${face ? `<img src="${face}" alt="" />` : `<svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
               <circle cx="12" cy="12" r="3.1"/>
               <path d="M12 2.6v2.3M12 19.1v2.3M21.4 12h-2.3M4.9 12H2.6M18.6 5.4l-1.6 1.6M7 17l-1.6 1.6M18.6 18.6 17 17M7 7 5.4 5.4"/>
-            </svg>
-          </button>` : ""}
+            </svg>`}
+          </button>`;
+          })() : ""}
         </div>
       </header>
 
@@ -154,7 +170,7 @@ export function openDashboard(opts: {
         <section class="dash-view is-active" data-view="home" role="tabpanel" aria-labelledby="dash-bar-home">
           ${heroBlock(scans, ctx, streak)}
           ${followUpCard(scans)}
-          ${scanSection(scans, allScans.length - scans.length)}
+          ${scanSection(scans, legacyCount, allComparable.length - scans.length, allComparable.length)}
           ${faces.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
             <span class="dash-faces-fan">
               ${faces.slice(0, 5).map((f) => `<img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />`).join("")}
@@ -400,15 +416,19 @@ function escapeHtml(s: string): string {
   );
 }
 
-function scanSection(scans: StoredScan[], legacyCount = 0): string {
+function scanSection(scans: StoredScan[], legacyCount = 0, guestCount = 0, listCount = 0): string {
   if (!scans.length) {
+    // Guests are named before legacy: "your only scan was of a friend" is the
+    // state most likely to make this panel's "No scans yet" read as data loss.
     return `<section class="dash-scans">
       <h2>Your scans</h2>
       <div class="dash-empty">
         <b>No scans yet.</b>
-        <span>${legacyCount
-          ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
-          : "Scan your face to see your first measurement — and every one after it lines up here so you can watch it move."}</span>
+        <span>${guestCount
+          ? `${guestCount} scan${guestCount === 1 ? "" : "s"} of someone else ${guestCount === 1 ? "is" : "are"} kept in the Scans tab — a friend's face is a record here, never your progress. Scan yourself to start your own trend.`
+          : legacyCount
+            ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
+            : "Scan your face to see your first measurement — and every one after it lines up here so you can watch it move."}</span>
       </div>
     </section>`;
   }
@@ -425,7 +445,7 @@ function scanSection(scans: StoredScan[], legacyCount = 0): string {
     <section class="dash-scans dash-anim" style="--d:480ms">
       <div class="dash-scans-head">
         <h2>Your scans</h2>
-        ${scans.length > 5 ? `<button class="linkish" id="dash-history">View all ${scans.length} →</button>` : ""}
+        ${listCount > 5 ? `<button class="linkish" id="dash-history">View all ${listCount} →</button>` : ""}
       </div>
       <div class="dash-scan-list">
         ${recent.map((s, i) => scanRow(s, scans[i + 1], sameDayAsAbove(i))).join("")}

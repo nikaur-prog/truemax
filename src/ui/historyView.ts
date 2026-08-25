@@ -1,6 +1,7 @@
-import { DISPLAY_NOISE, readAllComparableHistory, readAllHistory } from "../engine/history.js";
+import { DISPLAY_NOISE, ownScans, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
 import type { StoredScan } from "../engine/history.js";
-import { clearAllPhotos } from "../engine/photoStore.js";
+import { clearAllPhotos, loadPhotos } from "../engine/photoStore.js";
+import { previousForMovement } from "../engine/scanChain.js";
 import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,29 @@ import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
 const NOISE_SD = DISPLAY_NOISE;
 
 const mean = (a: number[]): number => a.reduce((s, x) => s + x, 0) / (a.length || 1);
+
+const escapeAttr = (v: string): string =>
+  v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+// Paint each row's front and side thumbnails once the store answers.
+//
+// One pass over the rows on screen rather than a load per row as it scrolls:
+// the list is capped at 120 and a thumbnail is a few KB, so the whole set is
+// cheaper than the machinery for doing it lazily.
+function fillShots(root: ParentNode): void {
+  for (const slot of root.querySelectorAll<HTMLElement>(".hist-row[data-shots]")) {
+    const key = slot.dataset.shots;
+    const host = slot.querySelector<HTMLElement>(".hist-shots");
+    if (!key || !host) continue;
+    void loadPhotos(key).then((p) => {
+      if (!host.isConnected || !p) return;
+      host.innerHTML =
+        (p.front ? `<img src="${p.front}" alt="" />` : "") +
+        (p.side ? `<img class="side" src="${p.side}" alt="" />` : "");
+      host.classList.toggle("has", !!(p.front || p.side));
+    });
+  }
+}
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -80,14 +104,16 @@ function trendSVG(scans: StoredScan[]): string {
 }
 
 function rows(scans: StoredScan[]): string {
-  // Newest first, each showing its move against the PREVIOUS scan (the one
-  // below it in the list).
+  // Newest first, each owner row showing its move against the owner's PREVIOUS
+  // scan. A guest row gets no chip at all: two different faces are not a
+  // movement, and even "first scan" would claim a sequence that isn't one.
   return scans
     .map((s, i) => {
-      const prev = scans[i + 1];
+      const prev = previousForMovement(scans, i);
       const d = prev ? Math.round((s.overall - prev.overall) * 10) / 10 : null;
-      const chip =
-        d == null
+      const chip = s.subject
+        ? ""
+        : d == null
           ? `<span class="hist-chip first">first scan</span>`
           : Math.abs(d) < NOISE_SD
             ? `<span class="hist-chip flat">${d >= 0 ? "+" : ""}${d.toFixed(1)} · within noise</span>`
@@ -95,11 +121,18 @@ function rows(scans: StoredScan[]): string {
       // A button, because it opens the scan. It was a div for as long as the
       // list was read-only, and a row of numbers you cannot press is where a
       // history stops being a record and becomes a chart legend.
-      return `<button type="button" class="hist-row" data-recall="${i}">
+      // The photographs, as a teaser. A list of dates and numbers gives no way
+      // to tell one scan from another — which of five scans in a week was the
+      // one in decent light? — and the app already holds a 320px thumbnail of
+      // each. They fill in after the row paints, because IndexedDB is async and
+      // a list must not wait on it; a scan with no stored photo simply keeps
+      // the empty slot, which is a real state and not an error.
+      return `<button type="button" class="hist-row" data-recall="${i}" data-shots="${escapeAttr(scanStorageKey(s))}">
+        <span class="hist-shots" aria-hidden="true"></span>
         <span class="hist-date">${fmtDate(s.date)}</span>
         <span class="hist-score">${s.overall.toFixed(1)}<small>/10</small></span>
         ${chip}
-        <span class="hist-sex">${s.sex === "male" ? "vs men" : "vs women"}</span>
+        <span class="hist-sex">${s.subject ? `${escapeAttr(s.subject.name)} · ` : ""}${s.sex === "male" ? "vs men" : "vs women"}</span>
         <span class="hist-go" aria-hidden="true">›</span>
       </button>`;
     })
@@ -148,21 +181,28 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
     </div>`;
   }
 
-  const avg = mean(scans.map((s) => s.overall));
-  const best = Math.max(...scans.map((s) => s.overall));
+  // The chart, the average and the best are about the owner. The LIST below
+  // shows every scan taken on this device, guests included and labelled —
+  // hiding them would make four results vanish for somebody who deliberately
+  // scanned four friends.
+  const mine = ownScans(scans);
+  const guests = scans.length - mine.length;
+  const avg = mean(mine.map((s) => s.overall));
+  const best = mine.length ? Math.max(...mine.map((s) => s.overall)) : 0;
   return `<div class="hist-panel">
     ${close}
     <h2>Your scans</h2>
     <div class="hist-stats">
-      <div><b>${scans.length}</b><span>SCANS</span></div>
-      <div><b>${avg.toFixed(1)}</b><span>YOUR AVERAGE</span></div>
-      <div><b>${best.toFixed(1)}</b><span>BEST</span></div>
+      <div><b>${mine.length}</b><span>YOUR SCANS</span></div>
+      <div><b>${mine.length ? avg.toFixed(1) : "—"}</b><span>YOUR AVERAGE</span></div>
+      <div><b>${mine.length ? best.toFixed(1) : "—"}</b><span>BEST</span></div>
     </div>
-    ${scans.length >= 2 ? trendSVG(scans) : ""}
+    ${mine.length >= 2 ? trendSVG(mine) : ""}
     <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.
       A dot inside it has not really moved — same face, different photo. Only dots clear of the
       band are a change worth reading.</p>
     ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
+    ${guests ? `<p class="hist-note">${guests} scan${guests === 1 ? " was" : "s were"} taken of someone else on this device. ${guests === 1 ? "It is" : "They are"} listed below but left out of your chart, your average and your streak.</p>` : ""}
     <div class="hist-list">${rows(scans)}</div>
     <p class="hist-foot">Stored on this device only for this profile: numbers and a thumbnail of each photo.
       Nothing here was ever uploaded, and clearing your browser data clears it.
@@ -174,14 +214,16 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
 // trend is made of, and they are not the sensitive part.
 export function wireHistoryPanel(root: ParentNode): void {
   // Rows reopen the scan they name. The index is into the same newest-first
-  // array the markup was built from, so the row and its predecessor — the one
-  // its movement chip is measured against — are both to hand.
+  // array the markup was built from, and the recall's movement chip obeys the
+  // same rule as the list's: an owner scan is measured against the owner's own
+  // previous scan, a guest scan against nothing.
+  fillShots(root);
   const scans = readAllComparableHistory();
   for (const row of root.querySelectorAll<HTMLElement>("[data-recall]")) {
     row.onclick = () => {
       const i = Number(row.dataset.recall);
       const scan = scans[i];
-      if (scan) openScanRecall(scan, scans[i + 1]);
+      if (scan) openScanRecall(scan, previousForMovement(scans, i));
     };
   }
 

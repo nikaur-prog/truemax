@@ -190,6 +190,22 @@ export interface Profile {
   // engine — only ever by the person, through the quiz.
   skin: string[];
   endGoal: string;
+  /**
+   * The account holder's own details, asked once at signup rather than on
+   * every scan.
+   *
+   * `sex` is the reference population their face is scored against — the same
+   * choice the per-scan chooser makes, hoisted to where it belongs. Knowing it
+   * is what lets "it's me" skip straight to the camera.
+   *
+   * `ethnicity` is SELF-REPORTED, optional, and never reaches the engine. It is
+   * not inferred from a photograph and it selects nothing: there is one scale
+   * and it is the same one for everybody. It exists so the reference set's own
+   * coverage can eventually be described honestly, which is a limitation worth
+   * being able to state, and for nothing else.
+   */
+  sex?: "male" | "female";
+  ethnicity?: string;
 }
 
 // Sleep hours used to live here. It was collected and never read by anything,

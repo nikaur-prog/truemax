@@ -1,6 +1,9 @@
 import { maxLoaderMarkup } from "./maxCharacter.js";
 import type { User } from "@supabase/supabase-js";
 import { GOALS, QUIET_TOPICS, loadProfile, saveProfile } from "../engine/goals.js";
+import { clearAvatar, dataUrlToAvatar, loadAvatar, saveAvatar } from "../engine/avatar.js";
+import { ownScans, readAllComparableHistory, scanStorageKey } from "../engine/history.js";
+import { loadPhotos } from "../engine/photoStore.js";
 import {
   loadOnboardingProfile,
   saveOnboardingProfile,
@@ -166,6 +169,15 @@ export async function openSettings(user: User): Promise<void> {
 
         <section class="set-group">
           <h3>Who you are</h3>
+          <div class="set-avatar-row">
+            <span class="set-avatar" id="set-avatar-now" aria-hidden="true"></span>
+            <div class="set-avatar-copy">
+              <b>Profile picture</b>
+              <small>Your first scan set it automatically. Pick any of your own scans below, or remove it. It never leaves this device.</small>
+            </div>
+            <button type="button" class="linkish" id="set-avatar-clear">Remove</button>
+          </div>
+          <div class="set-avatar-grid" id="set-avatar-grid" role="listbox" aria-label="Choose a scan photo as your profile picture"></div>
           <label class="trial-field" for="set-first"><span>First name</span>
             <input id="set-first" class="trial-input" type="text" maxlength="60" value="${esc(profile.firstName)}" autocomplete="given-name" /></label>
           <label class="trial-field" for="set-last"><span>Last name</span>
@@ -270,6 +282,52 @@ export async function openSettings(user: User): Promise<void> {
     }
 
     activeHost.querySelector("#set-save")?.addEventListener("click", () => void save());
+
+    // The profile picture. Choices are the person's OWN scans only — a guest's
+    // face is not offered, for the same reason it is never auto-adopted.
+    const paintAvatar = () => {
+      const now = activeHost.querySelector<HTMLElement>("#set-avatar-now");
+      const clearBtn = activeHost.querySelector<HTMLElement>("#set-avatar-clear");
+      if (!now) return;
+      const face = loadAvatar();
+      now.innerHTML = face ? `<img src="${face}" alt="" />` : "";
+      now.classList.toggle("empty", !face);
+      clearBtn?.classList.toggle("hidden", !face);
+    };
+    paintAvatar();
+    activeHost.querySelector("#set-avatar-clear")?.addEventListener("click", () => {
+      clearAvatar();
+      paintAvatar();
+    });
+    void (async () => {
+      const grid = activeHost.querySelector<HTMLElement>("#set-avatar-grid");
+      if (!grid) return;
+      const own = ownScans(readAllComparableHistory()).slice(0, 8);
+      const cells: string[] = [];
+      const sources = new Map<string, string>();
+      for (const scan of own) {
+        const photos = await loadPhotos(scanStorageKey(scan)).catch(() => null);
+        if (!photos?.front) continue;
+        const key = scanStorageKey(scan);
+        sources.set(key, photos.front);
+        cells.push(`<button type="button" class="set-avatar-cell" data-avatar-src="${key}" role="option">
+          <img src="${photos.front}" alt="Use the scan from ${new Date(scan.date).toLocaleDateString()}" /></button>`);
+      }
+      if (!activeHost.isConnected) return;
+      grid.innerHTML = cells.length
+        ? cells.join("")
+        : `<p class="set-hint">Photos from your scans appear here once you have one with a stored thumbnail.</p>`;
+      for (const cell of grid.querySelectorAll<HTMLButtonElement>("[data-avatar-src]")) {
+        cell.addEventListener("click", async () => {
+          const src = sources.get(cell.dataset.avatarSrc || "");
+          if (!src) return;
+          const square = await dataUrlToAvatar(src);
+          if (!square) return;
+          saveAvatar(square);
+          paintAvatar();
+        });
+      }
+    })();
   };
 
   const readInputs = () => {

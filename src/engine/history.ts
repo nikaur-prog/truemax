@@ -44,6 +44,26 @@ export interface StoredScan {
   pillars?: Partial<Record<string, number>>;
   regionPercentiles?: Partial<Record<RegionId, number>>;
   potential?: number;
+
+  /**
+   * Whose face this was, when it was not the account holder's.
+   *
+   * A phone gets handed across a table, and every scan taken that way used to
+   * land in the owner's history as though it were theirs — moving their trend,
+   * their average, their streak and what Max says about their progress. The
+   * fix is not to hide those scans: somebody who scans four friends wants to
+   * see the four results. It is to stop them being counted as the owner's own.
+   *
+   * Absent means the account holder. Present means a guest, and the name is
+   * what the person typing it chose to call them — it is a label on a local
+   * row, never an identity, never uploaded, and never matched against anything.
+   */
+  subject?: { name: string };
+}
+
+/** Scans of the account holder's own face — the only ones progress may read. */
+export function ownScans(scans: StoredScan[]): StoredScan[] {
+  return scans.filter((s) => !s.subject);
 }
 
 export interface ScanDelta {
@@ -101,8 +121,18 @@ export function readComparableHistory(sex: Sex): StoredScan[] {
   return comparableScans(readHistory(sex));
 }
 
+// EVERY scan, guests included — this feeds the history list and the recent
+// row, which are records rather than progress and should show what was taken.
 export function readAllComparableHistory(): StoredScan[] {
   return comparableScans(readAllHistory());
+}
+
+// The owner's own scans only. Trends, deltas, averages, streaks and anything
+// Max says about "your progress" read THIS one: a friend's face is not a data
+// point about yours, and a chart that mixes them is measuring a table, not a
+// person.
+export function readOwnComparableHistory(): StoredScan[] {
+  return ownScans(readAllComparableHistory());
 }
 
 export function scanStorageKey(scan: StoredScan): string {
@@ -159,7 +189,11 @@ export function readDelta(overall: number, daysAgo: number): DeltaReading {
   return daysAgo < STRUCTURAL_DAYS ? "tooSoon" : "worthNoting";
 }
 
-export function compareAndStore(report: Report, scanId = createScanId()): ScanDelta | null {
+export function compareAndStore(
+  report: Report,
+  scanId = createScanId(),
+  subject?: { name: string },
+): ScanDelta | null {
   if (!isScanId(scanId)) throw new Error("Scan ID is invalid");
   const log = readHistory(report.sex);
   const otherSex: Sex = report.sex === "male" ? "female" : "male";
@@ -176,7 +210,11 @@ export function compareAndStore(report: Report, scanId = createScanId()): ScanDe
       ? otherLog[otherIndex]
       : null;
   const priorLog = existingIndex >= 0 ? log.filter((_, index) => index !== existingIndex) : log;
-  const comparable = comparableScans(priorLog);
+  // A guest scan is compared against nothing and moves nothing: it has no
+  // "last time", and the owner's average must not shift because a friend
+  // borrowed the phone. An owner's scan compares only against other owner
+  // scans, for the same reason in the other direction.
+  const comparable = subject ? [] : ownScans(comparableScans(priorLog));
   const prev = comparable.length ? comparable[comparable.length - 1] : null;
 
   const current: StoredScan = {
@@ -190,6 +228,9 @@ export function compareAndStore(report: Report, scanId = createScanId()): ScanDe
     pillars: { ...report.pillars },
     regionPercentiles: Object.fromEntries(report.regions.map((r) => [r.region, r.percentile])),
     potential: report.potential,
+    // Re-scoring an existing row must not silently promote a guest's scan to
+    // the owner's, or demote the owner's to a guest's.
+    ...(subject ?? existing?.subject ? { subject: subject ?? existing?.subject } : {}),
   };
   // Average is taken over PRIOR scans, before this one is appended, so a fresh
   // scan is compared to where the face usually lands rather than to itself.
