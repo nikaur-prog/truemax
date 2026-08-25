@@ -87,14 +87,25 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     raf = requestAnimationFrame(frame);
   };
 
+  // How many consecutive not-ready frames it takes to abandon a running
+  // count. The hint text already has this hysteresis (captureSettle) and the
+  // countdown did not, so a face sitting on the boundary of one check reset
+  // the timer thirty times a second — the screen said "Hold still · 2"
+  // indefinitely while the count silently restarted underneath it, and the
+  // shutter never fired. Four frames is ~130ms: a real drift still cancels
+  // almost immediately, a flicker no longer can.
+  const GRACE_FRAMES = 4;
+  let misses = 0;
+
   return {
     update(ready: boolean) {
       if (ready) {
+        misses = 0;
         if (!startedAt) {
           startedAt = performance.now();
           raf = requestAnimationFrame(frame);
         }
-      } else if (startedAt) {
+      } else if (startedAt && ++misses >= GRACE_FRAMES) {
         stop();
         opts.onTick(null);
       }

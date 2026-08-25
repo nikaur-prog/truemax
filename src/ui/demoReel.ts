@@ -101,7 +101,7 @@ export function mountDemoReel(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const fadeIn = Math.min(1, t / 260);
+    const fadeIn = Math.min(1, t / 200);
     const fadeOut = t > T.out ? Math.max(0, (T.hold - t) / (T.hold - T.out)) : 1;
     const alpha = Math.min(fadeIn, fadeOut);
 
@@ -173,6 +173,13 @@ export function mountDemoReel(
     const swept = ease(seg(t, T.scan[0], T.scan[1]));
     const settled = t > T.scan[1];
 
+    // No geometry over a crossfade, full stop. Mid-fade the frame is two
+    // faces at partial opacity, and any mesh drawn then belongs to only one
+    // of them — a still of that instant reads as a misaligned overlay on a
+    // double exposure, which is exactly the frame that got screenshotted and
+    // called ugly. The lines wait for one face to own the frame.
+    const meshAlpha = alpha >= 1 ? 1 : 0;
+
     // The mesh, not a cloud.
     //
     // These were loose dots, and loose dots read as glitter over a photograph
@@ -186,10 +193,18 @@ export function mountDemoReel(
     // closing around an eye as the line passes it is the moment the animation
     // is selling. Lines under the dots so the vertices stay the brightest thing.
     const pts = face.points;
-    ctx.lineWidth = 1;
+    ctx.globalAlpha = alpha * meshAlpha;
+    ctx.lineWidth = 0.9;
     ctx.lineJoin = "round";
-    ctx.strokeStyle = `rgba(255,255,255,${settled ? 0.26 : 0.4})`;
-    for (const ring of reelContours()) {
+    const rings = reelContours();
+    ctx.strokeStyle = `rgba(255,255,255,${settled ? 0.22 : 0.4})`;
+    for (let ringIndex = 0; ringIndex < rings.length; ringIndex++) {
+      const ring = rings[ringIndex];
+      // The face oval is scaffolding: essential while the sweep is assembling
+      // the model, and the single ugliest thing on the card once it is done —
+      // a big pale ring floating over somebody's cheeks. It fades out after
+      // the sweep; the inner features stay and breathe.
+      if (settled && ringIndex === 0) continue;
       ctx.beginPath();
       let open = false;
       // Closed rings: the wrap-around edge is the last-to-first pair, so the
@@ -208,7 +223,7 @@ export function mountDemoReel(
     }
 
     for (const [px, py] of pts) {
-      if (py > swept) continue;
+      if (py > swept || meshAlpha === 0) continue;
       const fresh = !settled && swept - py < 0.09;
       // After the sweep the model stays ALIVE: a slow luminance wave travels
       // down the settled vertices, a few points at a time barely brightening.

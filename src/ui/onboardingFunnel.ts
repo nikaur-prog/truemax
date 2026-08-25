@@ -59,6 +59,10 @@ let host: HTMLDivElement | null = null;
 // ---------------------------------------------------------------------------
 export const MAX_MONTHLY = 11.99;
 export const MAX_ANNUAL = 89.99;
+// Exported for the Max tab's upgrade sheet, which quotes the difference a
+// Starter member pays on top of what they already pay. One constant, so the
+// plan card here and the upsell there can never disagree about the price.
+export const STARTER_MONTHLY = 7.99;
 
 function billingToggle(): string {
   const weekly = (yearTotal: number) => (yearTotal / 52).toFixed(2);
@@ -307,12 +311,12 @@ export async function openTrialFunnel(
       ${adult ? billingToggle() : ""}
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
-          <div class="plan-top"><span>STARTER</span><b>$7.99<small> USD / month</small></b></div>
+          <div class="plan-top"><span>STARTER</span><b>$${STARTER_MONTHLY.toFixed(2)}<small> USD / month</small></b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
           <div class="plan-feat"><ul><li>One scan a week</li><li>In-depth analysis of every measurement</li><li>Progress tracking scan to scan</li><li>Personalised recommendations</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="starter">Start 7-day free trial</button>
-          <small>Then $7.99/month. Cancel anytime.</small>
+          <small>Then $${STARTER_MONTHLY.toFixed(2)}/month. Cancel anytime.</small>
         </article>
         <article class="plan-card max${adult ? " featured" : " locked"}" data-plan="max">
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}

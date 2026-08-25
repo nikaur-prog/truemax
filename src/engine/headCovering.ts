@@ -3,6 +3,7 @@ import { FilesetResolver, ImageSegmenter } from "@mediapipe/tasks-vision";
 // Google's SelfieMulticlass labels:
 // 0 background, 1 hair, 2 body skin, 3 face skin, 4 clothes, 5 accessories.
 // The image is segmented on-device. No photograph or mask leaves the browser.
+const HAIR = 1;
 const FACE_SKIN = 3;
 const CLOTHES = 4;
 const ACCESSORY = 5;
@@ -92,6 +93,7 @@ export function classifyCoveringMask(data: Uint8Array, width: number, height: nu
     y1: y0 + fh * 0.08,
   }, new Set([CLOTHES, ACCESSORY]));
   const sideCategories = new Set([CLOTHES]);
+  const hairCategory = new Set([HAIR]);
   // Temple band only. This used to reach down to 80% of face height, which is
   // beside the jaw — and a hood resting on the SHOULDERS put enough fabric
   // there to read as worn. A tester with his hood down was told it was ruining
@@ -100,24 +102,33 @@ export function classifyCoveringMask(data: Uint8Array, width: number, height: nu
   // with the jaw or below is a collar, a hood on shoulders, or a shirt.
   const sideY0 = y0 + fh * 0.02;
   const sideY1 = y0 + fh * 0.45;
-  const left = ratioIn(data, width, height, {
-    x0: x0 - fw * 0.35,
-    x1: x0 + fw * 0.08,
-    y0: sideY0,
-    y1: sideY1,
-  }, sideCategories);
-  const right = ratioIn(data, width, height, {
-    x0: x1 - fw * 0.08,
-    x1: x1 + fw * 0.35,
-    y0: sideY0,
-    y1: sideY1,
-  }, sideCategories);
-  const sideCoverRatio = Math.max(left, right);
+  const leftBox = { x0: x0 - fw * 0.35, x1: x0 + fw * 0.08, y0: sideY0, y1: sideY1 };
+  const rightBox = { x0: x1 - fw * 0.08, x1: x1 + fw * 0.35, y0: sideY0, y1: sideY1 };
+  const left = ratioIn(data, width, height, leftBox, sideCategories);
+  const right = ratioIn(data, width, height, rightBox, sideCategories);
+  const leftHair = ratioIn(data, width, height, leftBox, hairCategory);
+  const rightHair = ratioIn(data, width, height, rightBox, hairCategory);
+
+  // A hood is a BILATERAL, HAIR-DISPLACING garment, and the check now demands
+  // both properties instead of neither. The single-sided max() fired on a
+  // shoulder at the edge of frame, and the clothes ratio alone fired on
+  // voluminous dark hair — this segmenter's best-known confusion is hair read
+  // as clothing, and a tester with curly hair and a plain collared shirt was
+  // told he was wearing a hood on EVERY capture, with no way past it.
+  //
+  //   - both temple bands must read as fabric: a hood that is up flanks both
+  //     sides of the head; anything one-sided is a shoulder, a wall, or hair
+  //     mislabelled on its shadowed side
+  //   - fabric must beat hair where it claims to sit: a hood that is up
+  //     COVERS the hair beside the temples, so "hood" and "lots of visible
+  //     hair in the same band" cannot both be true
+  const sideCoverRatio = Math.min(left, right);
+  const displacesHair = left > leftHair && right > rightHair;
 
   return {
     available: true,
     hatLikely: topCoverRatio >= 0.08,
-    hoodLikely: sideCoverRatio >= 0.18,
+    hoodLikely: sideCoverRatio >= 0.18 && displacesHair,
     topCoverRatio: +topCoverRatio.toFixed(4),
     sideCoverRatio: +sideCoverRatio.toFixed(4),
   };
