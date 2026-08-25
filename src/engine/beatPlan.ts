@@ -80,8 +80,19 @@ export function suggestWindow(
  * one — a clip shorter than a beat is a flash frame, not an edit.
  */
 export function beatsPerClipFor(grid: BeatGrid, windowSeconds: number, clipCount: number): number {
-  const totalBeats = Math.floor(windowSeconds / grid.period + 1e-6);
-  return Math.max(1, Math.floor(totalBeats / Math.max(1, clipCount)));
+  return Math.max(1, Math.floor(beatsIn(grid, windowSeconds) / Math.max(1, clipCount)));
+}
+
+/**
+ * The whole beats that fit inside a chosen number of seconds.
+ *
+ * The epsilon is not decoration: a window derived from a beat count and then
+ * measured back in seconds lands a hair under its own length in floating point,
+ * and a bare floor would drop the final beat of the section every time.
+ */
+export function beatsIn(grid: BeatGrid, seconds: number): number {
+  if (!(grid.period > 0)) return 0;
+  return Math.max(0, Math.floor(seconds / grid.period + 1e-6));
 }
 
 /**
@@ -111,6 +122,18 @@ export interface PlanOptions {
   clipCount: number;
   /** How many beats each clip is held for. 2 is the default reel pace. */
   beatsPerClip?: number;
+  /**
+   * Fill exactly this many beats, ignoring `beatsPerClip`.
+   *
+   * For the other way round: somebody with a specific section in mind says how
+   * long it is, and the clips divide it. Dividing by the clip count and
+   * rounding down would leave the tail of the section unused — at 124 BPM a
+   * twenty-second window is 41 beats, and six clips of six beats covers 36 of
+   * them, ending two and a half seconds early on a section that was chosen for
+   * where it ENDS as much as where it starts. Here the remainder is shared out
+   * instead, so the window is filled to the beat.
+   */
+  totalBeats?: number;
   /** Where in the song the window begins. Snapped to a bar start. */
   songStart: number;
   /**
@@ -133,7 +156,12 @@ export function planBeatCuts(opts: PlanOptions): BeatPlan {
   const beatsPerClip = Math.max(1, opts.beatsPerClip ?? 2);
   const start = nearestDownbeat(grid, opts.songStart);
 
-  const totalBeats = Math.max(clipCount, clipCount * beatsPerClip);
+  // At least one beat per clip either way: a clip that gets none is a clip the
+  // person attached and never sees.
+  const totalBeats = Math.max(
+    clipCount,
+    opts.totalBeats != null ? Math.round(opts.totalBeats) : clipCount * beatsPerClip,
+  );
   const cuts: ClipCut[] = [];
 
   // No usable drop: one stretch, even share, remainder to the ends.
