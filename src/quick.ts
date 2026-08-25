@@ -43,7 +43,6 @@ import type { RatedFace } from "./engine/calibrationSet.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
-import { openProducer } from "./ui/quickProducer.js";
 import { canShareFiles, exportName, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
@@ -70,7 +69,13 @@ import { mergeReports } from "./engine/scoring.js";
 // rather than presenting it as the same number.
 // ---------------------------------------------------------------------------
 
-const MAX_DIM = 1280;
+// Ingest cap. This was 1280, which quietly capped every EXPORT: the analysis
+// frame is authored at 720x1280 but rendered at 1080x1920 (and 4K), and the
+// photograph fills most of that height — so a 1280-tall source was upscaled
+// ~1.5x into every reel and looked exactly as pixelated as that sounds.
+// 2160 is native at 1080 output with headroom, and detection cost is
+// unchanged (MediaPipe resizes internally); only the one-off skin pass pays.
+const MAX_DIM = 2160;
 
 const el = {
   pillars: document.getElementById("q-pillars")!,
@@ -479,6 +484,40 @@ let beforeScan: { report: Report; photo: HTMLCanvasElement; lm: NormalizedLandma
 /** Which half of a Reel Creator run we are on. Meaningless in the other modes. */
 let reelStage: "before" | "after" = "before";
 
+// One photo, or the before-and-after glow-up. Chosen at the door of the mode,
+// because it decides how many scans the flow asks for: "single" skips the
+// before stage entirely and the reel's analysis segment plays this scan alone.
+let reelKind: "single" | "pair" = "pair";
+
+function openReelKindChoice(): void {
+  document.querySelector(".q-kindpick")?.remove();
+  const sheet = document.createElement("div");
+  sheet.className = "q-kindpick";
+  sheet.innerHTML = `
+    <div class="q-kindpick-card" role="dialog" aria-modal="true" aria-label="What kind of TikTok">
+      <b>What are we making?</b>
+      <button type="button" class="q-kind" data-kind="pair">
+        <span>Before &amp; after</span>
+        <em>Two photos, scanned separately. The video is the glow-up — the after score climbs out of the before.</em>
+      </button>
+      <button type="button" class="q-kind" data-kind="single">
+        <span>One photo</span>
+        <em>One scan, cut with your clips to a song.</em>
+      </button>
+    </div>`;
+  document.body.appendChild(sheet);
+  for (const b of sheet.querySelectorAll<HTMLButtonElement>(".q-kind")) {
+    b.onclick = () => {
+      reelKind = b.dataset.kind === "single" ? "single" : "pair";
+      // Single starts on the AFTER stage so the before-capture branch never
+      // fires: the one photo IS the result.
+      if (reelKind === "single") reelStage = "after";
+      updateModeStep();
+      sheet.remove();
+    };
+  }
+}
+
 function enterMode(next: QuickMode): void {
   quickScanGeneration += 1;
   last = null;
@@ -487,7 +526,12 @@ function enterMode(next: QuickMode): void {
   mode = next;
   beforeScan = null;
   reelStage = "before";
+  reelKind = "pair";
   el.pillars.classList.add("hidden");
+  // The reel's first question is not a photograph, it is what KIND of video
+  // this is — one photo, or the before/after pair. Everything downstream
+  // (how many scans, what the analysis segment plays) follows from it.
+  if (next === "reel") openReelKindChoice();
 
   // Nothing is photographed in the AI flow, so it gets its own screen rather
   // than the capture screen with a notice bolted on. Leaving the camera up
@@ -528,6 +572,10 @@ function updateModeStep(): void {
       mode === "analysis" ? "One photo" : mode === "calibrate" ? "One photo · then your rating" : "";
     return;
   }
+  if (reelKind === "single") {
+    el.modeStep.textContent = "One photo · then your clips and a song";
+    return;
+  }
   el.modeStep.textContent =
     reelStage === "before" ? "Step 1 of 2 — the before photo" : "Step 2 of 2 — the after photo";
 }
@@ -540,6 +588,7 @@ function leaveMode(): void {
   mode = null;
   beforeScan = null;
   reelStage = "before";
+  document.querySelector(".q-kindpick")?.remove();
   el.capture.classList.add("hidden");
   el.result.classList.add("hidden");
   el.ai.classList.add("hidden");
@@ -1500,11 +1549,6 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn gho" id="q-video-download">Breakdown MP4</button>
       <button class="btn gho" id="q-verdict-download">Verdict MP4</button>
       <button class="btn gho" id="q-rundown-download">Rundown MP4</button>
-      <!-- The other kind of reel: your own footage, cut to a song, with no
-           voiceover and no measurements. It shares nothing with the rundown
-           except the encoder, so it opens its own panel rather than adding a
-           fourth column of controls to this one. -->
-      <button class="btn gho" id="q-beatreel">Cut to the beat</button>
       <!-- Calibration, not a user feature. A screenshot of the region cards
            says the jaw is wrong; only the metric table says WHICH jaw metric,
            by how far, and whether the ideal or the spread is at fault. -->
@@ -1595,23 +1639,6 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(editedReport(r), "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(editedReport(r), "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(editedReport(r));
-  // Loaded on demand: the beat panel pulls in an FFT, a planner and the
-  // encoder, and most sessions in here never open it.
-  //
-  // The scan on screen rides along. "Cut to the beat" is the TikTok creator's
-  // engine, not a generic clip cutter, and the TikTok this product wants made
-  // is before-clips / THE ANALYSIS / after-clips — so the panel receives what
-  // it needs to render the analysis reel as a beat-aligned segment at 2x. The
-  // edited score travels the same way it does into every other export: what
-  // the operator corrected on screen is what the video says.
-  document.getElementById("q-beatreel")!.onclick = () => {
-    const rep = editedReport(r);
-    const analysis = last
-      ? { photo: last.photo, landmarks: last.lm, sex: rep.sex, scores: editedExportScores(rep) }
-      : undefined;
-    void import("./ui/beatReelPanel.js").then((m) => m.openBeatReelPanel(analysis));
-  };
-
   // The before half, exported on its own. Only present after a Reel Creator run
   // — there is no before to render otherwise, and a disabled button explaining
   // that would be a control for a mode you are not in.
@@ -1849,11 +1876,11 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
 // showed neither what was attached nor how many. These are pictures, and the
 // control for choosing pictures should show them.
 //
-// Paste is the point, same as in the producer: a still off a search results
-// page is two keystrokes pasted and a four-step detour through the filesystem
-// otherwise. The listener is on the document and routed by an armed slot, for
-// the same reason it is there in quickProducer — a paste goes to whatever holds
-// focus, and what holds focus after a click is a button the redraw replaces.
+// Paste is the point: a still off a search results page is two keystrokes
+// pasted and a four-step detour through the filesystem otherwise. The
+// listener is on the document and routed by an armed slot — a paste goes to
+// whatever holds focus, and what holds focus after a click is a button the
+// redraw replaces.
 // ---------------------------------------------------------------------------
 const CUT_SLOTS = 4;
 interface Cutaway {
@@ -2508,32 +2535,30 @@ async function downloadRundown(r: Report): Promise<void> {
   }
 }
 
-// Offered after a reel is built rather than as a fourth button up front: the
-// producer needs footage the person has to go and choose, so the moment they
-// have just watched their own analysis render is the moment the ask lands.
-// Inserted once; a new scan re-renders the card and clears it naturally.
+// Create Reel opens the beat panel — the TikTok creator now. The old
+// fixed-length producer asked the operator to guess clip durations, which is
+// the exact question the beat panel exists to make unaskable; keeping both
+// meant maintaining two answers to one problem, one of them wrong.
+//
+// A Reel Creator pair run rides its before scan along, so the analysis
+// segment can play as the glow-up: the before card, then the after card
+// counting up out of the before score. The current scan is always the LATER
+// one here — reel mode only reaches the results screen on the after photo.
 function openCurrentProducer(r: Report): void {
   if (!last) return;
-  // A Reel Creator run holds the before scan, so the producer can bracket the
-  // footage with both measurements instead of putting one in the middle. The
-  // current scan is always the LATER one here — reel mode only reaches the
-  // results screen on the after photo — so the stored scan is the opening.
   const before = beforeSource();
-  openProducer(
-    before
-      ? {
-          photo: before.photo,
-          landmarks: before.lm,
-          sex: r.sex,
-          // There is only one editable result grid and it belongs to the AFTER
-          // photograph. Reading that grid for the before made both producer
-          // inputs start on the after score. The held source owns its own
-          // report-derived number; the visible grid owns the after correction.
-          scores: before.scores,
-          after: { photo: last.photo, landmarks: last.lm, scores: editedExportScores(r) },
-        }
-      : { photo: last.photo, landmarks: last.lm, sex: r.sex, scores: editedExportScores(r) },
-  );
+  const analysis = {
+    photo: last.photo,
+    landmarks: last.lm,
+    sex: r.sex,
+    // There is only one editable result grid and it belongs to the AFTER
+    // photograph; the held before source owns its own report-derived number.
+    scores: editedExportScores(r),
+    before: before
+      ? { photo: before.photo, landmarks: before.lm, scores: before.scores }
+      : undefined,
+  };
+  void import("./ui/beatReelPanel.js").then((m) => m.openBeatReelPanel(analysis));
 }
 
 // Downloads still call this hook. The editor is now already present, so the
