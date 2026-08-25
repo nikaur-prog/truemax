@@ -19,8 +19,20 @@ import { shapeSubset } from "../engine/shape.js";
 // Indices returned are positions in a face's `points` array, not mesh indices.
 // ---------------------------------------------------------------------------
 
+// The FEATURES, and deliberately not the face oval.
+//
+// The oval was here and it was the wrong idea twice over. Traced around the
+// silhouette it reads as a cut-out sticker laid over the photograph rather
+// than as a model fitted to a face, and it is the one contour whose vertices
+// sit on the boundary between a person and their background — so it lands on
+// hair, on a jaw edge softened by depth of field, on nothing at all — and it
+// looked like the software could not find the edge of the head. Faded out
+// after the sweep it was still wrong for the whole sweep.
+//
+// What a measurement of a face actually looks like is the features: eyes,
+// brows, lips. Those are unambiguous, they are what the metrics are built
+// from, and a contour closing around an eye is the moment worth showing.
 const SETS = () => [
-  FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
   FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
   FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
   FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
@@ -57,6 +69,39 @@ export function orderRing(edges: ReadonlyArray<{ start: number; end: number }>):
 }
 
 let cached: number[][] | null = null;
+let cachedOval: Set<number> | null = null;
+
+/**
+ * The points that belong ONLY to the face oval.
+ *
+ * Dropping the oval from the contour list stops the outline being drawn, and
+ * leaves its vertices sitting on the photograph as a ring of loose dots —
+ * which is the same goofy cut-out shape with the lines taken out, and reads
+ * worse rather than better. The reel skips these when scattering points.
+ *
+ * Vertices shared with a feature ring are NOT included: a point that an eye
+ * or a lip also uses is doing a second job, and removing it would leave a gap
+ * in a contour that is staying.
+ */
+export function reelOvalPoints(): Set<number> {
+  if (cachedOval) return cachedOval;
+  const subset = shapeSubset();
+  const at = new Map<number, number>();
+  subset.forEach((mesh, i) => at.set(mesh, i));
+
+  const keep = new Set<number>();
+  for (const ring of reelContours()) for (const i of ring) keep.add(i);
+
+  const oval = new Set<number>();
+  for (const edge of FaceLandmarker.FACE_LANDMARKS_FACE_OVAL) {
+    for (const mesh of [edge.start, edge.end]) {
+      const i = at.get(mesh);
+      if (i !== undefined && !keep.has(i)) oval.add(i);
+    }
+  }
+  cachedOval = oval;
+  return oval;
+}
 
 /**
  * Each facial contour, as indices into a reel face's `points` array.

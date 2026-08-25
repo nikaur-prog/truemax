@@ -1604,10 +1604,7 @@ async function runFullAnalysis(
   // view the current stage is about.
   const sideShot = lastSide?.photo;
   let showing: "front" | "side" = "front";
-  const swapTo = (view: "front" | "side") => {
-    if (view === showing) return;
-    if (view === "side" && !sideShot) return;
-    showing = view;
+  const paintView = (view: "front" | "side") => {
     const cap = document.querySelector(".photo-caption span");
     if (cap) cap.textContent = view === "side" ? "SIDE" : "FRONT";
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
@@ -1628,23 +1625,73 @@ async function runFullAnalysis(
       drawCalm(el.overlayCanvas, landmarks, width, height);
     }
   };
+  // The view crosses rather than cuts. The old swap resized and repainted the
+  // canvas mid-frame — front photo, then suddenly the profile, then suddenly
+  // back — which is most of what read as "glitchy" about this screen. A short
+  // fade out, the repaint while nothing is showing, a fade back in.
+  const swapTo = (view: "front" | "side") => {
+    if (view === showing) return;
+    if (view === "side" && !sideShot) return;
+    showing = view;
+    el.zoomable.classList.add("viewfade");
+    window.setTimeout(() => {
+      if (!scanIsCurrent(token, generation)) return;
+      paintView(view);
+      el.zoomable.classList.remove("viewfade");
+    }, 170);
+  };
+  // The status line crosses too: fade the old sentence, land the new one.
+  // Eight hard innerHTML swaps in three seconds read as flicker, not work.
+  const setStatus = (html: string) => {
+    el.status.classList.add("swapping");
+    window.setTimeout(() => {
+      if (!scanIsCurrent(token, generation)) return;
+      el.status.innerHTML = html;
+      el.status.classList.remove("swapping");
+    }, 130);
+  };
+  // One continuous clock drives everything. The bar is a smooth function of
+  // elapsed time — no more 12.5% leaps fighting a CSS transition that never
+  // gets to finish — and the stage index falls out of the same clock, so the
+  // text, the view and the bar can never disagree about where the scan is.
+  // Width is written directly; the CSS transition is disabled for the run so
+  // the rAF is the only authority on where the bar sits.
+  const stageMs = stages.map((s) => (s.view === "side" ? 620 : 430));
+  const totalMs = stageMs.reduce((a, b) => a + b, 0);
+  el.barFill.classList.add("driven");
   await new Promise<void>((done) => {
-    let s = 0;
-    const step = () => {
+    const t0 = performance.now() + 200;
+    let lastStage = -1;
+    const tick = (now: number) => {
       if (!scanIsCurrent(token, generation)) {
         reveal.cancel();
         done();
         return;
       }
-      if (s < stages.length) {
-        el.status.innerHTML = `<b>${stages[s].text}</b> …`;
-        el.barFill.style.width = `${((s + 1) / stages.length) * 100}%`;
+      const t = now - t0;
+      if (t < 0) {
+        requestAnimationFrame(tick);
+        return;
+      }
+      const p = Math.min(1, t / totalMs);
+      // Ease-out: quick early progress that settles as it approaches done —
+      // the shape people read as software working, not a metronome.
+      el.barFill.style.width = `${((1 - Math.pow(1 - p, 1.6)) * 100).toFixed(2)}%`;
+      let acc = 0;
+      let s = 0;
+      for (; s < stages.length - 1; s++) {
+        acc += stageMs[s];
+        if (t < acc) break;
+      }
+      if (s !== lastStage) {
+        lastStage = s;
+        setStatus(`<b>${stages[s].text}</b> <span class="scan-ellipsis"><i>.</i><i>.</i><i>.</i></span>`);
         swapTo(stages[s].view);
-        s++;
-        setTimeout(step, stages[s - 1].view === "side" ? 520 : 360);
-      } else done();
+      }
+      if (p >= 1) done();
+      else requestAnimationFrame(tick);
     };
-    setTimeout(step, 200);
+    requestAnimationFrame(tick);
   });
   await reveal.done;
   if (!scanIsCurrent(token, generation) || !pending) return;
@@ -1699,7 +1746,18 @@ async function runFullAnalysis(
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "ANALYZED";
   el.status.textContent = "";
-  el.barFill.style.width = "0";
+  el.status.classList.remove("swapping");
+  // Retire the bar without animating it backwards. It used to be set straight
+  // to width 0 with the 0.4s transition still attached, so the finished bar
+  // visibly DRAINED right as the results arrived — the least premium pixel on
+  // the screen. Fade it out where it stands, snap the width while invisible,
+  // and hand the transition back for whoever runs next.
+  el.barFill.parentElement?.classList.add("spent");
+  window.setTimeout(() => {
+    el.barFill.style.width = "0";
+    el.barFill.classList.remove("driven");
+    window.setTimeout(() => el.barFill.parentElement?.classList.remove("spent"), 250);
+  }, 260);
   drawCalm(el.overlayCanvas, landmarks, width, height);
   // The one place the upload's outcome is actually needed: it decides a quality
   // chip. By now the reveal animation has run, so the POST fired underneath it
