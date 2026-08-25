@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CURRENT_SCORE_VERSION, comparableScans, ownScans } from "./history.js";
+import { previousForMovement } from "./scanChain.js";
 import type { StoredScan } from "./history.js";
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,24 @@ test("an absent subject means the owner — every pre-existing row is theirs", (
   const legacy = scan(5.5);
   delete (legacy as unknown as Record<string, unknown>).subject;
   assert.equal(ownScans([legacy]).length, 1);
+});
+
+test("a movement skips over guests to the owner's own previous scan", () => {
+  // The exact screenshot this whole split exists for: owner 5.9, then a friend
+  // at 5.2, then the owner again at 5.9. Paired by adjacency the owner's newest
+  // row reads "+0.7" against a face that is not theirs — and the friend's row
+  // reads "−0.7" against the owner's. Newest first, as the list is built.
+  const rows = [scan(5.9), scan(5.2, { name: "Ana" }), scan(5.9)];
+  assert.equal(previousForMovement(rows, 0)?.overall, 5.9); // the owner's own prior
+  assert.equal(previousForMovement(rows, 1), undefined); // Ana is compared to nobody
+  assert.equal(previousForMovement(rows, 2), undefined); // the owner's first
+});
+
+test("consecutive guests do not chain to each other", () => {
+  // Two friends scanned back to back are two records, not a trend of one face.
+  const rows = [scan(4.0, { name: "Sam" }), scan(6.0, { name: "Ana" }), scan(5.0)];
+  assert.equal(previousForMovement(rows, 0), undefined);
+  assert.equal(previousForMovement(rows, 1), undefined);
 });
 
 test("the guest label is a plain string with no claim to being anyone", () => {

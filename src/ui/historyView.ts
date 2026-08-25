@@ -1,6 +1,7 @@
 import { DISPLAY_NOISE, ownScans, readAllComparableHistory, readAllHistory, scanStorageKey } from "../engine/history.js";
 import type { StoredScan } from "../engine/history.js";
 import { clearAllPhotos, loadPhotos } from "../engine/photoStore.js";
+import { previousForMovement } from "../engine/scanChain.js";
 import { isScanRecallOpen, openScanRecall } from "./scanRecall.js";
 
 // ---------------------------------------------------------------------------
@@ -103,14 +104,16 @@ function trendSVG(scans: StoredScan[]): string {
 }
 
 function rows(scans: StoredScan[]): string {
-  // Newest first, each showing its move against the PREVIOUS scan (the one
-  // below it in the list).
+  // Newest first, each owner row showing its move against the owner's PREVIOUS
+  // scan. A guest row gets no chip at all: two different faces are not a
+  // movement, and even "first scan" would claim a sequence that isn't one.
   return scans
     .map((s, i) => {
-      const prev = scans[i + 1];
+      const prev = previousForMovement(scans, i);
       const d = prev ? Math.round((s.overall - prev.overall) * 10) / 10 : null;
-      const chip =
-        d == null
+      const chip = s.subject
+        ? ""
+        : d == null
           ? `<span class="hist-chip first">first scan</span>`
           : Math.abs(d) < NOISE_SD
             ? `<span class="hist-chip flat">${d >= 0 ? "+" : ""}${d.toFixed(1)} · within noise</span>`
@@ -211,15 +214,16 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
 // trend is made of, and they are not the sensitive part.
 export function wireHistoryPanel(root: ParentNode): void {
   // Rows reopen the scan they name. The index is into the same newest-first
-  // array the markup was built from, so the row and its predecessor — the one
-  // its movement chip is measured against — are both to hand.
+  // array the markup was built from, and the recall's movement chip obeys the
+  // same rule as the list's: an owner scan is measured against the owner's own
+  // previous scan, a guest scan against nothing.
   fillShots(root);
   const scans = readAllComparableHistory();
   for (const row of root.querySelectorAll<HTMLElement>("[data-recall]")) {
     row.onclick = () => {
       const i = Number(row.dataset.recall);
       const scan = scans[i];
-      if (scan) openScanRecall(scan, scans[i + 1]);
+      if (scan) openScanRecall(scan, previousForMovement(scans, i));
     };
   }
 

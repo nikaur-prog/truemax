@@ -9,6 +9,7 @@ import { POSE_CALIBRATION, buildGeometry, landmarkIntegrityIssues } from "./engi
 import { extractShape, shapeSubset } from "./engine/shape.js";
 import {
   compareAndStore,
+  ownScans,
   readAllHistory,
   readOwnComparableHistory,
   scanStorageKey,
@@ -52,7 +53,7 @@ import type { User } from "@supabase/supabase-js";
 import { revealSideScan } from "./ui/sideScan.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
-import { loadProfile } from "./engine/goals.js";
+import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
@@ -249,6 +250,12 @@ let selectedSex: Sex = storedSex() ?? "male";
 // Set when the current scan is of somebody other than the account holder, and
 // carried through to the stored row so progress can exclude it.
 let scanSubject: { name: string } | null = null;
+// Whether the "who is this?" question was actually put to a signed-in person
+// this scan. scanSubject === null is ambiguous on its own — it means "the
+// owner" AND "never asked" — and the difference matters at the account gate: a
+// scan captured signed-out never asked, and attributing it to whoever then
+// signs in would put a friend's face in the owner's history.
+let subjectAsked = false;
 // Whether the reference population is a real choice yet, or still the silent
 // default. A face app is used mostly by young men, so "male" is the right
 // default to compute against — but computing a man a percentile "of women"
@@ -401,7 +408,10 @@ const landingHistory = document.getElementById("landing-history");
 
 let recentPaintToken = 0;
 function syncLandingHistory(): void {
-  const scans = readAllHistory().slice(0, RECENT_ON_LANDING);
+  // "Your last scans", literally: a guest's scan is a record in the history
+  // panel, labelled with their name — but this row has no labels, just a face
+  // and a score, and an unlabelled friend here read as the owner's own result.
+  const scans = ownScans(readAllHistory()).slice(0, RECENT_ON_LANDING);
   landingRecent?.classList.toggle("hidden", scans.length === 0);
   if (!landingRecentRow || !scans.length) return;
 
@@ -587,9 +597,15 @@ function ensureSex(then: () => void): void {
   }
 
   openSubjectChooser((answer) => {
+    subjectAsked = true;
     if (answer.self) {
-      const own = profile.sex ?? storedSex();
-      // Only skip the question when the account can actually answer it.
+      // Only the ACCOUNT'S own stored answer can skip the question. The first
+      // version also fell back to the browser-global "last population used"
+      // key — which an anonymous visitor, another account on this browser, or
+      // a rescore of a guest's results all write — so "It's me" could silently
+      // score the owner against whatever face used the phone last, and then
+      // re-persist that wrong answer as theirs.
+      const own = profile.sex;
       if (own) {
         selectedSex = own;
         sexChosen = true;
@@ -600,10 +616,53 @@ function ensureSex(then: () => void): void {
         then();
         return;
       }
-      askPopulation(undefined, null);
+      // No answer on the account yet (the signup funnel predates the
+      // question). Ask once, and remember it ON THE ACCOUNT — so this is the
+      // last time a self-scan ever asks.
+      openSexChooser(
+        (sex) => {
+          saveProfile({ ...loadProfile(), sex });
+          selectedSex = sex;
+          sexChosen = true;
+          scanSubject = null;
+          storeSex(sex);
+          paintRefPop();
+          showGuide(sex);
+          then();
+        },
+        storedSex() ?? undefined,
+      );
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
+  });
+}
+
+// The late form of the same question, for a scan captured with nobody signed
+// in: the subject chooser is member-gated, so the capture never asked, and the
+// person now signing in at the gate may not be the person in the photographs —
+// an owner whose session expired hands the phone over, a friend scans, the
+// owner logs back in to see the result. Asked before the analysis is
+// attributed, because the alternative is the friend's scan landing in the
+// owner's trend and, on an avatar-less account, the friend's face becoming
+// the owner's profile picture.
+//
+// Resolves false when they back out, which abandons the run — the same thing
+// backing out of the chooser means at capture time.
+function askLateSubject(): Promise<boolean> {
+  if (subjectAsked) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    openSubjectChooser(
+      (answer) => {
+        subjectAsked = true;
+        scanSubject = answer.self ? null : { name: answer.subject.name };
+        resolve(true);
+      },
+      () => {
+        resetToUpload();
+        resolve(false);
+      },
+    );
   });
 }
 
@@ -1131,6 +1190,7 @@ function resetToUpload(): void {
   lastSide = null;
   captureMethod = null;
   scanSubject = null;
+  subjectAsked = false;
   feedbackInFlight = null;
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
@@ -1572,18 +1632,26 @@ async function runFullAnalysis(
   void (async () => {
     const owner = activeScanOwner();
     if (!owner || !scanSession.isCurrent(token, owner)) return;
+    // Read BEFORE the await. scanSubject is module state that resetToUpload
+    // nulls, and the IndexedDB write below is a real gap — an owner tapping
+    // "New photo" mid-write must not turn a guest's scan into "not a guest".
+    const guest = scanSubject !== null;
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
       front: frontThumb ?? undefined,
       side: sideThumb ?? undefined,
     });
+    // Re-checked AFTER the await and BEFORE anything is written for the owner:
+    // the suspended closure can resume under a different signed-in account
+    // (cross-tab auth swaps the scope synchronously), and this scan's face
+    // must not become THAT account's anything.
+    if (!scanSession.isCurrent(token, owner)) return;
     // The first front photo a member scans OF THEMSELVES becomes their
     // profile picture. A guest's face must never become the owner's avatar,
     // and an avatar already chosen is never overwritten from here — settings
     // owns changes.
-    if (!scanSubject) maybeAdoptAvatar(frontShot);
-    if (!scanSession.isCurrent(token, owner)) return;
+    if (!guest) maybeAdoptAvatar(frontShot);
     await pruneTo(readAllHistory().map(scanStorageKey));
   })();
 
@@ -1621,6 +1689,10 @@ async function runFullAnalysis(
     zoomable: el.zoomable,
     overlay: el.overlayCanvas,
     onNewPhoto: resetToUpload,
+    // Who the scan is OF, so the results screen can stop speaking to the
+    // owner about a guest's numbers — "first scan on record" was rendered
+    // over a friend's face because a guest's delta is deliberately null.
+    subjectName: scanSubject?.name,
     // Same destination as "continue" — the plan chooser, which already handles
     // signed-out users and the under-18 rule. The upgrade button is not a
     // second, parallel billing path.
@@ -1705,7 +1777,10 @@ async function runFullAnalysis(
     // the numbers describing a group the header no longer names.
     onSexChange: (sex: Sex) => {
       selectedSex = sex;
-      storeSex(sex);
+      // A toggle on a GUEST's results is about the guest — it must not
+      // overwrite the browser's remembered population, which seeds the
+      // owner's next preselect.
+      if (!scanSubject) storeSex(sex);
       paintRefPop();
       if (!lastSide) return;
       const f = analyze(landmarks, width, height, sex, frontShot);
@@ -1761,6 +1836,11 @@ async function gateAnalysis(
     }
     const owner = activeScanOwner();
     if (owner && scanSession.snapshot().owner !== owner) scanSession.claim(token, owner);
+    // A signed-in account reached without the capture ever asking whose face
+    // this is (signed in from another tab mid-scan) is asked now, before the
+    // scan is attributed to anyone.
+    if (user && !(await askLateSubject())) return;
+    if (!scanIsCurrent(token, generation) || !pending) return;
     if (!scanSession.transition(token, "analyzing")) return;
     startConsentedSideFeedback();
     await runFullAnalysis(sideReport, token);
@@ -1847,6 +1927,11 @@ async function gateAnalysis(
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
         scanSession.claim(token, `user:${signedInUser.id}`);
+        // The capture ran signed out, so nobody was ever asked whose face
+        // this is — and the person signing in at the gate is not necessarily
+        // the person in the photographs (an owner's expired session, a
+        // friend's scan). Attribution happens only after the answer.
+        if (!(await askLateSubject())) return;
         startConsentedSideFeedback();
         await runFullAnalysis(sideReport, token);
       },
@@ -1923,7 +2008,6 @@ async function resumePendingAfterAuth(): Promise<void> {
 
   selectedSex = saved.sex;
   sexChosen = true;
-  storeSex(saved.sex);
   paintRefPop();
   pending = {
     landmarks: saved.front.landmarks,
@@ -1949,6 +2033,15 @@ async function resumePendingAfterAuth(): Promise<void> {
   closeSide();
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  // A resumed scan crossed a redirect, so whatever the subject chooser knew is
+  // gone with the page it was answered on — and this scan may have been
+  // captured before sign-in ever happened. Ask before attributing.
+  if (!(await askLateSubject())) return;
+  if (!scanIsCurrent(token, generation)) return;
+  // Remember the population only once it is known to be the OWNER's answer —
+  // a resumed scan can turn out to be a guest's, and the global key seeds the
+  // owner's next preselect.
+  if (!scanSubject) storeSex(saved.sex);
   startConsentedSideFeedback();
   await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex), token);
 }

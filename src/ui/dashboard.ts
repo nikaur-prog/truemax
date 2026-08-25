@@ -1,4 +1,4 @@
-import { DISPLAY_NOISE, ownScans, readAllHistory, readOwnComparableHistory, scanStorageKey } from "../engine/history.js";
+import { DISPLAY_NOISE, ownScans, readAllComparableHistory, readAllHistory, readOwnComparableHistory, scanStorageKey } from "../engine/history.js";
 import { followUp, regionNote } from "../engine/followUp.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
@@ -133,6 +133,12 @@ export function openDashboard(opts: {
   // Progress is the owner's own face. A friend who borrows the phone must not
   // extend the owner's streak or bend their trend — see StoredScan.subject.
   const scans = readOwnComparableHistory();
+  // Calibration decides "legacy", subject decides "guest" — two different
+  // exclusions, counted separately. Subtracting the owner-only list from
+  // everything lumped a friend's fresh scan in with "used the previous
+  // scoring calibration", which is a sentence about the wrong thing.
+  const allComparable = readAllComparableHistory();
+  const legacyCount = allScans.length - allComparable.length;
   const streak = computeStreak(ownScans(allScans));
   const ctx = { name: opts.name ?? null, streak };
   const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
@@ -164,7 +170,7 @@ export function openDashboard(opts: {
         <section class="dash-view is-active" data-view="home" role="tabpanel" aria-labelledby="dash-bar-home">
           ${heroBlock(scans, ctx, streak)}
           ${followUpCard(scans)}
-          ${scanSection(scans, allScans.length - scans.length)}
+          ${scanSection(scans, legacyCount, allComparable.length - scans.length, allComparable.length)}
           ${faces.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
             <span class="dash-faces-fan">
               ${faces.slice(0, 5).map((f) => `<img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />`).join("")}
@@ -410,15 +416,19 @@ function escapeHtml(s: string): string {
   );
 }
 
-function scanSection(scans: StoredScan[], legacyCount = 0): string {
+function scanSection(scans: StoredScan[], legacyCount = 0, guestCount = 0, listCount = 0): string {
   if (!scans.length) {
+    // Guests are named before legacy: "your only scan was of a friend" is the
+    // state most likely to make this panel's "No scans yet" read as data loss.
     return `<section class="dash-scans">
       <h2>Your scans</h2>
       <div class="dash-empty">
         <b>No scans yet.</b>
-        <span>${legacyCount
-          ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
-          : "Scan your face to see your first measurement — and every one after it lines up here so you can watch it move."}</span>
+        <span>${guestCount
+          ? `${guestCount} scan${guestCount === 1 ? "" : "s"} of someone else ${guestCount === 1 ? "is" : "are"} kept in the Scans tab — a friend's face is a record here, never your progress. Scan yourself to start your own trend.`
+          : legacyCount
+            ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
+            : "Scan your face to see your first measurement — and every one after it lines up here so you can watch it move."}</span>
       </div>
     </section>`;
   }
@@ -435,7 +445,7 @@ function scanSection(scans: StoredScan[], legacyCount = 0): string {
     <section class="dash-scans dash-anim" style="--d:480ms">
       <div class="dash-scans-head">
         <h2>Your scans</h2>
-        ${scans.length > 5 ? `<button class="linkish" id="dash-history">View all ${scans.length} →</button>` : ""}
+        ${listCount > 5 ? `<button class="linkish" id="dash-history">View all ${listCount} →</button>` : ""}
       </div>
       <div class="dash-scan-list">
         ${recent.map((s, i) => scanRow(s, scans[i + 1], sameDayAsAbove(i))).join("")}

@@ -210,8 +210,19 @@ export function openQuiz(onDone: (p: Profile) => void, phase: Phase = "all"): vo
   // cards earlier in the same run — picking "Skin quality" must make the skin
   // card appear now, not on the next visit. Position is therefore tracked by
   // step id, since the index it sits at moves underneath it.
-  const visible = () => PHASES[phase].filter((s) => !s.when || s.when(p));
+  //
+  // A card that has already been PUT ON SCREEN stays on screen, even if its own
+  // `when` has since gone false. That case is real: the population card is
+  // gated on `!p.sex` and answering it is what sets p.sex, so the card
+  // vanished from under the tap that answered it — the chip never lit (sync
+  // painted the next step's selection onto it), the counter jumped to the next
+  // card's title, and Continue skipped a whole question because index 0 was no
+  // longer the card being looked at. Sticky-once-shown keeps the tap, the
+  // count, the rail and Back all describing the thing in front of the person.
+  const shown = new Set<string>();
+  const visible = () => PHASES[phase].filter((s) => shown.has(s.id) || !s.when || s.when(p));
   let curId = visible()[0].id;
+  shown.add(curId);
   const idx = () => Math.max(0, visible().findIndex((s) => s.id === curId));
 
   host?.remove();
@@ -244,6 +255,7 @@ export function openQuiz(onDone: (p: Profile) => void, phase: Phase = "all"): vo
     const i = idx();
     if (i < v.length - 1) {
       curId = v[i + 1].id;
+      shown.add(curId);
       draw();
     } else close(true);
   };
