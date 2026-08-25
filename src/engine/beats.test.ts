@@ -78,6 +78,47 @@ test("the grid lands ON the clicks, not merely at the right spacing", () => {
   assert.ok(worst < 0.02, `worst beat sat ${(worst * 1000).toFixed(1)}ms off the click`);
 });
 
+test("hats on every eighth do not drag the tempo off the beat", () => {
+  // The ordinary case in the music people cut reels to, and the one that fools
+  // a single-pass detector: twice as many onsets, evenly spaced, so the comb
+  // locks onto the EIGHTH note. Folding that back gives the right tempo, but
+  // the regression behind it was fitted through hats and drums together — two
+  // populations at different strengths and slightly different timings. It read
+  // 128 BPM as 127.85, which looks correct and drifts a frame and a half over
+  // a twenty-second window. The fix is to fit again once the period is known.
+  const SECONDS = 30;
+  const n = SR * SECONDS;
+  const audio = new Float32Array(n);
+  let seed = 0x27d4eb2f;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return (seed / 0xffffffff) * 2 - 1;
+  };
+  const hit = (t: number, tone: number, noise: number, gain: number, dec: number) => {
+    const at = Math.round(t * SR);
+    const len = Math.round(SR * dec);
+    for (let i = 0; i < len && at + i < n; i++) {
+      audio[at + i] +=
+        (Math.sin((2 * Math.PI * tone * i) / SR) * (1 - noise) + rand() * noise) * gain * Math.exp((-i / len) * 5);
+    }
+  };
+  const P = 60 / 128;
+  for (let k = 0; k * P < SECONDS; k++) {
+    const t = k * P;
+    const bar = k % 4;
+    if (bar === 0 || bar === 2) hit(t, 55, 0.15, 0.9, 0.12);
+    if (bar === 1 || bar === 3) hit(t, 190, 0.75, 0.7, 0.09);
+    hit(t, 9000, 0.95, 0.15, 0.03);
+    hit(t + P / 2, 9000, 0.95, 0.12, 0.025); // the off-beat hat
+  }
+  const grid = analyzeBeats(audio, SR);
+  assert.ok(Math.abs(grid.bpm - 128) < 0.1, `read as ${grid.bpm.toFixed(2)} BPM`);
+  // Stated as the thing it protects: half a minute of beats without a video
+  // frame of accumulated drift.
+  const drift = Math.abs(grid.period - P) * 64;
+  assert.ok(drift < 0.033, `drift over 64 beats was ${(drift * 1000).toFixed(1)}ms`);
+});
+
 test("a tempo outside the range people count in is folded, not reported raw", () => {
   // 240 BPM is heard and counted as 120. A grid claiming 240 would cut twice as
   // often as the music asks for.
