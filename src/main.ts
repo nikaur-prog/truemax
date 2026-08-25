@@ -1880,10 +1880,12 @@ async function gateAnalysis(
   // and "sign up and then we will run it" are different promises, and only the
   // first one is the acquisition flow this screen was meant to be.
   let preview = "";
+  let teaser: { overall: number; regionCount: number } | undefined;
   try {
     if (pending) {
       const front = analyze(pending.landmarks, pending.width, pending.height, selectedSex);
       const merged = sideReport ? mergeReports(front, sideReport) : front;
+      teaser = { overall: merged.overall, regionCount: merged.regions.length };
       preview = `<div class="lockblur gate-preview" aria-hidden="true" inert>
         <div class="gate-prev-score">${merged.overall.toFixed(1)}<small>/10</small></div>
         <div class="gate-prev-grid">${merged.regions
@@ -1918,6 +1920,7 @@ async function gateAnalysis(
     await openAccount({
       initialMode: saved ? "signup" : "password",
       reason: "analysis",
+      teaser,
       onDeferred: () => {
         el.status.innerHTML = "<b>Scan saved on this device.</b> Open the newest email link to continue.";
       },

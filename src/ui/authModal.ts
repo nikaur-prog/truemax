@@ -42,6 +42,16 @@ export interface OpenAccountOptions {
   checkoutSessionId?: string | null;
   initialMode?: AuthMode;
   reason?: "account" | "analysis";
+  /**
+   * The computed-but-locked result, shown INSIDE the modal as a blurred chip.
+   *
+   * The gate already blurs the full result behind this dialog, and on a phone
+   * the dialog covers all of it — so at the exact moment somebody is asked to
+   * type an email, the thing they would be typing it FOR is invisible. The
+   * chip is the same promise at the same fidelity as the preview underneath:
+   * the real number, unreadable, present.
+   */
+  teaser?: { overall: number; regionCount: number };
   onAuthenticated?: (user: User) => void | Promise<void>;
   onDeferred?: () => void | Promise<void>;
 }
@@ -134,6 +144,17 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   const body = activeOverlay.querySelector(".acct-body") as HTMLElement;
   const requestedMode = options.initialMode ?? (options.reason === "analysis" ? "signup" : null);
   const renderSignedOut = (initialMode: AuthMode) => {
+    // The locked result rides above the form, not the notice text: a sentence
+    // says a result exists, the chip SHOWS it existing. aria-hidden and inert
+    // because a screen reader reading out the real digits would unblur it for
+    // exactly the people the blur is supposed to be even-handed with.
+    const teaser = options.teaser
+      ? `<div class="acct-teaser" aria-hidden="true" inert>
+          <span class="acct-teaser-k">YOUR RESULT · COMPUTED ON THIS DEVICE</span>
+          <b class="lockblur">${options.teaser.overall.toFixed(1)}<small>/10</small></b>
+          <em>${options.teaser.regionCount} regions measured — unlocks the moment you're in</em>
+        </div>`
+      : "";
     renderAuthForm(body, {
       initialMode,
       context: options.reason === "analysis" ? "analysis" : "account",
@@ -148,6 +169,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
         }
       },
     });
+    if (teaser) body.insertAdjacentHTML("afterbegin", teaser);
   };
 
   // A deliberate Sign in / Sign up click should never wait on Supabase's

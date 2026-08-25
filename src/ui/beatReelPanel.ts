@@ -383,25 +383,58 @@ function paint(): void {
   go.disabled = busy || !currentPlan();
 }
 
+// Which clip's trim controls are open, by index. One at a time: eight open
+// scrubbers is a mixing desk, and this is a phone screen.
+let openClip: number | null = null;
+
 function paintClips(): void {
   const wrap = host!.querySelector<HTMLElement>("#brp-clips")!;
   wrap.innerHTML = "";
+  // The trim editor lives OUTSIDE the strip (wrap.after), so clearing the
+  // strip's innerHTML does not clear it. Every paint removes the old one and
+  // the open clip, if any, gets a fresh one below.
+  for (const old of host!.querySelectorAll(".brp-trim")) old.remove();
   clips.forEach((clip, i) => {
     const cell = document.createElement("div");
-    cell.className = "brp-clip";
+    cell.className = "brp-clip" + (openClip === i ? " open" : "");
+    // Reorder is two arrows rather than drag. Drag needs a long-press to
+    // disambiguate from scroll on a phone, ghosting, and a drop indicator;
+    // arrows need nothing and work identically everywhere. The order IS the
+    // edit, so it must be changeable without re-attaching everything.
     cell.innerHTML = `
       <video muted playsinline preload="metadata"></video>
       <button type="button" class="q-cut-x" title="Remove">✕</button>
-      <span class="brp-clip-n">${i + 1}</span>`;
+      <span class="brp-clip-n">${i + 1}</span>
+      <span class="brp-clip-moves">
+        <button type="button" data-move="-1" title="Earlier" ${i === 0 ? "disabled" : ""}>‹</button>
+        <button type="button" data-move="1" title="Later" ${i === clips.length - 1 ? "disabled" : ""}>›</button>
+      </span>`;
     const v = cell.querySelector("video")!;
     v.src = clip.url;
     v.currentTime = clip.startAt + 0.1;
-    cell.querySelector("button")!.onclick = () => {
+    cell.querySelector(".q-cut-x")!.addEventListener("click", (e) => {
+      e.stopPropagation();
       URL.revokeObjectURL(clip.url);
       clips.splice(i, 1);
+      openClip = null;
       if (clipsBeforeDrop !== null) clipsBeforeDrop = Math.min(clipsBeforeDrop, Math.max(1, clips.length - 1));
       paint();
-    };
+    });
+    for (const btn of cell.querySelectorAll<HTMLButtonElement>("[data-move]")) {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const to = i + Number(btn.dataset.move);
+        const [moved] = clips.splice(i, 1);
+        clips.splice(to, 0, moved);
+        openClip = null;
+        paint();
+      });
+    }
+    // Tapping the clip opens its trim controls under the strip.
+    cell.addEventListener("click", () => {
+      openClip = openClip === i ? null : i;
+      paint();
+    });
     wrap.append(cell);
   });
   const add = document.createElement("button");
@@ -410,6 +443,46 @@ function paintClips(): void {
   add.innerHTML = `<span>+</span>${clips.length ? "More clips" : "Add clips"}`;
   add.onclick = () => host!.querySelector<HTMLInputElement>("#brp-clip-input")!.click();
   wrap.append(add);
+
+  // The open clip's trim controls, under the strip. `startAt` is where in the
+  // SOURCE this clip begins — the cut still lands on the beat; this decides
+  // which moment of the footage is playing when it does. The preview seeks as
+  // the handle moves, so the in-point is chosen by looking at the frame.
+  if (openClip !== null && clips[openClip]) {
+    const clip = clips[openClip];
+    const dur = Math.max(0, (clip.video.duration || 0) - 0.3);
+    const editor = document.createElement("div");
+    editor.className = "brp-trim";
+    editor.innerHTML = `
+      <video muted playsinline preload="metadata"></video>
+      <div class="brp-trim-fields">
+        <b>Clip ${openClip + 1}</b>
+        <label>Starts at
+          <input type="range" data-k="start" min="0" max="${dur.toFixed(1)}" step="0.1" value="${clip.startAt}" />
+          <em data-out>${clip.startAt.toFixed(1)}s</em>
+        </label>
+        <label>Framing
+          <select class="q-input" data-k="bias">
+            <option value="-0.35"${clip.bias === -0.35 ? " selected" : ""}>Favour the top — heads in wide shots</option>
+            <option value="0"${!clip.bias ? " selected" : ""}>Centre</option>
+            <option value="0.35"${clip.bias === 0.35 ? " selected" : ""}>Favour the bottom</option>
+          </select>
+        </label>
+      </div>`;
+    const pv = editor.querySelector("video")!;
+    pv.src = clip.url;
+    pv.currentTime = clip.startAt + 0.05;
+    const out = editor.querySelector<HTMLElement>("[data-out]")!;
+    editor.querySelector<HTMLInputElement>('[data-k="start"]')!.oninput = (e) => {
+      clip.startAt = Number((e.target as HTMLInputElement).value);
+      pv.currentTime = clip.startAt + 0.05;
+      out.textContent = `${clip.startAt.toFixed(1)}s`;
+    };
+    editor.querySelector<HTMLSelectElement>('[data-k="bias"]')!.onchange = (e) => {
+      clip.bias = Number((e.target as HTMLSelectElement).value) || 0;
+    };
+    wrap.after(editor);
+  }
 
   note(
     "brp-clipnote",
