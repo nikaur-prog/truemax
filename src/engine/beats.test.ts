@@ -343,3 +343,56 @@ test("the window start snaps to a bar, so the music does not begin mid-phrase", 
   assert.ok(Math.abs(plan.songStart - 6) < 1e-9, `snapped to ${plan.songStart}`);
   assert.equal(nearestDownbeat(grid, 5.3), 6);
 });
+
+test("a pinned clip gets exactly the beats it asked for, the pace fills the rest", () => {
+  const grid = gridAt(120);
+  const plan = planBeatCuts({
+    grid, clipCount: 4, beatsPerClip: 2, songStart: 0,
+    beatOverrides: [null, 6, null, null],
+  });
+  const beats = plan.cuts.map((c) => c.beats);
+  // Pace mode: the window GROWS for the pin — 2+6+2+2 = 12 beats.
+  assert.deepEqual(beats, [2, 6, 2, 2]);
+  assert.ok(Math.abs(plan.duration - 12 * grid.period) < 1e-9);
+});
+
+test("pins inside a fixed window are honoured and the window never shrinks a pin", () => {
+  const grid = gridAt(120);
+  // Fit 10 beats with one clip pinned to 6: the other three share the 4 left.
+  const plan = planBeatCuts({
+    grid, clipCount: 4, songStart: 0, totalBeats: 10,
+    beatOverrides: [null, 6, null, null],
+  });
+  const beats = plan.cuts.map((c) => c.beats);
+  assert.equal(beats[1], 6);
+  assert.equal(beats.reduce((a, b) => a + b, 0), 10);
+  // A window too small for the pins grows rather than trimming them silently.
+  const grown = planBeatCuts({
+    grid, clipCount: 3, songStart: 0, totalBeats: 4,
+    beatOverrides: [4, 4, null],
+  });
+  assert.deepEqual(grown.cuts.map((c) => c.beats), [4, 4, 1]);
+});
+
+test("pins before the drop yield to the drop; pins after it extend the window", () => {
+  const grid = gridAt(120);
+  const drop = 4 * grid.period;
+  const plan = planBeatCuts({
+    grid, clipCount: 4, beatsPerClip: 2, songStart: 0,
+    dropAt: drop, clipsBeforeDrop: 2,
+    // The first clip asks for 8 beats but only 4 exist before the drop:
+    // the reveal must not move, so the pin is capped. The last clip's 6
+    // extends the window's end instead — same music, playing longer.
+    beatOverrides: [8, null, null, 6],
+  });
+  const reveal = plan.cuts.find((c) => c.onDrop);
+  assert.ok(Math.abs(reveal!.start - drop) < 1e-9, "the reveal moved off the drop");
+  const beats = plan.cuts.map((c) => c.beats);
+  assert.equal(beats[0] + beats[1], 4, "the before side must fill exactly the drop's beats");
+  assert.equal(beats[3], 6, "the after-side pin was not honoured");
+  // Still tiles exactly.
+  for (let i = 1; i < plan.cuts.length; i++) {
+    assert.ok(Math.abs(plan.cuts[i].start - plan.cuts[i - 1].end) < 1e-9);
+  }
+  assert.ok(Math.abs(plan.cuts[plan.cuts.length - 1].end - plan.duration) < 1e-9);
+});
