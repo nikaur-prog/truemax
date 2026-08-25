@@ -1,4 +1,5 @@
 import { analyzeBeats, nearestDownbeat, onsetEnvelope, toMono } from "../engine/beats.js";
+import { activeCut, coverRect } from "../engine/reelFrame.js";
 import type { BeatGrid } from "../engine/beats.js";
 import { beatsIn, planBeatCuts, suggestWindow } from "../engine/beatPlan.js";
 import type { BeatPlan } from "../engine/beatPlan.js";
@@ -39,6 +40,10 @@ interface PanelClip extends ReelClip {
   // trim editor can seek. The analysis segment never enters this list — it is
   // spliced in by reelClips() on the way to the renderer.
   video: HTMLVideoElement;
+  // How many beats this clip holds, when the person has said so. Null means
+  // the pace decides. This is how a clip is slowed DOWN — more beats is the
+  // same footage holding longer on the music.
+  beats: number | null;
 }
 
 interface Song {
@@ -80,8 +85,6 @@ export interface BeatAnalysisSource {
   before?: { photo: HTMLCanvasElement; landmarks: NormalizedLandmark[]; scores: QuickExportScores };
 }
 
-const ANALYSIS_SPEED = 2;
-
 let host: HTMLDivElement | null = null;
 let clips: PanelClip[] = [];
 let song: Song | null = null;
@@ -96,6 +99,24 @@ let analysisMoved = false;
 // Defaults ON when a before scan exists — two photographs were taken to make
 // this exact comparison — and the chips under the strip switch it.
 let analysisPair = true;
+// The analysis segment's own pace. Speed is how fast the breakdown plays;
+// beats is how long the cut holds, and NULL means "exactly long enough to
+// play the whole thing at that speed". The first live render held the
+// analysis for two beats — under a second of a 5.5-second breakdown — which
+// was not fast, it was decapitated. Auto-full is the only honest default.
+let analysisSpeed = 2;
+let analysisBeats: number | null = null;
+// Whether the analysis tile's own editor is open (the clip editors use
+// openClip; the analysis is not in clips[] so it carries its own flag).
+let openAna = false;
+
+function autoAnalysisBeats(): number | null {
+  const g = grid();
+  if (!g?.bpm) return null;
+  const body = quickVideoDuration("breakdown");
+  const content = (analysisPair && analysisSource?.before ? body * 2 : body) / analysisSpeed;
+  return Math.max(1, Math.ceil(content / g.period - 1e-6));
+}
 let beatsPerClip = 2;
 // When set, the section's length governs and the pace is whatever fills it.
 // Null means the pace control governs and the length follows from it. Exactly
@@ -118,6 +139,9 @@ export function closeBeatReelPanel(): void {
   // the export into two-second seek timeouts on dead blobs. The ✕ and the
   // backdrop are both disabled while busy, so this is belt and braces.
   if (busy) return;
+  stopReelPreview();
+  if (keyHandler) document.removeEventListener("keydown", keyHandler);
+  keyHandler = null;
   for (const c of clips) URL.revokeObjectURL(c.url);
   clips = [];
   song = null;
@@ -137,7 +161,11 @@ export function closeBeatReelPanel(): void {
   analysisAt = 0;
   analysisMoved = false;
   analysisPair = true;
+  analysisSpeed = 2;
+  analysisBeats = null;
+  openAna = false;
   stopSong();
+  pausedAt = null;
   songBuffer = null;
   host?.remove();
   host = null;
@@ -183,15 +211,15 @@ function analysisClip(a: BeatAnalysisSource): ReelClip {
       if (pair) {
         const half = dur / 2;
         if (into < half) {
-          const t = Math.min(into * ANALYSIS_SPEED, body - 0.05);
+          const t = Math.min(into * analysisSpeed, body - 0.05);
           renderQuickVideoFrame(off, a.before!.photo, a.before!.landmarks, a.sex, a.before!.scores, t, "breakdown", scale);
         } else {
-          const t = Math.min((into - half) * ANALYSIS_SPEED, body - 0.05);
+          const t = Math.min((into - half) * analysisSpeed, body - 0.05);
           const climb = { ...a.scores, from: a.before!.scores.overall };
           renderQuickVideoFrame(off, a.photo, a.landmarks, a.sex, climb, t, "breakdown", scale);
         }
       } else {
-        const t = Math.min(into * ANALYSIS_SPEED, body - 0.05);
+        const t = Math.min(into * analysisSpeed, body - 0.05);
         // The frame is authored at 720x1280; the scale argument renders it at
         // the reel's own resolution, so 1080 and 4K both get native pixels
         // rather than an upscale.
@@ -231,6 +259,15 @@ let playFrom = 0;
 let playCtxAt = 0;
 let playRaf = 0;
 let songBuffer: AudioBuffer | null = null;
+// Where full-song playback paused, in song seconds. Space resumes from HERE,
+// not from the start marker — pausing to look at something is not starting
+// over. Null means nothing is paused; play falls back to the marker.
+let pausedAt: number | null = null;
+// Whether the current playback is the full song (true) or a bounded preview
+// slice (false). Only a full play records a pause point: a cut preview ending
+// must not teleport the resume position to wherever the preview stopped.
+let fullPlay = false;
+let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function isPlaying(): boolean {
   return playingSrc !== null;
@@ -245,6 +282,13 @@ function stopSong(): void {
   if (playRaf) cancelAnimationFrame(playRaf);
   playRaf = 0;
   if (playingSrc) {
+    // Record the pause point BEFORE tearing the source down — afterwards the
+    // playhead is gone. A play that ran off the end of the track resumes from
+    // the marker instead: "resume from the silence after the song" is nothing.
+    if (fullPlay) {
+      const t = playheadTime();
+      pausedAt = t !== null && song && t < song.duration - 0.1 ? t : null;
+    }
     playingSrc.onended = null;
     try { playingSrc.stop(); } catch { /* already ended */ }
     playingSrc = null;
@@ -256,6 +300,7 @@ function stopSong(): void {
 function playSong(from: number, dur?: number): void {
   if (!song) return;
   stopSong();
+  fullPlay = dur === undefined;
   try {
     audioCtx = audioCtx ?? new AudioContext();
     if (audioCtx.state === "suspended") void audioCtx.resume();
@@ -293,7 +338,11 @@ function playSong(from: number, dur?: number): void {
 function paintPlayButton(): void {
   const btn = host?.querySelector<HTMLButtonElement>("#brp-play");
   if (!btn) return;
-  btn.textContent = isPlaying() ? "❚❚ Pause" : "► Play from the marker";
+  btn.textContent = isPlaying()
+    ? "❚❚ Pause · space"
+    : pausedAt !== null
+      ? "► Resume · space"
+      : "► Play from the marker";
 }
 
 /** The grid with the user's bar correction applied. */
@@ -307,15 +356,110 @@ function grid(): BeatGrid | null {
 function currentPlan(): BeatPlan | null {
   const g = grid();
   if (!g || !reelCount() || !g.bpm) return null;
+  const beatOverrides: Array<number | null> = clips.map((c) => c.beats);
+  if (analysisOn && analysisSource) {
+    beatOverrides.splice(analysisPos(), 0, analysisBeats ?? autoAnalysisBeats());
+  }
   return planBeatCuts({
     grid: g,
     clipCount: reelCount(),
     beatsPerClip,
+    beatOverrides,
     ...(fitSeconds != null ? { totalBeats: beatsIn(g, fitSeconds) } : {}),
     songStart,
     dropAt: dropAt ?? undefined,
     clipsBeforeDrop: clipsBeforeDrop ?? undefined,
   });
+}
+
+// ---------------------------------------------------------------------------
+// The live preview.
+//
+// "Does this edit work" was only answerable by a two-minute render. Now the
+// plan plays in real time in a small frame: the song from the chosen start,
+// the clips seeked and cut exactly where the export will cut them, the
+// analysis synthesised per frame the same way the encoder does it. It is the
+// render loop minus the encoder — same activeCut, same coverRect, same draw —
+// so what it shows is what renders, at thumbnail size and zero cost.
+// ---------------------------------------------------------------------------
+let previewOn = false;
+let previewRaf = 0;
+
+function paintPreviewButton(): void {
+  const btn = host?.querySelector<HTMLButtonElement>("#brp-preview");
+  if (!btn) return;
+  btn.textContent = previewOn ? "■ Stop the preview" : "► Preview the reel";
+}
+
+function stopReelPreview(): void {
+  if (previewRaf) cancelAnimationFrame(previewRaf);
+  previewRaf = 0;
+  if (!previewOn) return;
+  previewOn = false;
+  for (const c of clips) c.video.pause();
+  stopSong();
+  const wrapEl = host?.querySelector<HTMLElement>("#brp-prevwrap");
+  if (wrapEl) wrapEl.hidden = true;
+  paintPreviewButton();
+}
+
+function startReelPreview(): void {
+  const plan = currentPlan();
+  if (!plan || !song || busy) return;
+  stopReelPreview();
+  const wrapEl = host?.querySelector<HTMLElement>("#brp-prevwrap");
+  const canvas = host?.querySelector<HTMLCanvasElement>("#brp-prev");
+  const ctx = canvas?.getContext("2d");
+  if (!wrapEl || !canvas || !ctx) return;
+  wrapEl.hidden = false;
+  previewOn = true;
+  const list = reelClips();
+  // A bounded play, so the pause point of the transport is left alone.
+  playSong(plan.songStart, plan.duration);
+  const t0 = performance.now();
+  let lastClip = -1;
+  const W = canvas.width;
+  const H = canvas.height;
+  const tick = () => {
+    if (!previewOn || !host) return;
+    const t = (performance.now() - t0) / 1000;
+    if (t >= plan.duration) {
+      stopReelPreview();
+      return;
+    }
+    const hit = activeCut(plan.cuts, t);
+    const clip = hit ? list[hit.cut.clip] : undefined;
+    if (hit && clip) {
+      if (clip.draw) {
+        if (lastClip !== hit.cut.clip) {
+          for (const c of clips) c.video.pause();
+          lastClip = hit.cut.clip;
+        }
+        clip.draw(ctx, W, H, hit.into, hit.cut.end - hit.cut.start);
+      } else if (clip.video) {
+        const v = clip.video;
+        if (lastClip !== hit.cut.clip) {
+          // One video plays at a time. Seek to where the export would seek —
+          // the clip's in-point plus how far into the cut we are, at the
+          // clip's own speed — then let real time carry it.
+          for (const c of clips) c.video.pause();
+          v.currentTime = clip.startAt + hit.into * (clip.speed ?? 1);
+          v.playbackRate = clip.speed ?? 1;
+          void v.play().catch(() => undefined);
+          lastClip = hit.cut.clip;
+        }
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, W, H);
+        if (v.videoWidth && v.videoHeight) {
+          const r = coverRect(v.videoWidth, v.videoHeight, W, H, clip.bias ?? 0);
+          ctx.drawImage(v, r.sx, r.sy, r.sw, r.sh, 0, 0, W, H);
+        }
+      }
+    }
+    previewRaf = requestAnimationFrame(tick);
+  };
+  previewRaf = requestAnimationFrame(tick);
+  paintPreviewButton();
 }
 
 export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
@@ -402,9 +546,13 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
       <section class="brp-sec" id="brp-plan-sec" hidden>
         <div class="brp-head"><span>4 · THE CUT</span><small id="brp-plannote"></small></div>
         <div class="brp-cuts" id="brp-cuts"></div>
+        <div class="brp-prevwrap" id="brp-prevwrap" hidden>
+          <canvas id="brp-prev" width="270" height="480"></canvas>
+        </div>
       </section>
 
       <div class="brp-actions">
+        <button class="btn gho" id="brp-preview" disabled>► Preview the reel</button>
         <button class="btn pri" id="brp-go" disabled>Render the reel</button>
         <span class="brp-progress" id="brp-progress"></span>
       </div>
@@ -412,6 +560,37 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
 
   document.body.appendChild(el);
   wire(el);
+
+  // The transport, on the keyboard. Space pauses and resumes IN PLACE —
+  // never back to the start marker — and the arrow keys step the position a
+  // frame (1/30s) at a time, a beat with shift held. Frame-stepping is how a
+  // drop is actually found: the waveform gets you near it, the last few
+  // frames are ears-and-arrows work. Typing in a field is left alone.
+  keyHandler = (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable)) return;
+    if (!song || !grid()?.bpm) return;
+    if (e.code === "Space") {
+      e.preventDefault();
+      if (previewOn) { stopReelPreview(); return; }
+      if (cutPreviewStop) { cutPreviewStop(); return; }
+      if (isPlaying()) stopSong();
+      else playSong(pausedAt ?? songStart);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const g = grid()!;
+      const step = (e.shiftKey ? g.period : 1 / 30) * (e.key === "ArrowLeft" ? -1 : 1);
+      const base = isPlaying() ? (playheadTime() ?? songStart) : (pausedAt ?? songStart);
+      const at = Math.max(0, Math.min(song.duration - 0.05, base + step));
+      if (isPlaying()) playSong(at);
+      else {
+        pausedAt = at;
+        paintPlayButton();
+        drawWave();
+      }
+    }
+  };
+  document.addEventListener("keydown", keyHandler);
   paint();
 }
 
@@ -448,6 +627,7 @@ function wire(el: HTMLElement): void {
     // A new track is a new buffer and a fresh silence — playback of the old
     // one continuing under the new waveform would be a haunted house.
     stopSong();
+    pausedAt = null;
     songBuffer = null;
     song = loaded;
     // Start a quarter of the way in rather than at zero: the opening of a
@@ -524,6 +704,9 @@ function wire(el: HTMLElement): void {
         dropAt = null;
         clipsBeforeDrop = null;
       }
+      // Choosing a new section discards the old pause point: resume means
+      // "carry on from where I stopped", and this click said "no, from here".
+      pausedAt = songStart;
       // Scrubbing by ear: while the song is playing, moving the marker moves
       // playback with it. Choosing a section and listening to it are the same
       // gesture, which is the whole point of having a player here.
@@ -534,7 +717,11 @@ function wire(el: HTMLElement): void {
 
   el.querySelector<HTMLButtonElement>("#brp-play")!.onclick = () => {
     if (isPlaying()) stopSong();
-    else playSong(songStart);
+    else playSong(pausedAt ?? songStart);
+  };
+  el.querySelector<HTMLButtonElement>("#brp-preview")!.onclick = () => {
+    if (previewOn) stopReelPreview();
+    else startReelPreview();
   };
 
   el.querySelector<HTMLButtonElement>("#brp-go")!.onclick = () => void render();
@@ -568,7 +755,7 @@ async function loadClip(file: File): Promise<PanelClip | null> {
     URL.revokeObjectURL(url);
     return null;
   }
-  return { video, url, name: file.name, startAt: 0, bias: 0 };
+  return { video, url, name: file.name, startAt: 0, bias: 0, beats: null };
 }
 
 async function loadSong(file: File): Promise<Song | null> {
@@ -597,17 +784,27 @@ async function loadSong(file: File): Promise<Song | null> {
 
 function paint(): void {
   if (!host) return;
+  // Any repaint means the edit changed, and a preview of the OLD plan playing
+  // over the new controls is a lie in motion. Stop it; the button restarts it.
+  stopReelPreview();
   paintClips();
   paintSong();
   paintWindow();
   paintPlan();
+  const plan = currentPlan();
   const go = host.querySelector<HTMLButtonElement>("#brp-go")!;
-  go.disabled = busy || !currentPlan();
+  go.disabled = busy || !plan;
+  const pv = host.querySelector<HTMLButtonElement>("#brp-preview")!;
+  pv.disabled = busy || !plan;
+  paintPreviewButton();
 }
 
 // Which clip's trim controls are open, by index. One at a time: eight open
 // scrubbers is a mixing desk, and this is a phone screen.
 let openClip: number | null = null;
+// When a cut preview is running, this stops it — held at module level so the
+// spacebar can reach a closure that lives inside the editor's paint.
+let cutPreviewStop: (() => void) | null = null;
 
 function paintClips(): void {
   const wrap = host!.querySelector<HTMLElement>("#brp-clips")!;
@@ -669,6 +866,7 @@ function paintClips(): void {
         return;
       }
       openClip = openClip === i ? null : i;
+      openAna = false;
       paint();
     });
     cells.push(cell);
@@ -681,12 +879,12 @@ function paintClips(): void {
     const a = analysisSource;
     const pair = analysisPair && a.before;
     const tile = document.createElement("div");
-    tile.className = "brp-clip brp-ana";
+    tile.className = "brp-clip brp-ana" + (openAna ? " open" : "");
     tile.innerHTML = `
       <canvas class="brp-ana-thumb"></canvas>
       <button type="button" class="q-cut-x" title="Remove">✕</button>
       <span class="brp-clip-n">${pos + 1}</span>
-      <span class="brp-ana-badge">${pair ? "GLOW-UP · 2×" : "YOUR ANALYSIS · 2×"}</span>
+      <span class="brp-ana-badge">${pair ? `GLOW-UP · ${analysisSpeed}×` : `YOUR ANALYSIS · ${analysisSpeed}×`}</span>
       <span class="brp-clip-moves">
         <button type="button" data-amove="-1" title="Earlier" ${pos === 0 ? "disabled" : ""}>‹</button>
         <button type="button" data-amove="1" title="Later" ${pos === clips.length ? "disabled" : ""}>›</button>
@@ -703,7 +901,21 @@ function paintClips(): void {
     tile.querySelector(".q-cut-x")!.addEventListener("click", (e) => {
       e.stopPropagation();
       analysisOn = false;
+      openAna = false;
       if (clipsBeforeDrop !== null) clipsBeforeDrop = Math.min(clipsBeforeDrop, Math.max(1, reelCount() - 1));
+      paint();
+    });
+    // The analysis has its own line-up controls — how long it holds, and how
+    // fast the breakdown plays inside that hold — behind the same song gate
+    // as the clips, and for the same reason: beats mean nothing without a
+    // tempo to price them in seconds.
+    tile.addEventListener("click", () => {
+      if (!currentPlan()) {
+        note("brp-clipnote", "Attach the song first — then tap the analysis to set how long it holds.");
+        return;
+      }
+      openAna = !openAna;
+      openClip = null;
       paint();
     });
     for (const btn of tile.querySelectorAll<HTMLButtonElement>("[data-amove]")) {
@@ -731,7 +943,7 @@ function paintClips(): void {
     const back = document.createElement("button");
     back.type = "button";
     back.className = "brp-add brp-ana-add";
-    back.innerHTML = `<span>+</span>Your analysis · 2×`;
+    back.innerHTML = `<span>+</span>Your analysis · ${analysisSpeed}×`;
     back.onclick = () => {
       analysisOn = true;
       paint();
@@ -780,6 +992,7 @@ function paintClips(): void {
     const sourceNeed = windowSec * speed;
     const dur = Math.max(0.1, (clip.video.duration || 0) - 0.3);
     const sliderMax = Math.max(0.1, dur - sourceNeed);
+    const period = 60 / openPlan.bpm;
     const editor = document.createElement("div");
     editor.className = "brp-trim";
     editor.innerHTML = `
@@ -789,6 +1002,14 @@ function paintClips(): void {
         <label>Starts at
           <input type="range" data-k="start" min="0" max="${Math.min(dur, sliderMax).toFixed(1)}" step="0.1" value="${Math.min(clip.startAt, sliderMax).toFixed(1)}" />
           <em data-out>${clip.startAt.toFixed(1)}s</em>
+        </label>
+        <label>Plays for
+          <select class="q-input" data-k="beats">
+            <option value="">Auto — the pace decides</option>
+            ${[1, 2, 3, 4, 6, 8]
+              .map((b) => `<option value="${b}"${clip.beats === b ? " selected" : ""}>${b}♩ = ${(b * period).toFixed(2)}s</option>`)
+              .join("")}
+          </select>
         </label>
         <button type="button" class="btn gho brp-cutplay" data-k="preview">► Preview this cut with the song</button>
         <label>Framing
@@ -819,6 +1040,7 @@ function paintClips(): void {
     const stopPreview = () => {
       if (previewTimer) clearTimeout(previewTimer);
       previewTimer = 0;
+      cutPreviewStop = null;
       pv.pause();
       stopSong();
     };
@@ -842,10 +1064,22 @@ function paintClips(): void {
       pv.playbackRate = clip.speed ?? 1;
       void pv.play().catch(() => undefined);
       playSong(openPlan.songStart + cut.start, windowSec);
+      cutPreviewStop = stopPreview;
       previewTimer = window.setTimeout(() => {
         previewTimer = 0;
+        cutPreviewStop = null;
         pv.pause();
       }, windowSec * 1000);
+    };
+    // A clip's own length, in beats. This is how a clip is slowed DOWN in the
+    // edit sense — the same footage holding longer on the music — without
+    // touching how fast the footage itself plays (that is the speed select).
+    // The window changes, so the plan changes, so everything repaints.
+    editor.querySelector<HTMLSelectElement>('[data-k="beats"]')!.onchange = (e) => {
+      stopPreview();
+      const v = (e.target as HTMLSelectElement).value;
+      clip.beats = v ? Number(v) : null;
+      paint();
     };
     editor.querySelector<HTMLSelectElement>('[data-k="bias"]')!.onchange = (e) => {
       clip.bias = Number((e.target as HTMLSelectElement).value) || 0;
@@ -864,11 +1098,54 @@ function paintClips(): void {
     wrap.after(editor);
   }
 
+  // The analysis segment's controls. No video and no trim — the breakdown is
+  // synthesised, there is nothing to seek — just how long the cut holds and
+  // how fast the breakdown plays inside it. Auto answers the complaint the
+  // first live render earned: it holds exactly long enough to play the WHOLE
+  // breakdown at the chosen speed, so nothing is ever cut off by default.
+  if (openAna && analysisOn && analysisSource && openPlan) {
+    const cut = openPlan.cuts.find((c) => c.clip === pos);
+    const period = 60 / openPlan.bpm;
+    const auto = autoAnalysisBeats();
+    const editor = document.createElement("div");
+    editor.className = "brp-trim brp-anatrim";
+    editor.innerHTML = `
+      <div class="brp-trim-fields">
+        <b>Your analysis · ${cut ? `${cut.beats}♩ = ${(cut.end - cut.start).toFixed(2)}s of song` : ""}</b>
+        <label>Plays for
+          <select class="q-input" data-k="abeats">
+            <option value="">Auto — long enough to play it all${auto ? ` (${auto}♩)` : ""}</option>
+            ${[2, 3, 4, 6, 8, 10, 12]
+              .map((b) => `<option value="${b}"${analysisBeats === b ? " selected" : ""}>${b}♩ = ${(b * period).toFixed(2)}s</option>`)
+              .join("")}
+          </select>
+        </label>
+        <label>Breakdown speed
+          <select class="q-input" data-k="aspeed">
+            ${[1, 1.5, 2]
+              .map((s) => `<option value="${s}"${analysisSpeed === s ? " selected" : ""}>${s}×${s === 1 ? " — real time" : s === 2 ? " — the format's pace" : ""}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <em>A hold shorter than the breakdown at this speed cuts it off mid-read. Auto never does.</em>
+      </div>`;
+    editor.querySelector<HTMLSelectElement>('[data-k="abeats"]')!.onchange = (e) => {
+      const v = (e.target as HTMLSelectElement).value;
+      analysisBeats = v ? Number(v) : null;
+      paint();
+    };
+    editor.querySelector<HTMLSelectElement>('[data-k="aspeed"]')!.onchange = (e) => {
+      analysisSpeed = Number((e.target as HTMLSelectElement).value) || 2;
+      paint();
+    };
+    wrap.after(editor);
+  }
+
   note(
     "brp-clipnote",
     reelCount()
       ? `${clips.length} clip${clips.length === 1 ? "" : "s"}${
-          analysisOn ? " + your analysis at 2×" : ""
+          analysisOn ? ` + your analysis at ${analysisSpeed}×` : ""
         }, cut in the order shown.`
       : "Nothing attached yet.",
   );
@@ -938,14 +1215,31 @@ function paintWindow(): void {
   beforeWrap.hidden = !marked;
   clear.hidden = !marked;
   set.hidden = marked;
-  before.max = String(Math.max(1, reelCount() - 1));
-  before.value = String(clipsBeforeDrop ?? 1);
-  note(
-    "brp-dropnote",
-    marked
-      ? `The drop is at ${fmt(dropAt!)} — shift-click the waveform to move it. The reveal starts exactly there.`
-      : "Optional. The clip that starts on the drop is your reveal.",
-  );
+  // How many clips CAN sit before the drop is not a free choice: each one
+  // needs at least a beat, so a drop N beats after the start holds at most N
+  // clips (and at least one has to come after — a drop on the last frame is
+  // no reveal). The input's range says so instead of silently accepting a
+  // number the planner will clamp — the clamp was read as a bug, and it was
+  // one: the UI's, not the planner's.
+  let maxBefore = Math.max(1, reelCount() - 1);
+  if (marked) {
+    const dropBeat = Math.max(1, Math.round((dropAt! - songStart) / g.period));
+    maxBefore = Math.max(1, Math.min(reelCount() - 1, dropBeat));
+    if (clipsBeforeDrop !== null && clipsBeforeDrop > maxBefore) clipsBeforeDrop = maxBefore;
+  }
+  before.max = String(maxBefore);
+  before.value = String(Math.min(clipsBeforeDrop ?? 1, maxBefore));
+  if (marked) {
+    const dropBeat = Math.max(1, Math.round((dropAt! - songStart) / g.period));
+    note(
+      "brp-dropnote",
+      `The drop is at ${fmt(dropAt!)} — ${dropBeat}♩ after the start, so at most ${maxBefore} clip${
+        maxBefore === 1 ? " fits" : "s fit"
+      } before it. Shift-click the waveform to move it; the reveal starts exactly there.`,
+    );
+  } else {
+    note("brp-dropnote", "Optional. The clip that starts on the drop is your reveal.");
+  }
 
   drawWave();
 }
@@ -988,9 +1282,21 @@ function drawWave(): void {
 
   const xAt = (t: number) => (t / song!.duration) * W;
 
-  // Bar lines only — every beat at this width is a grey wash.
-  ctx.strokeStyle = "rgba(120,190,255,0.30)";
+  // Every beat gets a small tick along the bottom, bars a taller blue one.
+  // The ticks are the grid the cuts land on — lining a clip up "with a beat"
+  // needs the beats visible, and checking the analysis against the spikes
+  // above them is how a low-confidence read gets caught before a render.
+  ctx.strokeStyle = "rgba(150,170,185,0.35)";
   ctx.lineWidth = 1;
+  for (let i = 0; i < g.beats.length; i++) {
+    if (((i - g.downbeatOffset) % g.beatsPerBar + g.beatsPerBar) % g.beatsPerBar === 0) continue;
+    const x = Math.round(xAt(g.beats[i])) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, H - 22);
+    ctx.lineTo(x, H - 18);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(120,190,255,0.30)";
   for (let i = g.downbeatOffset; i < g.beats.length; i += g.beatsPerBar) {
     const x = Math.round(xAt(g.beats[i])) + 0.5;
     ctx.beginPath();
@@ -1023,13 +1329,19 @@ function drawWave(): void {
       ctx.stroke();
     }
     if (dropAt !== null) {
+      // The drop is the loudest mark on the canvas because it is the loudest
+      // moment of the edit: everything else is lined up against it. Full
+      // height, red, labelled — nothing else here is red.
       const x = Math.round(xAt(dropAt)) + 0.5;
-      ctx.strokeStyle = "#ffd166";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ff4d5e";
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, H - 22);
+      ctx.lineTo(x, H - 14);
       ctx.stroke();
+      ctx.fillStyle = "#ff4d5e";
+      ctx.font = "bold 10px ui-monospace, monospace";
+      ctx.fillText("DROP", x > W - 40 ? x - 36 : x + 5, 11);
     }
   }
 
@@ -1043,11 +1355,14 @@ function drawWave(): void {
 
   // The playhead, in the same canvas as the ruler it is read against, so the
   // two can never drift apart. White, because every other colour here already
-  // means something — bars, window, cuts, drop.
-  const at = playheadTime();
+  // means something — bars, window, cuts, drop. Dimmer while paused: the
+  // position is still there (that is where space resumes and the arrows step
+  // from), it is just not moving.
+  const live = playheadTime();
+  const at = live ?? pausedAt;
   if (at !== null && at <= song.duration) {
     const x = Math.round(xAt(at)) + 0.5;
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.strokeStyle = live !== null ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.45)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(x, 0);
@@ -1080,6 +1395,10 @@ function paintPlan(): void {
 async function render(): Promise<void> {
   const plan = currentPlan();
   if (!plan || !song || busy) return;
+  // The encoder needs the clip videos to itself — a preview still seeking
+  // them mid-render would fight the export frame by frame.
+  stopReelPreview();
+  stopSong();
   busy = true;
   const go = host!.querySelector<HTMLButtonElement>("#brp-go")!;
   go.disabled = true;

@@ -102,19 +102,70 @@ export function beatsIn(grid: BeatGrid, seconds: number): number {
  * loop: every clip must get an integer, and they must sum to exactly `total`,
  * or the last cut drifts off the grid the whole exercise exists to hit.
  */
+// First, then last, then inward — so a single spare beat lengthens the
+// opening shot rather than an arbitrary middle one.
+function endsFirst(count: number): number[] {
+  const order: number[] = [];
+  for (let i = 0; i < count; i++) order.push(i % 2 === 0 ? i / 2 : count - 1 - (i - 1) / 2);
+  return order.map(Math.floor);
+}
+
 function share(total: number, count: number): number[] {
   if (count <= 0) return [];
   const base = Math.floor(total / count);
   const out = new Array<number>(count).fill(base);
   let left = total - base * count;
-  // First, then last, then inward — so a single spare beat lengthens the
-  // opening shot rather than an arbitrary middle one.
-  const order: number[] = [];
-  for (let i = 0; i < count; i++) order.push(i % 2 === 0 ? i / 2 : count - 1 - (i - 1) / 2);
-  for (let i = 0; left > 0 && i < order.length; i++, left--) out[Math.floor(order[i])]++;
+  const order = endsFirst(count);
+  for (let i = 0; left > 0 && i < order.length; i++, left--) out[order[i]]++;
   // More clips than beats: the tail gets nothing, and the caller is told by
   // being handed fewer cuts than clips rather than by a zero-length cut.
   return out;
+}
+
+/**
+ * Like share(), but some clips have asked for a specific length.
+ *
+ * A pin is a request, not a law: the counts must still sum to EXACTLY
+ * `total`, or the last cut drifts off the grid. When the pins over-ask, the
+ * largest pinned clip gives beats back first (never below one) — trimming
+ * the most indulgent request is the cut a human editor would make. When
+ * beats are left over they go to the unpinned clips ends-first, and only
+ * when every clip is pinned do the pins themselves stretch, because a spare
+ * beat has to live somewhere and silence is not an option.
+ */
+export function shareWithPins(total: number, pins: ReadonlyArray<number | null>): number[] {
+  const count = pins.length;
+  if (count <= 0) return [];
+  if (pins.every((p) => p == null)) return share(total, count);
+  const counts = pins.map((p) => (p != null ? Math.max(1, Math.round(p)) : 1));
+  let sum = counts.reduce((a, b) => a + b, 0);
+  while (sum > total) {
+    let idx = -1;
+    let best = 1;
+    counts.forEach((c, i) => {
+      if (pins[i] != null && c > best) { best = c; idx = i; }
+    });
+    if (idx < 0) {
+      counts.forEach((c, i) => {
+        if (c > best) { best = c; idx = i; }
+      });
+    }
+    if (idx < 0) break; // everything already at one beat; total < count
+    counts[idx]--;
+    sum--;
+  }
+  if (sum < total) {
+    const unpinned: number[] = [];
+    pins.forEach((p, i) => { if (p == null) unpinned.push(i); });
+    const targets = unpinned.length ? unpinned : counts.map((_, i) => i);
+    const extra = total - sum;
+    const base = Math.floor(extra / targets.length);
+    for (const i of targets) counts[i] += base;
+    let left = extra - base * targets.length;
+    const order = endsFirst(targets.length);
+    for (let k = 0; left > 0 && k < order.length; k++, left--) counts[targets[order[k]]]++;
+  }
+  return counts;
 }
 
 export interface PlanOptions {
@@ -143,6 +194,16 @@ export interface PlanOptions {
   dropAt?: number;
   /** How many clips play BEFORE the drop. Defaults to half, rounded down. */
   clipsBeforeDrop?: number;
+  /**
+   * Per-clip beat requests, in clip order; null means "the pace decides".
+   *
+   * This is how a clip is SLOWED DOWN rather than sped up: ask for more
+   * beats and the cut simply holds longer on the music. Pins grow the
+   * window in pace mode (each clip contributes its pin instead of the
+   * pace), and inside a fixed window they are honoured as far as whole
+   * beats allow — see shareWithPins.
+   */
+  beatOverrides?: ReadonlyArray<number | null>;
 }
 
 /**
@@ -155,15 +216,27 @@ export function planBeatCuts(opts: PlanOptions): BeatPlan {
   const { grid, clipCount } = opts;
   const beatsPerClip = Math.max(1, opts.beatsPerClip ?? 2);
   const start = nearestDownbeat(grid, opts.songStart);
+  const pins: Array<number | null> =
+    opts.beatOverrides?.slice(0, clipCount).map((p) => (p != null ? Math.max(1, Math.round(p)) : null)) ??
+    new Array<number | null>(clipCount).fill(null);
+  while (pins.length < clipCount) pins.push(null);
+  const minBeats = pins.reduce<number>((a, p) => a + (p ?? 1), 0);
 
   // At least one beat per clip either way: a clip that gets none is a clip the
   // person attached and never sees. Rounded to whole beats whatever produced
   // it — a fractional total cannot be tiled by whole-beat clips, and the
   // integer shares then summed PAST the stated duration, running the last cut
   // off the end of the music window it claimed to fill.
+  //
+  // In pace mode each clip contributes its pin (or the pace); in fit mode
+  // the window can only GROW to fit the pins, never shrink a pin to fit the
+  // window silently — a clip somebody lengthened on purpose and the panel
+  // quietly cut back down is the edit arguing with its editor.
+  const paceTotal = pins.reduce<number>((a, p) => a + (p ?? beatsPerClip), 0);
   const totalBeats = Math.max(
     clipCount,
-    Math.round(opts.totalBeats != null ? opts.totalBeats : clipCount * beatsPerClip),
+    minBeats,
+    Math.round(opts.totalBeats != null ? Math.max(opts.totalBeats, minBeats) : paceTotal),
   );
   const cuts: ClipCut[] = [];
 
@@ -191,8 +264,9 @@ export function planBeatCuts(opts: PlanOptions): BeatPlan {
     });
   };
 
+  let finalBeats = totalBeats;
   if (!useDrop) {
-    emit(0, 0, share(totalBeats, clipCount));
+    emit(0, 0, shareWithPins(totalBeats, pins));
   } else {
     // Two solves. The split point is a beat, so neither half can drag the
     // reveal off it — the pre-drop clips fill exactly the beats before, the
@@ -208,12 +282,22 @@ export function planBeatCuts(opts: PlanOptions): BeatPlan {
     const lo = Math.max(1, clipCount - (totalBeats - dropBeat));
     const hi = Math.min(clipCount - 1, dropBeat);
     const before = Math.min(hi, Math.max(lo, opts.clipsBeforeDrop ?? Math.floor(clipCount / 2)));
-    const after = clipCount - before;
-    emit(0, 0, share(dropBeat, before));
-    emit(before, dropBeat, share(totalBeats - dropBeat, after), 0);
+    // The beats BEFORE the drop are fixed by where the drop is — pins on that
+    // side are honoured as far as those beats allow and no further, because
+    // the reveal moving off the drop to make room is the one trade this
+    // planner exists to refuse. The AFTER side can grow: pins there extend
+    // the window's end, which is the same music playing longer.
+    const afterPins = pins.slice(before);
+    const afterTotal = Math.max(
+      totalBeats - dropBeat,
+      afterPins.reduce<number>((a, p) => a + (p ?? 1), 0),
+    );
+    finalBeats = dropBeat + afterTotal;
+    emit(0, 0, shareWithPins(dropBeat, pins.slice(0, before)));
+    emit(before, dropBeat, shareWithPins(afterTotal, afterPins), 0);
   }
 
-  const duration = totalBeats * grid.period;
+  const duration = finalBeats * grid.period;
   return {
     cuts,
     duration,
