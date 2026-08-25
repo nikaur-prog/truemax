@@ -4,6 +4,10 @@ import { beatsIn, planBeatCuts, suggestWindow } from "../engine/beatPlan.js";
 import type { BeatPlan } from "../engine/beatPlan.js";
 import { renderBeatReel } from "./beatReelExport.js";
 import type { ReelClip, ReelQuality } from "./beatReelExport.js";
+import { quickVideoDuration, renderQuickVideoFrame } from "./quickVideoExport.js";
+import type { QuickExportScores } from "./quickVideoExport.js";
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import type { Sex } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
 // Attach clips. Attach a song. Get a cut.
@@ -31,6 +35,10 @@ import type { ReelClip, ReelQuality } from "./beatReelExport.js";
 interface PanelClip extends ReelClip {
   name: string;
   url: string;
+  // Required again here: everything in the panel's strip is a real video the
+  // trim editor can seek. The analysis segment never enters this list — it is
+  // spliced in by reelClips() on the way to the renderer.
+  video: HTMLVideoElement;
 }
 
 interface Song {
@@ -44,9 +52,38 @@ interface Song {
   envRate: number;
 }
 
+// ---------------------------------------------------------------------------
+// The analysis, on the beat.
+//
+// This panel began as a generic clip cutter, which missed its own point: the
+// TikTok this product wants made is before-clips, THE ANALYSIS, after-clips —
+// and the analysis is the one segment no other tool can provide. So when the
+// caller has a scan in hand, the analysis reel joins the strip as a segment
+// like any clip: it takes its beats from the same plan, it can be reordered
+// with the same arrows, and it renders AT 2x — the full breakdown compressed
+// into a couple of seconds, which is the pace the format demands. It is
+// synthesised per frame (a pure function of time) rather than pre-rendered to
+// a video, so there is no intermediate encode and no quality loss.
+// ---------------------------------------------------------------------------
+export interface BeatAnalysisSource {
+  photo: HTMLCanvasElement;
+  landmarks: NormalizedLandmark[];
+  sex: Sex;
+  scores: QuickExportScores;
+}
+
+const ANALYSIS_SPEED = 2;
+
 let host: HTMLDivElement | null = null;
 let clips: PanelClip[] = [];
 let song: Song | null = null;
+let analysisSource: BeatAnalysisSource | null = null;
+let analysisOn = false;
+// Where the analysis sits in the strip. Until the person moves it, it floats
+// to the middle — before-clips, analysis, after-clips is the format — and
+// once moved it stays where it was put.
+let analysisAt = 0;
+let analysisMoved = false;
 let beatsPerClip = 2;
 // When set, the section's length governs and the pace is whatever fills it.
 // Null means the pace control governs and the length follows from it. Exactly
@@ -83,8 +120,52 @@ export function closeBeatReelPanel(): void {
   quality = "1080";
   songStart = 0;
   outro = true;
+  analysisSource = null;
+  analysisOn = false;
+  analysisAt = 0;
+  analysisMoved = false;
   host?.remove();
   host = null;
+}
+
+// The strip's true length: video clips plus the analysis segment when it is
+// riding along. Every count the planner or a control sees goes through this —
+// a plan built on clips.length alone would give the analysis nobody's beats.
+function reelCount(): number {
+  return clips.length + (analysisOn ? 1 : 0);
+}
+
+// Where the analysis sits in the combined strip, clamped to what exists.
+function analysisPos(): number {
+  if (!analysisMoved) return Math.ceil(clips.length / 2);
+  return Math.max(0, Math.min(clips.length, analysisAt));
+}
+
+// The clip list the renderer receives: videos in strip order with the
+// analysis segment spliced in at its position.
+function reelClips(): ReelClip[] {
+  const list: ReelClip[] = [...clips];
+  if (analysisOn && analysisSource) list.splice(analysisPos(), 0, analysisClip(analysisSource));
+  return list;
+}
+
+function analysisClip(a: BeatAnalysisSource): ReelClip {
+  const off = document.createElement("canvas");
+  const body = quickVideoDuration("breakdown");
+  return {
+    startAt: 0,
+    draw: (ctx, w, h, into) => {
+      // 2x: the full breakdown in half its runtime. A cut longer than the
+      // sped-up body holds the final frame — the same rule a too-short video
+      // clip follows — because looping a score reveal reads as a glitch.
+      const t = Math.min(into * ANALYSIS_SPEED, body - 0.05);
+      // The frame is authored at 720x1280; the scale argument renders it at
+      // the reel's own resolution, so 1080 and 4K both get native pixels
+      // rather than an upscale.
+      renderQuickVideoFrame(off, a.photo, a.landmarks, a.sex, a.scores, t, "breakdown", w / 720);
+      ctx.drawImage(off, 0, 0, w, h);
+    },
+  };
 }
 
 const fmt = (t: number): string => {
@@ -103,10 +184,10 @@ function grid(): BeatGrid | null {
 
 function currentPlan(): BeatPlan | null {
   const g = grid();
-  if (!g || !clips.length || !g.bpm) return null;
+  if (!g || !reelCount() || !g.bpm) return null;
   return planBeatCuts({
     grid: g,
-    clipCount: clips.length,
+    clipCount: reelCount(),
     beatsPerClip,
     ...(fitSeconds != null ? { totalBeats: beatsIn(g, fitSeconds) } : {}),
     songStart,
@@ -115,8 +196,10 @@ function currentPlan(): BeatPlan | null {
   });
 }
 
-export function openBeatReelPanel(): void {
+export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
   closeBeatReelPanel();
+  analysisSource = analysis ?? null;
+  analysisOn = Boolean(analysis);
   const el = document.createElement("div");
   host = el;
   el.className = "brp";
@@ -124,8 +207,11 @@ export function openBeatReelPanel(): void {
     <div class="brp-card" role="dialog" aria-modal="true" aria-labelledby="brp-h">
       <button class="brp-x" type="button" aria-label="Close">✕</button>
       <h2 id="brp-h">Cut to the beat</h2>
-      <p class="brp-sub">Attach your clips, then a song. The tempo decides how long each clip is —
-        you never pick a duration.</p>
+      <p class="brp-sub">${
+        analysis
+          ? "Your clips before, your analysis at 2×, your clips after — every cut lands on a beat of the song you attach."
+          : "Attach your clips, then a song. The tempo decides how long each clip is — you never pick a duration."
+      }</p>
 
       <section class="brp-sec">
         <div class="brp-head"><span>1 · YOUR CLIPS</span><small id="brp-clipnote">Nothing attached yet.</small></div>
@@ -281,7 +367,7 @@ function wire(el: HTMLElement): void {
     // Defaults to the middle of the window, on a beat — a starting point to
     // drag from rather than a demand to have already decided.
     dropAt = songStart + Math.round(plan.duration / 2 / g.period) * g.period;
-    clipsBeforeDrop = Math.max(1, Math.floor(clips.length / 2));
+    clipsBeforeDrop = Math.max(1, Math.floor(reelCount() / 2));
     paint();
   };
   el.querySelector<HTMLButtonElement>("#brp-drop-clear")!.onclick = () => {
@@ -291,7 +377,7 @@ function wire(el: HTMLElement): void {
   };
   el.querySelector<HTMLInputElement>("#brp-before")!.oninput = (e) => {
     const v = Number((e.target as HTMLInputElement).value);
-    clipsBeforeDrop = Math.max(1, Math.min(clips.length - 1, v || 1));
+    clipsBeforeDrop = Math.max(1, Math.min(reelCount() - 1, v || 1));
     paint();
   };
 
@@ -394,6 +480,12 @@ function paintClips(): void {
   // strip's innerHTML does not clear it. Every paint removes the old one and
   // the open clip, if any, gets a fresh one below.
   for (const old of host!.querySelectorAll(".brp-trim")) old.remove();
+  const pos = analysisPos();
+  // Display numbers count the COMBINED strip — a video after the analysis is
+  // one later than its index in clips[], because that is the order the reel
+  // actually cuts in.
+  const shownNumber = (i: number) => i + (analysisOn && pos <= i ? 1 : 0) + 1;
+  const cells: HTMLElement[] = [];
   clips.forEach((clip, i) => {
     const cell = document.createElement("div");
     cell.className = "brp-clip" + (openClip === i ? " open" : "");
@@ -404,7 +496,7 @@ function paintClips(): void {
     cell.innerHTML = `
       <video muted playsinline preload="metadata"></video>
       <button type="button" class="q-cut-x" title="Remove">✕</button>
-      <span class="brp-clip-n">${i + 1}</span>
+      <span class="brp-clip-n">${shownNumber(i)}</span>
       <span class="brp-clip-moves">
         <button type="button" data-move="-1" title="Earlier" ${i === 0 ? "disabled" : ""}>‹</button>
         <button type="button" data-move="1" title="Later" ${i === clips.length - 1 ? "disabled" : ""}>›</button>
@@ -417,7 +509,7 @@ function paintClips(): void {
       URL.revokeObjectURL(clip.url);
       clips.splice(i, 1);
       openClip = null;
-      if (clipsBeforeDrop !== null) clipsBeforeDrop = Math.min(clipsBeforeDrop, Math.max(1, clips.length - 1));
+      if (clipsBeforeDrop !== null) clipsBeforeDrop = Math.min(clipsBeforeDrop, Math.max(1, reelCount() - 1));
       paint();
     });
     for (const btn of cell.querySelectorAll<HTMLButtonElement>("[data-move]")) {
@@ -435,14 +527,67 @@ function paintClips(): void {
       openClip = openClip === i ? null : i;
       paint();
     });
-    wrap.append(cell);
+    cells.push(cell);
   });
+
+  // The analysis segment's tile, spliced into the strip at its position. Not
+  // a PanelClip: it has no file, no trim, and a fixed 2x speed — what it has
+  // is the same arrows, because its place in the order IS its one edit.
+  if (analysisOn && analysisSource) {
+    const a = analysisSource;
+    const tile = document.createElement("div");
+    tile.className = "brp-clip brp-ana";
+    tile.innerHTML = `
+      <canvas class="brp-ana-thumb"></canvas>
+      <button type="button" class="q-cut-x" title="Remove">✕</button>
+      <span class="brp-clip-n">${pos + 1}</span>
+      <span class="brp-ana-badge">YOUR ANALYSIS · 2×</span>
+      <span class="brp-clip-moves">
+        <button type="button" data-amove="-1" title="Earlier" ${pos === 0 ? "disabled" : ""}>‹</button>
+        <button type="button" data-amove="1" title="Later" ${pos === clips.length ? "disabled" : ""}>›</button>
+      </span>`;
+    const thumb = tile.querySelector<HTMLCanvasElement>(".brp-ana-thumb")!;
+    // One representative frame, mid-reveal. 0.15 of the authored 720x1280 is
+    // thumbnail-sized without being a blur.
+    renderQuickVideoFrame(thumb, a.photo, a.landmarks, a.sex, a.scores, 1.2, "breakdown", 0.15);
+    tile.querySelector(".q-cut-x")!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      analysisOn = false;
+      if (clipsBeforeDrop !== null) clipsBeforeDrop = Math.min(clipsBeforeDrop, Math.max(1, reelCount() - 1));
+      paint();
+    });
+    for (const btn of tile.querySelectorAll<HTMLButtonElement>("[data-amove]")) {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        analysisAt = analysisPos() + Number(btn.dataset.amove);
+        analysisMoved = true;
+        openClip = null;
+        paint();
+      });
+    }
+    cells.splice(pos, 0, tile);
+  }
+  for (const cell of cells) wrap.append(cell);
+
   const add = document.createElement("button");
   add.type = "button";
   add.className = "brp-add";
   add.innerHTML = `<span>+</span>${clips.length ? "More clips" : "Add clips"}`;
   add.onclick = () => host!.querySelector<HTMLInputElement>("#brp-clip-input")!.click();
   wrap.append(add);
+
+  // The way back for a removed analysis: an offer, not a control panel.
+  if (analysisSource && !analysisOn) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "brp-add brp-ana-add";
+    back.innerHTML = `<span>+</span>Your analysis · 2×`;
+    back.onclick = () => {
+      analysisOn = true;
+      paint();
+    };
+    wrap.append(back);
+  }
 
   // The open clip's trim controls, under the strip. `startAt` is where in the
   // SOURCE this clip begins — the cut still lands on the beat; this decides
@@ -506,8 +651,10 @@ function paintClips(): void {
 
   note(
     "brp-clipnote",
-    clips.length
-      ? `${clips.length} clip${clips.length === 1 ? "" : "s"}, cut in the order shown.`
+    reelCount()
+      ? `${clips.length} clip${clips.length === 1 ? "" : "s"}${
+          analysisOn ? " + your analysis at 2×" : ""
+        }, cut in the order shown.`
       : "Nothing attached yet.",
   );
 }
@@ -538,7 +685,7 @@ function paintSong(): void {
 function paintWindow(): void {
   const sec = host!.querySelector<HTMLElement>("#brp-window-sec")!;
   const g = grid();
-  sec.hidden = !song || !g?.bpm || !clips.length;
+  sec.hidden = !song || !g?.bpm || !reelCount();
   if (sec.hidden || !song || !g) return;
 
   const plan = currentPlan();
@@ -554,15 +701,15 @@ function paintWindow(): void {
     const hi = Math.max(...counts);
     note(
       "brp-wantnote",
-      `Filling ${plan.duration.toFixed(2)}s of song with ${clips.length} clips — ${
+      `Filling ${plan.duration.toFixed(2)}s of song with ${reelCount()} clips — ${
         lo === hi ? `${lo} beats each` : `${lo}–${hi} beats each, the spares on the first and last`
       }. Starting at ${fmt(songStart)}.`,
     );
   } else {
-    const want = suggestWindow(g.bpm, clips.length, beatsPerClip);
+    const want = suggestWindow(g.bpm, reelCount(), beatsPerClip);
     note(
       "brp-wantnote",
-      `${clips.length} clips × ${beatsPerClip} beat${beatsPerClip === 1 ? "" : "s"} = ${want.seconds.toFixed(
+      `${reelCount()} clips × ${beatsPerClip} beat${beatsPerClip === 1 ? "" : "s"} = ${want.seconds.toFixed(
         2,
       )}s (${want.bars} bars). Starting at ${fmt(songStart)}.`,
     );
@@ -576,7 +723,7 @@ function paintWindow(): void {
   beforeWrap.hidden = !marked;
   clear.hidden = !marked;
   set.hidden = marked;
-  before.max = String(Math.max(1, clips.length - 1));
+  before.max = String(Math.max(1, reelCount() - 1));
   before.value = String(clipsBeforeDrop ?? 1);
   note(
     "brp-dropnote",
@@ -710,7 +857,7 @@ async function render(): Promise<void> {
   const progress = host!.querySelector<HTMLElement>("#brp-progress")!;
   try {
     const rendered = await renderBeatReel({
-      clips,
+      clips: reelClips(),
       plan,
       song: { channels: song.channels, sampleRate: song.sampleRate },
       quality,
