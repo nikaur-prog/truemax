@@ -2562,23 +2562,27 @@ body.auth-modal-open { overflow: hidden; }
    a point you have already found; this answers the one people actually have,
    which is where the other twelve belong and whether the set looks right. */
 .sref-badge {
-  position: absolute; left: 10px; top: 10px; z-index: 3; width: 62px;
-  border: 1px solid rgba(255,255,255,.28); border-radius: 12px;
+  /* TOP RIGHT, deliberately: on a phone it is the corner the points and the
+     thumb need least, and it is where people look for a reference. The photo
+     IS the badge now — the drawn silhouette is gone. */
+  position: absolute; right: 10px; top: 10px; z-index: 3; width: 64px;
+  border: 1px solid rgba(255,255,255,.28); border-radius: 12px; overflow: hidden;
   background: rgba(12,20,18,.62); backdrop-filter: blur(8px);
   color: #8ff3e0; transition: border-color .2s, transform .2s;
 }
 .sref-badge:hover { border-color: #8ff3e0; transform: scale(1.04); }
 .sref-open {
-  display: grid; place-items: center; gap: 1px; width: 100%; padding: 6px 4px 4px;
+  display: grid; gap: 0; width: 100%; padding: 0;
   border: 0; background: none; color: inherit; cursor: pointer;
 }
-.sref-open > span { font: 7.5px var(--mono); letter-spacing: .16em; }
-.sref-badge .sref-svg { width: 100%; height: 40px; }
+.sref-open img { display: block; width: 100%; height: 58px; object-fit: cover; object-position: top; }
+.sref-open img.mirrored { transform: scaleX(-1); }
+.sref-open > span { font: 7.5px var(--mono); letter-spacing: .16em; padding: 3px 0 4px; }
 /* Dismissing the guide. The badge sits over the photo, and a landmark that
    lands underneath it takes the badge's tap instead of the drag — so the ×
    collapses it to the pill below, which is small enough to cover nothing. */
 .sref-hide {
-  position: absolute; top: -8px; right: -8px;
+  position: absolute; top: 2px; right: 2px;
   width: 21px; height: 21px; display: grid; place-items: center;
   border: 1px solid rgba(255,255,255,.34); border-radius: 50%;
   background: rgba(12,20,18,.94); color: #8ff3e0;
@@ -2586,7 +2590,7 @@ body.auth-modal-open { overflow: hidden; }
 }
 .sref-hide:hover { border-color: #8ff3e0; }
 .sref-show {
-  position: absolute; left: 10px; top: 10px; z-index: 3;
+  position: absolute; right: 10px; top: 10px; z-index: 3;
   padding: 5px 9px; border: 1px solid rgba(255,255,255,.28); border-radius: 999px;
   background: rgba(12,20,18,.62); backdrop-filter: blur(8px);
   color: #8ff3e0; font: 7.5px var(--mono); letter-spacing: .16em; cursor: pointer;
@@ -2615,9 +2619,6 @@ body.auth-modal-open { overflow: hidden; }
   .retake-glyph:hover svg, .retake-glyph.spun svg { animation: none; transform: none; }
 }
 
-.sref-outline { fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; opacity: .75; }
-.sref-dot { fill: none; stroke: currentColor; stroke-width: 1.6; }
-
 .sref-overlay {
   position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
   padding: 20px; background: rgba(10,14,13,.72); backdrop-filter: blur(6px);
@@ -2627,24 +2628,34 @@ body.auth-modal-open { overflow: hidden; }
   width: min(520px, 100%); max-height: 92svh; overflow-y: auto; padding: 22px 24px 20px;
   border: 1px solid var(--line); border-radius: 22px; background: var(--card); text-align: center;
 }
-.sref-card .sref-svg { width: 100%; height: auto; max-height: 54svh; margin: 10px 0 4px; color: var(--acc); }
-.sref-card .sref-outline { opacity: 1; stroke-width: 1.6; }
-.sref-card .sref-dot { stroke-width: 2.4; }
-.sref-label { font: 5.5px var(--sans); fill: var(--ink); }
-/* The thread from a dot to its word. Faint on purpose: it has to be followable
-   without competing with the face it is drawn over. */
-.sref-leader { fill: none; stroke: color-mix(in srgb, var(--acc) 45%, transparent); stroke-width: .5; }
-/* The head the points sit on. A ring floating on an empty outline gave nothing
-   to compare against — with a drawn brow, eye, nostril, lips and ear, a point in
-   the wrong place looks wrong instead of merely looking like a dot. Neutral
-   grey-green rather than any skin tone: this is a ruler, not a portrait. */
-.sref-skin { fill: color-mix(in srgb, var(--acc) 9%, #fff); stroke: none; }
-.sref-hair { fill: color-mix(in srgb, var(--acc) 26%, #fff); stroke: none; }
-.sref-ear { fill: color-mix(in srgb, var(--acc) 14%, #fff); stroke: color-mix(in srgb, var(--acc) 55%, transparent); stroke-width: .9; }
-.sref-line { fill: none; stroke: color-mix(in srgb, var(--acc) 62%, transparent); stroke-width: 1.1; stroke-linecap: round; }
-.sref-eye-white { fill: #fff; stroke: color-mix(in srgb, var(--acc) 62%, transparent); stroke-width: 1; }
-.sref-iris { fill: color-mix(in srgb, var(--acc) 82%, #000); }
+/* The full reference: the photograph with every ring, replacing the old drawn
+   head. The rings are painted on the canvas in the same colour and weight as
+   the live handles, so the comparison is like-for-like. */
+.sref-photo-full { width: 100%; height: auto; max-height: 58svh; object-fit: contain; margin: 10px 0 4px; border-radius: 12px; }
 .sref-card > p { margin: 6px auto 16px; max-width: 44ch; color: var(--mut); font-size: 12.5px; line-height: 1.6; }
+
+/* The per-point reference crop's player. Play (bottom left) runs the zoom —
+   whole profile, ring on the point, smooth dive into the spot. Enlarge (top
+   right) does the same thing at screen size until ✕ or Escape. */
+.side-refcrop-stage { position: relative; display: inline-block; }
+.refcrop-play, .refcrop-big {
+  position: absolute; z-index: 2; display: grid; place-items: center;
+  width: 28px; height: 28px; border: 1px solid rgba(255,255,255,.34); border-radius: 999px;
+  background: rgba(12,20,18,.72); backdrop-filter: blur(6px); color: #8ff3e0;
+  font: 11px/1 var(--sans); cursor: pointer; transition: border-color .2s;
+}
+.refcrop-play { left: 8px; bottom: 10px; padding-left: 2px; }
+.refcrop-big { right: 8px; top: 8px; }
+.refcrop-play:hover, .refcrop-big:hover { border-color: #8ff3e0; }
+.refcrop-fullcard { position: relative; }
+.refcrop-fullcard canvas { display: block; border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+.refcrop-close {
+  position: absolute; top: -12px; right: -12px; width: 32px; height: 32px;
+  display: grid; place-items: center; border: 1px solid rgba(255,255,255,.4);
+  border-radius: 50%; background: rgba(12,20,18,.94); color: #8ff3e0;
+  font: 16px/1 var(--mono); cursor: pointer;
+}
+.refcrop-close:hover { border-color: #8ff3e0; }
 
 /* Offer-screen interaction -------------------------------------------------
    Two plans is two feature lists to read at once, which is how people end up

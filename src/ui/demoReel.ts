@@ -1,7 +1,7 @@
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
-import { reelContours } from "./reelMesh.js";
+import { reelContours, reelOvalPoints } from "./reelMesh.js";
 
 // The landing reel shows display scores rather than the engine's output, for
 // the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
@@ -101,7 +101,18 @@ export function mountDemoReel(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const fadeIn = Math.min(1, t / 200);
+    // A face crosses into the next ONCE.
+    //
+    // This ran the transition twice, in opposite directions, and the reel
+    // visibly jumped to the next celebrity and came back. The tail of each
+    // beat fades the current face out over the NEXT one drawn underneath —
+    // so by the time the index advances, that face is already fully on
+    // screen. It then faded IN from scratch, with the face it had just
+    // replaced drawn underneath at full opacity: forward, back, forward.
+    //
+    // Only the first face has nothing to cross from, so only the first face
+    // fades up from the card.
+    const fadeIn = shownAny ? 1 : Math.min(1, t / 200);
     const fadeOut = t > T.out ? Math.max(0, (T.hold - t) / (T.hold - T.out)) : 1;
     const alpha = Math.min(fadeIn, fadeOut);
 
@@ -124,22 +135,11 @@ export function mountDemoReel(
     // ends of every face. Whichever face this one is fading against is drawn
     // underneath at full opacity instead, so the two genuinely cross and the
     // card is never showing the page background through a photograph.
-    if (REEL.length > 1) {
-      // Nothing preceded the very first face, so it still fades up from the
-      // card rather than crossing with a face nobody has seen.
-      //
-      // The face underneath is drawn at the zoom IT is at, not at rest. The
-      // outgoing face has drifted to 1.04 by the time it hands over, and
-      // drawing it back at 1.0 under the incoming crossfade snapped every
-      // photograph four per cent smaller for exactly one transition — the
-      // kind of pop nobody can name but everybody's eye files under "cheap".
-      const prevOut = fadeIn < 1 && shownAny;
-      const under = prevOut
-        ? images[(idx - 1 + REEL.length) % REEL.length]
-        : fadeOut < 1
-          ? images[(idx + 1) % REEL.length]
-          : null;
-      if (under) drawCover(under, prevOut ? 1.04 : 1, 1);
+    // The incoming face, underneath, at its own rest zoom — which is exactly
+    // where it will be drawn on its first frame as the current face, so the
+    // handover is continuous rather than a four-per-cent pop.
+    if (REEL.length > 1 && fadeOut < 1) {
+      drawCover(images[(idx + 1) % REEL.length], 1, 1);
     }
     drawCover(img, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
     ctx.globalAlpha = alpha;
@@ -196,15 +196,12 @@ export function mountDemoReel(
     ctx.globalAlpha = alpha * meshAlpha;
     ctx.lineWidth = 0.9;
     ctx.lineJoin = "round";
+    // Features only — reelMesh no longer returns the face oval at all. A ring
+    // traced round the silhouette read as a cut-out laid over the photograph,
+    // and it sat on the one boundary the mesh is least sure of.
     const rings = reelContours();
     ctx.strokeStyle = `rgba(255,255,255,${settled ? 0.22 : 0.4})`;
-    for (let ringIndex = 0; ringIndex < rings.length; ringIndex++) {
-      const ring = rings[ringIndex];
-      // The face oval is scaffolding: essential while the sweep is assembling
-      // the model, and the single ugliest thing on the card once it is done —
-      // a big pale ring floating over somebody's cheeks. It fades out after
-      // the sweep; the inner features stay and breathe.
-      if (settled && ringIndex === 0) continue;
+    for (const ring of rings) {
       ctx.beginPath();
       let open = false;
       // Closed rings: the wrap-around edge is the last-to-first pair, so the
@@ -222,7 +219,12 @@ export function mountDemoReel(
       ctx.stroke();
     }
 
-    for (const [px, py] of pts) {
+    // The oval's own vertices go with its outline. Leaving them behind as a
+    // ring of loose dots is the same cut-out shape with the lines removed.
+    const oval = reelOvalPoints();
+    for (let i = 0; i < pts.length; i++) {
+      if (oval.has(i)) continue;
+      const [px, py] = pts[i];
       if (py > swept || meshAlpha === 0) continue;
       const fresh = !settled && swept - py < 0.09;
       // After the sweep the model stays ALIVE: a slow luminance wave travels

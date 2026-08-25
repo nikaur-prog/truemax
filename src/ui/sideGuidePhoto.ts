@@ -137,6 +137,127 @@ export function guideCrop(
  * Draw one landmark's reference patch into a canvas: the crop, a ring at the
  * landmark's true position within it, mirrored when the subject faces left.
  */
+/**
+ * The "show me" animation: the whole profile, the ring on the point, then a
+ * smooth zoom into the point's own crop.
+ *
+ * A static crop tells you what the point's neighbourhood looks like; it cannot
+ * tell you where that neighbourhood IS on the head, which is the thing a
+ * mis-seeded point needs. The zoom carries the eye from the face to the spot,
+ * and it ends on exactly the frame drawGuideCrop draws, so pressing play never
+ * leaves the step looking different from a step that was never played.
+ *
+ * Pure canvas — no video file. A rendered mp4 would need one per landmark,
+ * re-rendering whenever a point is re-verified, and would still be a bitmap of
+ * this exact draw call.
+ *
+ * Returns a cancel function. Cancelling immediately paints the final frame, so
+ * a step change mid-flight never strands a half-zoomed picture.
+ */
+export function playGuideZoom(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
+  id: SidePointId,
+  faceDir: number,
+  options: { durationMs?: number; holdMs?: number; onDone?: () => void } = {},
+): () => void {
+  if (!GUIDE_POINTS || !image.naturalWidth) return () => {};
+  const point = GUIDE_POINTS[id];
+  const iw = image.naturalWidth;
+  const ih = image.naturalHeight;
+  // Start: the largest square the image can offer, centred so the whole
+  // profile reads. End: the landmark's own crop.
+  const startSize = Math.min(iw, ih);
+  const start: CropRect = {
+    x: Math.max(0, Math.min(iw - startSize, iw / 2 - startSize / 2)),
+    y: Math.max(0, Math.min(ih - startSize, ih / 2 - startSize / 2)),
+    size: startSize,
+  };
+  const end = guideCrop(point, iw, ih, GUIDE_ZOOM[id]);
+  const duration = options.durationMs ?? 1500;
+  const hold = options.holdMs ?? 450;
+  // Ease-in-out, and the zoom interpolates the crop's LOG size: linear pixel
+  // interpolation spends nearly the whole animation zoomed out (halving the
+  // window removes half the remaining pixels but doubles the magnification),
+  // so the final approach — the part that teaches — flashed past.
+  const easeInOut = (x: number) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+
+  let raf = 0;
+  let cancelled = false;
+  const t0 = performance.now();
+
+  const paintAt = (p: number) => {
+    const k = Math.exp(Math.log(start.size) + (Math.log(end.size) - Math.log(start.size)) * p);
+    // The window tracks the point: its centre moves from the wide frame's
+    // centre toward the point as the zoom closes in, clamped inside the image.
+    const cx = start.x + start.size / 2 + (point[0] * iw - (start.x + start.size / 2)) * p;
+    const cy = start.y + start.size / 2 + (point[1] * ih - (start.y + start.size / 2)) * p;
+    const x = Math.max(0, Math.min(iw - k, cx - k / 2));
+    const y = Math.max(0, Math.min(ih - k, cy - k / 2));
+    drawGuidePatch(canvas, image, { x, y, size: k }, point, faceDir);
+  };
+
+  const frame = (now: number) => {
+    if (cancelled) return;
+    const t = now - t0;
+    if (t < hold) {
+      paintAt(0);
+    } else {
+      const p = Math.min(1, (t - hold) / duration);
+      paintAt(easeInOut(p));
+      if (p >= 1) {
+        // Land on the canonical crop, so play-then-look matches never-played.
+        drawGuideCrop(canvas, image, id, faceDir);
+        options.onDone?.();
+        return;
+      }
+    }
+    raf = requestAnimationFrame(frame);
+  };
+  paintAt(0);
+  raf = requestAnimationFrame(frame);
+
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(raf);
+    drawGuideCrop(canvas, image, id, faceDir);
+  };
+}
+
+/** One arbitrary window of the reference with the ring at the point. */
+function drawGuidePatch(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
+  rect: CropRect,
+  point: [number, number],
+  faceDir: number,
+): void {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const display = canvas.width / dpr || 148;
+  canvas.width = display * dpr;
+  canvas.height = display * dpr;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  if (faceDir === -1) {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(image, rect.x, rect.y, rect.size, rect.size, 0, 0, canvas.width, canvas.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const rx = ((point[0] * image.naturalWidth - rect.x) / rect.size) * canvas.width;
+  const ringX = faceDir === -1 ? canvas.width - rx : rx;
+  const ringY = ((point[1] * image.naturalHeight - rect.y) / rect.size) * canvas.height;
+  ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
+  ctx.lineWidth = 2 * dpr;
+  ctx.shadowColor = "rgba(6, 20, 17, 0.85)";
+  ctx.shadowBlur = 3 * dpr;
+  ctx.beginPath();
+  ctx.arc(ringX, ringY, 7 * dpr, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
 export function drawGuideCrop(
   canvas: HTMLCanvasElement,
   image: HTMLImageElement,

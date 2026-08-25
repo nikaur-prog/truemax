@@ -6,7 +6,7 @@ import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
-import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady } from "./sideGuidePhoto.js";
+import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
 import { mountRetakeGlyph } from "./retakeGlyph.js";
@@ -638,7 +638,16 @@ function mountVerify(
         <p class="side-sub">${hint}. Tap where it belongs on the photo — hold and drag to
         fine-tune with the lens. Moving it counts as your answer. If it is already right,
         the button asks you once to say so.</p>
-        ${guideImage ? `<div class="side-refcrop"><canvas id="side-refcrop"></canvas><span>On a real face, it sits here</span></div>` : ""}
+        ${guideImage
+          ? `<div class="side-refcrop">
+              <div class="side-refcrop-stage">
+                <canvas id="side-refcrop"></canvas>
+                <button type="button" class="refcrop-play" id="refcrop-play" aria-label="Show where this sits on the whole profile">▶</button>
+                <button type="button" class="refcrop-big" id="refcrop-big" aria-label="Enlarge">⤢</button>
+              </div>
+              <span>On a real face, it sits here</span>
+            </div>`
+          : ""}
         <p class="side-review-note">Point ${index + 1} of ${total}. The five behind the face
         are guesses from an average head, so they are the ones that usually need the tap.</p>`;
       if (guideImage) {
@@ -649,6 +658,55 @@ function mountVerify(
         };
         if (guideImage.complete) render();
         else guideImage.onload = render;
+        // The "show me" zoom: full profile, ring on the point, smooth zoom in.
+        // A step change re-renders this whole panel, so the cancel handle never
+        // outlives the canvas it paints.
+        let stopZoom: (() => void) | null = null;
+        const play = document.getElementById("refcrop-play");
+        if (play && crop) {
+          play.onclick = () => {
+            stopZoom?.();
+            stopZoom = playGuideZoom(crop, guideImage!, id, verifier!.faceDir, {
+              onDone: () => (stopZoom = null),
+            });
+          };
+        }
+        // Enlarge: the same animation, filling the screen until ✕ or Escape.
+        const big = document.getElementById("refcrop-big");
+        if (big) {
+          big.onclick = () => {
+            const overlay = document.createElement("div");
+            overlay.className = "sref-overlay refcrop-full";
+            overlay.innerHTML = `<div class="refcrop-fullcard" role="dialog" aria-modal="true" aria-label="Reference for this point">
+              <canvas></canvas>
+              <button type="button" class="refcrop-close" aria-label="Close">×</button>
+            </div>`;
+            document.body.appendChild(overlay);
+            const bigCanvas = overlay.querySelector("canvas")!;
+            const size = Math.min(640, Math.min(window.innerWidth, window.innerHeight) - 48);
+            const dpr = Math.min(2, window.devicePixelRatio || 1);
+            bigCanvas.width = size * dpr;
+            bigCanvas.height = size * dpr;
+            bigCanvas.style.width = `${size}px`;
+            bigCanvas.style.height = `${size}px`;
+            const stop = playGuideZoom(bigCanvas, guideImage!, id, verifier!.faceDir, {
+              durationMs: 1900,
+              holdMs: 650,
+            });
+            const close = () => {
+              stop();
+              overlay.remove();
+              document.removeEventListener("keydown", onKey);
+            };
+            const onKey = (ev: KeyboardEvent) => {
+              if (ev.key === "Escape") close();
+            };
+            document.addEventListener("keydown", onKey);
+            overlay.addEventListener("click", (ev) => {
+              if (ev.target === overlay || (ev.target as HTMLElement).closest(".refcrop-close")) close();
+            });
+          };
+        }
       }
       const counter = document.getElementById("side-gcount");
       if (counter) counter.textContent = `${index + 1} / ${total}`;
