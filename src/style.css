@@ -304,8 +304,34 @@ body {
 .photo-caption b { color: var(--ink); font-weight: 500; }
 .scan-status { margin-top: 14px; font-family: var(--mono); font-size: 12.5px; color: var(--mut); min-height: 20px; }
 .scan-status b { color: var(--ink); font-weight: 500; }
-.bar { height: 2.5px; background: var(--line); border-radius: 99px; margin-top: 10px; overflow: hidden; }
+.bar { height: 2.5px; background: var(--line); border-radius: 99px; margin-top: 10px; overflow: hidden; transition: opacity .25s ease; }
 .bar div { height: 100%; width: 0; background: var(--acc); transition: width 0.4s ease; }
+/* During the scan the bar is driven per-frame by a clock; the CSS transition
+   would forever chase it and stutter, so it stands down for the run. */
+.bar div.driven { transition: none; }
+/* Finished: fade the whole bar where it stands. Setting width back to 0 with
+   the transition attached made it visibly drain backwards over the results. */
+.bar.spent { opacity: 0; }
+
+/* The scan's narration. Sentences cross rather than cut, and the working
+   ellipsis breathes instead of sitting as three dead dots. */
+.scan-status { transition: opacity .13s ease; }
+.scan-status.swapping { opacity: 0; }
+.scan-ellipsis i { display: inline-block; font-style: normal; animation: scan-dot 1.2s ease-in-out infinite; }
+.scan-ellipsis i:nth-child(2) { animation-delay: .18s; }
+.scan-ellipsis i:nth-child(3) { animation-delay: .36s; }
+@keyframes scan-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+
+/* Crossing between the front and side photographs mid-scan. The canvas is
+   resized and repainted while faded out, so the swap is never seen as a cut.
+   The transform transition is restated here because `transition` is one
+   property: an opacity-only value would silently switch off the region zoom
+   this element animates on the results screen. */
+.zoomable { transition: transform 0.48s cubic-bezier(0.3, 0, 0.15, 1), opacity .17s ease; }
+.zoomable.viewfade { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .scan-ellipsis i { animation: none; opacity: .6; }
+}
 .quality-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .qchip { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--mut); background: var(--card); }
 .qchip.warn { color: var(--warm); border-color: color-mix(in srgb, var(--warm) 35%, var(--line)); }
