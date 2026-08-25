@@ -114,6 +114,29 @@ export interface RatedFace {
   ratedBy?: RatingSource;
   /** Optional label. Never exported — it is only there to find a row again. */
   label?: string;
+  /**
+   * A small thumbnail of the front capture, as a JPEG data URL. Never
+   * exported, same as the label, and for the same reason: it exists so the
+   * operator can tell WHICH face a row is. A fifty-row set of ids and gut
+   * numbers is unauditable — "m7, you said 4.5, engine said 6.1" is only
+   * actionable if you can see m7 — and the alternative was re-scanning a face
+   * to find out whether it was already in.
+   *
+   * ~4KB per row at 96px against localStorage's several megabytes: a hundred
+   * faces of thumbnails cost less than one photograph.
+   */
+  thumb?: string;
+  /**
+   * How many measurements were flagged implausible at capture, front and side
+   * together. Zero (or absent, on rows that predate the field) is clean.
+   *
+   * This is the plausibility warning the SET needed rather than the scan: the
+   * scan screen already refuses to score an out-of-range reading, but the row
+   * stored anyway — and a corpus row with misplaced points quietly poisons
+   * whatever is fitted against it. The set list flags it so a bad row is
+   * re-checked or removed while the face is still around to re-scan.
+   */
+  suspect?: number;
   measurements: Record<string, number>;
 }
 
@@ -182,6 +205,10 @@ export function addRatedFace(
   // against, and quietly averaging in a side score would move the thing being
   // measured rather than adding to it.
   side?: Report,
+  // The row's audit trail: the thumbnail that says which face this is, and
+  // the implausible-reading count that says whether to trust it. Optional as
+  // a pair because both come from the same capture context.
+  extras?: { thumb?: string; suspect?: number },
 ): RatedFace[] {
   const faces = loadCalibrationSet();
   const sexPrefix = report.sex === "male" ? "m" : "w";
@@ -210,6 +237,8 @@ export function addRatedFace(
     scored: report.overall,
     ratedBy,
     ...(label ? { label } : {}),
+    ...(extras?.thumb ? { thumb: extras.thumb } : {}),
+    ...(extras?.suspect ? { suspect: extras.suspect } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
   save(faces);
