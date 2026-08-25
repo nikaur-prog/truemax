@@ -468,6 +468,18 @@ function paintClips(): void {
             <option value="0.35"${clip.bias === 0.35 ? " selected" : ""}>Favour the bottom</option>
           </select>
         </label>
+        <label>Speed
+          <select class="q-input" data-k="speed">
+            ${[0.5, 0.75, 1, 1.5, 2]
+              .map(
+                (s) =>
+                  `<option value="${s}"${(clip.speed ?? 1) === s ? " selected" : ""}>${s}×${
+                    s === 0.5 ? " — slow motion" : s === 1 ? " — real time" : ""
+                  }</option>`,
+              )
+              .join("")}
+          </select>
+        </label>
       </div>`;
     const pv = editor.querySelector("video")!;
     pv.src = clip.url;
@@ -480,6 +492,14 @@ function paintClips(): void {
     };
     editor.querySelector<HTMLSelectElement>('[data-k="bias"]')!.onchange = (e) => {
       clip.bias = Number((e.target as HTMLSelectElement).value) || 0;
+    };
+    // Speed remaps how fast the SOURCE is consumed; the cut still lands on the
+    // beat, because cut times come from the plan, never from the footage. The
+    // song is untouched — clips are silent — so there is no pitch to protect.
+    // A sped-up clip that runs out of footage holds its last frame, the same
+    // rule a too-short clip follows at 1×.
+    editor.querySelector<HTMLSelectElement>('[data-k="speed"]')!.onchange = (e) => {
+      clip.speed = Number((e.target as HTMLSelectElement).value) || 1;
     };
     wrap.after(editor);
   }

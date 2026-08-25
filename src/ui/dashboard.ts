@@ -20,6 +20,7 @@ import { applyShim } from "./demoReelShim.js";
 import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
 import { countUp } from "./countUp.js";
+import { maxTabMarkup, wireMaxTab } from "./maxTab.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -51,6 +52,9 @@ import { countUp } from "./countUp.js";
 
 let overlay: HTMLDivElement | null = null;
 let dashboardBrand: Exclude<MembershipBrand, "guest"> = "member";
+// Whether the Max tab opens the chat (paid) or the frosted upgrade room
+// (adult, unpaid). Held at open time for fillView, which runs lazily.
+let dashboardPaidMax = false;
 
 // Two half-faces sharing one outline: a squarer, heavier-browed left half and a
 // softer, narrower right half, split down the facial midline. It says "this
@@ -127,9 +131,18 @@ export function openDashboard(opts: {
   membership: Exclude<MembershipBrand, "guest">;
   // Absent for a signed-out or preview dashboard, which has no profile to edit.
   onSettings?: () => void;
+  // Whether the signed-in person is 18 or over. Gates the Max tab: minors do
+  // not get a blurred advertisement for an 18+ product, they get no tab at
+  // all. Defaults false — an unknown age behaves like a minor, the same rule
+  // the results screen applies.
+  adult?: boolean;
 }): void {
   close();
   dashboardBrand = opts.membership;
+  // The Max tab exists for adults and for paid Max accounts (which checkout
+  // already restricts to adults). Everyone else gets a three-tab bar.
+  const maxTab = Boolean(opts.adult) || opts.membership === "max";
+  dashboardPaidMax = opts.membership === "max";
   // Advance the rotation once per open, so coming back to the dashboard gives a
   // different headline and a different quote rather than the same pair all day.
   nextVisit();
@@ -187,6 +200,7 @@ export function openDashboard(opts: {
         </section>
         <section class="dash-view" data-view="scans" role="tabpanel" aria-labelledby="dash-bar-scans" hidden></section>
         <section class="dash-view" data-view="faces" role="tabpanel" aria-labelledby="dash-bar-faces" hidden></section>
+        ${maxTab ? `<section class="dash-view" data-view="max" role="tabpanel" aria-labelledby="dash-bar-max" hidden></section>` : ""}
       </div>
     </div>
 
@@ -213,6 +227,10 @@ export function openDashboard(opts: {
         </svg>
         <span>Faces</span>
       </button>
+      ${maxTab ? `<button class="dash-bar-btn dash-bar-maxbtn" id="dash-bar-max" data-goto="max" type="button" role="tab" aria-selected="false">
+        <span class="dash-bar-maxface">${maxCharacterMarkup({ mood: "happy" })}</span>
+        <span>Max</span>
+      </button>` : ""}
     </nav>`;
 
   document.body.appendChild(overlay);
@@ -253,7 +271,7 @@ export function openDashboard(opts: {
 // of travel: going right moves the outgoing panel left. That is the one cue
 // that makes a tab bar feel like a place rather than a menu, because it tells
 // you the panels are laid out side by side and you are moving along them.
-export type ViewName = "home" | "scans" | "faces";
+export type ViewName = "home" | "scans" | "faces" | "max";
 
 let currentView: ViewName = "home";
 // Each panel remembers where it was scrolled to. Coming back to Home and
@@ -289,6 +307,9 @@ function fillView(name: ViewName, panel: HTMLElement): void {
   } else if (name === "faces") {
     panel.innerHTML = facesMarkup();
     wireFaces(panel);
+  } else if (name === "max") {
+    panel.innerHTML = maxTabMarkup(dashboardPaidMax);
+    wireMaxTab(panel, { paid: dashboardPaidMax });
   }
 }
 

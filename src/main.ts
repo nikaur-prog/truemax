@@ -176,7 +176,9 @@ if (import.meta.env.DEV) {
       // onSettings is a no-op here, but passing it makes the preview render
       // the profile button — which is where the avatar lives, and the whole
       // reason to look at this screen in a browser check.
-      openDashboard({ onScan: () => {}, name: "Sam", membership: "member", onSettings: () => {} }),
+      // adult: true so the preview also shows the Max tab's locked state,
+      // which is the harder of its two rooms to reach with a real account.
+      openDashboard({ onScan: () => {}, name: "Sam", membership: "member", onSettings: () => {}, adult: true }),
     );
   }
 }
@@ -250,6 +252,10 @@ let selectedSex: Sex = storedSex() ?? "male";
 // Set when the current scan is of somebody other than the account holder, and
 // carried through to the stored row so progress can exclude it.
 let scanSubject: { name: string } | null = null;
+// One-pass waiver of the head-covering heuristic, set by the "nothing
+// covering your face" button on its rejection screen and consumed by the very
+// next handleCanvas run. Never persisted: the next SCAN checks again.
+let skipCoveringCheck = false;
 // Whether the "who is this?" question was actually put to a signed-in person
 // this scan. scanSubject === null is ambiguous on its own — it means "the
 // owner" AND "never asked" — and the difference matters at the account gate: a
@@ -814,6 +820,12 @@ el.ovalFrame.addEventListener("drop", (e) => {
 //
 // Failures open: if the profile cannot be loaded the app continues rather than
 // locking somebody out of their own scan over a dropped request.
+// Whether the signed-in person is 18 or over, for the surfaces main.ts opens
+// itself (the dashboard's Max tab). Mirrors the results screen's own flag and
+// shares its default: false, so a profile that never loads behaves like a
+// minor rather than like an adult.
+let knownAdult = false;
+
 async function ensureOnboarded(user: User): Promise<void> {
   const generation = scanGeneration;
   // Answers that could not be sent last time — a phone that dropped its
@@ -831,7 +843,8 @@ async function ensureOnboarded(user: User): Promise<void> {
   // The one place the date of birth is already in hand. Every 18+ Max surface
   // on the results screen keys off this; the default is false, so a profile
   // that never loads behaves like a minor rather than like an adult.
-  setAdult(profileIsAdult(profile));
+  knownAdult = profileIsAdult(profile);
+  setAdult(knownAdult);
   if (onboardingComplete(profile)) return;
   await openTrialFunnel(user, undefined, { required: true });
 }
@@ -859,6 +872,7 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
     name: displayName(user),
     membership: brand === "max" ? "max" : "member",
     onSettings: () => void openSettings(user),
+    adult: knownAdult,
   });
 });
 
@@ -1191,6 +1205,7 @@ function resetToUpload(): void {
   captureMethod = null;
   scanSubject = null;
   subjectAsked = false;
+  skipCoveringCheck = false;
   feedbackInFlight = null;
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
@@ -1359,13 +1374,38 @@ async function handleCanvas(
   const occlusion = detectOcclusion(el.photoCanvas, landmarks, width, height);
   const warnings = frontPhotoWarnings(quality, stats, occlusion);
   let rejection = frontPhotoRejection(quality, stats, occlusion, landmarks, width, height);
-  if (!rejection) rejection = headCoveringRejection(await detectHeadCovering(el.photoCanvas));
+  // The covering check is a HEURISTIC over a segmentation model, and the two
+  // structural rejections above it are not — so only this one is overridable.
+  // A person the model misreads (it has misread curly hair as a hood) must
+  // never be locked out of their own scan by a guess; the person can see
+  // their own head, and on this one question they outrank the model.
+  let coveringRejection = false;
+  if (!rejection && !skipCoveringCheck) {
+    rejection = headCoveringRejection(await detectHeadCovering(el.photoCanvas));
+    coveringRejection = rejection !== null;
+  }
+  skipCoveringCheck = false;
   if (!scanIsCurrent(token, generation)) return;
   if (rejection) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "PHOTO NOT VALID";
-    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}`;
+    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}${
+      coveringRejection
+        ? ` <button type="button" class="linkish" id="covering-override">Nothing covering your face? Use this photo</button>`
+        : ""
+    }`;
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
+    if (coveringRejection) {
+      // Re-enter the same pipeline with the check waived for one pass. No
+      // timeout here: a screen with a decision on it must not dissolve while
+      // somebody is reading it.
+      document.getElementById("covering-override")?.addEventListener("click", () => {
+        if (!scanIsCurrent(token, generation)) return;
+        skipCoveringCheck = true;
+        void handleCanvas(src, exifOrientation, generation, token, extraFrames);
+      });
+      return;
+    }
     setTimeout(() => {
       if (scanIsCurrent(token, generation)) resetToUpload();
     }, 4200);
