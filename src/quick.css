@@ -729,3 +729,14 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 .brp-outro { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .brp-outro input { accent-color: var(--acc, #2f9e73); width: 16px; height: 16px; }
 .brp-outro em { font-style: normal; font-size: 11px; color: var(--mut, #6b7680); }
+
+/* The face in its row. Inline with the id so the first column stays one
+   span and the grid unchanged; a row saved before thumbnails existed shows
+   an empty plate rather than shifting the columns. */
+.q-cal-thumb {
+  width: 30px; height: 30px; object-fit: cover; border-radius: 8px;
+  vertical-align: middle; margin-right: 8px;
+  border: 1px solid var(--line); background: var(--card);
+  display: inline-block;
+}
+.q-cal-flag.bad { color: #b3462e; }

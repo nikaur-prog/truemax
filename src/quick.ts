@@ -25,6 +25,7 @@ import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
 import { showCaptionStep } from "./ui/captionStep.js";
 import { spokenSeconds } from "./engine/reelScript.js";
+import { toAvatarThumb } from "./engine/avatar.js";
 import {
   addRatedFace,
   clearCalibrationSet,
@@ -664,6 +665,10 @@ async function playSequence(r: Report, photo: HTMLCanvasElement): Promise<void> 
 // optional, at least one is required, and the pair is committed together.
 let pendingFront: Report | null = null;
 let pendingSide: Report | null = null;
+// The front capture itself, held only until the face is committed. The row
+// stores a 96px thumbnail so a fifty-row set stays auditable — "which face
+// was m7" must be answerable without re-scanning anybody.
+let pendingFrontShot: HTMLCanvasElement | null = null;
 
 // The last correction upload's fate, shown in the slots panel.
 //
@@ -725,6 +730,7 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
 
 function clearPending(): void {
   pendingFront = null;
+  pendingFrontShot = null;
   pendingSide = null;
 }
 
@@ -986,6 +992,14 @@ function renderRatingStep(r: Report): void {
       rating !== null && external.checked ? "external" : "self",
       label.value.trim() || undefined,
       pendingSide ?? undefined,
+      {
+        thumb: pendingFrontShot ? (toAvatarThumb(pendingFrontShot) ?? undefined) : undefined,
+        // Front and side counted together: a misplaced point poisons the row
+        // whichever view it came from.
+        suspect:
+          r.metrics.filter((m) => m.implausible).length +
+          (pendingSide?.metrics.filter((m) => m.implausible).length ?? 0),
+      },
     );
     const held = pendingSide;
     clearPending();
@@ -1177,8 +1191,18 @@ function renderCalibrationSet(): void {
                             ? ` <em class="q-cal-flag">revised after the score</em>`
                             : ` <em class="q-cal-flag">unknown</em>`;
                   const fittable = f.ratedBy === "self" && f.rating !== null;
+                  // The audit trail, in the row: the face itself, and a flag
+                  // when any of its readings fell outside anatomical range at
+                  // capture. A corpus row with misplaced points poisons the
+                  // fit, and the time to notice is while the person is still
+                  // around to re-scan.
+                  const suspectFlag = f.suspect
+                    ? ` <em class="q-cal-flag bad">${f.suspect} reading${f.suspect === 1 ? "" : "s"} off-anatomy</em>`
+                    : "";
                   return `<div class="q-cal-row${fittable ? "" : " held"}">
-                    <span>${f.label ? escapeHtml(f.label) : f.id}${flag}</span>
+                    <span>${
+                      f.thumb ? `<img class="q-cal-thumb" src="${f.thumb}" alt="" />` : `<i class="q-cal-thumb none"></i>`
+                    }${f.label ? escapeHtml(f.label) : f.id}${flag}${suspectFlag}</span>
                     <span>${f.rating === null ? "—" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
                     <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
@@ -1278,6 +1302,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     // Into the slot, not straight to the rating — the operator may still want
     // to add a side before committing the face.
     pendingFront = r;
+    pendingFrontShot = photo;
     renderFaceSlots();
     return;
   }

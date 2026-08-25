@@ -70,6 +70,22 @@ test("a borrowed rating never reaches the corpus export", () => {
   assert.deepEqual(out.faces.map((f: { id: string }) => f.id), ["m2"]);
 });
 
+test("the thumbnail and the suspect flag never reach the corpus export", () => {
+  // The thumbnail is a photograph of a real face and the suspect count is an
+  // internal audit flag; the corpus is a file that gets pasted into a public
+  // repository. The export picks its fields by name, and this pins that a
+  // future "just spread the row" refactor cannot quietly start shipping faces.
+  const rich: RatedFace = {
+    ...face("m1", "self"),
+    thumb: "data:image/jpeg;base64,AAAA",
+    suspect: 2,
+  };
+  const out = corpusJSON([rich]);
+  assert.ok(!out.includes("data:image"), "the export carries a photograph");
+  assert.ok(!out.includes("suspect"), "the export carries the audit flag");
+  assert.ok(!out.includes("thumb"), "the export carries the thumb field");
+});
+
 test("a row written before provenance existed is held out, not assumed honest", () => {
   // The direction that matters. The one row known to be contaminated carries no
   // ratedBy, so treating an absent field as "self" would wave through exactly
