@@ -4,6 +4,7 @@ import type { Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "../engine/analysisMode.js";
 import { exportName, saveFile } from "./saveFile.js";
+import { drawCtaCard } from "./ctaCard.js";
 import type { SaveOutcome } from "./saveFile.js";
 
 // Which cut to render.
@@ -64,7 +65,13 @@ export async function downloadQuickVideo(
   onProgress?: (progress: number) => void,
   variant: QuickVariant = "breakdown",
 ): Promise<SaveOutcome> {
-  const frameCount = Math.round(FPS * DURATION[variant]);
+  // Both cuts end on the shared card: a beat and a half of "truemax.app"
+  // after the analysis, which is the whole growth loop of a video built to be
+  // posted. Short on purpose — the platform counts a rewatch from a loop, and
+  // a long endcard is where a loop dies.
+  const CTA_TAIL = 1.6;
+  const body = DURATION[variant];
+  const frameCount = Math.round(FPS * (body + CTA_TAIL));
   const { Output, BufferTarget, Mp4OutputFormat, CanvasSource, QUALITY_HIGH, getFirstEncodableVideoCodec } =
     await import("mediabunny");
 
@@ -101,7 +108,13 @@ export async function downloadQuickVideo(
 
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
-    drawFrame(canvas, photo, landmarks, sex, scores, t, variant, EXPORT_SCALE);
+    if (t >= body) {
+      const g = canvas.getContext("2d")!;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      drawCtaCard(g, canvas.width, canvas.height, t - body, 0.5);
+    } else {
+      drawFrame(canvas, photo, landmarks, sex, scores, t, variant, EXPORT_SCALE);
+    }
     await source.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 6 === 0) onProgress?.(frame / frameCount);
   }

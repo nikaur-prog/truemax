@@ -3,6 +3,7 @@ import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
 import { beatNear } from "../engine/rundownTimeline.js";
 import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
+import { drawCtaCard } from "./ctaCard.js";
 import { SPREAD } from "../engine/rarity.js";
 
 // ---------------------------------------------------------------------------
@@ -793,12 +794,25 @@ export function drawRundownFrame(
   if (beat.beat.kind === "card") drawCard(ctx, input, beat, t, W, H);
   if (beat.beat.kind === "curve") drawCurve(ctx, input, beat, t, W, H, input.name);
   if (beat.beat.kind === "search") drawSearchBar(ctx, beat, t, W, H);
+  // The sign-off owns its frame too. The voice is saying "go get yours at
+  // truemax.app" and the picture used to still be the SUBJECT's face — the
+  // one moment in the video that is about the viewer was illustrated with
+  // somebody else. The shared endcard takes over on the beat, and the spoken
+  // line lands in the caption over it like every other line.
+  if (beat.beat.kind === "cta") drawCtaCard(ctx, W, H, t - beat.start, 0.6);
   // The caption is drawn on every beat including the card. It collided with the
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
   drawLedger(ctx, input, beat, t);
-  drawBottomBar(ctx, input, beat, W, H);
-  drawWatermark(ctx, H);
+  // No chrome over the endcard. The bottom bar prints the SUBJECT'S name and
+  // the watermark prints the URL — and the sign-off is the one beat that is
+  // about the viewer, on a card that already carries the wordmark and the URL
+  // at full size. Chrome here is the same information three times, one of
+  // them wrong.
+  if (beat.beat.kind !== "cta") {
+    drawBottomBar(ctx, input, beat, W, H);
+    drawWatermark(ctx, H);
+  }
   // Last, over everything: the whole frame resolves, chrome included, the way
   // a stream sharpens after a seek. Blurring only the photograph would leave
   // razor-sharp text floating on an out-of-focus face, which reads as a
@@ -834,10 +848,11 @@ export function brollFor(
   const index = input.timeline.beats.indexOf(beat);
   if (index < 0) return null;
 
-  // The card, the curve and the search bar own their whole frame and never take
-  // one — a photograph behind a chart is the head-shaped smudge the search beat
-  // was fixed to stop having.
-  if (kind === "card" || kind === "curve" || kind === "search") return null;
+  // The card, the curve, the search bar and the sign-off own their whole frame
+  // and never take one — a photograph behind a chart is the head-shaped smudge
+  // the search beat was fixed to stop having, and a cutaway rising behind the
+  // endcard would put a face back into the one beat that is not about a face.
+  if (kind === "card" || kind === "curve" || kind === "search" || kind === "cta") return null;
 
   // A beat that draws nothing can take a cutaway for its whole length.
   if (kind !== "metric") return pool[index % pool.length] ?? null;
@@ -1535,7 +1550,7 @@ function drawLedger(
   // the sign-off ("Who should we measure next?") in a real export, which put
   // the full trait list over the one frame that is not about the subject.
   const kind = beat.beat.kind;
-  if (kind === "card" || kind === "curve" || kind === "search") return;
+  if (kind === "card" || kind === "curve" || kind === "search" || kind === "cta") return;
   let lastMetricEnd = -Infinity;
   for (const b of input.timeline.beats) {
     if (b.beat.kind === "metric") lastMetricEnd = b.start + b.duration;

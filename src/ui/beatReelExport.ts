@@ -1,5 +1,6 @@
 import type { BeatPlan } from "../engine/beatPlan.js";
 import { activeCut, applyEdgeFades, coverRect, sliceAudio, sourceTime } from "../engine/reelFrame.js";
+import { drawCtaCard } from "./ctaCard.js";
 
 // ---------------------------------------------------------------------------
 // The beat-cut reel, rendered and encoded.
@@ -69,60 +70,6 @@ export interface BeatReelOptions {
   onProgress?: (fraction: number, label: string) => void;
 }
 
-/**
- * The endcard: the landing page's own opening line, set the way the landing
- * page sets it, over the product's dark ground. No screenshot, no baked image
- * — drawn from type at whatever resolution the export runs at, so the 4K card
- * is a 4K card. The rule under the wordmark draws in over the first beat, the
- * only motion on an otherwise still close.
- */
-function drawOutroCard(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  into: number,
-  beatSeconds: number,
-): void {
-  ctx.fillStyle = "#0d0f11";
-  ctx.fillRect(0, 0, w, h);
-  const u = w / 1080; // scale factor so the card is identical at 1080 and 4K
-  const cx = w / 2;
-  const fade = Math.min(1, into / 0.35);
-  ctx.globalAlpha = fade;
-
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#f4f2ec";
-  ctx.font = `300 ${Math.round(64 * u)}px "Fraunces Variable", Fraunces, Georgia, serif`;
-  ctx.fillText("Looks are no longer", cx, h * 0.44);
-  ctx.fillText("subjective.", cx, h * 0.44 + 76 * u);
-
-  const grow = Math.min(1, into / Math.max(0.2, beatSeconds));
-  ctx.fillStyle = "#2f9e73";
-  ctx.fillRect(cx - 90 * u * grow, h * 0.52, 180 * u * grow, Math.max(2, 3 * u));
-
-  ctx.fillStyle = "rgba(244,242,236,0.92)";
-  ctx.font = `500 ${Math.round(26 * u)}px "Inter Variable", Inter, system-ui, sans-serif`;
-  const spaced = (text: string, y: number) => {
-    // Canvas has no letter-spacing; the wordmark's tracking is the identity,
-    // so it is spaced by hand.
-    const gap = 10 * u;
-    const widths = [...text].map((c) => ctx.measureText(c).width);
-    const total = widths.reduce((a, b) => a + b, 0) + gap * (text.length - 1);
-    let x = cx - total / 2;
-    [...text].forEach((c, i) => {
-      ctx.fillText(c, x + widths[i] / 2, y);
-      x += widths[i] + gap;
-    });
-  };
-  spaced("TRUEMAX", h * 0.585);
-
-  ctx.fillStyle = "rgba(244,242,236,0.6)";
-  ctx.font = `400 ${Math.round(24 * u)}px "Inter Variable", Inter, system-ui, sans-serif`;
-  ctx.fillText("truemax.app", cx, h * 0.63);
-
-  ctx.globalAlpha = 1;
-  ctx.textAlign = "left";
-}
 
 export interface RenderedReel {
   blob: Blob;
@@ -251,7 +198,7 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
     // clip (its guard against a black last frame), and here that time belongs
     // to the card instead.
     if (outroSeconds > 0 && t >= plan.duration) {
-      drawOutroCard(ctx, size.w, size.h, t - plan.duration, period);
+      drawCtaCard(ctx, size.w, size.h, t - plan.duration, period);
       await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
       if (frame % 10 === 0) onProgress?.(0.08 + 0.88 * (frame / frameCount), "Cutting");
       continue;
