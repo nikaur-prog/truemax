@@ -36,9 +36,11 @@ export interface ReelClip {
    * as a pure function of time into the cut. It rides the same beat plan as
    * every video clip — the planner neither knows nor cares that one of its
    * cuts is synthesised — and it owns its own playback speed internally, so
-   * `speed` is ignored when this is set.
+   * `speed` is ignored when this is set. `dur` is the cut's full length, so a
+   * segment can stage itself (a before card handing over to an after card at
+   * the midpoint) without guessing how long it has.
    */
-  draw?: (ctx: CanvasRenderingContext2D, w: number, h: number, into: number) => void;
+  draw?: (ctx: CanvasRenderingContext2D, w: number, h: number, into: number, dur: number) => void;
 }
 
 /** 1080×1920 is the platform native; 2160×3840 is the opt-in. */
@@ -220,7 +222,7 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
     if (hit) {
       const clip = clips[hit.cut.clip % clips.length];
       if (clip?.draw) {
-        clip.draw(ctx, size.w, size.h, hit.into);
+        clip.draw(ctx, size.w, size.h, hit.into, hit.cut.end - hit.cut.start);
       } else if (clip?.video) {
         await seekTo(clip.video, sourceTime(
           { startAt: clip.startAt, duration: clip.video.duration || 0 },
