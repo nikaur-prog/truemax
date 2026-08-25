@@ -23,13 +23,22 @@ import { drawCtaCard } from "./ctaCard.js";
 // ---------------------------------------------------------------------------
 
 export interface ReelClip {
-  video: HTMLVideoElement;
+  /** Absent on a synthetic segment — see `draw`. */
+  video?: HTMLVideoElement;
   /** Seconds into the source where this clip starts. */
   startAt: number;
   /** Crop bias along the cropped axis, -1 to 1. Heads want a little negative. */
   bias?: number;
   /** Playback rate through the source. 1 is real time. */
   speed?: number;
+  /**
+   * A segment RENDERED rather than seeked: the analysis reel, drawn per frame
+   * as a pure function of time into the cut. It rides the same beat plan as
+   * every video clip — the planner neither knows nor cares that one of its
+   * cuts is synthesised — and it owns its own playback speed internally, so
+   * `speed` is ignored when this is set.
+   */
+  draw?: (ctx: CanvasRenderingContext2D, w: number, h: number, into: number) => void;
 }
 
 /** 1080×1920 is the platform native; 2160×3840 is the opt-in. */
@@ -210,7 +219,9 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
 
     if (hit) {
       const clip = clips[hit.cut.clip % clips.length];
-      if (clip) {
+      if (clip?.draw) {
+        clip.draw(ctx, size.w, size.h, hit.into);
+      } else if (clip?.video) {
         await seekTo(clip.video, sourceTime(
           { startAt: clip.startAt, duration: clip.video.duration || 0 },
           hit.into,

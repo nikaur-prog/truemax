@@ -8,20 +8,27 @@ import {
   startScanCreditCheckout,
 } from "../engine/entitlement.js";
 import { TRIAL_SCANS, tierOf } from "../engine/depth.js";
+import { mergeScanTimes, nextScanSlotAt, weeklyAllowance } from "../engine/scanAllowance.js";
 import { SCAN_PRICE_MEMBER, isMemberPricing, scanPrice, setMemberPricing } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
 import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
 
 // ---------------------------------------------------------------------------
-// One free scan a week.
+// The weekly scan allowance: one a week, two on Max.
 //
-// Two reasons, and the honest one goes in the copy. A face does not change by
-// Thursday: the product's second-best feature is the delta between scans, and
-// a delta measured across a day is lighting noise wearing a trend costume.
-// Weekly is the cadence at which the number can genuinely have moved. The
-// commercial reason is the same fact from the other side — someone who wants
-// to scan again TODAY is buying a re-measurement, not a measurement, and that
-// is what the one-time scan credit already prices.
+// Two reasons for weekly, and the honest one goes in the copy. A face does
+// not change by Thursday: the product's second-best feature is the delta
+// between scans, and a delta measured across a day is lighting noise wearing
+// a trend costume. Weekly is the cadence at which the number can genuinely
+// have moved. The commercial reason is the same fact from the other side —
+// someone who wants to scan again TODAY is buying a re-measurement, not a
+// measurement, and that is what the one-time scan credit already prices.
+//
+// Max gets two, because that is what its plan card has always said. The gate
+// held everybody to one, which made "Two scans a week" a printed promise the
+// product did not keep — the kind of bug no subscriber reports, they just
+// learn the cards are decoration. The arithmetic (rolling window, which scan
+// holds the slot) lives in engine/scanAllowance.ts where it can be tested.
 //
 // The gate sits at the moment of intent (the upload button, the camera button,
 // a pasted photo), never mid-flow: adding the side view to a scan in progress
@@ -32,8 +39,6 @@ import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
 // existing credit checkout as the way to skip it — members at the member
 // price, everyone else at the standard one, both set in Stripe.
 // ---------------------------------------------------------------------------
-
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 // How long an entitlement read may take before the gate stops waiting for it.
 // Two and a half seconds is past the slowest honest round trip and well short
@@ -63,28 +68,28 @@ export function recordScanRun(): void {
   }
 }
 
-function lastScanAt(): number | null {
-  let stamp = 0;
+// Every completion time this browser can witness: the precise stamp plus the
+// stored history's own dates. mergeScanTimes de-duplicates the stamp against
+// the entry written moments after it, so one scan cannot hold two slots.
+function scanTimes(): number[] {
+  let stamp: number | null = null;
   try {
     const key = scopedStorageKey(STAMP_KEY);
-    if (!key) return null;
-    stamp = Number(localStorage.getItem(key)) || 0;
+    if (key) stamp = Number(localStorage.getItem(key)) || null;
   } catch {
     /* storage disabled */
   }
-  for (const scan of readAllHistory()) {
-    const t = new Date(scan.date).getTime();
-    if (Number.isFinite(t) && t > stamp) stamp = t;
-  }
-  return stamp > 0 ? stamp : null;
+  const history = readAllHistory()
+    .map((scan) => new Date(scan.date).getTime())
+    .filter((t) => Number.isFinite(t));
+  return mergeScanTimes(stamp, history);
 }
 
-// When the next free scan unlocks, or null if one is free right now.
-export function nextFreeScanAt(): number | null {
-  const last = lastScanAt();
-  if (!last) return null;
-  const next = last + WEEK_MS;
-  return next > Date.now() ? next : null;
+// When the next scan unlocks for a given weekly allowance, or null if one is
+// allowed right now. Exported for the gate and kept allowance-explicit: the
+// caller knows the tier, this file knows the timestamps.
+export function nextFreeScanAt(allowance = 1): number | null {
+  return nextScanSlotAt(scanTimes(), allowance, Date.now());
 }
 
 // The single entry point: call with what should happen if scanning is allowed.
@@ -92,7 +97,11 @@ export function nextFreeScanAt(): number | null {
 // proceeds and is spent, everyone else sees the countdown.
 export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
   const owner = activeScanOwner();
-  const next = nextFreeScanAt();
+  // The base allowance first, with no network: a browser with an open slot at
+  // allowance one has an open slot at every tier, so the common case stays a
+  // pure localStorage check. Only a held slot goes on to ask who this is —
+  // which it must, because the answer decides whether a SECOND slot exists.
+  const next = nextFreeScanAt(1);
   if (!next) {
     proceed();
     return true;
@@ -137,10 +146,19 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
     withTimeout(loadEntitlement(), null),
   ]);
   if (activeScanOwner() !== owner) return false;
-  const member = tierOf(entitlement) !== "free";
+  const tier = tierOf(entitlement);
+  const member = tier !== "free";
   setMemberPricing(member);
 
   if (admin) {
+    proceed();
+    return true;
+  }
+  // The tier's own allowance, now that the tier is known. This is where a Max
+  // account's second weekly scan passes — before any credit is touched, since
+  // an included scan must never quietly spend a paid one.
+  const allowance = weeklyAllowance(tier);
+  if (allowance > 1 && nextFreeScanAt(allowance) === null) {
     proceed();
     return true;
   }
@@ -154,7 +172,10 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
     proceed();
     return true;
   }
-  openScanGate(next);
+  // The countdown must be to THIS tier's next slot. At allowance two that is
+  // when the older held scan leaves the window, which can be days sooner than
+  // the base-allowance figure computed above.
+  openScanGate(nextFreeScanAt(allowance) ?? next, allowance);
   return false;
 }
 
@@ -183,23 +204,41 @@ function remaining(nextAt: number): string {
 // argument, so the price on the button and the note under it cannot disagree
 // with each other or with the same price quoted on the results screen. Every
 // caller sets that state before opening.
-function openScanGate(nextAt: number): void {
+function openScanGate(nextAt: number, allowance = 1): void {
   if (host) return;
   track("scan-gate-shown");
   const member = isMemberPricing();
+
+  // The sheet describes the allowance the person actually has. Telling a Max
+  // subscriber they have used "your free scan" understates what they paid
+  // for at the exact moment they are being asked to pay again.
+  const title = allowance > 1
+    ? "You've used both of this week's scans"
+    : "You've used your free scan this week";
+  const sub = allowance > 1
+    ? "Max includes two scans a week. Your face doesn't change in a day, so a third scan mostly measures your lighting — leave it and the number can actually move."
+    : "You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.";
+  // One upsell line each: non-members hear about the member price, Starter
+  // members hear that Max carries a second weekly scan. Max members, who have
+  // nothing further to be sold, get neither.
+  const note = !member
+    ? `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`
+    : allowance === 1
+      ? `<p class="sg-note">Max includes two scans a week.</p>`
+      : "";
 
   host = document.createElement("div");
   host.className = "scangate";
   host.innerHTML = `
     <div class="scangate-sheet" role="dialog" aria-modal="true" aria-label="Weekly scan limit">
-      <b class="sg-title">You've used your free scan this week</b>
-      <p class="sg-sub">You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.</p>
+      <b class="sg-title">${title}</b>
+      <p class="sg-sub">${sub}</p>
       <div class="sg-timer">
         <span class="klabel">YOUR NEXT FREE SCAN</span>
         <b id="sg-count">–</b>
       </div>
       <button class="btn pri" id="sg-buy">Scan now for ${scanPrice()}</button>
-      ${member ? "" : `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`}
+      ${note}
       <button class="btn gho" id="sg-wait">I'll wait</button>
       <p class="sg-err" id="sg-err" hidden></p>
     </div>`;

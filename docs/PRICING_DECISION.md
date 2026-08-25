@@ -86,12 +86,18 @@ TrueMax offer and secure Checkout.
 The earlier one-month wording is superseded. Native introductory offers must
 use the same seven-day term when Apple and Google billing are implemented.
 
-## Decisions needed before the credit ledger is final
+## Weekly allowance (decided 25 August 2026)
 
-- Does the weekly scan replenish every seven days from subscription start, or
-  on a fixed weekday?
-- Do unused weekly scans expire or roll over? Recommended: expire when the next
-  weekly allowance arrives.
+The gate holds a ROLLING seven-day window per account: free and Starter may
+hold one completed scan inside the trailing week, Max two — which is what the
+Max plan card has sold since it existed ("Two scans a week"); the gate simply
+never honoured it until now. A slot frees exactly a week after the scan
+holding it, so there is no fixed weekday and no replenish moment. Rollover
+ceases to be a question: an unused slot is a window with room in it — nothing
+banks, nothing expires. The arithmetic lives in `src/engine/scanAllowance.ts`
+and is test-pinned to the plan-card wording.
+
+## Decisions needed before the credit ledger is final
 - Does the $2.99 member price apply during a free trial? Recommended: no; make
   it available only after the first successful paid invoice.
 - What exactly is included in Starter versus Max, beyond Max AI?

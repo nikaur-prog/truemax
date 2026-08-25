@@ -1597,8 +1597,19 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(editedReport(r));
   // Loaded on demand: the beat panel pulls in an FFT, a planner and the
   // encoder, and most sessions in here never open it.
+  //
+  // The scan on screen rides along. "Cut to the beat" is the TikTok creator's
+  // engine, not a generic clip cutter, and the TikTok this product wants made
+  // is before-clips / THE ANALYSIS / after-clips — so the panel receives what
+  // it needs to render the analysis reel as a beat-aligned segment at 2x. The
+  // edited score travels the same way it does into every other export: what
+  // the operator corrected on screen is what the video says.
   document.getElementById("q-beatreel")!.onclick = () => {
-    void import("./ui/beatReelPanel.js").then((m) => m.openBeatReelPanel());
+    const rep = editedReport(r);
+    const analysis = last
+      ? { photo: last.photo, landmarks: last.lm, sex: rep.sex, scores: editedExportScores(rep) }
+      : undefined;
+    void import("./ui/beatReelPanel.js").then((m) => m.openBeatReelPanel(analysis));
   };
 
   // The before half, exported on its own. Only present after a Reel Creator run
