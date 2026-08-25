@@ -31,6 +31,7 @@ import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
 import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.js";
+import { openFrontEdit } from "./ui/frontEdit.js";
 import { analyzeSide } from "./engine/scoring.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
 // The scan narration quotes these counts. Read from the arrays rather than
@@ -1710,6 +1711,12 @@ async function runFullAnalysis(
   if (!scanIsCurrent(token, generation) || !pending) return;
   renderQualityChips(quality, autoNote);
 
+  // The corrected cloud, once the person has corrected one. Held so re-opening
+  // the editor shows their own work rather than starting again from the
+  // detector's reading, and so a population switch after an edit re-scores the
+  // corrected face instead of quietly reverting it.
+  let editedLandmarks: NormalizedLandmark[] | null = null;
+
   const ctxArgs = {
     report,
     delta,
@@ -1762,6 +1769,45 @@ async function runFullAnalysis(
         reason: "analysis",
         notice: "Create your account to save your pathway and choose a trial.",
         onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser),
+      });
+    },
+    // Correct the front points, then score the corrected face.
+    //
+    // The same shape as onSexChange below: nothing is re-detected and no photo
+    // is retaken — the corrected cloud goes back through the identical
+    // analysis path, merges with the side if there is one, and re-stores under
+    // this scan's own ID so the history holds one scan rather than two.
+    //
+    // The burst frames are kept. Dropping to a single-frame analyse() would
+    // change the score for a reason that has nothing to do with the edit, so
+    // the edited frame replaces the shown one at the head of the same list and
+    // the median across frames still runs.
+    onEditFront: () => {
+      openFrontEdit({
+        photo: frontShot,
+        landmarks: editedLandmarks ?? landmarks,
+        onClose: () => {},
+        onApply: (corrected) => {
+          if (!scanIsCurrent(token, generation)) return;
+          editedLandmarks = corrected;
+          const f = analyzeFrames(
+            [
+              { landmarks: corrected, width, height, source: frontShot },
+              // Optional, not asserted. `pending` is module state that
+              // resetToUpload clears, and this closure outlives the render it
+              // was built in — a correction applied on a screen whose pending
+              // burst has already been dropped must re-measure from the one
+              // frame it still has, not throw.
+              ...(pending?.extraFrames ?? []),
+            ],
+            selectedSex,
+          );
+          const merged = sideReport ? mergeReports(f, sideReport) : f;
+          const rescored = compareAndStore(merged, token.scanId, scanSubject ?? undefined);
+          drawCalm(el.overlayCanvas, corrected, width, height);
+          renderQualityChips(quality, "Re-measured from your corrected points");
+          renderResults({ ...ctxArgs, report: merged, delta: rescored, landmarks: corrected });
+        },
       });
     },
     onSideProfile: () => startSide(),
@@ -1823,7 +1869,9 @@ async function runFullAnalysis(
       if (!scanSubject) storeSex(sex);
       paintRefPop();
       if (!lastSide) return;
-      const f = analyze(landmarks, width, height, sex, frontShot);
+      // The corrected cloud when there is one: switching population must not
+      // silently throw away the points somebody just fixed by hand.
+      const f = analyze(editedLandmarks ?? landmarks, width, height, sex, frontShot);
       const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
       const merged = mergeReports(f, sd);
       const rescoredDelta = compareAndStore(merged, token.scanId, scanSubject ?? undefined);

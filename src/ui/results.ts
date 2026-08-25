@@ -84,6 +84,10 @@ interface Ctx {
   // jumped somewhere else after I confirmed them".
   sidePoints?: SidePoints;
   onRedoSide?: () => void;
+  // The front half's equivalent: open the landmark editor over the front
+  // photograph. Absent when there is nothing to edit against — a restored
+  // scan with no landmark cloud in memory.
+  onEditFront?: () => void;
   // How far off level the front capture was, in degrees. The pose is corrected
   // before measurement, but the correction has residual error and the jaw and
   // chin take most of it — so beyond a few degrees the Basic grid says so
@@ -640,7 +644,13 @@ function showOverall(): void {
              <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
                <button class="btn gho" id="btn-share">Share card</button></div>`
       }
-      <div class="navrow"><button class="btn gho" id="btn-diag">Copy diagnostics</button></div>
+      <div class="navrow">${
+        // The front counterpart of the profile's "Re-verify the points". The
+        // frontal mesh is usually right, which is exactly why this is a quiet
+        // ghost button rather than a step: it is here for the person who can
+        // SEE a point in the wrong place, and invisible to everyone else.
+        ctx.onEditFront ? `<button class="btn gho" id="btn-fedit">Correct the points</button>` : ""
+      }<button class="btn gho" id="btn-diag">Copy diagnostics</button></div>
       ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
@@ -672,6 +682,7 @@ function showOverall(): void {
       window.setTimeout(() => (diagBtn.textContent = "Copy diagnostics"), 2600);
     };
   }
+  document.getElementById("btn-fedit")?.addEventListener("click", () => ctx?.onEditFront?.());
   document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");

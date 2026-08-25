@@ -2,7 +2,7 @@ import { loadEntitlement, openBillingPortal, startMaxCheckout } from "../engine/
 import type { Entitlement } from "../engine/entitlement.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { openMaxChat } from "./maxChat.js";
-import { MAX_MONTHLY, STARTER_MONTHLY } from "./onboardingFunnel.js";
+import { MAX_MONTHLY } from "./onboardingFunnel.js";
 
 // ---------------------------------------------------------------------------
 // The Max tab on the dashboard.
@@ -149,8 +149,18 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
   // error; a sheet with a blank where the cost should be is not a sheet.
   function applyFraming(upgrading: boolean): void {
     if (upgrading) {
-      price.innerHTML = `<b>+$${(MAX_MONTHLY - STARTER_MONTHLY).toFixed(2)}<small> USD / month</small></b>
-        on top of your Starter plan — not a second membership. Billing adjusts automatically; you only ever pay the difference.`;
+      // The MAX price, and a promise about the difference — never a computed
+      // difference figure. Subtracting two hardcoded constants publishes a
+      // number this client cannot actually verify: the Starter constant lives
+      // here, the real amount lives in Stripe, and the two have already
+      // disagreed once ($7.99 on the plan card against $6.99 in the portal).
+      // Stripe prorates the switch and shows the exact amount on the screen
+      // the button opens, so the honest thing to state here is the plan's
+      // price and the fact that the existing plan is credited against it.
+      price.innerHTML = `<b>$${MAX_MONTHLY.toFixed(2)}<small> USD / month</small></b>
+        — and what you already pay for Starter comes off it. Not a second membership:
+        your plan switches over and billing adjusts automatically, so you only pay the
+        difference. Stripe shows you the exact amount before you confirm.`;
       cta.textContent = "Add Max to my plan";
       cta.onclick = async () => {
         cta.disabled = true;
