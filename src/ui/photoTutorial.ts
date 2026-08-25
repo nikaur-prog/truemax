@@ -160,9 +160,11 @@ const STEPS: Record<TutorialView, Step[]> = {
       // the lens. The cue tracks the turn; the shutter fires once the phone is
       // up and steady.
       cue: { start: 1, end: 3 },
-      // The handset sits a touch left of centre, a third down, once the arm is
-      // extended toward the lens. Nudge x/y here if the clip is ever recut.
-      flash: { at: 4.2, x: 0.51, y: 0.33 },
+      // Measured off the clip, not eyeballed: the phone's centroid was tracked
+      // frame by frame (it is the one near-black object on a grey shirt) and
+      // it rises until 4.2s, then holds at exactly this point to the end. The
+      // flash fires mid-hold. Re-run the tracker if the clip is ever recut.
+      flash: { at: 4.45, x: 0.435, y: 0.557 },
       title: "This is the one",
       caption: "Turn your head a full ninety degrees \u2014 one ear to the camera, chin level \u2014 and hold still. The phone stays where it is; only your head moves.",
     },

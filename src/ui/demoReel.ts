@@ -125,20 +125,35 @@ export function mountDemoReel(
     // underneath at full opacity instead, so the two genuinely cross and the
     // card is never showing the page background through a photograph.
     if (REEL.length > 1) {
-      const under =
-        // Nothing preceded the very first face, so it still fades up from the
-        // card rather than crossing with a face nobody has seen.
-        fadeIn < 1
-          ? shownAny
-            ? images[(idx - 1 + REEL.length) % REEL.length]
-            : null
-          : fadeOut < 1
-            ? images[(idx + 1) % REEL.length]
-            : null;
-      if (under) drawCover(under, 1, 1);
+      // Nothing preceded the very first face, so it still fades up from the
+      // card rather than crossing with a face nobody has seen.
+      //
+      // The face underneath is drawn at the zoom IT is at, not at rest. The
+      // outgoing face has drifted to 1.04 by the time it hands over, and
+      // drawing it back at 1.0 under the incoming crossfade snapped every
+      // photograph four per cent smaller for exactly one transition — the
+      // kind of pop nobody can name but everybody's eye files under "cheap".
+      const prevOut = fadeIn < 1 && shownAny;
+      const under = prevOut
+        ? images[(idx - 1 + REEL.length) % REEL.length]
+        : fadeOut < 1
+          ? images[(idx + 1) % REEL.length]
+          : null;
+      if (under) drawCover(under, prevOut ? 1.04 : 1, 1);
     }
     drawCover(img, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
     ctx.globalAlpha = alpha;
+
+    // A quiet vignette over every photograph. The portraits come from many
+    // photographers under many lights, and side by side that variety reads as
+    // inconsistency; one shared edge treatment is what makes eleven strangers'
+    // photos look like one product shot them. Elliptical and gentle — the face
+    // in the middle is untouched.
+    const vig = ctx.createRadialGradient(w / 2, h * 0.42, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.78);
+    vig.addColorStop(0, "rgba(8,10,12,0)");
+    vig.addColorStop(1, "rgba(8,10,12,0.34)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, w, h);
 
     // Overlay text is white and the photograph underneath it is not reliably
     // dark — a lit forehead put "MEASURING" at almost no contrast. Two scrims
@@ -195,7 +210,13 @@ export function mountDemoReel(
     for (const [px, py] of pts) {
       if (py > swept) continue;
       const fresh = !settled && swept - py < 0.09;
-      ctx.fillStyle = fresh ? "#8FF3E0" : `rgba(255,255,255,${settled ? 0.3 : 0.62})`;
+      // After the sweep the model stays ALIVE: a slow luminance wave travels
+      // down the settled vertices, a few points at a time barely brightening.
+      // A static mesh over a photograph reads as a sticker; one that breathes
+      // reads as a fit being held. The amplitude is deliberately at the edge
+      // of perception — this should be felt, not watched.
+      const settle = settled ? 0.3 + 0.1 * Math.max(0, Math.sin(now / 640 - py * 7)) : 0.62;
+      ctx.fillStyle = fresh ? "#8FF3E0" : `rgba(255,255,255,${settle.toFixed(3)})`;
       ctx.beginPath();
       ctx.arc(px * w, py * h, fresh ? 2.4 : 1.4, 0, Math.PI * 2);
       ctx.fill();
@@ -207,6 +228,10 @@ export function mountDemoReel(
       g.addColorStop(1, "rgba(143,243,224,0.85)");
       ctx.fillStyle = g;
       ctx.fillRect(0, y - 26, w, 27);
+      // A hairline at the sweep's leading edge. The gradient alone is a glow
+      // with no address; the one-pixel line is the instrument.
+      ctx.fillStyle = "rgba(220,255,247,0.9)";
+      ctx.fillRect(0, y, w, 1);
     }
 
     // ---- phase label ------------------------------------------------------
@@ -243,7 +268,10 @@ export function mountDemoReel(
         ctx.fillStyle = "rgba(255,255,255,0.2)";
         ctx.fillRect(x, y + 16, bw, 3);
         ctx.fillStyle = "#8FF3E0";
-        ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * appear, 3);
+        // Eased, not linear: a bar that decelerates into its value reads as a
+        // measurement arriving; one that fills at constant speed reads as a
+        // loading indicator.
+        ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * ease(appear), 3);
         ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.66)";
         ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
@@ -260,23 +288,54 @@ export function mountDemoReel(
     if (t >= T.regions[0]) {
       const outs = calloutsFor(face);
       const placed = placeCallouts(outs, w, h);
-      outs.forEach((r, i) => {
-        const appear = seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
+      const appearOf = (i: number) => seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
+
+      // Two passes with a scrim between them. The layout keeps LABELS out of
+      // the caption band, but a connector from a chin anchor to a label above
+      // it has to cross that band — and it crossed straight through the score.
+      // Lines first; then the caption's backing scrim re-stamped so any line
+      // under the score drops to a murmur; then dots and labels on top, crisp.
+      outs.forEach((_, i) => {
+        const appear = appearOf(i);
         if (appear <= 0) return;
         ctx.globalAlpha = alpha * appear;
         const { ax, ay, lx, ly, left } = placed[i]!;
-
+        // The connector DRAWS from the anchor to the label rather than
+        // appearing whole — the eye follows it from the feature to the
+        // number, which is the causal order the interface is claiming.
+        const grow = ease(appear);
+        const tx = left ? lx + LABEL_W : lx;
         ctx.strokeStyle = "rgba(143,243,224,0.85)";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(ax, ay);
-        ctx.lineTo(left ? lx + LABEL_W : lx, ly + 9);
+        ctx.lineTo(ax + (tx - ax) * grow, ay + (ly + 9 - ay) * grow);
         ctx.stroke();
+      });
+
+      ctx.globalAlpha = alpha;
+      const capScrim = ctx.createLinearGradient(0, h - 176, 0, h);
+      capScrim.addColorStop(0, "rgba(10,11,13,0)");
+      capScrim.addColorStop(0.45, "rgba(10,11,13,0.5)");
+      capScrim.addColorStop(1, "rgba(10,11,13,0.78)");
+      ctx.fillStyle = capScrim;
+      ctx.fillRect(0, h - 176, w, 176);
+
+      outs.forEach((r, i) => {
+        const appear = appearOf(i);
+        if (appear <= 0) return;
+        ctx.globalAlpha = alpha * appear;
+        const { ax, ay, lx, ly, left } = placed[i]!;
+        const grow = ease(appear);
         ctx.fillStyle = "#8FF3E0";
         ctx.beginPath();
         ctx.arc(ax, ay, 3, 0, Math.PI * 2);
         ctx.fill();
 
+        // The label settles its last few pixels into place along the same
+        // direction the line travelled.
+        const slide = (1 - grow) * (left ? 6 : -6);
+        ctx.translate(slide, 0);
         ctx.fillStyle = "rgba(16,17,19,0.72)";
         ctx.beginPath();
         ctx.roundRect(lx, ly - 4, LABEL_W, LABEL_H, 7);
@@ -287,6 +346,7 @@ export function mountDemoReel(
         ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "#fff";
         ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
+        ctx.translate(-slide, 0);
         ctx.globalAlpha = alpha;
       });
     }
@@ -300,10 +360,14 @@ export function mountDemoReel(
     ctx.textAlign = "left";
     ctx.globalAlpha = 1;
 
-    // Overall counts up only once the measuring beat is over
+    // Overall counts up only once the measuring beat is over. The instant it
+    // LANDS gets its own beat: a class the CSS answers with one soft settle.
+    // The count-up is work; the landing is the result, and a result deserves
+    // punctuation the intermediate numbers do not get.
     const shown = face.overall * ease(seg(t, T.score[0], T.score[1]));
     scoreEl.textContent = t >= T.score[0] ? shown.toFixed(1) : "";
     scoreEl.style.opacity = String(alpha);
+    scoreEl.classList.toggle("landed", t >= T.score[1]);
     nameEl.textContent = face.name;
     nameEl.style.opacity = String(alpha * 0.85);
 

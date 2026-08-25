@@ -607,3 +607,125 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 #q-folder-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 #q-folder-state { flex: 1 1 100%; }
 .q-folder-btn { padding: 4px 10px; font-size: 12px; min-width: 0; }
+
+/* ---------------------------------------------------------------------------
+   Cut to the beat.
+
+   A full-screen panel rather than another row in the creator: this is a
+   different job from producing a card, it needs a waveform wide enough to find
+   a section in, and squeezing that into a column would make the one control
+   that has to be precise the smallest thing on screen.
+   --------------------------------------------------------------------------- */
+.brp {
+  position: fixed; inset: 0; z-index: 96; display: grid; place-items: center;
+  background: rgba(8, 10, 12, .74); backdrop-filter: blur(6px); padding: 18px;
+  overflow: auto;
+}
+.brp-card {
+  position: relative; width: min(1080px, 100%); max-height: 94vh; overflow: auto;
+  background: var(--card, #fff); color: var(--ink, #14181c);
+  border-radius: 20px; padding: 26px 28px 20px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .4);
+}
+.brp-x {
+  position: absolute; top: 14px; right: 14px; width: 30px; height: 30px;
+  border-radius: 50%; border: 1px solid rgba(128, 138, 148, .35);
+  background: transparent; color: var(--mut, #6b7680); cursor: pointer; font-size: 14px;
+}
+.brp-card h2 { margin: 0 0 4px; font-size: 22px; }
+.brp-sub { margin: 0 0 18px; color: var(--mut, #6b7680); font-size: 13.5px; line-height: 1.5; }
+.brp-sec { margin-bottom: 20px; }
+.brp-head > span {
+  display: block; font: 600 10.5px var(--mono, ui-monospace, monospace);
+  letter-spacing: .18em; color: var(--mut, #6b7680); margin-bottom: 4px;
+}
+.brp-head > small { display: block; color: var(--mut, #6b7680); font-size: 12px; margin-bottom: 10px; line-height: 1.45; }
+
+.brp-clips { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.brp-clip { position: relative; width: 84px; height: 108px; }
+.brp-clip video {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 12px;
+  background: #0c0f12; border: 1px solid rgba(128, 138, 148, .28);
+}
+.brp-clip-n {
+  position: absolute; left: 5px; bottom: 5px; min-width: 18px; height: 18px;
+  border-radius: 9px; background: rgba(8, 10, 12, .78); color: #fff;
+  font: 600 11px var(--mono, ui-monospace, monospace); display: grid; place-items: center; padding: 0 5px;
+}
+.brp-add {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  width: 84px; height: 108px; border-radius: 12px; padding: 0 6px;
+  border: 1px dashed rgba(128, 138, 148, .5); background: transparent;
+  color: var(--mut, #6b7680); font-size: 11.5px; text-align: center; cursor: pointer;
+}
+.brp-add span { font-size: 19px; line-height: 1; }
+.brp-add:hover { border-color: var(--acc, #2f9e73); color: var(--acc, #2f9e73); }
+
+.brp-songcard {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 4px 14px;
+  padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(128, 138, 148, .28);
+}
+.brp-songcard.unsure { border-color: rgba(214, 160, 60, .6); background: rgba(214, 160, 60, .07); }
+.brp-songcard b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.brp-songcard span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brp-songcard em {
+  grid-column: 1 / -1; font-style: normal; font-size: 12px; color: var(--mut, #6b7680); line-height: 1.45;
+}
+
+.brp-wave-wrap { position: relative; }
+.brp-wave {
+  width: 100%; height: 150px; display: block; border-radius: 12px; cursor: crosshair;
+  border: 1px solid rgba(128, 138, 148, .28);
+}
+.brp-wave-hint { margin: 6px 0 12px; font-size: 12px; color: var(--mut, #6b7680); }
+
+.brp-controls, .brp-drop { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
+/* Buttons size to their words. Left to the flex default they stretch to fill
+   the row, and a "Clear the drop" the width of the panel reads as the primary
+   action of the whole screen. */
+.brp-drop > .btn { flex: 0 0 auto; }
+.brp-ctl {
+  display: flex; flex-direction: column; gap: 5px;
+  font: 600 10.5px var(--mono, ui-monospace, monospace); letter-spacing: .14em;
+  color: var(--mut, #6b7680); text-transform: uppercase;
+}
+.brp-ctl .q-input { min-width: 210px; }
+.brp-bar { flex-direction: row; align-items: center; gap: 8px; }
+.brp-bar .btn { padding: 6px 12px; font-size: 12px; }
+.brp-before .q-input { min-width: 90px; }
+.brp-drop small { flex: 1 1 240px; font-size: 12px; color: var(--mut, #6b7680); line-height: 1.45; }
+
+/* The cut list, laid out proportionally: a clip held for four beats is twice
+   the width of one held for two, so the rhythm of the edit is visible without
+   reading a single number. */
+.brp-cuts { display: flex; gap: 3px; }
+.brp-cut {
+  min-width: 0; padding: 9px 4px; border-radius: 8px; text-align: center;
+  background: rgba(96, 214, 164, .16); border: 1px solid rgba(96, 214, 164, .4);
+  display: flex; flex-direction: column; gap: 2px; overflow: hidden;
+}
+.brp-cut b { font: 600 13px var(--mono, ui-monospace, monospace); }
+.brp-cut em { font-style: normal; font-size: 10px; color: var(--mut, #6b7680); }
+.brp-cut i {
+  font-style: normal; font: 600 8.5px var(--mono, ui-monospace, monospace);
+  letter-spacing: .1em; color: #a5761b;
+}
+.brp-cut.drop { background: rgba(255, 209, 102, .22); border-color: rgba(255, 209, 102, .65); }
+
+.brp-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.brp-progress { font-size: 12.5px; color: var(--mut, #6b7680); }
+
+@media (max-width: 640px) {
+  .brp-card { padding: 20px 16px 16px; border-radius: 16px; }
+  .brp-ctl .q-input { min-width: 0; width: 100%; }
+  .brp-ctl { flex: 1 1 100%; }
+}
+
+/* A control that cannot act has to look like it. The render button is disabled
+   until there are clips AND a song AND a readable tempo, and a full-strength
+   primary button that does nothing when pressed reads as a broken panel. */
+.brp-actions .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.brp-outro { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.brp-outro input { accent-color: var(--acc, #2f9e73); width: 16px; height: 16px; }
+.brp-outro em { font-style: normal; font-size: 11px; color: var(--mut, #6b7680); }

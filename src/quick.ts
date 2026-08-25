@@ -1475,6 +1475,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn gho" id="q-video-download">Breakdown MP4</button>
       <button class="btn gho" id="q-verdict-download">Verdict MP4</button>
       <button class="btn gho" id="q-rundown-download">Rundown MP4</button>
+      <!-- The other kind of reel: your own footage, cut to a song, with no
+           voiceover and no measurements. It shares nothing with the rundown
+           except the encoder, so it opens its own panel rather than adding a
+           fourth column of controls to this one. -->
+      <button class="btn gho" id="q-beatreel">Cut to the beat</button>
       <!-- Calibration, not a user feature. A screenshot of the region cards
            says the jaw is wrong; only the metric table says WHICH jaw metric,
            by how far, and whether the ideal or the spread is at fault. -->
@@ -1565,6 +1570,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(editedReport(r), "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(editedReport(r), "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(editedReport(r));
+  // Loaded on demand: the beat panel pulls in an FFT, a planner and the
+  // encoder, and most sessions in here never open it.
+  document.getElementById("q-beatreel")!.onclick = () => {
+    void import("./ui/beatReelPanel.js").then((m) => m.openBeatReelPanel());
+  };
 
   // The before half, exported on its own. Only present after a Reel Creator run
   // — there is no before to render otherwise, and a disabled button explaining

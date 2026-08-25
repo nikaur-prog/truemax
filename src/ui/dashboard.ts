@@ -12,6 +12,10 @@ import { trend } from "./dashTrend.js";
 import { loadPhotos } from "../engine/photoStore.js";
 import { historyPanelMarkup, wireHistoryPanel } from "./historyView.js";
 import { REEL } from "./demoReelData.js";
+// Only for the count on the faces strip: the gallery shows the faces with
+// photographs, and the number says how much bigger the measured set behind
+// the metric comparisons actually is. Both numbers are real.
+import { CELEBS } from "../engine/celebs.js";
 import { applyShim } from "./demoReelShim.js";
 import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
@@ -177,7 +181,7 @@ export function openDashboard(opts: {
             </span>
             <span class="dash-faces-copy">
               <b>${faces.length} famous faces, measured the same way</b>
-              <em>See where your numbers sit against theirs →</em>
+              <em>Plus ${CELEBS.length - faces.length} more inside your metric comparisons →</em>
             </span>
           </button>` : ""}
         </section>
