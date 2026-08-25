@@ -58,14 +58,31 @@ let clipsBeforeDrop: number | null = null;
 let quality: ReelQuality = "1080";
 let barNudge = 0;
 let busy = false;
+// The growth loop, on by default and honestly labelled: the card is the one
+// part of the reel that is ours, and it is a checkbox precisely so nobody
+// discovers it in their export.
+let outro = true;
 
 export function closeBeatReelPanel(): void {
+  // A render still writing must keep its sources: closing mid-render would
+  // revoke the clip URLs the encoder is seeking through and turn the rest of
+  // the export into two-second seek timeouts on dead blobs. The ✕ and the
+  // backdrop are both disabled while busy, so this is belt and braces.
+  if (busy) return;
   for (const c of clips) URL.revokeObjectURL(c.url);
   clips = [];
   song = null;
   dropAt = null;
   clipsBeforeDrop = null;
   barNudge = 0;
+  // Every control resets with the panel. Leaving quality or the fitted
+  // section length behind meant reopening showed the DEFAULTS while the state
+  // still held the old choices — a 4K render out of a select that said 1080.
+  beatsPerClip = 2;
+  fitSeconds = null;
+  quality = "1080";
+  songStart = 0;
+  outro = true;
   host?.remove();
   host = null;
 }
@@ -160,6 +177,10 @@ export function openBeatReelPanel(): void {
           </div>
         </div>
         <div class="brp-drop">
+          <label class="brp-outro"><input type="checkbox" id="brp-outro" checked />
+            End on the TrueMax card <em>one bar · "truemax.app"</em></label>
+        </div>
+        <div class="brp-drop">
           <button type="button" class="btn gho" id="brp-drop-set">Mark the drop here</button>
           <button type="button" class="btn gho" id="brp-drop-clear" hidden>Clear the drop</button>
           <label class="brp-ctl brp-before" hidden id="brp-before-wrap">Clips before it
@@ -186,7 +207,9 @@ export function openBeatReelPanel(): void {
 }
 
 function wire(el: HTMLElement): void {
-  el.querySelector<HTMLButtonElement>(".brp-x")!.onclick = () => closeBeatReelPanel();
+  el.querySelector<HTMLButtonElement>(".brp-x")!.onclick = () => {
+    if (!busy) closeBeatReelPanel();
+  };
   el.onclick = (e) => {
     if (e.target === el && !busy) closeBeatReelPanel();
   };
@@ -247,6 +270,10 @@ function wire(el: HTMLElement): void {
   el.querySelector<HTMLButtonElement>("#brp-bar-back")!.onclick = () => { barNudge--; snapStart(); paint(); };
   el.querySelector<HTMLButtonElement>("#brp-bar-fwd")!.onclick = () => { barNudge++; snapStart(); paint(); };
 
+  el.querySelector<HTMLInputElement>("#brp-outro")!.onchange = (e) => {
+    outro = (e.target as HTMLInputElement).checked;
+    paint();
+  };
   el.querySelector<HTMLButtonElement>("#brp-drop-set")!.onclick = () => {
     const plan = currentPlan();
     const g = grid();
@@ -565,9 +592,11 @@ function paintPlan(): void {
   const plan = currentPlan();
   sec.hidden = !plan;
   if (!plan) return;
+  const g2 = grid();
+  const outroSec = outro && g2 ? g2.period * g2.beatsPerBar : 0;
   note(
     "brp-plannote",
-    `${plan.cuts.length} cuts, ${plan.duration.toFixed(2)}s, every one on a beat at ${plan.bpm.toFixed(1)} BPM.`,
+    `${plan.cuts.length} cuts, ${plan.duration.toFixed(2)}s${outroSec ? ` + ${outroSec.toFixed(2)}s card` : ""}, every one on a beat at ${plan.bpm.toFixed(1)} BPM.`,
   );
   const wrap = host!.querySelector<HTMLElement>("#brp-cuts")!;
   wrap.innerHTML = plan.cuts
@@ -592,6 +621,7 @@ async function render(): Promise<void> {
       plan,
       song: { channels: song.channels, sampleRate: song.sampleRate },
       quality,
+      outroBeats: outro ? grid()!.beatsPerBar : 0,
       onProgress: (f, label) => {
         progress.textContent = `${label} — ${Math.round(f * 100)}%`;
       },

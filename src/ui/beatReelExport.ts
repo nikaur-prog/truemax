@@ -54,9 +54,74 @@ export interface BeatReelOptions {
   /** The decoded song. Only the plan's window is written into the export. */
   song: { channels: Float32Array[]; sampleRate: number };
   quality?: ReelQuality;
+  /**
+   * End on the TrueMax card, held for this many beats after the last clip.
+   *
+   * The card starts exactly where the final cut ends — a beat by construction
+   * — and a four-beat outro is one bar, so the music underneath it finishes a
+   * phrase rather than being chopped mid-thought. The CTA is the one part of
+   * the reel that is ours rather than the creator's, which is why it is an
+   * option and not a default they cannot see.
+   */
+  outroBeats?: number;
   /** Painted over the clip that lands on the drop — the reveal. */
   onDropFrame?: (ctx: CanvasRenderingContext2D, w: number, h: number, into: number, hold: number) => void;
   onProgress?: (fraction: number, label: string) => void;
+}
+
+/**
+ * The endcard: the landing page's own opening line, set the way the landing
+ * page sets it, over the product's dark ground. No screenshot, no baked image
+ * — drawn from type at whatever resolution the export runs at, so the 4K card
+ * is a 4K card. The rule under the wordmark draws in over the first beat, the
+ * only motion on an otherwise still close.
+ */
+function drawOutroCard(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  into: number,
+  beatSeconds: number,
+): void {
+  ctx.fillStyle = "#0d0f11";
+  ctx.fillRect(0, 0, w, h);
+  const u = w / 1080; // scale factor so the card is identical at 1080 and 4K
+  const cx = w / 2;
+  const fade = Math.min(1, into / 0.35);
+  ctx.globalAlpha = fade;
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f4f2ec";
+  ctx.font = `300 ${Math.round(64 * u)}px "Fraunces Variable", Fraunces, Georgia, serif`;
+  ctx.fillText("Looks are no longer", cx, h * 0.44);
+  ctx.fillText("subjective.", cx, h * 0.44 + 76 * u);
+
+  const grow = Math.min(1, into / Math.max(0.2, beatSeconds));
+  ctx.fillStyle = "#2f9e73";
+  ctx.fillRect(cx - 90 * u * grow, h * 0.52, 180 * u * grow, Math.max(2, 3 * u));
+
+  ctx.fillStyle = "rgba(244,242,236,0.92)";
+  ctx.font = `500 ${Math.round(26 * u)}px "Inter Variable", Inter, system-ui, sans-serif`;
+  const spaced = (text: string, y: number) => {
+    // Canvas has no letter-spacing; the wordmark's tracking is the identity,
+    // so it is spaced by hand.
+    const gap = 10 * u;
+    const widths = [...text].map((c) => ctx.measureText(c).width);
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (text.length - 1);
+    let x = cx - total / 2;
+    [...text].forEach((c, i) => {
+      ctx.fillText(c, x + widths[i] / 2, y);
+      x += widths[i] + gap;
+    });
+  };
+  spaced("TRUEMAX", h * 0.585);
+
+  ctx.fillStyle = "rgba(244,242,236,0.6)";
+  ctx.font = `400 ${Math.round(24 * u)}px "Inter Variable", Inter, system-ui, sans-serif`;
+  ctx.fillText("truemax.app", cx, h * 0.63);
+
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
 }
 
 export interface RenderedReel {
@@ -80,9 +145,14 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
   if (!plan.cuts.length) throw new Error("The plan has no cuts.");
   const size = SIZES[options.quality ?? "1080"];
   const { onProgress } = options;
+  const period = plan.bpm > 0 ? 60 / plan.bpm : 0;
+  const outroSeconds = Math.max(0, options.outroBeats ?? 0) * period;
+  const total = plan.duration + outroSeconds;
 
   onProgress?.(0.02, "Preparing the music");
-  const channels = sliceAudio(song.channels, song.sampleRate, plan.songStart, plan.duration);
+  // The music runs under the outro too — the card is the last cut of the
+  // edit, not a separate video stapled on after the song stops.
+  const channels = sliceAudio(song.channels, song.sampleRate, plan.songStart, total);
   applyEdgeFades(channels, song.sampleRate);
 
   const {
@@ -154,7 +224,7 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
     keyFrameInterval: 2,
   });
   const audioSource = new AudioBufferSource({ codec: audioCodec as never, bitrate: 192_000 });
-  const frameCount = Math.max(1, Math.round(FPS * plan.duration));
+  const frameCount = Math.max(1, Math.round(FPS * total));
   output.addVideoTrack(videoSource, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
   output.addAudioTrack(audioSource);
   output.setMetadataTags({ title: "TrueMax reel", artist: "TrueMax" });
@@ -175,6 +245,18 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
   onProgress?.(0.08, "Cutting");
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
+
+    // The outro claims everything after the last cut. Checked FIRST, because
+    // activeCut deliberately hands t >= the final cut's end back to the final
+    // clip (its guard against a black last frame), and here that time belongs
+    // to the card instead.
+    if (outroSeconds > 0 && t >= plan.duration) {
+      drawOutroCard(ctx, size.w, size.h, t - plan.duration, period);
+      await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
+      if (frame % 10 === 0) onProgress?.(0.08 + 0.88 * (frame / frameCount), "Cutting");
+      continue;
+    }
+
     const hit = activeCut(plan.cuts, t);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, size.w, size.h);

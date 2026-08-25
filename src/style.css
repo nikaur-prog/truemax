@@ -1116,6 +1116,15 @@ body.funnel-open { overflow: hidden; }
 #reel-canvas { border-radius: 24px; }
 .reel-caption { position: absolute; left: 0; right: 0; bottom: 84px; text-align: center; pointer-events: none; }
 .reel-caption b { display: block; font-family: var(--serif); font-weight: 300; font-size: 46px; line-height: 1; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.55); }
+/* The moment the count-up lands. One soft settle from a hair oversized, once
+   per face — the numeral equivalent of a stamp meeting paper. The animation
+   re-arms because the class is removed at each face change. */
+.reel-caption b.landed { animation: reel-land .5s cubic-bezier(.2,.9,.3,1.2) 1; }
+@keyframes reel-land {
+  from { transform: scale(1.06); text-shadow: 0 2px 26px rgba(143,243,224,.55); }
+  to { transform: scale(1); text-shadow: 0 2px 14px rgba(0,0,0,.55); }
+}
+@media (prefers-reduced-motion: reduce) { .reel-caption b.landed { animation: none; } }
 .reel-caption span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,.9); text-shadow: 0 1px 8px rgba(0,0,0,.6); }
 .oval-frame.showing-reel { background: #101113; }
 

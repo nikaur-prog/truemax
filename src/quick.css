@@ -725,3 +725,7 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
    until there are clips AND a song AND a readable tempo, and a full-strength
    primary button that does nothing when pressed reads as a broken panel. */
 .brp-actions .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.brp-outro { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.brp-outro input { accent-color: var(--acc, #2f9e73); width: 16px; height: 16px; }
+.brp-outro em { font-style: normal; font-size: 11px; color: var(--mut, #6b7680); }
