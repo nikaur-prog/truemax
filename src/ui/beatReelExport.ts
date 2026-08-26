@@ -265,7 +265,7 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
  * on a damaged file can simply never fire, and a render must not hang on it;
  * a stale frame is a far better outcome than a stuck export.
  */
-function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+export function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
   const target = Math.max(0, Math.min(time, Math.max(0, (video.duration || 0) - 0.05)));
   if (Math.abs(video.currentTime - target) < 0.001) return Promise.resolve();
   return new Promise<void>((resolve) => {
