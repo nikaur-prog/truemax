@@ -24,8 +24,18 @@ export function placeCallouts(
   outs: Array<{ x: number; y: number }>,
   w: number,
   h: number,
+  /**
+   * Pixels of the photo's bottom edge the labels must stay clear of.
+   *
+   * Undocked, that is the caption band the score sits in. Once the reel docks
+   * the photograph into the top two thirds, the score has moved OFF the
+   * picture onto its own panel, so the picture is entirely available — and
+   * reserving the old band there squeezed every label into a sixty-pixel
+   * strip at the top, three deep and overlapping the phase label.
+   */
+  reserve = 150,
 ): PlacedCallout[] {
-  const lowest = captionTop(h) - LABEL_H;
+  const lowest = h - reserve - LABEL_H;
   const taken: Array<[number, number, boolean]> = [];
   return outs.map((r) => {
     const ax = r.x * w;

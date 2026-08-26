@@ -87,6 +87,23 @@ export function mountDemoReel(
 
     const w = canvas.clientWidth || canvas.width;
     const h = canvas.clientHeight || canvas.height;
+
+    // ---- the dock ---------------------------------------------------------
+    //
+    // White numbers over a photograph are a coin toss: on Cavill's lit cheek
+    // the 8.1 all but vanished, and no amount of text-shadow fixes a number
+    // sitting on skin. So once the measuring is done the photograph RETREATS —
+    // it eases up into the top two thirds of the frame and the bottom third
+    // becomes solid black, with the seam blended so the panel reads as the
+    // photograph's own shadow rather than a bar stapled underneath it. The
+    // score and the four pillars then sit on black, where white is white.
+    //
+    // It expands back over the out-beat so the next face begins its scan
+    // full-frame and the crossfade never happens between two different shapes.
+    const dockT =
+      ease(seg(t, T.score[0], T.score[0] + 700)) * (1 - seg(t, T.out, T.hold));
+    const photoH = h - h * (1 / 3) * dockT;
+    const panelH = h - photoH;
     // Capped at 3, not 2. This canvas is around 300x375 CSS pixels, so even
     // full density is barely a megapixel — nothing here is worth trading
     // sharpness for. At the old cap of 2 a modern phone rendered the most
@@ -121,13 +138,35 @@ export function mountDemoReel(
     // A still photograph behind a moving overlay reads as a screenshot with
     // animation played on top of it; the same photograph drifting very slightly
     // reads as a camera pointed at someone.
-    const drawCover = (source: HTMLImageElement, zoom: number, a: number) => {
-      if (!source.complete || !source.naturalWidth) return;
-      const s = Math.max(w / source.naturalWidth, h / source.naturalHeight) * zoom;
+    // Where a photograph lands inside the (shrinking) photo area: cover-fit,
+    // centred. The demo portraits are 4:5 and so is the card, so at full
+    // height this is an exact fill; as the dock closes, the box gets wider
+    // than the picture and the fit crops equally off the top and the bottom,
+    // which takes hair and collar and leaves the face untouched in the middle.
+    const rectOf = (source: HTMLImageElement, zoom: number) => {
+      const s = Math.max(w / source.naturalWidth, photoH / source.naturalHeight) * zoom;
       const dw = source.naturalWidth * s;
       const dh = source.naturalHeight * s;
+      return { dx: (w - dw) / 2, dy: (photoH - dh) / 2, dw, dh };
+    };
+    // The live photo's rect — every point, line and callout is mapped through
+    // THIS, so the mesh is locked to the picture at every frame of the dock
+    // rather than drifting off it as the frame changes shape.
+    const rect = img.complete && img.naturalWidth ? rectOf(img, 1 + 0.04 * Math.min(1, t / T.hold)) : null;
+    const mapX = (px: number) => (rect ? rect.dx + px * rect.dw : px * w);
+    const mapY = (py: number) => (rect ? rect.dy + py * rect.dh : py * photoH);
+
+    const drawCover = (source: HTMLImageElement, zoom: number, a: number) => {
+      if (!source.complete || !source.naturalWidth) return;
+      const r = rectOf(source, zoom);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, photoH);
+      ctx.clip();
       ctx.globalAlpha = a;
-      ctx.drawImage(source, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      ctx.drawImage(source, r.dx, r.dy, r.dw, r.dh);
+      ctx.restore();
+      ctx.globalAlpha = a;
     };
 
     // The outgoing face used to fade to nothing and the incoming one to fade up
@@ -149,11 +188,11 @@ export function mountDemoReel(
     // inconsistency; one shared edge treatment is what makes eleven strangers'
     // photos look like one product shot them. Elliptical and gentle — the face
     // in the middle is untouched.
-    const vig = ctx.createRadialGradient(w / 2, h * 0.42, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.78);
+    const vig = ctx.createRadialGradient(w / 2, photoH * 0.42, Math.min(w, photoH) * 0.45, w / 2, photoH / 2, Math.max(w, photoH) * 0.78);
     vig.addColorStop(0, "rgba(8,10,12,0)");
     vig.addColorStop(1, "rgba(8,10,12,0.34)");
     ctx.fillStyle = vig;
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(0, 0, w, photoH);
 
     // Overlay text is white and the photograph underneath it is not reliably
     // dark — a lit forehead put "MEASURING" at almost no contrast. Two scrims
@@ -163,11 +202,16 @@ export function mountDemoReel(
     topScrim.addColorStop(1, "rgba(10,11,13,0)");
     ctx.fillStyle = topScrim;
     ctx.fillRect(0, 0, w, 72);
-    const botScrim = ctx.createLinearGradient(0, h - 120, 0, h);
+    // The seam. Undocked this is the old caption scrim; docked it is what
+    // makes the black panel read as the photograph's own falloff instead of a
+    // bar bolted underneath — the picture darkens INTO the panel, and the join
+    // has no visible edge.
+    const scrimTop = photoH - 120;
+    const botScrim = ctx.createLinearGradient(0, scrimTop, 0, photoH);
     botScrim.addColorStop(0, "rgba(10,11,13,0)");
-    botScrim.addColorStop(1, "rgba(10,11,13,0.72)");
+    botScrim.addColorStop(1, `rgba(10,11,13,${(0.72 + 0.28 * dockT).toFixed(3)})`);
     ctx.fillStyle = botScrim;
-    ctx.fillRect(0, h - 120, w, 120);
+    ctx.fillRect(0, scrimTop, w, 120);
 
     // ---- points sweep -----------------------------------------------------
     const swept = ease(seg(t, T.scan[0], T.scan[1]));
@@ -212,8 +256,8 @@ export function mountDemoReel(
           open = false;
           continue;
         }
-        if (open) ctx.lineTo(a[0] * w, a[1] * h);
-        else ctx.moveTo(a[0] * w, a[1] * h);
+        if (open) ctx.lineTo(mapX(a[0]), mapY(a[1]));
+        else ctx.moveTo(mapX(a[0]), mapY(a[1]));
         open = true;
       }
       ctx.stroke();
@@ -235,11 +279,11 @@ export function mountDemoReel(
       const settle = settled ? 0.3 + 0.1 * Math.max(0, Math.sin(now / 640 - py * 7)) : 0.62;
       ctx.fillStyle = fresh ? "#8FF3E0" : `rgba(255,255,255,${settle.toFixed(3)})`;
       ctx.beginPath();
-      ctx.arc(px * w, py * h, fresh ? 2.4 : 1.4, 0, Math.PI * 2);
+      ctx.arc(mapX(px), mapY(py), fresh ? 2.4 : 1.4, 0, Math.PI * 2);
       ctx.fill();
     }
     if (swept > 0 && swept < 1) {
-      const y = swept * h;
+      const y = mapY(swept);
       const g = ctx.createLinearGradient(0, y - 26, 0, y + 2);
       g.addColorStop(0, "rgba(143,243,224,0)");
       g.addColorStop(1, "rgba(143,243,224,0.85)");
@@ -272,6 +316,16 @@ export function mountDemoReel(
       ctx.fillRect(14, 50, (w - 28) * p, 2);
     }
 
+    // ---- the panel --------------------------------------------------------
+    // Solid, opaque, and painted before the numbers: this is the surface the
+    // score is legible against. Nothing of the photograph reaches it.
+    if (panelH > 0.5) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#0A0B0D";
+      ctx.fillRect(0, photoH, w, panelH + 1);
+      ctx.globalAlpha = alpha;
+    }
+
     // ---- pillars ----------------------------------------------------------
     if (t >= T.pillars[0]) {
       const names = Object.keys(face.pillars);
@@ -280,7 +334,9 @@ export function mountDemoReel(
         const appear = seg(t, T.pillars[0] + i * 170, T.pillars[0] + i * 170 + 380);
         if (appear <= 0) return;
         const x = 14 + i * (bw + 8);
-        const y = h - 74;
+        // Anchored to the panel rather than the frame: the row rides the seam
+        // down as the dock opens and never strands itself over the picture.
+        const y = photoH + panelH * 0.62;
         ctx.globalAlpha = alpha * appear;
         ctx.fillStyle = "rgba(255,255,255,0.2)";
         ctx.fillRect(x, y + 16, bw, 3);
@@ -304,7 +360,10 @@ export function mountDemoReel(
     // ---- region callouts --------------------------------------------------
     if (t >= T.regions[0]) {
       const outs = calloutsFor(face);
-      const placed = placeCallouts(outs, w, h);
+      // Docked, the score is on its own panel and the whole photograph is
+      // free — only a small margin off the bottom edge so a label never
+      // straddles the seam.
+      const placed = placeCallouts(outs, w, photoH, 150 - 132 * dockT);
       const appearOf = (i: number) => seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
 
       // Two passes with a scrim between them. The layout keeps LABELS out of
@@ -331,12 +390,18 @@ export function mountDemoReel(
       });
 
       ctx.globalAlpha = alpha;
-      const capScrim = ctx.createLinearGradient(0, h - 176, 0, h);
-      capScrim.addColorStop(0, "rgba(10,11,13,0)");
-      capScrim.addColorStop(0.45, "rgba(10,11,13,0.5)");
-      capScrim.addColorStop(1, "rgba(10,11,13,0.78)");
-      ctx.fillStyle = capScrim;
-      ctx.fillRect(0, h - 176, w, 176);
+      // Docked, the panel already owns the caption band and re-stamping a
+      // scrim over the picture would only mute the callouts sitting in it.
+      if (dockT < 1) {
+        ctx.globalAlpha = alpha * (1 - dockT);
+        const capScrim = ctx.createLinearGradient(0, photoH - 176, 0, photoH);
+        capScrim.addColorStop(0, "rgba(10,11,13,0)");
+        capScrim.addColorStop(0.45, "rgba(10,11,13,0.5)");
+        capScrim.addColorStop(1, "rgba(10,11,13,0.78)");
+        ctx.fillStyle = capScrim;
+        ctx.fillRect(0, photoH - 176, w, 176);
+        ctx.globalAlpha = alpha;
+      }
 
       outs.forEach((r, i) => {
         const appear = appearOf(i);
@@ -373,7 +438,9 @@ export function mountDemoReel(
     ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.42)";
     ctx.textAlign = "right";
-    ctx.fillText(face.credit, w - 12, h - 8);
+    // Sits with the picture it credits — on the photograph's own bottom edge,
+    // which travels up with the dock.
+    ctx.fillText(face.credit, w - 12, photoH - 8);
     ctx.textAlign = "left";
     ctx.globalAlpha = 1;
 
@@ -387,6 +454,11 @@ export function mountDemoReel(
     scoreEl.classList.toggle("landed", t >= T.score[1]);
     nameEl.textContent = face.name;
     nameEl.style.opacity = String(alpha * 0.85);
+    // The caption is DOM (the serif face and the landing animation are CSS),
+    // so it travels into the panel by having its offset driven from here —
+    // the number ends up on black above the pillar row, never on a cheek.
+    const cap = scoreEl.parentElement;
+    if (cap) cap.style.bottom = `${(84 - 40 * dockT).toFixed(1)}px`;
 
     if (t >= T.hold) {
       idx = (idx + 1) % REEL.length;
