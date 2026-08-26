@@ -1124,6 +1124,20 @@ body.funnel-open { overflow: hidden; }
 
 .verify-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #fff; background: rgba(16, 17, 19, 0.82); border-radius: 10px; padding: 9px 12px; opacity: 0; transition: opacity 0.18s; pointer-events: none; }
 .verify-hint.show { opacity: 1; }
+/* Not during the guided walk. It was half-covered by the retake button, it
+   repeated the name already on the pill, and the definition it carried is
+   worth reading exactly once — so it moved under the enlarged reference,
+   where the person who is actually unsure will go looking for it. */
+.verify-layer:has(~ .side-pointpill) .verify-hint,
+.face-frame:has(.side-pointpill) .verify-hint { display: none; }
+
+/* The explainer, under the enlarged reference. */
+.refcrop-stage { position: relative; display: block; }
+.refcrop-hint {
+  margin: 14px auto 0; max-width: 42ch; text-align: center;
+  font: 400 13.5px/1.55 var(--sans); color: rgba(255, 255, 255, .82);
+}
+.refcrop-hint b { color: #fff; font-weight: 600; }
 
 .verify-magnifier {
   position: absolute; top: 12px; z-index: 8; width: 132px;
@@ -2874,12 +2888,12 @@ body.auth-modal-open { overflow: hidden; }
 .side-refcrop-stage { position: relative; display: inline-block; }
 .refcrop-play, .refcrop-big {
   position: absolute; z-index: 2; display: grid; place-items: center;
-  width: 28px; height: 28px; border: 1px solid rgba(255,255,255,.34); border-radius: 999px;
+  width: 18px; height: 18px; border: 1px solid rgba(255,255,255,.34); border-radius: 999px;
   background: rgba(12,20,18,.72); backdrop-filter: blur(6px); color: #8ff3e0;
-  font: 11px/1 var(--sans); cursor: pointer; transition: border-color .2s;
+  font: 8.5px/1 var(--sans); cursor: pointer; transition: border-color .2s;
 }
-.refcrop-play { left: 8px; bottom: 10px; padding-left: 2px; }
-.refcrop-big { right: 8px; top: 8px; }
+.refcrop-play { left: 5px; bottom: 6px; padding-left: 1px; }
+.refcrop-big { right: 4px; top: 4px; }
 .refcrop-play:hover, .refcrop-big:hover { border-color: #8ff3e0; }
 .refcrop-fullcard { position: relative; }
 .refcrop-fullcard canvas { display: block; border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
@@ -4562,9 +4576,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    the whole signal, so it gets a real transition rather than a swap. */
 .gnext-in {
   position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: 58px; z-index: 4;
-  min-width: 62%; max-width: calc(100% - 24px);
-  padding: 13px 20px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.22);
+  bottom: 18px; z-index: 4;
+  min-width: 0; max-width: calc(100% - 24px);
+  padding: 10px 20px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.22);
   /* BLUE = asking. Black read as chrome — a bar sitting on the photo rather
      than the one control on the screen — and it matched the caption strip
      directly under it, so the two merged into a single dark block. */
@@ -4703,9 +4717,9 @@ body.is-member .journey { display: none; }
   position: absolute; top: 12px; left: 12px; z-index: 6;
   /* The reference sits in the opposite corner at 92px plus its margins, so the
      name has the rest of the width and wraps rather than sliding under it. */
-  max-width: calc(100% - 128px);
-  display: inline-flex; align-items: baseline; gap: 8px;
-  padding: 7px 13px; border-radius: 999px;
+  max-width: calc(100% - 96px);
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 5px 10px; border-radius: 999px;
   background: #fff; color: #14181c;
   box-shadow: 0 2px 14px rgba(8, 10, 12, .3);
   opacity: 0; transform: translateY(-6px);
@@ -4715,9 +4729,9 @@ body.is-member .journey { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .side-pointpill.in { animation: none; opacity: 1; transform: none; }
 }
-.side-pointpill b { font: 600 14px/1.1 var(--sans); letter-spacing: -0.01em; }
+.side-pointpill b { font: 600 12px/1.1 var(--sans); letter-spacing: -0.01em; }
 .side-pointpill em {
-  font: 500 10px/1 var(--mono); font-style: normal; letter-spacing: .08em;
+  font: 500 9px/1 var(--mono); font-style: normal; letter-spacing: .07em;
   color: #6b7680;
 }
 
@@ -4729,7 +4743,7 @@ body.is-member .journey { display: none; }
   margin: 0; cursor: pointer;
 }
 .side-refcrop canvas {
-  display: block; width: 92px; height: 92px; border-radius: 12px;
+  display: block; width: 62px; height: 62px; border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, .35); background: rgba(12, 20, 18, .6);
   box-shadow: 0 4px 18px rgba(8, 10, 12, .38);
   transition: transform .2s cubic-bezier(.2, .8, .3, 1);

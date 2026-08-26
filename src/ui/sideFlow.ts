@@ -546,13 +546,25 @@ function mountVerify(
   const automaticPoints = cloneSidePoints(seed.automaticPoints ?? seed.points);
   const seedMethod = seed.method ?? "existing";
 
+  // A fresh seed opens IN the walkthrough; a placement being re-opened for
+  // corrections goes straight to the free-editing review, because those points
+  // have already been through the walk once and the person came back for one
+  // or two of them, not all thirteen. Decided here because the reference badge
+  // below keys off it.
+  const startInGuidedMode = seedMethod !== "existing";
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
-  // The reference diagram, in the corner of the photo. Mounted with the seed's
-  // own facing so it points the same way the subject does — a guide facing the
-  // wrong way is harder to read than none.
+  // The whole-face reference badge, for the free-editing review where a person
+  // is looking at all thirteen rings at once and wants to compare the set.
+  //
+  // NOT during the guided walk. That step now carries its own reference — the
+  // crop for the point being placed, in the same corner — and two reference
+  // widgets stacked in one corner is how the walkthrough ended up with a
+  // labelled thumbnail sitting on top of an unlabelled one. One reference per
+  // screen, and on the walkthrough it is the one that answers the question
+  // actually being asked: where does THIS point go.
   reference?.destroy();
-  reference = mountSideReference(e.frame, seed.faceDir);
+  reference = startInGuidedMode ? null : mountSideReference(e.frame, seed.faceDir);
   // And the way back out, in the opposite corner. Mounted once here rather
   // than per step, so it is the same control in the same place whether you are
   // thirteen taps into the walkthrough or looking at the whole set at once —
@@ -633,7 +645,7 @@ function mountVerify(
     };
 
     const paint = (index: number, total: number, moved = false) => {
-      const { label } = verifier!.guidedCurrent();
+      const { label, hint } = verifier!.guidedCurrent();
       // ---------------------------------------------------------------------
       // The walkthrough is the photograph, and nothing else.
       //
@@ -692,9 +704,12 @@ function mountVerify(
             const overlay = document.createElement("div");
             overlay.className = "sref-overlay refcrop-full";
             overlay.innerHTML = `<div class="refcrop-fullcard" role="dialog" aria-modal="true" aria-label="Reference for this point">
-              <canvas></canvas>
-              <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
-              <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
+              <div class="refcrop-stage">
+                <canvas></canvas>
+                <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
+                <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
+              </div>
+              <p class="refcrop-hint"><b>${label}</b>${hint ? ` — ${hint}` : ""}</p>
             </div>`;
             document.body.appendChild(overlay);
             const bigCanvas = overlay.querySelector("canvas")!;
@@ -824,11 +839,7 @@ function mountVerify(
     };
   };
 
-  // A fresh seed opens IN the walkthrough; a placement being re-opened for
-  // corrections goes straight to the free-editing review, because those points
-  // have already been through the walk once and the person came back for one
-  // or two of them, not all thirteen.
-  const startInGuidedMode = seedMethod !== "existing";
+
 
   const confirmPlacement = async () => {
     if (!verifier) return;
