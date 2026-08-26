@@ -59,17 +59,41 @@ test("the ladder gets steeper going up and is strictly ordered", () => {
 });
 
 test("the ladder stops claiming counts where the sample runs out", () => {
-  // The rung at the top must be flagged as a bound, not a count. On the raw
-  // curve an 8 is about 1 in 91 and a 9 about 1 in 1000, but statedPct clamps
-  // at 99, so anything up there can only honestly be called "rarer than 1 in
-  // 100". A ladder that printed "1 in 1000" would be claiming three digits of
-  // resolution off roughly a hundred reference faces.
+  // The rung at the top must be flagged as the place the product stops quoting
+  // counts. On the raw curve a 9 is about 1 in 1000, and roughly a hundred
+  // reference faces per sex cannot support three digits of resolution — so 8 is
+  // where we stop counting, not where the faces stop.
   const top = LADDER[LADDER.length - 1];
   assert.ok(top.capped, `top rung ${top.score} should be capped`);
-  assert.equal(top.oneIn, 100);
+  // It used to assert oneIn === 100 here, which pinned the wrong number: an 8.0
+  // sits at the 98.90th percentile, or about 1 in 91. That 100 came from
+  // oneInN reading the STATED percentile, which rounds to the nearest five and
+  // rounded 98.9 up to 99. Correct on a report, where the rarity has to match
+  // the chip beside it; pure inflation on a ladder that has no chip beside it.
+  assert.equal(top.score, 8);
+  assert.ok(top.oneIn >= 85 && top.oneIn <= 95, `8.0 is about 1 in 91, got 1 in ${top.oneIn}`);
   // Everything below it is a real count and must not be flagged.
   for (const rung of LADDER.slice(0, -1)) {
     assert.ok(!rung.capped, `${rung.score} should not be capped`);
+  }
+});
+
+// The direction of every remaining rounding error on this ladder.
+//
+// All three upper rungs used to overstate: 1 in 4.5 shown as 1 in 5, 1 in 16.1
+// as 1 in 20, 1 in 91 as 1 in 100 — each making a reader's score look rarer
+// than it is, on the one screen whose whole job is telling them what it is
+// worth. Flooring the raw value guarantees the error can only ever fall the
+// other way.
+test("no ladder rung claims more rarity than the curve supports", () => {
+  for (const rung of LADDER) {
+    const trueOneIn = 100 / Math.max(1e-9, 100 - aggregateScoreToPercentile(rung.score));
+    assert.ok(
+      rung.oneIn <= trueOneIn + 1e-9,
+      `${rung.score} shown as 1 in ${rung.oneIn} but the curve says 1 in ${trueOneIn.toFixed(1)}`,
+    );
+    // And not so conservative it stops meaning anything.
+    assert.ok(rung.oneIn >= trueOneIn - 1, `${rung.score} understates by more than one person`);
   }
 });
 
