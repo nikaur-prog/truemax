@@ -4,7 +4,16 @@ import type { Report, Sex } from "../engine/types.js";
 import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
-import type { SidePoints } from "../engine/sideMetrics.js";
+import {
+  mountSoundToggle,
+  soundAdvance,
+  soundDrag,
+  soundFinish,
+  soundGrab,
+  startThinking,
+  stopThinking,
+} from "./scanSounds.js";
+import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
@@ -98,6 +107,7 @@ interface SidePlacementSeed {
 let verifier: VerifyHandle | null = null;
 let reference: ReferenceHandle | null = null;
 let retake: RetakeHandle | null = null;
+let soundToggle: { destroy(): void } | null = null;
 let sideCam: CameraHandle | null = null;
 let auto: AutoCapture | null = null;
 let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -145,6 +155,27 @@ function markSideOpen(open: boolean): void {
   document.body.classList.toggle("side-open", open);
 }
 
+/**
+ * Strip the guided walkthrough's furniture off the photo frame.
+ *
+ * The pill and the reference crop are appended straight to the frame by
+ * paint() rather than being owned by the verifier, so `verifier.destroy()`
+ * left them behind. Retaking the side photo therefore opened a live camera
+ * with "Ear notch 13/13" pinned to one corner and a cropped ear photograph
+ * in the other — a walkthrough for a photograph that no longer existed,
+ * naming a landmark on a face that had not been captured yet.
+ *
+ * Called from every path that puts the frame back into a state where there is
+ * no photograph to point at: opening the capture, retaking, and closing.
+ */
+function clearWalkthrough(frame: HTMLElement): void {
+  frame.querySelector(".side-pointpill")?.remove();
+  frame.querySelector(".side-refcrop")?.remove();
+  // The popped-out reference lives on <body>, so it survives the frame being
+  // emptied and would hang over the camera on its own.
+  document.querySelector(".refcrop-full")?.remove();
+}
+
 export function openSideCapture(ctx: SideCtx): void {
   const e = el();
   verifier?.destroy();
@@ -155,6 +186,10 @@ export function openSideCapture(ctx: SideCtx): void {
   // Same for retake: it acts on a photograph, and there is not one yet.
   retake?.destroy();
   retake = null;
+  soundToggle?.destroy();
+  soundToggle = null;
+  stopThinking();
+  clearWalkthrough(e.frame);
   markSideOpen(true);
   e.section.classList.remove("hidden");
   e.cap.textContent = "AWAITING PHOTO";
@@ -248,6 +283,18 @@ function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
 async function openSideCamera(ctx: SideCtx): Promise<void> {
   const e = el();
   if (sideCam) return;
+  // The retake button reaches here without going through openSideCapture, and
+  // it is the path that produced the bug: a walkthrough part-way through, then
+  // a live camera underneath the point it had reached.
+  verifier?.destroy();
+  verifier = null;
+  reference?.destroy();
+  reference = null;
+  soundToggle?.destroy();
+  soundToggle = null;
+  stopThinking();
+  clearWalkthrough(e.frame);
+  e.lines.replaceChildren();
   e.drop.classList.add("hidden");
   e.live.classList.remove("hidden");
   e.frame.classList.add("live");
@@ -421,6 +468,10 @@ export function close(): void {
   reference = null;
   retake?.destroy();
   retake = null;
+  soundToggle?.destroy();
+  soundToggle = null;
+  stopThinking();
+  clearWalkthrough(el().frame);
   if (sidePaste) {
     document.removeEventListener("paste", sidePaste);
     sidePaste = null;
@@ -582,6 +633,111 @@ function mountVerify(
   // goes through. Scoped per mounted photo, so the next face asks again.
   let untouchedAcknowledged = false;
 
+  // The photographic "it goes here" patch, when the reference exists. Loaded
+  // once per mount; a missing or unshipped image just means the steps show
+  // their words alone, which is what they always did.
+  //
+  // Out here rather than inside the walkthrough because the all-points view
+  // needs the same picture: it was declared in showGuidedActions, so the two
+  // screens could not share one reference even though they are describing the
+  // same thirteen landmarks on the same photograph.
+  let guideImage: HTMLImageElement | null = null;
+  if (guidePhotoReady()) {
+    guideImage = new Image();
+    guideImage.src = GUIDE_PHOTO_URL;
+  }
+
+  // -----------------------------------------------------------------------
+  // The reference in the corner, for ONE named point.
+  //
+  // It used to be built inside the walkthrough's paint() and nowhere else,
+  // which is why "all points at once" showed a cropped ear while the ring in
+  // your hand was the upper lip: the reference was left wherever the walk had
+  // last put it, describing a point you were no longer on. Lifted out here so
+  // the walkthrough and the all-points view drive the same thing — the walk
+  // by its step, the all-points view by whichever ring you pick up.
+  // -----------------------------------------------------------------------
+  const setReference = (id: SidePointId, label: string, hint: string): void => {
+  let refWrap = e.frame.querySelector<HTMLElement>(".side-refcrop");
+  if (guideImage && !refWrap) {
+    refWrap = document.createElement("div");
+    refWrap.className = "side-refcrop";
+    refWrap.innerHTML = `<div class="side-refcrop-stage">
+        <canvas id="side-refcrop"></canvas>
+        <button type="button" class="refcrop-big" id="refcrop-big" aria-label="Show where this sits on the whole profile">⤢</button>
+      </div>`;
+    e.frame.appendChild(refWrap);
+  }
+  if (guideImage) {
+    const crop = document.getElementById("side-refcrop") as HTMLCanvasElement | null;
+    const render = () => {
+      if (crop && guideImage!.naturalWidth) drawGuideCrop(crop, guideImage!, id, verifier!.faceDir);
+    };
+    if (guideImage.complete) render();
+    else guideImage.onload = render;
+    // The "show me" zoom: full profile, ring on the point, smooth zoom in.
+    // A step change re-renders this whole panel, so the cancel handle never
+    // outlives the canvas it paints.
+    // The thumb is a STILL. Playing a zoom inside a 92px square was an
+    // animation nobody could follow, and it ran on the same canvas the
+    // person was using as a reference — so the reference kept moving.
+    // Tap it and it opens; the movement lives there, where it is legible.
+    const big = document.getElementById("refcrop-big");
+    const openBig = () => {
+        const overlay = document.createElement("div");
+        overlay.className = "sref-overlay refcrop-full";
+        overlay.innerHTML = `<div class="refcrop-fullcard" role="dialog" aria-modal="true" aria-label="Reference for this point">
+          <div class="refcrop-stage">
+            <canvas></canvas>
+            <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
+            <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
+          </div>
+          <p class="refcrop-hint"><b>${label}</b>${hint ? ` — ${hint}` : ""}</p>
+        </div>`;
+        document.body.appendChild(overlay);
+        const bigCanvas = overlay.querySelector("canvas")!;
+        const size = Math.min(640, Math.min(window.innerWidth, window.innerHeight) - 48);
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        bigCanvas.width = size * dpr;
+        bigCanvas.height = size * dpr;
+        bigCanvas.style.width = `${size}px`;
+        bigCanvas.style.height = `${size}px`;
+        // Opens on the WHOLE profile, held still. The zoom is a thing you
+        // ask for with the play button, not a thing that happens at you
+        // the moment a panel appears — which is what made this feel like a
+        // glitch rather than a demonstration.
+        drawGuideWhole(bigCanvas, guideImage!, id, verifier!.faceDir);
+        let stop: (() => void) | null = null;
+        const close = () => {
+          stop?.();
+          stop = null;
+          overlay.remove();
+          document.removeEventListener("keydown", onKey);
+        };
+        const onKey = (ev: KeyboardEvent) => {
+          if (ev.key === "Escape") close();
+        };
+        document.addEventListener("keydown", onKey);
+        overlay.querySelector(".refcrop-play-big")?.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          stop?.();
+          stop = playGuideZoom(bigCanvas, guideImage!, id, verifier!.faceDir, {
+            durationMs: 1900,
+            holdMs: 650,
+            onDone: () => (stop = null),
+          });
+        });
+        overlay.addEventListener("click", (ev) => {
+          if (ev.target === overlay || (ev.target as HTMLElement).closest(".refcrop-close")) close();
+        });
+    };
+    if (big) big.onclick = openBig;
+    // The picture itself is the target people reach for, not the small
+    // glyph in its corner.
+    if (crop) crop.onclick = openBig;
+  }
+  };
+
   // The walkthrough: one point at a time, tap to place, next.
   //
   // The first live test found the failure plainly: a fresh seed shows thirteen
@@ -594,14 +750,6 @@ function mountVerify(
     verifier?.setEditable(true);
     e.layer.querySelector(".gnext-in")?.remove();
     e.cap.textContent = "PLACE THE POINTS";
-    // The photographic "it goes here" patch, when the reference exists. Loaded
-    // once per mount; a missing or unshipped image just means the step shows
-    // its words alone, which is what it always did.
-    let guideImage: HTMLImageElement | null = null;
-    if (guidePhotoReady()) {
-      guideImage = new Image();
-      guideImage.src = GUIDE_PHOTO_URL;
-    }
     // The advance control lives INSIDE the photo, just above the name of the
     // point it is asking about, because that is where the eye already is: a
     // button under the frame means looking away from the ring to press it and
@@ -618,6 +766,12 @@ function mountVerify(
     inFrame.dataset.verifyChrome = "1";
     inFrame.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     e.layer.appendChild(inFrame);
+    // The sounds start here, so the control for them does too. It is the same
+    // toggle in the same corner on both screens, because it is the same
+    // question — points are dragged in the walkthrough as much as in the
+    // all-points view.
+    soundToggle?.destroy();
+    soundToggle = mountSoundToggle(e.frame);
     const advance = new GuidedAdvance();
 
     // Three dots, bouncing out of phase, while a finger is down on the ring.
@@ -625,12 +779,38 @@ function mountVerify(
     // its own animation delay.
     const DOTS = `<i class="gnext-dot"></i><i class="gnext-dot"></i><i class="gnext-dot"></i>`;
 
-    const paintButton = () => {
+    // The blue-to-green change is the moment the step is answered, and it used
+    // to be a text swap: the same button, a different word, a different colour,
+    // all in one frame. Nothing about that said "you did that" — it read as the
+    // label being wrong a moment ago.
+    //
+    // So the change is played rather than applied. The old label leaves
+    // upward, the colour crosses under it, and the new one arrives from below,
+    // which is the same direction the walkthrough itself is travelling. Fast
+    // enough (about a fifth of a second) that pressing thirteen times never
+    // becomes a wait.
+    let wasReady = false;
+    const paintButton = (animate = false) => {
       const { ready, busy, text } = advance.view();
-      inFrame.classList.toggle("ready", ready);
-      inFrame.classList.toggle("busy", busy);
-      if (busy) inFrame.innerHTML = DOTS;
-      else inFrame.textContent = text;
+      const changed = ready !== wasReady;
+      wasReady = ready;
+      const apply = () => {
+        inFrame.classList.toggle("ready", ready);
+        inFrame.classList.toggle("busy", busy);
+        if (busy) inFrame.innerHTML = DOTS;
+        else inFrame.textContent = text;
+      };
+      if (animate && changed && !busy) {
+        inFrame.classList.add("swapping");
+        window.setTimeout(() => {
+          apply();
+          inFrame.classList.remove("swapping");
+          inFrame.classList.add("swapped");
+          window.setTimeout(() => inFrame.classList.remove("swapped"), 260);
+        }, 130);
+      } else {
+        apply();
+      }
       // The marker under the walkthrough goes green the moment the step is
       // answered, so the photo and the button agree without being read
       // separately.
@@ -641,8 +821,17 @@ function mountVerify(
     // the button can stop offering something the finger is not free to take.
     verifier!.onDragChange = (dragging) => {
       advance.setDragging(dragging);
+      // The pulse runs for exactly as long as the dots do, so the two are one
+      // signal rather than two.
+      if (dragging) {
+        soundGrab();
+        startThinking();
+      } else {
+        stopThinking();
+      }
       paintButton();
     };
+    verifier!.onDragMove = () => soundDrag();
 
     const paint = (index: number, total: number, moved = false) => {
       const { label, hint } = verifier!.guidedCurrent();
@@ -674,85 +863,9 @@ function mountVerify(
       void pill.offsetWidth;
       pill.classList.add("in");
 
-      let refWrap = e.frame.querySelector<HTMLElement>(".side-refcrop");
-      if (guideImage && !refWrap) {
-        refWrap = document.createElement("div");
-        refWrap.className = "side-refcrop";
-        refWrap.innerHTML = `<div class="side-refcrop-stage">
-            <canvas id="side-refcrop"></canvas>
-            <button type="button" class="refcrop-big" id="refcrop-big" aria-label="Show where this sits on the whole profile">⤢</button>
-          </div>`;
-        e.frame.appendChild(refWrap);
-      }
-      if (guideImage) {
-        const crop = document.getElementById("side-refcrop") as HTMLCanvasElement | null;
-        const id = SIDE_POINT_IDS[index];
-        const render = () => {
-          if (crop && guideImage!.naturalWidth) drawGuideCrop(crop, guideImage!, id, verifier!.faceDir);
-        };
-        if (guideImage.complete) render();
-        else guideImage.onload = render;
-        // The "show me" zoom: full profile, ring on the point, smooth zoom in.
-        // A step change re-renders this whole panel, so the cancel handle never
-        // outlives the canvas it paints.
-        // The thumb is a STILL. Playing a zoom inside a 92px square was an
-        // animation nobody could follow, and it ran on the same canvas the
-        // person was using as a reference — so the reference kept moving.
-        // Tap it and it opens; the movement lives there, where it is legible.
-        const big = document.getElementById("refcrop-big");
-        const openBig = () => {
-            const overlay = document.createElement("div");
-            overlay.className = "sref-overlay refcrop-full";
-            overlay.innerHTML = `<div class="refcrop-fullcard" role="dialog" aria-modal="true" aria-label="Reference for this point">
-              <div class="refcrop-stage">
-                <canvas></canvas>
-                <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
-                <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
-              </div>
-              <p class="refcrop-hint"><b>${label}</b>${hint ? ` — ${hint}` : ""}</p>
-            </div>`;
-            document.body.appendChild(overlay);
-            const bigCanvas = overlay.querySelector("canvas")!;
-            const size = Math.min(640, Math.min(window.innerWidth, window.innerHeight) - 48);
-            const dpr = Math.min(2, window.devicePixelRatio || 1);
-            bigCanvas.width = size * dpr;
-            bigCanvas.height = size * dpr;
-            bigCanvas.style.width = `${size}px`;
-            bigCanvas.style.height = `${size}px`;
-            // Opens on the WHOLE profile, held still. The zoom is a thing you
-            // ask for with the play button, not a thing that happens at you
-            // the moment a panel appears — which is what made this feel like a
-            // glitch rather than a demonstration.
-            drawGuideWhole(bigCanvas, guideImage!, id, verifier!.faceDir);
-            let stop: (() => void) | null = null;
-            const close = () => {
-              stop?.();
-              stop = null;
-              overlay.remove();
-              document.removeEventListener("keydown", onKey);
-            };
-            const onKey = (ev: KeyboardEvent) => {
-              if (ev.key === "Escape") close();
-            };
-            document.addEventListener("keydown", onKey);
-            overlay.querySelector(".refcrop-play-big")?.addEventListener("click", (ev) => {
-              ev.stopPropagation();
-              stop?.();
-              stop = playGuideZoom(bigCanvas, guideImage!, id, verifier!.faceDir, {
-                durationMs: 1900,
-                holdMs: 650,
-                onDone: () => (stop = null),
-              });
-            });
-            overlay.addEventListener("click", (ev) => {
-              if (ev.target === overlay || (ev.target as HTMLElement).closest(".refcrop-close")) close();
-            });
-        };
-        if (big) big.onclick = openBig;
-        // The picture itself is the target people reach for, not the small
-        // glyph in its corner.
-        if (crop) crop.onclick = openBig;
-      }
+      setReference(SIDE_POINT_IDS[index], label, hint);
+
+
       const counter = document.getElementById("side-gcount");
       if (counter) counter.textContent = `${index + 1} / ${total}`;
       advance.step(index, total, moved);
@@ -781,10 +894,18 @@ function mountVerify(
       showReviewActions();
     };
     inFrame.onclick = () => {
-      if (advance.press() === "confirm") paintButton();
-      else verifier?.guidedNext();
+      if (advance.press() === "confirm") {
+        // Answering an untouched point turns the button green and names what
+        // is next. That is the change worth playing — both the animation and
+        // the two rising notes belong here rather than on the step after.
+        paintButton(true);
+        soundAdvance();
+      } else {
+        verifier?.guidedNext();
+      }
     };
     verifier!.startGuided(paint, () => {
+      soundFinish();
       inFrame.remove();
       showReviewActions();
     });
@@ -799,6 +920,30 @@ function mountVerify(
     e.layer.querySelector(".gnext-in")?.remove();
     e.actions.classList.remove("guided-row");
     e.cap.textContent = "REVIEW LANDMARKS";
+    // Thirteen rings at once and no walkthrough to say which is which, so the
+    // corner reference follows the hand: pick up a ring and the reference
+    // becomes that landmark. Without this it sat on whatever the walk last
+    // showed — an ear crop while you were dragging the upper lip.
+    stopThinking();
+    e.frame.querySelector(".side-pointpill")?.remove();
+    soundToggle?.destroy();
+    soundToggle = mountSoundToggle(e.frame);
+    if (verifier) {
+      verifier.onDragChange = (dragging) => {
+        if (dragging) {
+          soundGrab();
+          startThinking();
+        } else {
+          stopThinking();
+          soundAdvance();
+        }
+      };
+      verifier.onDragMove = () => soundDrag();
+      verifier.onSelect = (id) => {
+        const def = SIDE_POINTS.find((sp) => sp.id === id);
+        if (def) setReference(id, def.label, def.hint);
+      };
+    }
     const low = (seed.confidence ?? 1) < 0.7;
     e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
       <p class="side-sub">${low

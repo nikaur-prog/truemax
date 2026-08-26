@@ -179,13 +179,39 @@ export function tutorialSteps(view: TutorialView): readonly Step[] {
 }
 
 /**
+ * Offer BOTH tutorials, once, before the first photograph.
+ *
+ * A scan is two photographs, and the tutorial used to be offered twice — once
+ * before the front, then again several minutes later before the profile. Which
+ * meant being interrupted by the same question twice in one scan, the second
+ * time at the worst possible moment: you have just been told to turn away from
+ * the screen, and the app puts a dialogue on it.
+ *
+ * Both up front instead. One question, both sets of examples, and answering
+ * "show me" plays the front tutorial straight into the side one. Somebody who
+ * is about to take two photographs would rather learn about both while they
+ * are still looking at the screen.
+ *
+ * The never-ask tick covers both views for the same reason: it is answering
+ * "do I need to be taught how to photograph my face", not "do I need to be
+ * taught this specific angle".
+ */
+export function offerBothTutorials(then: () => void): void {
+  if (tutorialSuppressed("front") && tutorialSuppressed("side")) {
+    then();
+    return;
+  }
+  offerTutorial("both", then);
+}
+
+/**
  * Offer the tutorial, then continue.
  *
  * Calls `then` exactly once, whatever route the person takes — including the
  * suppressed case, where nothing is shown at all.
  */
-export function offerTutorial(view: TutorialView, then: () => void): void {
-  if (tutorialSuppressed(view)) {
+export function offerTutorial(view: TutorialView | "both", then: () => void): void {
+  if (view !== "both" && tutorialSuppressed(view)) {
     then();
     return;
   }
@@ -196,41 +222,47 @@ export function offerTutorial(view: TutorialView, then: () => void): void {
     then();
   };
 
+  const FRONT_EGS = `<figure class="tut-eg good">
+      <img src="/tutorial/front-good.jpg" alt="A correctly taken front photo: square to the lens, level, evenly lit" loading="lazy" />
+      <figcaption><span class="tut-eg-mark">✓</span>Square, level, evenly lit</figcaption>
+    </figure>
+    <figure class="tut-eg bad">
+      <img src="/tutorial/front-bad.jpg" alt="A poorly taken front photo: tilted, shot from below, half in shadow" loading="lazy" />
+      <figcaption><span class="tut-eg-mark">✕</span>Tilted, from below, half shadowed</figcaption>
+    </figure>`;
+  const SIDE_EGS = `<figure class="tut-eg good">
+      <img src="/tutorial/side-do.jpg" alt="A correctly taken side profile: a full ninety degrees, chin level" loading="lazy" />
+      <figcaption><span class="tut-eg-mark">✓</span>A full quarter turn, chin level</figcaption>
+    </figure>
+    <figure class="tut-eg bad">
+      <img src="/tutorial/side-partial.jpg" alt="A poorly taken side profile: only half turned, so both eyes are still visible" loading="lazy" />
+      <figcaption><span class="tut-eg-mark">✕</span>Half turned — both eyes showing</figcaption>
+    </figure>`;
+
+  const heading = view === "front"
+    ? "Would you like a tutorial on how to take the front-on photo for best results?"
+    : view === "side"
+      ? "Would you like a tutorial on how to take the side profile for best results?"
+      : "Would you like a tutorial on how to take both photos for best results?";
+  const blurb = view === "front"
+    ? "Twenty seconds on what ruins a front photo, and what a good one looks like."
+    : view === "side"
+      ? "The profile is the shot people get wrong most. Twenty seconds on why."
+      : "A scan is two photographs — square to the lens, then a full quarter turn. Forty seconds on both, now, while you are still looking at the screen.";
+
   const wrap = document.createElement("div");
   wrap.className = "tut-ask";
   wrap.innerHTML = `
     <div class="tut-ask-panel" role="dialog" aria-modal="true" aria-labelledby="tut-ask-h">
-      <h2 id="tut-ask-h">${view === "front"
-        ? "Would you like a tutorial on how to take the front-on photo for best results?"
-        : "Would you like a tutorial on how to take the side profile for best results?"}</h2>
-      <p>${view === "front"
-        ? "Twenty seconds on what ruins a front photo, and what a good one looks like."
-        : "The profile is the shot people get wrong most. Twenty seconds on why."}</p>
+      <h2 id="tut-ask-h">${heading}</h2>
+      <p>${blurb}</p>
       <!-- One right, one wrong, before anybody has committed to watching. The
            question above is abstract until you have seen the difference it is
            asking about; two photographs answer "is this worth twenty seconds?"
            faster than the sentence does. -->
-      ${view === "front"
-        ? `<div class="tut-egs">
-            <figure class="tut-eg good">
-              <img src="/tutorial/front-good.jpg" alt="A correctly taken front photo: square to the lens, level, evenly lit" loading="lazy" />
-              <figcaption><span class="tut-eg-mark">✓</span>Square, level, evenly lit</figcaption>
-            </figure>
-            <figure class="tut-eg bad">
-              <img src="/tutorial/front-bad.jpg" alt="A poorly taken front photo: tilted, shot from below, half in shadow" loading="lazy" />
-              <figcaption><span class="tut-eg-mark">✕</span>Tilted, from below, half shadowed</figcaption>
-            </figure>
-          </div>`
-        : `<div class="tut-egs">
-            <figure class="tut-eg good">
-              <img src="/tutorial/side-do.jpg" alt="A correctly taken side profile: a full ninety degrees, chin level" loading="lazy" />
-              <figcaption><span class="tut-eg-mark">✓</span>A full quarter turn, chin level</figcaption>
-            </figure>
-            <figure class="tut-eg bad">
-              <img src="/tutorial/side-partial.jpg" alt="A poorly taken side profile: only half turned, so both eyes are still visible" loading="lazy" />
-              <figcaption><span class="tut-eg-mark">✕</span>Half turned — both eyes showing</figcaption>
-            </figure>
-          </div>`}
+      ${view === "front" ? `<div class="tut-egs">${FRONT_EGS}</div>`
+        : view === "side" ? `<div class="tut-egs">${SIDE_EGS}</div>`
+        : `<div class="tut-egs tut-egs-both">${FRONT_EGS}${SIDE_EGS}</div>`}
       <div class="tut-ask-actions">
         <button class="btn pri" id="tut-yes" type="button">Show me</button>
         <button class="btn gho" id="tut-no" type="button">Skip</button>
@@ -241,9 +273,19 @@ export function offerTutorial(view: TutorialView, then: () => void): void {
 
   const never = wrap.querySelector<HTMLInputElement>("#tut-never")!;
   const closeAsk = () => wrap.remove();
+  // "Both" answers for both views. The tick is answering "do I need to be
+  // taught how to photograph my face", not "do I need to be taught this angle".
+  const remember = (hidden: boolean) => {
+    if (view === "both") {
+      setTutorialSuppressed("front", hidden);
+      setTutorialSuppressed("side", hidden);
+    } else {
+      setTutorialSuppressed(view, hidden);
+    }
+  };
 
   wrap.querySelector("#tut-no")!.addEventListener("click", () => {
-    setTutorialSuppressed(view, never.checked);
+    remember(never.checked);
     closeAsk();
     finish();
   });
@@ -252,13 +294,34 @@ export function offerTutorial(view: TutorialView, then: () => void): void {
     // not quietly un-answer it.
     const carried = never.checked;
     closeAsk();
-    playTutorial(view, carried, finish);
+    if (view === "both") {
+      // Front runs straight into the profile. Closing the front player early
+      // still moves on to the side one — somebody who has seen enough of the
+      // front tutorial has not thereby declined the side tutorial, and the
+      // side is the shot people get wrong.
+      const both: readonly TutorialView[] = ["front", "side"];
+      playTutorial("front", carried, () => playTutorial("side", carried, finish, both), both);
+    } else {
+      playTutorial(view, carried, finish);
+    }
   });
   wrap.querySelector<HTMLButtonElement>("#tut-yes")!.focus();
 }
 
 /** The player. Exported so a settings screen can replay it on demand. */
-export function playTutorial(view: TutorialView, neverChecked: boolean, onClose: () => void): void {
+export function playTutorial(
+  view: TutorialView,
+  neverChecked: boolean,
+  onClose: () => void,
+  /**
+   * Which flags the tick at the end writes. Defaults to this view alone; the
+   * back-to-back run before a scan passes both, because there the tick is one
+   * answer to one question asked once, and letting the front player's copy of
+   * it silence only the front would leave the profile tutorial reappearing on
+   * every scan for somebody who ticked the box.
+   */
+  remembers: readonly TutorialView[] = [view],
+): void {
   const steps = STEPS[view];
   let index = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -431,7 +494,7 @@ export function playTutorial(view: TutorialView, neverChecked: boolean, onClose:
     if (timer) clearTimeout(timer);
     cancelAnimationFrame(cueFrame);
     vid.pause();
-    setTutorialSuppressed(view, never2.checked);
+    for (const v of remembers) setTutorialSuppressed(v, never2.checked);
     document.removeEventListener("keydown", key);
     wrap.remove();
     onClose();

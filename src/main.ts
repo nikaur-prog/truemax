@@ -65,7 +65,8 @@ import type { FrameCheck } from "./engine/captureGuide.js";
 import { estimateGaze } from "./engine/gaze.js";
 import { analyzeSkin } from "./engine/skin.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
-import { offerTutorial, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
+import { offerBothTutorials, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
+import { soundChapter } from "./ui/scanSounds.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
 import { headCoveringRejection } from "./engine/photoEligibility.js";
@@ -804,7 +805,7 @@ el.btnUpload.addEventListener("click", () => {
     if (generation !== scanGeneration) return;
     ensureSex(() => {
       if (generation !== scanGeneration) return;
-      offerTutorial("front", () => {
+      offerBothTutorials(() => {
         if (generation !== scanGeneration) return;
         filePickerGeneration = generation;
         el.fileInput.click();
@@ -1195,10 +1196,21 @@ async function openCamera(): Promise<void> {
     // A hard jump, not a smooth one. This is a correction of something the
     // viewer never asked for, and animating it would read as the page moving on
     // its own a second time.
+    //
+    // And it only ever scrolls UP. The old version scrolled TO the frame, which
+    // on a laptop — where the whole capture screen already fits above the fold —
+    // meant opening the camera pushed the page down a few hundred pixels and
+    // took the instructions above the frame with it. That is the same class of
+    // bug this was written to fix, in the opposite direction: the page moving on
+    // its own when nothing was wrong. If the frame is already sitting
+    // comfortably below the header there is nothing to correct, so nothing
+    // happens.
     requestAnimationFrame(() => {
-      const top = el.stage.getBoundingClientRect().top + window.scrollY;
+      const rect = el.stage.getBoundingClientRect();
       // A little air above, so the frame is not flush under the header.
-      window.scrollTo({ top: Math.max(0, top - 72), behavior: "auto" });
+      const AIR = 72;
+      if (rect.top >= AIR - 1) return;
+      window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - AIR), behavior: "auto" });
     });
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
@@ -1244,9 +1256,10 @@ el.btnCamera.addEventListener("click", async () => {
       ensureSex(() => {
         if (generation !== scanGeneration) return;
         // After the reference population is settled and before the camera
-        // opens: the tutorial is about the photograph, so it belongs at the
-        // last moment where the photograph does not exist yet.
-        offerTutorial("front", () => {
+        // opens: the tutorial is about the photographs, so it belongs at the
+        // last moment where neither of them exists yet. Both, here, rather
+        // than the front now and the profile later — see offerBothTutorials.
+        offerBothTutorials(() => {
           if (generation === scanGeneration) void openCamera();
         });
       });
@@ -1830,8 +1843,10 @@ async function runFullAnalysis(
   const report = sideReport ? mergeReports(front, sideReport) : front;
   const delta = compareAndStore(report, token.scanId, scanSubject ?? undefined);
   // The weekly free-scan clock starts when an analysis finishes, not when a
-  // photo is chosen — an abandoned capture must not cost the week's scan.
-  recordScanRun();
+  // photo is chosen — an abandoned capture must not cost the week's scan. A
+  // guest's scan does not start it at all: it cannot move the owner's chart,
+  // so it should not spend the week that would have.
+  recordScanRun(scanSubject !== null);
 
   // Keep a thumbnail of each view against this scan's immutable ID. Thumbnails
   // only — see engine/photoStore.
@@ -2372,10 +2387,20 @@ function startSide(): void {
       await gateAnalysis(sideReport, token);
     },
   });
-  // The profile is the shot people get wrong most, so it gets its own offer
-  // and its own memory of the answer: somebody who has the front down may
-  // still be turning only halfway.
-  offerTutorial("side", openSide);
+  // No offer here any more. Both tutorials are shown together before the
+  // FRONT photograph (see offerBothTutorials), because asking again at this
+  // point meant interrupting the same scan twice — and doing it at the moment
+  // somebody has just been told to turn away from the screen, with a dialogue
+  // on the screen. The information button on the frame reaches the profile
+  // tutorial on demand for anyone who wants it again.
+  //
+  // A bell first. This is the one boundary in a scan — one photograph is
+  // finished and a different one is being asked for — and it arrives at the
+  // exact moment the instructions are telling somebody to turn their head away
+  // from the screen those instructions are on. A sound is the only channel
+  // that still reaches them.
+  soundChapter();
+  openSide();
 }
 
 function renderQualityChips(q: QualityCheck, autoNote = ""): void {
