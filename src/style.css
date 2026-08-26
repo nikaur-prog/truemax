@@ -513,6 +513,21 @@ body {
 .rtabs {
   display: flex; flex-wrap: wrap; gap: 7px;
 }
+/* Where you are in the row, and how much of it is left. Two pixels tall, and
+   absent entirely when the tabs already fit — see mountTabScrollbar in
+   ui/results.ts. Above the wrapping breakpoint the row cannot scroll, so it
+   never appears there. */
+.rtabs-track {
+  position: relative; height: 2px; margin: 7px 0 0;
+  border-radius: 2px; background: var(--line);
+}
+.rtabs-track[hidden] { display: none; }
+.rtabs-track i {
+  position: absolute; top: 0; bottom: 0;
+  width: var(--thumb-w, 30%); left: var(--thumb-x, 0%);
+  border-radius: 2px; background: var(--ink); opacity: .42;
+  transition: left .08s linear;
+}
 /* Below the two-pane breakpoint the analysis column is narrow enough that
    wrapping the tabs eats too much height, so they scroll instead — with a
    right-edge fade so it reads as scrollable rather than cut off. That fade,
@@ -1033,6 +1048,59 @@ body.funnel-open { overflow: hidden; }
 .prog-row .d.up { color: var(--up); }
 .prog-row .d.down { color: var(--down); }
 .prog-row .d.flat { color: var(--mut); }
+
+/* What to do next, once the numbers have been read.
+   ---------------------------------------------------------------------------
+   Three tiers, because the previous six link-blue boxes were EQUAL and that
+   was the bug: "Build my pathway", which is the product, sat in the same
+   treatment as "Copy diagnostics", which is a debugging affordance. A screen
+   where every option looks alike asks the reader to do the ranking, and most
+   will not bother. See resultActions() in ui/results.ts. */
+.ractions { display: grid; gap: 10px; margin-top: 24px; }
+.ract-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ract-utils { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+
+.ract {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 13px 12px; border-radius: 14px; cursor: pointer;
+  font-family: var(--sans); font-size: 13.5px; font-weight: 600; line-height: 1.2;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  transition: border-color .15s ease, background-color .15s ease, transform .12s ease;
+  min-width: 0;
+}
+.ract span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ract-ico { width: 17px; height: 17px; flex: none; opacity: .62; }
+.ract:hover { border-color: #c9c7c0; background: var(--bg); }
+.ract:active { transform: scale(.985); }
+
+/* The lead. Full width and filled, so the one thing the product wants next is
+   the one thing that looks like a button rather than a choice. */
+.ract-lead {
+  background: var(--ink); border-color: var(--ink); color: #fff;
+  padding: 16px 18px; font-size: 15px; border-radius: 16px;
+  box-shadow: 0 10px 26px rgba(20, 21, 24, .16);
+}
+.ract-lead .ract-ico { opacity: .85; width: 18px; height: 18px; }
+.ract-lead:hover { background: #23262b; border-color: #23262b; }
+
+/* The utilities. Small, low-contrast, no fill — findable by anybody looking
+   for them and beneath notice for everybody else. */
+.ract-quiet {
+  border-color: transparent; background: none; color: var(--mut);
+  font-size: 12.5px; font-weight: 500; padding: 9px 10px;
+}
+.ract-quiet .ract-ico { width: 14px; height: 14px; opacity: .5; }
+.ract-quiet:hover { background: var(--card); border-color: var(--line); color: var(--ink); }
+
+@media (max-width: 460px) {
+  /* Two across rather than three: at 390px, three columns leaves about a
+     hundred pixels each and "Share card" was arriving as an ellipsis. */
+  .ract-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ract-utils { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* An odd last item spans the pair rather than sitting alone beside a hole,
+     which reads as a missing button rather than as the end of a list. */
+  .ract-row .ract:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
 
 .navrow { display: flex; gap: 10px; margin-top: 20px; }
 .btn { flex: 1; border: none; border-radius: 14px; padding: 15px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.12s, opacity 0.2s; }
@@ -4191,7 +4259,12 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo:not(:has(.scorestrip)) .face-frame { max-height: 66vh; }
   .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
 
-  .pane-photo.shrunk .face-frame { max-height: 96px; }
+  /* 112px, not 96. At 96 the strip is a letterbox slice — in practice a band
+     of eyes — and the question it has to answer while you read a region is
+     "whose face is this and where is that measurement", which needs a bit more
+     of a face than a band. Sixteen pixels is a cheap price for the pinned
+     block: it goes from about 309 to 325 on an 844px phone. */
+  .pane-photo.shrunk .face-frame { max-height: 112px; }
   /* The shrink used to snap because these were display:none — four elements
      leaving the flow in one frame, mid-transition, while the sticky pane was
      also resizing. Collapsing them on the same curve as the photo makes it
@@ -4222,7 +4295,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      features while collapsed is exactly when this is read, and a crop that
      jumps between regions reads as the photo glitching. */
   .pane-photo.shrunk .face-frame .zoomable canvas {
-    height: 96px; object-fit: cover;
+    height: 112px; object-fit: cover;
     object-position: var(--crop-x, center) var(--crop-y, 34%);
     transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
   }
@@ -4699,11 +4772,19 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 /* The advance control, inside the frame and directly above the name of the
    point it is asking about. Black asks; green advances. The colour change is
    the whole signal, so it gets a real transition rather than a swap. */
+/* On the bottom row, between the speaker and the retake glyph.
+   ---------------------------------------------------------------------------
+   It used to float centred at 18px, above and apart from the two controls
+   pinned to the bottom edge — three things at three heights, reading as a
+   button plus some furniture rather than as a row of controls. Both insets are
+   set so the button lives in the gap BETWEEN them (44px clears the speaker,
+   108px clears "⟳ RETAKE"), and `width: fit-content` with auto margins centres
+   it inside that band instead of stretching across it. */
 .gnext-in {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: 18px; z-index: 4;
-  min-width: 0; max-width: calc(100% - 24px);
-  padding: 10px 20px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.22);
+  position: absolute; left: 44px; right: 108px; bottom: 10px; z-index: 4;
+  width: fit-content; max-width: 100%; min-width: 0; margin-inline: auto;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 10px 18px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.22);
   /* BLUE = asking. Black read as chrome — a bar sitting on the photo rather
      than the one control on the screen — and it matched the caption strip
      directly under it, so the two merged into a single dark block. */
@@ -4712,7 +4793,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   cursor: pointer; box-shadow: 0 10px 28px rgba(37, 99, 235, 0.4);
   transition: background 0.22s ease, border-color 0.22s ease, color 0.22s ease, transform 0.12s ease;
 }
-.gnext-in:active { transform: translateX(-50%) scale(0.975); }
+.gnext-in:active { transform: scale(0.975); }
 .gnext-in.ready {
   background: #16a97a; border-color: #16a97a; color: #fff;
   box-shadow: 0 10px 28px rgba(22, 169, 122, 0.42);
@@ -4725,11 +4806,11 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    the colour crosses under it, and the new one arrives from below, travelling
    the same direction the walkthrough is. About a fifth of a second in total,
    because it happens thirteen times and must never become a wait. */
-.gnext-in.swapping { transform: translateX(-50%) translateY(-5px); opacity: 0; }
+.gnext-in.swapping { transform: translateY(-5px); opacity: 0; }
 .gnext-in.swapped { animation: gnext-swap 0.26s cubic-bezier(0.2, 0.8, 0.3, 1); }
 @keyframes gnext-swap {
-  from { transform: translateX(-50%) translateY(7px); opacity: 0; }
-  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+  from { transform: translateY(7px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 .gnext-in.swapping,
 .gnext-in.swapped {
@@ -4737,7 +4818,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
               background 0.26s ease, border-color 0.26s ease, box-shadow 0.26s ease;
 }
 @media (prefers-reduced-motion: reduce) {
-  .gnext-in.swapping { transform: translateX(-50%); opacity: 1; }
+  .gnext-in.swapping { transform: none; opacity: 1; }
   .gnext-in.swapped { animation: none; }
 }
 
@@ -4786,7 +4867,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 }
 @media (prefers-reduced-motion: reduce) { .gnext-dot { animation: none; opacity: 0.85; } }
 
-@media (max-width: 420px) { .gnext-in { bottom: 52px; font-size: 13.5px; padding: 12px 16px; min-width: 72%; } }
+/* The phone override used to push it to 52px and stretch it across 72% of the
+   frame, which is what put it mid-picture and overlapping the retake glyph.
+   It keeps the smaller type — 14.5px in a 255px band ellipsises "Next point:
+   Nasolabial angle »" — and gives up the width and the height. */
+@media (max-width: 420px) {
+  .gnext-in { font-size: 13px; padding: 10px 14px; }
+}
 @media (prefers-reduced-motion: reduce) { .gnext-in { transition: none; } }
 
 .vpoint.gdim { opacity: 0.22; }
@@ -4984,6 +5071,14 @@ body.is-member .journey { display: none; }
   display: grid; grid-template-rows: auto 1fr auto auto;
   padding: calc(10px + env(safe-area-inset-top)) 0 calc(14px + env(safe-area-inset-bottom));
   animation: tut-fade 0.2s ease;
+  /* `inset: 0` alone measures the LAYOUT viewport, which on a phone browser is
+     shorter than what you can see once the address bar retracts — so a
+     full-screen tutorial ended a couple of centimetres up the screen with
+     "YOUR LAST SCANS" from the page underneath showing below it. 100lvh is the
+     tall-chrome-hidden height, which is the largest of the three and therefore
+     the only one that always reaches the bottom edge. Any overflow goes behind
+     the browser bar, where an opaque backdrop does not care. */
+  height: 100lvh; overflow: hidden;
 }
 /* Story bars: how much of this is left, without a number. */
 .tut-bars { display: flex; gap: 4px; padding: 0 14px 10px; }
