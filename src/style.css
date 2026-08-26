@@ -454,6 +454,38 @@ body {
 
 /* ---------- right pane ---------- */
 .pane-analysis { min-width: 0; }
+
+/* ---------------------------------------------------------------------------
+   While the engine is still working.
+
+   The results page is two panes — photograph left, analysis right — and during
+   the scan the right pane is EMPTY, so a 1440px window showed a smallish card
+   pinned to the left with two thirds of the screen blank beside it. That is
+   the wait: the moment the product has nothing to show but the thing it is
+   doing, and it was spending it looking abandoned.
+
+   So until there is an analysis to sit beside, there is no second column. The
+   photograph takes the middle of the screen at a size worth watching, and when
+   the tabs arrive the layout eases back into two panes rather than cutting.
+   Keyed off the tab row existing, so nothing has to remember to switch it.
+   --------------------------------------------------------------------------- */
+@media (min-width: 861px) {
+  #v-main {
+    transition:
+      grid-template-columns .5s cubic-bezier(.32, 0, .15, 1),
+      max-width .5s cubic-bezier(.32, 0, .15, 1);
+  }
+  #v-main:not(:has(.rtab)) {
+    grid-template-columns: min(620px, 84vw);
+    justify-content: center;
+    max-width: 900px;
+    margin-top: max(26px, 6vh);
+  }
+  /* Sticky is for a column being scrolled past a long analysis. There is no
+     analysis yet, and a sticky element in a centred single column just fights
+     the scroll it does not need. */
+  #v-main:not(:has(.rtab)) .pane-photo { position: static; }
+}
 .rtabs {
   display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 18px;
 }
@@ -2837,11 +2869,19 @@ body.auth-modal-open { overflow: hidden; }
 .refcrop-play:hover, .refcrop-big:hover { border-color: #8ff3e0; }
 .refcrop-fullcard { position: relative; }
 .refcrop-fullcard canvas { display: block; border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+/* Inside the card, not hooked over its corners: the controls belong to the
+   picture they act on. Play bottom left, minimise top right. */
+.refcrop-play-big, .refcrop-close {
+  position: absolute; z-index: 2; display: grid; place-items: center;
+  width: 40px; height: 40px; border: 1px solid rgba(255,255,255,.4);
+  border-radius: 50%; background: rgba(12,20,18,.82);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: #8ff3e0; cursor: pointer; transition: border-color .2s, transform .2s;
+}
+.refcrop-play-big { left: 14px; bottom: 14px; font: 14px/1 var(--sans); padding-left: 3px; }
+.refcrop-play-big:hover, .refcrop-close:hover { border-color: #8ff3e0; transform: scale(1.06); }
 .refcrop-close {
-  position: absolute; top: -12px; right: -12px; width: 32px; height: 32px;
-  display: grid; place-items: center; border: 1px solid rgba(255,255,255,.4);
-  border-radius: 50%; background: rgba(12,20,18,.94); color: #8ff3e0;
-  font: 16px/1 var(--mono); cursor: pointer;
+  top: 14px; right: 14px; font: 15px/1 var(--mono);
 }
 .refcrop-close:hover { border-color: #8ff3e0; }
 
@@ -4631,16 +4671,53 @@ body.is-member .proof,
 body.is-member .journey { display: none; }
 
 /* The photographic "it sits here" patch under a walkthrough step. */
-.side-refcrop { margin: 12px 0 14px; }
+/* ---------------------------------------------------------------------------
+   The walkthrough, on the photograph.
+
+   The point's NAME on a pill in the top left, and the reference as a small
+   still in the bottom right. That is the whole interface for this step now:
+   the column of prose beside it — a heading, an instruction paragraph read
+   once and ignored twelve times, a caption, and a note about which points are
+   guesses — has gone, because the thing being done is looking at a ring on
+   your own face and the screen should be that.
+
+   White pill, black type: it has to be readable over a cheek, a jaw, a dark
+   collar and a bright window, and the only thing that survives all four is
+   opaque white.
+   --------------------------------------------------------------------------- */
+.side-pointpill {
+  position: absolute; top: 12px; left: 12px; z-index: 6;
+  display: inline-flex; align-items: baseline; gap: 8px;
+  padding: 7px 13px; border-radius: 999px;
+  background: #fff; color: #14181c;
+  box-shadow: 0 2px 14px rgba(8, 10, 12, .3);
+  opacity: 0; transform: translateY(-6px);
+}
+.side-pointpill.in { animation: pill-in .34s cubic-bezier(.2, .8, .3, 1) forwards; }
+@keyframes pill-in { to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .side-pointpill.in { animation: none; opacity: 1; transform: none; }
+}
+.side-pointpill b { font: 600 14px/1.1 var(--sans); letter-spacing: -0.01em; }
+.side-pointpill em {
+  font: 500 10px/1 var(--mono); font-style: normal; letter-spacing: .08em;
+  color: #6b7680;
+}
+
+/* The reference still, on the picture rather than beside it. Small enough to
+   ignore while dragging, large enough to read, and the whole thing is the
+   tap target — nobody aims for a 28px glyph when the picture is right there. */
+.side-refcrop {
+  position: absolute; right: 12px; bottom: 12px; z-index: 6;
+  margin: 0; cursor: pointer;
+}
 .side-refcrop canvas {
-  display: block; width: 148px; height: 148px; border-radius: 14px;
-  border: 1px solid var(--line); background: var(--card);
+  display: block; width: 92px; height: 92px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .35); background: rgba(12, 20, 18, .6);
+  box-shadow: 0 4px 18px rgba(8, 10, 12, .38);
+  transition: transform .2s cubic-bezier(.2, .8, .3, 1);
 }
-.side-refcrop span {
-  display: block; margin-top: 6px; font-family: var(--mono);
-  font-size: 9.5px; letter-spacing: 0.1em; color: var(--mut);
-  text-transform: uppercase;
-}
+.side-refcrop:hover canvas { transform: scale(1.04); }
 
 /* The pre-capture tutorial --------------------------------------------------
    The ask, then the pictures. Full-bleed and story-paced, because the lesson
