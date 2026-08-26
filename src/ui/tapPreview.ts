@@ -25,9 +25,14 @@
 /** Which row a touch has armed, across every deck on the screen. */
 let armed: string | null = null;
 
+function clearArmed(): void {
+  for (const el of document.querySelectorAll(".metric.armed")) el.classList.remove("armed");
+}
+
 /** Forget the armed row. Called whenever the deck is rebuilt or left. */
 export function resetTapPreview(): void {
   armed = null;
+  clearArmed();
 }
 
 export interface TapPreviewHandlers {
@@ -70,14 +75,17 @@ export function wireTapPreview(row: HTMLElement, id: string, h: TapPreviewHandle
       || (!(e as PointerEvent).pointerType && !window.matchMedia("(hover: hover)").matches);
     if (!touch || armed === id) {
       armed = null;
+      // Clear the lit state as the modal opens. Leaving it on was a lie about
+      // what the next press does: the row still looked armed, so it read as
+      // "press me again to open", while the state behind it had reset and a
+      // press would have armed it a second time instead.
+      clearArmed();
       h.open(id);
       return;
     }
     armed = id;
+    clearArmed();
     row.classList.add("armed");
-    for (const other of document.querySelectorAll(".metric.armed")) {
-      if (other !== row) other.classList.remove("armed");
-    }
     h.preview(id);
   };
 }
