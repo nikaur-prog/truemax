@@ -260,9 +260,15 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
            question above is abstract until you have seen the difference it is
            asking about; two photographs answer "is this worth twenty seconds?"
            faster than the sentence does. -->
-      ${view === "front" ? `<div class="tut-egs">${FRONT_EGS}</div>`
-        : view === "side" ? `<div class="tut-egs">${SIDE_EGS}</div>`
-        : `<div class="tut-egs tut-egs-both">${FRONT_EGS}${SIDE_EGS}</div>`}
+      <!-- Two examples, never four. The combined ask covers both photographs,
+           and showing both pairs here put four figures and four captions in a
+           panel that on a phone is already carrying a three-line heading, a
+           paragraph, two buttons and a checkbox — so the bottom of it fell off
+           the screen. The teaser is answering one question, "is this worth
+           forty seconds?", and the front pair answers it as well as four do.
+           The profile examples are still in the tutorial itself, which is
+           where somebody who said yes is going to see them anyway. -->
+      ${view === "side" ? `<div class="tut-egs">${SIDE_EGS}</div>` : `<div class="tut-egs">${FRONT_EGS}</div>`}
       <div class="tut-ask-actions">
         <button class="btn pri" id="tut-yes" type="button">Show me</button>
         <button class="btn gho" id="tut-no" type="button">Skip</button>

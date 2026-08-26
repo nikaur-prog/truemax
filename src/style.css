@@ -4938,15 +4938,19 @@ body.is-member .journey { display: none; }
    about; two photographs answer "is this worth twenty seconds?" in less time
    than the sentence above them takes to read. */
 .tut-egs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 18px; }
-/* Both photographs at once: front right and wrong on the top row, profile
-   right and wrong under it. Two rows of two rather than one row of four,
-   because the pairing is the point — each row is one shot, done and botched,
-   and four across turns that into a strip of unrelated faces. */
-.tut-egs-both { grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+/* The panel is tall on a phone before it holds anything: a heading that wraps
+   to three lines, a paragraph, two buttons and a checkbox. Two figures fit
+   under that; four did not, and the bottom of the sheet fell off the screen.
+   So the ask shows one pair whatever it is asking about — see the note in
+   ui/photoTutorial.ts. Capped so a short viewport loses picture height rather
+   than losing the buttons. */
 .tut-eg { margin: 0; }
 .tut-eg img {
   display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
   border-radius: 12px; border: 2px solid var(--line);
+  /* Capped so a short viewport loses picture height rather than losing the
+     buttons off the bottom of the sheet. */
+  max-height: min(34vh, 260px);
 }
 .tut-eg.good img { border-color: #2f9e73; }
 .tut-eg.bad img { border-color: #c06a54; }
