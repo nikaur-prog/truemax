@@ -203,6 +203,39 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       <g class="mx-arm${options.waving ? " waving" : ""}">
         <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
       </g>
+      <!-- Props for the idle acts (ui/maxIdle.ts). All hidden by default and
+           shown one at a time by the act's class, so a character standing
+           still costs nothing and the whole repertoire is one SVG rather than
+           four sprites to keep in sync. -->
+      <g class="mx-prop mx-prop-phone">
+        <rect x="96" y="96" width="20" height="33" rx="4" fill="#141a24"/>
+        <rect x="98.4" y="99" width="15.2" height="25" rx="2" fill="#4d7fe0"/>
+        <circle cx="106" cy="126.4" r="1.5" fill="#5c6a7d"/>
+      </g>
+      <!-- Confusion: a question mark over his head, and the brow set does the
+           rest via the mood class. -->
+      <g class="mx-prop mx-prop-question">
+        <path d="M104 30 q0 -9 8 -9 t8 8 q0 6 -7 8 v4" fill="none" stroke="${MINT}" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="113" cy="49" r="2.6" fill="${MINT}"/>
+      </g>
+      <!-- The board. He is a hovering robot, so it sits under the shadow and
+           he rides it without feet, which is exactly as silly as intended. -->
+      <g class="mx-prop mx-prop-board">
+        <rect x="43" y="146" width="64" height="7" rx="3.5" fill="#1d2a44"/>
+        <circle cx="56" cy="155" r="4" fill="#8b93a4"/>
+        <circle cx="94" cy="155" r="4" fill="#8b93a4"/>
+      </g>
+      <!-- Two small notes, for the dancing. -->
+      <g class="mx-prop mx-prop-notes">
+        <g class="mx-note mx-note-a">
+          <ellipse cx="20" cy="52" rx="4" ry="3" fill="${MINT}"/>
+          <path d="M24 52 V36" stroke="${MINT}" stroke-width="2.2" stroke-linecap="round"/>
+        </g>
+        <g class="mx-note mx-note-b">
+          <ellipse cx="128" cy="44" rx="3.4" ry="2.6" fill="${MINT}"/>
+          <path d="M131.4 44 V30" stroke="${MINT}" stroke-width="2" stroke-linecap="round"/>
+        </g>
+      </g>
     </g>
   </svg>`;
 }
@@ -308,6 +341,22 @@ export function wireMaxInteractions(
   (svg as unknown as { __mxWired?: boolean } & SVGSVGElement).__mxWired = true;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  // The idle repertoire, on every surface where he is big enough to be
+  // watched. Not on a knockable stage — a robot lying on his side who breaks
+  // into a dance undoes the joke — and not below about forty pixels, where he
+  // is a face beside a paragraph and a skateboard would be three grey pixels
+  // moving. Measured after a frame, because a stage mounted this tick has not
+  // been laid out yet and reports zero.
+  if (!options.knockable) {
+    requestAnimationFrame(() => {
+      if (!svg.isConnected) return;
+      if (svg.getBoundingClientRect().width < 40) return;
+      void import("./maxIdle.js").then((m) => {
+        if (svg.isConnected) m.mountMaxIdle(stage);
+      });
+    });
+  }
+
   const pupils = svg.querySelector<SVGGElement>(".mx-pupils");
   if (pupils && !reduced && window.matchMedia("(pointer: fine)").matches) {
     const onMove = (event: PointerEvent) => {
@@ -360,9 +409,54 @@ export function wireMaxInteractions(
       void (el as HTMLElement).offsetWidth;
       el.classList.add("poked");
     }
-    const arm = svg.querySelector(".mx-arm");
-    arm?.classList.remove("waving");
-    void (arm as HTMLElement | null)?.offsetWidth;
-    arm?.classList.add("waving");
+    greet(svg);
   });
+
+  // Hovering him is the other way to say hello, and it used to be a CSS
+  // `:hover` rule — which is what made the hand snap. A hover animation is
+  // CANCELLED the moment the pointer leaves, and a cancelled transform jumps,
+  // so leaving the box mid-wave threw his arm from shoulder height to his side
+  // in a single frame. Driven from here the wave always finishes and the
+  // keyframes bring the arm down themselves, whatever the pointer does.
+  stage.addEventListener("pointerenter", (e) => {
+    if (reduced || (e as PointerEvent).pointerType === "touch") return;
+    greet(svg);
+  });
+}
+
+/** How many times this drawing has waved. */
+const WAVE_LIMIT = 2;
+const waves = new WeakMap<SVGSVGElement, number>();
+
+/**
+ * Wave hello, at most twice per drawing.
+ *
+ * Twice is the number because it is what a person does: you wave when you
+ * arrive and maybe once more when they look up. A character who waves on every
+ * single hover for the rest of the session is not friendly, he is a tic — and
+ * by the fourth time the reader has stopped seeing him at all, which is the
+ * expensive failure. After the second he keeps his hand down and earns
+ * attention with the idle repertoire instead (ui/maxIdle.ts).
+ */
+export function greet(svg: SVGSVGElement | null, opts: { big?: boolean } = {}): void {
+  if (!svg) return;
+  const arm = svg.querySelector<SVGGElement>(".mx-arm");
+  if (!arm) return;
+  // A big wave is a deliberate entrance, not a greeting, so it is exempt from
+  // the count and from it: opening the chat should always get one.
+  if (!opts.big) {
+    const n = waves.get(svg) ?? 0;
+    if (n >= WAVE_LIMIT) return;
+    waves.set(svg, n + 1);
+  }
+  const cls = opts.big ? "waving-big" : "waving";
+  // Already mid-wave: leave it alone rather than restarting from zero, which
+  // is itself a snap.
+  if (arm.classList.contains("waving") || arm.classList.contains("waving-big")) return;
+  arm.classList.add(cls);
+  const done = () => {
+    arm.classList.remove("waving", "waving-big");
+    arm.removeEventListener("animationend", done);
+  };
+  arm.addEventListener("animationend", done);
 }

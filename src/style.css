@@ -1350,8 +1350,13 @@ body.funnel-open { overflow: hidden; }
 }
 
 /* Tappable measurement rows — the row that draws itself on the face */
-.metric.tappable { cursor: pointer; border-radius: 10px; padding: 6px 8px; margin-left: -8px; margin-right: -8px; transition: background 0.18s var(--ease, ease); }
+.metric.tappable { cursor: pointer; border-radius: 10px; padding: 6px 8px; margin-left: -8px; margin-right: -8px; transition: background 0.18s var(--ease, ease), box-shadow 0.18s var(--ease, ease); }
 .metric.tappable:hover { background: var(--soft); }
+/* Armed by a first touch: the same lit state a mouse gets on hover, plus an
+   edge so the row reads as holding something rather than merely being the last
+   one pressed. The second press on this row opens it — see ui/tapPreview.ts. */
+.metric.armed { background: var(--soft); box-shadow: inset 2px 0 0 var(--acc); }
+.metric.armed .mrow b::after { opacity: 1; color: var(--acc); }
 .metric.tappable .mrow b::after { content: "◱"; font-size: 9px; color: var(--mut); margin-left: 7px; opacity: 0.55; }
 .metric.tappable.active { background: var(--acc-soft); }
 .metric.tappable.active .mrow b { color: var(--acc); }
@@ -3139,13 +3144,48 @@ body.auth-modal-open { overflow: hidden; }
 .mx-svg.speaking .mx-mouth-grit { display: none; }
 /* Origin at the TOP of the mouth ellipse, so it opens downward like a jaw
    rather than inflating from its centre. */
-.mx-talk-shape { transform-origin: 75px 82px; animation: mx-talk .26s ease-in-out infinite; }
-.mx-svg.speaking .mx-bob { animation-duration: 2.1s; }
-.mx-svg.speaking .mx-antenna { animation-duration: 2.1s; }
+/* Speech, not a metronome.
+   ---------------------------------------------------------------------------
+   This was one ellipse scaling on a flat 0.26s loop, and a mouth opening and
+   closing at a perfectly even rate is the single most robotic thing a face can
+   do — it reads as a buffering indicator drawn on a head. Real speech is
+   irregular in both axes: wide open on an "ah", narrow and tall on an "oo",
+   nearly shut between words, and it pauses.
+
+   So the cycle is 1.15s, long enough to hold several distinct shapes, and it
+   varies scaleX and scaleY independently with an actual rest near the end
+   where a breath would be. Nothing here matches the words — it does not have
+   to. It only has to stop being periodic. */
+.mx-talk-shape { transform-origin: 75px 84px; animation: mx-talk 1.15s linear infinite; }
+/* The rest of him talks too. A moving mouth on a still head is a puppet; the
+   brows lift on the open vowels and the whole body picks up its pace. */
+.mx-svg.speaking .mx-bob { animation: mx-talk-bob 1.15s ease-in-out infinite; }
+.mx-svg.speaking .mx-antenna { animation-duration: 1.7s; }
+.mx-svg.speaking .mx-brows-happy { animation: mx-talk-brow 1.15s ease-in-out infinite; transform-box: fill-box; transform-origin: center bottom; }
 @keyframes mx-talk {
-  0%, 100% { transform: scaleY(.28); }
-  40% { transform: scaleY(1); }
-  70% { transform: scaleY(.55); }
+  0%   { transform: scale(1, .22); }
+  8%   { transform: scale(1.12, .95); }   /* ah */
+  18%  { transform: scale(.86, .55); }
+  26%  { transform: scale(.7, 1.05); }    /* oo */
+  36%  { transform: scale(1.05, .78); }
+  44%  { transform: scale(.92, .3); }
+  52%  { transform: scale(1.15, 1); }     /* ah */
+  62%  { transform: scale(.8, .62); }
+  70%  { transform: scale(1, .88); }
+  78%  { transform: scale(.88, .34); }
+  86%  { transform: scale(1.02, .7); }
+  92%, 100% { transform: scale(.95, .22); }  /* the breath between clauses */
+}
+@keyframes mx-talk-bob {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  26% { transform: translateY(-1.5px) rotate(-1.2deg); }
+  52% { transform: translateY(.5px) rotate(1deg); }
+  78% { transform: translateY(-1px) rotate(-.6deg); }
+}
+@keyframes mx-talk-brow {
+  0%, 100% { transform: translateY(0); }
+  8%, 52% { transform: translateY(-1.6px); }
+  30%, 78% { transform: translateY(.4px); }
 }
 .mx-mood-excited .mx-pupils,
 .mx-mood-excited .mx-lid,
@@ -3283,17 +3323,119 @@ body.auth-modal-open { overflow: hidden; }
    that the wave is a RESPONSE — hover him and he waves back once. */
 .mx-arm { transform-origin: 118px 94px; }
 .mx-arm.waving { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 2; }
-/* Hovering ANY of his surfaces waves, not just the drawing itself. He is
-   usually a 34px face beside a paragraph, so requiring the pointer to land on
-   the SVG's own box meant the greeting almost never fired — the thing people
-   actually point at is the card or the button he sits in. */
-.mx-svg:hover .mx-arm,
-.maxan:hover .mx-arm,
-.maxread:hover .mx-arm,
-.maxchat-head:hover .mx-arm,
-.max-pop:hover .mx-arm,
-.askmax:hover .mx-arm,
-[data-max-wave]:hover .mx-arm { animation: mx-wave 2.9s cubic-bezier(.4,.06,.28,.98) 1; }
+/* The entrance wave, for opening the chat. Higher, wider and one pass, so it
+   reads as somebody turning round to say hello rather than as the ambient
+   greeting repeated louder. */
+.mx-arm.waving-big { animation: mx-wave-big 1.5s cubic-bezier(.34,.12,.24,1) 1; }
+@keyframes mx-wave-big {
+  0% { transform: translate(0, 0) rotate(0); }
+  16% { transform: translate(2px, -9px) rotate(-150deg); }
+  32% { transform: translate(2px, -11px) rotate(-172deg); }
+  48% { transform: translate(2px, -9px) rotate(-146deg); }
+  64% { transform: translate(2px, -11px) rotate(-170deg); }
+  80% { transform: translate(2px, -8px) rotate(-150deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+/* The hover wave is NOT a CSS rule any more, and the reason is the hand coming
+   down. A `:hover` animation is cancelled the instant the pointer leaves, and a
+   cancelled transform snaps — so leaving the box mid-wave threw his arm from
+   shoulder height back to his side in one frame. ui/maxCharacter.ts adds
+   `.waving` on pointerenter and removes it on animationend instead, so the
+   wave always finishes and the keyframes bring the arm down themselves. It
+   also caps the greeting at two: a wave that happens twice is a greeting, and
+   the same motion on every hover for the rest of the session is a tic. */
+
+/* --------------------------------------------------------------------------
+   The idle repertoire (ui/maxIdle.ts).
+   Every act is one class on the SVG for about five seconds. Props live in the
+   drawing and are hidden until their act asks for them.
+   -------------------------------------------------------------------------- */
+.mx-prop { display: none; }
+.mx-act-phone .mx-prop-phone,
+.mx-act-confused .mx-prop-question,
+.mx-act-skate .mx-prop-board,
+.mx-act-dance .mx-prop-notes { display: block; }
+
+/* Phone: he leans in over it, and the free arm thumbs at the screen. */
+.mx-act-phone .mx-bob { animation: mx-lean 5s ease-in-out; }
+.mx-act-phone .mx-arm { animation: mx-thumb 5s ease-in-out; }
+.mx-act-phone .mx-prop-phone { animation: mx-prop-in .35s ease-out both; transform-box: fill-box; transform-origin: center; }
+@keyframes mx-lean {
+  0%, 100% { transform: rotate(0) translateY(0); }
+  12%, 88% { transform: rotate(-5deg) translateY(3px); }
+}
+@keyframes mx-thumb {
+  0%, 100% { transform: rotate(0); }
+  14% { transform: translate(-8px, -22px) rotate(48deg); }
+  26%, 42%, 58%, 74% { transform: translate(-8px, -21px) rotate(48deg); }
+  34%, 50%, 66% { transform: translate(-8px, -24px) rotate(44deg); }
+  88% { transform: translate(-8px, -22px) rotate(48deg); }
+}
+
+/* Confused: a slow head tilt one way, then the other, with a question mark. */
+.mx-act-confused .mx-bob { animation: mx-tilt 5s ease-in-out; }
+.mx-act-confused .mx-prop-question { animation: mx-prop-in .4s ease-out both, mx-q-float 2.5s ease-in-out .4s 2; transform-box: fill-box; transform-origin: center bottom; }
+@keyframes mx-tilt {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(9deg); }
+  55% { transform: rotate(-8deg); }
+  80% { transform: rotate(4deg); }
+}
+@keyframes mx-q-float {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50% { transform: translateY(-5px) rotate(7deg); }
+}
+
+/* Dance: a two-step with the arm swinging and a couple of notes rising. */
+.mx-act-dance .mx-bob { animation: mx-dance 5s cubic-bezier(.36,.07,.19,.97); }
+.mx-act-dance .mx-arm { animation: mx-dance-arm 1.25s ease-in-out 4; }
+.mx-act-dance .mx-note { transform-box: fill-box; transform-origin: center; }
+.mx-act-dance .mx-note-a { animation: mx-note-up 2.5s ease-out 2; }
+.mx-act-dance .mx-note-b { animation: mx-note-up 2.5s ease-out .6s 2; }
+@keyframes mx-dance {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  12% { transform: translate(-7px, -5px) rotate(-8deg); }
+  25% { transform: translate(0, 2px) rotate(0) scale(1.03, .97); }
+  37% { transform: translate(7px, -5px) rotate(8deg); }
+  50% { transform: translate(0, 2px) rotate(0) scale(1.03, .97); }
+  62% { transform: translate(-7px, -5px) rotate(-8deg); }
+  75% { transform: translate(0, 2px) rotate(0) scale(1.03, .97); }
+  87% { transform: translate(7px, -4px) rotate(6deg); }
+}
+@keyframes mx-dance-arm {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: translate(1px, -6px) rotate(-132deg); }
+}
+@keyframes mx-note-up {
+  0% { opacity: 0; transform: translateY(6px) scale(.6); }
+  20% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-26px) scale(.9) rotate(14deg); }
+}
+
+/* Skate: the board slides in, he crouches and pumps on the spot. */
+.mx-act-skate .mx-bob { animation: mx-skate 5s ease-in-out; }
+.mx-act-skate .mx-prop-board { animation: mx-board-in .45s cubic-bezier(.2,.8,.3,1) both, mx-board-rock 1s ease-in-out .45s 4; transform-box: fill-box; transform-origin: center; }
+@keyframes mx-skate {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  10% { transform: translateY(-4px) rotate(-3deg); }
+  30% { transform: translateY(3px) rotate(3deg) scale(1.02, .96); }
+  50% { transform: translateY(-6px) rotate(-4deg); }
+  70% { transform: translateY(3px) rotate(3deg) scale(1.02, .96); }
+  88% { transform: translateY(-3px) rotate(-2deg); }
+}
+@keyframes mx-board-in {
+  from { opacity: 0; transform: translateX(-46px) rotate(-14deg); }
+  to { opacity: 1; transform: translateX(0) rotate(0); }
+}
+@keyframes mx-board-rock {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+@keyframes mx-prop-in {
+  from { opacity: 0; transform: scale(.5) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) { .mx-prop { display: none !important; } }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves
    against the VIEW-BOX, so "center top" was the top of his skull and every

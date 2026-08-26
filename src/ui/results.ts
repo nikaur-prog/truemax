@@ -14,6 +14,7 @@ import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
 import { regionIconMarkup } from "./regionIcons.js";
 import { scoreTone } from "./scoreTone.js";
+import { resetTapPreview, wireTapPreview } from "./tapPreview.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
@@ -736,23 +737,21 @@ function wireSideMeasurementTaps(report: Report): void {
     };
   }
 
+  resetTapPreview();
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-side-metric]")) {
     const id = row.dataset.sideMetric!;
     if (!hasSideOverlay(id)) continue;
-    row.onpointerenter = (e) => {
-      if (e.pointerType === "touch") return;
-      disarm();
-      show(id);
-    };
-    row.onpointerleave = (e) => {
-      if (e.pointerType === "touch") return;
-      arm();
-    };
-    row.onclick = () => {
-      disarm();
-      const m = metrics.find((x) => x.def.id === id);
-      if (m) openDetail(m);
-    };
+    // On a phone the first press draws the measurement on the pinned profile
+    // and the second opens it — see ui/tapPreview.ts. A mouse is unchanged.
+    wireTapPreview(row, id, {
+      preview: (which) => show(which),
+      leave: arm,
+      disarm,
+      open: (which) => {
+        const m = metrics.find((x) => x.def.id === which);
+        if (m) openDetail(m);
+      },
+    });
   }
 }
 
@@ -1575,30 +1574,22 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     }, LEAVE_GRACE_MS);
   };
 
+  resetTapPreview();
   for (const row of document.querySelectorAll<HTMLElement>(".metric[data-metric]")) {
     const id = row.dataset.metric!;
     if (!r.metrics.some((m) => m.def.id === id)) continue;
     rows.push(row);
 
-    // Mouse only. A touch "hover" fires on tap and would draw and then
-    // immediately pin on the same press.
-    row.onpointerenter = (e) => {
-      if (e.pointerType === "touch") return;
-      disarm();
-      show(id);
-    };
-    row.onpointerleave = (e) => {
-      if (e.pointerType === "touch") return;
-      arm();
-    };
-    // A tap OPENS the measurement. Pinning used to live here — keep the
-    // drawing while looking away — and the detail view supersedes it: the
-    // thing you pinned for is now a screen of its own, with the photograph,
-    // the norm and the comparisons on it. One row, one gesture, one meaning.
-    row.onclick = () => {
-      disarm();
-      openDetail(id);
-    };
+    // A mouse draws on hover and opens on click. A phone, which has no hover,
+    // arms on the first press and opens on the second — otherwise the drawing
+    // appeared underneath a modal that had already covered it, and the best
+    // thing on this screen was desktop-only. See ui/tapPreview.ts.
+    wireTapPreview(row, id, {
+      preview: show,
+      leave: arm,
+      disarm,
+      open: openDetail,
+    });
   }
 
   // The hint is the affordance, so it does the thing it describes.
