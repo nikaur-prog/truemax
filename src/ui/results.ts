@@ -162,6 +162,25 @@ export function renderResults(c: Ctx): void {
   const tabs = document.createElement("div");
   tabs.className = "rtabs";
   rail.appendChild(tabs);
+  // A position indicator under the row.
+  //
+  // Ten tabs do not fit across a phone, so the row scrolls — and a right-edge
+  // fade, which is what it had, is a thing you notice only once you already
+  // know there is more. Everything past the third region was effectively
+  // undiscoverable: somebody reading their eye scores had no way to learn that
+  // Chin, Lips and Symmetry existed at all.
+  //
+  // A thumb whose width is the visible fraction and whose position is how far
+  // along you are says both things at once — there is more, and this is where
+  // you are in it — in two pixels of height. Hidden entirely when everything
+  // already fits, because a full-width scrollbar under a row that cannot
+  // scroll is furniture that lies.
+  const track = document.createElement("div");
+  track.className = "rtabs-track";
+  track.setAttribute("aria-hidden", "true");
+  track.innerHTML = `<i></i>`;
+  rail.appendChild(track);
+  mountTabScrollbar(tabs, track);
 
   // The Side tab is gone from this row: it is not a ninth region, it is the
   // other half of the scan, and burying it among eight regions made a quarter
@@ -230,6 +249,34 @@ function placeQualityChips(): void {
 // and a phone rotated to landscape leaves them stranded in the analysis.
 if (typeof window !== "undefined" && window.matchMedia) {
   window.matchMedia(NARROW).addEventListener?.("change", () => placeQualityChips());
+}
+
+/**
+ * Keep the tab row's position indicator in step with its scroll.
+ *
+ * Reads on scroll and on resize, both passive, and writes two custom
+ * properties rather than restyling — so a swipe costs one style recalculation
+ * per frame on one element and nothing else on the page moves.
+ */
+function mountTabScrollbar(tabs: HTMLElement, track: HTMLElement): void {
+  const sync = (): void => {
+    const { scrollWidth, clientWidth, scrollLeft } = tabs;
+    const overflow = scrollWidth - clientWidth;
+    // A couple of pixels of slack: sub-pixel layout leaves a phantom 0.5px of
+    // overflow on rows that visibly fit, and a scrollbar for half a pixel is
+    // worse than none.
+    if (overflow <= 2) {
+      track.hidden = true;
+      return;
+    }
+    track.hidden = false;
+    const frac = clientWidth / scrollWidth;
+    track.style.setProperty("--thumb-w", `${(frac * 100).toFixed(2)}%`);
+    track.style.setProperty("--thumb-x", `${((scrollLeft / overflow) * (1 - frac) * 100).toFixed(2)}%`);
+  };
+  tabs.addEventListener("scroll", sync, { passive: true });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(sync).observe(tabs);
+  sync();
 }
 
 // The tab row belongs to the view, not to the report.
@@ -316,6 +363,80 @@ function viewCards(r: Report): string {
       ? `<p class="viewnote same">Both views landed on the same number this time — the front and the profile agree.</p>`
       : ""
   }`;
+}
+
+// ---------------------------------------------------------------------------
+// What to do next, once the numbers have been read.
+//
+// This was six identical link-blue boxes in a three-row grid, and the problem
+// was not that they were ugly — it was that they were EQUAL. "Next · Build my
+// pathway", which is the whole product, sat in the same treatment as "Copy
+// diagnostics", which is a debugging affordance. A screen where every option
+// looks the same asks the reader to do the ranking, and most of them will
+// simply not bother.
+//
+// Three tiers instead:
+//
+//   lead      one action, filled, with an icon. The step the product wants.
+//   support   the two or three things a person might reasonably do instead.
+//   quiet     the utilities — correcting points, copying the dump — set small
+//             and low-contrast, findable and never competing.
+//
+// Icons on all of them, because a row of words is read left to right and a row
+// of marks is taken in at once, and these sit at the bottom of a long report
+// where attention is thinnest.
+// ---------------------------------------------------------------------------
+const ACT_ICON: Record<string, string> = {
+  plan: `<path d="M4 18.5 9 12l3.6 3.4L20 6.4"/><path d="M15.4 6H20v4.6"/>`,
+  pathway: `<path d="M5 12h11"/><path d="m13 8 4 4-4 4"/><circle cx="19.4" cy="12" r="1.6"/>`,
+  side: `<path d="M15.6 20.4v-3c0-1.1.6-1.7 1.7-1.9.8-.2 1.1-.7.7-1.4l-1.3-2.5c.3-4.1-1.9-6.9-5.5-6.9-3.4 0-5.9 2.5-5.9 6 0 2.2 1 3.7 2.4 4.8v4.9"/>`,
+  photo: `<path d="M3.5 8.5h3.2l1.6-2.4h7.4l1.6 2.4h3.2v11H3.5Z"/><circle cx="12" cy="13.6" r="3.4"/>`,
+  share: `<path d="M12 15.5V4.2"/><path d="m8.2 7.6 3.8-3.4 3.8 3.4"/><path d="M5 13.5v6.3h14v-6.3"/>`,
+  points: `<circle cx="7" cy="8" r="1.8"/><circle cx="17.2" cy="12" r="1.8"/><circle cx="9" cy="17.4" r="1.8"/><path d="M8.6 8.7 15.6 11M15.9 13.4 10.4 16.4" stroke-dasharray="1.6 1.8"/>`,
+  copy: `<rect x="9" y="9" width="11" height="11" rx="2.4"/><path d="M15 9V6.4a2 2 0 0 0-2-2H6.4a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/>`,
+};
+
+function actionButton(
+  id: string,
+  label: string,
+  icon: keyof typeof ACT_ICON,
+  tier: "lead" | "support" | "quiet",
+): string {
+  return `<button type="button" class="ract ract-${tier}" id="${id}">
+    <svg class="ract-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACT_ICON[icon]}</svg>
+    <span>${label}</span>
+  </button>`;
+}
+
+function resultActions(merged: boolean, ctx: Ctx): string {
+  // Until the profile is in, adding it IS the next step, so it takes the lead
+  // slot. A scan is not finished at one view, and putting that in a ghost
+  // button next to "Share card" said the opposite.
+  const wantsSide = !merged && ctx.onSideProfile;
+  const lead = wantsSide
+    ? actionButton("btn-side", "Add side profile", "side", "lead")
+    : ctx.onContinue
+      ? actionButton("btn-continue", "Build my pathway", "pathway", "lead")
+      : "";
+  const support = [
+    actionButton("btn-plan", "See your plan", "plan", "support"),
+    actionButton("btn-new", wantsSide ? "Start over" : "New photo", "photo", "support"),
+    actionButton("btn-share", "Share card", "share", "support"),
+  ].join("");
+  const quiet = [
+    // The front counterpart of the profile's "Re-verify the points". The
+    // frontal mesh is usually right, which is exactly why this is quiet: it is
+    // here for the person who can SEE a point in the wrong place, and beneath
+    // notice for everyone else.
+    ctx.onEditFront ? actionButton("btn-fedit", "Correct the points", "points", "quiet") : "",
+    actionButton("btn-diag", "Copy diagnostics", "copy", "quiet"),
+  ].join("");
+
+  return `<div class="ractions">
+    ${lead}
+    <div class="ract-row">${support}</div>
+    <div class="ract-row ract-utils">${quiet}</div>
+  </div>`;
 }
 
 function select(id: string): void {
@@ -723,27 +844,7 @@ function showOverall(): void {
         .join("")}
       </div>
       ${populationBlock(r)}
-      ${
-        // Until the profile is in, adding it IS the next step — so it is the
-        // primary button. A scan is not finished at one view, and burying that
-        // behind a ghost button next to "Share card" said the opposite.
-        !merged && ctx.onSideProfile
-          ? `<div class="navrow"><button class="btn gho" id="btn-plan">See your plan</button>
-               <button class="btn pri" id="btn-side">Add side profile →</button></div>
-             <div class="navrow"><button class="btn gho" id="btn-new">Start over</button>
-               <button class="btn gho" id="btn-share">Share card</button></div>`
-          : `<div class="navrow"><button class="btn gho" id="btn-plan">See your plan</button>
-               ${ctx.onContinue ? `<button class="btn pri result-next" id="btn-continue">Next · Build my pathway →</button>` : ""}</div>
-             <div class="navrow"><button class="btn gho" id="btn-new">New photo</button>
-               <button class="btn gho" id="btn-share">Share card</button></div>`
-      }
-      <div class="navrow">${
-        // The front counterpart of the profile's "Re-verify the points". The
-        // frontal mesh is usually right, which is exactly why this is a quiet
-        // ghost button rather than a step: it is here for the person who can
-        // SEE a point in the wrong place, and invisible to everyone else.
-        ctx.onEditFront ? `<button class="btn gho" id="btn-fedit">Correct the points</button>` : ""
-      }<button class="btn gho" id="btn-diag">Copy diagnostics</button></div>
+      ${resultActions(Boolean(merged), ctx)}
       ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
     </div>`;
@@ -771,8 +872,11 @@ function showOverall(): void {
       const copied = await copyDiagnostics(r, "", ctx?.capture);
       // Says which of the two things happened. "Copied" over a clipboard write
       // that silently failed is the one outcome that wastes somebody's scan.
-      diagBtn.textContent = copied ? "Copied" : "Copy from the box";
-      window.setTimeout(() => (diagBtn.textContent = "Copy diagnostics"), 2600);
+      // Into the label, not the button: the button also holds an icon, and
+      // textContent on the parent would delete it on the first press.
+      const label = diagBtn.querySelector("span") ?? diagBtn;
+      label.textContent = copied ? "Copied" : "Copy from the box";
+      window.setTimeout(() => (label.textContent = "Copy diagnostics"), 2600);
     };
   }
   document.getElementById("btn-fedit")?.addEventListener("click", () => ctx?.onEditFront?.());
