@@ -602,12 +602,27 @@ function showSideRegion(id: RegionId): void {
   if (!r) return select("side");
   calmSide();
 
+  // No population curve or rarity line in the profile panel, deliberately.
+  //
+  // AGG_NORM holds quantile tables measured from FRONT-ONLY scans of the
+  // reference set — there is not a single side entry in it, because side
+  // landmarks are hand-placed and nobody has dragged thirteen points onto a
+  // hundred reference faces. curveSVG("region:nose") therefore FOUND a table,
+  // just the wrong one: it drew the front nose distribution and marked the
+  // side nose percentile on it. Shape from one measurement set, dot from
+  // another, which is why the density and the quartile ticks visibly
+  // disagreed on screen. The rarity sentence underneath was the same claim in
+  // words — "roughly 1 in N faces measure this well" out of a table that never
+  // saw a profile.
+  //
+  // A fabricated chart is worse than no chart, so the panel says what it does
+  // not know. It gets a curve back when there are measured side quantiles to
+  // draw one from, and not before.
   body().innerHTML = `
     <div class="reveal">
       ${sideRegionDeck(r, report)}
-      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>${curveSVG(r.percentile, `region:${id}`, report.sex, true)}
-        ${curveLegend()}
-        <p class="rarity">${rarityLine(r)}</p></div>
+      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>
+        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against — the score above is real, the curve would be invented.</p></div>
     </div>`;
 
   revealBars();

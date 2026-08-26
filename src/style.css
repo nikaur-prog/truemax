@@ -5463,6 +5463,25 @@ body.is-member .journey { display: none; }
 .mdx-trait { margin-bottom: 10px; }
 .mdx-trait::first-letter { text-transform: uppercase; }
 .mdx-norm { font-family: var(--mono); font-size: 12px; color: var(--mut); margin-bottom: 10px; }
+
+/* Said in place of a chart we cannot honestly draw — see showSideRegion in
+   ui/results.ts. Sized like the caption a curve would have carried, so the
+   panel reads as deliberately empty rather than broken. */
+.side-nocurve {
+  margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--mut);
+  max-width: 60ch;
+}
+
+/* A measurement whose NUMBER is not comparable outside this app — the brow
+   tilt and the frontal jaw angle are both constructed differently from the
+   same-named figure elsewhere. Set quieter than the norm line it qualifies,
+   so it reads as a footnote to that line rather than competing with it. */
+.mdx-caveat {
+  margin: 6px 0 0; padding: 8px 10px; border-radius: 9px;
+  background: var(--soft); border-left: 2px solid var(--line);
+  font-size: 12px; line-height: 1.5; color: var(--mut);
+}
+
 /* The interpretation line. Set apart from the numbers around it because it is
    a different kind of sentence — a description of the face, not a statistic —
    and the seam between the two must stay visible. */
