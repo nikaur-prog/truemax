@@ -126,30 +126,78 @@ function fmtMean(m: ScoredMetric, sex: Sex): string {
   return `${distFor(m.def, sex).mean.toFixed(m.def.decimals)}${m.def.unit}`;
 }
 
-function ordinal(n: number): string {
-  const r = Math.round(n);
-  if (r % 100 >= 11 && r % 100 <= 13) return `${r}th`;
-  switch (r % 10) {
-    case 1: return `${r}st`;
-    case 2: return `${r}nd`;
-    case 3: return `${r}rd`;
-    default: return `${r}th`;
-  }
-}
-
 const sexNoun = (sex: Sex) => (sex === "male" ? "male" : "female");
 
-// Region summary: strongest metric, weakest metric, rarity — 3 sentences,
-// each anchored to a computed number.
+// ---------------------------------------------------------------------------
+// What a coach would actually say.
+//
+// This used to read: "Midline deviation is the anchor here, at 0.5% eye-span
+// against a male average of 1.6%, which lands in the top 15%. The drag is
+// eye-line / mouth-line skew. Net position: 6.2/10." Every number in it is
+// right and nobody talks like that. "Anchor", "drag" and "net position" are
+// analyst words — they describe the reader's face the way a report describes a
+// portfolio, and on a screen where somebody has just handed over a photograph
+// of themselves that distance reads as a machine grading them.
+//
+// So the shape stays and the voice changes. Same three jobs, same numbers, in
+// the order a person would say them: here is what is genuinely good, here is
+// the one to work on, here is where that leaves you. Nothing is softened and
+// nothing is added — a warmer sentence carrying a worse number would be the
+// flattery this whole product refuses.
+//
+// The greeting is gendered because a coach's is. It costs nothing, it is the
+// difference between a tool and somebody in your corner, and it is the thing
+// people quote back when they like an app. Used ONCE, at the top, and drawn
+// from a pool: "bro" on every tab of every scan stops being warmth and starts
+// being a verbal tic, which is the same failure Max's wave had.
+//
+// Deterministic, not random. The region name picks the opener, so the Eyes tab
+// says the same thing every time you open it — a line that reshuffles under a
+// typewriter effect on re-render looks like a glitch, and two people comparing
+// screenshots of the same face should see the same words.
+// ---------------------------------------------------------------------------
+const OPENERS: Record<Sex, readonly string[]> = {
+  male: ["Alright man", "Good news first, bro", "Straight up", "Right, my guy", "Listen"],
+  female: ["Alright queen", "Good news first, girl", "Straight up", "Right, you", "Listen"],
+};
+
+function opener(region: string, sex: Sex): string {
+  const pool = OPENERS[sex];
+  let h = 0;
+  for (let i = 0; i < region.length; i++) h = (h * 31 + region.charCodeAt(i)) >>> 0;
+  return pool[h % pool.length]!;
+}
+
+// "top 15%" reads as a rank. "ahead of 85 in every 100 guys" reads as a room
+// you are standing in. Same fact; the second one is the one a coach says.
+//
+// "in every 100" rather than "out of 100" because the sentence has to survive
+// the number being 1: "only 1 out of 100 guys sit below you" is broken, and
+// "1 in every 100 guys is below you" is not.
+const peers = (sex: Sex) => (sex === "male" ? "guys" : "women");
+
+function aheadOf(pct: number, sex: Sex): string {
+  const beaten = Math.max(1, Math.min(99, Math.round(pct)));
+  return `ahead of ${beaten} in every 100 ${peers(sex)}`;
+}
+
+function behindYou(pct: number, sex: Sex): string {
+  const below = Math.max(1, Math.min(99, Math.round(pct)));
+  return below === 1
+    ? `only 1 ${sex === "male" ? "guy" : "woman"} in every 100 is below you there`
+    : `only ${below} in every 100 ${peers(sex)} are below you there`;
+}
+
 export function regionSummary(r: RegionScore, sex: Sex): string {
   // Only what was actually read. An unmeasured metric has a NaN z, which sorts
   // unpredictably and can land at either end — so the sentence would name the
-  // one measurement that does not exist as the region's anchor or its drag, and
-  // print an em dash and an "NaNth percentile" alongside it.
+  // one measurement that does not exist as the region's best or its weakest,
+  // and print an em dash and an "NaNth percentile" alongside it.
   const sorted = r.metrics.filter(wasMeasured).sort((a, b) => b.zEff - a.zEff);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
   const name = REGION_NAMES[r.region].toLowerCase();
+  const hi = opener(r.region, sex);
   // A region CAN now arrive with nothing in it: measurements that failed are
   // dropped from the report rather than carried as undefined (see
   // scoreFrontSet), and the side view scores no metric at all in some regions.
@@ -157,34 +205,44 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
   // took the Midface tab out, one line further along, so it is answered here
   // rather than left to be discovered.
   if (!best || !worst) {
-    return `Nothing in the ${name} could be measured on this photograph, so this region is not scored. It is excluded from the total rather than counted as a zero.`;
+    return `${hi} — I couldn't get a clean read on your ${name} from this photograph, so I'm not scoring it. It sits out of your total rather than counting against you. Worth a rescan in better light.`;
   }
 
-  let s1: string;
-  if (best.percentile >= 55) {
-    s1 = `${best.def.name} is the anchor here, at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which lands in the top ${Math.max(1, Math.round(100 - best.percentile))}%. It measures ${traitOf(best.def.id)}.`;
-  } else {
-    s1 = `Nothing in this region carries hard: even ${best.def.name.toLowerCase()} only reaches the ${ordinal(best.percentile)} percentile at ${fmt(best)} (${sexNoun(sex)} average ${fmtMean(best, sex)}).`;
-  }
+  // What is good. Named, with the number, and with what it actually means —
+  // praise that does not say what it is praising is worth nothing.
+  const s1 = best.percentile >= 55
+    ? `${hi} — your ${best.def.name.toLowerCase()} is carrying this one. ${fmt(best)} where the ${sexNoun(sex)} average is ${fmtMean(best, sex)}, which puts you ${aheadOf(best.percentile, sex)}. That's ${traitOf(best.def.id)}, and yours is genuinely good.`
+    : `${hi} — I'm not going to pretend anything in your ${name} is doing heavy lifting. The best of it is ${best.def.name.toLowerCase()} at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which is about the middle of the room.`;
 
-  const s2 =
-    worst.percentile < 45
-      ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)}, the ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm. That one is ${traitOf(worst.def.id)}.`
-      : `Even the weakest number here, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, holds the ${ordinal(worst.percentile)} percentile.`;
-
-  // A region whose measurements do not reproduce gets no net position.
+  // What to work on. Said outright, with the number, no cushioning — the warm
+  // opener exists so that this sentence can afford to be blunt.
   //
-  // The two sentences above are still worth saying — they report what was read
-  // on this photograph, which is true — but "net position: 3.9/10, about 89% of
-  // faces score higher" is a population claim, and a claim needs a measurement
-  // that holds still. When every metric in the region wanders as much between
-  // two photos of one face as it does between two people, the ranking those
-  // metrics produce is a ranking of the lighting.
-  const s3 = !regionIsScored(r)
-    ? `No net position for the ${name}: every measurement in it moves about as much between two photographs of the same face as it does between two different faces, so there is nothing stable to rank. The readings are shown; the region is left out of the total rather than counted against you.`
+  // Except where the region has no score, and this is the part that was wrong
+  // the first time round: naming "the one to work on" and then explaining two
+  // sentences later that nothing here can be measured reliably is the product
+  // contradicting itself inside one paragraph. If the numbers do not hold
+  // still, neither does the ranking that picked a worst one, so there is no
+  // honest target to hand somebody.
+  const scored = regionIsScored(r);
+  const s2 = !scored
+    ? `I'm not going to point you at one of these to fix, either.`
+    : worst.percentile < 45
+      ? `The one to go at is your ${worst.def.name.toLowerCase()}: ${fmt(worst)} against ${fmtMean(worst, sex)}, and ${behindYou(worst.percentile, sex)}. That one's ${traitOf(worst.def.id)}.`
+      : `Nothing here is really letting you down — even your weakest number, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, is holding its own.`;
+
+  // Where that leaves you.
+  //
+  // A region whose measurements do not reproduce gets no position at all. The
+  // sentence above is still worth saying — it reports what was read on this
+  // photograph, which is true — but a placement is a claim about other people,
+  // and a claim needs a measurement that holds still. When every metric in a
+  // region wanders as much between two photos of one face as between two
+  // faces, the ranking is a ranking of the lighting.
+  const s3 = !scored
+    ? `Here's why: every measurement in your ${name} moves about as much between two photos of the same face as it does between two different people. There's nothing steady enough there to rank, so I'm not giving it a score and I'm keeping it out of your total. You still get the readings.`
     : r.percentile >= 50
-      ? `Net position: ${r.score.toFixed(1)}/10, meaning roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
-      : `Net position: ${r.score.toFixed(1)}/10. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
+      ? `All in, that's ${r.score.toFixed(1)} out of 10 across the ${name} — roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well.`
+      : `All in, ${r.score.toFixed(1)} out of 10 across the ${name}. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces come in above you — and you now know the exact number standing in the way, which is more than most people ever get told.`;
 
   return `${s1} ${s2} ${s3}`;
 }

@@ -181,11 +181,23 @@ export function spreadLine(sex: Sex): string {
 // prose two paragraphs below it in the primer said "around one in ninety" at
 // the same time, so one card showed the same fact as both 90 and 100.
 //
-// So the ladder now reads the raw curve and floors it. Flooring rather than
-// rounding, because the remaining error should fall on the side of claiming
-// less: 4.5 becomes "1 in 4", not "1 in 5". `oneInN` is untouched and still
-// governs every report surface, where matching the displayed percentile is the
-// property that matters.
+// The floored raw values were tried and reverted, on purpose and on request.
+// They read 1 in 2 / 4 / 16 / 90, which is more accurate and materially harder
+// to hold in your head — and this ladder exists to be understood in thirty
+// seconds by somebody who has just been handed a number about their face. A
+// rung nobody parses teaches nothing, however correct it is.
+//
+// So it is back on `oneInN`, which reads the STATED percentile and therefore
+// lands on round numbers: 2, 5, 20, 100. The overstatement is real and small —
+// an 8.0 is about 1 in 91 and is shown as 1 in 100 — and it is bounded by the
+// same five-point rounding every percentile on every screen already uses, so
+// the ladder now agrees with the rest of the product rather than being the one
+// place quoting a sharper figure.
+//
+// What does NOT come back is the contradiction. The prose beside the ladder
+// used to hardcode "around one in ninety" next to a rung reading 1 in 100 —
+// one card, one fact, two numbers. scaleNote reads its figures out of LADDER
+// now, so whatever this returns is what the sentence says.
 //
 // `capped` still marks where statedPct clamps, which is the point past which
 // the product stops quoting counts at all — 8 is where we stop counting, not
@@ -196,8 +208,7 @@ export function spreadLine(sex: Sex): string {
 export const LADDER: Array<{ score: number; oneIn: number; capped: boolean }> = [5, 6, 7, 8].map(
   (score) => {
     const pct = aggregateScoreToPercentile(score);
-    const oneIn = Math.max(2, Math.floor(100 / Math.max(1e-9, 100 - pct)));
-    return { score, oneIn, capped: statedPct(pct) >= 99 };
+    return { score, oneIn: oneInN(pct), capped: statedPct(pct) >= 99 };
   },
 );
 

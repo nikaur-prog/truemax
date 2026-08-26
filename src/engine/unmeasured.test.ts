@@ -104,6 +104,12 @@ test("an empty region is described rather than crashed on", () => {
   // scores no metric at all in several of them.
   const empty = { region: "midface" as const, score: 5, percentile: 50, z: 0, metrics: [], reliability: 0 };
   const said = regionSummary(empty, "male");
-  assert.match(said, /Nothing in the midface could be measured/);
+  // The PROPERTY, not the phrasing. This used to pin the exact sentence
+  // ("Nothing in the midface could be measured"), so rewriting the summary in
+  // a coach's voice failed a test that was not about voice at all. What has to
+  // hold is that the region is named, the reader is told it is not scored, and
+  // no placeholder leaks.
+  assert.match(said, /midface/);
+  assert.match(said, /not scoring it|not going to score it|not scored/);
   assert.doesNotMatch(said, /undefined|NaN/);
 });
