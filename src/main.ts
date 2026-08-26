@@ -2259,17 +2259,45 @@ function startSide(): void {
 }
 
 function renderQualityChips(q: QualityCheck, autoNote = ""): void {
-  const chips = q.issues.map((i) => `<span class="qchip warn">${i}</span>`);
-  if (autoNote) chips.push(`<span class="qchip">${autoNote}</span>`);
-  if (feedbackDeliveryNote) {
-    chips.push(`<span class="qchip${feedbackDeliveryNote.ok ? "" : " warn"}">${feedbackDeliveryNote.message}</span>`);
-  }
+  // What went wrong with the photograph, and the neutral provenance of how it
+  // was scored, are two different kinds of statement and they get two
+  // different treatments.
+  //
+  // Every issue used to be printed as its own red chip, and on a phone the
+  // whole block sat ABOVE the photograph — so a first scan opened on four
+  // outlined warnings ("head is off level", "smiling detected", "turned from
+  // the camera") with the score below the fold. The notes are honest and
+  // worth keeping; leading with them is not. Somebody came for a number and
+  // the first thing the product did was list what they had done wrong.
+  //
+  // So: more than one issue collapses behind a single quiet chip that says
+  // how many there are and opens in place. A lone issue stays inline, because
+  // hiding one short sentence behind a disclosure is worse than showing it.
+  const warnings = q.issues.slice();
+  if (feedbackDeliveryNote && !feedbackDeliveryNote.ok) warnings.push(feedbackDeliveryNote.message);
+
+  const neutral: string[] = [];
+  if (autoNote) neutral.push(autoNote);
+  if (feedbackDeliveryNote?.ok) neutral.push(feedbackDeliveryNote.message);
   // Surfacing the correction is part of showing the math: the user can see
   // that an off-axis photo was accounted for rather than silently mismeasured.
   const off = Math.max(Math.abs(q.yawDeg), Math.abs(q.pitchDeg));
-  if (off >= 6) chips.push(`<span class="qchip">Pose-corrected · ${off.toFixed(0)}° off-axis</span>`);
-  if (!chips.length) chips.push(`<span class="qchip">Capture quality: good</span>`);
-  el.qualityChips.innerHTML = chips.join("");
+  if (off >= 6) neutral.push(`Pose-corrected · ${off.toFixed(0)}° off-axis`);
+
+  const parts: string[] = [];
+  if (warnings.length > 1) {
+    parts.push(
+      `<details class="qnotes">
+        <summary><span class="qchip warn qnotes-sum">${warnings.length} notes on this photo</span></summary>
+        <div class="qnotes-body">${warnings.map((i) => `<span class="qchip warn">${i}</span>`).join("")}</div>
+      </details>`,
+    );
+  } else {
+    parts.push(...warnings.map((i) => `<span class="qchip warn">${i}</span>`));
+  }
+  parts.push(...neutral.map((n) => `<span class="qchip">${n}</span>`));
+  if (!parts.length) parts.push(`<span class="qchip">Capture quality: good</span>`);
+  el.qualityChips.innerHTML = parts.join("");
 }
 
 function exposeDev(report: Report, landmarks: unknown, quality: unknown): void {

@@ -1,5 +1,6 @@
 import { countUp, prefersReducedMotion } from "./countUp.js";
 import { percentileLine } from "./templates.js";
+import { renderShareCard, shareCard } from "./shareCard.js";
 import { verdictFor } from "../engine/analysisMode.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import type { Report } from "../engine/types.js";
@@ -64,7 +65,15 @@ export function renderScoreStrip(report: Report): void {
       <span class="ss-word">${verdict.word}</span>
     </div>
     <p class="ss-rank"></p>
-    <span class="ss-more" aria-hidden="true">Full breakdown below</span>`;
+    <div class="ss-foot">
+      <span class="ss-more" aria-hidden="true">Full breakdown below</span>
+      <button type="button" class="ss-share" id="ss-share">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
+        </svg>Share
+      </button>
+    </div>`;
 
   // After the quality chips, which describe the photograph, so the reading
   // order stays "here is the photo, here is what was wrong with it, here is
@@ -86,6 +95,27 @@ export function renderScoreStrip(report: Report): void {
     // The ranking starts typing as the count-up lands, so the two read as one
     // movement rather than as two animations competing for the same eye.
     typeInto(rank, rankText, 620);
+  }
+
+  // Share sits ON the score, not four screens down.
+  //
+  // The card was already reachable — as a ghost button in a row of four at the
+  // bottom of the overview, which is to say after everything somebody has to
+  // scroll past. The moment a person wants to send their score to somebody is
+  // the moment they read it, and this is where they read it.
+  const share = strip.querySelector<HTMLButtonElement>("#ss-share");
+  if (share) {
+    share.onclick = async () => {
+      const photo = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
+      if (!photo) return;
+      share.disabled = true;
+      try {
+        const card = await renderShareCard(report, photo);
+        await shareCard(card, report.overall);
+      } finally {
+        share.disabled = false;
+      }
+    };
   }
 
   detach = watchScroll(pane);

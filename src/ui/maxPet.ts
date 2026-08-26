@@ -324,7 +324,34 @@ function showPetTipOnce(): void {
     return;
   }
 
+  // Waits for the reader, not for the clock.
+  //
+  // A bare timer put this over the pillar cards about seven seconds into
+  // somebody's first look at their own face — the single worst moment in the
+  // product to interrupt, and it covered a score to do it. The offer is only
+  // considerate if it arrives when the first read is OVER, and the honest
+  // signal for that is scrolling: somebody who has moved past the opening
+  // screen has finished looking at it. Somebody who never scrolls is still
+  // reading, so he simply does not ask this visit.
+  const READ_PAST = 600;
+  let armed = false;
+  const offer = () => {
+    if (armed) return;
+    armed = true;
+    window.removeEventListener("scroll", onScroll);
+    window.setTimeout(show, 1200);
+  };
+  const onScroll = () => {
+    if (window.scrollY > READ_PAST) offer();
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  // A page too short to scroll can never satisfy the gate, so it falls back to
+  // the old timer — generously long, and only where scrolling is impossible.
   window.setTimeout(() => {
+    if (document.documentElement.scrollHeight <= window.innerHeight + READ_PAST) offer();
+  }, 20000);
+
+  function show(): void {
     if (!host || isMaxChatOpen()) return;
     const tip = document.createElement("div");
     tip.className = "maxpet-tip";
@@ -354,5 +381,5 @@ function showPetTipOnce(): void {
     };
     tip.querySelector('[data-pet-tip="hide"]')?.addEventListener("click", () => done(true));
     tip.querySelector('[data-pet-tip="keep"]')?.addEventListener("click", () => done(false));
-  }, 7000);
+  }
 }
