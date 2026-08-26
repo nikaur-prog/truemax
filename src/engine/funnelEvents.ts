@@ -20,6 +20,10 @@ export const FUNNEL_EVENTS = [
   "max-chat-opened",
   "scan-gate-shown",
   "scan-gate-buy",
+  // Took the way out that costs nothing: scanned a friend instead of buying a
+  // scan or waiting. Worth counting separately, because a gate somebody walks
+  // around is a different outcome from a gate they pay through.
+  "scan-gate-guest",
 ] as const;
 
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];

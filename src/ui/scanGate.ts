@@ -1,4 +1,4 @@
-import { readAllHistory } from "../engine/history.js";
+import { ownScans, readAllHistory } from "../engine/history.js";
 import { currentAccessToken } from "../engine/auth.js";
 import {
   consumeScanCredit,
@@ -57,7 +57,19 @@ function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
 // for scans that predate this stamp existing.
 const STAMP_KEY = "truemax.lastScanAt";
 
-export function recordScanRun(): void {
+export function recordScanRun(guest = false): void {
+  // A scan of somebody else's face does not spend the week.
+  //
+  // The allowance is about YOUR face and the delta between two readings of it,
+  // which is why a guest's row is already kept off the chart, the average and
+  // the streak (see ownScans). Charging the week for it was the same
+  // inconsistency from the other end: the scan could not contribute to
+  // progress but could still cost the scan that would have.
+  //
+  // Not an abuse hole. The subject chooser is member-gated, so the only people
+  // who can declare a guest are the ones already paying, and what they get out
+  // of it is a result they cannot chart.
+  if (guest) return;
   try {
     const key = scopedStorageKey(STAMP_KEY);
     if (!key) return;
@@ -79,7 +91,9 @@ function scanTimes(): number[] {
   } catch {
     /* storage disabled */
   }
-  const history = readAllHistory()
+  // Own scans only, matching recordScanRun above: a guest's row is in the
+  // history for the owner to look back at, and it is not one of their weeks.
+  const history = ownScans(readAllHistory())
     .map((scan) => new Date(scan.date).getTime())
     .filter((t) => Number.isFinite(t));
   return mergeScanTimes(stamp, history);
@@ -175,7 +189,7 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
   // The countdown must be to THIS tier's next slot. At allowance two that is
   // when the older held scan leaves the window, which can be days sooner than
   // the base-allowance figure computed above.
-  openScanGate(nextFreeScanAt(allowance) ?? next, allowance);
+  openScanGate(nextFreeScanAt(allowance) ?? next, allowance, member ? proceed : null);
   return false;
 }
 
@@ -187,6 +201,24 @@ export function closeScanGate(): void {
   timer = null;
   host?.remove();
   host = null;
+}
+
+/**
+ * The day the wait ends, in words.
+ *
+ * A live countdown is precise and unplannable: "3d 04h 12m" tells you how long
+ * but not WHEN, and the thing somebody actually wants to know is whether it is
+ * back before the weekend. Both are shown — the date to plan around, the
+ * countdown underneath because it is the one that visibly moves.
+ */
+function unlockDay(nextAt: number): string {
+  const when = new Date(nextAt);
+  const days = Math.round((when.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  const at = new Date(nextAt);
+  const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (days <= 0) return `later today, around ${time}`;
+  if (days === 1) return `tomorrow, around ${time}`;
+  return `${at.toLocaleDateString(undefined, { weekday: "long" })}, around ${time}`;
 }
 
 function remaining(nextAt: number): string {
@@ -204,7 +236,7 @@ function remaining(nextAt: number): string {
 // argument, so the price on the button and the note under it cannot disagree
 // with each other or with the same price quoted on the results screen. Every
 // caller sets that state before opening.
-function openScanGate(nextAt: number, allowance = 1): void {
+function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | null = null): void {
   if (host) return;
   track("scan-gate-shown");
   const member = isMemberPricing();
@@ -221,6 +253,16 @@ function openScanGate(nextAt: number, allowance = 1): void {
   // One upsell line each: non-members hear about the member price, Starter
   // members hear that Max carries a second weekly scan. Max members, who have
   // nothing further to be sold, get neither.
+  // The one thing that is still available, said plainly.
+  //
+  // Scanning a friend does not spend the week — it cannot move the owner's
+  // chart, so it does not cost the scan that would have (see recordScanRun) —
+  // and until this line existed there was no way to find that out except by
+  // guessing. Members only, because the subject chooser is members only.
+  const guestOffer = scanGuest
+    ? `<button class="btn gho" id="sg-guest">Scan someone else instead</button>
+       <p class="sg-note">Scanning a friend is always free and never spends your week — their result just doesn't go on your chart.</p>`
+    : "";
   const note = !member
     ? `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`
     : allowance === 1
@@ -235,9 +277,11 @@ function openScanGate(nextAt: number, allowance = 1): void {
       <p class="sg-sub">${sub}</p>
       <div class="sg-timer">
         <span class="klabel">YOUR NEXT FREE SCAN</span>
+        <b class="sg-when">${unlockDay(nextAt)}</b>
         <b id="sg-count">–</b>
       </div>
       <button class="btn pri" id="sg-buy">Scan now for ${scanPrice()}</button>
+      ${guestOffer}
       ${note}
       <button class="btn gho" id="sg-wait">I'll wait</button>
       <p class="sg-err" id="sg-err" hidden></p>
@@ -258,6 +302,14 @@ function openScanGate(nextAt: number, allowance = 1): void {
   timer = window.setInterval(tick, 1000);
 
   host.querySelector<HTMLButtonElement>("#sg-wait")!.onclick = closeScanGate;
+  host.querySelector<HTMLButtonElement>("#sg-guest")?.addEventListener("click", () => {
+    track("scan-gate-guest");
+    closeScanGate();
+    // Straight into the normal flow. The subject chooser is the next thing it
+    // shows, so "someone else" is a choice they make there rather than a mode
+    // this dialog puts them into behind their back.
+    scanGuest?.();
+  });
   host.addEventListener("click", (event) => {
     if (event.target === host) closeScanGate();
   });

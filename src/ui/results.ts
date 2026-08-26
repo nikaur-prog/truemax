@@ -13,6 +13,7 @@ import { regionMatches } from "../engine/celebs.js";
 import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
 import { regionIconMarkup } from "./regionIcons.js";
+import { scoreTone } from "./scoreTone.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
@@ -260,14 +261,23 @@ function buildTabs(view: "front" | "side"): void {
     b.onclick = () => select(id);
     tabs.appendChild(b);
   };
+  const headline = maxAccess && adultUser ? "Coach Max’s read" : "Overall";
   if (view === "side" && ctx.sideReport) {
     mk("Profile", "side");
     for (const r of ctx.sideReport.regions) {
       if (r.metrics.length) mk(REGION_NAMES[r.region], `side:${r.region}`);
     }
+    // These two are not front tabs that happen to be listed first. Max reads
+    // the WHOLE scan — both views are in his context — and the plan is built
+    // from every measurement in the report. Dropping them when the profile was
+    // selected meant switching view silently took away the read and the plan,
+    // and the only way back was to notice the front/side toggle under the
+    // photograph and use it. They belong on both rows.
+    mk(headline, "overall");
+    mk("Plan →", "improve");
     return;
   }
-  mk(maxAccess && adultUser ? "Coach Max’s read" : "Overall", "overall");
+  mk(headline, "overall");
   for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
   mk("Plan →", "improve");
 }
@@ -293,7 +303,7 @@ function viewCards(r: Report): string {
   const same = new Set(cards.map(([, score]) => score.toFixed(1))).size === 1;
   return `<div class="viewcards">${cards
     .map(([label, score, pct]) => {
-      const tone = score >= 6.5 ? "hi" : score >= 4.5 ? "mid" : "lo";
+      const tone = scoreTone(score);
       return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
         <span class="vc-label">${label}</span>
         <span class="vc-rank">${rankShort(pct)}</span>
@@ -311,7 +321,13 @@ function viewCards(r: Report): string {
 function select(id: string): void {
   if (!ctx) return;
   stopTypewriter();
-  const onSide = id === "side" || id.startsWith("side:");
+  // Two tabs belong to neither view. Max reads the whole scan and the plan is
+  // built from every measurement in it, so reaching either from the profile
+  // row must not throw the row back to the front tabs — that would take away
+  // the profile's own regions as the price of reading the summary, and leave
+  // the person hunting for the toggle under the photograph to get back.
+  const viewNeutral = id === "overall" || id === "improve";
+  const onSide = id === "side" || id.startsWith("side:") || (viewNeutral && tabView === "side");
   // Swap the tab row before marking one selected, or the mark lands on buttons
   // that are about to be thrown away.
   const view = onSide ? "side" : "front";

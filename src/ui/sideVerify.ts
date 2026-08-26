@@ -17,6 +17,18 @@ export interface VerifyHandle {
    * finger is not free to take. Assigned by the caller after mounting.
    */
   onDragChange?: (dragging: boolean) => void;
+  /**
+   * Called on every pointer move that actually shifts a landmark. Assigned by
+   * the caller after mounting, like onDragChange. Fires at the display's
+   * refresh rate — anything listening has to thin it itself.
+   */
+  onDragMove?: (id: SidePointId) => void;
+  /**
+   * Called when a landmark is selected without being dragged, so a caller can
+   * follow the selection — the corner reference tracks whichever point is in
+   * hand rather than staying on whichever one the walkthrough left it at.
+   */
+  onSelect?: (id: SidePointId) => void;
   points: SidePoints;
   faceDir: number; // +1 subject faces image-right, -1 image-left
   setEditable(editable: boolean): void;
@@ -1082,6 +1094,7 @@ export function mountVerifier(
       handles.get(id)?.classList.add("grabbing");
       paintMagnifier(id);
       magnifier.classList.add("show");
+      api.onSelect?.(id);
       api.onDragChange?.(true);
       host.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -1094,6 +1107,7 @@ export function mountVerifier(
     labelEl.classList.add("show");
     paintMagnifier(dragging);
     magnifier.classList.add("show");
+    api.onSelect?.(dragging);
     api.onDragChange?.(true);
     host.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -1108,6 +1122,7 @@ export function mountVerifier(
     place();
     paintMagnifier(dragging);
     onChange(points);
+    api.onDragMove?.(dragging);
     noteGuidedMove();
   };
   const up = () => {

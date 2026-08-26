@@ -1211,9 +1211,24 @@ body.funnel-open { overflow: hidden; }
   letter-spacing: 0.06em; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.side-panel { min-width: 0; }
-.side-title { font-family: var(--serif); font-weight: 300; font-size: 32px; letter-spacing: -0.01em; margin-bottom: 12px; }
-.side-sub { color: var(--mut); font-size: 14px; line-height: 1.6; margin-bottom: 22px; }
+/* The instructions sit against a frame that is most of the window tall, and
+   `align-items: start` on the grid left them jammed into the top corner with
+   four or five hundred pixels of nothing underneath — a short block of copy
+   pretending to be a full column. Centred against the picture it is describing,
+   and given a real measure: at 0.85fr of a wide window the lines were running
+   past seventy characters at 14px, which is a paragraph you skim rather than
+   read, and these are instructions somebody has to follow with their eyes shut. */
+.side-panel { min-width: 0; align-self: center; max-width: 46ch; }
+.side-title { font-family: var(--serif); font-weight: 300; font-size: 32px; letter-spacing: -0.01em; margin-bottom: 18px; }
+.side-sub { color: var(--mut); font-size: 14.5px; line-height: 1.65; margin-bottom: 18px; }
+/* Flush at the bottom, so the block is optically centred rather than sitting
+   one paragraph gap above where it looks like it should. */
+.side-sub:last-child { margin-bottom: 0; }
+@container (max-width: 820px) {
+  /* One column: the copy is above the frame, not beside it, and centring it
+     against its own height does nothing but cost a rule. */
+  .side-panel { align-self: start; max-width: none; }
+}
 .side-review-note {
   color: var(--acc); background: var(--acc-soft); border-radius: 12px;
   padding: 12px 14px; font-size: 12.5px; line-height: 1.55;
@@ -2488,9 +2503,18 @@ body.auth-modal-open { overflow: hidden; }
   padding: 34px 34px 30px; box-shadow: 0 22px 70px rgba(20, 21, 24, 0.1);
 }
 .auth-card h2 { font-family: var(--serif); font-weight: 300; font-size: 31px; line-height: 1.12; margin: 0 0 12px; }
-.auth-mark { height: 42px; margin-bottom: 22px; }
-.auth-mark span { display: block; width: 32px; height: 42px; border: 1.5px solid var(--acc); border-radius: 50%/46%; position: relative; }
-.auth-mark span::after { content: ""; position: absolute; left: 7px; right: 7px; top: 20px; height: 1px; background: var(--acc); }
+/* Centred, because this card is the whole page. A brand mark tucked into the
+   top-left corner of a centred card reads as a stray glyph; over the heading
+   it reads as a letterhead, which is what a sign-in page opened from an email
+   is. */
+.auth-mark { display: grid; place-items: center; margin-bottom: 18px; color: var(--acc); }
+.auth-mark svg { width: 40px; height: 40px; display: block; }
+/* The heading and its lede centre with the mark. Half-centred — a centred
+   glyph over a left-aligned title — is the one arrangement that looks like a
+   mistake rather than a choice. The form below stays left-aligned, because
+   labels and fields are read, not displayed. */
+.auth-card h2, .auth-card .acct-lede { text-align: center; }
+.auth-card .acct-lede { max-width: 36ch; margin-inline: auto; }
 .auth-foot { text-align: center; color: var(--mut); font-size: 11.5px; line-height: 1.5; margin: 16px auto 0; max-width: 42ch; }
 
 /* Post-capture account gate. It occupies the result column so closing the
@@ -4055,8 +4079,17 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   display: flex; flex-direction: column; gap: 4px; padding: 14px;
   border: 1px solid var(--line); border-radius: 14px; background: var(--bg);
 }
-.sg-timer b {
-  font-family: var(--serif); font-size: 30px; font-weight: 600;
+/* The day is the headline; the countdown under it is the detail.
+   "3d 04h 12m" is precise and unplannable — it says how long, never when, and
+   what somebody wants to know is whether their scan is back before the
+   weekend. */
+.sg-timer .sg-when {
+  font-family: var(--serif); font-size: 22px; font-weight: 500;
+  line-height: 1.25; letter-spacing: -0.01em;
+}
+.sg-timer b#sg-count {
+  font-family: var(--mono); font-size: 13px; font-weight: 500;
+  letter-spacing: 0.04em; color: var(--mut);
   font-variant-numeric: tabular-nums;
 }
 .sg-note { margin: -4px 0 0; font-size: 12px; color: var(--mut); }
@@ -4684,6 +4717,55 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   background: #16a97a; border-color: #16a97a; color: #fff;
   box-shadow: 0 10px 28px rgba(22, 169, 122, 0.42);
 }
+/* Blue-to-green, played rather than applied.
+   ---------------------------------------------------------------------------
+   This used to be a text swap in one frame: same button, different word,
+   different colour. Nothing about that said "you did that" — it read as the
+   label having been wrong a moment earlier. Now the old label leaves upward,
+   the colour crosses under it, and the new one arrives from below, travelling
+   the same direction the walkthrough is. About a fifth of a second in total,
+   because it happens thirteen times and must never become a wait. */
+.gnext-in.swapping { transform: translateX(-50%) translateY(-5px); opacity: 0; }
+.gnext-in.swapped { animation: gnext-swap 0.26s cubic-bezier(0.2, 0.8, 0.3, 1); }
+@keyframes gnext-swap {
+  from { transform: translateX(-50%) translateY(7px); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+.gnext-in.swapping,
+.gnext-in.swapped {
+  transition: transform 0.13s cubic-bezier(0.4, 0, 1, 1), opacity 0.13s ease,
+              background 0.26s ease, border-color 0.26s ease, box-shadow 0.26s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gnext-in.swapping { transform: translateX(-50%); opacity: 1; }
+  .gnext-in.swapped { animation: none; }
+}
+
+/* The speaker, bottom left of the photograph.
+   ---------------------------------------------------------------------------
+   Opposite corner to the retake glyph, and smaller than it: retake discards
+   your photo, this changes whether the app makes a noise. It exists only on
+   the landmark review, which is the only screen the sounds belong to, so it
+   never has to say what it is turning off. */
+.sound-toggle {
+  position: absolute; left: 10px; bottom: 10px; z-index: 6;
+  width: 24px; height: 24px; border-radius: 999px; padding: 0;
+  display: grid; place-items: center; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(12, 20, 18, 0.5); backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.88);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  opacity: 0.65;
+}
+.sound-toggle svg { width: 13px; height: 13px; display: block; }
+.sound-toggle:hover { opacity: 1; background: rgba(12, 20, 18, 0.78); border-color: rgba(255, 255, 255, 0.44); }
+.sound-toggle.off { color: rgba(255, 255, 255, 0.55); }
+
+/* The information button and the per-point reference both want the top-right
+   corner, and the reference is 62px of it. Nudged clear rather than hidden:
+   the tutorial has to stay reachable from the frame, which is the whole point
+   of it being on the frame. */
+.face-frame:has(.side-refcrop) .cam-info { right: 82px; }
 /* Mid-drag. The button stops offering anything — see guidedAdvance.ts — and
    shows three dots bouncing out of phase instead. It keeps its height so it
    does not resize under a finger that is busy elsewhere on the photo. */
@@ -4865,10 +4947,19 @@ body.is-member .journey { display: none; }
    about; two photographs answer "is this worth twenty seconds?" in less time
    than the sentence above them takes to read. */
 .tut-egs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 18px; }
+/* The panel is tall on a phone before it holds anything: a heading that wraps
+   to three lines, a paragraph, two buttons and a checkbox. Two figures fit
+   under that; four did not, and the bottom of the sheet fell off the screen.
+   So the ask shows one pair whatever it is asking about — see the note in
+   ui/photoTutorial.ts. Capped so a short viewport loses picture height rather
+   than losing the buttons. */
 .tut-eg { margin: 0; }
 .tut-eg img {
   display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
   border-radius: 12px; border: 2px solid var(--line);
+  /* Capped so a short viewport loses picture height rather than losing the
+     buttons off the bottom of the sheet. */
+  max-height: min(34vh, 260px);
 }
 .tut-eg.good img { border-color: #2f9e73; }
 .tut-eg.bad img { border-color: #c06a54; }
@@ -5226,16 +5317,106 @@ select.q-input { appearance: auto; }
 .set-avatar-cell:hover { border-color: var(--acc); transform: translateY(-1px); }
 .set-avatar-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* The locked result inside the signup dialog. On a phone the dialog covers
-   the blurred preview entirely, so the thing being signed up FOR was
-   invisible at the exact moment of the ask. Same fidelity as the preview
-   underneath: the real number, unreadable. */
+/* The finished scan, inside the signup dialog.
+   ---------------------------------------------------------------------------
+   The first version was a keyline, a blurred number and a sentence, and it
+   read as decoration on a paywall: a person who had just photographed their
+   face twice could not tell from a grey smudge whether anything had happened.
+   So it shows the scan — their two photographs, the score, the eight regions.
+
+   Three blur strengths, each doing a different job. The faces get just enough
+   to read as locked while staying recognisably yours. The number and the grid
+   get enough to destroy the digits — and blur leaves HUE completely intact,
+   which is the trick the whole panel turns on: green number, mostly green
+   grid, two amber cells, and you know exactly how badly you want to read it.
+   Nothing is given away that was not already yours, computed on your own
+   device before the dialog opened. */
 .acct-teaser {
-  display: grid; justify-items: center; gap: 2px; text-align: center;
-  padding: 14px 14px 12px; margin-bottom: 14px;
-  border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+  display: grid; justify-items: center; gap: 10px; text-align: center;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--card);
+  user-select: none; -webkit-user-select: none; pointer-events: none;
 }
 .acct-teaser-k { font: 600 9px var(--mono); letter-spacing: .16em; color: var(--mut); }
-.acct-teaser b { font-family: var(--serif); font-weight: 300; font-size: 40px; line-height: 1.05; }
-.acct-teaser b small { font-size: 16px; color: var(--mut); }
-.acct-teaser em { font-style: normal; font-size: 11.5px; color: var(--mut); }
+
+/* The two captures, side by side and the same size, so the pair reads as one
+   scan rather than as two pictures. */
+.acct-faces { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.acct-face { margin: 0; }
+.acct-face img {
+  display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover;
+  border-radius: 11px; border: 1px solid var(--line);
+  filter: blur(3.5px) saturate(.85);
+}
+.acct-face figcaption {
+  margin-top: 5px; font: 600 8.5px var(--mono); letter-spacing: .14em; color: var(--mut);
+}
+
+/* Heavier weight, and blurred to eight.
+   The first pass took the blur DOWN to six so the colour would read, and at
+   six a 46px numeral is simply legible — "6.2", plainly, which hands over the
+   one thing the account is being asked for. Weight is the right lever
+   instead: a 600 numeral at eight pixels of blur is a bold coloured shape
+   with no digits left in it. */
+.acct-teaser-score {
+  display: flex; align-items: baseline; justify-content: center; gap: 3px;
+  filter: blur(8px); margin: 4px 0 2px;
+}
+.acct-teaser-score b { font-family: var(--serif); font-weight: 600; font-size: 46px; line-height: 1; }
+.acct-teaser-score small { font-size: 18px; font-weight: 600; opacity: .55; }
+
+/* Four across, two rows. A filled tile rather than a number on the card,
+   because a thin glyph blurs away to almost nothing while a filled block
+   keeps its colour and its edge. */
+.acct-cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; width: 100%; }
+.acct-cell {
+  display: grid; gap: 1px; padding: 6px 4px; border-radius: 8px;
+  filter: blur(4px);
+}
+.acct-cell span { font-size: 7.5px; letter-spacing: .04em; opacity: .75; }
+.acct-cell b { font-size: 13px; font-weight: 650; }
+
+/* One palette for both, and the only place these three colours are decided.
+   Readable against the card at every tone, and distinguishable from each
+   other after eight pixels of blur, which is a stricter test than contrast. */
+.tone-hi { color: #12855f; }
+.tone-mid { color: #a97b1e; }
+.tone-lo { color: #b8553c; }
+.acct-cell.tone-hi { background: rgba(18, 133, 95, .26); }
+.acct-cell.tone-mid { background: rgba(169, 123, 30, .28); }
+.acct-cell.tone-lo { background: rgba(184, 85, 60, .26); }
+
+.acct-teaser em {
+  font-style: normal; font-size: 11.5px; line-height: 1.45; color: var(--mut);
+  max-width: 30ch;
+}
+
+/* Beside the form, not on top of it.
+   ---------------------------------------------------------------------------
+   Above the breakpoint the dialog widens and runs two columns with the scan on
+   the right, where it sits alongside the ask instead of pushing it down the
+   screen. Below it, one column with the scan FIRST: on a phone the dialog
+   covers the blurred preview on the page entirely, so this is the only thing
+   saying what the account is for, and it has to be the first thing seen. */
+/* 10px of clearance for the close button. It is absolutely positioned at
+   16px from the top and right of a panel padded to 26px, so its lower-left
+   corner sat about five pixels inside the content box — which with a teaser
+   in the corner meant a ✕ crossing the top-right of the card. */
+.acct-body.acct-two { display: grid; gap: 18px; padding-top: 10px; }
+.acct-form-col { min-width: 0; }
+@media (max-width: 719px) {
+  /* One column, teaser first, so the faces have to earn their height: at a
+     full square each they pushed the button that ends this dialog two screens
+     down. Shorter crops keep the ask reachable. */
+  .acct-face img { max-height: 118px; }
+  .acct-teaser { gap: 8px; padding: 14px 14px 12px; }
+  .acct-teaser-score b { font-size: 40px; }
+}
+@media (min-width: 720px) {
+  .acct-panel:has(.acct-two) { width: min(780px, 100%); }
+  .acct-body.acct-two { grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr); gap: 26px; align-items: start; }
+  /* DOM order puts the scan first so a phone gets it first with no rule at
+     all; on a wide screen it moves to the second column. */
+  .acct-body.acct-two .acct-teaser { order: 2; position: sticky; top: 0; }
+  .acct-body.acct-two .acct-form-col { order: 1; }
+}
