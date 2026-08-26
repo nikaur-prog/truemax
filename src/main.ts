@@ -47,6 +47,7 @@ import { closeHistory, openHistory } from "./ui/historyView.js";
 import { loadPhotos } from "./engine/photoStore.js";
 import { createSettler } from "./engine/captureSettle.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
+import type { OpenAccountOptions } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
@@ -2172,12 +2173,22 @@ async function gateAnalysis(
   // and "sign up and then we will run it" are different promises, and only the
   // first one is the acquisition flow this screen was meant to be.
   let preview = "";
-  let teaser: { overall: number; regionCount: number } | undefined;
+  let teaser: OpenAccountOptions["teaser"];
   try {
     if (pending) {
       const front = analyze(pending.landmarks, pending.width, pending.height, selectedSex);
       const merged = sideReport ? mergeReports(front, sideReport) : front;
-      teaser = { overall: merged.overall, regionCount: merged.regions.length };
+      // The photographs travel with the numbers. A blurred score on its own
+      // was a grey smudge nobody could read as their own result; their own two
+      // faces beside it are unmistakable, and they are thumbnails of pictures
+      // that never leave this device either way.
+      teaser = {
+        overall: merged.overall,
+        regionCount: merged.regions.length,
+        front: toThumb(el.photoCanvas),
+        side: lastSide?.photo ? toThumb(lastSide.photo) : null,
+        regions: merged.regions.map((g) => ({ label: REGION_NAMES[g.region], score: g.score })),
+      };
       preview = `<div class="lockblur gate-preview" aria-hidden="true" inert>
         <div class="gate-prev-score">${merged.overall.toFixed(1)}<small>/10</small></div>
         <div class="gate-prev-grid">${merged.regions

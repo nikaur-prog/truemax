@@ -10,6 +10,7 @@ import {
   soundDrag,
   soundFinish,
   soundGrab,
+  soundNext,
   startThinking,
   stopThinking,
 } from "./scanSounds.js";
@@ -901,6 +902,9 @@ function mountVerify(
         paintButton(true);
         soundAdvance();
       } else {
+        // A different ping from the confirm above: that one was agreement,
+        // this one is travel.
+        soundNext();
         verifier?.guidedNext();
       }
     };

@@ -234,6 +234,25 @@ export function mountSoundToggle(frame: HTMLElement): { destroy(): void } {
   return { destroy: () => btn.remove() };
 }
 
+/**
+ * Moving ON to the next point, as opposed to answering the current one.
+ *
+ * These are two different events and the button already treats them as two —
+ * the first press turns it green and names what is coming, the second press
+ * goes there — so they should not share a sound. This one is the shorter,
+ * brighter of the pair: a single note that slides up rather than two notes
+ * stepping, which reads as travel where soundAdvance reads as agreement.
+ *
+ * Same family on purpose. Thirteen points is a lot of repetitions, and two
+ * sounds from obviously different instruments would be a novelty for one
+ * scan and an irritation by the third.
+ */
+export function soundNext(): void {
+  if (!soundEnabled()) return;
+  stopThinking();
+  note(698.46, 130, 0.042, { type: "sine", glideTo: 987.77 }); // F5 → B5
+}
+
 /** The last point. The same move, one step further up, so it lands. */
 export function soundFinish(): void {
   if (!soundEnabled()) return;

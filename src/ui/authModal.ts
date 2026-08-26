@@ -15,6 +15,7 @@ import {
 } from "../engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { renderAuthForm } from "./authForm.js";
+import { scoreTone } from "./scoreTone.js";
 import type { AuthMode } from "./authForm.js";
 import { announceMembershipBrand } from "./membershipBrand.js";
 import { openTrialFunnel } from "./onboardingFunnel.js";
@@ -51,9 +52,71 @@ export interface OpenAccountOptions {
    * chip is the same promise at the same fidelity as the preview underneath:
    * the real number, unreadable, present.
    */
-  teaser?: { overall: number; regionCount: number };
+  teaser?: {
+    overall: number;
+    regionCount: number;
+    /** The two captured photographs, as small data URLs. */
+    front?: string | null;
+    side?: string | null;
+    /** Region label and score, in report order. */
+    regions?: ReadonlyArray<{ label: string; score: number }>;
+  };
   onAuthenticated?: (user: User) => void | Promise<void>;
   onDeferred?: () => void | Promise<void>;
+}
+
+/**
+ * The finished-but-locked scan, shown rather than described.
+ *
+ * The first version of this was a label, a blurred number, and a sentence:
+ * "YOUR RESULT · COMPUTED ON THIS DEVICE" over a grey smudge. Which is
+ * exactly as persuasive as it sounds — a person who has just photographed
+ * their face twice cannot tell from that whether anything happened at all, so
+ * the box read as decoration on a paywall rather than as their own result
+ * sitting behind it.
+ *
+ * So it shows the thing. Their two photographs, the number under them, and
+ * the eight region scores as a grid. Three different treatments, and each one
+ * is deliberate:
+ *
+ *   the faces   lightly blurred — enough to read as locked, not so much that
+ *               you cannot recognise your own head, which is the whole point
+ *   the score   heavily blurred, and COLOURED
+ *   the grid    heavily blurred, and coloured
+ *
+ * The colour is what makes this work. Blur destroys the digits and leaves the
+ * hue completely intact, so somebody sees a green number over a grid of mostly
+ * green cells with two amber ones, and knows precisely how much they want to
+ * read it. That is a real tease rather than a grey rectangle claiming to be
+ * one — and it gives nothing away that is not already theirs, on their own
+ * device, computed before the dialog opened.
+ *
+ * aria-hidden and inert throughout: a screen reader announcing the real digits
+ * would unblur the whole thing for exactly the people the blur is meant to
+ * treat the same as everybody else.
+ */
+function teaserMarkup(t: NonNullable<OpenAccountOptions["teaser"]>): string {
+  const face = (src: string | null | undefined, label: string) =>
+    src ? `<figure class="acct-face"><img src="${src}" alt="" /><figcaption>${label}</figcaption></figure>` : "";
+  const faces = [face(t.front, "FRONT"), face(t.side, "SIDE")].filter(Boolean).join("");
+  const grid = (t.regions ?? [])
+    .slice(0, 8)
+    .map(
+      (r) => `<div class="acct-cell tone-${scoreTone(r.score)}">
+        <span>${r.label}</span><b>${r.score.toFixed(1)}</b>
+      </div>`,
+    )
+    .join("");
+
+  return `<aside class="acct-teaser" aria-hidden="true" inert>
+    <span class="acct-teaser-k">YOUR SCAN · MEASURED ON THIS DEVICE</span>
+    ${faces ? `<div class="acct-faces">${faces}</div>` : ""}
+    <div class="acct-teaser-score tone-${scoreTone(t.overall)}">
+      <b>${t.overall.toFixed(1)}</b><small>/10</small>
+    </div>
+    ${grid ? `<div class="acct-cells">${grid}</div>` : ""}
+    <em>${t.regionCount} regions measured. It unlocks the moment you are in.</em>
+  </aside>`;
 }
 
 function initials(email: string): string {
@@ -144,18 +207,22 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   const body = activeOverlay.querySelector(".acct-body") as HTMLElement;
   const requestedMode = options.initialMode ?? (options.reason === "analysis" ? "signup" : null);
   const renderSignedOut = (initialMode: AuthMode) => {
-    // The locked result rides above the form, not the notice text: a sentence
-    // says a result exists, the chip SHOWS it existing. aria-hidden and inert
-    // because a screen reader reading out the real digits would unblur it for
-    // exactly the people the blur is supposed to be even-handed with.
-    const teaser = options.teaser
-      ? `<div class="acct-teaser" aria-hidden="true" inert>
-          <span class="acct-teaser-k">YOUR RESULT · COMPUTED ON THIS DEVICE</span>
-          <b class="lockblur">${options.teaser.overall.toFixed(1)}<small>/10</small></b>
-          <em>${options.teaser.regionCount} regions measured — unlocks the moment you're in</em>
-        </div>`
-      : "";
-    renderAuthForm(body, {
+    // The finished scan sits beside the form, not above the notice text: a
+    // sentence says a result exists, this SHOWS it existing. aria-hidden and
+    // inert because a screen reader reading out the real digits would unblur
+    // it for exactly the people the blur is supposed to be even-handed with.
+    //
+    // The form goes in a column of its own rather than straight into the body,
+    // because it renders as half a dozen siblings — heading, lede, social
+    // buttons, fields — and two columns need two boxes, not one box and a
+    // scatter.
+    body.innerHTML = "";
+    body.classList.toggle("acct-two", Boolean(options.teaser));
+    if (options.teaser) body.insertAdjacentHTML("beforeend", teaserMarkup(options.teaser));
+    const formCol = document.createElement("div");
+    formCol.className = "acct-form-col";
+    body.appendChild(formCol);
+    renderAuthForm(formCol, {
       initialMode,
       context: options.reason === "analysis" ? "analysis" : "account",
       portalHref: `/auth?mode=${initialMode}`,
@@ -165,11 +232,11 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
           close();
           await options.onAuthenticated(signedInUser);
         } else {
+          body.classList.remove("acct-two");
           renderSignedIn(body, signedInUser, options.notice, options.checkoutSessionId);
         }
       },
     });
-    if (teaser) body.insertAdjacentHTML("afterbegin", teaser);
   };
 
   // A deliberate Sign in / Sign up click should never wait on Supabase's
@@ -181,6 +248,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     renderSignedOut(requestedMode);
     void sessionCheck.then((lateUser) => {
       if (lateUser && overlay === activeOverlay && body.isConnected) {
+        body.classList.remove("acct-two");
         renderSignedIn(body, lateUser, options.notice, options.checkoutSessionId);
       }
     });
@@ -195,11 +263,15 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1200)),
   ]);
   if (overlay !== activeOverlay || !activeOverlay.isConnected) return;
-  if (user) renderSignedIn(body, user, options.notice, options.checkoutSessionId);
+  if (user) {
+    body.classList.remove("acct-two");
+    renderSignedIn(body, user, options.notice, options.checkoutSessionId);
+  }
   else {
     renderSignedOut("password");
     void sessionCheck.then((lateUser) => {
       if (lateUser && overlay === activeOverlay && body.isConnected) {
+        body.classList.remove("acct-two");
         renderSignedIn(body, lateUser, options.notice, options.checkoutSessionId);
       }
     });

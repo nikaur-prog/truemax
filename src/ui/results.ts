@@ -13,6 +13,7 @@ import { regionMatches } from "../engine/celebs.js";
 import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
 import { regionIconMarkup } from "./regionIcons.js";
+import { scoreTone } from "./scoreTone.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
@@ -302,7 +303,7 @@ function viewCards(r: Report): string {
   const same = new Set(cards.map(([, score]) => score.toFixed(1))).size === 1;
   return `<div class="viewcards">${cards
     .map(([label, score, pct]) => {
-      const tone = score >= 6.5 ? "hi" : score >= 4.5 ? "mid" : "lo";
+      const tone = scoreTone(score);
       return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
         <span class="vc-label">${label}</span>
         <span class="vc-rank">${rankShort(pct)}</span>

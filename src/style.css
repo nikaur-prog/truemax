@@ -2503,9 +2503,18 @@ body.auth-modal-open { overflow: hidden; }
   padding: 34px 34px 30px; box-shadow: 0 22px 70px rgba(20, 21, 24, 0.1);
 }
 .auth-card h2 { font-family: var(--serif); font-weight: 300; font-size: 31px; line-height: 1.12; margin: 0 0 12px; }
-.auth-mark { height: 42px; margin-bottom: 22px; }
-.auth-mark span { display: block; width: 32px; height: 42px; border: 1.5px solid var(--acc); border-radius: 50%/46%; position: relative; }
-.auth-mark span::after { content: ""; position: absolute; left: 7px; right: 7px; top: 20px; height: 1px; background: var(--acc); }
+/* Centred, because this card is the whole page. A brand mark tucked into the
+   top-left corner of a centred card reads as a stray glyph; over the heading
+   it reads as a letterhead, which is what a sign-in page opened from an email
+   is. */
+.auth-mark { display: grid; place-items: center; margin-bottom: 18px; color: var(--acc); }
+.auth-mark svg { width: 40px; height: 40px; display: block; }
+/* The heading and its lede centre with the mark. Half-centred — a centred
+   glyph over a left-aligned title — is the one arrangement that looks like a
+   mistake rather than a choice. The form below stays left-aligned, because
+   labels and fields are read, not displayed. */
+.auth-card h2, .auth-card .acct-lede { text-align: center; }
+.auth-card .acct-lede { max-width: 36ch; margin-inline: auto; }
 .auth-foot { text-align: center; color: var(--mut); font-size: 11.5px; line-height: 1.5; margin: 16px auto 0; max-width: 42ch; }
 
 /* Post-capture account gate. It occupies the result column so closing the
@@ -5308,16 +5317,106 @@ select.q-input { appearance: auto; }
 .set-avatar-cell:hover { border-color: var(--acc); transform: translateY(-1px); }
 .set-avatar-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* The locked result inside the signup dialog. On a phone the dialog covers
-   the blurred preview entirely, so the thing being signed up FOR was
-   invisible at the exact moment of the ask. Same fidelity as the preview
-   underneath: the real number, unreadable. */
+/* The finished scan, inside the signup dialog.
+   ---------------------------------------------------------------------------
+   The first version was a keyline, a blurred number and a sentence, and it
+   read as decoration on a paywall: a person who had just photographed their
+   face twice could not tell from a grey smudge whether anything had happened.
+   So it shows the scan — their two photographs, the score, the eight regions.
+
+   Three blur strengths, each doing a different job. The faces get just enough
+   to read as locked while staying recognisably yours. The number and the grid
+   get enough to destroy the digits — and blur leaves HUE completely intact,
+   which is the trick the whole panel turns on: green number, mostly green
+   grid, two amber cells, and you know exactly how badly you want to read it.
+   Nothing is given away that was not already yours, computed on your own
+   device before the dialog opened. */
 .acct-teaser {
-  display: grid; justify-items: center; gap: 2px; text-align: center;
-  padding: 14px 14px 12px; margin-bottom: 14px;
-  border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+  display: grid; justify-items: center; gap: 10px; text-align: center;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--card);
+  user-select: none; -webkit-user-select: none; pointer-events: none;
 }
 .acct-teaser-k { font: 600 9px var(--mono); letter-spacing: .16em; color: var(--mut); }
-.acct-teaser b { font-family: var(--serif); font-weight: 300; font-size: 40px; line-height: 1.05; }
-.acct-teaser b small { font-size: 16px; color: var(--mut); }
-.acct-teaser em { font-style: normal; font-size: 11.5px; color: var(--mut); }
+
+/* The two captures, side by side and the same size, so the pair reads as one
+   scan rather than as two pictures. */
+.acct-faces { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.acct-face { margin: 0; }
+.acct-face img {
+  display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover;
+  border-radius: 11px; border: 1px solid var(--line);
+  filter: blur(3.5px) saturate(.85);
+}
+.acct-face figcaption {
+  margin-top: 5px; font: 600 8.5px var(--mono); letter-spacing: .14em; color: var(--mut);
+}
+
+/* Heavier weight, and blurred to eight.
+   The first pass took the blur DOWN to six so the colour would read, and at
+   six a 46px numeral is simply legible — "6.2", plainly, which hands over the
+   one thing the account is being asked for. Weight is the right lever
+   instead: a 600 numeral at eight pixels of blur is a bold coloured shape
+   with no digits left in it. */
+.acct-teaser-score {
+  display: flex; align-items: baseline; justify-content: center; gap: 3px;
+  filter: blur(8px); margin: 4px 0 2px;
+}
+.acct-teaser-score b { font-family: var(--serif); font-weight: 600; font-size: 46px; line-height: 1; }
+.acct-teaser-score small { font-size: 18px; font-weight: 600; opacity: .55; }
+
+/* Four across, two rows. A filled tile rather than a number on the card,
+   because a thin glyph blurs away to almost nothing while a filled block
+   keeps its colour and its edge. */
+.acct-cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; width: 100%; }
+.acct-cell {
+  display: grid; gap: 1px; padding: 6px 4px; border-radius: 8px;
+  filter: blur(4px);
+}
+.acct-cell span { font-size: 7.5px; letter-spacing: .04em; opacity: .75; }
+.acct-cell b { font-size: 13px; font-weight: 650; }
+
+/* One palette for both, and the only place these three colours are decided.
+   Readable against the card at every tone, and distinguishable from each
+   other after eight pixels of blur, which is a stricter test than contrast. */
+.tone-hi { color: #12855f; }
+.tone-mid { color: #a97b1e; }
+.tone-lo { color: #b8553c; }
+.acct-cell.tone-hi { background: rgba(18, 133, 95, .26); }
+.acct-cell.tone-mid { background: rgba(169, 123, 30, .28); }
+.acct-cell.tone-lo { background: rgba(184, 85, 60, .26); }
+
+.acct-teaser em {
+  font-style: normal; font-size: 11.5px; line-height: 1.45; color: var(--mut);
+  max-width: 30ch;
+}
+
+/* Beside the form, not on top of it.
+   ---------------------------------------------------------------------------
+   Above the breakpoint the dialog widens and runs two columns with the scan on
+   the right, where it sits alongside the ask instead of pushing it down the
+   screen. Below it, one column with the scan FIRST: on a phone the dialog
+   covers the blurred preview on the page entirely, so this is the only thing
+   saying what the account is for, and it has to be the first thing seen. */
+/* 10px of clearance for the close button. It is absolutely positioned at
+   16px from the top and right of a panel padded to 26px, so its lower-left
+   corner sat about five pixels inside the content box — which with a teaser
+   in the corner meant a ✕ crossing the top-right of the card. */
+.acct-body.acct-two { display: grid; gap: 18px; padding-top: 10px; }
+.acct-form-col { min-width: 0; }
+@media (max-width: 719px) {
+  /* One column, teaser first, so the faces have to earn their height: at a
+     full square each they pushed the button that ends this dialog two screens
+     down. Shorter crops keep the ask reachable. */
+  .acct-face img { max-height: 118px; }
+  .acct-teaser { gap: 8px; padding: 14px 14px 12px; }
+  .acct-teaser-score b { font-size: 40px; }
+}
+@media (min-width: 720px) {
+  .acct-panel:has(.acct-two) { width: min(780px, 100%); }
+  .acct-body.acct-two { grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr); gap: 26px; align-items: start; }
+  /* DOM order puts the scan first so a phone gets it first with no rule at
+     all; on a wide screen it moves to the second column. */
+  .acct-body.acct-two .acct-teaser { order: 2; position: sticky; top: 0; }
+  .acct-body.acct-two .acct-form-col { order: 1; }
+}
