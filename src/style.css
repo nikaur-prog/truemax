@@ -3128,7 +3128,17 @@ body.auth-modal-open { overflow: hidden; }
 /* Thinking swaps the resting arm for the hand on the chin, and the dots in
    the thought bubble alternate like a messenger's typing indicator. */
 .mx-mood-thinking .mx-arm-rest { display: none; }
-.mx-thought .mx-dot { animation: mx-think-dot 1.15s ease-in-out infinite; animation-delay: calc(var(--di) * .17s); }
+/* Scoped to the state that shows the bubble, not to the bubble itself.
+ *
+ * `.mx-thought` carries `.mx-alt`, so it is display:none until a mood turns it
+ * on — but display:none on an ANCESTOR does not stop a child's animation from
+ * being created, and these three dots are children. Measured on one resting
+ * Max: twelve animations running, and four of them were these dots plus the
+ * talking mouth below, both for states that were not active. A third of his
+ * idle cost, on every drawing of him on the page, animating nothing anybody
+ * could see. */
+.mx-mood-thinking .mx-thought .mx-dot,
+.mx-svg.thinking .mx-thought .mx-dot { animation: mx-think-dot 1.15s ease-in-out infinite; animation-delay: calc(var(--di) * .17s); }
 @keyframes mx-think-dot {
   0%, 60%, 100% { opacity: .3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-2.5px); }
@@ -3156,7 +3166,9 @@ body.auth-modal-open { overflow: hidden; }
    varies scaleX and scaleY independently with an actual rest near the end
    where a breath would be. Nothing here matches the words — it does not have
    to. It only has to stop being periodic. */
-.mx-talk-shape { transform-origin: 75px 84px; animation: mx-talk 1.15s linear infinite; }
+/* Same fix as the thinking dots above: only while he is actually speaking. */
+.mx-talk-shape { transform-origin: 75px 84px; }
+.mx-svg.speaking .mx-talk-shape { animation: mx-talk 1.15s linear infinite; }
 /* The rest of him talks too. A moving mouth on a still head is a puppet; the
    brows lift on the open vowels and the whole body picks up its pace. */
 .mx-svg.speaking .mx-bob { animation: mx-talk-bob 1.15s ease-in-out infinite; }
@@ -3308,6 +3320,29 @@ body.auth-modal-open { overflow: hidden; }
 .max-sticker-sparks { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); pointer-events: none; }
 .mx-spark { opacity: 0; transform-origin: center; animation: mx-twinkle 2.6s ease-in-out infinite; animation-delay: calc(var(--si) * .55s); }
 .mx-svg { display: block; width: 100%; height: auto; }
+
+/* Max, switched off.
+ *
+ * He carries about a dozen `infinite` animations at rest — bob, blink, glance,
+ * antenna, antenna glint, pulse, shadow, plus the sparks behind the sticker and
+ * whatever his mood adds. None of them is expensive alone. All of them together,
+ * running forever, on every drawing of him that exists on the page, are: the
+ * loader alone renders four full copies, so four dozen animations tick on a
+ * screen whose entire job is to be waited through.
+ *
+ * Worse, they ran when nobody could see them. maxIdle already stopped the ACTS
+ * off screen and in a background tab, on exactly the reasoning that animating a
+ * character nobody is looking at is pure battery — but the resting animations
+ * underneath were never part of that deal and kept going regardless.
+ *
+ * One class, set by the same observer that gates the acts. `animation-play-state`
+ * rather than `animation: none`, so he freezes mid-breath and resumes from
+ * there instead of snapping back to the first keyframe when he scrolls into
+ * view. */
+.mx-svg.mx-asleep,
+.mx-asleep .mx-svg { animation-play-state: paused; }
+.mx-svg.mx-asleep *,
+.mx-asleep .mx-svg * { animation-play-state: paused; }
 /* The whole character breathes and leans — and squashes a touch at the bottom
    of the cycle, because a rigid body that only translates reads as a sticker
    being moved rather than as something alive. */
@@ -3354,6 +3389,10 @@ body.auth-modal-open { overflow: hidden; }
 .mx-act-phone .mx-prop-phone,
 .mx-act-confused .mx-prop-question,
 .mx-act-skate .mx-prop-board,
+.mx-act-tinker .mx-prop-spanner,
+.mx-act-mirror .mx-prop-mirror,
+.mx-act-pushups .mx-prop-floor,
+.mx-act-think .mx-prop-idea,
 .mx-act-dance .mx-prop-notes { display: block; }
 
 /* Phone: he leans in over it, and the free arm thumbs at the screen. */
@@ -3435,6 +3474,116 @@ body.auth-modal-open { overflow: hidden; }
   from { opacity: 0; transform: scale(.5) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+
+/* ---------------------------------------------------------------------------
+   Four more acts, so the repertoire stops being its own loop.
+   At four you have seen all of him inside a minute. Each of these is built
+   from the same parts as the originals — a transform on .mx-bob, a transform
+   on .mx-arm, one prop faded in — so they cost the same as what was already
+   there and none of them introduces a new paint.
+   --------------------------------------------------------------------------- */
+
+/* Tinker: he produces a spanner and works on something just off his own
+   shoulder, with the satisfied wobble of a robot who believes he is helping. */
+.mx-act-tinker .mx-bob { animation: mx-tinker 5s ease-in-out; }
+.mx-act-tinker .mx-arm { animation: mx-tinker-arm 1.15s ease-in-out 4; }
+.mx-act-tinker .mx-prop-spanner {
+  animation: mx-prop-in .3s ease-out both, mx-tinker-turn 1.15s ease-in-out .3s 4;
+  transform-box: fill-box; transform-origin: 20% 80%;
+}
+@keyframes mx-tinker {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  25% { transform: translate(-2px, 1px) rotate(-3deg); }
+  60% { transform: translate(2px, -1px) rotate(3deg); }
+}
+@keyframes mx-tinker-arm {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: translate(2px, -7px) rotate(-108deg); }
+}
+@keyframes mx-tinker-turn {
+  0%, 100% { transform: rotate(-14deg); }
+  50% { transform: rotate(20deg); }
+}
+
+/* Mirror: out comes a hand mirror, he admires himself, and plants one on his
+   own reflection. The joke has to be at HIS expense, not the reader's — this
+   is a product people arrive at feeling scrutinised, and a mascot who is smug
+   about his own face is funny where a mascot inspecting yours is not. */
+.mx-act-mirror .mx-bob { animation: mx-preen 5s ease-in-out; }
+.mx-act-mirror .mx-arm { animation: mx-mirror-arm 5s ease-in-out; }
+.mx-act-mirror .mx-prop-mirror {
+  animation: mx-prop-in .3s ease-out both;
+  transform-box: fill-box; transform-origin: center bottom;
+}
+.mx-act-mirror .mx-kiss {
+  transform-box: fill-box; transform-origin: center;
+  animation: mx-kiss-out 1.6s ease-out 2.6s 1 both;
+}
+@keyframes mx-preen {
+  0%, 100% { transform: rotate(0) scale(1); }
+  20% { transform: rotate(-7deg) scale(1.02); }
+  45% { transform: rotate(6deg) scale(1.02); }
+  /* The pucker: a small lunge toward the glass, then a pleased settle. */
+  62% { transform: translateX(6px) rotate(9deg) scale(1.05, .97); }
+  75% { transform: translateX(0) rotate(-3deg) scale(1); }
+}
+@keyframes mx-mirror-arm {
+  0%, 100% { transform: rotate(0); }
+  15%, 85% { transform: translate(3px, -9px) rotate(-119deg); }
+}
+@keyframes mx-kiss-out {
+  0% { opacity: 0; transform: translate(0, 0) scale(.4); }
+  25% { opacity: 1; transform: translate(4px, -3px) scale(1); }
+  100% { opacity: 0; transform: translate(14px, -18px) scale(1.3) rotate(12deg); }
+}
+
+/* Press-ups: he drops to a floor that has to be drawn, because a hovering
+   robot pumping against empty space reads as a rendering fault rather than a
+   joke. Five reps in five seconds, then back up pleased with himself. */
+.mx-act-pushups .mx-bob { animation: mx-pushup 1s ease-in-out 5; }
+.mx-act-pushups .mx-prop-floor { animation: mx-prop-in .25s ease-out both; }
+.mx-act-pushups .mx-sweat {
+  transform-box: fill-box; transform-origin: center;
+  animation: mx-sweat-fly 1.6s ease-out 2.2s 2 both;
+}
+@keyframes mx-pushup {
+  0%, 100% { transform: translateY(0) rotate(0) scale(1); }
+  /* Down: the whole body drops and squashes, the way a soft thing does. */
+  45% { transform: translateY(16px) rotate(-2deg) scale(1.05, .9); }
+  70% { transform: translateY(-3px) rotate(1deg) scale(.98, 1.03); }
+}
+@keyframes mx-sweat-fly {
+  0% { opacity: 0; transform: translate(0, 0) scale(.5); }
+  30% { opacity: .9; transform: translate(3px, -2px) scale(1); }
+  100% { opacity: 0; transform: translate(13px, -14px) scale(.8); }
+}
+
+/* Think: a daydream bubble, a slow look up and away, and a small nod when
+   whatever it was lands. Deliberately the quietest act in the set — eight
+   acts that are all big is the same wallpaper problem as one act repeated. */
+.mx-act-think .mx-bob { animation: mx-muse 5s ease-in-out; }
+.mx-act-think .mx-arm { animation: mx-chin-stroke 5s ease-in-out; }
+.mx-act-think .mx-prop-idea {
+  animation: mx-prop-in .4s ease-out both, mx-idea-float 2.4s ease-in-out .4s 2;
+  transform-box: fill-box; transform-origin: center bottom;
+}
+@keyframes mx-muse {
+  0%, 100% { transform: rotate(0) translateY(0); }
+  30% { transform: rotate(-9deg) translateY(-3px); }
+  55% { transform: rotate(-7deg) translateY(-2px); }
+  /* The nod, when the thought arrives. */
+  72% { transform: rotate(2deg) translateY(3px); }
+  84% { transform: rotate(0) translateY(-1px); }
+}
+@keyframes mx-chin-stroke {
+  0%, 100% { transform: rotate(0); }
+  20%, 70% { transform: translate(4px, -12px) rotate(-96deg); }
+}
+@keyframes mx-idea-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-4px) scale(1.04); }
+}
+
 @media (prefers-reduced-motion: reduce) { .mx-prop { display: none !important; } }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves

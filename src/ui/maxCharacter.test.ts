@@ -62,8 +62,13 @@ test("he is self-contained: no network, no script, no external asset", () => {
   assert.ok(!/url\((?!#)/.test(svg), "no external url() references");
 });
 
-test("the sticker arrives waving, with sparks", () => {
+test("the sticker arrives at rest, with sparks", () => {
   const svg = maxStickerMarkup();
-  assert.ok(svg.includes("mx-arm waving"));
+  // It used to assert `mx-arm waving`. The sticker mounts wherever it is
+  // placed, so that put an arm up every time one appeared — a greeting nobody
+  // triggered, which is exactly the tic greet() caps at two everywhere else.
+  // He arrives still and earns attention with the idle repertoire instead.
+  assert.ok(!svg.includes("waving"), "the sticker must not arrive mid-wave");
+  assert.ok(svg.includes("mx-arm"));
   assert.equal(svg.match(/mx-spark/g)?.length, 4);
 });
