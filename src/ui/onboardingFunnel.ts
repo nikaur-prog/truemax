@@ -322,7 +322,7 @@ export async function openTrialFunnel(
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}
           <div class="plan-top"><span>TRUE<span>MAX</span></span><b>$11.99<small> USD / month</small></b></div>
           <p>Your highest-touch experience with Max alongside you.</p>
-          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Max AI, comprehensive guidance</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
+          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="max" ${adult ? "" : "disabled"}>
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
@@ -544,9 +544,9 @@ export async function openTrialFunnel(
       ["A LITTLE ABOUT YOU", `Let's make this yours, ${esc(profile.firstName || "first")}.`, "Your email already comes from your secure account. We only ask for what shapes your experience."],
       ["AGE & DISCOVERY", "Keep the experience age-appropriate.", "Your date of birth controls which plan can be offered. Your mobile is optional and is never required for analysis."],
       ["YOUR OBJECTIVE", "What would you most like to improve?", "Pick as many as fit. This personalises the pathway; it never changes your measurements or score."],
-      ["THE OUTCOME", "What would make TrueMax genuinely useful?", "A short answer helps Max focus on your version of progress, not somebody else's."],
+      ["THE OUTCOME", "What would make TrueMax genuinely useful?", "A short answer helps Coach Max focus on your version of progress, not somebody else's."],
       ["YOUR STARTING POINT", "Bring the whole picture, not just a score.", "These are optional. We use them to keep coaching specific, constructive and grounded in what you already value."],
-      ["BOUNDARIES", "Anything you don't want made into a project?", "Optional. Measurements still appear, but your written pathway and Max will avoid pushing these topics."],
+      ["BOUNDARIES", "Anything you don't want made into a project?", "Optional. Measurements still appear, but your written pathway and Coach Max will avoid pushing these topics."],
     ];
     const [eyebrow, title, note] = headers[step];
     let content = "";

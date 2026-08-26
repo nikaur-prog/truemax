@@ -334,9 +334,14 @@ export function mountDemoReel(
         const appear = seg(t, T.pillars[0] + i * 170, T.pillars[0] + i * 170 + 380);
         if (appear <= 0) return;
         const x = 14 + i * (bw + 8);
-        // Anchored to the panel rather than the frame: the row rides the seam
-        // down as the dock opens and never strands itself over the picture.
-        const y = photoH + panelH * 0.62;
+        // Anchored a fixed distance off the BOTTOM of the frame, not to a
+        // fraction of the panel. The fraction put the row wherever the panel
+        // happened to be tall, while the name above it is positioned in CSS
+        // from the same bottom edge — two coordinate systems for one stack,
+        // which is exactly how the name ended up printed through the bars.
+        // One origin now, and the gap between them is arithmetic rather than
+        // luck. Undocked, it rides the seam down as before.
+        const y = dockT > 0.001 ? h - 32 - (1 - dockT) * (h - 32 - photoH) : photoH;
         ctx.globalAlpha = alpha * appear;
         ctx.fillStyle = "rgba(255,255,255,0.2)";
         ctx.fillRect(x, y + 16, bw, 3);
@@ -458,7 +463,10 @@ export function mountDemoReel(
     // so it travels into the panel by having its offset driven from here —
     // the number ends up on black above the pillar row, never on a cheek.
     const cap = scoreEl.parentElement;
-    if (cap) cap.style.bottom = `${(84 - 40 * dockT).toFixed(1)}px`;
+    // Docked, the name's baseline lands 52px off the bottom: the pillar labels
+    // top out at 30.5px, so the two clear each other by about thirteen pixels
+    // at every frame size rather than colliding at some of them.
+    if (cap) cap.style.bottom = `${(84 - 32 * dockT).toFixed(1)}px`;
 
     if (t >= T.hold) {
       idx = (idx + 1) % REEL.length;

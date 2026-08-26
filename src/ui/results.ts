@@ -206,7 +206,7 @@ function buildTabs(view: "front" | "side"): void {
     }
     return;
   }
-  mk(maxAccess && adultUser ? "Max’s analysis" : "Overall", "overall");
+  mk(maxAccess && adultUser ? "Coach Max’s read" : "Overall", "overall");
   for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
   mk("Plan →", "improve");
 }
@@ -1016,7 +1016,7 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
     <div class="maxan-body">
-      <span class="klabel">MAX'S READ</span>
+      <span class="klabel">COACH MAX'S READ</span>
       <p><b>${good}</b> ${improve}</p>
       ${tracking ? `<p class="maxan-track">${tracking}</p>` : ""}
       <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
@@ -1683,7 +1683,7 @@ function syncMaxSurfaces(): void {
   // row has no overall tab to rename.
   if (tabView === "front") {
     const tab = ctx.analysis.querySelector<HTMLButtonElement>('.rtab[data-id="overall"]');
-    if (tab) tab.textContent = maxAccess && adultUser ? "Max’s analysis" : "Overall";
+    if (tab) tab.textContent = maxAccess && adultUser ? "Coach Max’s read" : "Overall";
   }
   // Re-render the open tab if it is one whose content keys on the flags: the
   // overview carries Max's analysis, the plan carries the CTA card and the
@@ -1793,8 +1793,8 @@ function askMaxCard(): string {
     <span class="askmax-bubble" id="askmax-bubble" aria-hidden="true"></span>
     <span class="askmax-face">${maxCharacterMarkup({ mood: "happy" })}</span>
     <span class="askmax-copy">
-      <b>Meet Max, your personal coach</b>
-      <small>Part of the Max plan. He reads your numbers and turns them into your plan.</small>
+      <b>Meet Coach Max</b>
+      <small>Part of the Max plan. He reads your numbers and talks you through what to do about them.</small>
     </span>
     <span class="askmax-go" aria-hidden="true">→</span>
   </button>`;
@@ -1858,7 +1858,7 @@ function chatContext() {
 function upsell(): string {
   return `<div class="recs upsell">
     <h4>WHAT MAX ADDS</h4>
-    <p class="recs-note">Your measurements, your scores, your ranking and your progress over time are yours on every plan, and always will be. What Max adds is the part that takes work to get right: the specific routine for your face, not a generic list.</p>
+    <p class="recs-note">Your measurements, your scores, your ranking and your progress over time are yours on every plan, and always will be. What Coach Max adds is the part that takes work to get right: the specific routine for your face, not a generic list.</p>
     <ul class="upsell-list">
       <li><b>The method, not just the target.</b> The overview above says what to improve. Max writes how — for your face, in order, shaped by what you said you want.</li>
       <li><b>Follow-up that reads your numbers.</b> Max checks whether what you are doing actually moved a measurement, says so either way, and rebuilds the plan when eight weeks of a routine has moved nothing.</li>

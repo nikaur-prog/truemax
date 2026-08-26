@@ -81,11 +81,11 @@ export function openMaxChat(
   host = document.createElement("div");
   host.className = "maxchat";
   host.innerHTML = `
-    <div class="maxchat-sheet" role="dialog" aria-modal="true" aria-label="Chat with Max">
+    <div class="maxchat-sheet" role="dialog" aria-modal="true" aria-label="Chat with Coach Max">
       <header class="maxchat-head">
         <span class="maxchat-face">${maxCharacterMarkup({ mood: "happy" })}</span>
         <span class="maxchat-who">
-          <b>Max</b>
+          <b>Coach Max</b>
           <small>Reads your numbers. Does not make them up.</small>
         </span>
         <button type="button" class="maxchat-close" aria-label="Close chat">&times;</button>
@@ -93,7 +93,7 @@ export function openMaxChat(
       <div class="maxchat-log" role="log" aria-live="polite"></div>
       <div class="maxchat-chips"></div>
       <form class="maxchat-composer">
-        <input type="text" name="q" autocomplete="off" placeholder="Ask Max something" maxlength="600" />
+        <input type="text" name="q" autocomplete="off" placeholder="Ask Coach Max something" maxlength="600" />
         <button type="submit" aria-label="Send">Send</button>
       </form>
     </div>`;

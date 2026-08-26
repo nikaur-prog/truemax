@@ -229,7 +229,7 @@ export function openDashboard(opts: {
       </button>
       ${maxTab ? `<button class="dash-bar-btn dash-bar-maxbtn" id="dash-bar-max" data-goto="max" type="button" role="tab" aria-selected="false">
         <span class="dash-bar-maxface">${maxCharacterMarkup({ mood: "happy" })}</span>
-        <span>Max</span>
+        <span>Coach</span>
       </button>` : ""}
     </nav>`;
 

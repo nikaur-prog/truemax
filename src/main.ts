@@ -958,6 +958,50 @@ let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
 
+// ---------------------------------------------------------------------------
+// The frame travelling to the middle.
+//
+// On a wide screen the landing is two columns — the argument on the left, the
+// demo on the right — and the moment the camera opens the person stops reading
+// and starts aiming, so the frame belongs in the middle at a size worth aiming
+// into. The layout change is pure CSS; the MOVEMENT is not, because a grid
+// track cannot animate from a pixel width into a flexible one and snaps
+// instead. The frame appeared in the centre and only then grew, which reads as
+// a jump followed by an animation rather than as one gesture.
+//
+// So: FLIP. Measure where the card is, let the class land, measure where it
+// ended up, then start it from the inverse of the difference and release it.
+// The browser animates a transform on the compositor — the smoothest thing
+// available, and the only one that cannot disagree with the final layout,
+// because the final layout is what it was measured against.
+//
+// Called BEFORE the class changes, on both the open and the close, so the
+// journey plays in both directions.
+// ---------------------------------------------------------------------------
+function beginCaptureMove(): void {
+  const card = document.getElementById("capture-stage");
+  if (!card || window.innerWidth < 1100) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const first = card.getBoundingClientRect();
+  // Read back on the next frame: the caller applies the class immediately
+  // after this returns, and a microtask would land before style recalculation.
+  requestAnimationFrame(() => {
+    const last = card.getBoundingClientRect();
+    const dx = first.left + first.width / 2 - (last.left + last.width / 2);
+    if (Math.abs(dx) < 1) return;
+    // The Web Animations API rather than an inline transition, and the reason
+    // is specific: suppressing the inline transition to seat the inverted
+    // position also suppresses the CSS width transition running on the same
+    // element, so the card slid to the middle at its final size — half the
+    // gesture, played twice. WAAPI animates the transform on its own timeline
+    // and leaves the width transition alone, so the card grows AS it travels.
+    card.animate(
+      [{ transform: `translateX(${dx.toFixed(1)}px)` }, { transform: "translateX(0)" }],
+      { duration: 620, easing: "cubic-bezier(.22, .61, .36, 1)", fill: "none" },
+    );
+  });
+}
+
 async function openCamera(): Promise<void> {
   const generation = scanGeneration;
   if (!isSupported()) {
@@ -1049,6 +1093,7 @@ async function openCamera(): Promise<void> {
       el.btnCamera.click();
     };
     window.addEventListener("keydown", frontKeyHandler);
+    beginCaptureMove();
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
     // Headline and sub collapse so the preview can take the space — the
@@ -1108,6 +1153,7 @@ async function closeCamera(): Promise<void> {
   cam?.stop();
   cam = null;
   lastCheck = null;
+  beginCaptureMove();
   el.ovalFrame.classList.remove("live", "ready", "tracking");
   el.stage.classList.remove("live-cam");
   el.upload.classList.remove("camera-live");
