@@ -224,16 +224,27 @@ function viewCards(r: Report): string {
     ["FRONT", r.views.front.score, r.views.front.percentile],
     ["SIDE", r.views.side.score, r.views.side.percentile],
   ];
+  // One decimal, matching the headline and the pillars. Two decimals were an
+  // attempt at precision the measurement cannot support — a single scan moves
+  // by about 0.9 points between photographs — and they actively misled: three
+  // cards reading 4.20, 4.20, 4.20 look like a stuck constant, where 4.2,
+  // 4.2, 4.2 reads as three numbers that happen to agree.
+  const same = new Set(cards.map(([, score]) => score.toFixed(1))).size === 1;
   return `<div class="viewcards">${cards
     .map(([label, score, pct]) => {
       const tone = score >= 6.5 ? "hi" : score >= 4.5 ? "mid" : "lo";
       return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
         <span class="vc-label">${label}</span>
         <span class="vc-rank">${rankShort(pct)}</span>
-        <b class="vc-score ${tone}"><span data-count="${score}" data-decimals="2">0.00</span><small>/10</small></b>
+        <b class="vc-score ${tone}"><span data-count="${score}" data-decimals="1">0.0</span><small>/10</small></b>
       </div>`;
     })
-    .join("")}</div>`;
+    .join("")}</div>${
+    // When they genuinely coincide, say so. Silence there reads as a bug.
+    same
+      ? `<p class="viewnote same">Both views landed on the same number this time — the front and the profile agree.</p>`
+      : ""
+  }`;
 }
 
 function select(id: string): void {
@@ -1416,6 +1427,11 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
 }
 
 // ---------------- improvements ----------------
+// Ordinal words rather than "1 / 2 / 3": a numbered list reads as steps that
+// must be done in sequence, and these are four things to work on at once with
+// one of them mattering most.
+const PRIORITY = ["FIRST PRIORITY", "SECOND PRIORITY", "DO THIS THIRD", "DO THIS FOURTH"];
+
 function showImprove(): void {
   if (!ctx) return;
   track("plan-opened");
@@ -1469,7 +1485,7 @@ function showImprove(): void {
       ${quietNote}
       ${progress}
       ${fixables
-        .map((m) => {
+        .map((m, i) => {
           const lever = leverFor(m);
           const why = goalsTouching(m.def.id, profile);
           const muted = !profile.advice[lever.channel];
@@ -1483,7 +1499,14 @@ function showImprove(): void {
               ? lever.body(m, r.sex)
               : lockedCopy(m, r.sex);
           const locked = !muted && !maxAccess;
-          return `<div class="imp${locked ? " locked" : ""}"><b>${lever.title}<em>${REGION_NAMES[m.def.region].toUpperCase()} · ${m.score.toFixed(1)} · ${lever.tag}</em></b>
+          // The list was already ranked — sorted by how far the metric sits
+          // below its reference, weighted by the goals this person chose — but
+          // nothing on screen said so, so four cards read as four equal
+          // suggestions and the order looked arbitrary. Naming the rank turns
+          // a list into a programme: it tells somebody what to do FIRST, which
+          // is the only question a plan has to answer.
+          return `<div class="imp${locked ? " locked" : ""}"><span class="imp-rank">${PRIORITY[i] ?? `PRIORITY ${i + 1}`}</span>
+          <b>${lever.title}<em>${REGION_NAMES[m.def.region].toUpperCase()} · ${m.score.toFixed(1)} · ${lever.tag}</em></b>
           <p>${copy}</p>
           ${why.length ? `<span class="because">Because you chose ${why.map((g) => g.label.toLowerCase()).join(" + ")}</span>` : ""}
           <span class="why">MOVES ${m.def.pillar.toUpperCase()} →</span></div>`;

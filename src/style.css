@@ -153,6 +153,46 @@ body {
 
 /* ---------- upload ---------- */
 #v-upload { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 9vh 26px 60px; }
+
+/* ---------------------------------------------------------------------------
+   The landing on a wide screen.
+
+   The centred column is right on a phone and wrong on a desktop, where it
+   rendered as a 420px card marooned in a field of cream with the headline
+   floating above it — the layout said "mobile app in a browser tab" at the
+   exact moment a new visitor decides whether this is serious software.
+
+   Same components, no new markup: the argument goes on the left, the thing
+   that proves it goes on the right, and the proof sections below still span
+   the full width.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1100px) {
+  #v-upload {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(400px, 460px);
+    column-gap: clamp(48px, 6vw, 88px);
+    align-items: start;
+    justify-items: start;
+    text-align: left;
+    max-width: 1180px;
+    margin-inline: auto;
+    padding: 8vh 40px 72px;
+  }
+  /* Two flexible rows top and bottom centre the left stack against the card
+     beside it — top-aligned, the argument ended halfway up a 500px photograph
+     and left an obvious hole under it. */
+  #v-upload { grid-template-rows: 1fr auto auto auto 1fr; }
+  #v-upload > h1 { grid-column: 1; grid-row: 2; font-size: clamp(48px, 4.6vw, 66px); max-width: 12ch; margin-top: 0; }
+  #v-upload > .sub-more { grid-column: 1; grid-row: 3; }
+  #v-upload > .sub { grid-column: 1; grid-row: 4; margin-left: 0; }
+  #v-upload > .refpop { grid-column: 1; }
+  #v-upload > .capture-dock { grid-column: 2; grid-row: 1 / span 5; justify-self: stretch; align-self: center; }
+  #v-upload > .proof,
+  #v-upload > .journey,
+  #v-upload > .recent,
+  #v-upload > .engine-status { grid-column: 1 / -1; justify-self: stretch; }
+  #capture-stage { width: 100%; max-width: 460px; }
+}
 #v-upload h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(36px, 5vw, 54px); line-height: 1.08; letter-spacing: -0.01em; max-width: 640px; }
 #v-upload h1 em { font-style: normal; font-weight: 400; color: var(--acc); }
 #v-upload .sub { color: var(--mut); font-size: 15px; line-height: 1.6; max-width: 460px; margin: 18px 0 14px; }
@@ -335,6 +375,16 @@ body {
 .quality-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .qchip { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--mut); background: var(--card); }
 .qchip.warn { color: var(--warm); border-color: color-mix(in srgb, var(--warm) 35%, var(--line)); }
+/* The collapsed capture notes. The summary is one chip; opening it drops the
+   individual notes underneath rather than pushing the score down the page
+   before anybody has read it. */
+.qnotes { display: inline-block; }
+.qnotes > summary { list-style: none; cursor: pointer; display: inline-flex; }
+.qnotes > summary::-webkit-details-marker { display: none; }
+.qnotes-sum::after { content: " ▾"; opacity: .65; }
+.qnotes[open] .qnotes-sum::after { content: " ▴"; }
+.qnotes > summary:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 99px; }
+.qnotes-body { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
 /* ---------- right pane ---------- */
 .pane-analysis { min-width: 0; }
@@ -812,6 +862,14 @@ body.funnel-open { overflow: hidden; }
 }
 .pot p { font-size: 11.5px; color: var(--mut); line-height: 1.5; max-width: 280px; }
 .imp { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-bottom: 11px; }
+/* The rank, above the title. Loudest on the first card and quieter down the
+   list, because the whole point of ranking four things is that the first one
+   is not the same as the fourth. */
+.imp-rank {
+  display: block; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
+  color: var(--mut); margin-bottom: 6px;
+}
+.imp:first-of-type .imp-rank { color: var(--acc); font-weight: 600; }
 .imp b { font-size: 13.5px; font-weight: 600; display: block; margin-bottom: 5px; }
 .imp b em { font-family: var(--mono); font-style: normal; font-size: 11px; color: var(--mut); font-weight: 400; margin-left: 8px; }
 .imp p { font-size: 12.5px; color: #45474b; line-height: 1.55; }
@@ -1704,6 +1762,44 @@ body.funnel-open { overflow: hidden; }
   padding: 6px 4px; min-width: 56px; transition: color 0.15s ease;
 }
 .dash-bar-btn:hover { color: var(--ink); }
+
+/* ---------------------------------------------------------------------------
+   The dashboard on a wide screen.
+
+   Everything above is a phone layout, and on a 1440px window it showed as a
+   760px column of content with roughly six hundred pixels of empty page under
+   it and a phone tab-dock floating across the bottom — the single clearest
+   "this is a mobile app someone opened in a browser" moment in the product.
+
+   Two changes, no new markup: the column widens to something a desktop can
+   justify, and the dock stops being a dock. A row of tabs at the top is what
+   navigation looks like on a machine with a cursor; a bar pinned to the bottom
+   edge of a desktop window is a thumb affordance with no thumb.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1100px) {
+  .dash { display: flex; flex-direction: column; }
+  .dash-inner { max-width: 1080px; width: 100%; padding: 40px 40px 72px; order: 2; }
+  .dash-bar {
+    position: sticky; top: 0; bottom: auto; order: 1;
+    justify-content: flex-start; gap: 6px;
+    padding: 10px max(40px, calc(50vw - 540px));
+    border-top: 0; border-bottom: 1px solid var(--line);
+  }
+  .dash-bar-btn { flex-direction: row; gap: 8px; min-width: 0; padding: 8px 14px; border-radius: 10px; }
+  .dash-bar-btn span { font-size: 11px; letter-spacing: 0.08em; }
+  .dash-bar-btn:hover { background: var(--card); }
+  /* Scan is the action, not a destination, so on a row it goes to the far end
+     rather than sitting in the middle of the tabs the way a thumb-reachable
+     dock puts it. DOM order keeps it third for the phone layout. */
+  .dash-bar-scan { order: 9; margin-left: auto; }
+  /* An empty dashboard on a 1440px window is one short column and eight
+     hundred pixels of nothing. Until there is a scan to fill it, the invitation
+     centres itself instead of clinging to the top edge. */
+  .dash-inner:has(.dash-hero.empty) {
+    min-height: calc(100vh - 210px);
+    display: flex; flex-direction: column; justify-content: center;
+  }
+}
 .dash-bar-btn span { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em; }
 .dash-bar-scan {
   display: inline-flex; align-items: center; gap: 9px; cursor: pointer; font: inherit;
@@ -3779,6 +3875,17 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
     font-size: 9.5px; letter-spacing: .16em; color: var(--mut); opacity: .8;
   }
   .ss-more::after { content: " ↓"; }
+  .ss-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ss-foot .ss-more { margin-top: 0; }
+  .ss-share {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+    padding: 7px 13px; border-radius: 99px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    font: 600 12px var(--sans); transition: border-color .15s ease, color .15s ease;
+  }
+  .ss-share:hover { border-color: var(--acc); color: var(--acc); }
+  .ss-share:disabled { opacity: .5; cursor: default; }
+  .pane-photo.shrunk .ss-share { display: none; }
 
   /* The photograph sticks and shrinks. Sticky rather than fixed so it stays
      inside the grid and cannot overlap the footer, and a max-height rather
@@ -3790,10 +3897,12 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
     display: flex; flex-direction: column;
     background: var(--bg); padding-top: 8px;
   }
-  /* Reading order on a phone: the small print about HOW it was measured goes
-     above the photo, the photo, then the score. What somebody opened the app
-     for is the score, so nothing sits between it and the picture. */
-  .pane-photo .quality-chips { order: -3; margin: 0 0 6px; }
+  /* Reading order on a phone: photograph, score, then the small print about
+     how it was measured. The notes used to sit ABOVE the picture, which meant
+     a first scan opened on a stack of red warnings with the number below the
+     fold — the app criticising the photo before answering the question it was
+     given. Provenance belongs after the answer, not in front of it. */
+  .pane-photo .quality-chips { order: 5; margin: 10px 0 0; }
   .pane-photo .viewtoggle { order: -2; margin: 0 0 8px; }
   .pane-photo .face-frame { order: 0; }
   .pane-photo .scorestrip { order: 1; }
@@ -3802,6 +3911,16 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo .bar { order: 4; }
   /* Smaller: this is provenance, not the headline. */
   .pane-photo .quality-chips .chip { font-size: 10px; padding: 4px 8px; }
+  /* The strip under the photograph has already delivered the number and the
+     ranking. Repeating both eighty pixels lower, in a 64px serif with the
+     ranking pill tucked against it, was the same fact told twice — and the
+     pill lost the collision, rendering as a clipped green rectangle with half
+     a word in it. On a phone the strip IS the headline; the analysis keeps
+     its label, its reference switch and anything the strip does not say. */
+  .score-head .big,
+  .score-head .chip.big-chip { display: none; }
+  .score-head { align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+  .score-head .chipcol { margin-bottom: 0; }
   /* 52vh, not 62. The whole point of the strip is that the score is on screen
      when the scan finishes, and at 62vh the card's last two lines fell below
      the fold on a 667px phone, which is the smallest screen still in wide use.
@@ -3810,6 +3929,12 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo .face-frame {
     max-height: 52vh; transition: max-height .34s cubic-bezier(.32, 0, .15, 1);
   }
+  /* While the engine is still working there is no score strip and nothing
+     below the progress bar, so the 52vh cap left the best animation in the
+     product playing in the top half of an empty screen. It gets the room
+     until the number needs it, then eases back down on the same curve the
+     rest of the strip already moves on. */
+  .pane-photo:not(:has(.scorestrip)) .face-frame { max-height: 66vh; }
   .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
 
   .pane-photo.shrunk .face-frame { max-height: 96px; }

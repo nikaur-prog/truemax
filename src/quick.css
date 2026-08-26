@@ -840,3 +840,17 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
   color: var(--ink, #14181c); font-size: 13px; line-height: 1;
 }
 .brp-step button:hover { border-color: var(--acc, #2f9e73); }
+/* The Enhance pillar's panel: tier labels and the before/after wipe. */
+.enh-tiers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.enh-tier {
+  font: 600 10.5px var(--mono, ui-monospace, monospace); letter-spacing: .1em;
+  text-transform: uppercase; padding: 6px 11px; border-radius: 999px;
+}
+.enh-tier.on { background: rgba(47, 158, 115, .14); color: var(--acc, #2f9e73); border: 1px solid rgba(47, 158, 115, .4); }
+.enh-tier.off { color: var(--mut, #6b7680); border: 1px dashed rgba(128, 138, 148, .45); }
+.enh-prevwrap { display: grid; gap: 8px; justify-items: center; margin-top: 4px; }
+.enh-prevwrap canvas {
+  max-width: min(100%, 420px); height: auto; border-radius: 14px;
+  border: 1px solid rgba(128, 138, 148, .28); background: #0c0f12;
+}
+.enh-prevwrap input[type="range"] { width: min(100%, 420px); accent-color: var(--acc, #2f9e73); }

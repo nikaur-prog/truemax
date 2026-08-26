@@ -597,7 +597,17 @@ function leaveMode(): void {
 }
 
 for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) {
-  button.onclick = () => enterMode(button.dataset.mode as QuickMode);
+  button.onclick = () => {
+    // Enhance is a tool over the person's own files — no camera, no scan, no
+    // mode machinery. It opens as a panel over the pillars and closes back to
+    // them. Loaded on demand: its encoder stack has no business in the main
+    // bundle of a page most visitors use to scan a face.
+    if (button.dataset.mode === "enhance") {
+      void import("./ui/enhancePanel.js").then((m) => m.openEnhancePanel());
+      return;
+    }
+    enterMode(button.dataset.mode as QuickMode);
+  };
 }
 el.modeBack.onclick = () => leaveMode();
 // The wordmark is the way back. Every other page in the product treats a logo
