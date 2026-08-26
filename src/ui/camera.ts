@@ -1,4 +1,4 @@
-import { detectVideo, setRunningMode } from "../engine/landmarker.js";
+import { detectVideo, initLandmarker, setRunningMode } from "../engine/landmarker.js";
 import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.js";
 import { detectOcclusion } from "../engine/occlusion.js";
 import type { FrameCheck, Viewport } from "../engine/captureGuide.js";
@@ -54,7 +54,28 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   opts.video.muted = true;
   opts.video.playsInline = true;
   await opts.video.play();
-  await setRunningMode("VIDEO");
+
+  // The preview goes up without waiting for the landmarker.
+  //
+  // setRunningMode is a no-op while there is no landmarker to set options on,
+  // so calling it before the engine has loaded used to leave the detector
+  // parked in IMAGE mode for good: detectVideo returns null in that state, the
+  // loop ran, and the guidance never once found a face. Now that the engine
+  // loads on intent rather than on page load, that is not a rare race — it is
+  // what happens every time somebody's first action is to open the camera.
+  //
+  // So the mode switch waits for the boot instead, and the loop below starts
+  // immediately. Until the switch lands detectVideo returns null and the
+  // guidance shows its "looking for a face" state, which is true.
+  let live = true;
+  void initLandmarker()
+    .then(() => {
+      if (live) return setRunningMode("VIDEO");
+      return undefined;
+    })
+    .catch(() => {
+      /* the scan path reports the failure; the preview keeps running */
+    });
 
   const side = opts.mode === "side";
   scratch = scratch ?? document.createElement("canvas");
@@ -103,6 +124,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
 
   return {
     stop() {
+      live = false;
       cancelAnimationFrame(raf);
       stream?.getTracks().forEach((t) => t.stop());
       stream = null;
