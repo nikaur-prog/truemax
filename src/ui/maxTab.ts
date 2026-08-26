@@ -58,8 +58,8 @@ const PREVIEW = [
 ];
 
 const BENEFITS = [
-  "Unlimited chats with Max about your numbers",
-  "Max's written analysis on every scan",
+  "Unlimited chats with Coach Max about your numbers",
+  "Coach Max's written analysis on every scan",
   "Step-by-step plans, catered to you",
   "Two scans a week",
 ];
@@ -67,7 +67,7 @@ const BENEFITS = [
 export function maxTabMarkup(paid: boolean): string {
   const composer = `
     <form class="maxtab-composer" autocomplete="off">
-      <input type="text" name="q" placeholder="Ask Max something" maxlength="600" autocomplete="off" />
+      <input type="text" name="q" placeholder="Ask Coach Max something" maxlength="600" autocomplete="off" />
       <button type="submit">Send</button>
     </form>`;
 
@@ -75,7 +75,7 @@ export function maxTabMarkup(paid: boolean): string {
     return `<div class="maxtab">
       <div class="maxtab-stage">
         <span class="maxtab-face">${maxCharacterMarkup({ mood: "happy", waving: true })}</span>
-        <h2>Ask Max anything</h2>
+        <h2>Ask Coach Max anything</h2>
         <p>He has read every measurement in your scans. Plans, priorities, what moved and what did not — that is what he is for.</p>
       </div>
       ${composer}
@@ -88,7 +88,7 @@ export function maxTabMarkup(paid: boolean): string {
   return `<div class="maxtab locked">
     <div class="maxtab-head">
       <span class="maxtab-face small">${maxCharacterMarkup({ mood: "happy" })}</span>
-      <span class="maxtab-who"><b>Max</b><small>Reads your numbers. Does not make them up.</small></span>
+      <span class="maxtab-who"><b>Coach Max</b><small>Reads your numbers. Does not make them up.</small></span>
       <span class="maxtab-badge">18+</span>
     </div>
     <div class="maxtab-preview" aria-hidden="true" inert>${bubbles}</div>
@@ -96,7 +96,7 @@ export function maxTabMarkup(paid: boolean): string {
     <div class="maxtab-paywall" hidden>
       <div class="maxtab-paywall-card">
         <span class="maxtab-paywall-face">${maxCharacterMarkup({ mood: "excited" })}</span>
-        <h3>Max answers when you're on Max</h3>
+        <h3>Coach Max comes with the Max plan</h3>
         <ul>${BENEFITS.map((b) => `<li>${b}</li>`).join("")}</ul>
         <p class="maxtab-price" data-price></p>
         <button type="button" class="btn maxtab-cta" data-cta></button>

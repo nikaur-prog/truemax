@@ -203,7 +203,7 @@ export async function openSettings(user: User): Promise<void> {
 
         <section class="set-group">
           <h3>What to leave alone</h3>
-          <p class="set-hint">Measurements for these regions still appear in full. What stops is the coaching — nothing written, and Max won't raise them.</p>
+          <p class="set-hint">Measurements for these regions still appear in full. What stops is the coaching — nothing written, and Coach Max won't raise them.</p>
           <div class="trial-choices compact" data-field="quiet">
             ${QUIET_TOPICS.map((t) => chip(t.region, t.label, profile.quietTopics.includes(t.region))).join("")}
           </div>

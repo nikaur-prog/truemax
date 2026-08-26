@@ -6,7 +6,7 @@ import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePoints } from "./sideVerify.js";
-import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
+import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
 import { mountRetakeGlyph } from "./retakeGlyph.js";
@@ -633,23 +633,45 @@ function mountVerify(
     };
 
     const paint = (index: number, total: number, moved = false) => {
-      const { label, hint } = verifier!.guidedCurrent();
-      e.panelCopy.innerHTML = `<h2 class="side-title">${label}</h2>
-        <p class="side-sub">${hint}. Tap where it belongs on the photo — hold and drag to
-        fine-tune with the lens. Moving it counts as your answer. If it is already right,
-        the button asks you once to say so.</p>
-        ${guideImage
-          ? `<div class="side-refcrop">
-              <div class="side-refcrop-stage">
-                <canvas id="side-refcrop"></canvas>
-                <button type="button" class="refcrop-play" id="refcrop-play" aria-label="Show where this sits on the whole profile">▶</button>
-                <button type="button" class="refcrop-big" id="refcrop-big" aria-label="Enlarge">⤢</button>
-              </div>
-              <span>On a real face, it sits here</span>
-            </div>`
-          : ""}
-        <p class="side-review-note">Point ${index + 1} of ${total}. The five behind the face
-        are guesses from an average head, so they are the ones that usually need the tap.</p>`;
+      const { label } = verifier!.guidedCurrent();
+      // ---------------------------------------------------------------------
+      // The walkthrough is the photograph, and nothing else.
+      //
+      // This step used to be a photo on the left and a column of prose on the
+      // right: a heading, a paragraph of instructions, a reference thumbnail
+      // under a caption, and a note about which points are guesses — read once
+      // on the first point and never again on the other twelve, while the
+      // thing the person is actually doing (looking at a ring on their own
+      // face and deciding whether it is in the right place) had half a screen.
+      //
+      // So the column is gone. What survives is the only thing that changes
+      // per point: its NAME, on a pill in the corner of the photograph, where
+      // the eye already is. The reference sits on the picture too, small, and
+      // opens when it is wanted rather than occupying the layout in case.
+      // ---------------------------------------------------------------------
+      e.panelCopy.innerHTML = "";
+      let pill = e.frame.querySelector<HTMLElement>(".side-pointpill");
+      if (!pill) {
+        pill = document.createElement("span");
+        pill.className = "side-pointpill";
+        e.frame.appendChild(pill);
+      }
+      pill.innerHTML = `<b>${label}</b><em>${index + 1}/${total}</em>`;
+      // Re-arm the entrance so each point's name arrives rather than swaps.
+      pill.classList.remove("in");
+      void pill.offsetWidth;
+      pill.classList.add("in");
+
+      let refWrap = e.frame.querySelector<HTMLElement>(".side-refcrop");
+      if (guideImage && !refWrap) {
+        refWrap = document.createElement("div");
+        refWrap.className = "side-refcrop";
+        refWrap.innerHTML = `<div class="side-refcrop-stage">
+            <canvas id="side-refcrop"></canvas>
+            <button type="button" class="refcrop-big" id="refcrop-big" aria-label="Show where this sits on the whole profile">⤢</button>
+          </div>`;
+        e.frame.appendChild(refWrap);
+      }
       if (guideImage) {
         const crop = document.getElementById("side-refcrop") as HTMLCanvasElement | null;
         const id = SIDE_POINT_IDS[index];
@@ -661,25 +683,18 @@ function mountVerify(
         // The "show me" zoom: full profile, ring on the point, smooth zoom in.
         // A step change re-renders this whole panel, so the cancel handle never
         // outlives the canvas it paints.
-        let stopZoom: (() => void) | null = null;
-        const play = document.getElementById("refcrop-play");
-        if (play && crop) {
-          play.onclick = () => {
-            stopZoom?.();
-            stopZoom = playGuideZoom(crop, guideImage!, id, verifier!.faceDir, {
-              onDone: () => (stopZoom = null),
-            });
-          };
-        }
-        // Enlarge: the same animation, filling the screen until ✕ or Escape.
+        // The thumb is a STILL. Playing a zoom inside a 92px square was an
+        // animation nobody could follow, and it ran on the same canvas the
+        // person was using as a reference — so the reference kept moving.
+        // Tap it and it opens; the movement lives there, where it is legible.
         const big = document.getElementById("refcrop-big");
-        if (big) {
-          big.onclick = () => {
+        const openBig = () => {
             const overlay = document.createElement("div");
             overlay.className = "sref-overlay refcrop-full";
             overlay.innerHTML = `<div class="refcrop-fullcard" role="dialog" aria-modal="true" aria-label="Reference for this point">
               <canvas></canvas>
-              <button type="button" class="refcrop-close" aria-label="Close">×</button>
+              <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
+              <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
             </div>`;
             document.body.appendChild(overlay);
             const bigCanvas = overlay.querySelector("canvas")!;
@@ -689,12 +704,15 @@ function mountVerify(
             bigCanvas.height = size * dpr;
             bigCanvas.style.width = `${size}px`;
             bigCanvas.style.height = `${size}px`;
-            const stop = playGuideZoom(bigCanvas, guideImage!, id, verifier!.faceDir, {
-              durationMs: 1900,
-              holdMs: 650,
-            });
+            // Opens on the WHOLE profile, held still. The zoom is a thing you
+            // ask for with the play button, not a thing that happens at you
+            // the moment a panel appears — which is what made this feel like a
+            // glitch rather than a demonstration.
+            drawGuideWhole(bigCanvas, guideImage!, id, verifier!.faceDir);
+            let stop: (() => void) | null = null;
             const close = () => {
-              stop();
+              stop?.();
+              stop = null;
               overlay.remove();
               document.removeEventListener("keydown", onKey);
             };
@@ -702,11 +720,23 @@ function mountVerify(
               if (ev.key === "Escape") close();
             };
             document.addEventListener("keydown", onKey);
+            overlay.querySelector(".refcrop-play-big")?.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              stop?.();
+              stop = playGuideZoom(bigCanvas, guideImage!, id, verifier!.faceDir, {
+                durationMs: 1900,
+                holdMs: 650,
+                onDone: () => (stop = null),
+              });
+            });
             overlay.addEventListener("click", (ev) => {
               if (ev.target === overlay || (ev.target as HTMLElement).closest(".refcrop-close")) close();
             });
-          };
-        }
+        };
+        if (big) big.onclick = openBig;
+        // The picture itself is the target people reach for, not the small
+        // glyph in its corner.
+        if (crop) crop.onclick = openBig;
       }
       const counter = document.getElementById("side-gcount");
       if (counter) counter.textContent = `${index + 1} / ${total}`;

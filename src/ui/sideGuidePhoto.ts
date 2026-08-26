@@ -294,3 +294,51 @@ export function drawGuideCrop(
   ctx.stroke();
   return true;
 }
+
+/**
+ * The whole profile, fitted, with the ring on the point.
+ *
+ * What the enlarged reference opens on. The zoomed patch answers "what does
+ * this feature look like close up"; this answers "where on a head am I", which
+ * is the question somebody has before they have the first one — and it is the
+ * still the popout holds until the play button is pressed.
+ */
+export function drawGuideWhole(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
+  id: SidePointId,
+  faceDir: number,
+): boolean {
+  if (!GUIDE_POINTS) return false;
+  const point = GUIDE_POINTS[id];
+  const ctx = canvas.getContext("2d");
+  if (!ctx || !image.naturalWidth) return false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Contain rather than cover: a reference that crops the crown off is not a
+  // reference for the hairline.
+  const scale = Math.min(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+  const dw = image.naturalWidth * scale;
+  const dh = image.naturalHeight * scale;
+  const dx = (canvas.width - dw) / 2;
+  const dy = (canvas.height - dh) / 2;
+  if (faceDir === -1) {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(image, dx, dy, dw, dh);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const rx = dx + point[0] * dw;
+  const ringX = faceDir === -1 ? canvas.width - rx : rx;
+  const ringY = dy + point[1] * dh;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
+  ctx.lineWidth = 2 * dpr;
+  ctx.shadowColor = "rgba(6, 20, 17, 0.85)";
+  ctx.shadowBlur = 4 * dpr;
+  ctx.beginPath();
+  ctx.arc(ringX, ringY, 9 * dpr, 0, Math.PI * 2);
+  ctx.stroke();
+  return true;
+}

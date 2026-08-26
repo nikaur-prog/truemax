@@ -66,7 +66,7 @@ export function mountMaxPet(chatContext: MaxChatContext): void {
   host = document.createElement("button");
   host.type = "button";
   host.className = "maxpet";
-  host.setAttribute("aria-label", "Chat with Max");
+  host.setAttribute("aria-label", "Chat with Coach Max");
   // Waving is opt-in, and this is the one place that earns it: he is arriving.
   // The CSS runs it twice and then leaves the arm down for good, so the
   // greeting is an event rather than the idle loop it used to be.
@@ -356,7 +356,7 @@ function showPetTipOnce(): void {
     const tip = document.createElement("div");
     tip.className = "maxpet-tip";
     tip.setAttribute("role", "status");
-    tip.innerHTML = `<p>Want me out of the way? I'll still be in the Max tab.</p>
+    tip.innerHTML = `<p>Want me out of the way? I'll still be in the Coach tab.</p>
       <div class="maxpet-tip-actions">
         <button type="button" data-pet-tip="hide">Hide Max</button>
         <button type="button" data-pet-tip="keep" class="on">Keep him</button>
