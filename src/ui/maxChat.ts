@@ -1,5 +1,5 @@
 import { currentAccessToken } from "../engine/auth.js";
-import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { greet, maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 
@@ -136,7 +136,19 @@ export function openMaxChat(
     }
   };
 
-  speakGreeting(log, options.greeting ?? greeting(context));
+  // He turns round and says hello.
+  //
+  // Opening the chat is the one moment that earns a full entrance — somebody
+  // has just decided to talk to him — so it gets the big wave, exempt from the
+  // two-greeting cap, and the mouth moves for exactly as long as the line
+  // takes to type. Before this the greeting typed itself out under a face that
+  // was perfectly still, which is a subtitle rather than somebody speaking.
+  const face = host.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
+  greet(face, { big: true });
+  face?.classList.add("speaking");
+  speakGreeting(log, options.greeting ?? greeting(context), () => {
+    face?.classList.remove("speaking");
+  });
   renderChips(OPENING_SUGGESTIONS);
 
   host.querySelector<HTMLButtonElement>(".maxchat-close")!.onclick = closeMaxChat;
@@ -190,12 +202,13 @@ let spokenGreeting: string | null = null;
 
 const SPEAK_MS_PER_CHAR = 16;
 
-function speakGreeting(log: HTMLElement, text: string): void {
+function speakGreeting(log: HTMLElement, text: string, onDone: () => void = () => {}): void {
   const row = say(log, "", "max");
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   if (reduced || spokenGreeting === text) {
     row.textContent = text;
     spokenGreeting = text;
+    onDone();
     return;
   }
   spokenGreeting = text;
@@ -212,11 +225,18 @@ function speakGreeting(log: HTMLElement, text: string): void {
   const start = performance.now();
   const total = text.length * SPEAK_MS_PER_CHAR;
   const step = (now: number) => {
-    if (!row.isConnected) return;
+    if (!row.isConnected) {
+      onDone();
+      return;
+    }
     const p = Math.min(1, (now - start) / total);
     row.textContent = text.slice(0, Math.round(text.length * p));
-    if (p < 1) requestAnimationFrame(step);
-    else row.style.minHeight = "";
+    if (p < 1) {
+      requestAnimationFrame(step);
+    } else {
+      row.style.minHeight = "";
+      onDone();
+    }
   };
   requestAnimationFrame(step);
 }
