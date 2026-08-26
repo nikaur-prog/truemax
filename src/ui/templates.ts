@@ -1,5 +1,5 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
-import { REGION_NAMES } from "../engine/scoring.js";
+import { REGION_NAMES, regionIsScored } from "../engine/scoring.js";
 import { distFor } from "../engine/metrics.js";
 import { statedPct } from "../engine/precision.js";
 import { rarityPhrase } from "../engine/rarity.js";
@@ -172,8 +172,17 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
       ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)}, the ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm. That one is ${traitOf(worst.def.id)}.`
       : `Even the weakest number here, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, holds the ${ordinal(worst.percentile)} percentile.`;
 
-  const s3 =
-    r.percentile >= 50
+  // A region whose measurements do not reproduce gets no net position.
+  //
+  // The two sentences above are still worth saying — they report what was read
+  // on this photograph, which is true — but "net position: 3.9/10, about 89% of
+  // faces score higher" is a population claim, and a claim needs a measurement
+  // that holds still. When every metric in the region wanders as much between
+  // two photos of one face as it does between two people, the ranking those
+  // metrics produce is a ranking of the lighting.
+  const s3 = !regionIsScored(r)
+    ? `No net position for the ${name}: every measurement in it moves about as much between two photographs of the same face as it does between two different faces, so there is nothing stable to rank. The readings are shown; the region is left out of the total rather than counted against you.`
+    : r.percentile >= 50
       ? `Net position: ${r.score.toFixed(1)}/10, meaning roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
       : `Net position: ${r.score.toFixed(1)}/10. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
 

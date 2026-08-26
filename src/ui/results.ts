@@ -2,7 +2,7 @@ import { countUp } from "./countUp.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { copyDiagnostics } from "./diagnostics.js";
 import type { DiagnosticsCapture } from "./diagnostics.js";
-import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring.js";
+import { aggregateScoreToPercentile, phi, REGION_NAMES, regionIsScored } from "../engine/scoring.js";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
@@ -1022,7 +1022,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
   }
   return `<div class="deck">
     <div class="dcard">
-      <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+      <h3>${regionHeadline(r, r.region)}<em>SIDE</em></h3>
       ${r.metrics
         .map(
           (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}${m.implausible ? " implausible" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
@@ -1092,6 +1092,46 @@ function indicativeNote(metrics: ScoredMetric[]): string {
 function indicativeTag(m: ScoredMetric): string {
   if (!isIndicative(m)) return "";
   return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people — so it is shown and not scored.">not scored</span>`;
+}
+
+// The same rule as isIndicative, one level up.
+//
+// isIndicative has flagged individual rows for months. What it could not catch
+// is a region where EVERY row is flagged — because then the region header, the
+// population curve and the rarity sentence are all built on the same noise the
+// rows beneath them are disclaiming. The male nose is exactly that: nasalIndex
+// 0.00, noseMouthRatio 0.11, noseIntercanthal 0.14, all under RELIABLE_MIN,
+// weighted reliability 0.086.
+//
+// The engine has known since regionReliability landed. quick.ts, the staff
+// page, has printed "indicative" over those cells since it shipped. This is
+// the same question finally being asked on the report people actually read.
+function regionHeadline(r: RegionScore, id: RegionId): string {
+  return regionIsScored(r)
+    ? `${REGION_NAMES[id]} · ${r.score.toFixed(1)}`
+    : `${REGION_NAMES[id]} · <span class="rnotscored">not scored</span>`;
+}
+
+// A curve is a claim about where you sit among other people. It needs a
+// measurement that holds still between two photographs of you, and this region
+// does not have one — so the panel says that instead of drawing a distribution
+// and putting a dot on it.
+//
+// The nose curve is also where this became visible rather than merely wrong.
+// toleranceOf widens a metric's band as its reliability falls, the band branch
+// of zEff puts everyone inside the band on one plateau, and with all three nose
+// bands close to a full sigma wide, 24 of the 113 reference men land inside all
+// three at once and tie at the identical aggregate. AGG_NORM's nose table is
+// therefore one repeated number from the 75th percentile to the 100th, and a
+// zero-width quantile gap is an infinite density — the spike on the chart.
+function regionPositionPanel(r: RegionScore, id: RegionId, sex: Sex): string {
+  if (!regionIsScored(r)) {
+    return `<div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>
+      <p class="side-nocurve">No population curve for the ${REGION_NAMES[id].toLowerCase()}. Every measurement in this region moves about as much between two photographs of one face as it does between two different faces, so there is no stable position to plot. The readings above are real; a curve drawn from them would be a picture of the lighting.</p></div>`;
+  }
+  return `<div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, sex, true)}
+    ${curveLegend()}
+    <p class="rarity">${rarityLine(r)}</p></div>`;
 }
 
 // Told at the top of the profile, not left to be discovered halfway down a
@@ -1293,7 +1333,7 @@ function animateOverview(root: HTMLElement): void {
 // count of rows is true, and that is the honest part of the pitch.
 function regionPreviewHTML(r: RegionScore, id: RegionId): string {
   return `<div class="deck"><div class="dcard">
-    <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
+    <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
     ${r.metrics
       .map(
         (m) => `<div class="metric">
@@ -1338,7 +1378,7 @@ function showRegion(id: RegionId): void {
       <div class="dots" id="dots"><i class="on"></i><i></i></div>
       <div class="deck" id="deck">
         <div class="dcard">
-          <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
+          <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
               (m, i) => wasMeasured(m)
@@ -1371,9 +1411,7 @@ function showRegion(id: RegionId): void {
           <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
       </div>
-      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, ctx!.report.sex, true)}
-        ${curveLegend()}
-        <p class="rarity">${rarityLine(r)}</p></div>
+      ${regionPositionPanel(r, id, ctx!.report.sex)}
     </div>`;
 
   setTimeout(
