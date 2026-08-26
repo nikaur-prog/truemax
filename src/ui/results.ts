@@ -12,6 +12,7 @@ import { hasHistory, openHistory } from "./historyView.js";
 import { regionMatches } from "../engine/celebs.js";
 import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
+import { regionIconMarkup } from "./regionIcons.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
@@ -150,8 +151,16 @@ export function renderResults(c: Ctx): void {
   transition?.cancel();
   transition = null;
   shownRegion = null;
+  // The tab row rides in a rail of its own. The rail is what sticks, and it
+  // has to be a separate element: the tabs scroll sideways on a phone and
+  // carry a right-edge fade to say so, and a fade painted on the scroller
+  // itself would also fade the opaque background out from under the text
+  // passing beneath a pinned row.
+  const rail = document.createElement("div");
+  rail.className = "rtabs-rail";
   const tabs = document.createElement("div");
   tabs.className = "rtabs";
+  rail.appendChild(tabs);
 
   // The Side tab is gone from this row: it is not a ninth region, it is the
   // other half of the scan, and burying it among eight regions made a quarter
@@ -167,10 +176,11 @@ export function renderResults(c: Ctx): void {
   }
 
   c.analysis.innerHTML = "";
-  c.analysis.appendChild(tabs);
+  c.analysis.appendChild(rail);
   const body = document.createElement("div");
   body.id = "body";
   c.analysis.appendChild(body);
+  placeQualityChips();
   tabView = "front";
   buildTabs("front");
   select("overall");
@@ -178,6 +188,48 @@ export function renderResults(c: Ctx): void {
 
 // Which half of the scan the tab row is currently describing.
 let tabView: "front" | "side" = "front";
+
+// ---------------------------------------------------------------------------
+// Where the provenance chips live, which turns out to be a layout question
+// rather than a copy one.
+//
+// On a phone the photo column pins to the top of the screen so the score stays
+// visible while you read, and the chips — "scored against male norms",
+// "pose-corrected · 12° off-axis" — were the last thing inside it. So four
+// lines of small print about how the measurement was taken pinned themselves
+// to a third of the screen and stayed there for the entire report. They are
+// worth reading once. They are not worth a permanent seat.
+//
+// So on a phone they move out of the pinned column and into the top of the
+// analysis, directly above the tab row, where they are read once and then
+// scroll away like the rest of the small print. Desktop is untouched: there
+// the photo column is a column, not a lid, and nothing it holds is in the way.
+//
+// The node is MOVED, never rebuilt. main.ts and this module both hold a
+// reference to it from getElementById at load, and recreating it would strand
+// both of them writing into a detached div.
+// ---------------------------------------------------------------------------
+const NARROW = "(max-width: 850px)";
+
+function placeQualityChips(): void {
+  const chips = document.getElementById("quality-chips");
+  const analysis = ctx?.analysis ?? document.getElementById("analysis");
+  const photo = document.querySelector<HTMLElement>(".pane-photo");
+  if (!chips || !analysis || !photo) return;
+  const rail = analysis.querySelector<HTMLElement>(".rtabs-rail");
+  if (window.matchMedia(NARROW).matches) {
+    if (rail && chips.parentElement !== analysis) analysis.insertBefore(chips, rail);
+  } else if (chips.parentElement !== photo) {
+    photo.appendChild(chips);
+  }
+}
+
+// Crossing the breakpoint with a report already on screen has to move them
+// back, or a desktop window narrowed to a phone width keeps its chips pinned
+// and a phone rotated to landscape leaves them stranded in the analysis.
+if (typeof window !== "undefined" && window.matchMedia) {
+  window.matchMedia(NARROW).addEventListener?.("change", () => placeQualityChips());
+}
 
 // The tab row belongs to the view, not to the report.
 //
@@ -194,7 +246,16 @@ function buildTabs(view: "front" | "side"): void {
   const mk = (label: string, id: string) => {
     const b = document.createElement("button");
     b.className = "rtab";
-    b.textContent = label;
+    // The glyph is decorative — it is aria-hidden inside its own markup — so
+    // the label still carries the whole meaning for a screen reader, and the
+    // icon is above it rather than beside it so a row of eleven stays narrow
+    // enough to be worth scrolling.
+    const icon = regionIconMarkup(id);
+    if (icon) b.innerHTML = icon;
+    const text = document.createElement("span");
+    text.className = "rt-label";
+    text.textContent = label;
+    b.appendChild(text);
     b.dataset.id = id;
     b.onclick = () => select(id);
     tabs.appendChild(b);

@@ -152,6 +152,22 @@ function watchScroll(pane: HTMLElement): () => void {
   let shrunk = false;
   let queued = false;
 
+  // How far down the screen the pinned photo column reaches, published so the
+  // tab row can pin directly under it instead of behind it.
+  //
+  // Measured rather than assumed because the height is not a constant: the
+  // column shrinks on scroll, the score strip grows a line when the ranking
+  // wraps, and the quality chips move in and out of it at the breakpoint. A
+  // hard-coded offset would be right in exactly one of those states.
+  const main = pane.closest<HTMLElement>("#v-main") ?? pane.parentElement;
+  const publish = (): void => {
+    if (!main || !pane.isConnected) return;
+    main.style.setProperty("--pin-top", `${Math.round(pane.getBoundingClientRect().height)}px`);
+  };
+  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+  ro?.observe(pane);
+  publish();
+
   const measure = (): void => {
     queued = false;
     if (!pane.isConnected) return;
@@ -174,6 +190,8 @@ function watchScroll(pane: HTMLElement): () => void {
   measure();
   return () => {
     window.removeEventListener("scroll", onScroll);
+    ro?.disconnect();
+    main?.style.removeProperty("--pin-top");
     pane.classList.remove("shrunk");
   };
 }

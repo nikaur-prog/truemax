@@ -33,7 +33,31 @@ const LENIENT = {
   minTrackingConfidence: 0.3,
 };
 
-export async function initLandmarker(): Promise<void> {
+// The boot in flight, or the one already finished.
+//
+// This used to run exactly once because exactly one caller called it, at module
+// load. Now that it is started on intent — a thumb landing on "Use camera", a
+// file dropped on the page, a paste — it can be asked for several times in the
+// same second, and each of those calls used to build a SECOND landmarker over
+// the top of the first: two eleven-megabyte WASM instances, two model loads,
+// and whichever finished last winning the module-level variable.
+//
+// Sharing the promise makes every later caller await the first boot instead.
+// A failed boot clears it, so a retry after a dropped connection is a real
+// retry rather than a permanently poisoned promise.
+let booting: Promise<void> | null = null;
+
+export function initLandmarker(): Promise<void> {
+  if (!booting) {
+    booting = boot().catch((err: unknown) => {
+      booting = null;
+      throw err;
+    });
+  }
+  return booting;
+}
+
+async function boot(): Promise<void> {
   const fileset = await FilesetResolver.forVisionTasks("/wasm");
   landmarker = await FaceLandmarker.createFromOptions(fileset, {
     baseOptions: {

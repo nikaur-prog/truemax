@@ -21,7 +21,15 @@
     <link rel="alternate icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link rel="preload" href="/models/face_landmarker.task" as="fetch" crossorigin="anonymous" />
+    <!-- The face model is NOT preloaded. It is 3.32 MB brotli and its
+         companion WASM runtime is another 3.14 MB, and this hint pulled the
+         first of them down at 22ms into a landing page that does not measure
+         anything: the demo reel runs on pre-computed landmarks, and the
+         capture buttons were never gated on the engine. src/main.ts starts
+         the pair on intent instead — a pointer on a capture button, a file
+         dragged over the window — so the download begins when somebody has
+         decided to scan rather than when they have decided to look. -->
+
     <!-- Typefaces are self-hosted (see src/style.css). They used to come from
          the Google Fonts CDN, which meant a render-blocking third-party request
          before any text appeared — and on a slow or filtered connection the

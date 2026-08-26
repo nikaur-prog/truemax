@@ -66,10 +66,23 @@ function standing(m: ScoredMetric): string {
 // from discussing procedures, so a metric that only surgery touches must be
 // labelled as such here rather than left for him to guess about, which is how
 // a well-meaning model talks itself into naming one.
+//
+// These describe THE MEASUREMENT, not the anatomy, and the difference is not
+// pedantry — it was a live contradiction. "Jaw : cheekbone width" carried
+// "moves a lot with habit change", and Max, reading his own context, stopped
+// mid-answer to say that could not be right because cheekbone width is bone.
+// He was half right, which is the worst kind of wrong to hand a model: the
+// bone does not move, but this ratio is read off a photographed silhouette,
+// and the silhouette is soft tissue. The fixability number was fine. The
+// sentence was describing the skull when it meant the outline.
 function movability(m: ScoredMetric): string {
-  if (m.def.fixability >= 0.5) return "moves a lot with habit change";
-  if (m.def.fixability >= 0.2) return "moves a little with habit change";
-  return "essentially fixed bone, not changeable";
+  if (m.def.fixability >= 0.5) {
+    return "the measured outline responds to soft-tissue change (leanness, water, sleep); the bone under it does not move";
+  }
+  if (m.def.fixability >= 0.2) {
+    return "moves a little — soft tissue and photo conditions, not the underlying structure";
+  }
+  return "essentially fixed skeletal geometry, not changeable";
 }
 
 export interface ContextInput {

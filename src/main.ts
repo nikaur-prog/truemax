@@ -700,11 +700,6 @@ function clearEngineNote(): void {
   el.engineStatus.classList.remove("error");
 }
 
-const slowEngineNote = window.setTimeout(
-  () => showEngineNote("LOADING ANALYSIS ENGINE · ONE MOMENT"),
-  SLOW_ENGINE_MS,
-);
-
 // The machine-readable half of the same fact, for the measurement tools in
 // tools/ that drive this page in a headless browser and have to know when the
 // landmarker is usable.
@@ -715,22 +710,88 @@ const slowEngineNote = window.setTimeout(
 // sat at its selector until it timed out, with nothing in the failure naming
 // the real cause. A state attribute is not something anyone will delete for
 // being jargon, because it is not shown to anybody.
-function markEngine(state: "ready" | "failed"): void {
+function markEngine(state: "idle" | "loading" | "ready" | "failed"): void {
   document.documentElement.dataset.engine = state;
 }
+markEngine("idle");
 
-initLandmarker()
-  .then(() => {
-    window.clearTimeout(slowEngineNote);
-    clearEngineNote();
-    markEngine("ready");
-  })
-  .catch((err) => {
-    window.clearTimeout(slowEngineNote);
-    console.error(err);
-    showEngineNote("ENGINE FAILED TO LOAD · REFRESH TO RETRY", "error");
-    markEngine("failed");
-  });
+// ---------------------------------------------------------------------------
+// The engine loads when somebody is about to scan, not when the page opens.
+//
+// It is 6.5 MB over the wire — vision_wasm_internal.wasm at 3.14 MB brotli and
+// face_landmarker.task at 3.32 MB — and it used to be fetched at 22ms and
+// 287ms into the LANDING PAGE, ahead of any interaction at all. Nothing on the
+// landing page needs it: the demo reel runs on pre-computed landmarks and the
+// capture buttons were never gated on it. So the first visit on every browser
+// paid six and a half megabytes to look at a page that does not measure
+// anything, on whatever connection they happened to be on.
+//
+// Deferring it alone would move that cost onto the tap instead of removing it,
+// so the fetch is warmed on INTENT — a pointer landing on a capture button,
+// keyboard focus reaching one, a file dragged over the window. By the time the
+// camera permission prompt has been answered the engine is usually already in
+// memory, and the buttons are not disabled while it loads either way: an
+// upload that arrives first waits on the same promise rather than being
+// refused.
+//
+// Automation is the exception and takes the old eager path. Twenty-one tools
+// in tools/ open this page and block on `html[data-engine="ready"]` without
+// ever touching a button, and they should not each have to learn a new
+// handshake to keep measuring faces.
+// ---------------------------------------------------------------------------
+let slowEngineNote = 0;
+let enginePromise: Promise<void> | null = null;
+
+function ensureEngine(): Promise<void> {
+  if (enginePromise) return enginePromise;
+  markEngine("loading");
+  // Only after the load is genuinely slow, so a fast connection never sees a
+  // line of copy about a wait that did not happen.
+  slowEngineNote = window.setTimeout(
+    () => showEngineNote("LOADING ANALYSIS ENGINE · ONE MOMENT"),
+    SLOW_ENGINE_MS,
+  );
+  enginePromise = initLandmarker()
+    .then(() => {
+      window.clearTimeout(slowEngineNote);
+      clearEngineNote();
+      markEngine("ready");
+    })
+    .catch((err: unknown) => {
+      window.clearTimeout(slowEngineNote);
+      console.error(err);
+      showEngineNote("ENGINE FAILED TO LOAD · REFRESH TO RETRY", "error");
+      markEngine("failed");
+      // Cleared so a later attempt retries rather than re-reading a failure
+      // from a minute ago. A dropped connection at the wrong moment should not
+      // brick the scan for the rest of the session.
+      enginePromise = null;
+      throw err;
+    });
+  return enginePromise;
+}
+
+// Intent, not commitment. Swallows its own rejection: a warm that fails is not
+// an error anybody asked for, and the real attempt will report it properly.
+function warmEngine(): void {
+  void ensureEngine().catch(() => {});
+}
+
+for (const target of [el.btnCamera, el.btnUpload]) {
+  // pointerenter covers the cursor arriving on desktop; pointerdown covers the
+  // thumb landing on a phone, which is a good hundred milliseconds before the
+  // click it is going to become. focus covers the keyboard.
+  target.addEventListener("pointerenter", warmEngine, { once: true });
+  target.addEventListener("pointerdown", warmEngine, { once: true });
+  target.addEventListener("focus", warmEngine, { once: true });
+}
+// Somebody dragging a photo onto the window has decided. Same for a paste.
+window.addEventListener("dragover", warmEngine, { once: true });
+window.addEventListener("paste", warmEngine, { once: true });
+
+if (navigator.webdriver || new URLSearchParams(location.search).has("eager")) {
+  warmEngine();
+}
 
 let filePickerGeneration = 0;
 el.fileInput.addEventListener("change", () => {
@@ -1008,6 +1069,11 @@ async function openCamera(): Promise<void> {
     el.camHintDetail.textContent = "This browser can't open a camera, so upload a photo instead.";
     return;
   }
+  // Started, not awaited. The camera permission prompt and the engine download
+  // are independent, and the guidance loop needs landmarks only once there is
+  // a live frame to run them on — so both should be in flight at once rather
+  // than the preview waiting behind six megabytes.
+  warmEngine();
   const desktop = !matchMedia("(pointer: coarse)").matches;
   holdHintUntil = 0;
   resetGlassesOverride();
@@ -1297,9 +1363,17 @@ const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
 
 async function handleFile(file: File, expectedGeneration = scanGeneration): Promise<void> {
   if (expectedGeneration !== scanGeneration) return;
+  // Wait for the engine rather than refusing the photo. It used to say "engine
+  // still loading" and drop the file on the floor, which asks somebody to
+  // guess how long to wait and then pick the same picture again. Now the
+  // upload queues behind the load it triggered.
   if (!isReady()) {
-    showEngineNote("ENGINE STILL LOADING · ONE MOMENT");
-    return;
+    try {
+      await ensureEngine();
+    } catch {
+      return;
+    }
+    if (expectedGeneration !== scanGeneration) return;
   }
   const token = beginScan("upload");
   if (!token) {
