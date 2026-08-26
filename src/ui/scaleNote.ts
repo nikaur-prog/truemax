@@ -67,6 +67,19 @@ export function openScaleNote(sex: Sex): void {
         above the top rung is stated as a count, because a reference set of about
         ${REFERENCE_N} faces per sex cannot resolve one.</p>
 
+      <p class="scalenote-foot">Who is in that reference set matters as much as
+        how many. They are people notable for their work rather than their
+        appearance, which is the right choice for the shape of the curve and a
+        known problem for where its middle sits: they are mostly middle-aged,
+        and these measurements read youthful structure as better. Scored against
+        their own distribution the reference faces come out at a median of 3.8,
+        not 5.0. The scale already corrects for that gap — 5.0 is set where
+        blinded human raters put an average face, which is 0.87 sigma above the
+        reference median, not at the reference median itself. It is a real
+        correction fitted on a thin sample of nineteen rated faces, so treat a
+        placement near the top of the scale as "well clear of this reference
+        set" rather than as a precise standing among everybody your age.</p>
+
       <p class="scalenote-foot">${varianceLine()}</p>
     </div>`;
   document.body.appendChild(host);

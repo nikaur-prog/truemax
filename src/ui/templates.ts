@@ -1,7 +1,7 @@
 import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
 import { REGION_NAMES, regionIsScored } from "../engine/scoring.js";
 import { distFor } from "../engine/metrics.js";
-import { statedPct } from "../engine/precision.js";
+import { REFERENCE_N as ENGINE_REFERENCE_N, statedPct } from "../engine/precision.js";
 import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
 import { DISPLAY_NOISE } from "../engine/history.js";
@@ -200,7 +200,12 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
 // shows users "Top 0.01% · 1 in 8.35k", which would need something like a
 // hundred thousand measured faces to mean anything. Being the product that
 // doesn't do that is the entire positioning, and it costs nothing to be right.
-const REFERENCE_N = 110;
+// One constant, imported rather than restated. This file had its own
+// `REFERENCE_N = 110` while precision.ts exported 100, so the cap on how rare a
+// thing may be called and the disclosure of what it was measured against
+// disagreed by ten faces — two numbers describing one sample, drifting apart
+// exactly the way precision.ts's own comment says they must not.
+const REFERENCE_N = ENGINE_REFERENCE_N;
 
 export function rarityN(pct: number): number {
   return Math.max(2, Math.min(REFERENCE_N, Math.round(1 / Math.max(0.001, 1 - pct / 100))));
