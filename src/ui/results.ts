@@ -23,7 +23,7 @@ import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
-import { deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
+import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
@@ -1218,43 +1218,20 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
 function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
-  const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
-  const best = regions[0];
-  const fixables = r.metrics
-    .filter((m) => m.def.fixability >= 0.3)
-    .sort((a, b) => a.zEff - b.zEff);
-  const weakest = fixables[0];
-
-  // Phrased so it survives a plural region name: "Eyes is carrying you" is
-  // the kind of line that reads generated, and this one must not.
-  const good = best
-    ? `Best thing on the scan: ${REGION_NAMES[best.region].toLowerCase()}, top ${Math.max(1, 100 - Math.round(best.percentile))}% of the reference set.`
-    : "";
-  const improve = weakest
-    ? `The one I would attack first: ${weakest.def.name.toLowerCase()} (${fmt(weakest)}). ${leverFor(weakest).title} is the lever, and it moves without surgery.`
-    : "";
-  // Suppressed entirely on the profile: "first scan on record" is false on a
-  // rescan, and the real delta belongs to the overall number, not to this half.
-  //
-  // A guest's delta is null BY DESIGN — their scan is compared against nothing
-  // — so the null must not fall through to "first scan on record", which is a
-  // promise of a trend this scan will never join. Say what is actually true.
-  const tracking =
-    scope === "side"
-      ? ""
-      : guestName
-        ? `This is ${escapeHTML(guestName)}'s scan, so it is kept as its own record — off your history, your average and your trend.`
-        : delta
-          ? deltaReadingCopy(delta)
-          : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
+  // Built in templates.ts, where the rest of the voice lives. It used to be
+  // assembled here from "Best thing on the scan:" and "The one I would attack
+  // first: ... is the LEVER, and it MOVES WITHOUT SURGERY" — two pieces of
+  // jargon in one sentence, on the tab that is supposed to read as a coach
+  // talking rather than a report printing.
+  const read = coachRead(r, delta, { scope, ...(guestName ? { guestName } : {}) });
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
     <div class="maxan-body">
       <span class="klabel">COACH MAX'S READ</span>
-      <p><b>${good}</b> ${improve}</p>
-      ${tracking ? `<p class="maxan-track">${tracking}</p>` : ""}
-      <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
+      <p><b>${read.good}</b> ${read.work}</p>
+      ${read.memory ? `<p class="maxan-track">${read.memory}</p>` : ""}
+      <p class="maxan-invite">${read.invite}</p>
       <!-- Looks like the thing it starts, rather than describing it.
            "Tap me in the corner" asked the reader to find a separate control
            and trust that it was worth finding; a box with a cursor in it needs
