@@ -1,4 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import type { SidePoints } from "./engine/sideMetrics.js";
 import { detect, initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
@@ -18,7 +19,8 @@ import { openSideCapture, close as closeSideFlow } from "./ui/sideFlow.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
 import { askVerdictTone } from "./ui/tonePrompt.js";
 import { drawLandmarksAnimated } from "./ui/overlay.js";
-import type { Report, Sex } from "./engine/types.js";
+import type { Report, ScoredMetric, Sex } from "./engine/types.js";
+import { hasSideOverlay } from "./ui/sideMeasureOverlay.js";
 import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
@@ -44,7 +46,7 @@ import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
 import { canShareFiles, exportName, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
-import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
+import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
 
@@ -134,12 +136,14 @@ let ready = false;
 // The landmarker is deferred behind the same check for the plainer reason that
 // downloading multiple megabytes of face model for somebody about to be refused
 // is a waste of their data.
-void allowQuickAccess().then((allowed) => {
-  if (!allowed) {
+void quickAccessProfile().then((access) => {
+  if (!access.allowed) {
     denyQuickAccess();
     return;
   }
+  applyPillarGrants(access);
   document.querySelector(".q-wrap")?.classList.remove("q-locked");
+  openFromHash();
   initLandmarker()
   .then(() => {
     el.engine.textContent = "ENGINE READY";
@@ -157,6 +161,84 @@ void allowQuickAccess().then((allowed) => {
     el.engine.classList.add("error");
   });
 });
+
+// Which pillar buttons each grant unlocks, and which rooms only staff see.
+//
+// The grant keys are the League's ("cta", "polisher", "clips"), ticked by the
+// owner at approval; the buttons are this page's modes. CTA covers both
+// content cuts because they are the same job — footage of a scan, posted.
+// The AI Model Reel and Calibrate are not grants at all: /api/ai-image is
+// staff-gated server-side and Calibrate feeds the rating corpus, so for a
+// creator those buttons are REMOVED rather than locked — a door that would
+// 404 should not exist, which is the page's standing philosophy.
+const PILLAR_GRANT: Record<string, string> = { reel: "cta", analysis: "cta", enhance: "polisher" };
+const STAFF_ONLY_MODES = ["ai", "calibrate"];
+
+function applyPillarGrants(access: { staff: boolean; grants: Record<string, boolean> }): void {
+  if (access.staff) return;
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) {
+    const mode = button.dataset.mode ?? "";
+    if (STAFF_ONLY_MODES.includes(mode)) {
+      button.remove();
+      continue;
+    }
+    const grant = PILLAR_GRANT[mode];
+    if (grant && access.grants[grant] !== true) {
+      // Locked, not removed: the League Tools page shows the same card with
+      // the same words, and a member who can see what exists knows what to
+      // ask the owner for.
+      button.disabled = true;
+      button.classList.add("q-pillar-locked");
+      const chip = document.createElement("span");
+      chip.className = "q-pillar-lock-chip";
+      chip.textContent = "NOT IN YOUR PLAN";
+      button.appendChild(chip);
+    }
+  }
+}
+
+// Deep links from the League Tools page. Each pillar card over there is a
+// door into a specific room here, so a member lands in the tool they clicked
+// rather than on the menu. Unknown hashes fall through to the pillars, which
+// is where everybody else already starts. A hash pointing at a room the
+// member does not hold (or that was removed above) lands on the pillars too —
+// the locked card explains itself better than an error would.
+function openFromHash(): void {
+  const target = { polisher: "enhance", enhance: "enhance", cta: "reel", reel: "reel", analysis: "analysis" }[
+    location.hash.slice(1).toLowerCase()
+  ];
+  if (target) {
+    const button = document.querySelector<HTMLButtonElement>(`.q-pillar[data-mode="${target}"]`);
+    if (!button || button.disabled) return;
+  }
+  openFromHashInner();
+}
+
+function openFromHashInner(): void {
+  const hash = location.hash.slice(1).toLowerCase();
+  if (!hash) return;
+  if (hash === "polisher" || hash === "enhance") {
+    void import("./ui/enhancePanel.js").then((m) => m.openEnhancePanel());
+    return;
+  }
+  if (hash === "cta" || hash === "reel") {
+    enterMode("reel");
+    return;
+  }
+  if (hash === "analysis") {
+    enterMode("analysis");
+    return;
+  }
+  if (hash === "clips") {
+    // The saved-face strip is the clips library. It renders async and only
+    // when it has faces, so the scroll waits a beat and lands wherever the
+    // strip is — or stays on the pillars when the library is empty.
+    window.setTimeout(() => {
+      const lib = document.getElementById("q-lib");
+      if (lib && !lib.classList.contains("hidden")) lib.scrollIntoView({ behavior: "smooth" });
+    }, 600);
+  }
+}
 
 async function loadPreviewPhoto(): Promise<void> {
   const response = await fetch("/demo/michael-b-jordan.jpg");
@@ -728,6 +810,13 @@ let pendingSide: Report | null = null;
 // stores a 96px thumbnail so a fifty-row set stays auditable — "which face
 // was m7" must be answerable without re-scanning anybody.
 let pendingFrontShot: HTMLCanvasElement | null = null;
+// The rest of what the Dual-View export needs, held over the same window as
+// the shot above and cleared with it. This face, both views, its confirmed
+// points — the one moment in the product where all of it is in hand at once,
+// which is exactly why the dual cut is exported from here and nowhere else.
+let pendingFrontLandmarks: NormalizedLandmark[] | null = null;
+let pendingSidePhoto: HTMLCanvasElement | null = null;
+let pendingSidePoints: SidePoints | null = null;
 
 // The last correction upload's fate, shown in the slots panel.
 //
@@ -790,7 +879,10 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
 function clearPending(): void {
   pendingFront = null;
   pendingFrontShot = null;
+  pendingFrontLandmarks = null;
   pendingSide = null;
+  pendingSidePhoto = null;
+  pendingSidePoints = null;
 }
 
 /**
@@ -846,6 +938,11 @@ function renderFaceSlots(): void {
       onDone: (report, points, faceDir, review) => {
         closeSideFlow();
         pendingSide = report;
+        // Held for the Dual-View export, cleared with the rest of the pending
+        // face. The correction upload below consumes the same pair without
+        // owning it.
+        pendingSidePhoto = review.photo;
+        pendingSidePoints = points;
         // Send the correction, if the operator consented to sharing it.
         //
         // This slot used to take the report and drop the other three arguments,
@@ -1123,6 +1220,9 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
         <button class="btn pri" id="q-cal-next">Next face</button>
         <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
         <button class="btn gho" id="q-cal-list">See the set</button>
+        ${withSide && pendingFrontShot && pendingFrontLandmarks && pendingSidePhoto && pendingSidePoints
+          ? `<button class="btn gho" id="q-cal-dual">Export Dual-View MP4</button>`
+          : ""}
       </div>
     </div>`;
   // The captured face as pasteable text, both views, at the one moment both
@@ -1150,6 +1250,51 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
       window.setTimeout(() => (diag.textContent = "Copy diagnostics"), 2600);
     };
   }
+  // The Dual-View cut: both photographs, both scans, the merged number the
+  // in-app header already prints. Exported from here because this is the only
+  // screen where a front, a hand-confirmed side, and the merged report all
+  // exist at once — the honesty condition for ever printing a side figure.
+  const dualBtn = document.getElementById("q-cal-dual") as HTMLButtonElement | null;
+  if (dualBtn && side) {
+    dualBtn.onclick = async () => {
+      if (!pendingFrontShot || !pendingFrontLandmarks || !pendingSidePhoto || !pendingSidePoints) return;
+      const merged = mergeReports(r, side);
+      if (!merged.views) return; // merge fell back to front-only: nothing dual to show
+      dualBtn.disabled = true;
+      // The most legible constructions first; whatever the side actually
+      // measured fills the rest, four at most — the beat is 2.4s long.
+      const preferred = ["facialConvexity", "nasalProjection", "chinRecession", "lowerThirdDepth"];
+      const withOverlay = side.metrics.filter((m) => hasSideOverlay(m.def.id));
+      const sideMetrics = [
+        ...preferred.map((id) => withOverlay.find((m) => m.def.id === id)).filter((m): m is ScoredMetric => Boolean(m)),
+        ...withOverlay.filter((m) => !preferred.includes(m.def.id)),
+      ].slice(0, 4);
+      try {
+        await downloadQuickVideo(
+          pendingFrontShot,
+          pendingFrontLandmarks,
+          r.sex,
+          { overall: merged.overall, percentile: merged.overallPercentile, regions: [] },
+          (p) => (dualBtn.textContent = p < 1 ? `Rendering ${Math.round(p * 100)}%` : "Saved"),
+          "dual",
+          {
+            sidePhoto: pendingSidePhoto,
+            sidePoints: pendingSidePoints,
+            sideMetrics,
+            frontScore: merged.views.front.score,
+            sideScore: merged.views.side.score,
+          },
+        );
+        dualBtn.textContent = "Saved";
+      } catch (error) {
+        dualBtn.textContent = error instanceof Error ? error.message : "Export failed";
+      } finally {
+        dualBtn.disabled = false;
+        window.setTimeout(() => (dualBtn.textContent = "Export Dual-View MP4"), 3200);
+      }
+    };
+  }
+
   document.getElementById("q-cal-next")!.onclick = () => {
     resetSexAsk();
     clearPending();
@@ -1362,6 +1507,9 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     // to add a side before committing the face.
     pendingFront = r;
     pendingFrontShot = photo;
+    // The landmarks ride along for the Dual-View export; `last` is the scan
+    // that produced this report, still current at this point in the flow.
+    pendingFrontLandmarks = last?.lm ?? null;
     renderFaceSlots();
     return;
   }
@@ -1667,7 +1815,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   const before = beforeSource();
   if (before && beforeScan) {
     const held = beforeScan;
-    const wire = (id: string, idle: string, variant: QuickVariant) => {
+    const wire = (id: string, idle: string, variant: Exclude<QuickVariant, "dual">) => {
       const b = document.getElementById(id);
       if (b) b.onclick = () => void downloadVideo(r, variant, { source: before, buttonId: id, idle, tag: "before" });
     };
@@ -2309,7 +2457,9 @@ function beforeSource(): ExportSource | null {
 // the two files can never tell a different story about one face.
 async function downloadVideo(
   r: Report,
-  variant: QuickVariant,
+  // Never "dual": that cut has its own entry point on the Calibrate verdict
+  // screen, because only Calibrate holds the side assets it needs.
+  variant: Exclude<QuickVariant, "dual">,
   // Which face, and which button is reporting on it. Omitted for the face on
   // screen, which is what every caller but the before/after row wants.
   from?: { source: ExportSource; buttonId: string; idle: string; tag: string },

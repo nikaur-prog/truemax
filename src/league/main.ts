@@ -520,36 +520,130 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>`).join("")}</div>` : `<p class="lg-sub">Payouts land here once a sprint settles.</p>`}`;
   },
 
-  tools(mount, me) {
+  async tools(mount, me) {
     const granted = (id: string) => me.pillar_grants?.[id] === true;
+    // The pillars, in the order a member meets them. Each granted card is a
+    // real door: the hash tells /quick which room to open on arrival.
     const tools = [
-      { id: "cta", name: "CTA Generator", body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, ready to post.", href: "/quick" },
-      { id: "polisher", name: "The Polisher", body: "Clean up a soft clip: sharpen, colour, and a 4K upscale for the ones worth it.", href: "/quick" },
-      { id: "clips", name: "Clips Library", body: "Celebrity and demo exports to cut from.", href: "/quick" },
+      {
+        id: "cta", n: "01", name: "CTA Generator",
+        body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, voiced, ready to post.",
+        needs: "One photo · a face worth talking about", href: "/league/tools#cta",
+      },
+      {
+        id: "polisher", n: "02", name: "The Polisher",
+        body: "Clean up a soft clip on this device: sharpen, colour — and a 4K upscale for the ones worth it.",
+        needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
+      },
+      {
+        id: "clips", n: "03", name: "Clips Library",
+        body: "Saved faces, celebrity references and demo exports to cut from — scored instantly, no rescan.",
+        needs: "Nothing · it's all in the library", href: "/league/tools#clips",
+      },
     ];
     mount.innerHTML = `<h1 class="lg-h">Tools</h1>
-      <p class="lg-sub">What you see here is what your membership includes — ${me.monthly_render_quota}
-      renders a month across the lot.</p>
-      ${tools.map((t) => `<div class="lg-card">
+      <p class="lg-sub">What you see here is what your membership includes. Renders are the
+      calls that cost us money (a voiceover, a 4K pass) — everything else is unmetered.</p>
+      <div class="lg-card" id="lg-quota-card">
+        <div class="lg-row" style="border:none;padding:0 0 8px"><h3>Renders this month</h3>
+        <b class="lg-num" id="lg-quota-num">— / ${me.monthly_render_quota}</b></div>
+        <div class="lg-bar"><i id="lg-quota-fill" style="width:0%"></i></div>
+        <div class="lg-bar-note">Resets on the 1st. Need more? Ask — quotas are set per creator.</div>
+      </div>
+      <div class="lg-tools">
+      ${tools.map((t) => `<div class="lg-card lg-tool ${granted(t.id) ? "" : "off"}">
+        <div class="lg-tool-kicker">${t.n}</div>
         <div class="lg-row" style="border:none;padding:0">
-          <div><h3>${t.name}</h3><p class="lg-sub" style="margin:4px 0 0">${t.body}</p></div>
+          <div><h3>${t.name}</h3><p class="lg-sub" style="margin:4px 0 6px">${t.body}</p>
+          <p class="lg-note" style="margin:0">${t.needs}</p></div>
           ${granted(t.id)
             ? `<a class="lg-btn pri" href="${t.href}">Open</a>`
             : `<span class="lg-chip">NOT IN YOUR PLAN</span>`}
-        </div></div>`).join("")}`;
+        </div></div>`).join("")}
+      <div class="lg-card lg-tool off">
+        <div class="lg-tool-kicker">04</div>
+        <div class="lg-row" style="border:none;padding:0">
+          <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
+          the house palette — how every TrueMax video gets its look.</p>
+          <p class="lg-note" style="margin:0">Owner-run · assets land in your pillars automatically</p></div>
+          <span class="lg-chip">OWNER ONLY</span>
+        </div></div>
+      </div>`;
+    // Own usage, via the render_log RLS (a creator reads their own rows).
+    // Loaded after paint so a slow count never blocks the cards.
+    try {
+      const client = await getSupabaseClient();
+      const now = new Date();
+      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+      const { count } = await client
+        .from("league_render_log")
+        .select("id", { count: "exact", head: true })
+        .eq("creator_id", me.user_id)
+        .gte("created_at", monthStart);
+      const used = count ?? 0;
+      const num = mount.querySelector<HTMLElement>("#lg-quota-num");
+      const fill = mount.querySelector<HTMLElement>("#lg-quota-fill");
+      if (num) num.textContent = `${used} / ${me.monthly_render_quota}`;
+      if (fill) fill.style.width = `${Math.min(100, Math.round((used / Math.max(1, me.monthly_render_quota)) * 100))}%`;
+    } catch {
+      /* the bar simply stays at the dash — usage is a nicety, not a gate */
+    }
   },
 
   async admin(mount) {
     mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const [{ data: apps }, { data: pending }] = await Promise.all([
+    const [{ data: apps }, { data: pending }, { data: allSprints }] = await Promise.all([
       client.from("league_creators").select("*").eq("status", "applied").order("created_at"),
       client.from("league_submissions").select("*").eq("status", "pending").order("created_at"),
+      // Every status, drafts included — loadSprints deliberately hides drafts
+      // from creators, and the admin is exactly who drafts exist for.
+      client.from("league_sprints").select("*").order("starts_at", { ascending: false }),
     ]);
     const applications = (apps ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
     const subs = (pending ?? []) as SubmissionRow[];
+    const sprints = (allSprints ?? []) as SprintRow[];
+    const f = DEFAULT_FORMULA;
+
+    const sprintChip = (s: string) =>
+      s === "active" ? `<span class="lg-chip ok">ACTIVE</span>`
+      : s === "closed" ? `<span class="lg-chip">CLOSED</span>`
+      : `<span class="lg-chip warn">DRAFT</span>`;
+    const day = (iso: string) => new Date(iso).toLocaleDateString();
 
     mount.innerHTML = `<h1 class="lg-h">Admin</h1>
+      <div class="lg-card"><h3>Sprints · ${sprints.length}</h3>
+        ${sprints.map((s) => `<div class="lg-row" style="flex-wrap:wrap">
+          <span><b>${esc(s.name)}</b> <span class="lg-note">${day(s.starts_at)} → ${day(s.ends_at)} ·
+          pool ${fmtMoney(s.pool_cents)} · ${sprintFormula(s) ? "formula" : "tier ladder"}</span></span>
+          <span style="display:flex;gap:8px;align-items:center">
+            ${sprintChip(s.status)}
+            ${s.status === "draft" ? `<button class="lg-btn pri" data-sprint-activate="${s.id}">Activate</button>` : ""}
+            ${s.status === "active" ? `<button class="lg-btn danger" data-sprint-close="${s.id}">Close</button>` : ""}
+          </span>
+        </div>`).join("") || `<p class="lg-sub">No sprints yet — the league starts when the first one goes active.</p>`}
+        <div class="lg-sprint-new">
+          <h3 style="margin-top:18px">New sprint</h3>
+          <p class="lg-sub">Created as a DRAFT — creators see nothing until you activate it. The
+          formula fields are the deal the gate advertises; change them here and this sprint pays
+          differently, story included.</p>
+          <div class="lg-sprint-grid">
+            <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1 — September" /></label>
+            <label>Pool ($) <input id="sp-pool" type="number" min="0" step="50" value="2000" /></label>
+            <label>Starts <input id="sp-start" type="date" /></label>
+            <label>Ends <input id="sp-end" type="date" /></label>
+            <label>$ per 1,000 views <input id="sp-rpm" type="number" min="0" step="0.25" value="${(f.rpmCents / 100).toFixed(2)}" /></label>
+            <label>Max engagement × <input id="sp-emax" type="number" min="1" step="0.1" value="${f.eMax}" /></label>
+            <label>Unlock views <input id="sp-tviews" type="number" min="0" step="1000" value="${f.thresholdViews}" /></label>
+            <label>Unlock comments <input id="sp-tcomments" type="number" min="0" value="${f.thresholdComments}" /></label>
+            <label>Per-video cap ($) <input id="sp-vcap" type="number" min="0" step="50" value="${(f.videoCapCents / 100).toFixed(0)}" /></label>
+            <label>Per-creator cap ($) <input id="sp-ccap" type="number" min="0" step="50" value="${(f.creatorCapCents / 100).toFixed(0)}" /></label>
+          </div>
+          <p style="margin-top:14px"><button class="lg-btn pri" id="sp-create">Create draft sprint</button></p>
+          <p class="lg-error" id="sp-err"></p>
+        </div>
+      </div>
+
       <div class="lg-card"><h3>Applications · ${applications.length}</h3>${applications.map((a) => `
         <div class="lg-row" style="align-items:flex-start;flex-direction:column">
           <div style="width:100%"><b>${esc(a.display_name)}</b> <span class="lg-note">${esc(a.handle)} · ${esc(a.niche ?? "")}</span>
@@ -581,6 +675,45 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <button class="lg-btn" data-snap="${s.id}">Record counts</button>
           </span>
         </div>`).join("") || `<p class="lg-sub">Nothing waiting.</p>`}</div>
+
+      <div class="lg-card"><h3>Outreach</h3>
+        <p class="lg-sub">The daily engine: 100 DMs and 50 emails, sent by hand, tracked by hand.
+        The scripts are the proven structure — "Paid promo?" gets answered where a pitch gets
+        scrolled past. Never lead with the deal; it's message two.</p>
+        <div class="lg-scripts">
+          ${[
+            {
+              t: "DM · message 1 (the opener)",
+              s: "Paid promo?",
+            },
+            {
+              t: "DM · message 2 (they replied)",
+              s: "We run TrueMax — you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views — then every view you already have counts. Want the link to apply?",
+            },
+            {
+              t: "DM · follow-up (48h silence)",
+              s: "Still open if you want it — creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
+            },
+            {
+              t: "Email (from their bio / Linktree / YouTube About)",
+              s: "Subject: Paid promo — your {niche} content\n\nHey {name},\n\nSaw {video} — that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league — two minutes. Happy to answer anything on here first.\n",
+            },
+            {
+              t: "Referral bounty (to anyone signed)",
+              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough — we'll do the rest.",
+            },
+          ].map((x, i) => `<div class="lg-row" style="align-items:flex-start">
+            <div style="flex:1;min-width:0"><b style="font-size:13.5px">${x.t}</b>
+            <pre class="lg-script" id="lg-script-${i}">${esc(x.s)}</pre></div>
+            <button class="lg-btn" data-copy="${i}">Copy</button>
+          </div>`).join("")}
+        </div>
+        <p class="lg-note" style="margin-top:12px">Where the addresses come from: TikTok/IG bios
+        and Linktrees first, YouTube About tabs second (most mirror to Shorts). Clippers live in
+        Whop clipping communities, clipping Discords, and under #clips #edits in the niche — the
+        /league link is the whole pitch. Fill {name}, {video}, {niche} before sending; a script
+        sent unfilled reads as spam because it is.</p>
+      </div>
 
       <div class="lg-card"><h3>Settlement</h3>
         <p class="lg-sub">Every approved creator's accrual under the sprint's formula, from the
@@ -619,14 +752,106 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
             <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00 — pool covers everyone" : scale.toFixed(3)}</b></div>
-            ${earning.map((r) => `<div class="lg-row">
+            ${earning.map((r, i) => `<div class="lg-row">
               <span>${esc(r.c.display_name)} <span class="lg-note">${esc(r.c.handle)} ·
               ${fmtCount(r.totals.views)} views</span></span>
-              <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
+              <span style="display:flex;gap:10px;align-items:center">
+                <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
+                <button class="lg-btn" data-pay="${i}">Record paid</button>
+              </span>
             </div>`).join("") || `<p class="lg-sub">Nobody over the threshold yet.</p>`}`;
+          // Recording a payout is the LAST step, pressed after the money has
+          // actually moved — the row is what feeds the leaderboard and the
+          // creator's own Money page, and both promise "real money that
+          // actually moved". Per row rather than one big button, because each
+          // transfer is its own decision and its own bank action.
+          out.querySelectorAll<HTMLButtonElement>("[data-pay]").forEach((btn) => {
+            btn.onclick = async () => {
+              const r = earning[Number(btn.dataset.pay)];
+              if (!r) return;
+              btn.disabled = true;
+              const { error } = await client.from("league_payouts").insert({
+                creator_id: r.c.user_id,
+                amount_cents: Math.round(r.accrued * scale),
+                note: sprint.name,
+                status: "paid",
+              });
+              btn.textContent = error ? "Failed — retry" : "Recorded";
+              if (error) btn.disabled = false;
+            };
+          });
         };
       });
     }
+
+    // Sprint lifecycle. Draft → active is the launch; active → closed freezes
+    // the counts settlement reads. Both are staff-only writes RLS already
+    // enforces — these buttons are the convenience, not the boundary.
+    mount.querySelectorAll<HTMLButtonElement>("[data-sprint-activate]").forEach((b) => {
+      b.onclick = async () => {
+        await client.from("league_sprints").update({ status: "active" }).eq("id", b.dataset.sprintActivate!);
+        refresh();
+      };
+    });
+    mount.querySelectorAll<HTMLButtonElement>("[data-sprint-close]").forEach((b) => {
+      b.onclick = async () => {
+        await client.from("league_sprints").update({ status: "closed" }).eq("id", b.dataset.sprintClose!);
+        refresh();
+      };
+    });
+    {
+      const err = mount.querySelector<HTMLElement>("#sp-err")!;
+      const num = (id: string) => Number(mount.querySelector<HTMLInputElement>(`#${id}`)?.value || 0);
+      const str = (id: string) => mount.querySelector<HTMLInputElement>(`#${id}`)?.value.trim() ?? "";
+      const create = mount.querySelector<HTMLButtonElement>("#sp-create");
+      if (create) create.onclick = async () => {
+        err.textContent = "";
+        const name = str("sp-name");
+        const starts = str("sp-start");
+        const ends = str("sp-end");
+        if (!name || !starts || !ends) {
+          err.textContent = "Name and both dates.";
+          return;
+        }
+        if (new Date(ends) <= new Date(starts)) {
+          err.textContent = "The end has to come after the start.";
+          return;
+        }
+        const { error } = await client.from("league_sprints").insert({
+          name,
+          pool_cents: Math.round(num("sp-pool") * 100),
+          // tiers is the legacy ladder column and NOT NULL; a formula sprint
+          // carries an empty ladder and the formula does the paying.
+          tiers: [],
+          formula: {
+            rpmCents: Math.round(num("sp-rpm") * 100),
+            eMax: num("sp-emax"),
+            thresholdViews: num("sp-tviews"),
+            thresholdComments: num("sp-tcomments"),
+            videoCapCents: Math.round(num("sp-vcap") * 100),
+            creatorCapCents: Math.round(num("sp-ccap") * 100),
+          },
+          starts_at: new Date(starts).toISOString(),
+          ends_at: new Date(ends).toISOString(),
+          status: "draft",
+        });
+        if (error) {
+          err.textContent = error.message;
+          return;
+        }
+        refresh();
+      };
+    }
+
+    mount.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((b) => {
+      b.onclick = async () => {
+        const pre = mount.querySelector<HTMLElement>(`#lg-script-${b.dataset.copy}`);
+        if (!pre) return;
+        await navigator.clipboard.writeText(pre.textContent ?? "").catch(() => {});
+        b.textContent = "Copied";
+        window.setTimeout(() => (b.textContent = "Copy"), 1200);
+      };
+    });
 
     const refresh = () => void PAGES.admin(mount, undefined as never);
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {

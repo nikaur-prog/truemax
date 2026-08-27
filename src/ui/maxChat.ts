@@ -1,5 +1,5 @@
 import { currentAccessToken } from "../engine/auth.js";
-import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { maxCharacterMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 
@@ -150,6 +150,13 @@ export function openMaxChat(
   // earns attention with the idle repertoire instead (ui/maxIdle.ts), and a
   // tap still gets a wave.
   const face = host.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
+  // He LANDS rather than appears: the settle bounce on mount is the same
+  // follow-through every act ends with, and it is what makes opening the
+  // panel read as him arriving to talk rather than a header painting in.
+  if (face && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    face.classList.add("mx-settle");
+    window.setTimeout(() => face.classList.remove("mx-settle"), 600);
+  }
   face?.classList.add("speaking");
   speakGreeting(log, options.greeting ?? greeting(context), () => {
     face?.classList.remove("speaking");
@@ -347,6 +354,9 @@ async function ask(
       return null;
     }
     transcript.push({ role: "assistant", content: said });
+    // Said his piece: a small nod as the reply lands. Follow-through, not
+    // celebration — the reply is the content, the nod is the punctuation.
+    reactMax(document.querySelector<HTMLElement>(".maxchat-face"), "nod");
     return said;
   } catch (error) {
     const name = (error as Error)?.name;
@@ -376,6 +386,8 @@ function fail(bubble: HTMLElement, message: string): void {
   bubble.classList.remove("thinking");
   bubble.classList.add("maxchat-err");
   bubble.textContent = message;
+  // He minds that it broke — with you, briefly, and then back to normal.
+  reactMax(document.querySelector<HTMLElement>(".maxchat-face"), "shake");
 }
 
 // Max is told to write plain sentences for a plain bubble, but a model under

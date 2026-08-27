@@ -7,7 +7,8 @@
     { "source": "/delete-account", "destination": "/delete-account.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/brand", "destination": "/brand.html" },
-    { "source": "/league", "destination": "/league.html" }
+    { "source": "/league", "destination": "/league.html" },
+    { "source": "/league/tools", "destination": "/quick.html" }
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" }

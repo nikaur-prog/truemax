@@ -22,6 +22,25 @@
 .quick.side-open .q-wrap { width: 100%; max-width: 1560px; }
 
 .q-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.q-top-right { display: flex; align-items: center; gap: 14px; }
+.q-league-back { font-size: 13px; font-weight: 600; text-decoration: none; opacity: 0.75; }
+.q-league-back:hover { opacity: 1; text-decoration: underline; }
+
+/* A pillar the member can see but was not granted. Present on purpose — the
+   League Tools page shows the same locked card, and knowing what exists is
+   how somebody knows what to ask the owner for. */
+.q-pillar-locked { opacity: 0.55; cursor: default; position: relative; }
+.q-pillar-locked:hover { transform: none; box-shadow: none; }
+.q-pillar-lock-chip {
+  display: inline-block;
+  margin-top: 10px;
+  font: 600 10px/1 "SF Mono", ui-monospace, Menlo, monospace;
+  letter-spacing: 0.08em;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
 
 /* Capture ---------------------------------------------------------------- */
 .q-frame {

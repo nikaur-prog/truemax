@@ -64,7 +64,13 @@ const ACTS = [
   "mirror",
   "pushups",
   "think",
+  "stretch",
+  "lookout",
 ] as const;
+
+/** The gather before an act, and the bounce back to breathing after it. */
+const WINDUP_MS = 340;
+const SETTLE_MS = 550;
 type Act = (typeof ACTS)[number];
 
 export interface IdleHandle {
@@ -109,14 +115,28 @@ export function mountMaxIdle(stage: HTMLElement | null): IdleHandle | null {
   const stopAct = (): void => {
     if (clear) clearTimeout(clear);
     clear = null;
+    svg.classList.remove("mx-windup", "mx-settle");
     for (const a of ACTS) svg.classList.remove(`mx-act-${a}`);
   };
 
+  // Wind-up, act, settle. The act does not start from a standstill and does
+  // not stop dead — he gathers, performs, and bounces back to breathing.
+  // Anticipation and follow-through are most of the difference between "a
+  // character" and "a div with keyframes", and wrapping them here once means
+  // every act in the repertoire, present and future, gets both.
   const play = (act: Act): void => {
     stopAct();
     last = act;
-    svg.classList.add(`mx-act-${act}`);
-    clear = setTimeout(stopAct, ACT_MS);
+    svg.classList.add("mx-windup");
+    clear = setTimeout(() => {
+      svg.classList.remove("mx-windup");
+      svg.classList.add(`mx-act-${act}`);
+      clear = setTimeout(() => {
+        svg.classList.remove(`mx-act-${act}`);
+        svg.classList.add("mx-settle");
+        clear = setTimeout(stopAct, SETTLE_MS);
+      }, ACT_MS);
+    }, WINDUP_MS);
   };
 
   const pick = (): Act => {

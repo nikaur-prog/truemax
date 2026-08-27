@@ -1,10 +1,13 @@
 import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { Sex } from "../engine/types.js";
+import type { ScoredMetric, Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "../engine/analysisMode.js";
 import { exportName, saveFile } from "./saveFile.js";
 import { drawCtaCard } from "./ctaCard.js";
+import { drawSearchLockup } from "./searchLockup.js";
+import { drawSideMeasurement } from "./sideMeasureOverlay.js";
+import type { SidePoints } from "../engine/sideMetrics.js";
 import type { SaveOutcome } from "./saveFile.js";
 
 // Which cut to render.
@@ -16,7 +19,12 @@ import type { SaveOutcome } from "./saveFile.js";
 // composited by the same code. The verdict cut is shorter because a word does
 // not need five seconds, and because the thing people re-post is the reaction,
 // not the table.
-export type QuickVariant = "breakdown" | "verdict";
+//   dual      — front and side together, the two view scores converging into
+//               the combined number. Only rendered where both views were
+//               actually captured and the side's 13 points hand-confirmed —
+//               it prints exactly the figures the in-app merged header prints,
+//               nothing the data cannot support.
+export type QuickVariant = "breakdown" | "verdict" | "dual";
 
 // A real 720×1280, 30fps export. The previous renderer called a 540×960,
 // 10fps file “720p”; no easing curve can make ten distinct images per second
@@ -25,11 +33,12 @@ export type QuickVariant = "breakdown" | "verdict";
 const W = 720;
 const H = 1280;
 
+
 // What the exported file is rasterised at, as a multiple of the authored size.
 // 1.5 is 1080x1920. See downloadQuickVideo for why it is not 1.
 const EXPORT_SCALE = 1.5;
 const FPS = 30;
-const DURATION: Record<QuickVariant, number> = { breakdown: 5.5, verdict: 4 };
+const DURATION: Record<QuickVariant, number> = { breakdown: 5.5, verdict: 4, dual: 7 };
 
 // The producer re-renders the analysis segment frame by frame through
 // renderQuickVideoFrame rather than decoding an MP4 back in, so it needs to
@@ -55,6 +64,21 @@ export interface QuickExportScores {
   from?: number;
 }
 
+/**
+ * Everything the dual cut needs beyond the front view, handed in by the one
+ * screen that legitimately has it: Calibrate, after both slots were captured
+ * and the side's 13 points were confirmed by hand. The scores are the merged
+ * report's own view figures — this module draws them, it never derives them.
+ */
+export interface DualViewAssets {
+  sidePhoto: HTMLCanvasElement;
+  sidePoints: SidePoints;
+  /** Side-view constructions for the scan beat, drawn in this order. */
+  sideMetrics: ScoredMetric[];
+  frontScore: number;
+  sideScore: number;
+}
+
 // Returns how the file left the device, so the button can say what happened —
 // "Saved" after a share sheet is a lie if the person cancelled it.
 export async function downloadQuickVideo(
@@ -64,6 +88,7 @@ export async function downloadQuickVideo(
   scores: QuickExportScores,
   onProgress?: (progress: number) => void,
   variant: QuickVariant = "breakdown",
+  dual?: DualViewAssets,
 ): Promise<SaveOutcome> {
   // Both cuts end on the shared card: a beat and a half of "truemax.app"
   // after the analysis, which is the whole growth loop of a video built to be
@@ -113,7 +138,7 @@ export async function downloadQuickVideo(
       g.setTransform(1, 0, 0, 1, 0, 0);
       drawCtaCard(g, canvas.width, canvas.height, t - body, 0.5);
     } else {
-      drawFrame(canvas, photo, landmarks, sex, scores, t, variant, EXPORT_SCALE);
+      drawFrame(canvas, photo, landmarks, sex, scores, t, variant, EXPORT_SCALE, dual);
     }
     await source.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 6 === 0) onProgress?.(frame / frameCount);
@@ -146,10 +171,11 @@ export function renderQuickVideoFrame(
   t: number,
   variant: QuickVariant = "breakdown",
   scale = 1,
+  dual?: DualViewAssets,
 ): void {
   canvas.width = Math.round(W * scale);
   canvas.height = Math.round(H * scale);
-  drawFrame(canvas, photo, landmarks, sex, scores, t, variant, scale);
+  drawFrame(canvas, photo, landmarks, sex, scores, t, variant, scale, dual);
 }
 
 function drawFrame(
@@ -161,6 +187,7 @@ function drawFrame(
   t: number,
   variant: QuickVariant = "breakdown",
   scale = 1,
+  dual?: DualViewAssets,
 ): void {
   const ctx = canvas.getContext("2d")!;
   // Everything below is authored in 720x1280 coordinates; the transform is the
@@ -171,6 +198,11 @@ function drawFrame(
   ctx.fillRect(0, 0, W, H);
   if (variant === "verdict") {
     drawVerdictFrame(ctx, photo, landmarks, sex, scores, t);
+    drawWatermark(ctx);
+    return;
+  }
+  if (variant === "dual" && dual) {
+    drawDualFrame(ctx, photo, landmarks, scores, t, dual);
     drawWatermark(ctx);
     return;
   }
@@ -277,25 +309,12 @@ function drawFrame(
 
 // The way back. A reel that travels without its address is an ad for a
 // product nobody can find, so the address sits on every frame — screenshots,
-// trims and re-uploads all carry it. Steady rather than animated, and dim
-// enough to read as a signature instead of a banner; both variants keep the
-// bottom 40px of the frame clear of content, so nothing ever sits under it.
+// trims and re-uploads all carry it. Drawn as the shared search lockup
+// rather than a flat wordmark: a persistent little search bar is an
+// instruction, not a signature. Both variants keep the bottom of the frame
+// clear of content, so nothing ever sits under it.
 function drawWatermark(ctx: CanvasRenderingContext2D): void {
-  ctx.save();
-  ctx.font = "500 16px Inter, Arial, sans-serif";
-  ctx.letterSpacing = "2px";
-  ctx.textAlign = "left";
-  const name = "truemax";
-  const tld = ".app";
-  const total = ctx.measureText(name).width + ctx.measureText(tld).width;
-  const x = (W - total) / 2;
-  const y = H - 22;
-  ctx.globalAlpha = 0.62;
-  ctx.fillStyle = "#f5f5f1";
-  ctx.fillText(name, x, y);
-  ctx.fillStyle = "#0c876f";
-  ctx.fillText(tld, x + ctx.measureText(name).width, y);
-  ctx.restore();
+  drawSearchLockup(ctx, { cx: W / 2, cy: H - 34, h: 34, alpha: 0.88 });
 }
 
 interface Crop { x: number; y: number; w: number; h: number }
@@ -547,6 +566,327 @@ export function fitVerdict(
   return { size, lines: lines ?? [word] };
 }
 
+// The constellation: the measurement graph drawn as a star map.
+//
+// NOT the dot-confetti the mesh replaced — that was 234 arbitrary specks with
+// no structure. This is ~40 points the measuring actually uses (pupils, canthi,
+// brows, nasal base, lip corners, gonions, the midline chain), joined by the
+// segments the product genuinely measures between them: the bizygomatic width,
+// the intercanthal line, the mandible run, the midline. A sparse, deliberate
+// graph over a face reads as "these exact points matter", which is a different
+// sentence from the tesselation's "everything is being captured" — so the
+// breakdown cut keeps the mesh (it explains the product) and the verdict cut
+// gets the constellation (it delivers a judgement).
+//
+// Points ignite in list order with a brief flare; a line lights only once both
+// of its stars exist. Pure function of progress — no clock, no randomness.
+const CONSTELLATION_POINTS = [
+  10, 168, 1, 2, 13, 17, 152, // the midline chain, forehead to chin
+  33, 133, 362, 263, // eye corners
+  468, 473, // pupils
+  70, 105, 107, 336, 334, 300, // brows
+  98, 327, // nasal base
+  61, 291, 0, // lip corners and cupid's bow
+  234, 454, // bizygomatic
+  172, 136, 149, 148, 377, 378, 365, 397, // mandible run
+  50, 280, // cheek mass
+  199, // under-chin
+];
+const CONSTELLATION_LINES: Array<[number, number]> = [
+  [10, 168], [168, 1], [1, 2], [2, 13], [13, 17], [17, 152], // midline
+  [33, 133], [362, 263], [133, 362], // eyes and the intercanthal bridge
+  [70, 105], [105, 107], [336, 334], [334, 300], // brows
+  [234, 454], // bizygomatic width
+  [98, 327], // nasal base
+  [61, 0], [0, 291], // lips
+  [234, 172], [172, 136], [136, 149], [149, 148], [148, 152], // left mandible
+  [454, 397], [397, 365], [365, 378], [378, 377], [377, 152], // right mandible
+  [50, 234], [280, 454], // cheeks out to the arch
+  [468, 133], [473, 362], // pupils to inner canthi
+];
+
+function drawConstellation(
+  ctx: CanvasRenderingContext2D,
+  landmarks: NormalizedLandmark[],
+  photo: HTMLCanvasElement,
+  crop: Crop,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  progress: number,
+  alpha = 1,
+): void {
+  if (!landmarks.length || alpha <= 0 || progress <= 0) return;
+  const project = (p: NormalizedLandmark) => ({
+    x: x + ((p.x * photo.width - crop.x) / crop.w) * w,
+    y: y + ((p.y * photo.height - crop.y) / crop.h) * h,
+  });
+  // How far through its own ignition each star is: staggered down the list,
+  // each taking a fixed slice of the reveal to flare and settle.
+  const n = CONSTELLATION_POINTS.length;
+  const lit = (i: number) => clamp01((progress * (n + 6) - i) / 6);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = "round";
+
+  // Lines first, under the stars. A line exists at the strength of its
+  // dimmer endpoint, so the graph assembles joint by joint.
+  ctx.strokeStyle = "rgba(143,243,224,0.55)";
+  ctx.lineWidth = Math.max(0.8, w / 780);
+  for (const [a, b] of CONSTELLATION_LINES) {
+    const ia = CONSTELLATION_POINTS.indexOf(a);
+    const ib = CONSTELLATION_POINTS.indexOf(b);
+    const la = landmarks[a];
+    const lb = landmarks[b];
+    if (!la || !lb) continue;
+    const strength = Math.min(lit(ia), lit(ib));
+    if (strength <= 0) continue;
+    const pa = project(la);
+    const pb = project(lb);
+    ctx.globalAlpha = alpha * 0.9 * strength;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    // Drawn tip-out from the first star rather than popping whole.
+    ctx.lineTo(pa.x + (pb.x - pa.x) * strength, pa.y + (pb.y - pa.y) * strength);
+    ctx.stroke();
+  }
+
+  // The stars: a flare that overshoots and settles, so each point ARRIVES
+  // rather than fades in. Refined iris points may be absent on some models;
+  // any missing index is simply skipped.
+  for (let i = 0; i < n; i++) {
+    const p = landmarks[CONSTELLATION_POINTS[i]];
+    if (!p) continue;
+    const s = lit(i);
+    if (s <= 0) continue;
+    const { x: sx, y: sy } = project(p);
+    const flare = s < 1 ? 1 + (1 - s) * 1.8 : 1;
+    const r = Math.max(1.6, w / 320) * flare;
+    ctx.globalAlpha = alpha * s;
+    ctx.fillStyle = "rgba(143,243,224,0.28)";
+    ctx.beginPath();
+    ctx.arc(sx, sy, r * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#c9fff2";
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// The Dual-View cut: both photographs, both scans, one number.
+//
+// Front and side are shown side by side, scanned together — constellation on
+// the front, the real side constructions on the profile — and then each view's
+// own score appears under its pane and the two visibly combine into the merged
+// figure. That combination is the honest content of this cut: the numbers are
+// the merged report's own view scores and overall, produced by mergeReports
+// and already printed by the in-app header. This renderer draws them; it
+// derives nothing.
+//
+// Only reachable from Calibrate, because that is the one flow where both
+// views were genuinely captured and the side's 13 points were confirmed by a
+// person rather than trusted from the seeder.
+// ---------------------------------------------------------------------------
+
+// Reused across frames: drawSideMeasurement repaints it from scratch anyway,
+// and allocating a photo-sized canvas thirty times a second is pure GC load.
+let dualScratch: HTMLCanvasElement | null = null;
+
+// Where the profile sits in its photograph, from the 13 confirmed points —
+// the side has no landmarker mesh, but the points ARE the face's extent.
+// Same containment discipline as faceCrop: fit the aspect, clamp to the photo.
+function sideCrop(photo: HTMLCanvasElement, points: SidePoints, aspect: number): Crop {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const p of Object.values(points)) {
+    if (p.x < x0) x0 = p.x;
+    if (p.x > x1) x1 = p.x;
+    if (p.y < y0) y0 = p.y;
+    if (p.y > y1) y1 = p.y;
+  }
+  if (!Number.isFinite(x0)) return { x: 0, y: 0, w: photo.width, h: photo.height };
+  const bw = Math.max(1, x1 - x0);
+  const bh = Math.max(1, y1 - y0);
+  // The points span roughly trichion to menton — most of the head — so the
+  // crop needs modest air: ~62% of its height is points, and never so tight
+  // sideways that the nose meets the edge.
+  let sh = bh / 0.62;
+  let sw = sh * aspect;
+  if (sw < bw * 1.45) { sw = bw * 1.45; sh = sw / aspect; }
+  if (sw > photo.width) { sw = photo.width; sh = sw / aspect; }
+  if (sh > photo.height) { sh = photo.height; sw = sh * aspect; }
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  return {
+    x: Math.max(0, Math.min(photo.width - sw, cx - sw / 2)),
+    y: Math.max(0, Math.min(photo.height - sh, cy - sh * 0.5)),
+    w: sw,
+    h: sh,
+  };
+}
+
+function drawDualFrame(
+  ctx: CanvasRenderingContext2D,
+  photo: HTMLCanvasElement,
+  landmarks: NormalizedLandmark[],
+  scores: QuickExportScores,
+  t: number,
+  dual: DualViewAssets,
+): void {
+  ctx.font = "600 18px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "5px";
+  ctx.fillStyle = "#f5f5f1";
+  ctx.fillText("TRUE", 48, 58);
+  const trueW = ctx.measureText("TRUE").width;
+  ctx.fillStyle = "#0c876f";
+  ctx.fillText("MAX", 48 + trueW, 58);
+  ctx.font = "500 12px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "3px";
+  ctx.fillStyle = "#747a77";
+  ctx.textAlign = "right";
+  ctx.fillText("DUAL-VIEW ANALYSIS", W - 48, 57);
+  ctx.textAlign = "left";
+  ctx.letterSpacing = "0px";
+
+  // The two panes, settling in together.
+  const entrance = smoother(clamp01(t / 0.45));
+  const margin = 24;
+  const gap = 16;
+  const paneW = (W - margin * 2 - gap) / 2;
+  const paneH = 620;
+  const py = 92 + (1 - entrance) * 14;
+  const fx = margin;
+  const sx = margin + paneW + gap;
+  const aspect = paneW / paneH;
+
+  const fCrop = faceCrop(photo, landmarks, aspect, 0.8);
+  const sCrop = sideCrop(dual.sidePhoto, dual.sidePoints, aspect);
+
+  ctx.save();
+  ctx.globalAlpha = entrance;
+  roundedImage(ctx, photo, fCrop, fx, py, paneW, paneH, 26);
+  roundedImage(ctx, dual.sidePhoto, sCrop, sx, py, paneW, paneH, 26);
+
+  // The scan. One sweep over both panes at once — it is one measurement of
+  // one person, and two independent lines would read as two products.
+  if (t < 1.5) {
+    drawScanLine(ctx, fx, py, paneW, paneH, t);
+    drawScanLine(ctx, sx, py, paneW, paneH, t);
+  }
+
+  // The constructions, fading off together once the numbers take over.
+  const overlayAlpha = 1 - smoother(clamp01((t - 2.9) / 0.5));
+  if (overlayAlpha > 0) {
+    const reveal = clamp01((t - 0.55) / 1.5);
+    if (reveal > 0) drawConstellation(ctx, landmarks, photo, fCrop, fx, py, paneW, paneH, reveal, overlayAlpha);
+
+    // The side's real constructions, in sequence, exactly as the measure pass
+    // draws them — rendered at photo resolution and carried through the same
+    // crop as the photograph so they land on the anatomy.
+    if (dual.sideMetrics.length && t >= 0.55) {
+      const scr = dualScratch ?? (dualScratch = document.createElement("canvas"));
+      const n = dual.sideMetrics.length;
+      const slice = (2.9 - 0.55) / n;
+      const idx = Math.min(n - 1, Math.floor((t - 0.55) / slice));
+      const local = clamp01((t - 0.55 - idx * slice) / (slice * 0.7));
+      drawSideMeasurement(scr, dual.sidePoints, dual.sidePhoto.width, dual.sidePhoto.height, dual.sideMetrics[idx], local, { labels: false });
+      ctx.save();
+      ctx.globalAlpha = entrance * overlayAlpha;
+      roundRect(ctx, sx, py, paneW, paneH, 26);
+      ctx.clip();
+      ctx.drawImage(scr, sCrop.x, sCrop.y, sCrop.w, sCrop.h, sx, py, paneW, paneH);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+
+  // View labels, on from the start so the frame is legible paused anywhere.
+  ctx.font = "500 13px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "3px";
+  ctx.fillStyle = "#7f8682";
+  ctx.textAlign = "center";
+  ctx.fillText("FRONT", fx + paneW / 2, py + paneH + 34);
+  ctx.fillText("SIDE", sx + paneW / 2, py + paneH + 34);
+
+  // Each view's own score, counting up under its pane.
+  const viewCount = smoother(clamp01((t - 3.1) / 0.8));
+  const scoreY = py + paneH + 106;
+  if (viewCount > 0) {
+    ctx.globalAlpha = Math.min(1, viewCount * 2);
+    ctx.font = "300 58px Fraunces, Georgia, serif";
+    ctx.letterSpacing = "-1px";
+    ctx.fillStyle = "#f7f7f2";
+    ctx.fillText((dual.frontScore * viewCount).toFixed(1), fx + paneW / 2, scoreY);
+    ctx.fillText((dual.sideScore * viewCount).toFixed(1), sx + paneW / 2, scoreY);
+    ctx.globalAlpha = 1;
+  }
+
+  // The combination: two threads leave the view scores and meet where the
+  // merged number lands. This is the sentence of the whole cut — two views,
+  // one figure — so it is drawn rather than implied.
+  const mergeY = 1020;
+  const join = smoother(clamp01((t - 3.95) / 0.55));
+  if (join > 0) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(143,243,224,0.7)";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    for (const startX of [fx + paneW / 2, sx + paneW / 2]) {
+      ctx.beginPath();
+      for (let i = 0; i <= 24; i++) {
+        const u = (i / 24) * join;
+        // A quadratic bend toward the middle, sampled so it can be drawn
+        // part-way through. The threads stop clear ABOVE the label — meeting
+        // on top of it made the word illegible at exactly the moment it
+        // mattered.
+        const qx = lerp(startX, W / 2, u * u);
+        const qy = lerp(scoreY + 22, mergeY - 152, u);
+        if (i === 0) ctx.moveTo(qx, qy);
+        else ctx.lineTo(qx, qy);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const mergeCount = smoother(clamp01((t - 4.35) / 0.85));
+  if (mergeCount > 0) {
+    ctx.globalAlpha = Math.min(1, mergeCount * 2);
+    ctx.font = "500 13px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "4px";
+    ctx.fillStyle = "#747b77";
+    ctx.fillText("COMBINED", W / 2, mergeY - 118);
+    ctx.font = "300 108px Fraunces, Georgia, serif";
+    ctx.letterSpacing = "-3px";
+    ctx.fillStyle = "#8ff3e0";
+    const shown = (scores.overall * mergeCount).toFixed(1);
+    ctx.fillText(shown, W / 2, mergeY);
+    ctx.font = "500 19px Inter, Arial, sans-serif";
+    ctx.letterSpacing = "0px";
+    ctx.fillStyle = "#0c876f";
+    ctx.fillText(rankShort(scores.percentile), W / 2, mergeY + 40);
+    ctx.globalAlpha = 1;
+  }
+  ctx.textAlign = "left";
+
+  // The scale under the claim, same honesty as the verdict cut.
+  const barAlpha = smoother(clamp01((t - 5.3) / 0.5));
+  if (barAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = barAlpha;
+    const barY = mergeY + 88;
+    ctx.fillStyle = "#222725";
+    ctx.fillRect(margin, barY, W - margin * 2, 4);
+    ctx.fillStyle = "#0c876f";
+    ctx.fillRect(margin, barY, (W - margin * 2) * clamp01(scores.percentile / 100) * smoother(clamp01((t - 5.4) / 0.7)), 4);
+    ctx.restore();
+  }
+}
+
 function drawVerdictFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
@@ -577,8 +917,10 @@ function drawVerdictFrame(
 
   if (t < 2.2) {
     if (t < 1.35) drawScanLine(ctx, px, py, pw, ph, t);
-    const reveal = clamp01((t - 0.8) / 0.55);
-    if (reveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, reveal, 1 - settle);
+    // The constellation rather than the mesh — see drawConstellation for why
+    // the two cuts scan differently on purpose.
+    const reveal = clamp01((t - 0.7) / 0.9);
+    if (reveal > 0) drawConstellation(ctx, landmarks, photo, crop, px, py, pw, ph, reveal, 1 - settle);
   }
 
   // Sex and tone both threaded in rather than defaulted.

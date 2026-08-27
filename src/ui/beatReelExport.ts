@@ -1,6 +1,7 @@
 import type { BeatPlan } from "../engine/beatPlan.js";
 import { activeCut, applyEdgeFades, coverRect, sliceAudio, sourceTime } from "../engine/reelFrame.js";
 import { drawCtaCard } from "./ctaCard.js";
+import { drawSearchLockup } from "./searchLockup.js";
 
 // ---------------------------------------------------------------------------
 // The beat-cut reel, rendered and encoded.
@@ -240,6 +241,16 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
         options.onDropFrame(ctx, size.w, size.h, hit.into, hit.cut.end - hit.cut.start);
       }
     }
+
+    // The address on every cut, as the shared search lockup. Not drawn over
+    // the outro card, which already states the brand at full size; here it is
+    // the persistent way back on the frames that travel without one.
+    drawSearchLockup(ctx, {
+      cx: size.w / 2,
+      cy: size.h - size.w * 0.05,
+      h: size.w * 0.047,
+      alpha: 0.85,
+    });
 
     await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 10 === 0) onProgress?.(0.08 + 0.88 * (frame / frameCount), "Cutting");

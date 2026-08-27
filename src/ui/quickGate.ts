@@ -1,4 +1,4 @@
-import { currentAccessToken } from "../engine/auth.js";
+import { currentAccessToken, currentUser, getSupabaseClient } from "../engine/auth.js";
 import { loadIsAdmin } from "../engine/entitlement.js";
 
 // ---------------------------------------------------------------------------
@@ -11,15 +11,24 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 // not linked anywhere — which stops nobody the moment one clipper shares a
 // screen recording with the address bar visible.
 //
-// Gated on `app_admins` rather than a shared password, and the reasons are the
-// ones that matter operationally:
+// Two doors in, both of them rows granted by hand:
+//
+//   - `app_admins` — staff. Granted only in the SQL editor, never self-serve.
+//   - `league_creators` with status 'approved' — a Creator League member. The
+//     approval only ever happens in the League admin panel, by the founder,
+//     and RLS pins the status a person can write about themselves to
+//     'applied'. Membership IS the /quick grant: the League's whole pitch is
+//     "we hand you the tools", and this is the door those tools live behind.
+//
+// Rows rather than a shared password, for the reasons that matter
+// operationally:
 //
 //   - a password leaks the first time it is sent to somebody, and cannot be
 //     revoked for one person without changing it for everybody
-//   - a row can be added when a clipper is hired and deleted when they leave,
-//     which is the actual lifecycle this needs to model
-//   - the table already exists, /api/tts already gates on it, and the RLS
-//     policy already scopes a read to its own owner
+//   - a row can be added when a creator is approved and flipped to 'paused'
+//     when they leave, which is the actual lifecycle this needs to model
+//   - the tables already exist, /api/tts already gates on the same pair, and
+//     the RLS policies already scope a read to its own owner
 //
 // Honest about what this is: a CLIENT-side gate on a client-side tool. The
 // scanning runs in the browser, so somebody determined who already knows the
@@ -32,15 +41,54 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 // something here worth trying to reach.
 // ---------------------------------------------------------------------------
 
-export async function allowQuickAccess(): Promise<boolean> {
+export interface QuickAccess {
+  allowed: boolean;
+  staff: boolean;
+  /** Pillar grants from the creator's row. Staff hold every grant. */
+  grants: Record<string, boolean>;
+}
+
+const DENIED: QuickAccess = { allowed: false, staff: false, grants: {} };
+
+/**
+ * Who is at the door, and which rooms they hold keys to.
+ *
+ * Not just a boolean any more, because the page gates twice: once at the door
+ * (allowed at all?) and once per pillar (the owner ticks grants at approval,
+ * and a grant the interface ignores is a checkbox that lies). Staff see
+ * everything; a creator sees the pillars they were granted, and the two
+ * staff-only rooms — AI generation and Calibrate — are simply not rendered
+ * for them, matching the endpoints behind them which still 404 non-staff.
+ */
+export async function quickAccessProfile(): Promise<QuickAccess> {
   const token = await currentAccessToken().catch(() => null);
   // Signed out is simply not allowed, and there is deliberately no sign-in form
   // here. Offering one would confirm the page exists and is worth a login
   // attempt; staff sign in on the main app and arrive already carrying a
   // session, which is one step for the handful of people who need it and a dead
   // end for everybody else.
-  if (!token) return false;
-  return loadIsAdmin().catch(() => false);
+  if (!token) return DENIED;
+  if (await loadIsAdmin().catch(() => false)) {
+    return { allowed: true, staff: true, grants: { cta: true, clips: true, polisher: true } };
+  }
+  // The League door. Reads the caller's OWN league_creators row — the RLS
+  // select policy is `auth.uid() = user_id or staff`, and the explicit eq
+  // keeps this a single-row read even if that policy is ever widened. Any
+  // error is a refusal: a gate that fails open is not a gate.
+  try {
+    const user = await currentUser();
+    if (!user) return DENIED;
+    const client = await getSupabaseClient();
+    const { data } = await client
+      .from("league_creators")
+      .select("status, pillar_grants")
+      .eq("user_id", user.id)
+      .maybeSingle<{ status: string; pillar_grants: Record<string, boolean> | null }>();
+    if (data?.status !== "approved") return DENIED;
+    return { allowed: true, staff: false, grants: data.pillar_grants ?? {} };
+  } catch {
+    return DENIED;
+  }
 }
 
 /** Replaces the page. Nothing underneath keeps running. */
