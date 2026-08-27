@@ -127,7 +127,7 @@ export function drawCtaSeriesFrame(
 
 // --- beat 1: the score card ------------------------------------------------
 
-function drawScore(ctx: CanvasRenderingContext2D, w: number, h: number, local: number, a: CtaAssets): void {
+export function drawScore(ctx: CanvasRenderingContext2D, w: number, h: number, local: number, a: CtaAssets): void {
   // The real card, rising into place with a slow push-in. The card already
   // carries the number, the percentile and the face — re-drawing any of it
   // here would just be a second copy that can drift.
@@ -160,7 +160,7 @@ function drawScore(ctx: CanvasRenderingContext2D, w: number, h: number, local: n
 
 // --- beat 2: the measure pass ----------------------------------------------
 
-function drawMeasure(
+export function drawMeasure(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
@@ -640,7 +640,7 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number): str
 }
 
 /** The Wikimedia credit line. Every beat the demo face appears in renders it. */
-function credit(ctx: CanvasRenderingContext2D, w: number, h: number, text: string, at: "top" | "bottom" = "bottom"): void {
+export function credit(ctx: CanvasRenderingContext2D, w: number, h: number, text: string, at: "top" | "bottom" = "bottom"): void {
   const u = w / 1080;
   ctx.textAlign = "left";
   ctx.fillStyle = "rgba(244,242,236,0.4)";

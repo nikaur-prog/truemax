@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<!-- Offline renderer for CTA v2 (the Kurzgesagt cut). Driven by
+     tools/build-cta2.mjs through window.__frame(t); never linked from the
+     app. Same contract as the v1 harness: every frame is a pure function of
+     t (src/ui/ctaSeries2.ts), so the master is identical on every build. -->
+<head><meta charset="utf-8"></head>
+<body style="margin:0;background:#0d1626">
+<canvas id="out"></canvas>
+<script type="module">
+import "@fontsource-variable/fraunces";
+import "@fontsource-variable/inter";
+import { initLandmarker, detect, setRunningMode } from "/src/engine/landmarker.ts";
+import { analyze } from "/src/engine/scoring.ts";
+import { RECS } from "/src/engine/recommendations.ts";
+import { renderScoreCard } from "/src/ui/scoreCard.ts";
+import { buildPassPlan } from "/src/ui/measurePass.ts";
+import { drawCta2Frame } from "/src/ui/ctaSeries2.ts";
+
+const W = 1080;
+const H = 1920;
+const canvas = document.getElementById("out");
+canvas.width = W;
+canvas.height = H;
+const ctx = canvas.getContext("2d");
+
+const img = (src) => new Promise((res, rej) => {
+  const i = new Image();
+  i.onload = () => res(i);
+  i.onerror = rej;
+  i.src = src;
+});
+
+try {
+  await Promise.all([
+    document.fonts.load('300 64px "Fraunces Variable"'),
+    document.fonts.load('500 26px "Inter Variable"'),
+    document.fonts.ready,
+  ]);
+
+  const params = new URLSearchParams(location.search);
+  const fs = (key) => params.get(key); // absolute /@fs/ URLs from the builder
+
+  const face = await img("/demo/cillian-murphy.jpg");
+  const photo = document.createElement("canvas");
+  photo.width = face.naturalWidth;
+  photo.height = face.naturalHeight;
+  photo.getContext("2d").drawImage(face, 0, 0);
+
+  await initLandmarker();
+  await setRunningMode("IMAGE");
+  const landmarks = detect(photo).faceLandmarks?.[0];
+  if (!landmarks) throw new Error("no face detected in demo photo");
+  const report = analyze(landmarks, photo.width, photo.height, "male", photo);
+
+  const scoreCard = document.createElement("canvas");
+  renderScoreCard(scoreCard, photo, landmarks, { report, caption: "DEMO SCAN" });
+
+  // All the reliable constructions — the beat is fast, the breadth is the show.
+  const metrics = buildPassPlan(report, null, { maxSteps: 8 }).map((s) => s.metric);
+
+  const maxAvatar = await img("/brand/max-avatar.png").catch(() => null);
+  const mark = await img("/brand/truemax-mark-512.png").catch(() => null);
+  const actorBefore = await img(fs("before"));
+  const actorAfter = await img(fs("after"));
+  const linkbioPerson = fs("person") ? await img(fs("person")).catch(() => null) : null;
+
+  // Clip frame sequences, exploded by the builder (headless Chromium has no
+  // H.264 decoder; arithmetic frame lookup keeps it deterministic).
+  async function frameSeq(dirKey, fpsKey, countKey) {
+    const dir = fs(dirKey);
+    if (!dir) return () => null;
+    const fps = Number(params.get(fpsKey) || "24");
+    const count = Number(params.get(countKey) || "0");
+    const frames = await Promise.all(
+      Array.from({ length: count }, (_, i) => img(`${dir}/f${String(i + 1).padStart(4, "0")}.jpg`)),
+    );
+    return (local) => frames.length
+      ? frames[Math.min(frames.length - 1, Math.max(0, Math.round(local * fps)))]
+      : null;
+  }
+  const teacherFrame = await frameSeq("teacher", "teacherfps", "teachercount");
+  const celebrateFrame = await frameSeq("celebrate", "celebratefps", "celebratecount");
+
+  // The products in the chat are the app's own acne-relevant topical recs,
+  // verbatim, because the ad may only show recommendations the product gives.
+  const byId = Object.fromEntries(RECS.map((r) => [r.id, r]));
+  const products = ["adapalene", "spf", "emollient"]
+    .map((id) => byId[id])
+    .filter(Boolean)
+    .map((r) => ({ title: r.title, what: r.what }));
+
+  const assets = {
+    scoreCard,
+    photo,
+    landmarks,
+    metrics,
+    credit: "Cillian Murphy photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+    maxAvatar,
+    mark,
+    girlFrame: () => null,
+    recs: ["Daily sunscreen", "Zinc in food", "Consistent sleep timing"],
+    actorBefore,
+    actorAfter,
+    teacherFrame,
+    celebrateFrame,
+    linkbioPerson,
+    // Measured once from the generated still: the blank screen's rect.
+    linkbioScreen: { x: 0.437, y: 0.163, w: 0.372, h: 0.495, rot: 8 },
+    products,
+  };
+
+  window.__frame = (t) => {
+    drawCta2Frame(ctx, W, H, t, assets);
+    return canvas.toDataURL("image/jpeg", 0.95);
+  };
+  window.__ready = true;
+} catch (e) {
+  window.__error = String(e && e.stack ? e.stack : e);
+  window.__ready = "error";
+}
+</script>
+</body>
+</html>
