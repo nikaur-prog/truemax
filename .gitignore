@@ -50,6 +50,11 @@ clips/
 # above is protecting against everywhere else.
 !public/tutorial/*.mp4
 
+# Same category, same decision: the League gate montage is a deterministic
+# render (tools/build-montage.mjs) whose only face is the Wikimedia demo
+# portrait already versioned under public/demo, credited on its endcard.
+!public/league/montage.mp4
+
 # The export folders, in every casing the sorter might produce.
 [Rr]eels/
 [Rr]undowns/
@@ -70,3 +75,4 @@ exports/
 # Contact sheets from tools/rundown-sheet.mjs — regenerate, never commit.
 .rundown-sheet/
 .celeb-cache/
+.cta-assets/

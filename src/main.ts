@@ -21,6 +21,8 @@ import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
+import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
+import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
 import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
@@ -34,11 +36,6 @@ import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFl
 import { openFrontEdit } from "./ui/frontEdit.js";
 import { analyzeSide } from "./engine/scoring.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
-// The scan narration quotes these counts. Read from the arrays rather than
-// typed into the string: the side list said 15 for months after the
-// experimental metrics were filtered out and the real number became 10.
-import { SIDE_METRICS } from "./engine/sideMetrics.js";
-import { METRICS } from "./engine/metrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
@@ -52,7 +49,6 @@ import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
 import type { User } from "@supabase/supabase-js";
-import { revealSideScan } from "./ui/sideScan.js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
@@ -1361,19 +1357,6 @@ function resetToUpload(): void {
   closeMaxChat();
 }
 
-// Two views go into the score, so the scan shows two views being measured. It
-// only ever showed the front, which made the profile someone had just spent
-// time verifying look like it had been filed away and ignored.
-const SCAN_STAGES: Array<{ text: string; view: "front" | "side" }> = [
-  { text: "Detecting facial landmarks", view: "front" },
-  { text: "Normalizing to interpupillary scale", view: "front" },
-  { text: `Measuring ${METRICS.length} front proportions`, view: "front" },
-  { text: "Checking bilateral symmetry", view: "front" },
-  { text: "Reading the profile: chin, jaw, convexity", view: "side" },
-  { text: `Measuring ${SIDE_METRICS.length} side proportions`, view: "side" },
-  { text: "Comparing against population", view: "side" },
-  { text: "Merging both views", view: "front" },
-];
 
 async function handleFile(file: File, expectedGeneration = scanGeneration): Promise<void> {
   if (expectedGeneration !== scanGeneration) return;
@@ -1713,10 +1696,6 @@ async function runFullAnalysis(
   if (!scanSession.transition(token, "analyzing")) return;
   const generation = scanGeneration;
   const { landmarks, width, height, quality, autoNote, photo: frontShot } = pending;
-  // The scan sequence only narrates the side view when there is one. Front-only
-  // is now a complete result rather than an unfinished one, so its loading bar
-  // must not claim to be reading a profile that was never taken.
-  const stages = sideReport ? SCAN_STAGES : SCAN_STAGES.filter((s) => s.view === "front");
   el.main.classList.remove("hidden");
   // The front capture comes from `pending`, which has owned its own copy since
   // the moment it was accepted. It used to be cloned off el.photoCanvas right
@@ -1732,107 +1711,14 @@ async function runFullAnalysis(
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
   await nextFrame();
-  const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
-
-  // Staged status lines, ~360ms each, with the photo pane following whichever
-  // view the current stage is about.
-  const sideShot = lastSide?.photo;
-  let showing: "front" | "side" = "front";
-  const paintView = (view: "front" | "side") => {
-    const cap = document.querySelector(".photo-caption span");
-    if (cap) cap.textContent = view === "side" ? "SIDE" : "FRONT";
-    el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
-    if (view === "side") {
-      const t = sideShot!;
-      el.photoCanvas.width = t.width;
-      el.photoCanvas.height = t.height;
-      el.photoCanvas.getContext("2d")!.drawImage(t, 0, 0);
-      // The profile gets its own reveal: a synthesised mesh sweeping the face,
-      // matched to the front scan's density, with the thirteen measured anchors
-      // lighting up on top. Without this the side half of the scan was a photo
-      // sitting still while the text claimed it was being measured.
-      if (lastSide) revealSideScan(el.overlayCanvas, lastSide.points, t.width, t.height);
-    } else {
-      el.photoCanvas.width = width;
-      el.photoCanvas.height = height;
-      el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
-      drawCalm(el.overlayCanvas, landmarks, width, height);
-    }
-  };
-  // The view crosses rather than cuts. The old swap resized and repainted the
-  // canvas mid-frame — front photo, then suddenly the profile, then suddenly
-  // back — which is most of what read as "glitchy" about this screen. A short
-  // fade out, the repaint while nothing is showing, a fade back in.
-  const swapTo = (view: "front" | "side") => {
-    if (view === showing) return;
-    if (view === "side" && !sideShot) return;
-    showing = view;
-    el.zoomable.classList.add("viewfade");
-    window.setTimeout(() => {
-      if (!scanIsCurrent(token, generation)) return;
-      paintView(view);
-      el.zoomable.classList.remove("viewfade");
-    }, 170);
-  };
-  // The status line crosses too: fade the old sentence, land the new one.
-  // Eight hard innerHTML swaps in three seconds read as flicker, not work.
-  const setStatus = (html: string) => {
-    el.status.classList.add("swapping");
-    window.setTimeout(() => {
-      if (!scanIsCurrent(token, generation)) return;
-      el.status.innerHTML = html;
-      el.status.classList.remove("swapping");
-    }, 130);
-  };
-  // One continuous clock drives everything. The bar is a smooth function of
-  // elapsed time — no more 12.5% leaps fighting a CSS transition that never
-  // gets to finish — and the stage index falls out of the same clock, so the
-  // text, the view and the bar can never disagree about where the scan is.
-  // Width is written directly; the CSS transition is disabled for the run so
-  // the rAF is the only authority on where the bar sits.
-  const stageMs = stages.map((s) => (s.view === "side" ? 620 : 430));
-  const totalMs = stageMs.reduce((a, b) => a + b, 0);
-  el.barFill.classList.add("driven");
-  await new Promise<void>((done) => {
-    const t0 = performance.now() + 200;
-    let lastStage = -1;
-    const tick = (now: number) => {
-      if (!scanIsCurrent(token, generation)) {
-        reveal.cancel();
-        done();
-        return;
-      }
-      const t = now - t0;
-      if (t < 0) {
-        requestAnimationFrame(tick);
-        return;
-      }
-      const p = Math.min(1, t / totalMs);
-      // Ease-out: quick early progress that settles as it approaches done —
-      // the shape people read as software working, not a metronome.
-      el.barFill.style.width = `${((1 - Math.pow(1 - p, 1.6)) * 100).toFixed(2)}%`;
-      let acc = 0;
-      let s = 0;
-      for (; s < stages.length - 1; s++) {
-        acc += stageMs[s];
-        if (t < acc) break;
-      }
-      if (s !== lastStage) {
-        lastStage = s;
-        setStatus(`<b>${stages[s].text}</b> <span class="scan-ellipsis"><i>.</i><i>.</i><i>.</i></span>`);
-        swapTo(stages[s].view);
-      }
-      if (p >= 1) done();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-  await reveal.done;
-  if (!scanIsCurrent(token, generation) || !pending) return;
-
-  // The shown frame first, then the rest of the burst. analyzeFrames falls
-  // straight through to analyze when there is only one, so an uploaded photo
-  // takes exactly the path it always did.
+  // MEASURE FIRST, THEN SHOW THE MEASURING.
+  //
+  // This used to run the other way round: eight sentences on a timer, then the
+  // analysis. The animation therefore could not show a single real number, and
+  // the score arrived with no visible parentage — the exact opposite of what a
+  // measurement product should look like while it works. The engine is
+  // synchronous and takes milliseconds, so there was never a reason for the
+  // wait to come first except that it had always been written that way.
   const front = analyzeFrames(
     [{ landmarks, width, height, source: frontShot }, ...pending.extraFrames],
     selectedSex,
@@ -1842,6 +1728,46 @@ async function runFullAnalysis(
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
+
+  // The mesh landing is the opening beat, handed to the pass so it waits for
+  // the reveal to finish rather than clearing it off the canvas underneath.
+  const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
+  const sideShot = lastSide?.photo;
+  const plan = buildPassPlan(front, sideReport);
+  const pass = runMeasurePass(
+    {
+      zoomable: el.zoomable,
+      photoCanvas: el.photoCanvas,
+      overlayCanvas: el.overlayCanvas,
+      status: el.status,
+      barFill: el.barFill,
+      capLeft: document.querySelector(".photo-caption span"),
+      frame: el.frame,
+    },
+    {
+      front: { photo: frontShot, landmarks, width, height },
+      side: sideShot && lastSide
+        ? { photo: sideShot, points: lastSide.points, width: sideShot.width, height: sideShot.height }
+        : null,
+    },
+    plan,
+    {
+      open: reveal.done,
+      // The front photograph is already painted and the reveal owns the
+      // overlay; repainting would blank it on the pass's first frame.
+      startPainted: "front",
+    },
+  );
+  await pass.done;
+  reveal.cancel();
+  if (!scanIsCurrent(token, generation) || !pending) {
+    pass.cancel();
+    return;
+  }
+  // Back to rest, and with no camera transition attached: the results screen
+  // owns this element's zoom from here and must not inherit a half-finished
+  // push-in on somebody's chin.
+  applyZoom(el.zoomable, IDENTITY_ZOOM);
   const delta = compareAndStore(report, token.scanId, scanSubject ?? undefined);
   // The weekly free-scan clock starts when an analysis finishes, not when a
   // photo is chosen — an abandoned capture must not cost the week's scan. A
@@ -2085,6 +2011,14 @@ async function runFullAnalysis(
     },
   };
   track("results-shown");
+  // The report does not cut in — it arrives. The pass has just spent ten
+  // seconds moving smoothly over the face; a hard innerHTML swap at the end
+  // of it is the one jolt that would undo all of that. The class fades and
+  // lifts the whole analysis column in (see .analysis-arrive), and is removed
+  // after the animation so later re-renders (tab changes, unlocks) do not
+  // replay an entrance nobody is entering.
+  el.analysis.classList.add("analysis-arrive");
+  window.setTimeout(() => el.analysis.classList.remove("analysis-arrive"), 900);
   renderResults(ctxArgs);
   scanSession.transition(token, "results");
 

@@ -6,7 +6,8 @@
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/delete-account", "destination": "/delete-account.html" },
     { "source": "/terms", "destination": "/terms.html" },
-    { "source": "/brand", "destination": "/brand.html" }
+    { "source": "/brand", "destination": "/brand.html" },
+    { "source": "/league", "destination": "/league.html" }
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" }
@@ -37,6 +38,10 @@
     },
     {
       "source": "/calib(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/league(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {

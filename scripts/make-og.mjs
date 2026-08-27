@@ -16,7 +16,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" v
   <rect width="1200" height="630" fill="url(#bg)"/>
   <text x="90" y="255" font-family="Georgia, serif" font-size="92" fill="#f7fffc" font-weight="400">True<tspan fill="#ffd54a">Max</tspan></text>
   <text x="92" y="330" font-family="Helvetica, Arial, sans-serif" font-size="34" fill="#8ff3e0">Facial analysis that shows the actual math.</text>
-  <text x="92" y="395" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="rgba(247,255,252,.62)">41 measurements · scored on your device · nothing uploaded</text>
+  <text x="92" y="395" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="rgba(247,255,252,.62)">43 measurements · scored on your device · nothing uploaded</text>
   <rect x="92" y="452" width="330" height="64" rx="32" fill="#4bf5c5"/>
   <text x="257" y="494" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#071e19" text-anchor="middle">truemax.app</text>
   ${mark}

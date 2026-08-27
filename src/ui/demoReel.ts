@@ -1,3 +1,4 @@
+import { METRICS } from "../engine/metrics.js";
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
@@ -30,7 +31,9 @@ const T = {
   hold: 6800,
 };
 
-const STAGES = ["Normalizing pose", "Measuring 31 proportions", "Comparing against population"];
+// Count from the engine, not prose: the demo is front-only, and a hardcoded
+// number here drifted (it said 31 while the engine measured 33).
+const STAGES = ["Normalizing pose", `Measuring ${METRICS.length} proportions`, "Comparing against population"];
 // Four characters each: at reel width a full pillar name ran into its own
 // number, and "ANGULARIT" truncated mid-word looks like a bug.
 const PILLAR_ABBR: Record<string, string> = {

@@ -95,7 +95,9 @@ body {
   position: sticky; top: 0; z-index: 50;
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 26px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  /* 94%, not 88%: where backdrop-filter is unavailable the blur silently
+     drops and scrolled headline text read straight through the bar. */
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
@@ -390,7 +392,7 @@ body {
    column-width change, not a bigger card. */
 #v-main { display: grid; grid-template-columns: 38% 1fr; gap: 34px; max-width: 1240px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
 .pane-photo { position: sticky; top: 78px; }
-.face-frame { position: relative; border-radius: 22px; overflow: hidden; background: #101113; box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); line-height: 0; }
+.face-frame { position: relative; border-radius: 22px; overflow: hidden; background: #101113; box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); line-height: 0; scroll-margin-top: 84px; }
 /* The camera. Zooms are translate+scale about a fixed 0 0 origin (see
    zoomTransform.ts), so this one transition tweens the whole move — pan and
    zoom together — instead of scaling around a pivot that already jumped. A
@@ -427,6 +429,25 @@ body {
 .scan-ellipsis i:nth-child(2) { animation-delay: .18s; }
 .scan-ellipsis i:nth-child(3) { animation-delay: .36s; }
 @keyframes scan-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+
+/* The report arriving after the measure pass: one fade-and-lift on the whole
+   column, then the class is removed so re-renders don't replay it. */
+.analysis-arrive { animation: analysis-arrive .7s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+@keyframes analysis-arrive {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .analysis-arrive { animation: none; } }
+
+/* The face lifts slightly out of the page while it is being measured, and the
+   frame holds a faint inner light. Cheap: one box-shadow, no filter, no
+   compositing layer per beat. */
+.face-frame.measuring { box-shadow: 0 18px 60px rgba(20, 21, 24, 0.18), inset 0 0 0 1px rgba(121, 232, 210, 0.18); }
+/* The roving sweep line belongs to the opening beat, when nothing specific is
+   being looked at yet. Once the camera is pushed in on one construction, a
+   second line travelling across it is just another thing moving. */
+.face-frame.measuring .sweep { display: none; }
+@media (prefers-reduced-motion: reduce) { .face-frame.measuring { box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); } }
 
 /* Crossing between the front and side photographs mid-scan. The canvas is
    resized and repainted while faded out, so the swap is never seen as a cut.
@@ -480,6 +501,16 @@ body {
     justify-content: center;
     max-width: 900px;
     margin-top: max(26px, 6vh);
+  }
+  /* While the measure pass runs, the column is additionally capped by the
+     viewport's HEIGHT: a 620px-wide portrait is ~775px tall, which pushed the
+     status line and progress bar below the fold of a 900px laptop screen —
+     an animation whose narration cannot be seen. 0.8 is width-per-height of
+     the portrait crops the capture flow produces; a squarer photo simply gets
+     more air. */
+  #v-main:not(:has(.rtab)):has(.face-frame.measuring) {
+    grid-template-columns: min(620px, 84vw, calc((100dvh - 240px) * 0.8));
+    margin-top: 16px;
   }
   /* Sticky is for a column being scrolled past a long analysis. There is no
      analysis yet, and a sticky element in a centred single column just fights
@@ -1177,6 +1208,49 @@ body.funnel-open { overflow: hidden; }
    by half the letterboxing. Sizing the frame keeps every layer on the same box. */
 .side-photo .face-frame { background: #101113; margin: 0 auto; }
 #side-canvas { width: 100%; height: auto; display: block; }
+
+/* The exemplar, shown only while the frame is empty.
+   Same 3/4 box the live camera uses, so opening the camera does not resize the
+   pane under your thumb. Held back to a third opacity: it is a reference, and
+   at full strength people mistake it for a photo already loaded and wonder why
+   the confirm button is missing. Mirrored because every side photo the app
+   handles is canonicalised to face image-right (see load() in sideFlow.ts) —
+   an exemplar facing the other way teaches the wrong shape. */
+#side-frame.awaiting { aspect-ratio: 3 / 4; max-height: 66vh; }
+#side-frame.awaiting #side-canvas { display: none; }
+.side-exemplar { display: none; }
+#side-frame.awaiting .side-exemplar {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.side-exemplar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.34;
+  transform: scaleX(-1);
+  filter: grayscale(1) contrast(1.05);
+}
+/* Says what it is, in the frame, so it is never read as somebody's scan. */
+.side-exemplar-tag {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(10, 11, 13, 0.72);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 #side-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #side-verify { position: absolute; inset: 0; }
 /* touch-action:none stops the browser scrolling the page while a point is
@@ -1343,6 +1417,15 @@ body.funnel-open { overflow: hidden; }
 @media (max-width: 760px) {
   #v-main { grid-template-columns: 1fr; gap: 20px; margin-top: 16px; }
   .pane-photo { position: static; }
+  /* The pass on a phone: the frame is width-bound and short, which left the
+     bottom two-thirds of the screen as empty cream while the scan ran. The
+     stage cannot honestly be taller — the photo is the photo — so the whole
+     group (frame, caption, status, bar) centres in the viewport instead of
+     huddling at the top of an empty page. */
+  #v-main:has(.face-frame.measuring) {
+    min-height: calc(100dvh - 150px);
+    align-content: center;
+  }
   .big { font-size: 64px; }
   .pillars { grid-template-columns: repeat(2, 1fr); }
   .topbar { padding: 12px 18px; }
@@ -1655,6 +1738,17 @@ body.funnel-open { overflow: hidden; }
 .rec p { font-size: 13px; line-height: 1.6; color: var(--mut); margin-top: 8px; }
 .rec-caution { display: block; font-size: 11.5px; line-height: 1.55; color: var(--warm);
   background: #f8ece7; border-radius: 9px; padding: 8px 10px; margin-top: 10px; }
+/* Products only: a Google search for the generic active, never a merchant or a
+   brand. Styled as a quiet utility link, not a buy button — the evidence label
+   above it is the sell, this is just the door. */
+.rec-find {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 9px; font-size: 12px; font-weight: 600;
+  color: var(--acc); text-decoration: none;
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px;
+  transition: border-color .16s ease, background .16s ease;
+}
+.rec-find:hover { border-color: var(--acc); background: var(--acc-soft); }
 /* Evidence strength is the whole point of the section, so it is visible before
    the text is read rather than only inside it. */
 .rec.ev-strong { border-left-color: var(--up); }
@@ -2148,6 +2242,18 @@ body.funnel-open { overflow: hidden; }
 .dash-empty { border: 1px dashed var(--line); border-radius: 16px; padding: 22px; text-align: center; }
 .dash-empty b { display: block; font-size: 15px; margin-bottom: 6px; }
 .dash-empty span { color: var(--mut); font-size: 13.5px; line-height: 1.5; }
+/* The shape of the scans that will be here. Numbers deliberately absent. */
+.dash-ghost { margin-top: 18px; display: grid; gap: 10px; }
+.dash-ghost-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border-radius: 12px; background: var(--soft);
+  opacity: .55;
+}
+.dash-ghost-row:nth-child(2) { opacity: .38; }
+.dash-ghost-row:nth-child(3) { opacity: .22; }
+.dash-ghost-row i { width: 34px; height: 34px; border-radius: 10px; background: var(--line); flex: none; }
+.dash-ghost-row b { height: 9px; border-radius: 99px; background: var(--line); flex: 1 1 auto; max-width: 130px; }
+.dash-ghost-row s { height: 9px; border-radius: 99px; background: var(--line); flex: none; width: 48px; margin-left: auto; text-decoration: none; }
 
 .celeb-q {
   width: 100%; font-family: var(--sans); font-size: 15px; color: var(--ink);
@@ -4079,14 +4185,8 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    it reads as a notification demanding attention, not as a mascot. The unlit
    state is dimmed the same way the line icons are greyed, so he lights up on
    selection like everything else in the bar. */
-.dash-bar-maxface { display: inline-flex; width: 21px; height: 22px; }
-.dash-bar-maxface .mx-svg { width: 100%; height: 100%; }
-.dash-bar-maxface .mx-bob, .dash-bar-maxface .mx-antenna, .dash-bar-maxface .mx-pulse,
-.dash-bar-maxface .mx-lid, .dash-bar-maxface .mx-pupils, .dash-bar-maxface .mx-arm,
-.dash-bar-maxface .mx-shadow { animation: none !important; }
-.dash-bar-btn .dash-bar-maxface { opacity: .62; filter: grayscale(.4); transition: opacity .15s ease, filter .15s ease; }
-.dash-bar-btn[aria-selected="true"] .dash-bar-maxface,
-.dash-bar-btn:hover .dash-bar-maxface { opacity: 1; filter: none; }
+/* The Coach tab wears a stroke glyph like its neighbours (see dashboard.ts);
+   the shrunken full-character SVG this used to style is gone. */
 
 .maxtab { display: flex; flex-direction: column; gap: 14px; position: relative; min-height: 62vh; }
 
@@ -4320,6 +4420,22 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   display: flex; gap: 8px; max-width: 460px; margin: 0 auto 18px;
   padding: 5px; border-radius: 16px; background: var(--bg);
   border: 1px solid var(--line);
+}
+/* Inside the Max card — the only plan the toggle governs — it sits above the
+   price it changes, so it can never read as a third plan floating over
+   Starter's number. The card is dark, so the cream tokens are re-stated. */
+.plan-card.max .billtoggle {
+  max-width: none; margin: 6px 0 14px;
+  background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .16);
+}
+.plan-card.max .bt-opt { color: rgba(255, 255, 255, .62); }
+.plan-card.max .bt-opt.on {
+  background: rgba(255, 255, 255, .15); color: #fff;
+  border-color: rgba(255, 255, 255, .22); box-shadow: none;
+}
+.plan-week {
+  display: block; margin: -4px 0 10px;
+  font-size: 11.5px; color: rgba(255, 255, 255, .62);
 }
 .bt-opt {
   flex: 1 1 0; position: relative; padding: 10px 8px;
@@ -5879,3 +5995,62 @@ select.q-input { appearance: auto; }
     -webkit-backdrop-filter: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   The protocol check-in.
+   One question, two pills, and Max's reply once it is answered. Sized as a
+   quiet inset inside his read rather than as a card of its own: it is him
+   still talking, not a form the app has interrupted him with.
+   --------------------------------------------------------------------------- */
+.protocard-slot:empty { display: none; }
+.protocard {
+  margin: 10px 0 0; padding: 12px 14px; border-radius: 12px;
+  background: var(--soft); border-left: 2px solid var(--acc);
+  animation: protocard-in .3s ease both;
+}
+@keyframes protocard-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.protocard .klabel { display: block; margin-bottom: 6px; }
+/* The judge card is the one moment the clock has been running towards, so it
+   gets the accent rather than the same grey as a week-three adherence ping. */
+.protocard-judge { border-left-color: var(--acc); background: var(--acc-soft); }
+.protocard-ask { font-size: 13.5px; line-height: 1.55; margin: 0; }
+.protocard-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.protocard-pill {
+  flex: none; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+}
+.protocard-pill:hover { border-color: var(--acc); background: var(--acc-soft); }
+.protocard-pill.pri { border-color: var(--acc); color: var(--acc); }
+/* Answered. The pills go and the reply stays — a control that vanishes on
+   touch leaves somebody unsure it registered. */
+.protocard-done { border-left-color: var(--line); background: var(--soft); }
+@media (prefers-reduced-motion: reduce) { .protocard { animation: none; } }
+
+/* "I'm going with this", on a recommendation. Sized like a quiet secondary
+   action rather than a buy button: the decision is theirs and the app should
+   not look like it is selling. The weeks label is the honest part — somebody
+   who knows going in that a retinoid needs twelve weeks does not quit at
+   week three. */
+.rec-track {
+  display: inline-flex; align-items: baseline; gap: 8px; margin-top: 10px;
+  padding: 7px 13px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+}
+.rec-track em { font-style: normal; font-weight: 500; font-size: 11px; color: var(--mut); }
+.rec-track:hover { border-color: var(--acc); background: var(--acc-soft); }
+.rec-track-on {
+  cursor: default; border-color: transparent; background: var(--soft);
+  color: var(--mut); font-weight: 500;
+}
+.rec-track-on:hover { border-color: transparent; background: var(--soft); }
+
+/* An icon inside a button. The glyph sits on the text baseline rather than
+   centred on the cap height, which is what stops it looking like it is
+   floating above the words. */
+.btn svg { flex: none; }
+.btn:has(svg) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }

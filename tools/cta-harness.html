@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<!-- Offline renderer for the universal CTA outro. Driven by tools/build-cta.mjs
+     through window.__frame(t); never linked from the app. Everything drawn is
+     a pure function of t (see src/ui/ctaSeries.ts), which is what makes the
+     output identical on every build. -->
+<head><meta charset="utf-8"></head>
+<body style="margin:0;background:#0d0f11">
+<canvas id="out"></canvas>
+<script type="module">
+import "@fontsource-variable/fraunces";
+import "@fontsource-variable/inter";
+import { initLandmarker, detect, setRunningMode } from "/src/engine/landmarker.ts";
+import { analyze } from "/src/engine/scoring.ts";
+import { renderScoreCard } from "/src/ui/scoreCard.ts";
+import { buildPassPlan } from "/src/ui/measurePass.ts";
+import { drawCtaSeriesFrame } from "/src/ui/ctaSeries.ts";
+
+const W = 1080;
+const H = 1920;
+const canvas = document.getElementById("out");
+canvas.width = W;
+canvas.height = H;
+const ctx = canvas.getContext("2d");
+
+const img = (src) => new Promise((res, rej) => {
+  const i = new Image();
+  i.onload = () => res(i);
+  i.onerror = rej;
+  i.src = src;
+});
+
+try {
+  // Fonts first, or the first frames render in Georgia and the rest in
+  // Fraunces — a flicker baked permanently into the master.
+  await Promise.all([
+    document.fonts.load('300 64px "Fraunces Variable"'),
+    document.fonts.load('500 26px "Inter Variable"'),
+    document.fonts.ready,
+  ]);
+
+  // The demo face, measured by the real engine. Cillian Murphy — Wikimedia
+  // Commons (credit rendered by the series), and the strongest-reading of the
+  // demo set so the opening card is not selling with a number that reads flat.
+  const face = await img("/demo/cillian-murphy.jpg");
+  const photo = document.createElement("canvas");
+  photo.width = face.naturalWidth;
+  photo.height = face.naturalHeight;
+  photo.getContext("2d").drawImage(face, 0, 0);
+
+  await initLandmarker();
+  await setRunningMode("IMAGE");
+  const landmarks = detect(photo).faceLandmarks?.[0];
+  if (!landmarks) throw new Error("no face detected in demo photo");
+  const report = analyze(landmarks, photo.width, photo.height, "male", photo);
+
+  const scoreCard = document.createElement("canvas");
+  renderScoreCard(scoreCard, photo, landmarks, { report, caption: "DEMO SCAN" });
+
+  const metrics = buildPassPlan(report, null, { maxSteps: 3 }).map((s) => s.metric);
+
+  const maxAvatar = await img("/brand/max-avatar.png").catch(() => null);
+  const mark = await img("/brand/truemax-mark-512.png").catch(() => null);
+
+  // The AI actor clip arrives as an image sequence the builder extracted with
+  // ffmpeg — headless Chromium has no H.264 decoder, and an indexed array of
+  // frames is deterministic in a way <video> seeking never quite is.
+  let girlFrames = [];
+  let girlFps = 30;
+  const params = new URLSearchParams(location.search);
+  const girlDir = params.get("girldir");
+  if (girlDir) {
+    girlFps = Number(params.get("girlfps") || "30");
+    const count = Number(params.get("girlcount") || "0");
+    girlFrames = await Promise.all(
+      Array.from({ length: count }, (_, i) =>
+        img(`${girlDir}/g${String(i + 1).padStart(4, "0")}.jpg`)),
+    );
+  }
+
+  const assets = {
+    scoreCard,
+    photo,
+    landmarks,
+    metrics,
+    credit: "Cillian Murphy photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+    maxAvatar,
+    mark,
+    girlFrame: (local) => girlFrames.length
+      ? girlFrames[Math.min(girlFrames.length - 1, Math.max(0, Math.round(local * girlFps)))]
+      : null,
+    // Verbatim titles from src/engine/recommendations.ts — the ad may only
+    // show recommendations the product actually gives.
+    recs: ["Daily sunscreen", "Zinc in food", "Consistent sleep timing"],
+  };
+
+  window.__frame = (t) => {
+    drawCtaSeriesFrame(ctx, W, H, t, assets);
+    return canvas.toDataURL("image/jpeg", 0.95);
+  };
+  window.__ready = true;
+} catch (e) {
+  window.__error = String(e && e.stack ? e.stack : e);
+  window.__ready = "error";
+}
+</script>
+</body>
+</html>

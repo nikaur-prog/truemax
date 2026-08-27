@@ -100,6 +100,48 @@ export interface Protocol {
   status: ProtocolStatus;
 }
 
+/**
+ * Start tracking something Max recommended.
+ *
+ * The entry point to the whole ladder, and it deliberately creates the
+ * protocol in "offered" rather than "running": recommending a thing and
+ * somebody actually doing it are different events, and conflating them is how
+ * an app ends up congratulating you for a routine you never started. Nothing
+ * has a clock until they say yes and then say when.
+ *
+ * Idempotent per recommendation. Offering the same product on every scan until
+ * somebody caves is the behaviour of an upsell, not a coach — so an existing
+ * entry for this recId wins, including a declined one.
+ */
+export function offerProtocol(
+  rec: { id: string; title: string; channel: AdviceChannel; weeksToJudge?: number },
+  metricId: string,
+  at: number = Date.now(),
+): Protocol {
+  const existing = readProtocols().find((p) => p.recId === rec.id);
+  if (existing) return existing;
+  const p: Protocol = {
+    id: `${rec.id}-${at}`,
+    recId: rec.id,
+    title: rec.title,
+    channel: rec.channel,
+    metricId,
+    weeksToJudge: Math.max(MIN_WEEKS_TO_JUDGE, rec.weeksToJudge ?? MIN_WEEKS_TO_JUDGE),
+    offeredAt: at,
+    startBy: null,
+    startedAt: null,
+    checkIns: [],
+    status: "offered",
+  };
+  writeProtocols([...readProtocols(), p]);
+  return p;
+}
+
+/** Has this recommendation already been offered, taken or turned down? */
+export function protocolFor(recId: string): Protocol | null {
+  return readProtocols().find((p) => p.recId === recId) ?? null;
+}
+
 const KEY = () => scopedStorageKey("truemax:protocols");
 
 export function readProtocols(): Protocol[] {
@@ -278,22 +320,27 @@ export function judge(p: Protocol, now: number, scanMoved: boolean): Verdict {
 /**
  * What Max says about a verdict.
  *
- * The addAlongside wording is the load-bearing part of this whole module. It
- * must never read as "that didn't work, try this instead": the first protocol
- * may well be holding something steady, and pulling it out to test a second
- * one destroys the only evidence there was. Keep it, stack the new thing on
- * top, change one variable at a time.
+ * The addAlongside wording is the load-bearing part of this module, and the
+ * first version got it wrong in a way worth recording. It opened with "Here's
+ * what I'm NOT going to do: tell you to bin it" and went on about losing "the
+ * only evidence we've got" — a coach explaining his own reasoning at the
+ * reader, in language nobody uses. Announcing what you are not about to say is
+ * a tell; a person just says the thing.
+ *
+ * The rule underneath is unchanged and non-negotiable: keep what they are
+ * doing, add alongside, never swap. It is simply said plainly now. Stay on it,
+ * the change might not be visible yet, and here is one more thing worth adding.
  */
 export function verdictCopy(v: Verdict): string {
   const thing = v.protocol.title.toLowerCase();
   switch (v.kind) {
     case "tooEarly":
-      return `Still early on ${thing}. Give it another ${v.weeksLeft} ${v.weeksLeft === 1 ? "week" : "weeks"} before either of us reads anything into the number. I'd rather say nothing than have you chopping and changing on noise.`;
+      return `Still early on ${thing}. Give it another ${v.weeksLeft} ${v.weeksLeft === 1 ? "week" : "weeks"} before we read anything into the number. Changing things this soon just means neither of us finds out what worked.`;
     case "notRun":
-      return `${v.weeks} weeks in on ${thing}, but by your own answers it hasn't really been running. That's not a failure of the protocol, it just hasn't been tested yet. No point swapping it for something else you'd also skip. Want to restart it properly, or would something easier to stick to suit you better?`;
+      return `${v.weeks} weeks in on ${thing}, but from your answers it hasn't really been running. So we don't know yet whether it works for you. Want to give it a proper go from here, or would something easier to stick to suit you better?`;
     case "worked":
-      return `${v.weeks} weeks on ${thing} and the scan agrees with you. That's a real result and it's yours. Keep it exactly as it is. We only change what isn't working.`;
+      return `${v.weeks} weeks on ${thing} and the scan agrees with you. That's a real result and it's yours. Keep doing exactly what you're doing.`;
     case "addAlongside":
-      return `${v.weeks} weeks on ${thing}, you stuck with it, and the number hasn't moved. Here's what I'm NOT going to do: tell you to bin it. It might be holding something steady, and if we pull it out now we lose the only evidence we've got. Keep it running. What I'd do is add one thing alongside it, so we're only ever changing one variable at a time.`;
+      return `${v.weeks} weeks on ${thing} and you stuck with it, but the number hasn't moved yet. Stay on it. The change might just not be showing up in a scan yet, and stopping now means we never find out. What I'd recommend as well is adding one more thing alongside it. Ask me and I'll tell you which one I'd pick for you and why.`;
   }
 }

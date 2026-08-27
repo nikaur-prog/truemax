@@ -38,6 +38,21 @@ import { createAutoCapture } from "./autoCapture.js";
 import type { AutoCapture } from "./autoCapture.js";
 import type { CameraHandle } from "./camera.js";
 
+// The upload glyph: a cloud with an arrow going up into it.
+//
+// Named rather than inlined three times. "Upload a photo" appears on the
+// awaiting screen, on the camera screen as the escape hatch, and the two must
+// carry the same mark — three hand-copied SVGs is how one of them ends up a
+// pixel off and nobody notices for a month.
+//
+// currentColor throughout, so it inherits whichever button variant it lands
+// in: mint on the primary, ink on the ghost.
+const UPLOAD_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M17.5 18.5a4 4 0 0 0 .3-8 6 6 0 0 0-11.5-1.4 3.6 3.6 0 0 0 .2 7.2"/>
+  <path d="M12 21V11"/><path d="M8.5 14.2 12 10.7l3.5 3.5"/>
+</svg>`;
+
 // Side-profile capture flow: camera or upload → auto-seeded landmarks → user
 // verifies by dragging → side report.
 //
@@ -196,6 +211,9 @@ export function openSideCapture(ctx: SideCtx): void {
   e.cap.textContent = "AWAITING PHOTO";
   e.drop.classList.remove("hidden");
   e.live.classList.add("hidden");
+  // Frame is empty, so the exemplar has the frame. Cleared by the camera and
+  // by mountVerify; nothing else may show it, or it sits under a real face.
+  e.frame.classList.add("awaiting");
   e.lines.replaceChildren();
   renderSideCaptureCopy(e.panelCopy);
 
@@ -216,8 +234,8 @@ export function openSideCapture(ctx: SideCtx): void {
     ? ""
     : `<button class="btn pri" id="side-cam">Use camera</button>`;
   const pickBtn = ctx.method === "upload"
-    ? `<button class="btn pri" id="side-pick">Upload a photo</button>`
-    : `<button class="btn gho" id="side-pick">Upload a photo</button>`;
+    ? `<button class="btn pri" id="side-pick">${UPLOAD_ICON}<span>Upload a photo</span></button>`
+    : `<button class="btn gho" id="side-pick">${UPLOAD_ICON}<span>Upload a photo</span></button>`;
   e.actions.innerHTML = camBtn + pickBtn;
   e.actions.insertAdjacentHTML(
     "beforeend",
@@ -299,6 +317,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   e.drop.classList.add("hidden");
   e.live.classList.remove("hidden");
   e.frame.classList.add("live");
+  e.frame.classList.remove("awaiting");
   e.turnCue.classList.remove("hidden");
   e.cap.textContent = "LINE UP YOUR PROFILE";
   // The gate remembers having seen the head turn, so that losing the face can
@@ -365,6 +384,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   } catch {
     e.live.classList.add("hidden");
     e.frame.classList.remove("live");
+    e.frame.classList.add("awaiting");
     e.drop.classList.remove("hidden");
     e.hintTitle.textContent = "Camera unavailable";
     return;
@@ -374,7 +394,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // two steps of the same flow.
   e.actions.innerHTML = `
     <button class="btn pri" id="side-shoot">Capture</button>
-    <button class="btn gho" id="side-stop">Upload a photo</button>`;
+    <button class="btn gho" id="side-stop">${UPLOAD_ICON}<span>Upload a photo</span></button>`;
   e.actions.insertAdjacentHTML(
     "beforeend",
     `<button class="btn cancel" id="side-quit2">Cancel</button>`,
@@ -512,6 +532,10 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // confirmation/correction before analysis. If automatic detection fails,
   // seedSidePoints deliberately falls back to an editable centred template.
   e.drop.classList.add("hidden");
+  // The photo is already on the canvas by this line. mountVerify clears this
+  // too, but there is async work between here and there, and one frame of an
+  // exemplar sitting over somebody's own face is one frame too many.
+  e.frame.classList.remove("awaiting");
   e.cap.textContent = "VERIFY LANDMARKS";
 
   // Canonicalise the facing. A profile photograph mirrored horizontally has
@@ -592,6 +616,7 @@ function mountVerify(
   const w = e.canvas.width;
   const h = e.canvas.height;
   e.drop.classList.add("hidden");
+  e.frame.classList.remove("awaiting");
   e.cap.textContent = caption;
   fitFrameToViewport(e.frame, w, h);
 

@@ -1,0 +1,214 @@
+/* The Creator League shell.
+ *
+ * Deliberately its own world: near-black ground where the consumer app is
+ * cream, because this is backstage — the person here is on the team, not in
+ * the shop. What carries over from the brand is the mint (it is the money
+ * colour here), Fraunces for numbers, and the button discipline: one obvious
+ * primary action per screen, visible hover on everything clickable, controls
+ * that settle instead of vanishing.
+ */
+
+:root {
+  --lg-bg: #0b0d0f;
+  --lg-panel: #12151a;
+  --lg-panel-2: #171b21;
+  --lg-line: #232830;
+  --lg-ink: #eef1ee;
+  --lg-mut: #8b959b;
+  --lg-mint: #2f9e73;
+  --lg-mint-bright: #79e8d2;
+  --lg-danger: #d98a7a;
+  --lg-radius: 14px;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--lg-bg);
+  color: var(--lg-ink);
+  font: 15px/1.55 Inter, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+@font-face {
+  font-family: "Fraunces Variable";
+  src: local("Fraunces");
+  font-display: swap;
+}
+
+button { font: inherit; cursor: pointer; }
+a { color: var(--lg-mint-bright); text-decoration: none; }
+a:hover { text-decoration: underline; }
+input, select, textarea {
+  font: inherit;
+  color: var(--lg-ink);
+  background: var(--lg-panel-2);
+  border: 1px solid var(--lg-line);
+  border-radius: 10px;
+  padding: 11px 14px;
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid var(--lg-mint);
+  outline-offset: 1px;
+}
+label { display: block; font-size: 13px; color: var(--lg-mut); margin: 14px 0 6px; font-weight: 600; }
+
+.lg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--lg-line);
+  background: var(--lg-panel-2);
+  color: var(--lg-ink);
+  padding: 12px 22px;
+  font-weight: 600;
+  transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.lg-btn:hover { background: #1d2229; border-color: #2f363f; }
+.lg-btn:active { transform: translateY(1px); }
+.lg-btn.pri {
+  background: var(--lg-mint);
+  border-color: var(--lg-mint);
+  color: #06231a;
+}
+.lg-btn.pri:hover { background: #37b585; }
+.lg-btn.danger { color: var(--lg-danger); }
+.lg-btn[disabled] { opacity: 0.5; cursor: default; }
+
+/* ---- frame ---- */
+.lg-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--lg-line);
+  position: sticky;
+  top: 0;
+  background: rgba(11, 13, 15, 0.92);
+  backdrop-filter: blur(10px);
+  z-index: 5;
+}
+.lg-mark { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.06em; }
+.lg-mark img { width: 26px; height: 26px; }
+.lg-mark .lg-league { color: var(--lg-mint-bright); font-weight: 600; }
+.lg-shell { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 57px); }
+.lg-nav { border-right: 1px solid var(--lg-line); padding: 18px 12px; display: flex; flex-direction: column; gap: 4px; }
+.lg-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--lg-mut);
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.lg-nav button:hover { background: var(--lg-panel); color: var(--lg-ink); }
+.lg-nav button.on { background: var(--lg-panel-2); color: var(--lg-mint-bright); }
+.lg-main { padding: 26px 28px 80px; max-width: 980px; }
+h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spacing: -0.01em; }
+.lg-sub { color: var(--lg-mut); max-width: 60ch; }
+
+@media (max-width: 760px) {
+  .lg-shell { grid-template-columns: 1fr; }
+  .lg-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--lg-line);
+    padding: 10px 12px;
+  }
+  .lg-nav button { white-space: nowrap; width: auto; }
+  .lg-main { padding: 20px 16px 90px; }
+}
+
+/* ---- cards ---- */
+.lg-card {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: var(--lg-radius);
+  padding: 20px 22px;
+  margin: 14px 0;
+}
+.lg-card h3 { margin: 0 0 6px; font-size: 17px; }
+.lg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--lg-line);
+}
+.lg-row:last-child { border-bottom: none; }
+.lg-money { font: 500 22px/1 "Fraunces Variable", Fraunces, Georgia, serif; color: var(--lg-mint-bright); font-variant-numeric: tabular-nums; }
+.lg-num { font-variant-numeric: tabular-nums; }
+.lg-chip {
+  display: inline-block;
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--lg-line);
+  color: var(--lg-mut);
+  text-transform: uppercase;
+}
+.lg-chip.ok { color: var(--lg-mint-bright); border-color: rgba(121, 232, 210, 0.35); }
+.lg-chip.warn { color: var(--lg-danger); border-color: rgba(217, 138, 122, 0.4); }
+
+/* Budget / progress bars. */
+.lg-bar { height: 6px; border-radius: 99px; background: var(--lg-line); overflow: hidden; margin: 10px 0 4px; }
+.lg-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--lg-mint), var(--lg-mint-bright)); border-radius: 99px; }
+.lg-bar-note { font-size: 12px; color: var(--lg-mut); }
+
+/* ---- the gate (signed-out landing) ---- */
+.lg-gate { max-width: 860px; margin: 0 auto; padding: 48px 20px 90px; text-align: center; }
+.lg-gate h1 {
+  font: 300 clamp(34px, 7vw, 56px)/1.08 "Fraunces Variable", Fraunces, Georgia, serif;
+  margin: 18px 0 10px;
+  letter-spacing: -0.01em;
+}
+.lg-gate .lg-tagline { color: var(--lg-mut); font-size: 17px; max-width: 46ch; margin: 0 auto 26px; }
+.lg-montage {
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--lg-line);
+  background: var(--lg-panel);
+  aspect-ratio: 16 / 9;
+  margin: 26px auto;
+}
+.lg-montage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lg-tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 26px 0; }
+.lg-tier {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: var(--lg-radius);
+  padding: 18px 14px;
+}
+.lg-tier .lg-money { font-size: 28px; }
+.lg-tier .lg-tier-req { color: var(--lg-mut); font-size: 12.5px; margin-top: 6px; }
+.lg-how { text-align: left; max-width: 560px; margin: 10px auto; }
+.lg-how li { margin: 10px 0; color: var(--lg-mut); }
+.lg-how li b { color: var(--lg-ink); }
+
+/* ---- forms / auth ---- */
+.lg-form { max-width: 460px; margin: 0 auto; text-align: left; }
+.lg-note { font-size: 13px; color: var(--lg-mut); }
+.lg-error { color: var(--lg-danger); font-size: 13.5px; margin-top: 10px; min-height: 18px; }
+
+/* ---- admin ---- */
+.lg-grants { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
+.lg-grants label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; color: var(--lg-ink); }
+.lg-grants input[type="checkbox"] { width: auto; }
+.lg-counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lg-btn { transition: none; }
+}

@@ -7,9 +7,9 @@
     <!-- Link previews. Without these, a share of truemax.app on TikTok,
          iMessage or anywhere else renders as a bare URL: no image, no claim.
          The image is generated from the Max drawing by scripts/make-og.mjs. -->
-    <meta name="description" content="Facial analysis that shows the actual math. 41 measurements against published reference ranges, scored on your device. Your photos never leave your phone." />
+    <meta name="description" content="Facial analysis that shows the actual math. 43 measurements against published reference ranges, scored on your device. Your photos never leave your phone." />
     <meta property="og:title" content="TrueMax · Facial analysis that shows the actual math" />
-    <meta property="og:description" content="41 measurements against published reference ranges, scored on your device. Your photos never leave your phone." />
+    <meta property="og:description" content="43 measurements against published reference ranges, scored on your device. Your photos never leave your phone." />
     <meta property="og:image" content="https://www.truemax.app/og.png" />
     <meta property="og:url" content="https://www.truemax.app/" />
     <meta property="og:type" content="website" />
@@ -112,7 +112,10 @@
 
         <div class="cam-actions">
           <button class="btn pri shutter" id="btn-camera"><span id="btn-camera-label">Use camera</span><svg class="btn-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
-          <button class="btn gho" id="btn-upload"><span>Upload a photo</span><svg class="btn-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
+          <!-- "Upload photo", not "Upload a photo": the article pushed the
+               label onto two lines beside "Use camera" on a phone. Same
+               cloud-and-arrow glyph as the side screen (sideFlow.ts). -->
+          <button class="btn gho" id="btn-upload"><span>Upload photo</span><svg class="btn-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 18.5a4 4 0 0 0 .3-8 6 6 0 0 0-11.5-1.4 3.6 3.6 0 0 0 .2 7.2"/><path d="M12 21V11"/><path d="M8.5 14.2 12 10.7l3.5 3.5"/></svg></button>
         </div>
       </div>
         <!-- Filled in by script, and only on a device that actually has a
@@ -195,7 +198,7 @@
         </div>
         <div class="proof-item">
           <b>Every number shows its working</b>
-          <p>41 measurements, each against the reference range it was compared to. Where a measurement is too noisy to count, we say so instead of quietly scoring it.</p>
+          <p>43 measurements, each against the reference range it was compared to. Where a measurement is too noisy to count, we say so instead of quietly scoring it.</p>
         </div>
         <div class="proof-item">
           <b>Nothing that comes in a bottle</b>
@@ -219,7 +222,7 @@
           <li>
             <span class="journey-n">1</span>
             <b>Measure</b>
-            <p>41 measurements, taken the same way every scan, against published population data. You see all of them and the range each was compared to.</p>
+            <p>43 measurements, taken the same way every scan, against published population data. You see all of them and the range each was compared to.</p>
           </li>
           <li>
             <span class="journey-n">2</span>
@@ -300,6 +303,20 @@
         <div class="side-photo">
           <div class="face-frame" id="side-frame">
             <canvas id="side-canvas"></canvas>
+            <!-- What the frame shows before there is a photo in it.
+                 An empty black rectangle asks for a side profile without ever
+                 showing one, and the two mistakes people make — chin lifted,
+                 head three-quarters rather than square on — are exactly the
+                 ones a sentence cannot correct. So the frame holds the shot it
+                 wants: head level, one ear to the lens, forehead and chin in.
+                 Faint, behind the drop target, and gone the instant a real
+                 photo or the live camera takes the frame (see .awaiting in
+                 sideFlow.ts). Synthetic, not a person: labelled as such in the
+                 alt text so nobody reads it as a customer. -->
+            <div class="side-exemplar" id="side-exemplar" aria-hidden="true">
+              <img src="/tutorial/side-exemplar.jpg" alt="" loading="lazy" decoding="async" />
+              <span class="side-exemplar-tag">Like this &middot; illustration</span>
+            </div>
             <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
             <div id="side-verify"></div>
             <!-- Live profile capture, layered over the same frame so the

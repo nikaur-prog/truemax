@@ -63,6 +63,23 @@ export interface Rec {
   // Absent means it is worth showing to anyone who picked skin as a goal —
   // sunscreen and "go see someone" are not contingent on a complaint.
   concerns?: string[];
+  // Search words for finding the product, where the title is advice-phrased
+  // rather than shelf-phrased ("Daily sunscreen" finds opinion pieces;
+  // "broad-spectrum SPF 30 sunscreen" finds bottles). Absent means the title
+  // already is the product.
+  search?: string;
+}
+
+/**
+ * A Google search link for buying the thing — products only, and always a
+ * search, never a merchant. We name generic actives, not brands, so the
+ * honest link is "here is where to compare what's available where you live"
+ * rather than an affiliate pointing at one shop. Non-product groups (food,
+ * habits, professionals) return null: there is nothing to buy.
+ */
+export function productSearchUrl(rec: Rec): string | null {
+  if (rec.group !== "topical") return null;
+  return `https://www.google.com/search?q=${encodeURIComponent(rec.search ?? rec.title)}`;
 }
 
 export const EVIDENCE_LABEL: Record<Evidence, string> = {

@@ -1,0 +1,538 @@
+<!doctype html>
+<html>
+<!-- Offline renderer for the Creator League gate montage. Driven by
+     tools/build-montage.mjs through window.__frame(t); never linked from the
+     app. Same discipline as the CTA harness: every frame is a pure function
+     of t, so the master is identical on every build.
+
+     The montage shows what the League tools actually render - the score card,
+     the measure pass, the weekly trend - playing inside phone frames beside
+     the payout ladder. No AI-actor footage here: this file's output is
+     committed to the public repo, so the only face it may contain is the
+     Wikimedia demo face, credited on the endcard. -->
+<head><meta charset="utf-8"></head>
+<body style="margin:0;background:#0b0d0f">
+<canvas id="out"></canvas>
+<script type="module">
+import "@fontsource-variable/fraunces";
+import "@fontsource-variable/inter";
+import { initLandmarker, detect, setRunningMode } from "/src/engine/landmarker.ts";
+import { analyze } from "/src/engine/scoring.ts";
+import { renderScoreCard } from "/src/ui/scoreCard.ts";
+import { buildPassPlan } from "/src/ui/measurePass.ts";
+import { drawCtaSeriesFrame } from "/src/ui/ctaSeries.ts";
+
+const W = 1920;
+const H = 1080;
+export const MONTAGE_SECONDS = 18;
+
+const canvas = document.getElementById("out");
+canvas.width = W;
+canvas.height = H;
+const ctx = canvas.getContext("2d");
+
+// League palette, matched to src/league/league.css.
+const BG = "#0b0d0f";
+const PANEL = "#12151a";
+const LINE = "#232830";
+const INK = "#eef1ee";
+const MUT = "rgba(238,241,238,0.55)";
+const MINT = "#2f9e73";
+const MINT_BRIGHT = "#79e8d2";
+const SERIF = '"Fraunces Variable", Fraunces, Georgia, serif';
+const SANS = '"Inter Variable", Inter, system-ui, sans-serif';
+const MONO = '"SF Mono", ui-monospace, Menlo, monospace';
+
+const easeOutCubic = (p) => 1 - Math.pow(1 - p, 3);
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const seg = (local, a, b) => easeOutCubic(clamp01((local - a) / (b - a)));
+
+// Same deal as src/league/earnings.ts DEFAULT_FORMULA. Nothing here may
+// promise money the formula does not: a flat rate per thousand views,
+// engagement raising it, an unlock threshold, a pay day.
+const TIERS = [
+  { money: "$2.00", req: "per 1,000 views — every view counts" },
+  { money: "×1.3", req: "engagement multiplier on real comments" },
+  { money: "25k", req: "views to unlock — then it all counts" },
+  { money: "7 days", req: "from sprint close to payout" },
+];
+
+const img = (src) => new Promise((res, rej) => {
+  const i = new Image();
+  i.onload = () => res(i);
+  i.onerror = rej;
+  i.src = src;
+});
+
+try {
+  await Promise.all([
+    document.fonts.load('300 96px "Fraunces Variable"'),
+    document.fonts.load('500 30px "Inter Variable"'),
+    document.fonts.ready,
+  ]);
+
+  const face = await img("/demo/cillian-murphy.jpg");
+  const photo = document.createElement("canvas");
+  photo.width = face.naturalWidth;
+  photo.height = face.naturalHeight;
+  photo.getContext("2d").drawImage(face, 0, 0);
+
+  await initLandmarker();
+  await setRunningMode("IMAGE");
+  const landmarks = detect(photo).faceLandmarks?.[0];
+  if (!landmarks) throw new Error("no face detected in demo photo");
+  const report = analyze(landmarks, photo.width, photo.height, "male", photo);
+
+  const scoreCard = document.createElement("canvas");
+  renderScoreCard(scoreCard, photo, landmarks, { report, caption: "DEMO SCAN" });
+
+  const metrics = buildPassPlan(report, null, { maxSteps: 6 }).map((s) => s.metric);
+  const maxAvatar = await img("/brand/max-avatar.png").catch(() => null);
+  const mark = await img("/brand/truemax-mark-512.png").catch(() => null);
+
+  const ctaAssets = {
+    scoreCard,
+    photo,
+    landmarks,
+    metrics,
+    credit: "Cillian Murphy photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+    maxAvatar,
+    mark,
+    girlFrame: () => null,
+    recs: ["Daily sunscreen", "Zinc in food", "Consistent sleep timing"],
+  };
+
+  // Each phone plays a looped window of the CTA series - the real renderer,
+  // not screenshots, so any future beat change flows into the montage on the
+  // next build.
+  const PHONE_W = 1080;
+  const PHONE_H = 1920;
+  const phoneCanvases = [0, 1, 2].map(() => {
+    const c = document.createElement("canvas");
+    c.width = PHONE_W;
+    c.height = PHONE_H;
+    return c;
+  });
+  const PHONES = [
+    { base: 0.2, span: 2.8, caption: "The score card" },   // score beat
+    // stillMeasureCamera: looped inside a phone, the beat's per-metric
+    // push-in read as restless zooming. The camera holds; the lines animate.
+    // rate 1.7: six measurements at a clip — the montage sells the breadth,
+    // the product itself does the slow version.
+    { base: 3.2, span: 4.0, rate: 1.7, caption: "The measure pass", opts: { stillMeasureCamera: true } },
+    // Custom-drawn (drawTrackPhone): the weekly chart carries the face at
+    // both ends, then hands off to a scroll through the real demo rows.
+    { track: true, caption: "Weekly tracking" },
+  ];
+
+  const T_TITLE_END = 2.6;
+  const T_PHONES_END = 13.4;
+
+  function chip(cx, cy, text, alpha) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.font = `600 26px ${MONO}`;
+    const tw = ctx.measureText(text).width;
+    const pw = tw + 56;
+    ctx.strokeStyle = "rgba(121,232,210,0.4)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(cx - pw / 2, cy - 27, pw, 54, 27);
+    ctx.stroke();
+    ctx.fillStyle = MINT_BRIGHT;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, cx, cy + 2);
+    ctx.restore();
+  }
+
+  // The tracking phone, drawn here rather than borrowed from the CTA: the
+  // weekly chart carries the demo face at BOTH ends of the line, then the
+  // screen scrolls through the rows that improvement is made of. Every number
+  // in the scroll is the engine's real reading of the demo photo.
+  const TRACK_SPAN = 10.8; // matches the phones beat duration
+  function faceThumb(ctx2, cx, cy, size, ring) {
+    const pw = photo.width;
+    const ph = photo.height;
+    const s = Math.min(pw, ph) * 0.72;
+    ctx2.save();
+    ctx2.beginPath();
+    ctx2.roundRect(cx - size / 2, cy - size / 2, size, size, size * 0.22);
+    ctx2.clip();
+    ctx2.drawImage(photo, (pw - s) / 2, Math.max(0, ph * 0.04), s, s, cx - size / 2, cy - size / 2, size, size);
+    ctx2.restore();
+    if (ring) {
+      ctx2.strokeStyle = MINT_BRIGHT;
+      ctx2.lineWidth = 5;
+      ctx2.beginPath();
+      ctx2.roundRect(cx - size / 2, cy - size / 2, size, size, size * 0.22);
+      ctx2.stroke();
+    }
+  }
+  function drawTrackPhone(ctx2, local) {
+    const W2 = PHONE_W;
+    const H2 = PHONE_H;
+    ctx2.fillStyle = "#0d0f11";
+    ctx2.fillRect(0, 0, W2, H2);
+    const phase = local / TRACK_SPAN;
+
+    // Phase A: the chart, faces at both ends of the line.
+    const chartA = 1 - easeOutCubic(clamp01((phase - 0.52) / 0.08));
+    if (chartA > 0) {
+      ctx2.save();
+      ctx2.globalAlpha = chartA;
+      ctx2.fillStyle = "#f4f2ec";
+      ctx2.font = `300 92px ${SERIF}`;
+      ctx2.textAlign = "center";
+      ctx2.fillText("Tracked, week by week", W2 / 2, 340);
+
+      const x0 = W2 * 0.16, x1 = W2 * 0.84;
+      const yBase = H2 * 0.62, yTop = H2 * 0.44;
+      const grow = easeOutCubic(clamp01(local / 2.2));
+      ctx2.strokeStyle = MINT_BRIGHT;
+      ctx2.lineWidth = 7;
+      ctx2.beginPath();
+      const steps = 8;
+      for (let k = 0; k <= steps * grow; k++) {
+        const fx = x0 + ((x1 - x0) * k) / steps;
+        const wobble = [0, 0.06, 0.1, 0.22, 0.3, 0.46, 0.6, 0.82, 1][Math.min(8, k)];
+        const fy = yBase - (yBase - yTop) * wobble;
+        if (k === 0) ctx2.moveTo(fx, fy); else ctx2.lineTo(fx, fy);
+      }
+      ctx2.stroke();
+      // The face at week one, and the same face where the line is heading.
+      faceThumb(ctx2, x0, yBase + 170, 230, false);
+      ctx2.fillStyle = "rgba(244,242,236,0.55)";
+      ctx2.font = `600 30px ${MONO}`;
+      ctx2.fillText("WEEK 1", x0, yBase + 340);
+      if (grow > 0.96) {
+        faceThumb(ctx2, x1, yTop - 190, 230, true);
+        ctx2.fillStyle = MINT_BRIGHT;
+        ctx2.fillText("WEEK 8", x1, yTop - 40);
+      }
+      ctx2.restore();
+    }
+
+    // Phase B: scrolling through the improvements — real rows, real scores.
+    const scrollIn = easeOutCubic(clamp01((phase - 0.55) / 0.1));
+    if (scrollIn > 0) {
+      ctx2.save();
+      ctx2.globalAlpha = scrollIn;
+      const rows = [];
+      for (const m of metrics) rows.push({ t: m.def.name, v: m.score.toFixed(1) });
+      for (const r of ctaAssets.recs) rows.push({ t: r, v: "" });
+      const rowH = 190;
+      const total = rows.length * rowH;
+      const scroll = (clamp01((phase - 0.62) / 0.36)) * Math.max(0, total - H2 * 0.55);
+      // The rows scroll under the header, never over it.
+      ctx2.beginPath();
+      ctx2.rect(0, H2 * 0.235, W2, H2);
+      ctx2.clip();
+      ctx2.translate(0, H2 * 0.3 - scroll);
+      ctx2.textAlign = "left";
+      rows.forEach((r, k) => {
+        const y = k * rowH;
+        ctx2.fillStyle = "rgba(255,255,255,0.05)";
+        ctx2.beginPath();
+        ctx2.roundRect(W2 * 0.08, y, W2 * 0.84, rowH - 26, 28);
+        ctx2.fill();
+        ctx2.fillStyle = "#f4f2ec";
+        ctx2.font = `500 46px ${SANS}`;
+        ctx2.fillText(r.t, W2 * 0.13, y + 88);
+        if (r.v) {
+          ctx2.fillStyle = MINT_BRIGHT;
+          ctx2.font = `500 56px ${SERIF}`;
+          ctx2.textAlign = "right";
+          ctx2.fillText(r.v, W2 * 0.87, y + 92);
+          ctx2.textAlign = "left";
+        } else {
+          ctx2.fillStyle = MINT;
+          ctx2.font = `600 30px ${MONO}`;
+          ctx2.textAlign = "right";
+          ctx2.fillText("PLAN", W2 * 0.87, y + 84);
+          ctx2.textAlign = "left";
+        }
+      });
+      ctx2.restore();
+      ctx2.save();
+      ctx2.globalAlpha = scrollIn;
+      ctx2.fillStyle = "rgba(244,242,236,0.55)";
+      ctx2.font = `600 30px ${MONO}`;
+      ctx2.textAlign = "center";
+      ctx2.fillText("YOUR IMPROVEMENTS", W2 / 2, H2 * 0.19);
+      ctx2.restore();
+    }
+  }
+
+  function drawTitle(local) {
+    const out = 1 - seg(local, T_TITLE_END - 0.35, T_TITLE_END);
+    ctx.save();
+    ctx.globalAlpha = out;
+    chip(W / 2, 300, "TRUEMAX CREATOR LEAGUE", seg(local, 0.1, 0.6));
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = INK;
+    ctx.font = `300 110px ${SERIF}`;
+    const p1 = seg(local, 0.35, 0.95);
+    ctx.save();
+    ctx.globalAlpha *= p1;
+    ctx.fillText("Make these.", W / 2, 540 + (1 - p1) * 40);
+    ctx.restore();
+    const p2 = seg(local, 0.65, 1.25);
+    ctx.save();
+    ctx.globalAlpha *= p2;
+    ctx.fillText("Get paid when they hit.", W / 2, 680 + (1 - p2) * 40);
+    ctx.restore();
+
+    const p3 = seg(local, 1.05, 1.55);
+    ctx.save();
+    ctx.globalAlpha *= p3;
+    ctx.fillStyle = MUT;
+    ctx.font = `500 32px ${SANS}`;
+    ctx.fillText("The tools render the video. You post it.", W / 2, 790);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawPhone(cx, cy, ph, tiltDeg, src, alpha, rise, crop) {
+    const pw = ph * (PHONE_W / PHONE_H);
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(cx, cy + rise);
+    ctx.rotate((tiltDeg * Math.PI) / 180);
+    const bezel = 10;
+    ctx.fillStyle = "#04060a";
+    ctx.strokeStyle = LINE;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(-pw / 2 - bezel, -ph / 2 - bezel, pw + bezel * 2, ph + bezel * 2, 46);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.roundRect(-pw / 2, -ph / 2, pw, ph, 36);
+    ctx.clip();
+    if (crop) {
+      const sh = (crop.y1 - crop.y0) * PHONE_H;
+      const sw = sh * (PHONE_W / PHONE_H);
+      ctx.drawImage(src, (PHONE_W - sw) / 2, crop.y0 * PHONE_H, sw, sh, -pw / 2, -ph / 2, pw, ph);
+    } else {
+      ctx.drawImage(src, -pw / 2, -ph / 2, pw, ph);
+    }
+    ctx.restore();
+  }
+
+  function drawPhones(local) {
+    const dur = T_PHONES_END - T_TITLE_END;
+    const out = 1 - seg(local, dur - 0.35, dur);
+    ctx.save();
+    ctx.globalAlpha = out;
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = MUT;
+    ctx.font = `600 24px ${MONO}`;
+    ctx.save();
+    ctx.globalAlpha *= seg(local, 0.2, 0.7);
+    ctx.fillText("M A D E   W I T H   T H E   L E A G U E   T O O L S", 780, 96);
+    ctx.restore();
+
+    const spots = [
+      { cx: 400, cy: 560, ph: 760, tilt: -2.5, at: 0.0 },
+      { cx: 780, cy: 545, ph: 800, tilt: 0, at: 0.25 },
+      { cx: 1160, cy: 560, ph: 760, tilt: 2.5, at: 0.5 },
+    ];
+    for (let i = 0; i < 3; i++) {
+      const s = spots[i];
+      const p = seg(local, s.at, s.at + 0.6);
+      if (p <= 0) continue;
+      const cfg = PHONES[i];
+      const c = phoneCanvases[i];
+      if (cfg.track) {
+        drawTrackPhone(c.getContext("2d"), local);
+      } else {
+        const t = cfg.base + ((local * (cfg.rate || 1)) % cfg.span);
+        drawCtaSeriesFrame(c.getContext("2d"), PHONE_W, PHONE_H, t, ctaAssets, cfg.opts || {});
+      }
+      drawPhone(s.cx, s.cy, s.ph, s.tilt, c, p, (1 - p) * 70, cfg.crop);
+      // Captions hand their line to the combine note rather than sharing it.
+      ctx.save();
+      ctx.globalAlpha *= p * (1 - seg(local, 2.4, 3.0));
+      ctx.fillStyle = MUT;
+      ctx.font = `500 24px ${SANS}`;
+      ctx.fillText(cfg.caption, s.cx, s.cy + s.ph / 2 + 58);
+      ctx.restore();
+    }
+
+    // The ladder. Slides in a rung at a time, top rung first.
+    ctx.save();
+    ctx.globalAlpha *= seg(local, 0.7, 1.2);
+    ctx.fillStyle = MUT;
+    ctx.font = `600 24px ${MONO}`;
+    ctx.fillText("T H E   D E A L", 1640, 178);
+    ctx.restore();
+    for (let i = 0; i < TIERS.length; i++) {
+      const p = seg(local, 0.9 + i * 0.35, 1.5 + i * 0.35);
+      if (p <= 0) continue;
+      const x = 1450 + (1 - p) * 70;
+      const y = 232 + i * 168;
+      ctx.save();
+      ctx.globalAlpha *= p;
+      ctx.fillStyle = PANEL;
+      ctx.strokeStyle = LINE;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x, y, 380, 146, 16);
+      ctx.fill();
+      ctx.stroke();
+      ctx.textAlign = "left";
+      ctx.fillStyle = MINT_BRIGHT;
+      ctx.font = `500 52px ${SERIF}`;
+      ctx.fillText(TIERS[i].money, x + 28, y + 66);
+      ctx.fillStyle = MUT;
+      ctx.font = `500 22px ${SANS}`;
+      ctx.fillText(TIERS[i].req, x + 28, y + 110);
+      ctx.restore();
+      ctx.textAlign = "center";
+    }
+
+    ctx.save();
+    ctx.globalAlpha *= seg(local, 2.8, 3.4);
+    ctx.fillStyle = MUT;
+    ctx.font = `500 26px ${SANS}`;
+    ctx.fillText("Views and comments combine across every video you post.", 780, 1004);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawEndcard(local) {
+    const out = 1 - seg(local, MONTAGE_SECONDS - T_PHONES_END - 0.45, MONTAGE_SECONDS - T_PHONES_END);
+    ctx.save();
+    ctx.globalAlpha = out;
+    ctx.textAlign = "center";
+
+    if (mark) {
+      const p = seg(local, 0.1, 0.7);
+      const size = 130 * (0.85 + 0.15 * p);
+      ctx.save();
+      ctx.globalAlpha *= p;
+      ctx.drawImage(mark, W / 2 - size / 2, 250 - size / 2, size, size);
+      ctx.restore();
+    }
+
+    const p1 = seg(local, 0.3, 0.9);
+    ctx.save();
+    ctx.globalAlpha *= p1;
+    ctx.fillStyle = INK;
+    ctx.font = `300 92px ${SERIF}`;
+    ctx.fillText("TrueMax Creator League", W / 2, 480 + (1 - p1) * 30);
+    ctx.restore();
+
+    // The Apply pill — and the cursor that actually clicks it. The press is
+    // the endcard's whole argument: this is a button, and this is what
+    // happens when you push it.
+    const press = seg(local, 2.05, 2.2) * (1 - seg(local, 2.3, 2.55));
+    const clicked = local >= 2.1;
+    const p2 = seg(local, 0.55, 1.15);
+    ctx.save();
+    ctx.globalAlpha *= p2;
+    ctx.translate(W / 2, 589);
+    ctx.scale(1 - 0.07 * press, 1 - 0.07 * press);
+    ctx.fillStyle = clicked ? "#43c896" : MINT;
+    ctx.beginPath();
+    ctx.roundRect(-160, -39, 320, 78, 39);
+    ctx.fill();
+    ctx.fillStyle = "#06231a";
+    ctx.font = `600 32px ${SANS}`;
+    ctx.textBaseline = "middle";
+    ctx.fillText("Apply to join", 0, 3);
+    ctx.textBaseline = "alphabetic";
+    ctx.restore();
+    // Click ripple: one ring, out and gone.
+    const rip = seg(local, 2.1, 2.7);
+    if (rip > 0 && rip < 1) {
+      ctx.save();
+      ctx.globalAlpha *= (1 - rip) * 0.8;
+      ctx.strokeStyle = MINT_BRIGHT;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(W / 2 - 160 - 60 * rip, 550 - 60 * rip, 320 + 120 * rip, 78 + 120 * rip, 39 + 60 * rip);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.globalAlpha *= p2;
+    ctx.fillStyle = MINT_BRIGHT;
+    ctx.font = `600 34px ${MONO}`;
+    ctx.fillText("truemax.app/league", W / 2, 710);
+    ctx.restore();
+
+    // The cursor rides in from the lower right, lands on the pill, presses.
+    const cIn = seg(local, 1.25, 2.05);
+    if (cIn > 0) {
+      const cx = W * 0.72 + (W / 2 + 34 - W * 0.72) * cIn;
+      const cy = H * 0.88 + (600 - H * 0.88) * cIn;
+      const dip = 1 + 0.12 * press;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(dip, dip);
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "rgba(6,10,14,0.85)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, 46);
+      ctx.lineTo(11, 36);
+      ctx.lineTo(19, 54);
+      ctx.lineTo(27, 50);
+      ctx.lineTo(19, 33);
+      ctx.lineTo(33, 32);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const p3 = seg(local, 0.8, 1.4);
+    ctx.save();
+    ctx.globalAlpha *= p3;
+    ctx.fillStyle = MUT;
+    ctx.font = `500 30px ${SANS}`;
+    const row = "$2.00 / 1k views      engagement up to \u00d71.3      unlocks at 25k";
+    ctx.fillText(row, W / 2, 820);
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(238,241,238,0.35)";
+    ctx.font = `400 19px ${SANS}`;
+    ctx.fillText(
+      "Screens show a demo scan. Demo face: Cillian Murphy — photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+      W / 2, 1010,
+    );
+    ctx.restore();
+  }
+
+  window.__frame = (t) => {
+    ctx.save();
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, W, H);
+    // A whisper of depth behind everything, matching the gate's montage box.
+    const g = ctx.createRadialGradient(W / 2, H * 0.42, 120, W / 2, H * 0.42, 1100);
+    g.addColorStop(0, "rgba(47,158,115,0.10)");
+    g.addColorStop(1, "rgba(47,158,115,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    if (t < T_TITLE_END) drawTitle(t);
+    else if (t < T_PHONES_END) drawPhones(t - T_TITLE_END);
+    else drawEndcard(t - T_PHONES_END);
+    ctx.restore();
+    return canvas.toDataURL("image/jpeg", 0.95);
+  };
+  window.__seconds = MONTAGE_SECONDS;
+  window.__ready = true;
+} catch (e) {
+  window.__error = String(e && e.stack ? e.stack : e);
+  window.__ready = "error";
+}
+</script>
+</body>
+</html>

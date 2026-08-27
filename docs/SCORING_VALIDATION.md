@@ -208,3 +208,45 @@ current and there is nothing to regenerate. Adding people would:
 - **not help** the nose or any other region whose measurements do not
   reproduce. Reliability is a property of the measurement, not of the sample
   size — ten thousand more men would reproduce the same flat top.
+
+## Field evidence: the side reads far too harsh at the top
+
+Two scans run by the owner on 2026-08-27, on faces he independently rated as
+attractive (the profile he put at "8 to 8.5"):
+
+| | overall | front | side |
+|---|---|---|---|
+| subject A | 4.2 | 4.1 | 4.3 |
+
+The front number carries a stated confound and is not evidence either way: the
+report itself printed `Head is 15° off level` and the capture was taken at
+night under a hard overhead source. Pose correction reduces that damage, it
+does not remove it, and jaw and chin both read low from a lifted head.
+
+**The side number is the finding.** A profile that a human reader places near
+the top decile landing at 4.3 — "about 75% of male profiles score higher" — is
+the sharpest available evidence for what #58 already claims from the fixture
+pairings: the side ideals are wrong, not the landmarks. The chain behind it:
+
+1. `AGG_NORM` holds **zero** side entries. `analyzeSide` therefore lands in the
+   no-table branch of `normalizeAgg`, which converts a raw aggregate z straight
+   to a display z through `SHRINK / aggSd(weights)`. That branch is honest about
+   spread but it has no idea where the population centre is, because nothing has
+   ever measured it.
+2. Every side ideal in `sideMetrics.ts` is a prior recentred on five profiles.
+   A band whose centre is off by half a population sd costs roughly a point of
+   score for a face sitting at the true optimum — and costs it *most* at the top,
+   because the band penalises distance from the assumed centre in both
+   directions.
+3. Every side reliability is the 0.50 seed default (#54). That number is not a
+   measurement; no repeat-photo corpus has ever been run through these
+   constructions.
+
+What this does NOT justify is moving a constant. Shifting the side output up
+until this one profile reads 8 would centre the scale on a single face, which
+is the same mistake as the five-profile recentring that produced the current
+ideals — one sample smaller. The fix is the one already written down: fifty
+side faces measured through these constructions, then real quantiles.
+
+Until then the honest disclosure is the one the report already makes — the side
+is capped at 25% of the overall and labelled as thirteen hand-placed points.
