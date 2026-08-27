@@ -64,14 +64,18 @@ export const MAX_ANNUAL = 89.99;
 // plan card here and the upsell there can never disagree about the price.
 export const STARTER_MONTHLY = 7.99;
 
+/** $X.XX/week for a year priced at yearTotal. */
+const weeklyOf = (yearTotal: number) => (yearTotal / 52).toFixed(2);
+
 function billingToggle(): string {
-  const weekly = (yearTotal: number) => (yearTotal / 52).toFixed(2);
+  // Labels only. The toggle used to carry both prices, and sitting above the
+  // plan grid it read as a third plan — "$11.99" floating directly over
+  // Starter's $7.99. It now lives inside the Max card (the only card it
+  // governs) and the prices live where prices live: on the card.
   return `<div class="billtoggle" data-billing="monthly">
-    <button type="button" class="bt-opt on" data-set="monthly">
-      <b>Monthly</b><span>$${MAX_MONTHLY.toFixed(2)} · $${weekly(MAX_MONTHLY * 12)}/week</span>
-    </button>
+    <button type="button" class="bt-opt on" data-set="monthly"><b>Monthly</b></button>
     <button type="button" class="bt-opt" data-set="annual">
-      <b>Yearly</b><span>$${MAX_ANNUAL.toFixed(2)} · $${weekly(MAX_ANNUAL)}/week</span>
+      <b>Yearly</b>
       <i class="bt-save">Save $${(MAX_MONTHLY * 12 - MAX_ANNUAL).toFixed(2)}</i>
     </button>
   </div>`;
@@ -363,7 +367,6 @@ export async function openTrialFunnel(
         <span>re-taken the same way every scan. One scan is a score; a run of them
           is the only thing that can tell you a change was real and not the camera.</span>
       </div>
-      ${adult ? billingToggle() : ""}
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
           <div class="plan-top"><span>STARTER</span><b>$${STARTER_MONTHLY.toFixed(2)}<small> USD / month</small></b></div>
@@ -375,7 +378,9 @@ export async function openTrialFunnel(
         </article>
         <article class="plan-card max${adult ? " featured" : " locked"}" data-plan="max">
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}
+          ${adult ? billingToggle() : ""}
           <div class="plan-top"><span>TRUE<span>MAX</span></span><b>$11.99<small> USD / month</small></b></div>
+          ${adult ? `<span class="plan-week">$${weeklyOf(MAX_MONTHLY * 12)}/week. The leading weekly-priced app: $3.99/week.</span>` : ""}
           <p>Your highest-touch experience with Max alongside you.</p>
           <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
@@ -513,6 +518,12 @@ export async function openTrialFunnel(
             note.textContent = mode === "annual"
               ? `Then $${MAX_ANNUAL.toFixed(2)}/year. Cancel anytime.`
               : `Then $${MAX_MONTHLY.toFixed(2)}/month. Cancel anytime.`;
+          }
+          const week = card.querySelector<HTMLElement>(".plan-week");
+          if (week) {
+            week.textContent = mode === "annual"
+              ? `$${weeklyOf(MAX_ANNUAL)}/week. The leading weekly-priced app: $3.99/week.`
+              : `$${weeklyOf(MAX_MONTHLY * 12)}/week. The leading weekly-priced app: $3.99/week.`;
           }
         });
       }

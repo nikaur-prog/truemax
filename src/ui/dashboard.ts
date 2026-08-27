@@ -228,7 +228,17 @@ export function openDashboard(opts: {
         <span>Faces</span>
       </button>
       ${maxTab ? `<button class="dash-bar-btn dash-bar-maxbtn" id="dash-bar-max" data-goto="max" type="button" role="tab" aria-selected="false">
-        <span class="dash-bar-maxface">${maxCharacterMarkup({ mood: "happy" })}</span>
+        <!-- A glyph OF Max, not Max himself: the full character SVG shrunk to
+             21px was an unreadable smudge between four crisp stroke icons.
+             Same stroke grammar as its neighbours; the character appears at
+             full size inside the tab, where he has room to be somebody. -->
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 5.4V3.2"/><circle cx="12" cy="2.6" r="0.9"/>
+          <rect x="5" y="5.4" width="14" height="12.6" rx="6.3"/>
+          <circle cx="9.4" cy="11" r="0.9" fill="currentColor" stroke="none"/>
+          <circle cx="14.6" cy="11" r="0.9" fill="currentColor" stroke="none"/>
+          <path d="M9.8 14.4c1.4 1 3 1 4.4 0"/>
+        </svg>
         <span>Coach</span>
       </button>` : ""}
     </nav>`;
@@ -454,6 +464,16 @@ function scanSection(scans: StoredScan[], legacyCount = 0, guestCount = 0, listC
           : legacyCount
             ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
             : "Scan your face to see your first measurement — and every one after it lines up here so you can watch it move."}</span>
+        <!-- A ghost of what fills in: three rows shaped like the real scan
+             rows. With no scans a desktop dashboard was two-thirds empty
+             cream, which reads as a broken page rather than a young one. The
+             ghost carries no numbers — inventing a score to decorate an empty
+             state is exactly what this product must never do. -->
+        <div class="dash-ghost" aria-hidden="true">
+          <div class="dash-ghost-row"><i></i><b></b><s></s></div>
+          <div class="dash-ghost-row"><i></i><b></b><s></s></div>
+          <div class="dash-ghost-row"><i></i><b></b><s></s></div>
+        </div>
       </div>
     </section>`;
   }

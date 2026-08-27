@@ -376,10 +376,24 @@ function showPetTipOnce(): void {
       } catch {
         /* asked and answered for this view only */
       }
+      window.clearTimeout(fade);
+      window.removeEventListener("scroll", walkAway);
       tip.remove();
       if (hide) setPetHidden(true);
     };
     tip.querySelector('[data-pet-tip="hide"]')?.addEventListener("click", () => done(true));
     tip.querySelector('[data-pet-tip="keep"]')?.addEventListener("click", () => done(false));
+
+    // A question left hanging becomes furniture standing on the metric rows.
+    // Ignoring it IS an answer — no thanks, leave things as they are — so it
+    // withdraws on its own: after a while, or the moment the person scrolls
+    // on past it. Either way it counts as asked; the same choice stays in
+    // settings, where a nag-free second chance belongs.
+    const askedAt = window.scrollY;
+    const fade = window.setTimeout(() => done(false), 12000);
+    const walkAway = () => {
+      if (Math.abs(window.scrollY - askedAt) > 220) done(false);
+    };
+    window.addEventListener("scroll", walkAway, { passive: true });
   }
 }

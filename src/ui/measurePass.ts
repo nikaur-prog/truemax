@@ -398,6 +398,10 @@ export function runMeasurePass(
     if (signal.cancelled) return;
 
     host.frame?.classList.add("measuring");
+    // The whole pass — frame, narration, bar — must be on screen when it
+    // begins. On a laptop the un-capped column used to leave the status line
+    // below the fold, running the show to an audience that could not see it.
+    host.frame?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
     for (let i = 0; i < plan.length; i++) {
       const step = plan[i];
       if (signal.cancelled) return;
