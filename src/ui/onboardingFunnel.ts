@@ -12,7 +12,7 @@ import {
 import type { OnboardingProfile } from "../engine/onboarding.js";
 import { startTrialCheckout } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
-import { maxCharacterMarkup, maxLoaderMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
 import { METRICS } from "../engine/metrics.js";
@@ -332,7 +332,11 @@ export async function openTrialFunnel(
         say.innerHTML = `<p><b>${exchange.lead}</b> ${exchange.body}</p>`;
         typewriteBlock(say);
         svg.classList.add("speaking");
-        window.setTimeout(() => svg.classList.remove("speaking"), 5600);
+        window.setTimeout(() => {
+          svg.classList.remove("speaking");
+          // Said his piece: the same follow-through nod the real chat gives.
+          if (alive()) reactMax(activeHost.querySelector<HTMLElement>(".max-stage"), "nod");
+        }, 5600);
       }, 2100);
     }, 700);
   };

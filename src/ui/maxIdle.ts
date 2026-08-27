@@ -65,6 +65,7 @@ const ACTS = [
   "pushups",
   "think",
   "stretch",
+  "lookout",
 ] as const;
 
 /** The gather before an act, and the bounce back to breathing after it. */

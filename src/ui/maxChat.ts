@@ -150,6 +150,13 @@ export function openMaxChat(
   // earns attention with the idle repertoire instead (ui/maxIdle.ts), and a
   // tap still gets a wave.
   const face = host.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
+  // He LANDS rather than appears: the settle bounce on mount is the same
+  // follow-through every act ends with, and it is what makes opening the
+  // panel read as him arriving to talk rather than a header painting in.
+  if (face && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    face.classList.add("mx-settle");
+    window.setTimeout(() => face.classList.remove("mx-settle"), 600);
+  }
   face?.classList.add("speaking");
   speakGreeting(log, options.greeting ?? greeting(context), () => {
     face?.classList.remove("speaking");

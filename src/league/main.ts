@@ -752,11 +752,34 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
             <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00 — pool covers everyone" : scale.toFixed(3)}</b></div>
-            ${earning.map((r) => `<div class="lg-row">
+            ${earning.map((r, i) => `<div class="lg-row">
               <span>${esc(r.c.display_name)} <span class="lg-note">${esc(r.c.handle)} ·
               ${fmtCount(r.totals.views)} views</span></span>
-              <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
+              <span style="display:flex;gap:10px;align-items:center">
+                <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
+                <button class="lg-btn" data-pay="${i}">Record paid</button>
+              </span>
             </div>`).join("") || `<p class="lg-sub">Nobody over the threshold yet.</p>`}`;
+          // Recording a payout is the LAST step, pressed after the money has
+          // actually moved — the row is what feeds the leaderboard and the
+          // creator's own Money page, and both promise "real money that
+          // actually moved". Per row rather than one big button, because each
+          // transfer is its own decision and its own bank action.
+          out.querySelectorAll<HTMLButtonElement>("[data-pay]").forEach((btn) => {
+            btn.onclick = async () => {
+              const r = earning[Number(btn.dataset.pay)];
+              if (!r) return;
+              btn.disabled = true;
+              const { error } = await client.from("league_payouts").insert({
+                creator_id: r.c.user_id,
+                amount_cents: Math.round(r.accrued * scale),
+                note: sprint.name,
+                status: "paid",
+              });
+              btn.textContent = error ? "Failed — retry" : "Recorded";
+              if (error) btn.disabled = false;
+            };
+          });
         };
       });
     }

@@ -3713,6 +3713,27 @@ body.auth-modal-open { overflow: hidden; }
   80% { transform: translate(0, 0) rotate(8deg); }
 }
 
+/* Lookout: hand up shading his eyes, a long scan left, then right — scouting
+   for the next face. The second prop-free act; the pupils travel with the
+   lean so the look reads as LOOKING rather than as a sway. */
+.mx-act-lookout .mx-bob { animation: mx-lookout 5s ease-in-out; }
+.mx-act-lookout .mx-arm { animation: mx-lookout-arm 5s ease-in-out; }
+.mx-act-lookout .mx-pupils { animation: mx-lookout-eyes 5s ease-in-out; }
+@keyframes mx-lookout {
+  0%, 100% { transform: rotate(0) translateX(0); }
+  16%, 42% { transform: rotate(-4deg) translateX(-4px); }
+  60%, 86% { transform: rotate(4deg) translateX(4px); }
+}
+@keyframes mx-lookout-arm {
+  0%, 100% { transform: rotate(0); }
+  12%, 88% { transform: translate(1px, -13px) rotate(-128deg); }
+}
+@keyframes mx-lookout-eyes {
+  0%, 100% { transform: translate(0, 0); }
+  16%, 42% { transform: translate(-2.4px, -0.6px); }
+  60%, 86% { transform: translate(2.4px, -0.6px); }
+}
+
 /* --------------------------------------------------------------------------
    Anticipation and follow-through around every act (ui/maxIdle.ts).
 
