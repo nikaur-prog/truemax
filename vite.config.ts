@@ -43,6 +43,9 @@ export default defineConfig({
         // The logo pack has been sitting in public/brand since launch with
         // nothing linking to it. This is the page that hands it over.
         brand: resolve(import.meta.dirname, "brand.html"),
+        // The Creator League: creator-facing, invite-gated, and deliberately
+        // NOT importing the consumer app's engine or styles.
+        league: resolve(import.meta.dirname, "league.html"),
       },
     },
   },
