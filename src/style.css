@@ -5879,3 +5879,56 @@ select.q-input { appearance: auto; }
     -webkit-backdrop-filter: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   The protocol check-in.
+   One question, two pills, and Max's reply once it is answered. Sized as a
+   quiet inset inside his read rather than as a card of its own: it is him
+   still talking, not a form the app has interrupted him with.
+   --------------------------------------------------------------------------- */
+.protocard-slot:empty { display: none; }
+.protocard {
+  margin: 10px 0 0; padding: 12px 14px; border-radius: 12px;
+  background: var(--soft); border-left: 2px solid var(--acc);
+  animation: protocard-in .3s ease both;
+}
+@keyframes protocard-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.protocard .klabel { display: block; margin-bottom: 6px; }
+/* The judge card is the one moment the clock has been running towards, so it
+   gets the accent rather than the same grey as a week-three adherence ping. */
+.protocard-judge { border-left-color: var(--acc); background: var(--acc-soft); }
+.protocard-ask { font-size: 13.5px; line-height: 1.55; margin: 0; }
+.protocard-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.protocard-pill {
+  flex: none; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+}
+.protocard-pill:hover { border-color: var(--acc); background: var(--acc-soft); }
+.protocard-pill.pri { border-color: var(--acc); color: var(--acc); }
+/* Answered. The pills go and the reply stays — a control that vanishes on
+   touch leaves somebody unsure it registered. */
+.protocard-done { border-left-color: var(--line); background: var(--soft); }
+@media (prefers-reduced-motion: reduce) { .protocard { animation: none; } }
+
+/* "I'm going with this", on a recommendation. Sized like a quiet secondary
+   action rather than a buy button: the decision is theirs and the app should
+   not look like it is selling. The weeks label is the honest part — somebody
+   who knows going in that a retinoid needs twelve weeks does not quit at
+   week three. */
+.rec-track {
+  display: inline-flex; align-items: baseline; gap: 8px; margin-top: 10px;
+  padding: 7px 13px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+}
+.rec-track em { font-style: normal; font-weight: 500; font-size: 11px; color: var(--mut); }
+.rec-track:hover { border-color: var(--acc); background: var(--acc-soft); }
+.rec-track-on {
+  cursor: default; border-color: transparent; background: var(--soft);
+  color: var(--mut); font-weight: 500;
+}
+.rec-track-on:hover { border-color: transparent; background: var(--soft); }

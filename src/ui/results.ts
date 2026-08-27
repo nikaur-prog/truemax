@@ -20,6 +20,8 @@ import { animateMeasurement, measurementBounds, transitionMeasurement } from "./
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
+import { mountProtocolCard } from "./protocolCard.js";
+import { offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
@@ -27,7 +29,7 @@ import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
-import { EVIDENCE_LABEL, recsFor } from "../engine/recommendations.js";
+import { EVIDENCE_LABEL, RECS, recsFor } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
@@ -120,6 +122,7 @@ export function renderResults(c: Ctx): void {
   void showScalePrimer(c.report.sex);
   wireScaleNote(() => ctx?.report.sex ?? "male");
   wireMaxAsk();
+  wireRecTracking();
   // A previous report may have been left on its side photograph. main.ts has
   // already painted the new front capture; reset the cached state so this scan
   // cannot restore the previous person's canvas or stale quality chips.
@@ -908,6 +911,9 @@ function showOverall(): void {
     const card = await renderShareCard(ctx.report, photo);
     await shareCard(card, ctx.report.overall);
   };
+  // The overview carries the real delta, so a protocol coming due here can be
+  // judged against actual scan movement rather than against nothing.
+  mountProtocolIfDue(ctx?.delta ?? null);
 }
 
 // Side-profile results: same measurement language, its own report, no photo
@@ -941,6 +947,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
     </div>`;
 
   revealBars();
+  mountProtocolIfDue(null);
   wireModeSwitcher(showSide);
   wireSideNav();
 }
@@ -1215,6 +1222,22 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
 //
 // So the profile says nothing about movement rather than something untrue. The
 // front keeps the tracking line, where it is about the number directly above it.
+// Mount the check-in into whichever read was just painted.
+//
+// Called after the innerHTML rather than folded into it, because the card owns
+// its own click handlers and writes back to storage — building it as a string
+// would mean re-wiring it by hand at both call sites and getting it wrong at
+// one of them. Safe to call when there is no slot and safe to call twice: it
+// returns null unless a slot exists and is empty.
+let protocolCard: { destroy(): void } | null = null;
+function mountProtocolIfDue(delta: ScanDelta | null): void {
+  protocolCard?.destroy();
+  protocolCard = null;
+  const slot = document.querySelector<HTMLElement>("[data-protocol-slot]");
+  if (!slot || slot.childElementCount) return;
+  protocolCard = mountProtocolCard(slot, delta);
+}
+
 function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
@@ -1231,6 +1254,11 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
       <span class="klabel">COACH MAX'S READ</span>
       <p><b>${read.good}</b> ${read.work}</p>
       ${read.memory ? `<p class="maxan-track">${read.memory}</p>` : ""}
+      <!-- The protocol check-in, when there is one. Empty most of the time by
+           design: engine/protocol.ts returns nothing while a protocol is
+           waiting on a date somebody gave, inside the gap between check-ins,
+           or once it has been judged. -->
+      <div class="protocard-slot" data-protocol-slot></div>
       <p class="maxan-invite">${read.invite}</p>
       <!-- Looks like the thing it starts, rather than describing it.
            "Tap me in the corner" asked the reader to find a separate control
@@ -1257,6 +1285,35 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
 // rebuilt on every tab and depth change, so wiring this per render would stack
 // a listener each time somebody looked at their jaw.
 let maxAskBound = false;
+
+// One delegated listener for every "I'm going with this" on the page.
+//
+// Delegated rather than per-button because the plan re-renders on every tab
+// change and goal edit, and re-wiring a dozen buttons each time is how one of
+// them ends up dead.
+function wireRecTracking(): void {
+  document.addEventListener("click", (event) => {
+    const hit = (event.target as HTMLElement | null)?.closest?.("[data-track-rec]");
+    if (!(hit instanceof HTMLElement)) return;
+    const recId = hit.dataset.trackRec;
+    const rec = RECS.find((r) => r.id === recId);
+    if (!rec) return;
+    // The metric this was picked to move, so a rescan looks at the right
+    // number. Best effort: the plan is goal-ordered rather than metric-keyed,
+    // so an empty string is honest rather than a guess at the wrong metric.
+    offerProtocol(rec, "");
+    // Answer the decision immediately — they just pressed the button that IS
+    // the yes. The next question is when, which the check-in card asks.
+    const list = readProtocols();
+    const made = list.find((p) => p.recId === rec.id);
+    if (made) writeProtocols(list.map((p) => (p.id === made.id ? { ...p, status: "committed" as const } : p)));
+    hit.replaceWith(Object.assign(document.createElement("span"), {
+      className: "rec-track rec-track-on",
+      textContent: "On your list",
+    }));
+    mountProtocolIfDue(ctx?.delta ?? null);
+  });
+}
 
 function wireMaxAsk(): void {
   if (maxAskBound) return;
@@ -2109,11 +2166,40 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
         <span class="rec-what">${r.what}</span>
         <p>${r.detail}</p>
         ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
+        ${recTrackHTML(r)}
       </div>`,
         )
         .join("")}
     </div>`;
   }).join("");
+
+// "I'm going with this" — the entry point to the protocol clock.
+//
+// Deliberately on the recommendation itself rather than in a separate tracker
+// screen. The moment somebody decides to try a thing is the moment they are
+// reading about it, and asking them to go and log it somewhere else afterwards
+// is how a tracker ends up empty.
+//
+// It also states the timeline up front. Somebody who knows going in that a
+// retinoid needs twelve weeks is somebody who does not quit at week three, and
+// it is the honest thing to put next to a purchase.
+function recTrackHTML(r: { id: string; weeksToJudge?: number }): string {
+  const already = protocolFor(r.id);
+  const weeks = Math.max(4, r.weeksToJudge ?? 4);
+  if (already && already.status !== "offered") {
+    const label = already.status === "declined"
+      ? "Not for you"
+      : already.status === "judged"
+        ? "Done and dusted"
+        : already.startedAt
+          ? "Running — Max is tracking it"
+          : "On your list";
+    return `<span class="rec-track rec-track-on">${label}</span>`;
+  }
+  return `<button type="button" class="rec-track" data-track-rec="${r.id}">
+    I'm going with this<em>${weeks} weeks to know</em>
+  </button>`;
+}
 
   return `<div class="recs">
     <h4>WORTH TRYING</h4>

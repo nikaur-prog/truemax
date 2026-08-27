@@ -92,18 +92,21 @@ test("a protocol that ran its full course and did nothing is ADDED to, never rep
   const v = judge(p, T0 + 9 * WEEK, false);
   assert.equal(v.kind, "addAlongside");
   const said = verdictCopy(v);
-  // It must explicitly keep the first thing running.
-  assert.match(said, /Keep it running/i);
-  assert.match(said, /add one thing alongside/i);
-  // And must never tell them to drop it.
-  assert.doesNotMatch(said, /\b(instead of|replace|swap|stop using|drop it and)\b/i);
+  // The RULE, not the phrasing. This used to pin "Keep it running" and "add one
+  // thing alongside" as literals, so rewriting the copy into plainer speech
+  // failed a test that was never about the words. What has to hold is that the
+  // reader is told to continue, and that anything new is ADDED.
+  assert.match(said, /stay on it|keep (going|doing|it|at it)/i, "does not tell them to continue");
+  assert.match(said, /add(ing)? (one )?(more )?thing alongside|alongside it/i, "does not add alongside");
+  // And must never tell them to drop what they are doing.
+  assert.doesNotMatch(said, /\b(instead of|replace|swap|stop using|drop it|bin it)\b/i);
 });
 
 test("something that worked is left completely alone", () => {
   const p = running({ checkIns: [{ at: T0 + WEEK, using: true, noticing: null }] });
   const v = judge(p, T0 + 9 * WEEK, true);
   assert.equal(v.kind, "worked");
-  assert.match(verdictCopy(v), /Keep it exactly as it is/i);
+  assert.match(verdictCopy(v), /keep doing exactly what you're doing|keep it exactly as it is/i);
 });
 
 test("the add-on bar is eight weeks, not a few", () => {
@@ -193,4 +196,73 @@ test("the slow things are honestly slow", () => {
     const rec = byId.get(id);
     if (rec) assert.ok(rec.weeksToJudge! >= 12, `${id} judged too soon`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// The answers, and what they do to the clock.
+//
+// applyAnswer lives in the UI module but is pure and exported precisely so it
+// can be walked through the whole ladder here without a DOM. A wrong
+// transition does not throw or look broken — it silently restarts somebody's
+// eight-week clock, or starts one for a product they never bought.
+// ---------------------------------------------------------------------------
+
+test("saying yes to an offer does not start the clock", async () => {
+  const { applyAnswer } = await import("../ui/protocolCard.js");
+  const offered = running({ status: "offered", startedAt: null, startBy: null });
+  const prompt = nextPrompt(offered, T0)!;
+  const after = applyAnswer(offered, prompt, true, T0);
+  assert.equal(after.status, "committed");
+  // The whole point: agreeing to buy a thing is not the same as using it.
+  assert.equal(after.startedAt, null, "clock started on a yes");
+  assert.equal(weeksRunning(after, T0 + 9 * WEEK), null);
+});
+
+test("confirming you started is what starts the clock, from that day", async () => {
+  const { applyAnswer } = await import("../ui/protocolCard.js");
+  const waiting = running({ status: "committed", startedAt: null, startBy: T0 });
+  const prompt = nextPrompt(waiting, T0 + 2 * WEEK)!;
+  assert.equal(prompt.kind, "started");
+  const after = applyAnswer(waiting, prompt, true, T0 + 2 * WEEK);
+  assert.equal(after.status, "running");
+  // Two weeks passed between the offer and the start, and none of them count.
+  assert.equal(Math.floor(weeksRunning(after, T0 + 5 * WEEK)!), 3);
+});
+
+test("not having started yet pushes the date out rather than nagging tomorrow", async () => {
+  const { applyAnswer } = await import("../ui/protocolCard.js");
+  const waiting = running({ status: "committed", startedAt: null, startBy: T0 });
+  const after = applyAnswer(waiting, nextPrompt(waiting, T0)!, false, T0);
+  assert.equal(after.status, "committed", "status changed on a not-yet");
+  assert.equal(after.startedAt, null);
+  assert.ok(after.startBy! > T0, "did not push the date out");
+  assert.equal(nextPrompt(after, T0 + 24 * 60 * 60 * 1000), null, "asked again the next day");
+});
+
+test("falling off is recorded without ending the protocol", async () => {
+  const { applyAnswer } = await import("../ui/protocolCard.js");
+  const p = running();
+  const after = applyAnswer(p, nextPrompt(p, T0 + 2 * WEEK)!, false, T0 + 2 * WEEK);
+  assert.equal(after.status, "running", "a missed week ended the protocol");
+  assert.equal(after.checkIns[after.checkIns.length - 1]?.using, false);
+  // And the clock is untouched, so picking it back up carries on where it was.
+  assert.equal(after.startedAt, p.startedAt);
+});
+
+test("the judge answer closes the protocol and records what they saw", async () => {
+  const { applyAnswer } = await import("../ui/protocolCard.js");
+  const p = running();
+  const prompt = nextPrompt(p, T0 + 9 * WEEK)!;
+  assert.equal(prompt.kind, "judge");
+  const after = applyAnswer(p, prompt, true, T0 + 9 * WEEK);
+  assert.equal(after.status, "judged");
+  assert.equal(after.checkIns[after.checkIns.length - 1]?.noticing, true);
+  assert.equal(nextPrompt(after, T0 + 20 * WEEK), null, "kept asking after the verdict");
+});
+
+test("a start date is set from today, not from when it was offered", async () => {
+  const { answerWhen } = await import("../ui/protocolCard.js");
+  const p = running({ status: "committed", startedAt: null, startBy: null, offeredAt: T0 });
+  const after = answerWhen(p, 5, T0 + 3 * WEEK);
+  assert.ok(after.startBy! > T0 + 3 * WEEK, "date anchored to the offer rather than to now");
 });
