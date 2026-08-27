@@ -1,4 +1,4 @@
-import { currentAccessToken } from "../engine/auth.js";
+import { currentAccessToken, currentUser, getSupabaseClient } from "../engine/auth.js";
 import { loadIsAdmin } from "../engine/entitlement.js";
 
 // ---------------------------------------------------------------------------
@@ -11,15 +11,24 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 // not linked anywhere — which stops nobody the moment one clipper shares a
 // screen recording with the address bar visible.
 //
-// Gated on `app_admins` rather than a shared password, and the reasons are the
-// ones that matter operationally:
+// Two doors in, both of them rows granted by hand:
+//
+//   - `app_admins` — staff. Granted only in the SQL editor, never self-serve.
+//   - `league_creators` with status 'approved' — a Creator League member. The
+//     approval only ever happens in the League admin panel, by the founder,
+//     and RLS pins the status a person can write about themselves to
+//     'applied'. Membership IS the /quick grant: the League's whole pitch is
+//     "we hand you the tools", and this is the door those tools live behind.
+//
+// Rows rather than a shared password, for the reasons that matter
+// operationally:
 //
 //   - a password leaks the first time it is sent to somebody, and cannot be
 //     revoked for one person without changing it for everybody
-//   - a row can be added when a clipper is hired and deleted when they leave,
-//     which is the actual lifecycle this needs to model
-//   - the table already exists, /api/tts already gates on it, and the RLS
-//     policy already scopes a read to its own owner
+//   - a row can be added when a creator is approved and flipped to 'paused'
+//     when they leave, which is the actual lifecycle this needs to model
+//   - the tables already exist, /api/tts already gates on the same pair, and
+//     the RLS policies already scope a read to its own owner
 //
 // Honest about what this is: a CLIENT-side gate on a client-side tool. The
 // scanning runs in the browser, so somebody determined who already knows the
@@ -40,7 +49,28 @@ export async function allowQuickAccess(): Promise<boolean> {
   // session, which is one step for the handful of people who need it and a dead
   // end for everybody else.
   if (!token) return false;
-  return loadIsAdmin().catch(() => false);
+  if (await loadIsAdmin().catch(() => false)) return true;
+  return isApprovedCreator();
+}
+
+// The League door. Reads the caller's OWN league_creators row — the RLS
+// select policy is `auth.uid() = user_id or staff`, and the explicit eq keeps
+// this a single-row read even if that policy is ever widened. Any error is a
+// refusal: a gate that fails open is not a gate.
+async function isApprovedCreator(): Promise<boolean> {
+  try {
+    const user = await currentUser();
+    if (!user) return false;
+    const client = await getSupabaseClient();
+    const { data } = await client
+      .from("league_creators")
+      .select("status")
+      .eq("user_id", user.id)
+      .maybeSingle<{ status: string }>();
+    return data?.status === "approved";
+  } catch {
+    return false;
+  }
 }
 
 /** Replaces the page. Nothing underneath keeps running. */

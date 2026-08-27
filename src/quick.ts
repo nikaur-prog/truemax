@@ -140,6 +140,7 @@ void allowQuickAccess().then((allowed) => {
     return;
   }
   document.querySelector(".q-wrap")?.classList.remove("q-locked");
+  openFromHash();
   initLandmarker()
   .then(() => {
     el.engine.textContent = "ENGINE READY";
@@ -157,6 +158,36 @@ void allowQuickAccess().then((allowed) => {
     el.engine.classList.add("error");
   });
 });
+
+// Deep links from the League Tools page. Each pillar card over there is a
+// door into a specific room here, so a member lands in the tool they clicked
+// rather than on the menu. Unknown hashes fall through to the pillars, which
+// is where everybody else already starts.
+function openFromHash(): void {
+  const hash = location.hash.slice(1).toLowerCase();
+  if (!hash) return;
+  if (hash === "polisher" || hash === "enhance") {
+    void import("./ui/enhancePanel.js").then((m) => m.openEnhancePanel());
+    return;
+  }
+  if (hash === "cta" || hash === "reel") {
+    enterMode("reel");
+    return;
+  }
+  if (hash === "analysis") {
+    enterMode("analysis");
+    return;
+  }
+  if (hash === "clips") {
+    // The saved-face strip is the clips library. It renders async and only
+    // when it has faces, so the scroll waits a beat and lands wherever the
+    // strip is — or stays on the pillars when the library is empty.
+    window.setTimeout(() => {
+      const lib = document.getElementById("q-lib");
+      if (lib && !lib.classList.contains("hidden")) lib.scrollIntoView({ behavior: "smooth" });
+    }, 600);
+  }
+}
 
 async function loadPreviewPhoto(): Promise<void> {
   const response = await fetch("/demo/michael-b-jordan.jpg");

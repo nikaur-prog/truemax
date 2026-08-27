@@ -1,4 +1,13 @@
-import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import {
+  authenticatedUser,
+  getSupabaseAdmin,
+  json,
+  leagueRenderBudget,
+  recordLeagueRender,
+  requestOrigin,
+  safeMessage,
+  type LeagueRenderBudget,
+} from "./_shared.js";
 
 // ---------------------------------------------------------------------------
 // The voice on a rundown.
@@ -25,16 +34,22 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 //
 //   1. origin  — no cross-site use of somebody's session
 //   2. signed in
-//   3. staff   — the hard one, see below
-//   4. length  — a ceiling on the bill for any single call
+//   3. staff OR approved League creator — the hard one, see below
+//   4. quota   — a creator spends only what the owner budgeted for them
+//   5. length  — a ceiling on the bill for any single call
 //
-// The staff gate is the important one and it is deliberately stricter than the
-// rest of the product. /quick is an internal tool: the founder, one editor and
-// whoever gets hired next. It is not a customer feature, and every character
-// that passes through here costs money at a rate nobody is paying us for. An
-// endpoint that turns text into billable audio for any signed-in account is a
-// way to empty the ElevenLabs balance from a browser console. Customers get
-// scores and a plan; nobody gets a synthesiser.
+// The membership gate is the important one and it is deliberately stricter
+// than the rest of the product. /quick is the League's toolroom: the founder,
+// and the creators the founder approved BY HAND in the League admin panel.
+// It is not a customer feature, and every character that passes through here
+// costs money at a rate nobody is paying us for. An endpoint that turns text
+// into billable audio for any signed-in account is a way to empty the
+// ElevenLabs balance from a browser console. Customers get scores and a plan;
+// only the League gets a synthesiser — and each member only up to the
+// monthly_render_quota the owner set at approval, metered in
+// league_render_log after each successful render. Staff are exempt from the
+// meter: the quota bounds spending the owner did not budget, and the owner
+// spending their own money is not that.
 // ---------------------------------------------------------------------------
 
 // A full rundown measured about 1,100 characters against a real scan. Three
@@ -81,10 +96,23 @@ export async function POST(request: Request): Promise<Response> {
       .select("user_id")
       .eq("user_id", user.id)
       .maybeSingle<{ user_id: string }>();
-    // Deliberately vague to a non-staff caller. "Not found" rather than "you
-    // are not staff" — an endpoint that confirms its own existence to everyone
-    // is an invitation to keep pushing at it.
-    if (!staff) return json({ error: "Not found." }, 404);
+    // Deliberately vague to an outside caller. "Not found" rather than "you
+    // are not a member" — an endpoint that confirms its own existence to
+    // everyone is an invitation to keep pushing at it.
+    let budget: LeagueRenderBudget | null = null;
+    if (!staff) {
+      budget = await leagueRenderBudget(user.id);
+      if (!budget) return json({ error: "Not found." }, 404);
+      // Past the door, the refusal turns honest: a member over budget is told
+      // exactly that, because "not found" to somebody who rendered here
+      // yesterday reads as an outage, not a limit.
+      if (budget.used >= budget.quota) {
+        return json(
+          { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st — or ask for a raise.` },
+          429,
+        );
+      }
+    }
 
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) return json({ error: "Voiceover is not configured on this deployment." }, 503);
@@ -172,6 +200,13 @@ export async function POST(request: Request): Promise<Response> {
     if (!payload.audio_base64) {
       console.error("ElevenLabs returned no audio");
       return json({ error: "Voiceover generation failed." }, 502);
+    }
+
+    // The meter ticks only after audio actually came back — a failed upstream
+    // call must not spend a quota slot. And a failed LOG must not spend a
+    // render: the audio exists, so it ships, and the miss is logged instead.
+    if (budget) {
+      await recordLeagueRender(user.id, "tts").catch((e) => console.error("render log failed", safeMessage(e)));
     }
 
     // The alignment is passed through rather than reshaped. It is the

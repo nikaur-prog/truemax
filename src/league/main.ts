@@ -520,23 +520,74 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>`).join("")}</div>` : `<p class="lg-sub">Payouts land here once a sprint settles.</p>`}`;
   },
 
-  tools(mount, me) {
+  async tools(mount, me) {
     const granted = (id: string) => me.pillar_grants?.[id] === true;
+    // The pillars, in the order a member meets them. Each granted card is a
+    // real door: the hash tells /quick which room to open on arrival.
     const tools = [
-      { id: "cta", name: "CTA Generator", body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, ready to post.", href: "/quick" },
-      { id: "polisher", name: "The Polisher", body: "Clean up a soft clip: sharpen, colour, and a 4K upscale for the ones worth it.", href: "/quick" },
-      { id: "clips", name: "Clips Library", body: "Celebrity and demo exports to cut from.", href: "/quick" },
+      {
+        id: "cta", n: "01", name: "CTA Generator",
+        body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, voiced, ready to post.",
+        needs: "One photo · a face worth talking about", href: "/quick#cta",
+      },
+      {
+        id: "polisher", n: "02", name: "The Polisher",
+        body: "Clean up a soft clip on this device: sharpen, colour — and a 4K upscale for the ones worth it.",
+        needs: "Your clips or photos · nothing uploaded", href: "/quick#polisher",
+      },
+      {
+        id: "clips", n: "03", name: "Clips Library",
+        body: "Saved faces, celebrity references and demo exports to cut from — scored instantly, no rescan.",
+        needs: "Nothing · it's all in the library", href: "/quick#clips",
+      },
     ];
     mount.innerHTML = `<h1 class="lg-h">Tools</h1>
-      <p class="lg-sub">What you see here is what your membership includes — ${me.monthly_render_quota}
-      renders a month across the lot.</p>
-      ${tools.map((t) => `<div class="lg-card">
+      <p class="lg-sub">What you see here is what your membership includes. Renders are the
+      calls that cost us money (a voiceover, a 4K pass) — everything else is unmetered.</p>
+      <div class="lg-card" id="lg-quota-card">
+        <div class="lg-row" style="border:none;padding:0 0 8px"><h3>Renders this month</h3>
+        <b class="lg-num" id="lg-quota-num">— / ${me.monthly_render_quota}</b></div>
+        <div class="lg-bar"><i id="lg-quota-fill" style="width:0%"></i></div>
+        <div class="lg-bar-note">Resets on the 1st. Need more? Ask — quotas are set per creator.</div>
+      </div>
+      <div class="lg-tools">
+      ${tools.map((t) => `<div class="lg-card lg-tool ${granted(t.id) ? "" : "off"}">
+        <div class="lg-tool-kicker">${t.n}</div>
         <div class="lg-row" style="border:none;padding:0">
-          <div><h3>${t.name}</h3><p class="lg-sub" style="margin:4px 0 0">${t.body}</p></div>
+          <div><h3>${t.name}</h3><p class="lg-sub" style="margin:4px 0 6px">${t.body}</p>
+          <p class="lg-note" style="margin:0">${t.needs}</p></div>
           ${granted(t.id)
             ? `<a class="lg-btn pri" href="${t.href}">Open</a>`
             : `<span class="lg-chip">NOT IN YOUR PLAN</span>`}
-        </div></div>`).join("")}`;
+        </div></div>`).join("")}
+      <div class="lg-card lg-tool off">
+        <div class="lg-tool-kicker">04</div>
+        <div class="lg-row" style="border:none;padding:0">
+          <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
+          the house palette — how every TrueMax video gets its look.</p>
+          <p class="lg-note" style="margin:0">Owner-run · assets land in your pillars automatically</p></div>
+          <span class="lg-chip">OWNER ONLY</span>
+        </div></div>
+      </div>`;
+    // Own usage, via the render_log RLS (a creator reads their own rows).
+    // Loaded after paint so a slow count never blocks the cards.
+    try {
+      const client = await getSupabaseClient();
+      const now = new Date();
+      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+      const { count } = await client
+        .from("league_render_log")
+        .select("id", { count: "exact", head: true })
+        .eq("creator_id", me.user_id)
+        .gte("created_at", monthStart);
+      const used = count ?? 0;
+      const num = mount.querySelector<HTMLElement>("#lg-quota-num");
+      const fill = mount.querySelector<HTMLElement>("#lg-quota-fill");
+      if (num) num.textContent = `${used} / ${me.monthly_render_quota}`;
+      if (fill) fill.style.width = `${Math.min(100, Math.round((used / Math.max(1, me.monthly_render_quota)) * 100))}%`;
+    } catch {
+      /* the bar simply stays at the dash — usage is a nicety, not a gate */
+    }
   },
 
   async admin(mount) {
