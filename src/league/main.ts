@@ -1,6 +1,16 @@
 import { getSupabaseClient, currentUser, signIn, signUp } from "../engine/auth.js";
 import type { Tier } from "./tiers.js";
-import { DEFAULT_TIERS, earnedCents, nextTier, combineLatest, fmtMoney, fmtCount } from "./tiers.js";
+import { earnedCents, nextTier, fmtMoney, fmtCount } from "./tiers.js";
+import type { EarningsFormula, VideoTotals } from "./earnings.js";
+import {
+  DEFAULT_FORMULA,
+  creatorAccruedCents,
+  engagementFactor,
+  formulaFrom,
+  poolScale,
+  unlockProgress,
+  unlocked,
+} from "./earnings.js";
 
 // ---------------------------------------------------------------------------
 // The TrueMax Creator League — /league.
@@ -36,10 +46,14 @@ interface SprintRow {
   name: string;
   pool_cents: number;
   tiers: Tier[];
+  /** When set, the sprint pays by the continuous formula, not the ladder. */
+  formula: unknown;
   starts_at: string;
   ends_at: string;
   status: string;
 }
+
+const sprintFormula = (s: SprintRow): EarningsFormula | null => formulaFrom(s.formula);
 
 interface SubmissionRow {
   id: string;
@@ -67,6 +81,29 @@ function tierCardsHTML(tiers: readonly Tier[]): string {
     .join("")}</div>`;
 }
 
+// The formula, as four cards. Same slot the ladder used to fill — but the
+// deal it states has no cliffs: the rate, the dial, the unlock, the pay day.
+function formulaCardsHTML(f: EarningsFormula): string {
+  return `<div class="lg-tiers">
+    <div class="lg-tier">
+      <div class="lg-money">$${(f.rpmCents / 100).toFixed(2)}</div>
+      <div class="lg-tier-req">per 1,000 views — every view counts</div>
+    </div>
+    <div class="lg-tier">
+      <div class="lg-money">×${f.eMax.toFixed(1)}</div>
+      <div class="lg-tier-req">engagement multiplier — real comments raise your rate</div>
+    </div>
+    <div class="lg-tier">
+      <div class="lg-money">${fmtCount(f.thresholdViews)}</div>
+      <div class="lg-tier-req">views to unlock — then every view you already have pays</div>
+    </div>
+    <div class="lg-tier">
+      <div class="lg-money">7 days</div>
+      <div class="lg-tier-req">from sprint close to payout</div>
+    </div>
+  </div>`;
+}
+
 function topBarHTML(right = ""): string {
   return `<div class="lg-top">
     <div class="lg-mark"><img src="/brand/truemax-mark-512.png" alt="" />TRUEMAX <span class="lg-league">CREATOR LEAGUE</span></div>
@@ -83,16 +120,17 @@ function renderGate(): void {
     <span class="lg-chip ok">PAID ON VIEWS · APPLICATION ONLY</span>
     <h1>Make TrueMax videos.<br/>Get paid when they hit.</h1>
     <p class="lg-tagline">The face scan is the most filmable thing on this app. We hand you the
-    tools that make the videos, you post in your own style, and the ladder below pays on the
-    combined views across everything you post.</p>
+    tools that make the videos, you post in your own style, and every view you get is worth
+    money — a flat rate per thousand, raised by real engagement.</p>
     <div class="lg-montage">
       <!-- The montage master drops in as /league/montage.mp4 when rendered; the
            poster keeps the box honest until then. -->
       <video src="/league/montage.mp4" poster="/og.png" autoplay muted loop playsinline></video>
     </div>
-    ${tierCardsHTML(DEFAULT_TIERS)}
+    ${formulaCardsHTML(DEFAULT_FORMULA)}
     <p class="lg-note">Views and comments combine across all your TrueMax videos — every post
-    counts. Comment floors keep it human. Paid at the highest rung you reach.</p>
+    counts. No cliffs: 237k views is worth exactly what 237k views is worth. Comments are the
+    bot filter — silent view farms earn half-rate.</p>
     <ol class="lg-how">
       <li><b>Apply.</b> Two minutes — handles, niche, why you.</li>
       <li><b>Get approved.</b> Every application is reviewed by the founder. You get the tools
@@ -270,7 +308,13 @@ async function loadMySubmissions(userId: string): Promise<SubmissionRow[]> {
   return (data ?? []) as SubmissionRow[];
 }
 
-async function myTotalsFor(sprint: SprintRow, userId: string): Promise<{ views: number; comments: number }> {
+/**
+ * The latest snapshot of each of a creator's counted videos in a sprint.
+ * Per-video rather than pre-combined, because the formula computes its
+ * engagement factor per video; combining is one reduce away for callers
+ * that want totals.
+ */
+async function myVideoTotalsFor(sprint: SprintRow, userId: string): Promise<VideoTotals[]> {
   const client = await getSupabaseClient();
   const { data: subs } = await client
     .from("league_submissions")
@@ -279,20 +323,23 @@ async function myTotalsFor(sprint: SprintRow, userId: string): Promise<{ views: 
     .eq("sprint_id", sprint.id)
     .in("status", ["approved", "earning", "paid_out"]);
   const ids = (subs ?? []).map((s: { id: string }) => s.id);
-  if (!ids.length) return { views: 0, comments: 0 };
+  if (!ids.length) return [];
   const { data: snaps } = await client
     .from("league_stat_snapshots")
     .select("submission_id, at, views, comments")
     .in("submission_id", ids);
-  return combineLatest(
-    (snaps ?? []).map((s: { submission_id: string; at: string; views: number; comments: number }) => ({
-      submissionId: s.submission_id,
-      at: Date.parse(s.at),
-      views: s.views,
-      comments: s.comments,
-    })),
-  );
+  const latest = new Map<string, { at: number; views: number; comments: number }>();
+  for (const s of (snaps ?? []) as Array<{ submission_id: string; at: string; views: number; comments: number }>) {
+    const at = Date.parse(s.at);
+    const held = latest.get(s.submission_id);
+    if (!held || at > held.at) latest.set(s.submission_id, { at, views: s.views, comments: s.comments });
+  }
+  return [...latest.values()].map((v) => ({ views: v.views, comments: v.comments }));
 }
+
+const sumTotals = (videos: VideoTotals[]): { views: number; comments: number } =>
+  videos.reduce((a, v) => ({ views: a.views + v.views, comments: a.comments + v.comments }), { views: 0, comments: 0 });
+
 
 const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> | void> = {
   async overview(mount, me) {
@@ -306,15 +353,36 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       return;
     }
     const cards = await Promise.all(sprints.map(async (s) => {
-      const totals = await myTotalsFor(s, me.user_id);
-      const earned = earnedCents(s.tiers, totals);
-      const next = nextTier(s.tiers, totals);
-      return `<div class="lg-card">
-        <div class="lg-row" style="border:none;padding:0 0 8px">
+      const videos = await myVideoTotalsFor(s, me.user_id);
+      const totals = sumTotals(videos);
+      const f = sprintFormula(s);
+      const head = `<div class="lg-row" style="border:none;padding:0 0 8px">
           <h3>${esc(s.name)}</h3><span class="lg-chip ok">POOL ${fmtMoney(s.pool_cents)}</span>
         </div>
         <div class="lg-row"><span>Your combined views</span><b class="lg-num">${fmtCount(totals.views)}</b></div>
-        <div class="lg-row"><span>Your combined comments</span><b class="lg-num">${fmtCount(totals.comments)}</b></div>
+        <div class="lg-row"><span>Your combined comments</span><b class="lg-num">${fmtCount(totals.comments)}</b></div>`;
+      if (f) {
+        // The formula sprint: continuous accrual once the threshold unlocks.
+        if (!unlocked(f, totals)) {
+          const p = unlockProgress(f, totals);
+          return `<div class="lg-card">${head}
+            <div class="lg-row"><span>Earnings</span><span class="lg-chip">LOCKED</span></div>
+            <div class="lg-bar"><i style="width:${Math.round(p * 100)}%"></i></div>
+            <div class="lg-bar-note">Pay unlocks at ${fmtCount(f.thresholdViews)} views and
+            ${f.thresholdComments} comments, combined — then it counts every view you already have.</div>
+          </div>`;
+        }
+        const accrued = creatorAccruedCents(f, videos);
+        const eOverall = engagementFactor(f, totals);
+        return `<div class="lg-card">${head}
+          <div class="lg-row"><span>Accrued this sprint</span><span class="lg-money">${fmtMoney(accrued)}</span></div>
+          <div class="lg-bar-note">$${(f.rpmCents / 100).toFixed(2)} per 1,000 views ×
+          ${eOverall.toFixed(2)} engagement — locks at sprint close, paid within 7 days.</div>
+        </div>`;
+      }
+      const earned = earnedCents(s.tiers, totals);
+      const next = nextTier(s.tiers, totals);
+      return `<div class="lg-card">${head}
         <div class="lg-row"><span>Earned so far</span><span class="lg-money">${fmtMoney(earned)}</span></div>
         ${next
           ? `<div class="lg-bar"><i style="width:${Math.round(next.progress * 100)}%"></i></div>
@@ -322,7 +390,8 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           : `<div class="lg-bar-note">Top rung reached. Well played.</div>`}
       </div>`;
     }));
-    mount.innerHTML = `<h1 class="lg-h">Overview</h1>${cards.join("")}${tierCardsHTML(sprints[0].tiers)}`;
+    const explainer = sprintFormula(sprints[0]) ? formulaCardsHTML(sprintFormula(sprints[0])!) : tierCardsHTML(sprints[0].tiers);
+    mount.innerHTML = `<h1 class="lg-h">Overview</h1>${cards.join("")}${explainer}`;
   },
 
   async submit(mount, me) {
@@ -415,7 +484,33 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       .order("created_at", { ascending: false });
     const rows = (data ?? []) as Array<{ amount_cents: number; note: string | null; status: string; created_at: string }>;
     const total = rows.filter((r) => r.status === "paid").reduce((a, r) => a + r.amount_cents, 0);
+    // Live accrual for formula sprints: the number that moves between
+    // payouts, clearly marked as accruing rather than owed. Locked totals
+    // become payout rows below at sprint close.
+    const active = (await loadSprints()).filter((s) => s.status === "active" && sprintFormula(s));
+    const accrualCards = await Promise.all(active.map(async (s) => {
+      const f = sprintFormula(s)!;
+      const videos = await myVideoTotalsFor(s, me.user_id);
+      const totals = sumTotals(videos);
+      if (!unlocked(f, totals)) {
+        const p = unlockProgress(f, totals);
+        return `<div class="lg-card"><h3>${esc(s.name)}</h3>
+          <div class="lg-row"><span>Earnings</span><span class="lg-chip">LOCKED</span></div>
+          <div class="lg-bar"><i style="width:${Math.round(p * 100)}%"></i></div>
+          <div class="lg-bar-note">${fmtCount(totals.views)} / ${fmtCount(f.thresholdViews)} views ·
+          ${totals.comments} / ${f.thresholdComments} comments — cross both and every view you
+          already have starts counting.</div></div>`;
+      }
+      const accrued = creatorAccruedCents(f, videos);
+      return `<div class="lg-card"><h3>${esc(s.name)}</h3>
+        <div class="lg-row"><span>Accruing this sprint</span><span class="lg-money">${fmtMoney(accrued)}</span></div>
+        <div class="lg-bar-note">$${(f.rpmCents / 100).toFixed(2)} per 1,000 views, engagement-adjusted
+        per video. Locks from the final counts at sprint close; if the whole pool
+        (${fmtMoney(s.pool_cents)}) is oversubscribed, every payout scales by the same factor.</div>
+      </div>`;
+    }));
     mount.innerHTML = `<h1 class="lg-h">Money</h1>
+      ${accrualCards.join("")}
       <div class="lg-card"><div class="lg-row"><span>Paid out, all time</span>
       <span class="lg-money">${fmtMoney(total)}</span></div></div>
       ${rows.length ? `<div class="lg-card">${rows.map((r) => `
@@ -485,7 +580,53 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <input type="number" placeholder="comments" data-c="${s.id}" />
             <button class="lg-btn" data-snap="${s.id}">Record counts</button>
           </span>
-        </div>`).join("") || `<p class="lg-sub">Nothing waiting.</p>`}</div>`;
+        </div>`).join("") || `<p class="lg-sub">Nothing waiting.</p>`}</div>
+
+      <div class="lg-card"><h3>Settlement</h3>
+        <p class="lg-sub">Every approved creator's accrual under the sprint's formula, from the
+        latest snapshots — with the pro-rata factor if the pool is oversubscribed. The suggested
+        numbers ARE the payouts; recording them is still a decision you make per row.</p>
+        <div id="lg-settle-sprints"></div>
+        <div id="lg-settle-out"></div>
+      </div>`;
+
+    // Settlement: staff-only arithmetic over data staff can already read.
+    // Client-side on purpose — the same earnings.ts the creators' own
+    // dashboards use produces these numbers, so what a creator watched
+    // accrue all month and what settlement offers can never disagree.
+    {
+      const sprints = (await loadSprints()).filter((s) => s.status === "active" && sprintFormula(s));
+      const box = mount.querySelector<HTMLElement>("#lg-settle-sprints")!;
+      const out = mount.querySelector<HTMLElement>("#lg-settle-out")!;
+      box.innerHTML = sprints.length
+        ? sprints.map((s) => `<button class="lg-btn" data-settle="${s.id}" style="margin:6px 8px 0 0">Compute · ${esc(s.name)}</button>`).join("")
+        : `<p class="lg-sub">No active formula sprint.</p>`;
+      mount.querySelectorAll<HTMLButtonElement>("[data-settle]").forEach((b) => {
+        b.onclick = async () => {
+          const sprint = sprints.find((s) => s.id === b.dataset.settle)!;
+          const f = sprintFormula(sprint)!;
+          out.innerHTML = `<p class="lg-sub">Computing…</p>`;
+          const { data: creators } = await client
+            .from("league_creators").select("user_id, display_name, handle").eq("status", "approved");
+          const rows = await Promise.all(((creators ?? []) as CreatorRow[]).map(async (c) => {
+            const videos = await myVideoTotalsFor(sprint, c.user_id);
+            return { c, accrued: creatorAccruedCents(f, videos), totals: sumTotals(videos) };
+          }));
+          const earning = rows.filter((r) => r.accrued > 0).sort((a, b2) => b2.accrued - a.accrued);
+          const totalAccrued = earning.reduce((a, r) => a + r.accrued, 0);
+          const scale = poolScale(sprint.pool_cents, totalAccrued);
+          out.innerHTML = `
+            <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
+            <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
+            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00 — pool covers everyone" : scale.toFixed(3)}</b></div>
+            ${earning.map((r) => `<div class="lg-row">
+              <span>${esc(r.c.display_name)} <span class="lg-note">${esc(r.c.handle)} ·
+              ${fmtCount(r.totals.views)} views</span></span>
+              <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
+            </div>`).join("") || `<p class="lg-sub">Nobody over the threshold yet.</p>`}`;
+        };
+      });
+    }
 
     const refresh = () => void PAGES.admin(mount, undefined as never);
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {
