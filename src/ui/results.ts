@@ -408,6 +408,7 @@ const ACT_ICON: Record<string, string> = {
   share: `<path d="M12 15.5V4.2"/><path d="m8.2 7.6 3.8-3.4 3.8 3.4"/><path d="M5 13.5v6.3h14v-6.3"/>`,
   points: `<circle cx="7" cy="8" r="1.8"/><circle cx="17.2" cy="12" r="1.8"/><circle cx="9" cy="17.4" r="1.8"/><path d="M8.6 8.7 15.6 11M15.9 13.4 10.4 16.4" stroke-dasharray="1.6 1.8"/>`,
   copy: `<rect x="9" y="9" width="11" height="11" rx="2.4"/><path d="M15 9V6.4a2 2 0 0 0-2-2H6.4a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/>`,
+  voice: `<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v2.6"/>`,
 };
 
 function actionButton(
@@ -436,6 +437,12 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     actionButton("btn-plan", "See your plan", "plan", "support"),
     actionButton("btn-new", wantsSide ? "Start over" : "New photo", "photo", "support"),
     actionButton("btn-share", "Share card", "share", "support"),
+    // The voiced analysis: this scan as the narrated video, Coach Max's
+    // voice included. A Max-plan perk with a monthly allowance — every
+    // export is a real synthesis call — and adult-only like every Max
+    // surface. The render is the same rundown machinery the creator tools
+    // use; this button is just the member's own door to it.
+    maxAccess && adultUser ? actionButton("btn-voiced", "Voiced analysis", "voice", "support") : "",
   ].join("");
   const quiet = [
     // The front counterpart of the profile's "Re-verify the points". The
@@ -921,9 +928,71 @@ function showOverall(): void {
     const card = await renderShareCard(ctx.report, photo);
     await shareCard(card, ctx.report.overall);
   };
+  const voicedBtn = document.getElementById("btn-voiced") as HTMLButtonElement | null;
+  if (voicedBtn) voicedBtn.onclick = () => void downloadVoicedAnalysis(voicedBtn);
   // The overview carries the real delta, so a protocol coming due here can be
   // judged against actual scan movement rather than against nothing.
   mountProtocolIfDue(ctx?.delta ?? null);
+}
+
+// The member's own narrated analysis — the growth loop. Same rundown
+// machinery the creator tools use; this is just the member's door to it,
+// loaded on demand because the encoder stack has no business in the results
+// bundle for the majority who never press the button. The voiceover call is
+// metered server-side against the Max plan's monthly allowance.
+async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
+  if (!ctx || !frontPhoto) return;
+  btn.disabled = true;
+  const label = btn.querySelector("span");
+  const say = (text: string) => {
+    if (label) label.textContent = text;
+  };
+  const done = (text: string) => {
+    say(text);
+    window.setTimeout(() => {
+      say("Voiced analysis");
+      btn.disabled = false;
+    }, 2600);
+  };
+  try {
+    const [rundown, { currentAccessToken, currentUser }, { loadOnboardingProfile }, { METRICS }] = await Promise.all([
+      import("./rundownExport.js"),
+      import("../engine/auth.js"),
+      import("../engine/onboarding.js"),
+      import("../engine/metrics.js"),
+    ]);
+    const user = await currentUser().catch(() => null);
+    const profile = user ? await loadOnboardingProfile(user).catch(() => null) : null;
+    const name = ctx.subjectName || profile?.firstName || "This face";
+    // Front metrics only: the narrated constructions are the front recipes,
+    // and a merged report's side rows would be spoken over a photograph that
+    // cannot draw them. The overall spoken is still the merged number — the
+    // one the person sees on this screen.
+    const frontIds = new Set(METRICS.map((m) => m.id));
+    const report = { ...ctx.report, metrics: ctx.report.metrics.filter((m) => frontIds.has(m.def.id)) };
+    const accessToken = (await currentAccessToken().catch(() => null)) ?? undefined;
+    const result = await rundown.downloadRundownVideo(frontPhoto, ctx.landmarks, report, {
+      name,
+      accessToken,
+      onProgress: (p, stage) => say(`${stage} · ${Math.round(p * 100)}%`),
+    });
+    if (result.outcome === "cancelled") {
+      done("Not saved");
+    } else if (!result.narrated) {
+      // The one silent-failure worth naming: the render still shipped, but
+      // without the voice — usually the monthly allowance, sometimes a
+      // network blip. The video in hand is the honest report of both.
+      done("Saved — no voice (allowance?)");
+    } else {
+      done(result.outcome === "shared" ? "Sent to share sheet" : "Downloaded");
+    }
+  } catch (error) {
+    // A capture the app itself would warn about must not be published with a
+    // number on it — the same rule the creator tools enforce.
+    const blocked = error instanceof Error && error.name === "RundownBlocked";
+    done(blocked ? "Retake first — quality too low" : "Export failed");
+    if (!blocked) console.error(error);
+  }
 }
 
 // Side-profile results: same measurement language, its own report, no photo
