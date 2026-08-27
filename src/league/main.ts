@@ -1,4 +1,4 @@
-import { getSupabaseClient, currentUser, signIn, signUp } from "../engine/auth.js";
+import { getSupabaseClient, currentAccessToken, currentUser, signIn, signUp } from "../engine/auth.js";
 import type { Tier } from "./tiers.js";
 import { earnedCents, nextTier, fmtMoney, fmtCount } from "./tiers.js";
 import type { EarningsFormula, VideoTotals } from "./earnings.js";
@@ -340,6 +340,89 @@ async function myVideoTotalsFor(sprint: SprintRow, userId: string): Promise<Vide
 const sumTotals = (videos: VideoTotals[]): { views: number; comments: number } =>
   videos.reduce((a, v) => ({ views: a.views + v.views, comments: a.comments + v.comments }), { views: 0, comments: 0 });
 
+// --- TikTok link (Phase 2 tracking) -----------------------------------------
+
+/** One shape for every call to the TikTok endpoint; the server does the work. */
+async function apiTikTok<T = Record<string, unknown>>(
+  action: string,
+  extra: Record<string, unknown> = {},
+): Promise<(T & { error?: string }) | null> {
+  const token = await currentAccessToken().catch(() => null);
+  const response = await fetch("/api/tiktok-auth", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ action, ...extra }),
+  }).catch(() => null);
+  if (!response) return null;
+  return (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+}
+
+/**
+ * The link card on the Overview: connect, or show what is connected.
+ *
+ * The tokens never reach this code — the table's column grants stop even the
+ * owner's browser reading them — so everything here is display state plus
+ * calls to the server, which is the only party that talks to TikTok.
+ */
+async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> {
+  const client = await getSupabaseClient();
+  const { data } = await client
+    .from("league_tiktok_accounts")
+    .select("display_name, open_id")
+    .eq("user_id", me.user_id)
+    .maybeSingle<{ display_name: string | null; open_id: string }>();
+
+  if (!data) {
+    el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
+      <div><h3>TikTok</h3><p class="lg-sub" style="margin:4px 0 0">Link your own account and the
+      views and comments on your submitted videos count themselves — no screenshots, no waiting
+      on review day.</p></div>
+      <button class="lg-btn pri" id="lg-tt-go">Connect</button></div>
+      <p class="lg-error" id="lg-tt-err"></p>`;
+    el.querySelector<HTMLButtonElement>("#lg-tt-go")!.onclick = async () => {
+      const res = await apiTikTok<{ url: string; state: string }>("start");
+      if (res?.url && res.state) {
+        // The state is checked on the way back — a redirect carrying somebody
+        // else's code gets ignored rather than exchanged.
+        sessionStorage.setItem("lg-tt-state", res.state);
+        location.href = res.url;
+        return;
+      }
+      el.querySelector("#lg-tt-err")!.textContent = res?.error ?? "Couldn't reach TikTok just now.";
+    };
+    return;
+  }
+
+  el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
+    <div><h3>TikTok</h3><p class="lg-sub" style="margin:4px 0 0">Linked as
+    <b>${esc(data.display_name ?? "your TikTok account")}</b>. Counts on your submitted videos
+    are read from here.</p></div>
+    <span style="display:flex;gap:8px">
+      <button class="lg-btn" id="lg-tt-videos">My videos</button>
+      <button class="lg-btn danger" id="lg-tt-off">Disconnect</button>
+    </span></div>
+    <div id="lg-tt-list"></div>
+    <p class="lg-error" id="lg-tt-err"></p>`;
+  el.querySelector<HTMLButtonElement>("#lg-tt-videos")!.onclick = async () => {
+    const list = el.querySelector<HTMLElement>("#lg-tt-list")!;
+    list.innerHTML = `<p class="lg-sub">Loading…</p>`;
+    const res = await apiTikTok<{ videos: Array<{ title: string; views: number; comments: number; url: string }> }>("videos");
+    if (!res?.videos) {
+      list.innerHTML = "";
+      el.querySelector("#lg-tt-err")!.textContent = res?.error ?? "TikTok didn't answer just now.";
+      return;
+    }
+    list.innerHTML = res.videos.map((v) => `<div class="lg-row">
+      <span>${v.url ? `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title || "Untitled video")}</a>` : esc(v.title || "Untitled video")}</span>
+      <b class="lg-num">${fmtCount(v.views)} views · ${fmtCount(v.comments)} comments</b>
+    </div>`).join("") || `<p class="lg-sub">No videos on the account yet.</p>`;
+  };
+  el.querySelector<HTMLButtonElement>("#lg-tt-off")!.onclick = async () => {
+    await apiTikTok("disconnect");
+    void renderTikTokCard(el, me);
+  };
+}
+
 
 const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> | void> = {
   async overview(mount, me) {
@@ -349,7 +432,9 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       mount.innerHTML = `<h1 class="lg-h">Overview</h1>
         <div class="lg-card"><h3>No live sprint right now</h3>
         <p class="lg-sub">The next pool opens soon — anything you post in the meantime can be
-        submitted once it does.</p></div>`;
+        submitted once it does.</p></div>
+        <div class="lg-card" id="lg-tt"><p class="lg-sub">Loading…</p></div>`;
+      void renderTikTokCard(mount.querySelector<HTMLElement>("#lg-tt")!, me);
       return;
     }
     const cards = await Promise.all(sprints.map(async (s) => {
@@ -391,7 +476,9 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       </div>`;
     }));
     const explainer = sprintFormula(sprints[0]) ? formulaCardsHTML(sprintFormula(sprints[0])!) : tierCardsHTML(sprints[0].tiers);
-    mount.innerHTML = `<h1 class="lg-h">Overview</h1>${cards.join("")}${explainer}`;
+    mount.innerHTML = `<h1 class="lg-h">Overview</h1>${cards.join("")}
+      <div class="lg-card" id="lg-tt"><p class="lg-sub">Loading…</p></div>${explainer}`;
+    void renderTikTokCard(mount.querySelector<HTMLElement>("#lg-tt")!, me);
   },
 
   async submit(mount, me) {
@@ -905,6 +992,19 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
 async function boot(): Promise<void> {
   const user = await currentUser().catch(() => null);
   if (!user) return renderGate();
+
+  // Back from TikTok: the redirect lands on /league?code=…&state=…. The state
+  // must match the one this browser stashed before leaving — a redirect
+  // carrying anything else is ignored, not exchanged — and the code is spent
+  // server-side against the signed-in user before the URL is cleaned.
+  const params = new URLSearchParams(location.search);
+  const oauthCode = params.get("code");
+  if (oauthCode && params.get("state") && params.get("state") === sessionStorage.getItem("lg-tt-state")) {
+    sessionStorage.removeItem("lg-tt-state");
+    await apiTikTok("exchange", { code: oauthCode }).catch(() => null);
+    history.replaceState(null, "", location.pathname + location.hash);
+  }
+
   const client = await getSupabaseClient();
   const [{ data: me }, { data: staffRow }] = await Promise.all([
     client.from("league_creators").select("*").eq("user_id", user.id).maybeSingle(),
