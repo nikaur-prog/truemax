@@ -108,7 +108,8 @@ export function drawSideMeasurement(
   const recipe = RECIPES[metric.def.id];
   if (!recipe) return;
 
-  const lw = Math.max(1.4, w / 320);
+  // Thinner base width; strokePremium's bloom carries the presence.
+  const lw = Math.max(1.2, w / 400);
   const fs = Math.max(10, w / 34);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -129,14 +130,13 @@ export function drawSideMeasurement(
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = lw;
-    ctx.shadowColor = "rgba(0,0,0,0.55)";
-    ctx.shadowBlur = 5;
 
     if (prim.kind === "span") {
       const b = lerp(prim.a, prim.b, u);
       line(ctx, prim.a, b);
+      node(ctx, prim.a, lw);
+      node(ctx, b, lw);
       if (done) {
-        tick(ctx, prim.a, prim.b, lw);
         if (prim.label && opts.labels !== false) labelPast(ctx, prim.label, prim.a, prim.b, fs, color);
       }
     } else if (prim.kind === "angle") {
@@ -146,26 +146,27 @@ export function drawSideMeasurement(
       if (prim.label && done && opts.labels !== false) label(ctx, prim.label, prim.v, fs, color);
     } else if (prim.kind === "drop") {
       // Reference line first, faint; then the perpendicular carrying the number.
-      ctx.strokeStyle = WARM;
       const refA = lerp(prim.la, prim.lb, 0.5 - 0.6 * u);
       const refB = lerp(prim.la, prim.lb, 0.5 + 0.6 * u);
-      line(ctx, refA, refB);
+      auxLine(ctx, refA, refB);
       const f = foot(prim.p, prim.la, prim.lb);
       ctx.strokeStyle = color;
       line(ctx, f, lerp(f, prim.p, u));
+      node(ctx, f, lw);
+      node(ctx, lerp(f, prim.p, u), lw);
       if (done) {
-        tick(ctx, f, prim.p, lw);
         if (prim.label && opts.labels !== false) labelPast(ctx, prim.label, f, prim.p, fs, color);
       }
     } else {
       // Measured span, plus a dashed true-vertical through one end.
       const b = lerp(prim.a, prim.b, u);
       line(ctx, prim.a, b);
+      node(ctx, prim.a, lw);
+      node(ctx, b, lw);
       ctx.save();
-      ctx.strokeStyle = WARM;
-      ctx.setLineDash([lw * 3, lw * 3]);
+      ctx.setLineDash([lw * 2, lw * 3.4]);
       const vlen = h * 0.16 * u;
-      line(ctx, { x: prim.through.x, y: prim.through.y - vlen }, { x: prim.through.x, y: prim.through.y + vlen });
+      auxLine(ctx, { x: prim.through.x, y: prim.through.y - vlen }, { x: prim.through.x, y: prim.through.y + vlen });
       ctx.restore();
       if (prim.label && done && opts.labels !== false) labelPast(ctx, prim.label, prim.a, prim.b, fs, color);
     }
@@ -242,21 +243,63 @@ export function sideMeasurementBounds(
 
 // --- drawing primitives (pixel space) --------------------------------------
 
+// Same premium stroke grammar as measureOverlay.ts: a crisp hairline over its
+// own soft bloom, ends marked by glowing nodes instead of ruler whiskers, and
+// auxiliary guides held translucent. The two files must stay visually
+// identical — a scan whose side view draws differently from its front reads
+// as two products.
+function strokePremium(ctx: CanvasRenderingContext2D, trace: () => void): void {
+  const w0 = ctx.lineWidth;
+  const a0 = ctx.globalAlpha;
+  ctx.save();
+  ctx.shadowColor = "transparent";
+  ctx.globalAlpha = a0 * 0.16;
+  ctx.lineWidth = w0 * 3;
+  ctx.beginPath();
+  trace();
+  ctx.stroke();
+  ctx.globalAlpha = a0 * 0.92;
+  ctx.lineWidth = Math.max(0.9, w0 * 0.8);
+  ctx.shadowColor = "rgba(0,0,0,0.4)";
+  ctx.shadowBlur = 2.5;
+  ctx.beginPath();
+  trace();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function line(ctx: CanvasRenderingContext2D, a: Pt, b: Pt): void {
+  strokePremium(ctx, () => {
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  });
+}
+
+function auxLine(ctx: CanvasRenderingContext2D, a: Pt, b: Pt): void {
+  ctx.save();
+  ctx.shadowColor = "transparent";
+  ctx.globalAlpha *= 0.35;
+  ctx.lineWidth = Math.max(0.9, ctx.lineWidth * 0.8);
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
+  ctx.restore();
 }
 
-function tick(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, lw: number): void {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = (-dy / len) * lw * 3;
-  const ny = (dx / len) * lw * 3;
-  line(ctx, { x: a.x - nx, y: a.y - ny }, { x: a.x + nx, y: a.y + ny });
-  line(ctx, { x: b.x - nx, y: b.y - ny }, { x: b.x + nx, y: b.y + ny });
+function node(ctx: CanvasRenderingContext2D, p: Pt, lw: number): void {
+  const a0 = ctx.globalAlpha;
+  ctx.save();
+  ctx.shadowColor = "transparent";
+  ctx.globalAlpha = a0 * 0.22;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, lw * 3.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = a0;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, lw * 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function arc(ctx: CanvasRenderingContext2D, v: Pt, a: Pt, b: Pt, w: number, u = 1): void {
@@ -266,9 +309,7 @@ function arc(ctx: CanvasRenderingContext2D, v: Pt, a: Pt, b: Pt, w: number, u = 
   const lo = Math.min(a1, a2);
   const hi = Math.max(a1, a2);
   const t = Math.max(0, Math.min(1, u));
-  ctx.beginPath();
-  ctx.arc(v.x, v.y, r, lo, lo + (hi - lo) * t, Math.abs(a1 - a2) > Math.PI);
-  ctx.stroke();
+  strokePremium(ctx, () => ctx.arc(v.x, v.y, r, lo, lo + (hi - lo) * t, Math.abs(a1 - a2) > Math.PI));
 }
 
 // A label sat just past the far end of a segment, so the face stays visible.

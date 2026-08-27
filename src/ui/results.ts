@@ -29,7 +29,7 @@ import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
-import { EVIDENCE_LABEL, RECS, recsFor } from "../engine/recommendations.js";
+import { EVIDENCE_LABEL, RECS, recsFor, productSearchUrl } from "../engine/recommendations.js";
 import { startScanCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
@@ -2166,6 +2166,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
         <span class="rec-what">${r.what}</span>
         <p>${r.detail}</p>
         ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
+        ${productSearchUrl(r) ? `<a class="rec-find" href="${productSearchUrl(r)}" target="_blank" rel="noopener noreferrer">Find it on Google <span aria-hidden="true">↗</span></a>` : ""}
         ${recTrackHTML(r)}
       </div>`,
         )

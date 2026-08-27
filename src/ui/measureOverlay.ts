@@ -370,7 +370,9 @@ export function drawMeasurement(
     return ref;
   };
 
-  const lw = Math.max(1.4, width / 420);
+  // Thinner than it was: the premium stroke gets its presence from the bloom
+  // pass in strokePremium, not from width.
+  const lw = Math.max(1.2, width / 520);
   const fs = Math.max(9, width / 62);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -397,15 +399,16 @@ export function drawMeasurement(
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = lw;
-    ctx.shadowColor = "rgba(0,0,0,0.55)";
-    ctx.shadowBlur = 5;
 
     if (seg.kind === "span") {
       const a = P(seg.a);
       const bFull = P(seg.b);
       const b = lerp(a, bFull, u);
       line(ctx, a, b);
-      if (done) tick(ctx, a, bFull, lw);
+      // The tip carries a node as it travels; the start is marked from the
+      // first frame. A span is a reading between two points of light.
+      node(ctx, a, lw);
+      node(ctx, b, lw);
       if (seg.label && done && opts.labels !== false) {
         // Sit the label just past the line's end so the face stays visible
         const dx = bFull.x - a.x, dy = bFull.y - a.y;
@@ -442,8 +445,8 @@ export function drawMeasurement(
     } else {
       const p = P(seg.x);
       const half = (height / 2) * u;
-      ctx.setLineDash([lw * 3, lw * 3]);
-      line(ctx, { x: p.x, y: height / 2 - half }, { x: p.x, y: height / 2 + half });
+      ctx.setLineDash([lw * 2, lw * 3.4]);
+      auxLine(ctx, { x: p.x, y: height / 2 - half }, { x: p.x, y: height / 2 + half });
       ctx.setLineDash([]);
     }
   }
@@ -451,22 +454,71 @@ export function drawMeasurement(
   return true;
 }
 
+/**
+ * The premium stroke: a crisp hairline laid over its own soft bloom.
+ *
+ * One opaque line with ruler whiskers read as a school diagram; a thin,
+ * slightly translucent core floating on a wide faint halo of its own colour
+ * reads as light — an instrument, not a marker pen. Two passes over the same
+ * path: the halo carries no shadow, the core carries a whisper of dark
+ * shadow so it survives bright skin.
+ */
+function strokePremium(ctx: CanvasRenderingContext2D, trace: () => void): void {
+  const w0 = ctx.lineWidth;
+  const a0 = ctx.globalAlpha;
+  ctx.save();
+  ctx.shadowColor = "transparent";
+  ctx.globalAlpha = a0 * 0.16;
+  ctx.lineWidth = w0 * 3;
+  ctx.beginPath();
+  trace();
+  ctx.stroke();
+  ctx.globalAlpha = a0 * 0.92;
+  ctx.lineWidth = Math.max(0.9, w0 * 0.8);
+  ctx.shadowColor = "rgba(0,0,0,0.4)";
+  ctx.shadowBlur = 2.5;
+  ctx.beginPath();
+  trace();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function line(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2): void {
+  strokePremium(ctx, () => {
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  });
+}
+
+/** A faint auxiliary line — guides and verticals, never the measurement itself. */
+function auxLine(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2): void {
+  ctx.save();
+  ctx.shadowColor = "transparent";
+  ctx.globalAlpha *= 0.35;
+  ctx.lineWidth = Math.max(0.9, ctx.lineWidth * 0.8);
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
+  ctx.restore();
 }
 
-// End caps, so a span reads as a measurement rather than a stray line
-function tick(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2, lw: number): void {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = (-dy / len) * lw * 3;
-  const ny = (dx / len) * lw * 3;
-  line(ctx, { x: a.x - nx, y: a.y - ny }, { x: a.x + nx, y: a.y + ny });
-  line(ctx, { x: b.x - nx, y: b.y - ny }, { x: b.x + nx, y: b.y + ny });
+// Glowing instrument nodes where the whisker end-caps used to be. The span
+// still reads as a measurement — its ends are marked — but as a reading
+// taken between two points of light rather than a ruler laid on a face.
+function node(ctx: CanvasRenderingContext2D, p: Pt2, lw: number): void {
+  const a0 = ctx.globalAlpha;
+  ctx.save();
+  ctx.shadowColor = "transparent";
+  ctx.globalAlpha = a0 * 0.22;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, lw * 3.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = a0;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, lw * 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 // `u` sweeps the arc from its first leg toward its second.
@@ -560,9 +612,7 @@ function arc(ctx: CanvasRenderingContext2D, v: Pt2, a: Pt2, b: Pt2, width: numbe
   // thirteen pixels, obvious the moment the arc was drawn at a readable size.
   const d = interiorSweep(a1, a2);
   const t = Math.max(0, Math.min(1, u));
-  ctx.beginPath();
-  ctx.arc(v.x, v.y, r, a1, a1 + d * t, d < 0);
-  ctx.stroke();
+  strokePremium(ctx, () => ctx.arc(v.x, v.y, r, a1, a1 + d * t, d < 0));
 }
 
 // How much of the timeline is spent staggering segment starts, as opposed to

@@ -1738,6 +1738,17 @@ body.funnel-open { overflow: hidden; }
 .rec p { font-size: 13px; line-height: 1.6; color: var(--mut); margin-top: 8px; }
 .rec-caution { display: block; font-size: 11.5px; line-height: 1.55; color: var(--warm);
   background: #f8ece7; border-radius: 9px; padding: 8px 10px; margin-top: 10px; }
+/* Products only: a Google search for the generic active, never a merchant or a
+   brand. Styled as a quiet utility link, not a buy button — the evidence label
+   above it is the sell, this is just the door. */
+.rec-find {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 9px; font-size: 12px; font-weight: 600;
+  color: var(--acc); text-decoration: none;
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px;
+  transition: border-color .16s ease, background .16s ease;
+}
+.rec-find:hover { border-color: var(--acc); background: var(--acc-soft); }
 /* Evidence strength is the whole point of the section, so it is visible before
    the text is read rather than only inside it. */
 .rec.ev-strong { border-left-color: var(--up); }
