@@ -141,7 +141,9 @@ function drawScore(ctx: CanvasRenderingContext2D, w: number, h: number, local: n
     ctx.fillStyle = grad;
     ctx.fillRect(w * 0.08, y - 3, w * 0.84, 6);
   }
-  credit(ctx, w, h, a.credit);
+  // Top-left on this beat: the card draws its own footer line along the
+  // bottom, and two faint captions on one baseline read as a misprint.
+  credit(ctx, w, h, a.credit, "top");
 }
 
 // --- beat 2: the measure pass ----------------------------------------------
@@ -169,7 +171,10 @@ function drawMeasure(
   const scratch = scratchLayer(pw, ph);
   const sctx = scratch.getContext("2d")!;
   sctx.clearRect(0, 0, pw, ph);
-  drawMeasurement(scratch, a.landmarks, pw, ph, metric, seg(sub, 0.15, 0.75));
+  // Lines only, matching the scan itself: the app's measure pass stopped
+  // printing values, and the ad depicting it must not show a UI the app
+  // does not have.
+  drawMeasurement(scratch, a.landmarks, pw, ph, metric, seg(sub, 0.15, 0.75), { labels: false });
 
   const b = measurementBounds(metric, a.landmarks) ?? { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 };
   const pad = 0.16;
@@ -198,13 +203,6 @@ function drawMeasure(
   ctx.fillStyle = MUT;
   ctx.font = `500 ${Math.round(26 * u)}px ${SANS}`;
   ctx.fillText(metric.def.name.toUpperCase(), w * 0.08, h * 0.9);
-  if (sub > 0.55) {
-    ctx.fillStyle = MINT_BRIGHT;
-    ctx.font = `600 ${Math.round(44 * u)}px ${SANS}`;
-    ctx.globalAlpha = seg(sub, 0.55, 0.75);
-    ctx.fillText(`${metric.value.toFixed(metric.def.decimals ?? 2)}${metric.def.unit}`, w * 0.08, h * 0.945);
-    ctx.globalAlpha = 1;
-  }
   credit(ctx, w, h, a.credit);
 }
 
@@ -259,7 +257,8 @@ function drawCoach(ctx: CanvasRenderingContext2D, w: number, h: number, local: n
   for (let i = 0; i < COACH_LINES.length; i++) {
     if (local < starts[i]) continue;
     const line = COACH_LINES[i];
-    const typed = Math.min(line.length, Math.floor(((local - starts[i]) / 1.1) * line.length));
+    const tp = (local - starts[i]) / 1.1;
+    const typed = tp >= 1 ? line.length : Math.floor(tp * line.length);
     bubble(ctx, w, u, line.slice(0, typed), h * 0.48 + i * 150 * u, i === 0);
   }
 }
@@ -354,8 +353,8 @@ function drawProgress(ctx: CanvasRenderingContext2D, w: number, h: number, local
   // rises but no number is claimed — a fabricated delta has no place here.
   const x0 = w * 0.12;
   const x1 = w * 0.88;
-  const yBase = h * 0.55;
-  const yTop = h * 0.36;
+  const yBase = h * 0.62;
+  const yTop = h * 0.4;
   const p = seg(local, 0.2, 2.2);
   const pts = [0, 0.08, 0.1, 0.22, 0.28, 0.42, 0.55, 0.66];
   ctx.strokeStyle = "rgba(244,242,236,0.12)";
@@ -397,12 +396,25 @@ function drawProgress(ctx: CanvasRenderingContext2D, w: number, h: number, local
   ctx.textAlign = "right";
   ctx.fillText("WEEK 8", x1, yBase + 60 * u);
 
-  // Max leans in from the right edge and waves — a rock around his own base.
+  // The live end of the line, marked, so the eye lands where the story is.
+  {
+    const li = Math.min(7, Math.floor(upto));
+    const lf = Math.min(1, upto - li);
+    const lx = x0 + ((x1 - x0) * Math.min(7, upto)) / 7;
+    const ly = yBase - (yBase - yTop) * (pts[li] + ((pts[li + 1] ?? pts[7]) - pts[li]) * lf);
+    ctx.fillStyle = MINT_BRIGHT;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 8 * u, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Max peeks in from the right edge — half off-frame, like he is leaning
+  // round a door, not a sticker placed in the corner.
   if (a.maxAvatar && local > 1.2) {
     const inP = seg(local, 1.2, 1.8);
-    const size = 220 * u;
-    const mx = w * 0.98 - size * 0.62 * inP;
-    const my = h * 0.72;
+    const size = 300 * u;
+    const mx = w + size * 0.5 - size * 0.72 * inP;
+    const my = h * 0.78;
     const tilt = Math.sin((local - 1.8) * 5) * 0.08 * (local > 1.8 ? 1 : 0);
     ctx.save();
     ctx.translate(mx, my);
@@ -596,10 +608,10 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number): str
 }
 
 /** The Wikimedia credit line. Every beat the demo face appears in renders it. */
-function credit(ctx: CanvasRenderingContext2D, w: number, h: number, text: string): void {
+function credit(ctx: CanvasRenderingContext2D, w: number, h: number, text: string, at: "top" | "bottom" = "bottom"): void {
   const u = w / 1080;
   ctx.textAlign = "left";
   ctx.fillStyle = "rgba(244,242,236,0.4)";
   ctx.font = `400 ${Math.round(18 * u)}px ${SANS}`;
-  ctx.fillText(text, w * 0.04, h * 0.985);
+  ctx.fillText(text, w * 0.04, at === "top" ? h * 0.03 : h * 0.985);
 }
