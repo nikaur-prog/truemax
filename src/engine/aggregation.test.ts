@@ -1,7 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AGG_NORM } from "./aggNorm.js";
-import { tableZ, TAIL_Z_MAX, phi, probit } from "./scoring.js";
+import {
+  REGION_NAMES,
+  REGION_RELIABLE_MIN,
+  SIDE_AGG_PREFIX,
+  TAIL_Z_MAX,
+  phi,
+  probit,
+  regionIsScored,
+  tableZ,
+} from "./scoring.js";
+import { METRICS } from "./metrics.js";
+import { SIDE_METRICS } from "./sideMetrics.js";
+import { reliabilityOf } from "./reliability.js";
 
 // ---------------------------------------------------------------------------
 // The relationship between the metrics and the headline number.
@@ -162,4 +174,102 @@ test("a face at the sample maximum claims the sample-max percentile, not the 99.
 // next step.
 test("one face photographed twice scores within half a point", { todo: true }, () => {
   assert.fail("needs multi-photo fixtures through the real pipeline");
+});
+
+// ---------------------------------------------------------------------------
+// The side profile must not be scored against front tables.
+//
+// analyzeSide used to call buildReport with the bare aggregate keys, so it
+// asked AGG_NORM for `region:nose` — and got it, because that key exists. It is
+// the FRONT nose table. The side profile was therefore ranked and charted
+// against the distribution of a different measurement of a different view, and
+// the frontal and profile Nose tabs rendered the identical curve under two
+// different scores.
+//
+// normalizeAgg has always had an honest path for an aggregate with no measured
+// distribution. It was simply never reached. SIDE_AGG_PREFIX is what makes the
+// miss real, so these pin both halves: the side keys must be absent, and the
+// front keys must all still be present (if a front key ever went missing, the
+// front would silently switch to the modelled path too).
+test("every side aggregate key is absent from AGG_NORM, and every front key present", () => {
+  const pillars = ["Harmony", "Angularity", "Dimorphism", "Features"];
+  const regions = Object.keys(REGION_NAMES);
+  const frontKeys = [...pillars.map((p) => `pillar:${p}`), "overall",
+    ...regions.map((r) => `region:${r}`)];
+
+  for (const sex of ["male", "female"] as const) {
+    for (const key of frontKeys) {
+      const q = AGG_NORM[sex][key];
+      assert.ok(q && q.length >= 3,
+        `${sex}/${key} has no table — the front would fall through to the modelled path`);
+      assert.ok(!AGG_NORM[sex][`${SIDE_AGG_PREFIX}${key}`],
+        `${sex}/${SIDE_AGG_PREFIX}${key} exists — the side is back on a measured table it did not earn`);
+    }
+  }
+});
+
+// The modelled path, for an aggregate with no table.
+//
+// It used to be `SHRINK * (z - CENTRE)` applied to the raw aggregate, which is
+// a units error rather than an approximation: `z` is a weighted mean of
+// per-metric zEffs with an sd near 0.38, not a position in reference sigmas, so
+// subtracting 0.87 from it subtracts more than two of its own standard
+// deviations. Fed the male overall table's own median it returned -1.390 — the
+// median face at the 8th percentile.
+//
+// The property that has to hold is that a typical aggregate reads as typical.
+// zEff is constructed so that 0 means "ordinary closeness to the ideal", so an
+// aggregate of 0 must land at the middle of the scale, not the bottom of it.
+test("an aggregate with no measured table puts a typical face at the middle", () => {
+  // Mirrors normalizeAgg's no-table branch and aggSd. Kept in the test rather
+  // than exported, because what is being pinned is the OUTPUT property, not the
+  // formula — a different formula with the same property is a valid rewrite.
+  const RHO = 0.1;
+  const modelled = (z: number, weights: number[]): number => {
+    const kept = weights.filter((w) => w > 0);
+    const sum = kept.reduce((a, w) => a + w, 0);
+    const share = sum ? kept.reduce((a, w) => a + w * w, 0) / (sum * sum) : 1;
+    const v = 1.13 * (z / Math.sqrt(Math.max(1e-6, RHO + (1 - RHO) * share)));
+    return Math.min(TAIL_Z_MAX, Math.max(-TAIL_Z_MAX, v));
+  };
+  for (const k of [2, 3, 5, 10]) {
+    const w = Array(k).fill(0.5);
+    assert.equal(modelled(0, w), 0, `${k} metrics: a zero aggregate must be the median`);
+    assert.ok(modelled(1, w) > 0 && modelled(-1, w) < 0, `${k} metrics: sign must be preserved`);
+    // And it must stay on a human scale rather than running off the top.
+    // Capped at the same bound the measured tail uses. Without it, aggSd falls
+    // with the metric count and a good face runs off the top of the scale on a
+    // model with no reference faces behind it at all.
+    assert.ok(Math.abs(modelled(1.5, w)) <= TAIL_Z_MAX + 1e-9,
+      `${k} metrics: a good face must not exceed what the tail bound allows`);
+  }
+  // The specific regression: the old branch sent the male median to -1.39.
+  const medianOverall = AGG_NORM.male.overall[10];
+  assert.ok(1.13 * (medianOverall - 0.87) < -1.3, "sanity: the old branch really was that harsh");
+  // Tolerance, not equality: phi is an erf approximation and does not return
+  // exactly 0.5 at zero.
+  assert.ok(Math.abs(phi(modelled(0, Array(3).fill(0.5))) * 100 - 50) < 0.5,
+    "the replacement puts a typical aggregate at the 50th percentile");
+});
+
+// The region-level counterpart to isIndicative.
+//
+// Every male nose metric reproduces below RELIABLE_MIN (nasalIndex 0.00,
+// noseMouthRatio 0.11, noseIntercanthal 0.14), giving the region a weighted
+// reliability of 0.086 — so it cannot carry a score, a percentile or a curve.
+// quick.ts has said so since it shipped; the report did not.
+test("regionIsScored gates exactly the regions built from noise", () => {
+  const rel = (view: string, region: string): number => {
+    const ms = [...METRICS, ...SIDE_METRICS].filter((m) => m.region === region && m.view === view);
+    let num = 0, den = 0;
+    for (const m of ms) { num += m.weight * reliabilityOf(m.id); den += m.weight; }
+    return den > 0 ? num / den : 0;
+  };
+  const nose = rel("front", "nose");
+  assert.ok(nose < REGION_RELIABLE_MIN, `front nose reliability ${nose} should be under the bar`);
+  assert.equal(regionIsScored({ reliability: nose }), false);
+  for (const r of ["eyes", "midface", "jaw", "chin", "lips", "proportions", "symmetry"]) {
+    const v = rel("front", r);
+    assert.ok(regionIsScored({ reliability: v }), `front ${r} (${v.toFixed(3)}) should still be scored`);
+  }
 });

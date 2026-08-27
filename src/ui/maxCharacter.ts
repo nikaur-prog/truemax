@@ -236,6 +236,38 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
           <path d="M131.4 44 V30" stroke="${MINT}" stroke-width="2" stroke-linecap="round"/>
         </g>
       </g>
+      <!-- A spanner, for tinkering. He is a robot with an antenna and no
+           visible fasteners, so there is nothing on him this could plausibly
+           tighten, which is the joke. -->
+      <g class="mx-prop mx-prop-spanner">
+        <path d="M110 92 l14 14" stroke="#8b93a4" stroke-width="6" stroke-linecap="round"/>
+        <path d="M106 84 a9 9 0 1 0 9 9 l-5 -5 -4 1 -1 -4 z" fill="#b7bfcd"/>
+        <circle cx="126" cy="108" r="3.4" fill="#8b93a4"/>
+      </g>
+      <!-- A hand mirror, and the kiss that lands on it. The heart is separate
+           so it can float off on its own timing while the mirror stays put. -->
+      <g class="mx-prop mx-prop-mirror">
+        <ellipse cx="116" cy="94" rx="12" ry="14" fill="#cfe6ff" stroke="#8b93a4" stroke-width="2.6"/>
+        <ellipse cx="112.5" cy="89" rx="4" ry="5.5" fill="#ffffff" opacity=".7"/>
+        <path d="M116 108 v13" stroke="#8b93a4" stroke-width="5" stroke-linecap="round"/>
+        <path class="mx-kiss" d="M100 84 c0 -4 6 -4 6 0 c0 -4 6 -4 6 0 c0 5 -6 9 -6 9 s-6 -4 -6 -9 z" fill="#ff8fb1"/>
+      </g>
+      <!-- The floor he presses up from. Drawn rather than implied, because a
+           hovering robot doing press-ups against nothing reads as a glitch. -->
+      <g class="mx-prop mx-prop-floor">
+        <rect x="36" y="150" width="78" height="4" rx="2" fill="#1d2a44" opacity=".55"/>
+        <path class="mx-sweat" d="M110 62 c0 0 5 7 5 10 a5 5 0 0 1 -10 0 c0 -3 5 -10 5 -10 z" fill="#7fd7ff"/>
+      </g>
+      <!-- Thought bubble for the thinking act. Distinct from .mx-thought,
+           which is the messenger-dots bubble the chat uses while a real reply
+           is in flight — this one is a daydream, not a status. -->
+      <g class="mx-prop mx-prop-idea">
+        <circle cx="112" cy="44" r="11" fill="#ffffff" opacity=".92"/>
+        <circle cx="124" cy="56" r="4.2" fill="#ffffff" opacity=".92"/>
+        <circle cx="130" cy="64" r="2.4" fill="#ffffff" opacity=".92"/>
+        <path d="M108 46 q4 -8 8 -3 t-4 6 v2" fill="none" stroke="#7b8598" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="112" cy="51.5" r="1.5" fill="#7b8598"/>
+      </g>
     </g>
   </svg>`;
 }
@@ -255,9 +287,13 @@ export function maxStickerMarkup(): string {
         `<path d="M${x} ${y} l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3 z" class="mx-spark" style="--si:${i}" fill="currentColor"/>`,
     )
     .join("");
+  // Not waving. The sticker mounts wherever it is placed, so `waving: true`
+  // meant an arm went up every time one appeared on screen — a greeting nobody
+  // triggered, which is the definition of the tic greet() caps at two. He
+  // arrives at rest and gets on with the idle repertoire.
   return `<span class="max-sticker" aria-hidden="true">
     <svg viewBox="0 0 144 112" class="max-sticker-sparks">${sparks}</svg>
-    ${maxCharacterMarkup({ waving: true })}
+    ${maxCharacterMarkup()}
   </span>`;
 }
 

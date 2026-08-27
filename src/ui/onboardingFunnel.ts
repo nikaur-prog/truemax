@@ -228,14 +228,66 @@ export async function openTrialFunnel(
   // that cannot succeed.
   locked = required && !preview;
 
-  // The scripted demo conversation. One question, one answer, written here
-  // rather than generated: this is a demonstration of what the paid product
-  // FEELS like on the screen where the money is asked for, and a demonstration
-  // must be identical for everybody, cost nothing, and never surprise anyone.
-  // The question arrives from the person's side of the chat, Max visibly
-  // thinks about it — messenger dots, thinking face — and the answer types
-  // itself out while his mouth runs. Runs once; a demo that loops on a
-  // payment screen becomes a screensaver.
+  // The scripted demo conversation. Written here rather than generated: this
+  // is a demonstration of what the paid product FEELS like on the screen where
+  // the money is asked for, so it must cost nothing, never fail, and never
+  // surprise anyone. The question arrives from the person's side of the chat,
+  // Max visibly thinks about it — messenger dots, thinking face — and the
+  // answer types itself out while his mouth runs. Runs once; a demo that loops
+  // on a payment screen becomes a screensaver.
+  //
+  // One exchange for a long time, which is one exchange too few. People reach
+  // this screen more than once — they close it, scan again, come back — and a
+  // scripted conversation that replays word for word stops being a
+  // demonstration the second time and becomes an advert they have already
+  // seen. Worse, a single question can only answer a single objection, and the
+  // objections that actually stop someone here are different from each other:
+  // can it fix THIS, will it be honest with me, what if nothing moves.
+  //
+  // So there is a set, and one is drawn per open. Every answer has to survive
+  // being read by somebody who then buys — nothing here may promise a number
+  // will move, or claim the engine measures something it does not. The
+  // constraints are the same ones the report copy works under, because a
+  // promise made on the payment screen is the one people hold you to.
+  const DEMO_EXCHANGES: ReadonlyArray<{ ask: string; lead: string; body: string }> = [
+    {
+      ask: "Real talk, can you actually fix my jawline?",
+      lead: "If it's soft tissue, yes.",
+      body:
+        "Your scan tells me exactly which numbers are holding it back. I build your weekly routine around them, and every rescan I tell you straight whether it moved. If it stalls, I rebuild the plan.",
+    },
+    {
+      ask: "My skin is the main thing. Is that even in here?",
+      lead: "It is, and it's the part that moves fastest.",
+      body:
+        "Skin is the one area where weeks of consistent work show up as a visibly different photograph. I read what your scan found, build the routine around it, and keep the plan boring on purpose — the products that work are cheap and the results come from not skipping.",
+    },
+    {
+      ask: "What if I do everything and the number doesn't move?",
+      lead: "Then I tell you that, and we change the plan.",
+      body:
+        "Two photos of the same unchanged face already differ by about half a point, so I won't call noise a win to keep you subscribed. If a real rescan comes back flat after a fair run at it, that's information about the plan, not about you.",
+    },
+    {
+      ask: "Is this just going to tell me what I want to hear?",
+      lead: "No, and you can check that.",
+      body:
+        "Every number on your report shows its working — the measurement, the average it's compared against, and whether it's reliable enough to be scored at all. The ones that aren't get marked and given no weight. A tool that flattered you would hide that column, not print it.",
+    },
+    {
+      ask: "How is a photo supposed to know anything about my face?",
+      lead: "It measures, it doesn't guess.",
+      body:
+        "The mesh puts a few hundred points on your face and I read proportions off them — spacing, angles, ratios. That's geometry, and it's repeatable. What it can't see is the things a photograph doesn't contain, which is why the report tells you when a number is indicative rather than scored.",
+    },
+    {
+      ask: "How long before I actually see something?",
+      lead: "Depends entirely which lever you pull.",
+      body:
+        "Skin and body composition move in weeks. Hair moves in months. Bone doesn't move at all, and I'll say so rather than sell you a routine for it. Your plan is ordered by what's actually movable on your face, so the early weeks are spent where the return is.",
+    },
+  ];
+
   let demoRan = false;
   const runMaxDemo = () => {
     if (demoRan || !alive()) return;
@@ -248,9 +300,13 @@ export async function openTrialFunnel(
     // answering a question face-down would be committing to the bit too hard.
     svg.classList.remove("mx-down", "mx-shock");
 
+    // Drawn per open rather than rotated in order, because the order would be
+    // per page load and everybody would see the same first one anyway.
+    const exchange = DEMO_EXCHANGES[Math.floor(Math.random() * DEMO_EXCHANGES.length)]!;
+
     const ask = document.createElement("div");
     ask.className = "max-ask";
-    ask.textContent = "Real talk, can you actually fix my jawline?";
+    ask.textContent = exchange.ask;
     feed.insertBefore(ask, say);
     ask.classList.add("show");
 
@@ -269,8 +325,7 @@ export async function openTrialFunnel(
         say.classList.remove("pondering");
         svg.classList.remove("mx-mood-thinking");
         svg.classList.add("mx-mood-happy");
-        say.innerHTML =
-          "<p><b>If it's soft tissue, yes.</b> Your scan tells me exactly which numbers are holding it back. I build your weekly routine around them, and every rescan I tell you straight whether it moved. If it stalls, I rebuild the plan.</p>";
+        say.innerHTML = `<p><b>${exchange.lead}</b> ${exchange.body}</p>`;
         typewriteBlock(say);
         svg.classList.add("speaking");
         window.setTimeout(() => svg.classList.remove("speaking"), 5600);

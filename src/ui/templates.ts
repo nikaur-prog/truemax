@@ -1,7 +1,7 @@
-import type { RegionScore, ScoredMetric, Sex } from "../engine/types.js";
-import { REGION_NAMES } from "../engine/scoring.js";
+import type { RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
+import { REGION_NAMES, regionIsScored } from "../engine/scoring.js";
 import { distFor } from "../engine/metrics.js";
-import { statedPct } from "../engine/precision.js";
+import { REFERENCE_N as ENGINE_REFERENCE_N, statedPct } from "../engine/precision.js";
 import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
 import { DISPLAY_NOISE } from "../engine/history.js";
@@ -126,30 +126,78 @@ function fmtMean(m: ScoredMetric, sex: Sex): string {
   return `${distFor(m.def, sex).mean.toFixed(m.def.decimals)}${m.def.unit}`;
 }
 
-function ordinal(n: number): string {
-  const r = Math.round(n);
-  if (r % 100 >= 11 && r % 100 <= 13) return `${r}th`;
-  switch (r % 10) {
-    case 1: return `${r}st`;
-    case 2: return `${r}nd`;
-    case 3: return `${r}rd`;
-    default: return `${r}th`;
-  }
-}
-
 const sexNoun = (sex: Sex) => (sex === "male" ? "male" : "female");
 
-// Region summary: strongest metric, weakest metric, rarity — 3 sentences,
-// each anchored to a computed number.
+// ---------------------------------------------------------------------------
+// What a coach would actually say.
+//
+// This used to read: "Midline deviation is the anchor here, at 0.5% eye-span
+// against a male average of 1.6%, which lands in the top 15%. The drag is
+// eye-line / mouth-line skew. Net position: 6.2/10." Every number in it is
+// right and nobody talks like that. "Anchor", "drag" and "net position" are
+// analyst words — they describe the reader's face the way a report describes a
+// portfolio, and on a screen where somebody has just handed over a photograph
+// of themselves that distance reads as a machine grading them.
+//
+// So the shape stays and the voice changes. Same three jobs, same numbers, in
+// the order a person would say them: here is what is genuinely good, here is
+// the one to work on, here is where that leaves you. Nothing is softened and
+// nothing is added — a warmer sentence carrying a worse number would be the
+// flattery this whole product refuses.
+//
+// The greeting is gendered because a coach's is. It costs nothing, it is the
+// difference between a tool and somebody in your corner, and it is the thing
+// people quote back when they like an app. Used ONCE, at the top, and drawn
+// from a pool: "bro" on every tab of every scan stops being warmth and starts
+// being a verbal tic, which is the same failure Max's wave had.
+//
+// Deterministic, not random. The region name picks the opener, so the Eyes tab
+// says the same thing every time you open it — a line that reshuffles under a
+// typewriter effect on re-render looks like a glitch, and two people comparing
+// screenshots of the same face should see the same words.
+// ---------------------------------------------------------------------------
+const OPENERS: Record<Sex, readonly string[]> = {
+  male: ["Alright man", "Good news first, bro", "Straight up, dude", "Right then, man", "Listen, bro"],
+  female: ["Alright queen", "Good news first, girl", "Straight up, girl", "Right then, you", "Listen, queen"],
+};
+
+function opener(region: string, sex: Sex): string {
+  const pool = OPENERS[sex];
+  let h = 0;
+  for (let i = 0; i < region.length; i++) h = (h * 31 + region.charCodeAt(i)) >>> 0;
+  return pool[h % pool.length]!;
+}
+
+// "top 15%" reads as a rank. "ahead of 85 in every 100 guys" reads as a room
+// you are standing in. Same fact; the second one is the one a coach says.
+//
+// "in every 100" rather than "out of 100" because the sentence has to survive
+// the number being 1: "only 1 out of 100 guys sit below you" is broken, and
+// "1 in every 100 guys is below you" is not.
+const peers = (sex: Sex) => (sex === "male" ? "guys" : "women");
+
+function aheadOf(pct: number, sex: Sex): string {
+  const beaten = Math.max(1, Math.min(99, Math.round(pct)));
+  return `ahead of ${beaten} in every 100 ${peers(sex)}`;
+}
+
+function behindYou(pct: number, sex: Sex): string {
+  const below = Math.max(1, Math.min(99, Math.round(pct)));
+  return below === 1
+    ? `only 1 ${sex === "male" ? "guy" : "woman"} in every 100 is below you there`
+    : `only ${below} in every 100 ${peers(sex)} are below you there`;
+}
+
 export function regionSummary(r: RegionScore, sex: Sex): string {
   // Only what was actually read. An unmeasured metric has a NaN z, which sorts
   // unpredictably and can land at either end — so the sentence would name the
-  // one measurement that does not exist as the region's anchor or its drag, and
-  // print an em dash and an "NaNth percentile" alongside it.
+  // one measurement that does not exist as the region's best or its weakest,
+  // and print an em dash and an "NaNth percentile" alongside it.
   const sorted = r.metrics.filter(wasMeasured).sort((a, b) => b.zEff - a.zEff);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
   const name = REGION_NAMES[r.region].toLowerCase();
+  const hi = opener(r.region, sex);
   // A region CAN now arrive with nothing in it: measurements that failed are
   // dropped from the report rather than carried as undefined (see
   // scoreFrontSet), and the side view scores no metric at all in some regions.
@@ -157,25 +205,44 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
   // took the Midface tab out, one line further along, so it is answered here
   // rather than left to be discovered.
   if (!best || !worst) {
-    return `Nothing in the ${name} could be measured on this photograph, so this region is not scored. It is excluded from the total rather than counted as a zero.`;
+    return `${hi}. I couldn't get a clean read on your ${name} from this photograph, so I'm not scoring it. It sits out of your total rather than counting against you. Worth a rescan in better light.`;
   }
 
-  let s1: string;
-  if (best.percentile >= 55) {
-    s1 = `${best.def.name} is the anchor here, at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which lands in the top ${Math.max(1, Math.round(100 - best.percentile))}%. It measures ${traitOf(best.def.id)}.`;
-  } else {
-    s1 = `Nothing in this region carries hard: even ${best.def.name.toLowerCase()} only reaches the ${ordinal(best.percentile)} percentile at ${fmt(best)} (${sexNoun(sex)} average ${fmtMean(best, sex)}).`;
-  }
+  // What is good. Named, with the number, and with what it actually means —
+  // praise that does not say what it is praising is worth nothing.
+  const s1 = best.percentile >= 55
+    ? `${hi}. Your ${best.def.name.toLowerCase()} is carrying this one. ${fmt(best)} where the ${sexNoun(sex)} average is ${fmtMean(best, sex)}, which puts you ${aheadOf(best.percentile, sex)}. That's ${traitOf(best.def.id)}, and yours is genuinely good.`
+    : `${hi}. I'm not going to pretend anything in your ${name} is doing heavy lifting. The best of it is ${best.def.name.toLowerCase()} at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which is about the middle of the room.`;
 
-  const s2 =
-    worst.percentile < 45
-      ? `The drag is ${worst.def.name.toLowerCase()} at ${fmt(worst)}, the ${ordinal(worst.percentile)} percentile against the ${fmtMean(worst, sex)} norm. That one is ${traitOf(worst.def.id)}.`
-      : `Even the weakest number here, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, holds the ${ordinal(worst.percentile)} percentile.`;
+  // What to work on. Said outright, with the number, no cushioning — the warm
+  // opener exists so that this sentence can afford to be blunt.
+  //
+  // Except where the region has no score, and this is the part that was wrong
+  // the first time round: naming "the one to work on" and then explaining two
+  // sentences later that nothing here can be measured reliably is the product
+  // contradicting itself inside one paragraph. If the numbers do not hold
+  // still, neither does the ranking that picked a worst one, so there is no
+  // honest target to hand somebody.
+  const scored = regionIsScored(r);
+  const s2 = !scored
+    ? `I'm not going to point you at one of these to fix, either.`
+    : worst.percentile < 45
+      ? `The one to go at is your ${worst.def.name.toLowerCase()}: ${fmt(worst)} against ${fmtMean(worst, sex)}, and ${behindYou(worst.percentile, sex)}. That one's ${traitOf(worst.def.id)}.`
+      : `Nothing here is really letting you down. Even your weakest number, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, is holding its own.`;
 
-  const s3 =
-    r.percentile >= 50
-      ? `Net position: ${r.score.toFixed(1)}/10, meaning roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well across the ${name}.`
-      : `Net position: ${r.score.toFixed(1)}/10. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces score higher here, and the gap is specific, not vague.`;
+  // Where that leaves you.
+  //
+  // A region whose measurements do not reproduce gets no position at all. The
+  // sentence above is still worth saying — it reports what was read on this
+  // photograph, which is true — but a placement is a claim about other people,
+  // and a claim needs a measurement that holds still. When every metric in a
+  // region wanders as much between two photos of one face as between two
+  // faces, the ranking is a ranking of the lighting.
+  const s3 = !scored
+    ? `Here's why: every measurement in your ${name} moves about as much between two photos of the same face as it does between two different people. There's nothing steady enough there to rank, so I'm not giving it a score and I'm keeping it out of your total. You still get the readings.`
+    : r.percentile >= 50
+      ? `All in, that's ${r.score.toFixed(1)} out of 10 across the ${name}. Roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well.`
+      : `All in, ${r.score.toFixed(1)} out of 10 across the ${name}. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces come in above you, and you now know the exact number standing in the way. Most people never get told that.`;
 
   return `${s1} ${s2} ${s3}`;
 }
@@ -191,7 +258,12 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
 // shows users "Top 0.01% · 1 in 8.35k", which would need something like a
 // hundred thousand measured faces to mean anything. Being the product that
 // doesn't do that is the entire positioning, and it costs nothing to be right.
-const REFERENCE_N = 110;
+// One constant, imported rather than restated. This file had its own
+// `REFERENCE_N = 110` while precision.ts exported 100, so the cap on how rare a
+// thing may be called and the disclosure of what it was measured against
+// disagreed by ten faces — two numbers describing one sample, drifting apart
+// exactly the way precision.ts's own comment says they must not.
+const REFERENCE_N = ENGINE_REFERENCE_N;
 
 export function rarityN(pct: number): number {
   return Math.max(2, Math.min(REFERENCE_N, Math.round(1 / Math.max(0.001, 1 - pct / 100))));
@@ -281,6 +353,133 @@ export function deltaReadingCopy(d: ScanDelta): string {
 }
 
 const DELTA_SD = DISPLAY_NOISE.toFixed(1);
+
+// ---------------------------------------------------------------------------
+// Coach Max's read, and the part of it that has a memory.
+//
+// The old version said: "Best thing on the scan: eyes, top 15% of the
+// reference set. The one I would attack first: brow tilt. Cut body fat is the
+// LEVER, and it MOVES WITHOUT SURGERY." Two pieces of jargon in one sentence,
+// neither of which anybody says out loud, on the tab that is supposed to be a
+// coach talking rather than a report printing.
+//
+// It also had no memory worth the name. It printed a delta and stopped, which
+// is a measurement, not coaching. A coach who has been working with you for a
+// month opens with whether the work is showing, and if it is, wants to know
+// what you actually did.
+//
+// THE HONESTY PROBLEM, and it is the whole design here. The obvious version
+// congratulates anybody whose number went up. That is the exact sale this
+// product exists not to make: two photographs of one unchanged face differ by
+// about 0.6 points, so most "improvement" is the camera. history.ts already
+// grades every delta as noise / tooSoon / worthNoting against that spread, and
+// this copy is built on that grade rather than on the sign of the number.
+//
+// So even when a rise IS outside capture spread, Max does not simply take
+// credit for it. He says it looks real, and then asks whether they have
+// actually been doing the work, for two reasons that are both honest: it is
+// the only way to tell a working routine from a flattering month, and the
+// answer is the single most useful thing anybody could tell him. When the
+// number has NOT moved he asks the same question, because "are you doing it"
+// has to be asked in both directions or it is not a question, it is a
+// congratulation with a question mark on it.
+// ---------------------------------------------------------------------------
+
+// Long enough for a routine to have shown up in a face. Skin and composition
+// move over weeks; below this the honest read is "too early to tell" however
+// the number went.
+const ROUTINE_DAYS = 21;
+
+function memoryLine(delta: ScanDelta, sex: Sex): string {
+  const you = sex === "male" ? "bro" : "girl";
+  const size = Math.abs(delta.overall).toFixed(1);
+  // Against the running average where there is one. One prior scan can be an
+  // outlier; the mean of several cannot, and "where you usually land" is the
+  // more honest comparison against a noisy instrument.
+  const trend = delta.vsAverage != null && delta.averageOf >= 2
+    ? ` You're ${Math.abs(delta.vsAverage).toFixed(1)} ${delta.vsAverage > 0 ? "above" : "below"} your own average of the last ${delta.averageOf}, which is the number I actually watch.`
+    : "";
+
+  if (delta.reading === "tooSoon") {
+    return `You rescanned after ${delta.daysAgo} ${delta.daysAgo === 1 ? "day" : "days"}. A face doesn't restructure that fast, so I'm reading that swing as the two photographs differing, not you. Same light, same distance, same time of day, and I'll have something worth telling you.`;
+  }
+  if (delta.reading === "noise") {
+    return `Flat since last time, and flat is not the same as failing. Anything under ${DELTA_SD} points is the camera rather than your face, so this reads as no change either way.${trend} What I do want to know: have you actually been running what I gave you? Tell me straight either way. If you have, I'll stop guessing and start tightening it. If you haven't, that's the whole explanation and no drama.`;
+  }
+  // worthNoting: outside capture spread, so it is worth saying out loud.
+  if (delta.overall > 0) {
+    const earned = delta.daysAgo >= ROUTINE_DAYS
+      ? `${size} up over ${delta.daysAgo} days, ${you}, and that's past what the camera can fake. That's the look of somebody who actually did the thing instead of just reading about it. Respect.`
+      : `${size} up in ${delta.daysAgo} days, and that clears the noise floor, which most weeks don't.`;
+    return `${earned}${trend} Do me a favour though: tell me what you've actually been doing. I want to know whether this is the routine landing or just a good month, because those two look identical from here and only one of them is worth doubling down on.`;
+  }
+  return `${size} down since last time, and that's past what I can blame on the camera.${trend} Before either of us reads anything into it: have you been running the plan? No judgement, I'd genuinely rather know. If you have, then it's the plan that's wrong and I'll rebuild it. If you haven't, we start there instead of changing something that never got a fair go.`;
+}
+
+export interface CoachRead {
+  good: string;
+  work: string;
+  memory: string;
+  invite: string;
+}
+
+export function coachRead(
+  r: Report,
+  delta: ScanDelta | null,
+  opts: { guestName?: string; scope: "front" | "side" } = { scope: "front" },
+): CoachRead {
+  const sex = r.sex;
+  const hi = opener("coach", sex);
+  const peer = sex === "male" ? "guys" : "women";
+
+  // What is noticeably standing out. Region-level, because that is the unit a
+  // person recognises in a mirror.
+  const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
+  const best = regions[0];
+  // "Standout" has to earn the word. The best region of a face can still sit
+  // below average, and calling a 45th-percentile nose "the part doing the most
+  // for you" is praise the number does not support — the same trap the region
+  // summary gates at 55. Below the bar he says so and moves to the fixable
+  // thing, which is the useful half anyway.
+  const good = !best
+    ? `${hi}. Not much to go on from this scan.`
+    : best.percentile >= 55
+      ? `${hi}. Your ${REGION_NAMES[best.region].toLowerCase()} is the standout on this scan, sitting ahead of ${Math.max(1, Math.min(99, Math.round(best.percentile)))} in every 100 ${peer}. That's the part of your face doing the most for you, so don't go changing it.`
+      : `${hi}. Straight answer: nothing on this scan is jumping out as a strength yet. Your best region is your ${REGION_NAMES[best.region].toLowerCase()} and even that lands mid-pack. That's not a write-off, it just means the wins here come from work rather than from something you were born with.`;
+
+  // What is noticeably poor, restricted to things that can actually move. No
+  // "lever", no "moves without surgery": naming a fixable thing and then
+  // offering to fix it says the same thing without the vocabulary.
+  const fixables = r.metrics
+    .filter((m) => m.def.fixability >= 0.3)
+    .sort((a, b) => a.zEff - b.zEff);
+  const weakest = fixables[0];
+  const work = weakest
+    ? `The one holding you back most is your ${weakest.def.name.toLowerCase()}, reading ${fmt(weakest)}. Good news is it's one of the ones that actually shifts with what you do day to day, so it's worth your attention rather than your worry.`
+    : "";
+
+  const memory = opts.scope === "side"
+    ? ""
+    : opts.guestName
+      ? `This one's ${escapeForCopy(opts.guestName)}'s scan, so I'm keeping it as its own record. It stays off your history, your average and your trend.`
+      : delta
+        ? memoryLine(delta, sex)
+        : `First scan on record, so there's nothing to compare it to yet. Scan again in a few weeks and I'll be able to tell you whether anything you're doing is working, which is the part that actually matters.`;
+
+  const invite = weakest
+    ? `Want me to tell you exactly what to use on that ${weakest.def.name.toLowerCase()}? Ask me and I'll give you the products, the order, and roughly how long before it shows up in a scan.`
+    : `Ask me anything off this scan and I'll tell you what I'd actually do about it, products included.`;
+
+  return { good, work, memory, invite };
+}
+
+// Names come from a user-controlled field and land in innerHTML. results.ts
+// has its own escaper for exactly this, but coachRead is built here and the
+// caller should not have to remember which of its four strings needs treating.
+function escapeForCopy(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
 
 // ---------------------------------------------------------------------------
 // Improvement plan copy — non-surgical levers only, each tied to the actual

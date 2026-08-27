@@ -157,21 +157,54 @@ export function spreadLine(sex: Sex): string {
 // set does not have. Above the 99th percentile the honest statement is "rarer
 // than 1 in 100, and this sample cannot tell you how much rarer".
 //
-// `capped` marks that rung so the UI renders it as a bound rather than a
-// count. Deriving it here rather than hardcoding the top score means that if
-// REFERENCE_N ever grows and statedPct earns another digit, the ladder gains
-// a real rung instead of silently keeping a stale ceiling.
 // `capped` marks a rung the reference sample cannot resolve past — the honest
 // reading is a bound rather than a count. That much is right and is why the
 // flag exists.
 //
-// What it does NOT license is a bound in the flattering direction. An 8.0 sits
-// at the 98.90th percentile, which is about 1 in 91 — slightly MORE common than
-// one in a hundred. The rung was rendered as "rarer than 1 in 100", turning a
-// rounding step into a claim stronger than the measurement, on the one number
-// people screenshot. Every other guard in this file rounds away from flattering
-// the reader; this one rounded toward it. The wording is fixed where it is
-// rendered, in scaleNote.ts, rather than by moving the cap.
+// What it does NOT license is a bound in the flattering direction, and for a
+// long time every rung here leaned that way. The ladder was built on `oneInN`,
+// which reads the STATED percentile — rounded to the nearest five, because a
+// report has to quote the same figure as the chip beside it. On a report that
+// is correct. On this ladder there is no chip beside it, and the rounding was
+// pure inflation:
+//
+//   score   true percentile   true 1-in-N   was shown as
+//     6.0        77.90            4.5          1 in 5
+//     7.0        93.80           16.1          1 in 20
+//     8.0        98.90           90.9          1 in 100
+//
+// Three rungs, all overstated, all in the direction that makes a reader's
+// score look rarer than it is — on the one screen whose entire job is telling
+// them what the number is worth. The 8.0 rung was the worst of it: the comment
+// that used to sit here already recorded that 1 in 91 was being printed as
+// 1 in 100, and the fix went into the WORDING while the number stayed. The
+// prose two paragraphs below it in the primer said "around one in ninety" at
+// the same time, so one card showed the same fact as both 90 and 100.
+//
+// The floored raw values were tried and reverted, on purpose and on request.
+// They read 1 in 2 / 4 / 16 / 90, which is more accurate and materially harder
+// to hold in your head — and this ladder exists to be understood in thirty
+// seconds by somebody who has just been handed a number about their face. A
+// rung nobody parses teaches nothing, however correct it is.
+//
+// So it is back on `oneInN`, which reads the STATED percentile and therefore
+// lands on round numbers: 2, 5, 20, 100. The overstatement is real and small —
+// an 8.0 is about 1 in 91 and is shown as 1 in 100 — and it is bounded by the
+// same five-point rounding every percentile on every screen already uses, so
+// the ladder now agrees with the rest of the product rather than being the one
+// place quoting a sharper figure.
+//
+// What does NOT come back is the contradiction. The prose beside the ladder
+// used to hardcode "around one in ninety" next to a rung reading 1 in 100 —
+// one card, one fact, two numbers. scaleNote reads its figures out of LADDER
+// now, so whatever this returns is what the sentence says.
+//
+// `capped` still marks where statedPct clamps, which is the point past which
+// the product stops quoting counts at all — 8 is where we stop counting, not
+// where the faces stop. On the raw curve a 9 is about 1 in 1000, and a
+// hundred-odd reference faces per sex cannot support three digits of
+// resolution. Derived rather than hardcoded, so a larger reference set grows
+// the ladder a real rung instead of keeping a stale ceiling.
 export const LADDER: Array<{ score: number; oneIn: number; capped: boolean }> = [5, 6, 7, 8].map(
   (score) => {
     const pct = aggregateScoreToPercentile(score);

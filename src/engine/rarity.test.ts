@@ -59,17 +59,46 @@ test("the ladder gets steeper going up and is strictly ordered", () => {
 });
 
 test("the ladder stops claiming counts where the sample runs out", () => {
-  // The rung at the top must be flagged as a bound, not a count. On the raw
-  // curve an 8 is about 1 in 91 and a 9 about 1 in 1000, but statedPct clamps
-  // at 99, so anything up there can only honestly be called "rarer than 1 in
-  // 100". A ladder that printed "1 in 1000" would be claiming three digits of
-  // resolution off roughly a hundred reference faces.
+  // The rung at the top must be flagged as the place the product stops quoting
+  // counts. On the raw curve a 9 is about 1 in 1000, and roughly a hundred
+  // reference faces per sex cannot support three digits of resolution — so 8 is
+  // where we stop counting, not where the faces stop.
   const top = LADDER[LADDER.length - 1];
   assert.ok(top.capped, `top rung ${top.score} should be capped`);
+  // It used to assert oneIn === 100 here, which pinned the wrong number: an 8.0
+  // sits at the 98.90th percentile, or about 1 in 91. That 100 came from
+  // oneInN reading the STATED percentile, which rounds to the nearest five and
+  // rounded 98.9 up to 99. Correct on a report, where the rarity has to match
+  // the chip beside it; pure inflation on a ladder that has no chip beside it.
+  assert.equal(top.score, 8);
+  // Round numbers on purpose. The exact figure is about 1 in 91; the ladder
+  // quotes 1 in 100 because it reads the STATED percentile, which is rounded to
+  // the nearest five everywhere else in the product too. A ladder that reads
+  // 1 in 91 is more accurate and harder to hold in your head, and this is the
+  // one screen whose job is being understood in thirty seconds.
   assert.equal(top.oneIn, 100);
   // Everything below it is a real count and must not be flagged.
   for (const rung of LADDER.slice(0, -1)) {
     assert.ok(!rung.capped, `${rung.score} should not be capped`);
+  }
+});
+
+// How far the round numbers are allowed to drift from the curve.
+//
+// The rungs are deliberately rounded — 1 in 2 / 5 / 20 / 100 against a true
+// 2 / 4.5 / 16.1 / 90.9 — because comprehension is the point of this screen.
+// Rounding is not licence to drift, though: the bound here is the same
+// five-point percentile rounding the rest of the product uses, so a rung may
+// never be more than about a quarter off the curve, and every rung must still
+// be strictly rarer than the one below it (asserted above).
+test("ladder rungs stay within the rounding the rest of the product uses", () => {
+  for (const rung of LADDER) {
+    const trueOneIn = 100 / Math.max(1e-9, 100 - aggregateScoreToPercentile(rung.score));
+    const drift = Math.abs(rung.oneIn - trueOneIn) / trueOneIn;
+    assert.ok(
+      drift <= 0.27,
+      `${rung.score} shown as 1 in ${rung.oneIn} but the curve says 1 in ${trueOneIn.toFixed(1)} (${(drift*100).toFixed(0)}% off)`,
+    );
   }
 });
 

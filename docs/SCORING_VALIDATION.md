@@ -157,3 +157,54 @@ The current social rundown is intentionally compact:
 That is the visual system to verify in a real phone export before deployment:
 face-filling crops, no stretched photographs, readable lines inside TikTok's
 safe area, aligned key/click sounds, and no repeated full-sentence captions.
+
+## What the reference set scores, and what "Top 5% of men" therefore means
+
+Run the current pipeline over its own reference photographs — 113 men and 129
+women from `.calib/pop-scans.json`, through `scoreFrontMeasurements` — and it
+scores them:
+
+|        | min | p25 | median | p75 | p95 | max | mean | share ≥ 7.0 |
+|--------|-----|-----|--------|-----|-----|-----|------|-------------|
+| male   | 3.4 | 3.7 | **3.8**| 4.2 | 5.1 | 6.1 | 4.02 | 0.0% |
+| female | 3.4 | 3.6 | **4.0**| 4.4 | 5.2 | 6.0 | 4.09 | 0.0% |
+
+Nobody in the reference set reaches 7.0. One man and one woman clear 6.0.
+
+This is by design and it is worth stating plainly, because it is the single
+most misread thing about the scale. `CENTRE = 0.87` deliberately puts the
+reference median **below** 5.0: the reference faces are people notable for
+their work, mostly middle-aged, and these metrics read youthful structure as
+better, so "the median of our reference photographs" and "what a person calls
+average" are two different claims. Only the second is the claim the product
+makes. A reference face landing at 3.8 is that correction working, not a bug.
+
+The consequence is the part that needs saying on screen. A user at 7.2 is not
+"top 5% of men" in the plain sense that sentence carries. They are far clear of
+a reference set of middle-aged notable people, converted onto a human scale by
+`SHRINK` and `CENTRE`, **both fitted on nineteen rated faces**. The ordering is
+sound; the population noun is doing more work than the evidence supports.
+`scaleNote.ts` now discloses the set's composition alongside its size — the
+size was already disclosed, and size was never the misleading part.
+
+### What more reference faces would and would not fix
+
+Recomputing the tables from the corpus on disk reproduces the shipped
+`AGG_NORM` region tables to within 0.02 (most under 0.001), so the tables are
+current and there is nothing to regenerate. Adding people would:
+
+- **help** the tail resolution — `TAIL_Z_MAX = 2.6` is `probit(1 - 1/2n)` at
+  n ≈ 113, so a bigger set is the only thing that lets the top of the scale
+  separate further;
+- **help** the composition problem directly, if the people added are closer to
+  the user base in age — that is the live half of #51;
+- **not help** the "0.1 z moves 13 percentile points" sensitivity, which is not
+  a defect at all. The aggregate is a weighted mean of ~33 correlated metrics
+  and therefore has an sd near 0.38, not 1.0 (recovered from the tables' own
+  IQR; implied inter-metric correlation 0.102 male, 0.036 female). A tenth of a
+  raw z is a quarter of that sd, so a ~10-point percentile move is arithmetic,
+  not oversensitivity. More faces would smooth the quantile gaps; they would
+  not widen a statistic that is narrow because averaging makes it narrow;
+- **not help** the nose or any other region whose measurements do not
+  reproduce. Reliability is a property of the measurement, not of the sample
+  size — ten thousand more men would reproduce the same flat top.

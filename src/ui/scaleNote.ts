@@ -32,11 +32,23 @@ export function scaleTrigger(): string {
     aria-label="What this number means on this scale">?</button>`;
 }
 
+// The prose beside the ladder must quote the ladder, not a number somebody
+// typed while looking at it. It used to say "about one person in twenty" and
+// "around one in ninety" as literals, and the second of those disagreed with
+// the rung directly above it, which printed 1 in 100 for the same score. One
+// card, one fact, two numbers. Reading it back out of LADDER is the only way
+// they cannot drift apart again.
+function rung(score: number): { score: number; oneIn: number; capped: boolean } {
+  const found = LADDER.find((r) => r.score === score);
+  if (!found) throw new Error(`no ladder rung at ${score}`);
+  return found;
+}
+
 function ladderHTML(): string {
   return LADDER.map(
     (r) => `<div class="scale-rung">
       <b>${r.score.toFixed(1)}</b>
-      <span>${r.capped ? `about 1 in ${r.oneIn} — our limit` : `about 1 in ${r.oneIn}`}</span>
+      <span>${r.capped ? `about 1 in ${r.oneIn} — as far as we can count` : `about 1 in ${r.oneIn}`}</span>
     </div>`,
   ).join("");
 }
@@ -66,6 +78,19 @@ export function openScaleNote(sex: Sex): void {
         disappointed you: on this scale a 6 is uncommon and a 7 is rare. Nothing
         above the top rung is stated as a count, because a reference set of about
         ${REFERENCE_N} faces per sex cannot resolve one.</p>
+
+      <p class="scalenote-foot">Who is in that reference set matters as much as
+        how many. They are people notable for their work rather than their
+        appearance, which is the right choice for the shape of the curve and a
+        known problem for where its middle sits: they are mostly middle-aged,
+        and these measurements read youthful structure as better. Scored against
+        their own distribution the reference faces come out at a median of 3.8,
+        not 5.0. The scale already corrects for that gap — 5.0 is set where
+        blinded human raters put an average face, which is 0.87 sigma above the
+        reference median, not at the reference median itself. It is a real
+        correction fitted on a thin sample of nineteen rated faces, so treat a
+        placement near the top of the scale as "well clear of this reference
+        set" rather than as a precise standing among everybody your age.</p>
 
       <p class="scalenote-foot">${varianceLine()}</p>
     </div>`;
@@ -152,12 +177,13 @@ export function showScalePrimer(sex: Sex): Promise<void> {
 
         <div class="scale-ladder">${ladderHTML()}</div>
 
-        <p>That column is the part worth thirty seconds. A 7 here is not a
-          school seven: it is about one person in twenty. An 8 is around one in
-          ninety, and past that our reference set stops being able to tell one
-          rung from the next — so 8 is where we stop counting, not where the
-          faces stop. Scan anyone you consider good-looking and they will land
-          lower than you expect.</p>
+        <p>That column is the part worth thirty seconds. A ${rung(7).score} here
+          is not a school seven: it is about one person in ${rung(7).oneIn}. An
+          ${rung(8).score} is around one in ${rung(8).oneIn}, and past that our
+          reference set stops being able to tell one rung from the next — so
+          ${rung(8).score} is where we stop counting, not where the faces stop.
+          Scan anyone you consider good-looking and they will land lower than you
+          expect.</p>
 
         <p class="scalenote-foot">${varianceLine()}</p>
 

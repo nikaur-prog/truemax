@@ -452,18 +452,83 @@ export const SHRINK = 1.13;
 // leap of faith, it is the same evidence used correctly.
 export const CENTRE = 0.87;
 
+// Inter-metric correlation, recovered from the reference tables themselves.
+//
+// aggregateZ is a plain weighted mean and deliberately does NOT re-standardize
+// (see the note under it — dividing by the standard error turned precision into
+// extremity). So an aggregate of k metrics has an sd well below 1, and for a
+// weighted mean of variables with common correlation rho that sd is
+//   sd² = rho + (1 - rho) · Σw² / (Σw)²
+// Inverting that against the measured spread of AGG_NORM's own overall table
+// gives rho = 0.102 for men and 0.036 for women. Rounded to one figure and
+// shared, because the per-region estimates are recovered from 21 quantiles of
+// ~113 people and come out noisy enough to go negative — the overall pair is
+// the only estimate the sample actually supports.
+const RHO = 0.1;
+
+function aggSd(weights: number[]): number {
+  const kept = weights.filter((w) => w > 0);
+  const sum = kept.reduce((a, w) => a + w, 0);
+  if (!sum) return 1;
+  const share = kept.reduce((a, w) => a + w * w, 0) / (sum * sum);
+  return Math.sqrt(Math.max(1e-6, RHO + (1 - RHO) * share));
+}
+
+/**
+ * Put one aggregate on the population scale.
+ *
+ * With a measured quantile table, interpolate position in it and apply the
+ * human-scale calibration: CENTRE moves "the median of our reference
+ * photographs" to "what a person calls average" (they are 0.87 sigma apart
+ * because the reference set is middle-aged and these metrics read youthful
+ * structure as better), then SHRINK compresses to the 0-10 display.
+ *
+ * WITHOUT a table, the old fallback was `SHRINK * (z - CENTRE)` on the raw
+ * aggregate, and that is a units error rather than an approximation. `z` here
+ * is a weighted mean of per-metric zEffs, which has an sd near 0.38 for the
+ * overall — not 1 — and it is centred wherever the metrics happen to put it,
+ * not on a reference median. Subtracting 0.87 from it therefore subtracts more
+ * than two of its own standard deviations. Fed the male overall table's own
+ * median of -0.3604, that branch returns z = -1.390: the median face reported
+ * at the 8th percentile. Nothing hit it while every front key had a table, so
+ * it sat there correct-looking and wrong.
+ *
+ * The replacement standardizes before it calibrates — divide by the
+ * aggregate's own sd, which the weights and RHO give analytically — and then
+ * applies SHRINK but NOT CENTRE. CENTRE is a correction for the composition of
+ * the reference photographs, and it enters only through the quantile tables. An
+ * aggregate with no table never touched those photographs, so there is no such
+ * bias to remove, and removing it anyway would push a face sitting exactly on
+ * every ideal down below average.
+ *
+ * This is a model, not a measurement, and the UI says so: an aggregate scored
+ * this way gets no population curve and no rarity sentence (see
+ * regionPositionPanel and showSideRegion). It carries a score and nothing that
+ * claims to know where that score sits among other people.
+ */
 function normalizeAgg(
   z: number,
   sex: Sex,
   key: string,
   raw: Record<string, number>,
+  weights?: number[],
 ): number {
   raw[key] = z;
   const q = AGG_NORM[sex]?.[key];
+  // Bounded by TAIL_Z_MAX, for the same reason the table path is.
+  //
+  // aggSd falls as the metric count rises — ten metrics at rho = 0.1 give an sd
+  // of 0.44 — so without a cap a raw aggregate of 1.5 across ten side metrics
+  // comes out near +3.9 sigma, a one-in-ten-thousand claim built on ten
+  // hand-placed landmarks and no reference distribution at all. tailZ refuses
+  // to make that claim from a measured table of a hundred faces; a model with
+  // no faces behind it has strictly less standing to make it.
+  if (!q || q.length < 3) {
+    return clamp(SHRINK * (z / aggSd(weights ?? [])), -TAIL_Z_MAX, TAIL_Z_MAX);
+  }
   // Centre first, then scale — the offset is in reference sigmas, which is the
   // space tableZ returns, so it has to be subtracted before SHRINK converts
   // that space into displayed points.
-  if (!q || q.length < 3) return SHRINK * (z - CENTRE);
   return SHRINK * (tableZ(z, q) - CENTRE);
 }
 
@@ -540,6 +605,41 @@ export function regionReliability(ms: ScoredMetric[]): number {
 // the detail underneath, which is exactly what a published video cannot do.
 export const REGION_RELIABLE_MIN = RELIABLE_MIN;
 
+/**
+ * Has this region earned a number?
+ *
+ * For a long time the answer was computed in `quick.ts` and nowhere else. The
+ * staff breakdown page compared `reliability` against REGION_RELIABLE_MIN and
+ * printed "indicative" over the weak cells; the actual report — the one people
+ * pay for — never asked the question, so the same region carried a hard score,
+ * a percentile, a population curve and a rarity sentence. The honest tool was
+ * the internal one.
+ *
+ * The male nose is what that costs. Its three measurements reproduce at 0.00,
+ * 0.11 and 0.14 across repeat photographs of the same people, all three under
+ * RELIABLE_MIN, giving the region a weighted reliability of 0.086 and an
+ * effective weight of 0.25 out of a declared 2.90 — nine tenths of it thrown
+ * away as noise before the aggregate is even formed. The metric rows already
+ * said so individually, via isIndicative. The region header above them still
+ * printed a confident "3.9".
+ *
+ * Worse, the noise has a shape. `toleranceOf` widens a band as reliability
+ * falls (a measurement that wanders has not earned a strong opinion), the band
+ * branch of zEff collapses everything inside the band onto one plateau, and
+ * with all three nose bands near a full sigma wide, 24 of 113 reference men
+ * land inside all three at once and tie at the identical aggregate. That tie
+ * is the flat top of AGG_NORM's nose table — the 75th through 100th
+ * percentiles are one repeated number — and a zero-width quantile gap is an
+ * infinite density, which is the spike people were seeing on the chart.
+ *
+ * So this is not a display nicety. A region under the line cannot support a
+ * score, a placement, or a curve, and everything downstream should ask here
+ * rather than deciding for itself.
+ */
+export function regionIsScored(r: { reliability: number }): boolean {
+  return r.reliability >= REGION_RELIABLE_MIN;
+}
+
 // A metric only influences the score in proportion to how reproducibly it
 // measures the same face across different photos (see reliability.ts).
 function effWeight(m: ScoredMetric): number {
@@ -573,7 +673,41 @@ function effWeight(m: ScoredMetric): number {
 // earns a small weight, not a majority one.
 const W_SHAPE = 0.15;
 
-function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, number>, shapeZ?: number | null): Report {
+/**
+ * Namespace for the side profile's aggregate keys.
+ *
+ * AGG_NORM is generated by tools/normalize.mjs from FRONT-ONLY photographs of
+ * the reference set — press portraits, scored by the same mesh the app runs.
+ * There is not one side entry in it and there cannot be, because the thirteen
+ * profile landmarks are placed by hand and nobody has dragged them onto a
+ * hundred reference faces.
+ *
+ * normalizeAgg is written to cope with that: a key it cannot find falls
+ * through to `SHRINK * (z - CENTRE)`, the parametric path, which says "we have
+ * no measured distribution for this, so treat the aggregate as its own z". The
+ * fallback was correct and it was never reached, because analyzeSide asked for
+ * `region:nose` — and `region:nose` EXISTS. It is the front nose table. So the
+ * side profile has been scored, ranked and charted against the distribution of
+ * a different measurement of a different view, and the miss that would have
+ * triggered the honest path never happened.
+ *
+ * Prefixing the side's keys makes the miss real. `side:region:nose` is absent
+ * from AGG_NORM, absent by construction rather than by oversight, and stays
+ * absent until somebody measures profiles. Then normalizeAgg does what it
+ * always meant to do.
+ *
+ * The prefix is also what a future side table would be keyed under, so
+ * generating one is a matter of adding entries rather than changing callers.
+ */
+export const SIDE_AGG_PREFIX = "side:";
+
+function buildReport(
+  scored: ScoredMetric[],
+  sex: Sex,
+  zShift?: Map<string, number>,
+  shapeZ?: number | null,
+  keyPrefix = "",
+): Report {
   const rawZ: Record<string, number> = {};
   const eff = (m: ScoredMetric) =>
     clamp(m.zEff + (zShift?.get(m.def.id) ?? 0), -Z_CLAMP, Z_CLAMP);
@@ -582,7 +716,8 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   const pillarZ = {} as Record<PillarId, number>;
   for (const p of Object.keys(PILLAR_WEIGHTS) as PillarId[]) {
     const ms = scored.filter((m) => m.def.pillar === p);
-    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight)), sex, `pillar:${p}`, rawZ);
+    const pw = ms.map(effWeight);
+    pillarZ[p] = normalizeAgg(aggregateZ(ms.map(eff), pw), sex, `${keyPrefix}pillar:${p}`, rawZ, pw);
     pillars[p] = aggScore(pillarZ[p]);
   }
 
@@ -603,20 +738,19 @@ function buildReport(scored: ScoredMetric[], sex: Sex, zShift?: Map<string, numb
   // pillar's share, averaged once, normalised once. Pillars keep their own
   // normalisation because a pillar CARD is a rank and should read as one — it
   // just no longer feeds the overall.
-  const ratioZ = aggregateZ(
-    scored.map(eff),
-    scored.map((m) => effWeight(m) * PILLAR_WEIGHTS[m.def.pillar]),
-  );
+  const overallW = scored.map((m) => effWeight(m) * PILLAR_WEIGHTS[m.def.pillar]);
+  const ratioZ = aggregateZ(scored.map(eff), overallW);
   const blended = shapeZ == null ? ratioZ : W_SHAPE * shapeZ + (1 - W_SHAPE) * ratioZ;
   // Recorded so the calibration harness can decompose where score variance
   // between two photos of the same face actually comes from.
-  rawZ["blend:shape"] = shapeZ ?? NaN;
-  rawZ["blend:ratio"] = ratioZ;
-  const overallZ = normalizeAgg(blended, sex, "overall", rawZ);
+  rawZ[`${keyPrefix}blend:shape`] = shapeZ ?? NaN;
+  rawZ[`${keyPrefix}blend:ratio`] = ratioZ;
+  const overallZ = normalizeAgg(blended, sex, `${keyPrefix}overall`, rawZ, overallW);
 
   const regions = (Object.keys(REGION_NAMES) as RegionId[]).map((r) => {
     const ms = scored.filter((m) => m.def.region === r);
-    const rz = normalizeAgg(aggregateZ(ms.map(eff), ms.map(effWeight)), sex, `region:${r}`, rawZ);
+    const rw = ms.map(effWeight);
+    const rz = normalizeAgg(aggregateZ(ms.map(eff), rw), sex, `${keyPrefix}region:${r}`, rawZ, rw);
     return {
       region: r,
       score: aggScore(rz),
@@ -878,13 +1012,20 @@ export function analyzeSide(points: SidePoints, faceDir: number, sex: Sex): Repo
   const invalid = SIDE_METRICS.filter((m) => !Number.isFinite(raw[m.id])).map((m) => m.id);
   if (invalid.length) throw new Error(`Profile scan produced invalid measurements: ${invalid.join(", ")}`);
   const scored = SIDE_METRICS.map((def) => scoreMetric(def, raw[def.id], sex));
-  const report = buildReport(scored, sex);
+  // SIDE_AGG_PREFIX, not the bare keys. Without it every aggregate here is
+  // looked up in a table measured from front photographs — see the comment on
+  // the constant. mergeReports, one function down, has warned against exactly
+  // this since it was written; the mistake was happening a level below it.
+  const report = buildReport(scored, sex, undefined, undefined, SIDE_AGG_PREFIX);
 
   const lift = new Map<string, number>();
   for (const m of scored) {
     if (m.def.fixability > 0 && m.zEff < Z_CLAMP) lift.set(m.def.id, m.def.fixability * 0.9);
   }
-  report.potential = Math.max(report.overall, buildReport(scored, sex, lift).overall);
+  report.potential = Math.max(
+    report.overall,
+    buildReport(scored, sex, lift, undefined, SIDE_AGG_PREFIX).overall,
+  );
   return report;
 }
 

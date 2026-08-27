@@ -140,6 +140,31 @@ function step(delta: number): void {
 // have — below it you keep scoring better, not worse. So only a band metric
 // gets a two-sided ideal quoted; the others are told the truth about their
 // direction and given the one edge that is real.
+// Metrics whose printed NUMBER is not comparable to anything outside this app.
+//
+// Both are recorded in docs/SCORING_VALIDATION.md as construction mismatches
+// rather than data problems, and both were found by comparing the same face
+// against a second product: browTilt reads about 11.9 degrees below it because
+// we measure to the brow TAIL where the comparison measures to the PEAK, and
+// jawFrontalAngle reads about 26 degrees off for a similar reason.
+//
+// The ranking they produce is still meaningful — every face is measured the
+// same way, so who is above whom does not change. What is NOT meaningful is
+// the absolute figure, and printing "Male average -4.9°" next to it makes an
+// anatomical claim we cannot support: a brow that slopes DOWN five degrees
+// from the inner end to the outer is not what a typical face does, it is what
+// our two landmarks do. Saying so is cheaper than being asked.
+const CONSTRUCTION_CAVEAT: Record<string, string> = {
+  browTilt:
+    "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail — so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
+  jawFrontalAngle:
+    "Constructed differently from the same-named angle in other tools, which read about 26° apart on the same face. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
+};
+
+export function constructionCaveat(id: string): string | null {
+  return CONSTRUCTION_CAVEAT[id] ?? null;
+}
+
 function normLine(m: ScoredMetric, sex: Sex): string {
   const d = distFor(m.def, sex);
   const dec = m.def.decimals;
@@ -182,6 +207,9 @@ function overviewHTML(m: ScoredMetric, sex: Sex): string {
   return `
     <p class="mdx-trait">It measures ${metricTrait(m.def.id)}.</p>
     <p class="mdx-norm">${normLine(m, sex)}</p>
+    ${constructionCaveat(m.def.id)
+      ? `<p class="mdx-caveat">${constructionCaveat(m.def.id)}</p>`
+      : ""}
     ${read ? `<p class="mdx-read"><b>On your face:</b> ${read}.</p>` : ""}
     ${m.implausible ? "" : `<p class="mdx-pos">${positionLine(m, sex)}</p>`}
     ${m.implausible

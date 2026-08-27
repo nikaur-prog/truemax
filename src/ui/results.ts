@@ -2,7 +2,7 @@ import { countUp } from "./countUp.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { copyDiagnostics } from "./diagnostics.js";
 import type { DiagnosticsCapture } from "./diagnostics.js";
-import { aggregateScoreToPercentile, phi, REGION_NAMES } from "../engine/scoring.js";
+import { aggregateScoreToPercentile, phi, REGION_NAMES, regionIsScored } from "../engine/scoring.js";
 import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
@@ -23,7 +23,7 @@ import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
-import { deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
+import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
@@ -602,12 +602,27 @@ function showSideRegion(id: RegionId): void {
   if (!r) return select("side");
   calmSide();
 
+  // No population curve or rarity line in the profile panel, deliberately.
+  //
+  // AGG_NORM holds quantile tables measured from FRONT-ONLY scans of the
+  // reference set — there is not a single side entry in it, because side
+  // landmarks are hand-placed and nobody has dragged thirteen points onto a
+  // hundred reference faces. curveSVG("region:nose") therefore FOUND a table,
+  // just the wrong one: it drew the front nose distribution and marked the
+  // side nose percentile on it. Shape from one measurement set, dot from
+  // another, which is why the density and the quartile ticks visibly
+  // disagreed on screen. The rarity sentence underneath was the same claim in
+  // words — "roughly 1 in N faces measure this well" out of a table that never
+  // saw a profile.
+  //
+  // A fabricated chart is worse than no chart, so the panel says what it does
+  // not know. It gets a curve back when there are measured side quantiles to
+  // draw one from, and not before.
   body().innerHTML = `
     <div class="reveal">
       ${sideRegionDeck(r, report)}
-      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>${curveSVG(r.percentile, `region:${id}`, report.sex, true)}
-        ${curveLegend()}
-        <p class="rarity">${rarityLine(r)}</p></div>
+      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>
+        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against — the score above is real, the curve would be invented.</p></div>
     </div>`;
 
   revealBars();
@@ -1007,7 +1022,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
   }
   return `<div class="deck">
     <div class="dcard">
-      <h3>${REGION_NAMES[r.region]} · ${r.score.toFixed(1)}<em>SIDE</em></h3>
+      <h3>${regionHeadline(r, r.region)}<em>SIDE</em></h3>
       ${r.metrics
         .map(
           (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}${m.implausible ? " implausible" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
@@ -1077,6 +1092,46 @@ function indicativeNote(metrics: ScoredMetric[]): string {
 function indicativeTag(m: ScoredMetric): string {
   if (!isIndicative(m)) return "";
   return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people — so it is shown and not scored.">not scored</span>`;
+}
+
+// The same rule as isIndicative, one level up.
+//
+// isIndicative has flagged individual rows for months. What it could not catch
+// is a region where EVERY row is flagged — because then the region header, the
+// population curve and the rarity sentence are all built on the same noise the
+// rows beneath them are disclaiming. The male nose is exactly that: nasalIndex
+// 0.00, noseMouthRatio 0.11, noseIntercanthal 0.14, all under RELIABLE_MIN,
+// weighted reliability 0.086.
+//
+// The engine has known since regionReliability landed. quick.ts, the staff
+// page, has printed "indicative" over those cells since it shipped. This is
+// the same question finally being asked on the report people actually read.
+function regionHeadline(r: RegionScore, id: RegionId): string {
+  return regionIsScored(r)
+    ? `${REGION_NAMES[id]} · ${r.score.toFixed(1)}`
+    : `${REGION_NAMES[id]} · <span class="rnotscored">not scored</span>`;
+}
+
+// A curve is a claim about where you sit among other people. It needs a
+// measurement that holds still between two photographs of you, and this region
+// does not have one — so the panel says that instead of drawing a distribution
+// and putting a dot on it.
+//
+// The nose curve is also where this became visible rather than merely wrong.
+// toleranceOf widens a metric's band as its reliability falls, the band branch
+// of zEff puts everyone inside the band on one plateau, and with all three nose
+// bands close to a full sigma wide, 24 of the 113 reference men land inside all
+// three at once and tie at the identical aggregate. AGG_NORM's nose table is
+// therefore one repeated number from the 75th percentile to the 100th, and a
+// zero-width quantile gap is an infinite density — the spike on the chart.
+function regionPositionPanel(r: RegionScore, id: RegionId, sex: Sex): string {
+  if (!regionIsScored(r)) {
+    return `<div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>
+      <p class="side-nocurve">No population curve for the ${REGION_NAMES[id].toLowerCase()}. Every measurement in this region moves about as much between two photographs of one face as it does between two different faces, so there is no stable position to plot. The readings above are real; a curve drawn from them would be a picture of the lighting.</p></div>`;
+  }
+  return `<div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, sex, true)}
+    ${curveLegend()}
+    <p class="rarity">${rarityLine(r)}</p></div>`;
 }
 
 // Told at the top of the profile, not left to be discovered halfway down a
@@ -1163,43 +1218,20 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
 function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
-  const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
-  const best = regions[0];
-  const fixables = r.metrics
-    .filter((m) => m.def.fixability >= 0.3)
-    .sort((a, b) => a.zEff - b.zEff);
-  const weakest = fixables[0];
-
-  // Phrased so it survives a plural region name: "Eyes is carrying you" is
-  // the kind of line that reads generated, and this one must not.
-  const good = best
-    ? `Best thing on the scan: ${REGION_NAMES[best.region].toLowerCase()}, top ${Math.max(1, 100 - Math.round(best.percentile))}% of the reference set.`
-    : "";
-  const improve = weakest
-    ? `The one I would attack first: ${weakest.def.name.toLowerCase()} (${fmt(weakest)}). ${leverFor(weakest).title} is the lever, and it moves without surgery.`
-    : "";
-  // Suppressed entirely on the profile: "first scan on record" is false on a
-  // rescan, and the real delta belongs to the overall number, not to this half.
-  //
-  // A guest's delta is null BY DESIGN — their scan is compared against nothing
-  // — so the null must not fall through to "first scan on record", which is a
-  // promise of a trend this scan will never join. Say what is actually true.
-  const tracking =
-    scope === "side"
-      ? ""
-      : guestName
-        ? `This is ${escapeHTML(guestName)}'s scan, so it is kept as its own record — off your history, your average and your trend.`
-        : delta
-          ? deltaReadingCopy(delta)
-          : "First scan on record. The next one is where this gets interesting — one scan is a score, two is a direction.";
+  // Built in templates.ts, where the rest of the voice lives. It used to be
+  // assembled here from "Best thing on the scan:" and "The one I would attack
+  // first: ... is the LEVER, and it MOVES WITHOUT SURGERY" — two pieces of
+  // jargon in one sentence, on the tab that is supposed to read as a coach
+  // talking rather than a report printing.
+  const read = coachRead(r, delta, { scope, ...(guestName ? { guestName } : {}) });
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
     <div class="maxan-body">
       <span class="klabel">COACH MAX'S READ</span>
-      <p><b>${good}</b> ${improve}</p>
-      ${tracking ? `<p class="maxan-track">${tracking}</p>` : ""}
-      <p class="maxan-invite">Want different products in the plan, or a different target? Tell me and we will rebuild it together.</p>
+      <p><b>${read.good}</b> ${read.work}</p>
+      ${read.memory ? `<p class="maxan-track">${read.memory}</p>` : ""}
+      <p class="maxan-invite">${read.invite}</p>
       <!-- Looks like the thing it starts, rather than describing it.
            "Tap me in the corner" asked the reader to find a separate control
            and trust that it was worth finding; a box with a cursor in it needs
@@ -1278,7 +1310,7 @@ function animateOverview(root: HTMLElement): void {
 // count of rows is true, and that is the honest part of the pitch.
 function regionPreviewHTML(r: RegionScore, id: RegionId): string {
   return `<div class="deck"><div class="dcard">
-    <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
+    <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
     ${r.metrics
       .map(
         (m) => `<div class="metric">
@@ -1323,7 +1355,7 @@ function showRegion(id: RegionId): void {
       <div class="dots" id="dots"><i class="on"></i><i></i></div>
       <div class="deck" id="deck">
         <div class="dcard">
-          <h3>${REGION_NAMES[id]} · ${r.score.toFixed(1)}<em>MEASURED</em></h3>
+          <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
               (m, i) => wasMeasured(m)
@@ -1356,9 +1388,7 @@ function showRegion(id: RegionId): void {
           <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
       </div>
-      <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, ctx!.report.sex, true)}
-        ${curveLegend()}
-        <p class="rarity">${rarityLine(r)}</p></div>
+      ${regionPositionPanel(r, id, ctx!.report.sex)}
     </div>`;
 
   setTimeout(

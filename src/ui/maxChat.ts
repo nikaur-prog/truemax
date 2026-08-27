@@ -1,5 +1,5 @@
 import { currentAccessToken } from "../engine/auth.js";
-import { greet, maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 
@@ -136,15 +136,20 @@ export function openMaxChat(
     }
   };
 
-  // He turns round and says hello.
+  // He says hello, and no longer waves about it.
   //
-  // Opening the chat is the one moment that earns a full entrance — somebody
-  // has just decided to talk to him — so it gets the big wave, exempt from the
-  // two-greeting cap, and the mouth moves for exactly as long as the line
-  // takes to type. Before this the greeting typed itself out under a face that
-  // was perfectly still, which is a subtitle rather than somebody speaking.
+  // Opening the chat used to get a full big-wave entrance on the reasoning
+  // that somebody had just decided to talk to him. In practice it fires on
+  // every single open, which is the tic that greet() itself caps at two
+  // everywhere else — and the cap was explicitly waived here, so the one place
+  // he waves most often is the one place he never stops. An arm going up
+  // before a word appears also delays the thing the reader actually came for.
+  //
+  // The mouth still moves for exactly as long as the line takes to type;
+  // without that the greeting is a subtitle rather than somebody speaking. He
+  // earns attention with the idle repertoire instead (ui/maxIdle.ts), and a
+  // tap still gets a wave.
   const face = host.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
-  greet(face, { big: true });
   face?.classList.add("speaking");
   speakGreeting(log, options.greeting ?? greeting(context), () => {
     face?.classList.remove("speaking");
