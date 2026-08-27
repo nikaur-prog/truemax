@@ -413,7 +413,32 @@ function memoryLine(delta: ScanDelta, sex: Sex): string {
       : `${size} up in ${delta.daysAgo} days, and that clears the noise floor, which most weeks don't.`;
     return `${earned}${trend} Do me a favour though: tell me what you've actually been doing. I want to know whether this is the routine landing or just a good month, because those two look identical from here and only one of them is worth doubling down on.`;
   }
-  return `${size} down since last time, and that's past what I can blame on the camera.${trend} Before either of us reads anything into it: have you been running the plan? No judgement, I'd genuinely rather know. If you have, then it's the plan that's wrong and I'll rebuild it. If you haven't, we start there instead of changing something that never got a fair go.`;
+  // Deliberately does NOT offer to change anything. Whether a protocol has had
+  // long enough is protocol.ts's call, not this sentence's, and the version
+  // that said "then it's the plan that's wrong and I'll rebuild it" would have
+  // fired nine days into an eight-week routine.
+  return `${size} down since last time, and that's past what I can blame on the camera.${trend} Before either of us reads anything into it: have you been keeping up with what we talked about? No judgement, I'd genuinely rather know. Most of what I'd recommend needs a couple of months before it shows up here at all, so one dip is not a reason to change anything yet.`;
+}
+
+// The part of a face somebody would actually name.
+//
+// "Want me to tell you exactly what to use on that cheekbone height" is not a
+// sentence anybody says. A person does not have a cheekbone height problem,
+// they have a cheek area they are unhappy with, and the offer has to be made
+// in those words even though the measurement behind it is precise.
+const AREA: Record<string, string> = {
+  eyes: "eye area",
+  midface: "cheeks",
+  jaw: "jawline",
+  chin: "chin and jaw",
+  nose: "nose",
+  lips: "lips",
+  proportions: "overall proportions",
+  symmetry: "symmetry",
+};
+
+function areaOf(region: string): string {
+  return AREA[region] ?? "face";
 }
 
 export interface CoachRead {
@@ -467,8 +492,8 @@ export function coachRead(
         : `First scan on record, so there's nothing to compare it to yet. Scan again in a few weeks and I'll be able to tell you whether anything you're doing is working, which is the part that actually matters.`;
 
   const invite = weakest
-    ? `Want me to tell you exactly what to use on that ${weakest.def.name.toLowerCase()}? Ask me and I'll give you the products, the order, and roughly how long before it shows up in a scan.`
-    : `Ask me anything off this scan and I'll tell you what I'd actually do about it, products included.`;
+    ? `Want me to help you with your ${areaOf(weakest.def.region)}? Ask me and I'll talk you through what actually works on it and how long it realistically takes.`
+    : `Ask me anything off this scan and I'll tell you what I'd actually do about it.`;
 
   return { good, work, memory, invite };
 }
