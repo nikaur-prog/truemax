@@ -81,6 +81,17 @@ const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 /** 0→1 across [a,b] of the local beat time, eased. */
 const seg = (local: number, a: number, b: number) => easeOutCubic(clamp01((local - a) / (b - a)));
 
+export interface CtaFrameOpts {
+  /**
+   * Hold the measure beat's camera on one wide, cover-fit framing of the face
+   * instead of easing into each construction. For contexts that LOOP the beat
+   * — the gate montage plays it inside a phone frame — where the per-metric
+   * push-in reads as restless zooming rather than as a camera move. The lines
+   * still draw themselves; only the camera stands still.
+   */
+  stillMeasureCamera?: boolean;
+}
+
 /**
  * Draw the frame at absolute time `t` seconds. `w`,`h` are the output size
  * (1080×1920 in production). `total` is the full video length — everything
@@ -92,6 +103,7 @@ export function drawCtaSeriesFrame(
   h: number,
   t: number,
   assets: CtaAssets,
+  opts: CtaFrameOpts = {},
 ): void {
   ctx.save();
   ctx.fillStyle = BG;
@@ -102,7 +114,7 @@ export function drawCtaSeriesFrame(
 
   switch (beat.id) {
     case "score": drawScore(ctx, w, h, local, assets); break;
-    case "measure": drawMeasure(ctx, w, h, local, beat.end - beat.start, assets); break;
+    case "measure": drawMeasure(ctx, w, h, local, beat.end - beat.start, assets, opts); break;
     case "coach": drawCoach(ctx, w, h, local, assets); break;
     case "confident": drawConfident(ctx, w, h, local, assets); break;
     case "recs": drawRecs(ctx, w, h, local, assets); break;
@@ -155,6 +167,7 @@ function drawMeasure(
   local: number,
   span: number,
   a: CtaAssets,
+  opts: CtaFrameOpts = {},
 ): void {
   const n = Math.max(1, a.metrics.length);
   const per = span / n;
@@ -176,17 +189,36 @@ function drawMeasure(
   // does not have.
   drawMeasurement(scratch, a.landmarks, pw, ph, metric, seg(sub, 0.15, 0.75), { labels: false });
 
-  const b = measurementBounds(metric, a.landmarks) ?? { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 };
-  const pad = 0.16;
-  const cxN = (b.x0 + b.x1) / 2;
-  const cyN = (b.y0 + b.y1) / 2;
-  const spanN = Math.max(b.x1 - b.x0, (b.y1 - b.y0) * (ph / pw)) + pad * 2;
-  // Ease from wide to framed across the metric's own window.
-  const zoomIn = seg(sub, 0, 0.45);
-  const viewW = pw * (1 + (Math.min(0.95, Math.max(0.35, spanN)) - 1) * zoomIn);
-  const viewH = (viewW / w) * h;
-  const sx = Math.max(0, Math.min(pw - viewW, cxN * pw - viewW / 2));
-  const sy = Math.max(0, Math.min(ph - viewH, cyN * ph - viewH / 2));
+  let viewW: number;
+  let viewH: number;
+  let sx: number;
+  let sy: number;
+  if (opts.stillMeasureCamera) {
+    // One framing for the whole beat: cover-fit, centred on the face itself
+    // (the landmark centroid), identical for every metric so the loop cuts
+    // are invisible.
+    let cxSum = 0;
+    let cySum = 0;
+    for (const p of a.landmarks) { cxSum += p.x; cySum += p.y; }
+    const cxN = a.landmarks.length ? cxSum / a.landmarks.length : 0.5;
+    const cyN = a.landmarks.length ? cySum / a.landmarks.length : 0.5;
+    viewW = Math.min(pw, ph * (w / h));
+    viewH = (viewW / w) * h;
+    sx = Math.max(0, Math.min(pw - viewW, cxN * pw - viewW / 2));
+    sy = Math.max(0, Math.min(ph - viewH, cyN * ph - viewH / 2));
+  } else {
+    const b = measurementBounds(metric, a.landmarks) ?? { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 };
+    const pad = 0.16;
+    const cxN = (b.x0 + b.x1) / 2;
+    const cyN = (b.y0 + b.y1) / 2;
+    const spanN = Math.max(b.x1 - b.x0, (b.y1 - b.y0) * (ph / pw)) + pad * 2;
+    // Ease from wide to framed across the metric's own window.
+    const zoomIn = seg(sub, 0, 0.45);
+    viewW = pw * (1 + (Math.min(0.95, Math.max(0.35, spanN)) - 1) * zoomIn);
+    viewH = (viewW / w) * h;
+    sx = Math.max(0, Math.min(pw - viewW, cxN * pw - viewW / 2));
+    sy = Math.max(0, Math.min(ph - viewH, cyN * ph - viewH / 2));
+  }
 
   ctx.drawImage(a.photo, sx, sy, viewW, viewH, 0, 0, w, h);
   ctx.drawImage(scratch, sx, sy, viewW, viewH, 0, 0, w, h);

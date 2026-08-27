@@ -114,7 +114,9 @@ try {
   });
   const PHONES = [
     { base: 0.2, span: 2.8, caption: "The score card" },   // score beat
-    { base: 3.3, span: 3.7, caption: "The measure pass" }, // measure beat
+    // stillMeasureCamera: looped inside a phone, the beat's per-metric
+    // push-in read as restless zooming. The camera holds; the lines animate.
+    { base: 3.3, span: 3.7, caption: "The measure pass", opts: { stillMeasureCamera: true } },
     // The progress beat composes for a full 9:16 frame with its lower half
     // quiet; inside a phone this montage crops to the chart so the screen
     // reads full, not abandoned.
@@ -226,7 +228,7 @@ try {
       const cfg = PHONES[i];
       const t = cfg.base + ((local * 1.0) % cfg.span);
       const c = phoneCanvases[i];
-      drawCtaSeriesFrame(c.getContext("2d"), PHONE_W, PHONE_H, t, ctaAssets);
+      drawCtaSeriesFrame(c.getContext("2d"), PHONE_W, PHONE_H, t, ctaAssets, cfg.opts || {});
       drawPhone(s.cx, s.cy, s.ph, s.tilt, c, p, (1 - p) * 70, cfg.crop);
       // Captions hand their line to the combine note rather than sharing it.
       ctx.save();
