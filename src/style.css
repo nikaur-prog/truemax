@@ -1177,6 +1177,49 @@ body.funnel-open { overflow: hidden; }
    by half the letterboxing. Sizing the frame keeps every layer on the same box. */
 .side-photo .face-frame { background: #101113; margin: 0 auto; }
 #side-canvas { width: 100%; height: auto; display: block; }
+
+/* The exemplar, shown only while the frame is empty.
+   Same 3/4 box the live camera uses, so opening the camera does not resize the
+   pane under your thumb. Held back to a third opacity: it is a reference, and
+   at full strength people mistake it for a photo already loaded and wonder why
+   the confirm button is missing. Mirrored because every side photo the app
+   handles is canonicalised to face image-right (see load() in sideFlow.ts) —
+   an exemplar facing the other way teaches the wrong shape. */
+#side-frame.awaiting { aspect-ratio: 3 / 4; max-height: 66vh; }
+#side-frame.awaiting #side-canvas { display: none; }
+.side-exemplar { display: none; }
+#side-frame.awaiting .side-exemplar {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.side-exemplar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.34;
+  transform: scaleX(-1);
+  filter: grayscale(1) contrast(1.05);
+}
+/* Says what it is, in the frame, so it is never read as somebody's scan. */
+.side-exemplar-tag {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(10, 11, 13, 0.72);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 #side-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #side-verify { position: absolute; inset: 0; }
 /* touch-action:none stops the browser scrolling the page while a point is
@@ -5932,3 +5975,9 @@ select.q-input { appearance: auto; }
   color: var(--mut); font-weight: 500;
 }
 .rec-track-on:hover { border-color: transparent; background: var(--soft); }
+
+/* An icon inside a button. The glyph sits on the text baseline rather than
+   centred on the cap height, which is what stops it looking like it is
+   floating above the words. */
+.btn svg { flex: none; }
+.btn:has(svg) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }

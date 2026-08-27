@@ -300,6 +300,20 @@
         <div class="side-photo">
           <div class="face-frame" id="side-frame">
             <canvas id="side-canvas"></canvas>
+            <!-- What the frame shows before there is a photo in it.
+                 An empty black rectangle asks for a side profile without ever
+                 showing one, and the two mistakes people make — chin lifted,
+                 head three-quarters rather than square on — are exactly the
+                 ones a sentence cannot correct. So the frame holds the shot it
+                 wants: head level, one ear to the lens, forehead and chin in.
+                 Faint, behind the drop target, and gone the instant a real
+                 photo or the live camera takes the frame (see .awaiting in
+                 sideFlow.ts). Synthetic, not a person: labelled as such in the
+                 alt text so nobody reads it as a customer. -->
+            <div class="side-exemplar" id="side-exemplar" aria-hidden="true">
+              <img src="/tutorial/side-exemplar.jpg" alt="" loading="lazy" decoding="async" />
+              <span class="side-exemplar-tag">Like this &middot; illustration</span>
+            </div>
             <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
             <div id="side-verify"></div>
             <!-- Live profile capture, layered over the same frame so the
