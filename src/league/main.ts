@@ -528,17 +528,17 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       {
         id: "cta", n: "01", name: "CTA Generator",
         body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, voiced, ready to post.",
-        needs: "One photo · a face worth talking about", href: "/quick#cta",
+        needs: "One photo · a face worth talking about", href: "/league/tools#cta",
       },
       {
         id: "polisher", n: "02", name: "The Polisher",
         body: "Clean up a soft clip on this device: sharpen, colour — and a 4K upscale for the ones worth it.",
-        needs: "Your clips or photos · nothing uploaded", href: "/quick#polisher",
+        needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
         id: "clips", n: "03", name: "Clips Library",
         body: "Saved faces, celebrity references and demo exports to cut from — scored instantly, no rescan.",
-        needs: "Nothing · it's all in the library", href: "/quick#clips",
+        needs: "Nothing · it's all in the library", href: "/league/tools#clips",
       },
     ];
     mount.innerHTML = `<h1 class="lg-h">Tools</h1>
@@ -593,14 +593,57 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async admin(mount) {
     mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const [{ data: apps }, { data: pending }] = await Promise.all([
+    const [{ data: apps }, { data: pending }, { data: allSprints }] = await Promise.all([
       client.from("league_creators").select("*").eq("status", "applied").order("created_at"),
       client.from("league_submissions").select("*").eq("status", "pending").order("created_at"),
+      // Every status, drafts included — loadSprints deliberately hides drafts
+      // from creators, and the admin is exactly who drafts exist for.
+      client.from("league_sprints").select("*").order("starts_at", { ascending: false }),
     ]);
     const applications = (apps ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
     const subs = (pending ?? []) as SubmissionRow[];
+    const sprints = (allSprints ?? []) as SprintRow[];
+    const f = DEFAULT_FORMULA;
+
+    const sprintChip = (s: string) =>
+      s === "active" ? `<span class="lg-chip ok">ACTIVE</span>`
+      : s === "closed" ? `<span class="lg-chip">CLOSED</span>`
+      : `<span class="lg-chip warn">DRAFT</span>`;
+    const day = (iso: string) => new Date(iso).toLocaleDateString();
 
     mount.innerHTML = `<h1 class="lg-h">Admin</h1>
+      <div class="lg-card"><h3>Sprints · ${sprints.length}</h3>
+        ${sprints.map((s) => `<div class="lg-row" style="flex-wrap:wrap">
+          <span><b>${esc(s.name)}</b> <span class="lg-note">${day(s.starts_at)} → ${day(s.ends_at)} ·
+          pool ${fmtMoney(s.pool_cents)} · ${sprintFormula(s) ? "formula" : "tier ladder"}</span></span>
+          <span style="display:flex;gap:8px;align-items:center">
+            ${sprintChip(s.status)}
+            ${s.status === "draft" ? `<button class="lg-btn pri" data-sprint-activate="${s.id}">Activate</button>` : ""}
+            ${s.status === "active" ? `<button class="lg-btn danger" data-sprint-close="${s.id}">Close</button>` : ""}
+          </span>
+        </div>`).join("") || `<p class="lg-sub">No sprints yet — the league starts when the first one goes active.</p>`}
+        <div class="lg-sprint-new">
+          <h3 style="margin-top:18px">New sprint</h3>
+          <p class="lg-sub">Created as a DRAFT — creators see nothing until you activate it. The
+          formula fields are the deal the gate advertises; change them here and this sprint pays
+          differently, story included.</p>
+          <div class="lg-sprint-grid">
+            <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1 — September" /></label>
+            <label>Pool ($) <input id="sp-pool" type="number" min="0" step="50" value="2000" /></label>
+            <label>Starts <input id="sp-start" type="date" /></label>
+            <label>Ends <input id="sp-end" type="date" /></label>
+            <label>$ per 1,000 views <input id="sp-rpm" type="number" min="0" step="0.25" value="${(f.rpmCents / 100).toFixed(2)}" /></label>
+            <label>Max engagement × <input id="sp-emax" type="number" min="1" step="0.1" value="${f.eMax}" /></label>
+            <label>Unlock views <input id="sp-tviews" type="number" min="0" step="1000" value="${f.thresholdViews}" /></label>
+            <label>Unlock comments <input id="sp-tcomments" type="number" min="0" value="${f.thresholdComments}" /></label>
+            <label>Per-video cap ($) <input id="sp-vcap" type="number" min="0" step="50" value="${(f.videoCapCents / 100).toFixed(0)}" /></label>
+            <label>Per-creator cap ($) <input id="sp-ccap" type="number" min="0" step="50" value="${(f.creatorCapCents / 100).toFixed(0)}" /></label>
+          </div>
+          <p style="margin-top:14px"><button class="lg-btn pri" id="sp-create">Create draft sprint</button></p>
+          <p class="lg-error" id="sp-err"></p>
+        </div>
+      </div>
+
       <div class="lg-card"><h3>Applications · ${applications.length}</h3>${applications.map((a) => `
         <div class="lg-row" style="align-items:flex-start;flex-direction:column">
           <div style="width:100%"><b>${esc(a.display_name)}</b> <span class="lg-note">${esc(a.handle)} · ${esc(a.niche ?? "")}</span>
@@ -716,6 +759,65 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             </div>`).join("") || `<p class="lg-sub">Nobody over the threshold yet.</p>`}`;
         };
       });
+    }
+
+    // Sprint lifecycle. Draft → active is the launch; active → closed freezes
+    // the counts settlement reads. Both are staff-only writes RLS already
+    // enforces — these buttons are the convenience, not the boundary.
+    mount.querySelectorAll<HTMLButtonElement>("[data-sprint-activate]").forEach((b) => {
+      b.onclick = async () => {
+        await client.from("league_sprints").update({ status: "active" }).eq("id", b.dataset.sprintActivate!);
+        refresh();
+      };
+    });
+    mount.querySelectorAll<HTMLButtonElement>("[data-sprint-close]").forEach((b) => {
+      b.onclick = async () => {
+        await client.from("league_sprints").update({ status: "closed" }).eq("id", b.dataset.sprintClose!);
+        refresh();
+      };
+    });
+    {
+      const err = mount.querySelector<HTMLElement>("#sp-err")!;
+      const num = (id: string) => Number(mount.querySelector<HTMLInputElement>(`#${id}`)?.value || 0);
+      const str = (id: string) => mount.querySelector<HTMLInputElement>(`#${id}`)?.value.trim() ?? "";
+      const create = mount.querySelector<HTMLButtonElement>("#sp-create");
+      if (create) create.onclick = async () => {
+        err.textContent = "";
+        const name = str("sp-name");
+        const starts = str("sp-start");
+        const ends = str("sp-end");
+        if (!name || !starts || !ends) {
+          err.textContent = "Name and both dates.";
+          return;
+        }
+        if (new Date(ends) <= new Date(starts)) {
+          err.textContent = "The end has to come after the start.";
+          return;
+        }
+        const { error } = await client.from("league_sprints").insert({
+          name,
+          pool_cents: Math.round(num("sp-pool") * 100),
+          // tiers is the legacy ladder column and NOT NULL; a formula sprint
+          // carries an empty ladder and the formula does the paying.
+          tiers: [],
+          formula: {
+            rpmCents: Math.round(num("sp-rpm") * 100),
+            eMax: num("sp-emax"),
+            thresholdViews: num("sp-tviews"),
+            thresholdComments: num("sp-tcomments"),
+            videoCapCents: Math.round(num("sp-vcap") * 100),
+            creatorCapCents: Math.round(num("sp-ccap") * 100),
+          },
+          starts_at: new Date(starts).toISOString(),
+          ends_at: new Date(ends).toISOString(),
+          status: "draft",
+        });
+        if (error) {
+          err.textContent = error.message;
+          return;
+        }
+        refresh();
+      };
     }
 
     mount.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((b) => {

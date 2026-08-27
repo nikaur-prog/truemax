@@ -219,6 +219,10 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
 .lg-tool:not(.off):hover { border-color: rgba(121, 232, 210, 0.35); }
 
 /* ---- admin ---- */
+.lg-sprint-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.lg-sprint-grid label { margin: 12px 0 0; }
+.lg-sprint-grid input { margin-top: 6px; }
+@media (max-width: 560px) { .lg-sprint-grid { grid-template-columns: 1fr; } }
 .lg-scripts .lg-row { gap: 16px; }
 .lg-script {
   font: 13px/1.5 var(--mono);

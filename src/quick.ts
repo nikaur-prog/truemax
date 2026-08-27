@@ -46,7 +46,7 @@ import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
 import { canShareFiles, exportName, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
-import { allowQuickAccess, denyQuickAccess } from "./ui/quickGate.js";
+import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
 
@@ -136,11 +136,12 @@ let ready = false;
 // The landmarker is deferred behind the same check for the plainer reason that
 // downloading multiple megabytes of face model for somebody about to be refused
 // is a waste of their data.
-void allowQuickAccess().then((allowed) => {
-  if (!allowed) {
+void quickAccessProfile().then((access) => {
+  if (!access.allowed) {
     denyQuickAccess();
     return;
   }
+  applyPillarGrants(access);
   document.querySelector(".q-wrap")?.classList.remove("q-locked");
   openFromHash();
   initLandmarker()
@@ -161,11 +162,59 @@ void allowQuickAccess().then((allowed) => {
   });
 });
 
+// Which pillar buttons each grant unlocks, and which rooms only staff see.
+//
+// The grant keys are the League's ("cta", "polisher", "clips"), ticked by the
+// owner at approval; the buttons are this page's modes. CTA covers both
+// content cuts because they are the same job — footage of a scan, posted.
+// The AI Model Reel and Calibrate are not grants at all: /api/ai-image is
+// staff-gated server-side and Calibrate feeds the rating corpus, so for a
+// creator those buttons are REMOVED rather than locked — a door that would
+// 404 should not exist, which is the page's standing philosophy.
+const PILLAR_GRANT: Record<string, string> = { reel: "cta", analysis: "cta", enhance: "polisher" };
+const STAFF_ONLY_MODES = ["ai", "calibrate"];
+
+function applyPillarGrants(access: { staff: boolean; grants: Record<string, boolean> }): void {
+  if (access.staff) return;
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) {
+    const mode = button.dataset.mode ?? "";
+    if (STAFF_ONLY_MODES.includes(mode)) {
+      button.remove();
+      continue;
+    }
+    const grant = PILLAR_GRANT[mode];
+    if (grant && access.grants[grant] !== true) {
+      // Locked, not removed: the League Tools page shows the same card with
+      // the same words, and a member who can see what exists knows what to
+      // ask the owner for.
+      button.disabled = true;
+      button.classList.add("q-pillar-locked");
+      const chip = document.createElement("span");
+      chip.className = "q-pillar-lock-chip";
+      chip.textContent = "NOT IN YOUR PLAN";
+      button.appendChild(chip);
+    }
+  }
+}
+
 // Deep links from the League Tools page. Each pillar card over there is a
 // door into a specific room here, so a member lands in the tool they clicked
 // rather than on the menu. Unknown hashes fall through to the pillars, which
-// is where everybody else already starts.
+// is where everybody else already starts. A hash pointing at a room the
+// member does not hold (or that was removed above) lands on the pillars too —
+// the locked card explains itself better than an error would.
 function openFromHash(): void {
+  const target = { polisher: "enhance", enhance: "enhance", cta: "reel", reel: "reel", analysis: "analysis" }[
+    location.hash.slice(1).toLowerCase()
+  ];
+  if (target) {
+    const button = document.querySelector<HTMLButtonElement>(`.q-pillar[data-mode="${target}"]`);
+    if (!button || button.disabled) return;
+  }
+  openFromHashInner();
+}
+
+function openFromHashInner(): void {
   const hash = location.hash.slice(1).toLowerCase();
   if (!hash) return;
   if (hash === "polisher" || hash === "enhance") {

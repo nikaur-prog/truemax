@@ -41,35 +41,53 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 // something here worth trying to reach.
 // ---------------------------------------------------------------------------
 
-export async function allowQuickAccess(): Promise<boolean> {
+export interface QuickAccess {
+  allowed: boolean;
+  staff: boolean;
+  /** Pillar grants from the creator's row. Staff hold every grant. */
+  grants: Record<string, boolean>;
+}
+
+const DENIED: QuickAccess = { allowed: false, staff: false, grants: {} };
+
+/**
+ * Who is at the door, and which rooms they hold keys to.
+ *
+ * Not just a boolean any more, because the page gates twice: once at the door
+ * (allowed at all?) and once per pillar (the owner ticks grants at approval,
+ * and a grant the interface ignores is a checkbox that lies). Staff see
+ * everything; a creator sees the pillars they were granted, and the two
+ * staff-only rooms — AI generation and Calibrate — are simply not rendered
+ * for them, matching the endpoints behind them which still 404 non-staff.
+ */
+export async function quickAccessProfile(): Promise<QuickAccess> {
   const token = await currentAccessToken().catch(() => null);
   // Signed out is simply not allowed, and there is deliberately no sign-in form
   // here. Offering one would confirm the page exists and is worth a login
   // attempt; staff sign in on the main app and arrive already carrying a
   // session, which is one step for the handful of people who need it and a dead
   // end for everybody else.
-  if (!token) return false;
-  if (await loadIsAdmin().catch(() => false)) return true;
-  return isApprovedCreator();
-}
-
-// The League door. Reads the caller's OWN league_creators row — the RLS
-// select policy is `auth.uid() = user_id or staff`, and the explicit eq keeps
-// this a single-row read even if that policy is ever widened. Any error is a
-// refusal: a gate that fails open is not a gate.
-async function isApprovedCreator(): Promise<boolean> {
+  if (!token) return DENIED;
+  if (await loadIsAdmin().catch(() => false)) {
+    return { allowed: true, staff: true, grants: { cta: true, clips: true, polisher: true } };
+  }
+  // The League door. Reads the caller's OWN league_creators row — the RLS
+  // select policy is `auth.uid() = user_id or staff`, and the explicit eq
+  // keeps this a single-row read even if that policy is ever widened. Any
+  // error is a refusal: a gate that fails open is not a gate.
   try {
     const user = await currentUser();
-    if (!user) return false;
+    if (!user) return DENIED;
     const client = await getSupabaseClient();
     const { data } = await client
       .from("league_creators")
-      .select("status")
+      .select("status, pillar_grants")
       .eq("user_id", user.id)
-      .maybeSingle<{ status: string }>();
-    return data?.status === "approved";
+      .maybeSingle<{ status: string; pillar_grants: Record<string, boolean> | null }>();
+    if (data?.status !== "approved") return DENIED;
+    return { allowed: true, staff: false, grants: data.pillar_grants ?? {} };
   } catch {
-    return false;
+    return DENIED;
   }
 }
 
