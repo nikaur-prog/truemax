@@ -428,6 +428,32 @@ body {
 .scan-ellipsis i:nth-child(3) { animation-delay: .36s; }
 @keyframes scan-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
 
+/* The measured value, beside the region it belongs to, during the measure pass.
+   Tabular figures so a readout changing from 4.9 to 12.4 does not shove the
+   line sideways — eight of these in a row, each nudging the text, is the kind
+   of small instability that reads as a cheap screen. */
+.mp-detail {
+  color: var(--acc);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  /* Held back until the construction behind it has finished drawing. See the
+     `in` toggle in measurePass.ts: a value on screen before the line that
+     produced it is exactly the impression this screen exists to avoid. */
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.mp-detail.in { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .mp-detail { transition: none; } }
+/* The face lifts slightly out of the page while it is being measured, and the
+   frame holds a faint inner light. Cheap: one box-shadow, no filter, no
+   compositing layer per beat. */
+.face-frame.measuring { box-shadow: 0 18px 60px rgba(20, 21, 24, 0.18), inset 0 0 0 1px rgba(121, 232, 210, 0.18); }
+/* The roving sweep line belongs to the opening beat, when nothing specific is
+   being looked at yet. Once the camera is pushed in on one construction, a
+   second line travelling across it is just another thing moving. */
+.face-frame.measuring .sweep { display: none; }
+@media (prefers-reduced-motion: reduce) { .face-frame.measuring { box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); } }
+
 /* Crossing between the front and side photographs mid-scan. The canvas is
    resized and repainted while faded out, so the swap is never seen as a cut.
    The transform transition is restated here because `transition` is one
