@@ -633,6 +633,45 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           </span>
         </div>`).join("") || `<p class="lg-sub">Nothing waiting.</p>`}</div>
 
+      <div class="lg-card"><h3>Outreach</h3>
+        <p class="lg-sub">The daily engine: 100 DMs and 50 emails, sent by hand, tracked by hand.
+        The scripts are the proven structure — "Paid promo?" gets answered where a pitch gets
+        scrolled past. Never lead with the deal; it's message two.</p>
+        <div class="lg-scripts">
+          ${[
+            {
+              t: "DM · message 1 (the opener)",
+              s: "Paid promo?",
+            },
+            {
+              t: "DM · message 2 (they replied)",
+              s: "We run TrueMax — you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views — then every view you already have counts. Want the link to apply?",
+            },
+            {
+              t: "DM · follow-up (48h silence)",
+              s: "Still open if you want it — creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
+            },
+            {
+              t: "Email (from their bio / Linktree / YouTube About)",
+              s: "Subject: Paid promo — your {niche} content\n\nHey {name},\n\nSaw {video} — that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league — two minutes. Happy to answer anything on here first.\n",
+            },
+            {
+              t: "Referral bounty (to anyone signed)",
+              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough — we'll do the rest.",
+            },
+          ].map((x, i) => `<div class="lg-row" style="align-items:flex-start">
+            <div style="flex:1;min-width:0"><b style="font-size:13.5px">${x.t}</b>
+            <pre class="lg-script" id="lg-script-${i}">${esc(x.s)}</pre></div>
+            <button class="lg-btn" data-copy="${i}">Copy</button>
+          </div>`).join("")}
+        </div>
+        <p class="lg-note" style="margin-top:12px">Where the addresses come from: TikTok/IG bios
+        and Linktrees first, YouTube About tabs second (most mirror to Shorts). Clippers live in
+        Whop clipping communities, clipping Discords, and under #clips #edits in the niche — the
+        /league link is the whole pitch. Fill {name}, {video}, {niche} before sending; a script
+        sent unfilled reads as spam because it is.</p>
+      </div>
+
       <div class="lg-card"><h3>Settlement</h3>
         <p class="lg-sub">Every approved creator's accrual under the sprint's formula, from the
         latest snapshots — with the pro-rata factor if the pool is oversubscribed. The suggested
@@ -678,6 +717,16 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         };
       });
     }
+
+    mount.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((b) => {
+      b.onclick = async () => {
+        const pre = mount.querySelector<HTMLElement>(`#lg-script-${b.dataset.copy}`);
+        if (!pre) return;
+        await navigator.clipboard.writeText(pre.textContent ?? "").catch(() => {});
+        b.textContent = "Copied";
+        window.setTimeout(() => (b.textContent = "Copy"), 1200);
+      };
+    });
 
     const refresh = () => void PAGES.admin(mount, undefined as never);
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {

@@ -4,6 +4,7 @@ import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
 import { beatNear } from "../engine/rundownTimeline.js";
 import { drawMeasurement, measurementBounds } from "./measureOverlay.js";
 import { drawCtaCard } from "./ctaCard.js";
+import { drawSearchLockup } from "./searchLockup.js";
 import { SPREAD } from "../engine/rarity.js";
 
 // ---------------------------------------------------------------------------
@@ -1805,27 +1806,23 @@ function clip(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
 // width, a philtrum, a midline: all of them run through the middle of the
 // bottom third, and all of them arrived on top of the wordmark.
 //
-// So it tucks in under the score column instead, right-aligned to the same edge
-// the number and its band already use. Nothing is measured out there, the three
-// items read as one stack, and the centre of the frame is left to the face.
+// So it tucks in under the score column instead, left-aligned to the same edge
+// the metric name already uses. Nothing is measured out there, the items read
+// as one stack, and the centre of the frame is left to the face.
+//
+// Drawn as the shared search lockup (searchLockup.ts) rather than flat type:
+// a persistent little search bar is an instruction, not a signature, and it
+// is the same pill on every export the product makes.
 function drawWatermark(ctx: CanvasRenderingContext2D, H: number): void {
+  // Left-anchored in the old wordmark's slot: centre sits half a pill-width
+  // in from SAFE_LEFT, measured once with the pill's own font so the left
+  // edge lands where the flat wordmark's did.
+  const h = 30;
   ctx.save();
-  ctx.font = "500 16px Inter, Arial, sans-serif";
-  ctx.letterSpacing = "2px";
-  ctx.textAlign = "left";
-  const name = "truemax";
-  const tld = ".app";
-  // Bottom-left, under the metric name's own column. The bar moved down with
-  // the one-word caption and the wordmark's old right-side spot printed
-  // straight through the score; the right column now carries the number and
-  // its band, the left carries the name and the brand. Two differently
-  // coloured draws, the second starting where the first ends.
-  const x = SAFE_LEFT;
-  const y = H - SAFE_BOTTOM + 64;
-  ctx.globalAlpha = 0.62;
-  ctx.fillStyle = "#f5f5f1";
-  ctx.fillText(name, x, y);
-  ctx.fillStyle = "#0c876f";
-  ctx.fillText(tld, x + ctx.measureText(name).width, y);
+  ctx.font = `500 ${Math.round(h * 0.44)}px Inter, Arial, sans-serif`;
+  ctx.letterSpacing = "1px";
+  const textW = ctx.measureText("truemax").width + ctx.measureText(".app").width;
+  const pillW = h * 0.5 + h * 0.17 * 2.9 + h * 0.32 + textW + h * 0.5;
   ctx.restore();
+  drawSearchLockup(ctx, { cx: SAFE_LEFT + pillW / 2, cy: H - SAFE_BOTTOM + 58, h, alpha: 0.85 });
 }

@@ -5,6 +5,7 @@ import { rankShort } from "./templates.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "../engine/analysisMode.js";
 import { exportName, saveFile } from "./saveFile.js";
 import { drawCtaCard } from "./ctaCard.js";
+import { drawSearchLockup } from "./searchLockup.js";
 import type { SaveOutcome } from "./saveFile.js";
 
 // Which cut to render.
@@ -24,6 +25,7 @@ export type QuickVariant = "breakdown" | "verdict";
 // cadence while 720p remains practical to encode on-device.
 const W = 720;
 const H = 1280;
+
 
 // What the exported file is rasterised at, as a multiple of the authored size.
 // 1.5 is 1080x1920. See downloadQuickVideo for why it is not 1.
@@ -277,25 +279,12 @@ function drawFrame(
 
 // The way back. A reel that travels without its address is an ad for a
 // product nobody can find, so the address sits on every frame — screenshots,
-// trims and re-uploads all carry it. Steady rather than animated, and dim
-// enough to read as a signature instead of a banner; both variants keep the
-// bottom 40px of the frame clear of content, so nothing ever sits under it.
+// trims and re-uploads all carry it. Drawn as the shared search lockup
+// rather than a flat wordmark: a persistent little search bar is an
+// instruction, not a signature. Both variants keep the bottom of the frame
+// clear of content, so nothing ever sits under it.
 function drawWatermark(ctx: CanvasRenderingContext2D): void {
-  ctx.save();
-  ctx.font = "500 16px Inter, Arial, sans-serif";
-  ctx.letterSpacing = "2px";
-  ctx.textAlign = "left";
-  const name = "truemax";
-  const tld = ".app";
-  const total = ctx.measureText(name).width + ctx.measureText(tld).width;
-  const x = (W - total) / 2;
-  const y = H - 22;
-  ctx.globalAlpha = 0.62;
-  ctx.fillStyle = "#f5f5f1";
-  ctx.fillText(name, x, y);
-  ctx.fillStyle = "#0c876f";
-  ctx.fillText(tld, x + ctx.measureText(name).width, y);
-  ctx.restore();
+  drawSearchLockup(ctx, { cx: W / 2, cy: H - 34, h: 34, alpha: 0.88 });
 }
 
 interface Crop { x: number; y: number; w: number; h: number }
