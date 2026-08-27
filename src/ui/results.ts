@@ -147,6 +147,16 @@ export function renderResults(c: Ctx): void {
   if (maxAccess && adultUser) {
     const cc = chatContext();
     if (cc) mountMaxPet(cc);
+    // A scan that moved up gets a reaction from him, once he has peeked out.
+    // The coach celebrating YOUR number is the one moment the character and
+    // the product are the same thing — and only on a real rise: cheering a
+    // flat rescan would teach people his excitement means nothing.
+    if (cc && c.delta && c.delta.overall > 0.05) {
+      window.setTimeout(() => {
+        const pet = document.querySelector<HTMLElement>(".maxpet");
+        if (pet) void import("./maxCharacter.js").then((m) => m.reactMax(pet, "cheer"));
+      }, 1900);
+    }
   } else {
     unmountMaxPet();
   }

@@ -460,6 +460,55 @@ export function wireMaxInteractions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Reactions: Max responding to what just happened, not performing to himself.
+//
+// The idle repertoire is Max alone; a reaction is Max WITH you, and that
+// difference is most of what "Duolingo-level liveliness" actually is. Duo is
+// beloved because he answers the moment — right answer, wrong answer, streak —
+// with a short, whole-body burst and then gets out of the way. So each
+// reaction here is under two seconds, plays once, and restores whatever he was
+// doing before.
+//
+//   cheer — two springy jumps with star eyes; a result worth celebrating just
+//           landed. Borrows the excited face for exactly its own duration.
+//   nod   — two small forward nods; "said my piece" at the end of a reply.
+//   shake — a quick head shake; something went wrong, and he minds with you.
+//
+// Never queued and never looped: a reaction that fires while another runs
+// replaces it, because reacting late is worse than not reacting.
+// ---------------------------------------------------------------------------
+
+export type MaxReaction = "cheer" | "nod" | "shake";
+
+const REACTION_MS: Record<MaxReaction, number> = { cheer: 1600, nod: 900, shake: 800 };
+const reactionTimers = new WeakMap<SVGSVGElement, number>();
+
+export function reactMax(stage: HTMLElement | null, reaction: MaxReaction): void {
+  const svg = stage?.querySelector<SVGSVGElement>(".mx-svg");
+  if (!svg) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  const pending = reactionTimers.get(svg);
+  if (pending) window.clearTimeout(pending);
+  svg.classList.remove("mx-react-cheer", "mx-react-nod", "mx-react-shake", "mx-react-face");
+  // Reflow, or re-adding a class the same frame restarts nothing.
+  void (svg as unknown as HTMLElement).offsetWidth;
+
+  svg.classList.add(`mx-react-${reaction}`);
+  // The cheer earns the star eyes; mx-react-face outranks the mood classes in
+  // the stylesheet, so whatever mood the surface holds resumes untouched when
+  // the class comes off — no bookkeeping of what he was feeling before.
+  if (reaction === "cheer") svg.classList.add("mx-react-face");
+  reactionTimers.set(
+    svg,
+    window.setTimeout(() => {
+      svg.classList.remove(`mx-react-${reaction}`, "mx-react-face");
+      reactionTimers.delete(svg);
+    }, REACTION_MS[reaction]),
+  );
+}
+
 /** How many times this drawing has waved. */
 const WAVE_LIMIT = 2;
 const waves = new WeakMap<SVGSVGElement, number>();

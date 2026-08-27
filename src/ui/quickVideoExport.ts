@@ -536,6 +536,117 @@ export function fitVerdict(
   return { size, lines: lines ?? [word] };
 }
 
+// The constellation: the measurement graph drawn as a star map.
+//
+// NOT the dot-confetti the mesh replaced — that was 234 arbitrary specks with
+// no structure. This is ~40 points the measuring actually uses (pupils, canthi,
+// brows, nasal base, lip corners, gonions, the midline chain), joined by the
+// segments the product genuinely measures between them: the bizygomatic width,
+// the intercanthal line, the mandible run, the midline. A sparse, deliberate
+// graph over a face reads as "these exact points matter", which is a different
+// sentence from the tesselation's "everything is being captured" — so the
+// breakdown cut keeps the mesh (it explains the product) and the verdict cut
+// gets the constellation (it delivers a judgement).
+//
+// Points ignite in list order with a brief flare; a line lights only once both
+// of its stars exist. Pure function of progress — no clock, no randomness.
+const CONSTELLATION_POINTS = [
+  10, 168, 1, 2, 13, 17, 152, // the midline chain, forehead to chin
+  33, 133, 362, 263, // eye corners
+  468, 473, // pupils
+  70, 105, 107, 336, 334, 300, // brows
+  98, 327, // nasal base
+  61, 291, 0, // lip corners and cupid's bow
+  234, 454, // bizygomatic
+  172, 136, 149, 148, 377, 378, 365, 397, // mandible run
+  50, 280, // cheek mass
+  199, // under-chin
+];
+const CONSTELLATION_LINES: Array<[number, number]> = [
+  [10, 168], [168, 1], [1, 2], [2, 13], [13, 17], [17, 152], // midline
+  [33, 133], [362, 263], [133, 362], // eyes and the intercanthal bridge
+  [70, 105], [105, 107], [336, 334], [334, 300], // brows
+  [234, 454], // bizygomatic width
+  [98, 327], // nasal base
+  [61, 0], [0, 291], // lips
+  [234, 172], [172, 136], [136, 149], [149, 148], [148, 152], // left mandible
+  [454, 397], [397, 365], [365, 378], [378, 377], [377, 152], // right mandible
+  [50, 234], [280, 454], // cheeks out to the arch
+  [468, 133], [473, 362], // pupils to inner canthi
+];
+
+function drawConstellation(
+  ctx: CanvasRenderingContext2D,
+  landmarks: NormalizedLandmark[],
+  photo: HTMLCanvasElement,
+  crop: Crop,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  progress: number,
+  alpha = 1,
+): void {
+  if (!landmarks.length || alpha <= 0 || progress <= 0) return;
+  const project = (p: NormalizedLandmark) => ({
+    x: x + ((p.x * photo.width - crop.x) / crop.w) * w,
+    y: y + ((p.y * photo.height - crop.y) / crop.h) * h,
+  });
+  // How far through its own ignition each star is: staggered down the list,
+  // each taking a fixed slice of the reveal to flare and settle.
+  const n = CONSTELLATION_POINTS.length;
+  const lit = (i: number) => clamp01((progress * (n + 6) - i) / 6);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = "round";
+
+  // Lines first, under the stars. A line exists at the strength of its
+  // dimmer endpoint, so the graph assembles joint by joint.
+  ctx.strokeStyle = "rgba(143,243,224,0.55)";
+  ctx.lineWidth = Math.max(0.8, w / 780);
+  for (const [a, b] of CONSTELLATION_LINES) {
+    const ia = CONSTELLATION_POINTS.indexOf(a);
+    const ib = CONSTELLATION_POINTS.indexOf(b);
+    const la = landmarks[a];
+    const lb = landmarks[b];
+    if (!la || !lb) continue;
+    const strength = Math.min(lit(ia), lit(ib));
+    if (strength <= 0) continue;
+    const pa = project(la);
+    const pb = project(lb);
+    ctx.globalAlpha = alpha * 0.9 * strength;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    // Drawn tip-out from the first star rather than popping whole.
+    ctx.lineTo(pa.x + (pb.x - pa.x) * strength, pa.y + (pb.y - pa.y) * strength);
+    ctx.stroke();
+  }
+
+  // The stars: a flare that overshoots and settles, so each point ARRIVES
+  // rather than fades in. Refined iris points may be absent on some models;
+  // any missing index is simply skipped.
+  for (let i = 0; i < n; i++) {
+    const p = landmarks[CONSTELLATION_POINTS[i]];
+    if (!p) continue;
+    const s = lit(i);
+    if (s <= 0) continue;
+    const { x: sx, y: sy } = project(p);
+    const flare = s < 1 ? 1 + (1 - s) * 1.8 : 1;
+    const r = Math.max(1.6, w / 320) * flare;
+    ctx.globalAlpha = alpha * s;
+    ctx.fillStyle = "rgba(143,243,224,0.28)";
+    ctx.beginPath();
+    ctx.arc(sx, sy, r * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#c9fff2";
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawVerdictFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
@@ -566,8 +677,10 @@ function drawVerdictFrame(
 
   if (t < 2.2) {
     if (t < 1.35) drawScanLine(ctx, px, py, pw, ph, t);
-    const reveal = clamp01((t - 0.8) / 0.55);
-    if (reveal > 0) drawLandmarks(ctx, landmarks, photo, crop, px, py, pw, ph, reveal, 1 - settle);
+    // The constellation rather than the mesh — see drawConstellation for why
+    // the two cuts scan differently on purpose.
+    const reveal = clamp01((t - 0.7) / 0.9);
+    if (reveal > 0) drawConstellation(ctx, landmarks, photo, crop, px, py, pw, ph, reveal, 1 - settle);
   }
 
   // Sex and tone both threaded in rather than defaulted.

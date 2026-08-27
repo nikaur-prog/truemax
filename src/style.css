@@ -3690,6 +3690,96 @@ body.auth-modal-open { overflow: hidden; }
   50% { transform: translateY(-4px) scale(1.04); }
 }
 
+/* Stretch: arms up, a long reach with the whole body drawn tall, then the
+   pleased slump of somebody who needed that. No prop — the act IS the body,
+   which is exactly why it earns a slot: nine acts of pulling objects out of
+   nowhere and the objects become the joke instead of him. */
+.mx-act-stretch .mx-bob { animation: mx-stretch 5s ease-in-out; }
+.mx-act-stretch .mx-arm { animation: mx-stretch-arm 5s ease-in-out; }
+@keyframes mx-stretch {
+  0%, 100% { transform: scale(1) translateY(0) rotate(0); }
+  /* The gather before the reach — anticipation is what sells the stretch. */
+  12% { transform: scale(1.05, .93) translateY(3px); }
+  30% { transform: scale(.95, 1.07) translateY(-5px) rotate(-2deg); }
+  48% { transform: scale(.94, 1.08) translateY(-6px) rotate(2deg); }
+  62% { transform: scale(.96, 1.06) translateY(-4px); }
+  /* The slump: past neutral on the way down, then settle. */
+  78% { transform: scale(1.06, .94) translateY(3px); }
+  88% { transform: scale(.99, 1.01) translateY(-1px); }
+}
+@keyframes mx-stretch-arm {
+  0%, 100% { transform: rotate(0); }
+  25%, 65% { transform: translate(3px, -11px) rotate(-160deg); }
+  80% { transform: translate(0, 0) rotate(8deg); }
+}
+
+/* --------------------------------------------------------------------------
+   Anticipation and follow-through around every act (ui/maxIdle.ts).
+
+   The acts used to start from a standstill — one frame breathing, next frame
+   skateboarding — which is the single biggest tell separating UI animation
+   from character animation. Real characters gather before they move and
+   settle after they stop. So the idle loop now wraps every act in a wind-up
+   (a quick crouch, weight down) and a settle (an overshoot bounce back to
+   the breathing cycle). Both are on .mx-bob so they compose with whatever
+   arms and props the act itself animates.
+   -------------------------------------------------------------------------- */
+.mx-svg.mx-windup .mx-bob { animation: mx-windup .34s cubic-bezier(.5,.05,.7,.4) both; }
+@keyframes mx-windup {
+  0% { transform: scale(1) translateY(0); }
+  100% { transform: scale(1.06, .92) translateY(4px); }
+}
+.mx-svg.mx-settle .mx-bob { animation: mx-settle .55s cubic-bezier(.26,1.6,.44,1) both; }
+@keyframes mx-settle {
+  0% { transform: scale(1.05, .94) translateY(3px); }
+  55% { transform: scale(.98, 1.03) translateY(-2px); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+/* --------------------------------------------------------------------------
+   Reactions (ui/maxCharacter.ts reactMax): Max answering the moment.
+   Short, once, whole-body, then out of the way — see the module comment.
+   -------------------------------------------------------------------------- */
+.mx-svg.mx-react-cheer .mx-bob { animation: mx-cheer 1.6s cubic-bezier(.3,1.4,.45,1); }
+.mx-svg.mx-react-cheer .mx-arm { animation: mx-cheer-arm 1.6s ease-in-out; }
+@keyframes mx-cheer {
+  0% { transform: translateY(0) scale(1); }
+  /* Two jumps, each with a gather before and a squash on landing. */
+  10% { transform: translateY(4px) scale(1.08, .9); }
+  26% { transform: translateY(-16px) scale(.95, 1.06) rotate(-3deg); }
+  40% { transform: translateY(2px) scale(1.07, .92); }
+  54% { transform: translateY(-12px) scale(.96, 1.05) rotate(3deg); }
+  68% { transform: translateY(2px) scale(1.05, .94); }
+  82% { transform: translateY(-2px) scale(.99, 1.01); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes mx-cheer-arm {
+  0%, 100% { transform: rotate(0); }
+  20%, 60% { transform: translate(3px, -10px) rotate(-165deg); }
+  80% { transform: translate(0, -2px) rotate(-30deg); }
+}
+.mx-svg.mx-react-nod .mx-bob { animation: mx-nod .9s ease-in-out; }
+@keyframes mx-nod {
+  0%, 100% { transform: rotate(0) translateY(0); }
+  22% { transform: rotate(4deg) translateY(3px); }
+  45% { transform: rotate(-1deg) translateY(-1px); }
+  68% { transform: rotate(3deg) translateY(2px); }
+}
+.mx-svg.mx-react-shake .mx-bob { animation: mx-headshake .8s ease-in-out; }
+@keyframes mx-headshake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  18% { transform: translateX(-4px) rotate(-3deg); }
+  42% { transform: translateX(4px) rotate(3deg); }
+  66% { transform: translateX(-3px) rotate(-2deg); }
+  84% { transform: translateX(2px) rotate(1deg); }
+}
+/* The cheer borrows the excited face without touching the mood classes, so
+   whatever the surface set resumes untouched when the reaction ends. Placed
+   after the mood rules, so at equal specificity these win while present. */
+.mx-react-face .mx-eye-stars { display: block; }
+.mx-react-face .mx-pupils,
+.mx-react-face .mx-lid { display: none; }
+
 @media (prefers-reduced-motion: reduce) { .mx-prop { display: none !important; } }
 /* Lids are head-coloured ellipses that drop from the top of each eye. */
 /* transform-box matters here: without it an SVG transform-origin resolves
