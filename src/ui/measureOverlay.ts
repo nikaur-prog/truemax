@@ -332,6 +332,13 @@ export function drawMeasurement(
   height: number,
   metric: ScoredMetric,
   progress = 1,
+  /**
+   * Whether the value chips are drawn. The report keeps them — a tapped row is
+   * a question about a number. The scan's measure pass turns them off: while
+   * the face is being read, the construction itself is the show, and eight
+   * numbers flashing past in ten seconds is noise pretending to be data.
+   */
+  opts: { labels?: boolean } = {},
 ): boolean {
   // Only resize when the size actually changed. Assigning to canvas.width or
   // canvas.height reallocates the whole backing buffer and resets the context,
@@ -399,7 +406,7 @@ export function drawMeasurement(
       const b = lerp(a, bFull, u);
       line(ctx, a, b);
       if (done) tick(ctx, a, bFull, lw);
-      if (seg.label && done) {
+      if (seg.label && done && opts.labels !== false) {
         // Sit the label just past the line's end so the face stays visible
         const dx = bFull.x - a.x, dy = bFull.y - a.y;
         const len = Math.hypot(dx, dy) || 1;
@@ -425,13 +432,13 @@ export function drawMeasurement(
       line(ctx, v, lerp(v, a, phase.legA));
       if (phase.legB > 0) line(ctx, v, lerp(v, b, phase.legB));
       if (phase.arc > 0) arc(ctx, v, a, b, width, phase.arc);
-      if (seg.label && done) label(ctx, seg.label, angleLabelAt(v, a, b, width, fs), fs, color);
+      if (seg.label && done && opts.labels !== false) label(ctx, seg.label, angleLabelAt(v, a, b, width, fs), fs, color);
     } else if (seg.kind === "rule") {
       // A rule spans the frame, so it opens from the middle outward.
       const p = P(seg.y);
       const half = (width / 2) * u;
       line(ctx, { x: width / 2 - half, y: p.y }, { x: width / 2 + half, y: p.y });
-      if (seg.label && done) label(ctx, seg.label, { x: width * 0.5, y: p.y }, fs, color);
+      if (seg.label && done && opts.labels !== false) label(ctx, seg.label, { x: width * 0.5, y: p.y }, fs, color);
     } else {
       const p = P(seg.x);
       const half = (height / 2) * u;

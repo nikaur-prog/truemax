@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPassPlan, readout } from "./measurePass.js";
+import { buildPassPlan } from "./measurePass.js";
 import { hasOverlay } from "./measureOverlay.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { REGION_RELIABLE_MIN } from "../engine/scoring.js";
@@ -126,21 +126,4 @@ test("a front-only scan plans a front-only pass", () => {
   assert.ok(plan.every((s) => s.view === "front"));
 });
 
-test("the readout quotes a value the way the rest of the app quotes it", () => {
-  const m = metric("browTilt");
-  m.value = -4.87;
-  // Degrees, one decimal — the metric's own unit and precision, so the pass and
-  // the report can never print the same measurement two different ways.
-  assert.equal(readout(m), "-4.9°");
-});
 
-test("the readout is a measurement, never a score", () => {
-  const m = metric("lipRatio");
-  m.value = 0.61;
-  m.score = 8.4;
-  m.percentile = 91;
-  const said = readout(m);
-  assert.ok(!said.includes("8.4"), "a beat must not deliver a verdict");
-  assert.ok(!said.includes("/10"));
-  assert.ok(!said.includes("91"));
-});

@@ -428,22 +428,15 @@ body {
 .scan-ellipsis i:nth-child(3) { animation-delay: .36s; }
 @keyframes scan-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
 
-/* The measured value, beside the region it belongs to, during the measure pass.
-   Tabular figures so a readout changing from 4.9 to 12.4 does not shove the
-   line sideways — eight of these in a row, each nudging the text, is the kind
-   of small instability that reads as a cheap screen. */
-.mp-detail {
-  color: var(--acc);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-  /* Held back until the construction behind it has finished drawing. See the
-     `in` toggle in measurePass.ts: a value on screen before the line that
-     produced it is exactly the impression this screen exists to avoid. */
-  opacity: 0;
-  transition: opacity 0.22s ease;
+/* The report arriving after the measure pass: one fade-and-lift on the whole
+   column, then the class is removed so re-renders don't replay it. */
+.analysis-arrive { animation: analysis-arrive .7s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+@keyframes analysis-arrive {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
 }
-.mp-detail.in { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .mp-detail { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .analysis-arrive { animation: none; } }
+
 /* The face lifts slightly out of the page while it is being measured, and the
    frame holds a faint inner light. Cheap: one box-shadow, no filter, no
    compositing layer per beat. */

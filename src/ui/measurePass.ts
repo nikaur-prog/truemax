@@ -20,10 +20,11 @@ import { prefersReducedMotion } from "./countUp.js";
 //
 // So the pass walks the face region by region and DRAWS the measurement that
 // carries each region, using the same recipes the report uses on tap. The
-// camera pushes in on the construction, the line arrives along its own path,
-// the value lands once the line is real. Nothing here is decorative geometry:
-// every figure is the actual span or angle taken off the actual landmarks of
-// the photograph in the frame.
+// camera pushes in on the construction and the line arrives along its own
+// path. Deliberately NO numbers: while the face is being read, the lines are
+// the show, and the report is where values belong. Nothing here is decorative
+// geometry — every figure is the actual span or angle taken off the actual
+// landmarks of the photograph in the frame.
 //
 // Two rules this must never break.
 //
@@ -343,10 +344,10 @@ export function runMeasurePass(
     if (step.view === "side") {
       const s = sources.side;
       if (!s) return;
-      drawSideMeasurement(host.overlayCanvas, s.points, s.width, s.height, step.metric, progress);
+      drawSideMeasurement(host.overlayCanvas, s.points, s.width, s.height, step.metric, progress, { labels: false });
     } else {
       const f = sources.front;
-      drawMeasurement(host.overlayCanvas, f.landmarks, f.width, f.height, step.metric, progress);
+      drawMeasurement(host.overlayCanvas, f.landmarks, f.width, f.height, step.metric, progress, { labels: false });
     }
   };
 
@@ -403,7 +404,11 @@ export function runMeasurePass(
       await crossTo(step.view);
       if (signal.cancelled) return;
       opts.onStep?.(step, i);
-      say(step.label, readout(step.metric));
+      // The region name alone. The values were here once and were cut on
+      // purpose: while the face is being read the construction is the show,
+      // and eight numbers flashing past in ten seconds is noise wearing a
+      // lab coat. The report is where the numbers live.
+      say(step.label, "");
       if (!reduced) {
         const b = boundsFor(step);
         if (b) applyZoom(host.zoomable, zoomToBounds(b, { fill: 0.62, max: 2.2 }));
@@ -413,17 +418,9 @@ export function runMeasurePass(
         if (signal.cancelled) return;
         await arrive(step);
         if (signal.cancelled) return;
-        // The value only appears once the line that proves it is whole.
-        //
-        // It used to land with the region name, which put a measurement on
-        // screen for the length of the camera move with nothing drawn behind
-        // it — a number arriving before its evidence, on the one screen whose
-        // entire job is to show that the numbers are measured.
-        host.status.querySelector(".mp-detail")?.classList.add("in");
         await sleep(HOLD_MS, signal);
       } else {
         drawStep(step, 1);
-        host.status.querySelector(".mp-detail")?.classList.add("in");
         await sleep(200, signal);
       }
     }
@@ -457,18 +454,3 @@ export function runMeasurePass(
   };
 }
 
-/**
- * The value, as the narration says it.
- *
- * The metric's own unit and precision, never its score — a beat is a
- * measurement being taken, and putting "7.3/10" beside a line drawn on a face
- * would turn the one honest part of this screen into a verdict delivered eight
- * times before the verdict.
- */
-export function readout(m: ScoredMetric): string {
-  // def.unit is already the printable symbol ("°", "×", "" for a pure ratio)
-  // and def.decimals is the precision the metric is quoted at everywhere else
-  // in the app, so the pass and the report never disagree about a value's
-  // last digit.
-  return `${m.value.toFixed(m.def.decimals ?? 2)}${m.def.unit}`;
-}

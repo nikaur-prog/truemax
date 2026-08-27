@@ -98,6 +98,8 @@ export function drawSideMeasurement(
   h: number,
   metric: ScoredMetric,
   progress = 1,
+  /** Same switch as drawMeasurement: the scan pass draws lines, not numbers. */
+  opts: { labels?: boolean } = {},
 ): void {
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
@@ -135,13 +137,13 @@ export function drawSideMeasurement(
       line(ctx, prim.a, b);
       if (done) {
         tick(ctx, prim.a, prim.b, lw);
-        if (prim.label) labelPast(ctx, prim.label, prim.a, prim.b, fs, color);
+        if (prim.label && opts.labels !== false) labelPast(ctx, prim.label, prim.a, prim.b, fs, color);
       }
     } else if (prim.kind === "angle") {
       line(ctx, prim.v, lerp(prim.v, prim.a, u));
       line(ctx, prim.v, lerp(prim.v, prim.b, u));
       if (u > 0.55) arc(ctx, prim.v, prim.a, prim.b, w, (u - 0.55) / 0.45);
-      if (prim.label && done) label(ctx, prim.label, prim.v, fs, color);
+      if (prim.label && done && opts.labels !== false) label(ctx, prim.label, prim.v, fs, color);
     } else if (prim.kind === "drop") {
       // Reference line first, faint; then the perpendicular carrying the number.
       ctx.strokeStyle = WARM;
@@ -153,7 +155,7 @@ export function drawSideMeasurement(
       line(ctx, f, lerp(f, prim.p, u));
       if (done) {
         tick(ctx, f, prim.p, lw);
-        if (prim.label) labelPast(ctx, prim.label, f, prim.p, fs, color);
+        if (prim.label && opts.labels !== false) labelPast(ctx, prim.label, f, prim.p, fs, color);
       }
     } else {
       // Measured span, plus a dashed true-vertical through one end.
@@ -165,7 +167,7 @@ export function drawSideMeasurement(
       const vlen = h * 0.16 * u;
       line(ctx, { x: prim.through.x, y: prim.through.y - vlen }, { x: prim.through.x, y: prim.through.y + vlen });
       ctx.restore();
-      if (prim.label && done) labelPast(ctx, prim.label, prim.a, prim.b, fs, color);
+      if (prim.label && done && opts.labels !== false) labelPast(ctx, prim.label, prim.a, prim.b, fs, color);
     }
   });
   ctx.shadowBlur = 0;

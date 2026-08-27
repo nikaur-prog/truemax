@@ -2011,6 +2011,14 @@ async function runFullAnalysis(
     },
   };
   track("results-shown");
+  // The report does not cut in — it arrives. The pass has just spent ten
+  // seconds moving smoothly over the face; a hard innerHTML swap at the end
+  // of it is the one jolt that would undo all of that. The class fades and
+  // lifts the whole analysis column in (see .analysis-arrive), and is removed
+  // after the animation so later re-renders (tab changes, unlocks) do not
+  // replay an entrance nobody is entering.
+  el.analysis.classList.add("analysis-arrive");
+  window.setTimeout(() => el.analysis.classList.remove("analysis-arrive"), 900);
   renderResults(ctxArgs);
   scanSession.transition(token, "results");
 

@@ -70,3 +70,4 @@ exports/
 # Contact sheets from tools/rundown-sheet.mjs — regenerate, never commit.
 .rundown-sheet/
 .celeb-cache/
+.cta-assets/
