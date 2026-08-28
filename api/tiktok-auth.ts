@@ -1,4 +1,5 @@
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import { freshTikTokAccess, listOwnTikTokVideos, tiktokTokenRequest } from "./_tiktok.js";
 
 // ---------------------------------------------------------------------------
 // TikTok Login Kit + Display API, for League creators.
@@ -23,9 +24,7 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 // ---------------------------------------------------------------------------
 
 const AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/";
-const TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const USERINFO_URL = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name";
-const VIDEOS_URL = "https://open.tiktokapis.com/v2/video/list/?fields=id,title,view_count,like_count,comment_count,share_count,create_time,share_url";
 const SCOPES = "user.info.basic,video.list";
 
 function redirectUri(): string {
@@ -40,28 +39,6 @@ async function memberOrStaff(userId: string): Promise<boolean> {
     admin.from("league_creators").select("status").eq("user_id", userId).maybeSingle<{ status: string }>(),
   ]);
   return Boolean(staff) || creator?.status === "approved";
-}
-
-interface TokenPayload {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  open_id?: string;
-  error?: string;
-  error_description?: string;
-}
-
-async function tokenRequest(fields: Record<string, string>): Promise<TokenPayload> {
-  const response = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_key: process.env.TIKTOK_CLIENT_KEY || "",
-      client_secret: process.env.TIKTOK_CLIENT_SECRET || "",
-      ...fields,
-    }).toString(),
-  });
-  return (await response.json().catch(() => ({}))) as TokenPayload;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -96,7 +73,7 @@ export async function POST(request: Request): Promise<Response> {
     if (body?.action === "exchange") {
       const code = typeof body.code === "string" ? body.code : "";
       if (!code) return json({ error: "No code to exchange." }, 400);
-      const token = await tokenRequest({
+      const token = await tiktokTokenRequest({
         code,
         grant_type: "authorization_code",
         redirect_uri: redirectUri(),
@@ -129,48 +106,16 @@ export async function POST(request: Request): Promise<Response> {
         .maybeSingle<{ access_token: string; refresh_token: string; expires_at: string }>();
       if (!row) return json({ error: "No TikTok account is linked." }, 400);
 
-      let access = row.access_token;
-      // Refresh with a minute of slack — a token that expires mid-request
-      // fails exactly like a missing one but is harder to explain.
-      if (Date.parse(row.expires_at) < Date.now() + 60_000) {
-        const refreshed = await tokenRequest({ grant_type: "refresh_token", refresh_token: row.refresh_token });
-        if (!refreshed.access_token) {
-          return json({ error: "The TikTok link has expired — connect it again." }, 401);
-        }
-        access = refreshed.access_token;
-        await admin.from("league_tiktok_accounts").update({
-          access_token: refreshed.access_token,
-          refresh_token: refreshed.refresh_token ?? row.refresh_token,
-          expires_at: new Date(Date.now() + (refreshed.expires_in ?? 3600) * 1000).toISOString(),
-        }).eq("user_id", user.id);
-      }
+      // Refresh-and-persist lives in _tiktok.ts, shared with the nightly
+      // tracker — two copies of refresh logic is how one stops refreshing.
+      const access = await freshTikTokAccess(user.id, row);
+      if (!access) return json({ error: "The TikTok link has expired — connect it again." }, 401);
 
-      const listing = (await (
-        await fetch(VIDEOS_URL, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${access}`, "content-type": "application/json" },
-          body: JSON.stringify({ max_count: 10 }),
-        })
-      ).json().catch(() => ({}))) as {
-        data?: { videos?: Array<{ id?: string; title?: string; view_count?: number; like_count?: number; comment_count?: number; share_count?: number; share_url?: string }> };
-        error?: { code?: string; message?: string };
-      };
-      const videos = listing.data?.videos;
+      const videos = await listOwnTikTokVideos(access, 10);
       if (!videos) {
-        console.error("TikTok video.list refused", listing.error?.code);
         return json({ error: "TikTok would not list videos just now. Try again shortly." }, 502);
       }
-      return json({
-        videos: videos.map((v) => ({
-          id: v.id ?? "",
-          title: v.title ?? "",
-          views: v.view_count ?? 0,
-          likes: v.like_count ?? 0,
-          comments: v.comment_count ?? 0,
-          shares: v.share_count ?? 0,
-          url: v.share_url ?? "",
-        })),
-      });
+      return json({ videos });
     }
 
     if (body?.action === "disconnect") {

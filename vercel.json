@@ -11,7 +11,8 @@
     { "source": "/league/tools", "destination": "/quick.html" }
   ],
   "crons": [
-    { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" }
+    { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" },
+    { "path": "/api/league-track", "schedule": "45 2 * * *" }
   ],
   "headers": [
     {

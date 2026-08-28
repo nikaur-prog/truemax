@@ -63,6 +63,9 @@ interface SubmissionRow {
   platform: string;
   status: string;
   created_at: string;
+  /** Set by the nightly tracker when the URL matched a video on the
+   *  creator's own linked TikTok — ownership proven, counts automatic. */
+  tiktok_video_id: string | null;
 }
 
 const root = document.getElementById("league")!;
@@ -536,7 +539,10 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       ${subs.length ? `<div class="lg-card">${subs.map((s) => `
         <div class="lg-row">
           <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url.replace(/^https:\/\/(www\.)?/, "").slice(0, 48))}</a>
-          ${chip(s.status)}
+          <span style="display:flex;gap:8px">
+            ${s.tiktok_video_id ? `<span class="lg-chip ok">AUTO-TRACKED</span>` : ""}
+            ${chip(s.status)}
+          </span>
         </div>`).join("")}</div>`
       : `<div class="lg-card"><h3>Nothing yet</h3><p class="lg-sub">Post, then submit the link. Every video counts.</p></div>`}`;
   },
@@ -748,9 +754,16 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           </div>
         </div>`).join("") || `<p class="lg-sub">Inbox zero.</p>`}</div>
 
-      <div class="lg-card"><h3>Submissions to review · ${subs.length}</h3>${subs.map((s) => `
+      <div class="lg-card"><h3>Submissions to review · ${subs.length}</h3>
+        <p class="lg-sub">ON LINKED ACCOUNT means the nightly tracker found this exact video on
+        the creator's own connected TikTok — ownership is proven. Approval is still your call:
+        it says the video is actually TrueMax content, which no API can check.</p>
+        ${subs.map((s) => `
         <div class="lg-row" style="flex-wrap:wrap">
-          <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url.slice(0, 52))}</a>
+          <span style="display:flex;gap:10px;align-items:center;min-width:0">
+            <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url.slice(0, 52))}</a>
+            ${s.tiktok_video_id ? `<span class="lg-chip ok">ON LINKED ACCOUNT</span>` : ""}
+          </span>
           <span style="display:flex;gap:8px;align-items:center">
             <button class="lg-btn pri" data-sub-approve="${s.id}">Approve</button>
             <button class="lg-btn danger" data-sub-reject="${s.id}">Reject</button>
