@@ -72,10 +72,39 @@ function click(sampleRate: number): Float32Array {
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const t = i / sampleRate;
-    const envelope = Math.exp((-i / n) * 9);
-    // Two partials a fifth apart. One sine is a beep; two is a mechanism.
-    const body = Math.sin(2 * Math.PI * 2100 * t) * 0.7 + Math.sin(2 * Math.PI * 3150 * t) * 0.3;
+    // A steeper decay than the first version (12, up from 9): at 9 the two
+    // partials beat against each other long enough to read as a double tap,
+    // which was the whole complaint. One fundamental with a faint upper
+    // partial and a fast die-off is one tap.
+    const envelope = Math.exp((-i / n) * 12);
+    const body = Math.sin(2 * Math.PI * 1500 * t) * 0.85 + Math.sin(2 * Math.PI * 2250 * t) * 0.15;
     out[i] = body * envelope * CLICK_GAIN;
+  }
+  return out;
+}
+
+/**
+ * The cutaway whoosh: air moving left to right, for the shot changes.
+ *
+ * Band-limited noise with the low-pass corner swept up and back down over the
+ * swell, which is what makes filtered noise read as movement rather than as
+ * static. Short and far down in the mix, like everything else here: it marks
+ * the cut, it is not a sound effect to admire.
+ */
+function whoosh(sampleRate: number): Float32Array {
+  const n = Math.floor(sampleRate * 0.3);
+  const out = new Float32Array(n);
+  let seed = 0x51f7a3d;
+  let low = 0;
+  for (let i = 0; i < n; i++) {
+    const u = i / n;
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const noise = (seed / 0xffffffff) * 2 - 1;
+    // The filter opens toward the middle of the swell and closes again.
+    const open = 0.08 + 0.3 * Math.sin(Math.PI * u);
+    low += (noise - low) * open;
+    const envelope = Math.sin(Math.PI * Math.min(1, u * 1.15)) ** 2;
+    out[i] = low * envelope * 0.34;
   }
   return out;
 }
@@ -265,6 +294,7 @@ export async function mixRundownAudio(
     key: keystroke(sampleRate),
     click: click(sampleRate),
     pop: pop(sampleRate),
+    whoosh: whoosh(sampleRate),
   };
   for (const cue of timeline.sfx) {
     stamp(mix, effects[cue.kind] ?? effects.click, cue.at * sampleRate);

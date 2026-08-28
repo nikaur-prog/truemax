@@ -54,6 +54,192 @@ export interface Phrase {
   bad: (v: string, high: boolean) => string;
 }
 
+// ---------------------------------------------------------------------------
+// The SHORT clauses — the fast cut's whole voice.
+//
+// Same verdict-first shape, with the figure REMOVED from the mouth entirely:
+// in the short cut the number is drawn on screen beside its own measurement
+// line, and saying it a second time is the two seconds per beat the format
+// exists to save. Two kinds of good clause:
+//
+//   - trait names, where the strength has a name people repeat ("high-set
+//     cheekbones", "a sharp jawline") — grade words would only dilute these
+//   - graded generics for the ratio-and-proportion metrics, where the grade
+//     IS the verdict ("a great midface ratio", "an ideal face shape"). The
+//     builder passes the article-plus-adjective, picked from the metric's own
+//     zEff, so "great" always means the same distance from the mean.
+//
+// Bad clauses stay direction-true to the full phrases above — eyes too far
+// apart and too close together are still not the same note.
+// ---------------------------------------------------------------------------
+
+export interface ShortPhrase {
+  /** `grade` arrives as article + adjective, e.g. "a great". */
+  good: (grade: string) => string;
+  bad: (high: boolean) => string;
+}
+
+export const SHORT_PHRASES: Record<string, ShortPhrase> = {
+  // --- eyes ---------------------------------------------------------------
+  // canthalTilt's good clause is normally replaced by the measured eye SHAPE
+  // (engine/traits.ts) in the builder; this is the fallback when the shape
+  // cannot be classified.
+  canthalTilt: {
+    good: (g) => `${g} canthal tilt`,
+    bad: (high) => (high ? "over-tilted, startled-set eyes" : "flat, downturned eyes"),
+  },
+  browTilt: {
+    good: () => "masculine straight-set brows",
+    bad: (high) => (high ? "soft, arched brows" : "heavy, drooping brows"),
+  },
+  browPosition: {
+    good: (g) => `${g} brow height`,
+    bad: (high) => (high ? "high-floating brows" : "low-set brows"),
+  },
+  intercanthalEyeWidth: {
+    good: (g) => `${g} eye separation ratio`,
+    bad: (high) => (high ? "eyes spaced more than one eye apart" : "close-set eyes"),
+  },
+  fifthsEyeRatio: {
+    good: () => "textbook facial fifths",
+    bad: (high) => (high ? "eyes oversized for the face" : "eyes small for the face"),
+  },
+
+  // --- midface ------------------------------------------------------------
+  midfaceRatio: {
+    good: (g) => `${g} midface ratio`,
+    bad: (high) => (high ? "a long, ageing midface" : "a cramped midface"),
+  },
+  cheekboneHeight: {
+    good: () => "high-set cheekbones",
+    bad: (high) => (high ? "cheekbones riding hollow-high" : "low, flat cheekbones"),
+  },
+  cheekFullness: {
+    good: () => "lean, cut cheeks",
+    bad: (high) => (high ? "soft, padded cheeks" : "gaunt, hollowed cheeks"),
+  },
+
+  // --- jaw ----------------------------------------------------------------
+  jawCheekRatio: {
+    good: (g) => `${g} jaw-to-cheekbone width`,
+    bad: (high) => (high ? "a squared-off jaw" : "a tapering jaw"),
+  },
+
+  // --- chin ---------------------------------------------------------------
+  philtrumChinRatio: {
+    good: (g) => `${g} chin-to-philtrum ratio`,
+    bad: (high) => (high ? "an overlong chin" : "a weak chin"),
+  },
+  chinWidthRatio: {
+    good: () => "a broad dimorphic chin",
+    bad: (high) => (high ? "a blunt, flattened chin" : "a narrow, pointed chin"),
+  },
+  lowerFacePct: {
+    good: (g) => `${g} lower third`,
+    bad: (high) => (high ? "an overlong lower third" : "a boyish short lower third"),
+  },
+
+  // --- lips ---------------------------------------------------------------
+  lipRatio: {
+    good: () => "full, balanced lips",
+    bad: (high) => (high ? "a bottom-heavy mouth" : "a thin mouth"),
+  },
+  mouthCornerTilt: {
+    good: () => "upturned mouth corners",
+    bad: (high) => (high ? "expression-forced mouth corners" : "a resting scowl"),
+  },
+
+  // --- proportions --------------------------------------------------------
+  facialIndex: {
+    good: (g) => `${g} face shape`,
+    bad: (high) => (high ? "an overlong, narrow face" : "a wide, short face"),
+  },
+  middleLowerBalance: {
+    good: () => "balanced facial thirds",
+    bad: (high) => (high ? "a top-heavy midface" : "a bottom-heavy face"),
+  },
+  topThirdEst: {
+    good: (g) => `${g} upper third`,
+    bad: (high) => (high ? "a tall forehead" : "a short forehead"),
+  },
+  foreheadRatio: {
+    good: (g) => `${g} forehead proportion`,
+    bad: (high) => (high ? "a dominant forehead" : "a low forehead"),
+  },
+
+  // --- symmetry -----------------------------------------------------------
+  midlineDeviation: {
+    good: () => "a near-perfect midline",
+    bad: () => "a visibly shifted midline",
+  },
+
+  // --- side ---------------------------------------------------------------
+  gonialAngle: {
+    good: () => "a sharp jawline",
+    bad: (high) => (high ? "a rounded, soft jaw corner" : "an over-cut jaw corner"),
+  },
+  ramusMandible: {
+    good: (g) => `${g} ramus`,
+    bad: (high) => (high ? "a tall, short-bodied jaw" : "a shallow ramus"),
+  },
+  submentalCervical: {
+    good: () => "a clean chin-to-neck line",
+    bad: (high) => (high ? "a soft under-chin" : "a compressed neckline"),
+  },
+  mandibularPlane: {
+    good: () => "a flat, strong jaw plane",
+    bad: (high) => (high ? "a steep jaw plane" : "an over-flat jaw plane"),
+  },
+  chinProjection: {
+    good: () => "a forward-set chin",
+    bad: (high) => (high ? "an over-projected chin" : "a recessed chin"),
+  },
+  chinRecession: {
+    good: () => "a chin that holds its own line",
+    bad: (high) => (high ? "a chin that falls behind the lips" : "a chin running ahead of the lips"),
+  },
+  facialConvexity: {
+    good: (g) => `${g} facial convexity`,
+    bad: (high) => (high ? "a bowed, convex profile" : "a concave profile"),
+  },
+  totalFacialConvexity: {
+    good: () => "a straight nose-in profile",
+    bad: (high) => (high ? "a nose-heavy convex profile" : "a flattened full profile"),
+  },
+  nasofrontalAngle: {
+    good: (g) => `${g} nasofrontal angle`,
+    bad: (high) => (high ? "a flat brow-to-bridge line" : "a deep-notched nasofrontal angle"),
+  },
+  nasolabialAngle: {
+    good: (g) => `${g} nose base`,
+    bad: (high) => (high ? "an upturned nose base" : "a drooping nose base"),
+  },
+  nasalProjection: {
+    good: (g) => `${g} nose projection`,
+    bad: (high) => (high ? "a leading nose" : "a flat nose"),
+  },
+  upperLipELine: {
+    good: () => "a textbook upper lip",
+    bad: (high) => (high ? "a protruding upper lip" : "a recessed upper lip"),
+  },
+  lowerLipELine: {
+    good: () => "a lower lip tracking the E-line",
+    bad: (high) => (high ? "a protruding lower lip" : "a recessed lower lip"),
+  },
+  lowerThirdDepth: {
+    good: () => "a deep, forward lower third",
+    bad: (high) => (high ? "a jutting lower third" : "a shallow lower third"),
+  },
+  foreheadSlope: {
+    good: () => "an upright forehead",
+    bad: (high) => (high ? "a swept-back forehead" : "a domed, vertical forehead"),
+  },
+  midfaceRatioSide: {
+    good: (g) => `${g} side midface`,
+    bad: (high) => (high ? "a long side midface" : "a shallow side midface"),
+  },
+};
+
 // The measured number, formatted the way the metric asks and no further. The
 // clause supplies the unit word, because "6.4°" has to become "6.4 degrees" for
 // a microphone and "0.85×" has to become "0.85 times" or vanish into the

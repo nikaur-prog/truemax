@@ -77,14 +77,14 @@ const DEFAULT_MODEL = "eleven_multilingual_v2";
 // Raising it shortens the whole rundown, because the visual timeline is fitted
 // to the audio rather than the other way round.
 //
-// 1.12 is a deliberate ceiling. Past about 1.2 the delivery starts clipping its
-// own pauses, and the beat of air spokenSeconds leaves at the end of each line
-// stops landing — which is what makes a rundown read as a list being recited
-// rather than as somebody talking.
-// 1.18, up from 1.12 — watched back, 1.12 still read as measured rather than
-// confident. Still under the 1.2 ceiling above, so the end-of-line pauses that
-// keep this sounding like talking rather than reciting survive.
-const VOICE_SPEED = 1.18;
+// 1.12 was the first setting and 1.18 the second; both read as measured
+// rather than confident when watched back against the fast-cut reference
+// channels. 1.25 is the owner's call after listening: past ~1.2 the delivery
+// does start clipping its own end-of-line pauses, and that trade is accepted
+// — on the short cut the beats are terse enough that pace reads as energy,
+// not as reciting. If it still drags, 1.5 is the next stop; anything between
+// is unlikely to be distinguishable by ear.
+const VOICE_SPEED = 1.25;
 
 export async function POST(request: Request): Promise<Response> {
   try {

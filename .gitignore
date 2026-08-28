@@ -55,6 +55,13 @@ clips/
 # portrait already versioned under public/demo, credited on its endcard.
 !public/league/montage.mp4
 
+# Same decision again: the landing reel's living-portrait loops and the
+# voiced example are renders of AI-GENERATED cast faces, tagged as such on
+# screen — nobody's real face. The blanket rule above silently kept the
+# living-portrait clips out of the PR that shipped the reel, which is why
+# this exception is explicit rather than a force-add nobody can see.
+!public/demo/*.mp4
+
 # The export folders, in every casing the sorter might produce.
 [Rr]eels/
 [Rr]undowns/
@@ -74,5 +81,10 @@ exports/
 
 # Contact sheets from tools/rundown-sheet.mjs — regenerate, never commit.
 .rundown-sheet/
+
+# Working files from tools/build-voiced-example.mjs. The finished example
+# ships as public/demo/voiced-example.mp4; the voice track and narration are
+# intermediates.
+.voiced-example/
 .celeb-cache/
 .cta-assets/

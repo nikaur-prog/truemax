@@ -1651,6 +1651,17 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
                placeholder="LeBron" autocomplete="off" />
         <small>Used for the rest of the video. Defaults to the first name.</small>
       </label>
+      <!-- The two cuts. Short is the TikTok default: trait-led clauses, the
+           number drawn on screen instead of spoken, the face matted onto the
+           dark ground, about fifty seconds. Full is the deep read. -->
+      <label class="q-namefield">
+        <span>Cut</span>
+        <select id="q-rundown-cut" class="q-input">
+          <option value="short" selected>Short — fast, trait-led (~50s)</option>
+          <option value="full">Full read — every figure spoken (~90s)</option>
+        </select>
+        <small>Short says the verdict and shows the number. Full says both.</small>
+      </label>
       <!-- Turns the score card into a before/after. Left empty the card shows
            now-versus-potential, which is the FIRST card in a glow-up video;
            filled in it shows before-versus-now, which is the last one. -->
@@ -2634,12 +2645,14 @@ async function downloadRundown(r: Report): Promise<void> {
     // The token is what gets past the staff gate on /api/tts. Absent for a
     // signed-out operator, which is not an error here — it means no voice.
     const accessToken = (await currentAccessToken()) ?? undefined;
+    const cutChoice = (document.getElementById("q-rundown-cut") as HTMLSelectElement | null)?.value;
     const result = await downloadRundownVideo(last.photo, last.lm, r, {
       name,
       shortName,
       opening,
       note,
       broll,
+      cut: cutChoice === "full" ? "full" : "short",
       disclaimer: discClips.some(Boolean)
         ? { clips: discClips.filter((c): c is DiscClip => !!c) }
         : undefined,

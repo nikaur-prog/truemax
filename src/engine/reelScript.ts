@@ -6,7 +6,8 @@ import { directionFor } from "./metrics.js";
 import { statedPct } from "./precision.js";
 import { reliabilityOf } from "./reliability.js";
 import { SPREAD, spreadLine } from "./rarity.js";
-import { PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
+import { PHRASES, SHORT_PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
+import { eyeShapeFrom } from "./traits.js";
 
 // ---------------------------------------------------------------------------
 // The celebrity breakdown, as an ordered list of beats.
@@ -184,6 +185,19 @@ export interface ReelScriptOptions {
    * says "Mogger" over a page that says "Great-looking" is two products.
    */
   tone?: VerdictTone;
+  /**
+   * Which cut this script is for.
+   *
+   * "full" (default) is the deep read: every clause closes on its figure and
+   * the ending runs card, ceiling, curve, curve. "short" is the fast cut: the
+   * voice says the verdict and the SCREEN says the number (the badge already
+   * carries it), grades come from each metric's own zEff, more measurements
+   * fit because each costs fewer words, and the ending is compressed to
+   * verdict-and-score, ceiling, one curve, the search bar. The pace difference
+   * is not a render setting: the timeline fits itself to the narration, so a
+   * terser script IS the faster video.
+   */
+  cut?: "short" | "full";
 }
 
 // Words per minute the voice actually reads at.
@@ -258,8 +272,40 @@ const REEL_RELIABLE_MIN = 0.35;
 // balance is achieved instead at SELECTION time — take the most notable
 // strengths and the most notable weaknesses in roughly equal number — and then
 // a single sort down the face is the last thing that touches the order.
-function selectBalanced(candidates: ScoredMetric[], limit: number): ScoredMetric[] {
-  const byInterest = [...candidates].sort((a, b) => Math.abs(b.zEff) - Math.abs(a.zEff));
+// The measurements the reference format always covers, and the ones a viewer
+// who knows the genre expects to hear: thirds, face shape, midface, the
+// marquee eye and lip reads. In the short cut these get a selection boost so
+// they make the running order whenever they were measured, even at a
+// middling grade — "balanced facial thirds" is a sentence the format owes its
+// audience, and a face can be notable for being BALANCED, which a pure
+// |zEff| ranking treats as unremarkable. fWHR is deliberately not here: its
+// measured reliability is 0.00 (two photographs of one person disagree about
+// it completely), and nothing with that number may carry a sentence in a
+// published video, however famous the acronym.
+const MARQUEE = new Set([
+  "middleLowerBalance",
+  "facialIndex",
+  "midfaceRatio",
+  "topThirdEst",
+  "cheekboneHeight",
+  "canthalTilt",
+  "intercanthalEyeWidth",
+  "lipRatio",
+]);
+const MARQUEE_BOOST = 0.5;
+// A marquee STRENGTH has no floor at all in the short cut: near the mean is a
+// legitimate read for these — "balanced facial thirds" is precisely what is
+// true of a face whose thirds sit in the population's normal band, and the
+// grade words scale down honestly ("a decent", "an alright") as zEff does. A
+// marquee FLAW still has to clear NOTABLE_Z like everything else: calling a
+// barely-off midface "top-heavy" would be overclaiming, and the flaw section
+// is where the credibility lives.
+const marqueeFloor = (m: ScoredMetric) => (m.zEff >= 0 ? 0 : NOTABLE_Z);
+
+function selectBalanced(candidates: ScoredMetric[], limit: number, marquee = false): ScoredMetric[] {
+  const interest = (m: ScoredMetric) =>
+    Math.abs(m.zEff) + (marquee && MARQUEE.has(m.def.id) ? MARQUEE_BOOST : 0);
+  const byInterest = [...candidates].sort((a, b) => interest(b) - interest(a));
   const good = byInterest.filter((m) => m.zEff >= 0);
   const bad = byInterest.filter((m) => m.zEff < 0);
 
@@ -306,6 +352,56 @@ function clauseFor(m: ScoredMetric, sex: Sex): string {
         ? m.z > 0
         : m.z > 0;
   return phrase.bad(v, high);
+}
+
+// The graded article-plus-adjective for a short clause, from the metric's own
+// distance above the mean. The words are the ones the reference format
+// actually says — "an ideal FWHR", "a great midface ratio", "a good ramus" —
+// and each band holds more than one so consecutive clauses do not chant the
+// same adjective. The pick cycles by position rather than randomly, for the
+// same reason the openers do: a fixed cycle cannot produce three "good"s in a
+// row, and a random pick eventually will.
+//
+// The bottom two bands exist for the backfill case: on a face with few
+// notable strengths, selection reaches below NOTABLE_Z to fill the running
+// order, and "a decent" or "an average" is the honest word for what it finds
+// there. Nothing below the mean ever reaches this function — a negative zEff
+// takes the bad clause instead.
+const GRADE_BANDS: Array<{ min: number; words: string[] }> = [
+  { min: 1.3, words: ["an excellent", "an ideal"] },
+  { min: 0.9, words: ["a great", "a very strong"] },
+  { min: 0.45, words: ["a good", "a strong", "a well built"] },
+  { min: 0.15, words: ["a decent", "a solid"] },
+  { min: -Infinity, words: ["an average", "an alright"] },
+];
+
+function gradeFor(zEff: number, cycle: number): string {
+  const band = GRADE_BANDS.find((b) => zEff >= b.min)!;
+  return band.words[cycle % band.words.length];
+}
+
+// The short clause: verdict in the voice, figure on the screen.
+//
+// canthalTilt is the one metric whose strength has a NAME the audience uses —
+// the eye shape — so its good clause comes from the trait classifier when the
+// eyes classify, and only falls back to the graded generic when they do not.
+function shortClauseFor(m: ScoredMetric, sex: Sex, report: Report, cycle: number): string {
+  const phrase = SHORT_PHRASES[m.def.id];
+  if (m.zEff > 0) {
+    if (m.def.id === "canthalTilt") {
+      const shape = eyeShapeFrom(report.metrics);
+      if (shape) return shape.label;
+    }
+    return phrase.good(gradeFor(m.zEff, cycle));
+  }
+  const [lo, hi] = m.idealRange ?? [];
+  const high =
+    Number.isFinite(hi) && Number.isFinite(lo)
+      ? m.value > (hi as number)
+      : directionFor(m.def, sex) === "lower"
+        ? m.z > 0
+        : m.z > 0;
+  return phrase.bad(high);
 }
 
 /** "a, b and c" — an Oxford-less list, because it is being spoken. */
@@ -371,7 +467,16 @@ const OPENERS: Record<GroupKind, (subject: string, pronoun: string) => string[]>
 // rather than the same sentence with the nouns swapped.
 const CLAUSES_PER_SENTENCE = 1;
 
-function groupedBeats(ms: ScoredMetric[], sex: Sex, subject: string, kind: GroupKind): Beat[] {
+function groupedBeats(
+  ms: ScoredMetric[],
+  sex: Sex,
+  subject: string,
+  kind: GroupKind,
+  // The clause writer for the cut being built. Passed in rather than branched
+  // on here so this function stays about STRUCTURE — openers, cycling, badges
+  // — and the two cuts cannot drift apart in anything except their words.
+  clause: (m: ScoredMetric, cycle: number) => string,
+): Beat[] {
   if (!ms.length) return [];
   const pronoun = sex === "female" ? "she" : "he";
   const openers = OPENERS[kind](subject, pronoun);
@@ -387,7 +492,7 @@ function groupedBeats(ms: ScoredMetric[], sex: Sex, subject: string, kind: Group
     const positive = kind === "positive" || kind === "side";
     beats.push({
       kind: "metric",
-      line: `${opener} ${listOf(chunk.map((m) => clauseFor(m, sex)))}.`,
+      line: `${opener} ${listOf(chunk.map((m) => clause(m, n)))}.`,
       metricId: chunk[0].def.id,
       region: chunk[0].def.region as Beat["region"],
       positive,
@@ -440,7 +545,13 @@ function cardData(report: Report, tone?: VerdictTone): CardData {
 }
 
 export function buildReelScript(report: Report, options: ReelScriptOptions): Beat[] {
-  const limit = options.metricBeats ?? 10;
+  const short = options.cut === "short";
+  // The short cut fits more measurements because each costs fewer words:
+  // fourteen terse clauses run about the same seconds as ten full ones.
+  const limit = options.metricBeats ?? (short ? 14 : 10);
+  const clause: (m: ScoredMetric, cycle: number) => string = short
+    ? (m, cycle) => shortClauseFor(m, report.sex, report, cycle)
+    : (m) => clauseFor(m, report.sex);
   const name = options.name;
   // Everything after the hook uses the short form. Falls back to the full name
   // when the first word IS the whole thing, so a mononym never ends up with an
@@ -483,14 +594,14 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   const candidates = report.metrics.filter(
     (m) =>
       !m.implausible &&
-      Math.abs(m.zEff) >= NOTABLE_Z &&
+      Math.abs(m.zEff) >= (short && MARQUEE.has(m.def.id) ? marqueeFloor(m) : NOTABLE_Z) &&
       reliabilityOf(m.def.id) >= REEL_RELIABLE_MIN &&
       hasPhrase(m.def.id),
   );
 
   // Selection is by interest AND tone balance; the running order is by anatomy.
   // This sort is the last thing that touches the order — see selectBalanced.
-  const byRegion = selectBalanced(candidates, limit).sort(
+  const byRegion = selectBalanced(candidates, limit, short).sort(
     (a, b) => REGION_ORDER.indexOf(a.def.region) - REGION_ORDER.indexOf(b.def.region),
   );
 
@@ -514,10 +625,10 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   const metricBeats: Beat[] = [
     // Front strengths, grouped. Side is held back for its own section — it is
     // a different photograph and naming it gives the rundown a second act.
-    ...groupedBeats(positives.filter((m) => m.def.view !== "side"), report.sex, shortName, "positive"),
-    ...groupedBeats(negatives.filter((m) => m.def.view !== "side"), report.sex, shortName, "negative"),
-    ...groupedBeats(positives.filter((m) => m.def.view === "side"), report.sex, shortName, "side"),
-    ...groupedBeats(negatives.filter((m) => m.def.view === "side"), report.sex, shortName, "side-negative"),
+    ...groupedBeats(positives.filter((m) => m.def.view !== "side"), report.sex, shortName, "positive", clause),
+    ...groupedBeats(negatives.filter((m) => m.def.view !== "side"), report.sex, shortName, "negative", clause),
+    ...groupedBeats(positives.filter((m) => m.def.view === "side"), report.sex, shortName, "side", clause),
+    ...groupedBeats(negatives.filter((m) => m.def.view === "side"), report.sex, shortName, "side-negative", clause),
   ];
 
   const pct = statedPct(report.overallPercentile);
@@ -568,6 +679,24 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // is also a word that means nothing to somebody who arrived from the For You
     // page without ever having heard it. "A very attractive male" costs four
     // words and carries the same verdict to everybody else watching.
+    // The short cut merges the verdict and the number into one card beat and
+    // keeps the ceiling to one terse line: same ending the format always runs
+    // — card, curve, search — with half the narration under it. The full cut
+    // keeps the three-beat build; see each beat's own comment.
+    ...(short
+      ? ([
+          {
+            kind: "card",
+            line: `The verdict: ${verdict.word}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
+            card: cardData(report, options.tone),
+          },
+          {
+            kind: "card",
+            line: `Ceiling: ${report.potential.toFixed(1)}, with everything soft fixed.`,
+            card: cardData(report, options.tone),
+          },
+        ] satisfies Beat[])
+      : ([
     {
       kind: "card",
       line: `The verdict: ${verdict.word}. ${capitalize(verdict.descriptor)}.`,
@@ -600,6 +729,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       line: `Ceiling: ${report.potential.toFixed(1)}. That's the same bone structure with everything soft fixed.`,
       card: cardData(report, options.tone),
     },
+        ] satisfies Beat[])),
     // THE CURVE, on the word "percent". Crowd shaded, one marker outside it.
     //
     // The distribution was previously SAID here, and saying it is not the same
@@ -633,11 +763,17 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       percentile: report.overallPercentile,
       badge: `${ord(pct)} percentile`,
     },
-    {
-      kind: "curve",
-      line: `${SPREAD.median.toFixed(1)} is dead average. That band is most of them.`,
-      percentile: report.overallPercentile,
-    },
+    // The second curve line is the full cut's luxury: the short cut has made
+    // its point by now and the search bar is waiting.
+    ...(short
+      ? []
+      : [
+          {
+            kind: "curve" as const,
+            line: `${SPREAD.median.toFixed(1)} is dead average. That band is most of them.`,
+            percentile: report.overallPercentile,
+          },
+        ]),
   ];
 
   if (options.context?.length) {

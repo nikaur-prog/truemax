@@ -26,6 +26,7 @@ import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
+import { nutritionPlanHTML } from "./nutritionPlan.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
@@ -1059,6 +1060,9 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
     const result = await rundown.downloadRundownVideo(frontPhoto, ctx.landmarks, report, {
       name,
       accessToken,
+      // The $2.99 product is the SHORT cut: trait-led, the number on screen,
+      // about fifty seconds. The full read stays a creator tool.
+      cut: "short",
       onProgress: (p, stage) => say(`${stage} · ${Math.round(p * 100)}%`),
     });
     if (result.outcome === "cancelled") {
@@ -1951,6 +1955,7 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
+      ${nutritionPlanHTML(r, { dietAdvice: profile.advice.diet, maxAccess })}
       ${recsHTML(profile)}
       ${maxAccess || gated ? "" : upsell()}`;
 
