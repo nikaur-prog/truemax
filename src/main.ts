@@ -885,6 +885,9 @@ el.ovalFrame.addEventListener("drop", (e) => {
 // shares its default: false, so a profile that never loads behaves like a
 // minor rather than like an adult.
 let knownAdult = false;
+// The owner's first name once their profile has loaded, for Coach Max's
+// greeting. Null until then; the greeting drops the name rather than guessing.
+let knownFirstName: string | null = null;
 
 async function ensureOnboarded(user: User): Promise<void> {
   const generation = scanGeneration;
@@ -904,6 +907,7 @@ async function ensureOnboarded(user: User): Promise<void> {
   // on the results screen keys off this; the default is false, so a profile
   // that never loads behaves like a minor rather than like an adult.
   knownAdult = profileIsAdult(profile);
+  knownFirstName = profile.firstName?.trim() || null;
   setAdult(knownAdult);
   if (onboardingComplete(profile)) return;
   await openTrialFunnel(user, undefined, { required: true });
@@ -1871,6 +1875,8 @@ async function runFullAnalysis(
     // owner about a guest's numbers — "first scan on record" was rendered
     // over a friend's face because a guest's delta is deliberately null.
     subjectName: scanSubject?.name,
+    // The owner's first name, for Coach Max's greeting on their own scans.
+    selfName: knownFirstName ?? undefined,
     // Same destination as "continue" — the plan chooser, which already handles
     // signed-out users and the under-18 rule. The upgrade button is not a
     // second, parallel billing path.

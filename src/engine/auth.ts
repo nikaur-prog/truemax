@@ -380,7 +380,11 @@ function friendly(msg: string): string {
   if (m.includes("same password")) return "Choose a password you have not used for this account.";
   if (m.includes("session") || m.includes("expired"))
     return "That link has expired. Request a new one and try again.";
-  if (m.includes("password")) return "Password must be at least 6 characters.";
+  // Supabase's password-policy messages ("should be at least N characters",
+  // "should contain at least one …") are already written for end users, and
+  // the policy is project configuration this bundle cannot know. Repeat the
+  // real requirement instead of guessing one and being wrong about it.
+  if (m.includes("password")) return msg.endsWith(".") ? msg : `${msg}.`;
   if (m.includes("email")) return "That does not look like a valid email.";
   if (m.includes("rate limit")) return "Too many tries. Wait a minute and try again.";
   return "Something went wrong. Try again.";

@@ -30,7 +30,7 @@ import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, RECS, recsFor, productSearchUrl } from "../engine/recommendations.js";
-import { startScanCreditCheckout } from "../engine/entitlement.js";
+import { loadVoiceCredits, startScanCreditCheckout, startVoiceCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { track } from "../engine/track.js";
@@ -65,6 +65,10 @@ interface Ctx {
   // has to know, because a guest's delta is deliberately null and null also
   // means "your first scan".
   subjectName?: string;
+  // The account holder's first name, for Coach Max's greeting on their own
+  // scans. Absent when signed out or the profile has not loaded; the greeting
+  // simply drops the name rather than inventing one.
+  selfName?: string;
   // Opens the plan chooser. Absent on a build with no billing configured, in
   // which case the upgrade button simply is not rendered rather than dead.
   onUpgrade?: () => void;
@@ -438,11 +442,11 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     actionButton("btn-new", wantsSide ? "Start over" : "New photo", "photo", "support"),
     actionButton("btn-share", "Share card", "share", "support"),
     // The voiced analysis: this scan as the narrated video, Coach Max's
-    // voice included. A Max-plan perk with a monthly allowance — every
-    // export is a real synthesis call — and adult-only like every Max
-    // surface. The render is the same rundown machinery the creator tools
-    // use; this button is just the member's own door to it.
-    maxAccess && adultUser ? actionButton("btn-voiced", "Voiced analysis", "voice", "support") : "",
+    // voice included. A $2.99 one-time purchase for any adult account —
+    // every export is a real synthesis call, so every export is paid for.
+    // The price rides on the button until the account holds a credit; the
+    // wire-up below swaps the label the moment the balance says otherwise.
+    adultUser ? actionButton("btn-voiced", "Voiced analysis · $2.99", "voice", "support") : "",
   ].join("");
   const quiet = [
     // The front counterpart of the profile's "Re-verify the points". The
@@ -450,6 +454,9 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     // here for the person who can SEE a point in the wrong place, and beneath
     // notice for everyone else.
     ctx.onEditFront ? actionButton("btn-fedit", "Correct the points", "points", "quiet") : "",
+    // The shop window for the voiced analysis: a pop-out example so nobody
+    // pays $2.99 for a format they have not seen.
+    adultUser ? actionButton("btn-voiced-eg", "See a voiced example", "voice", "quiet") : "",
     actionButton("btn-diag", "Copy diagnostics", "copy", "quiet"),
   ].join("");
 
@@ -850,7 +857,7 @@ function showOverall(): void {
 
   body().innerHTML = `
     <div class="reveal overview-reveal">
-      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta, "front", ctx.subjectName) : ""}
+      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta, "front", ctx.subjectName, ctx.selfName) : ""}
       <div class="score-head">
         <div><div class="klabel">${ctx.subjectName ? `${escapeHTML(ctx.subjectName.toUpperCase())} · ` : ""}${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
@@ -933,17 +940,91 @@ function showOverall(): void {
     await shareCard(card, ctx.report.overall);
   };
   const voicedBtn = document.getElementById("btn-voiced") as HTMLButtonElement | null;
-  if (voicedBtn) voicedBtn.onclick = () => void downloadVoicedAnalysis(voicedBtn);
+  if (voicedBtn) {
+    voicedBtn.onclick = () => void voicedAnalysisFlow(voicedBtn);
+    // A credit already on the account takes the price off the button, so a
+    // buyer coming back from Checkout sees "ready" rather than a second ask.
+    void loadVoiceCredits()
+      .then((balance) => {
+        const label = voicedBtn.querySelector("span");
+        if (balance > 0 && label) label.textContent = "Voiced analysis · ready";
+      })
+      .catch(() => undefined);
+  }
+  const voicedEg = document.getElementById("btn-voiced-eg");
+  if (voicedEg) voicedEg.addEventListener("click", openVoicedExample);
   // The overview carries the real delta, so a protocol coming due here can be
   // judged against actual scan movement rather than against nothing.
   mountProtocolIfDue(ctx?.delta ?? null);
 }
 
-// The member's own narrated analysis — the growth loop. Same rundown
-// machinery the creator tools use; this is just the member's door to it,
-// loaded on demand because the encoder stack has no business in the results
-// bundle for the majority who never press the button. The voiceover call is
-// metered server-side against the Max plan's monthly allowance.
+// The $2.99 gate in front of the render. No credit: straight to Checkout,
+// where Stripe itself shows the price and asks for the card — a second
+// confirm dialog here would be the same question twice. With a credit, the
+// render starts immediately and the server spends the credit only after the
+// audio actually comes back.
+async function voicedAnalysisFlow(btn: HTMLButtonElement): Promise<void> {
+  btn.disabled = true;
+  let balance = 0;
+  try {
+    balance = await loadVoiceCredits();
+  } catch {
+    /* signed out or offline; the render path below reports it properly */
+  }
+  if (balance <= 0) {
+    const label = btn.querySelector("span");
+    if (label) label.textContent = "Opening checkout…";
+    const result = await startVoiceCreditCheckout();
+    if (!result.ok) {
+      if (label) label.textContent = result.message || "Checkout unavailable";
+      window.setTimeout(() => {
+        if (label) label.textContent = "Voiced analysis · $2.99";
+        btn.disabled = false;
+      }, 2600);
+    }
+    // On ok the page is already navigating to Stripe; leave the button be.
+    return;
+  }
+  btn.disabled = false;
+  await downloadVoicedAnalysis(btn);
+}
+
+// The example pop-out: exactly what a voiced analysis looks and sounds like,
+// before anybody pays for one. The clip is a demo scan of an AI-generated
+// face and says so on screen.
+function openVoicedExample(): void {
+  document.getElementById("veg-overlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "veg-overlay";
+  overlay.className = "veg-overlay";
+  overlay.innerHTML = `
+    <div class="veg-box" role="dialog" aria-label="Voiced analysis example">
+      <div class="veg-head">
+        <span class="klabel">VOICED ANALYSIS · EXAMPLE</span>
+        <button type="button" class="veg-close" aria-label="Close">×</button>
+      </div>
+      <video src="/demo/voiced-example.mp4" controls autoplay playsinline></video>
+      <p class="veg-note">A demo scan of an AI-generated face. Yours narrates your own numbers, in Coach Max's voice, ready to post.</p>
+    </div>`;
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  overlay.querySelector(".veg-close")?.addEventListener("click", close);
+  const video = overlay.querySelector("video");
+  video?.addEventListener("error", () => {
+    const note = overlay.querySelector<HTMLElement>(".veg-note");
+    video.remove();
+    if (note) note.textContent = "The example clip is still rendering. The format: your scan, every number narrated in Coach Max's voice, about forty seconds.";
+  });
+  document.body.appendChild(overlay);
+}
+
+// The narrated analysis render — the growth loop. Same rundown machinery the
+// creator tools use; this is just the buyer's door to it, loaded on demand
+// because the encoder stack has no business in the results bundle for the
+// majority who never press the button. The credit is spent server-side in
+// /api/tts, only after audio came back.
 async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
   if (!ctx || !frontPhoto) return;
   btn.disabled = true;
@@ -984,9 +1065,9 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
       done("Not saved");
     } else if (!result.narrated) {
       // The one silent-failure worth naming: the render still shipped, but
-      // without the voice — usually the monthly allowance, sometimes a
-      // network blip. The video in hand is the honest report of both.
-      done("Saved — no voice (allowance?)");
+      // without the voice — a credit hiccup or a network blip. The credit is
+      // only spent when audio comes back, so nothing was paid for nothing.
+      done("Saved — no voice (credit not used)");
     } else {
       done(result.outcome === "shared" ? "Sent to share sheet" : "Downloaded");
     }
@@ -1020,7 +1101,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
-      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side") : ""}
+      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
@@ -1321,7 +1402,7 @@ function mountProtocolIfDue(delta: ScanDelta | null): void {
   protocolCard = mountProtocolCard(slot, delta);
 }
 
-function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string): string {
+function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string, selfName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
   // Built in templates.ts, where the rest of the voice lives. It used to be
@@ -1329,7 +1410,11 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
   // first: ... is the LEVER, and it MOVES WITHOUT SURGERY" — two pieces of
   // jargon in one sentence, on the tab that is supposed to read as a coach
   // talking rather than a report printing.
-  const read = coachRead(r, delta, { scope, ...(guestName ? { guestName } : {}) });
+  const read = coachRead(r, delta, {
+    scope,
+    ...(guestName ? { guestName } : {}),
+    ...(selfName ? { selfName } : {}),
+  });
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
@@ -1538,7 +1623,12 @@ function showRegion(id: RegionId): void {
         .forEach((i) => (i.style.left = `${i.dataset.l}%`)),
     120,
   );
-  typewrite(document.getElementById("tw")!, regionSummary(r, ctx.report.sex));
+  // A guest's delta is deliberately null, so a guest scan cannot borrow the
+  // owner's trend; they get the neutral opener with their own name.
+  typewrite(document.getElementById("tw")!, regionSummary(r, ctx.report.sex, {
+    name: ctx.subjectName || ctx.selfName,
+    delta: ctx.delta?.regions.find((d) => d.region === r.region)?.delta ?? null,
+  }));
   wireMeasurementTaps(r, id);
 
   const deck = document.getElementById("deck")!;

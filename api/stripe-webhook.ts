@@ -122,6 +122,15 @@ export async function POST(request: Request): Promise<Response> {
           if (error) throw new Error(`Scan credit grant failed: ${error.message}`);
         }
       }
+
+      // Voiced-analysis purchases: same shape, different ledger.
+      if (session.metadata?.purpose === "voice_credit" && session.payment_status === "paid") {
+        const userId = session.metadata.supabase_user_id;
+        if (userId) {
+          const { error } = await getSupabaseAdmin().rpc("grant_voice_credit", { p_user_id: userId });
+          if (error) throw new Error(`Voice credit grant failed: ${error.message}`);
+        }
+      }
     }
 
     if (event.type === "checkout.session.expired") {

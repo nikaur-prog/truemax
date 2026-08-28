@@ -824,7 +824,16 @@ function mountVerify(
         inFrame.classList.toggle("ready", ready);
         inFrame.classList.toggle("busy", busy);
         if (busy) inFrame.innerHTML = DOTS;
-        else inFrame.textContent = text;
+        else {
+          inFrame.textContent = text;
+          // The return-key glyph rides on the button so the shortcut teaches
+          // itself. CSS shows it only on fine-pointer devices: a phone has no
+          // Enter, and a hint for a key that does not exist reads as clutter.
+          const kbd = document.createElement("kbd");
+          kbd.className = "gnext-kbd";
+          kbd.textContent = "⏎";
+          inFrame.appendChild(kbd);
+        }
       };
       if (animate && changed && !busy) {
         inFrame.classList.add("swapping");
@@ -919,7 +928,7 @@ function mountVerify(
       verifier?.endGuided();
       showReviewActions();
     };
-    inFrame.onclick = () => {
+    const pressAdvance = () => {
       if (advance.press() === "confirm") {
         // Answering an untouched point turns the button green and names what
         // is next. That is the change worth playing — both the animation and
@@ -933,7 +942,29 @@ function mountVerify(
         verifier?.guidedNext();
       }
     };
+    inFrame.onclick = pressAdvance;
+    // Enter mirrors the advance for anyone on a keyboard. Thirteen presses is
+    // exactly the count at which reaching for the trackpad between each one
+    // starts to grate. Focused buttons already fire their own click on Enter,
+    // so those are left to the browser rather than fired twice.
+    const onWalkKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Enter") return;
+      const t = ev.target as HTMLElement | null;
+      if (t && ["BUTTON", "INPUT", "TEXTAREA", "SELECT", "A"].includes(t.tagName)) return;
+      ev.preventDefault();
+      pressAdvance();
+    };
+    window.addEventListener("keydown", onWalkKey);
+    const gall = document.getElementById("side-gall");
+    if (gall) {
+      const leaveViaAll = gall.onclick;
+      gall.onclick = (ev) => {
+        window.removeEventListener("keydown", onWalkKey);
+        leaveViaAll?.call(gall, ev);
+      };
+    }
     verifier!.startGuided(paint, () => {
+      window.removeEventListener("keydown", onWalkKey);
       soundFinish();
       inFrame.remove();
       showReviewActions();

@@ -118,7 +118,7 @@ function topBarHTML(right = ""): string {
 
 function renderGate(): void {
   document.title = "TrueMax Creator League";
-  root.innerHTML = `${topBarHTML(`<button class="lg-btn" id="lg-signin">Sign in</button>`)}
+  root.innerHTML = `${topBarHTML(`<button class="lg-btn" id="lg-signin">Sign in / Sign up</button>`)}
   <div class="lg-gate">
     <span class="lg-chip ok">PAID ON VIEWS · APPLICATION ONLY</span>
     <h1>Make TrueMax videos.<br/>Get paid when they hit.</h1>
@@ -141,15 +141,18 @@ function renderGate(): void {
       <li><b>Post and track.</b> Submit each video's link; your dashboard shows views, earnings
       and the sprint pool live.</li>
     </ol>
-    <p style="margin-top:26px"><button class="lg-btn pri" id="lg-apply">Apply to join</button></p>
+    <p style="margin-top:26px"><button class="lg-btn pri lg-cta" id="lg-apply">Apply to join</button></p>
     <div class="lg-form" id="lg-authbox" hidden>
+      <h3 style="margin:0 0 2px">Sign in — or create your account</h3>
+      <p class="lg-note" style="margin-top:4px">One account works for the app and the League.
+      New here? The same button below creates your account.</p>
       <label for="lg-email">Email</label>
       <input id="lg-email" type="email" autocomplete="email" />
       <label for="lg-pass">Password</label>
       <input id="lg-pass" type="password" autocomplete="new-password" />
-      <p style="margin-top:16px"><button class="lg-btn pri" id="lg-auth-go">Continue</button></p>
+      <p style="margin-top:16px"><button class="lg-btn pri" id="lg-auth-go">Sign in / Create account</button></p>
       <p class="lg-error" id="lg-auth-err"></p>
-      <p class="lg-note">One account for the app and the League. Signing up agrees to the
+      <p class="lg-note">Signing up agrees to the
       <a href="/terms" target="_blank" rel="noopener">terms</a> and
       <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>.</p>
     </div>
@@ -167,8 +170,10 @@ function renderGate(): void {
     const pass = (document.getElementById("lg-pass") as HTMLInputElement).value;
     const err = document.getElementById("lg-auth-err")!;
     err.textContent = "";
-    if (!email || pass.length < 8) {
-      err.textContent = "Email and a password of at least 8 characters.";
+    // 6 is the app-wide minimum (authForm.ts) — demanding 8 here locked out
+    // existing app accounts with shorter passwords before signIn even ran.
+    if (!email || pass.length < 6) {
+      err.textContent = "Email and a password of at least 6 characters.";
       return;
     }
     // Try sign-in first; a fresh visitor falls through to sign-up. One button,

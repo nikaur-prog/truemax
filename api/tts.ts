@@ -3,11 +3,11 @@ import {
   getSupabaseAdmin,
   json,
   leagueRenderBudget,
-  maxVoiceBudget,
   recordLeagueRender,
-  recordVoiceExport,
   requestOrigin,
   safeMessage,
+  spendVoiceCredit,
+  voiceCreditBalance,
   type LeagueRenderBudget,
 } from "./_shared.js";
 
@@ -102,26 +102,28 @@ export async function POST(request: Request): Promise<Response> {
     // are not a member" — an endpoint that confirms its own existence to
     // everyone is an invitation to keep pushing at it. Three doors in:
     // staff (unmetered), League creators (the owner's per-creator budget),
-    // and Max-plan members (the plan's voiced-analysis allowance). Which
-    // ledger the render lands in follows from which door admitted it.
+    // and anyone holding a purchased voiced-analysis credit ($2.99 each).
+    // Which ledger the render lands in follows from which door admitted it.
     let budget: LeagueRenderBudget | null = null;
     let meter: "league" | "voice" | null = null;
     if (!staff) {
       budget = await leagueRenderBudget(user.id);
       meter = budget ? "league" : null;
       if (!budget) {
-        budget = await maxVoiceBudget(user.id);
-        meter = budget ? "voice" : null;
+        // The credit door. 402 rather than 404: the client showed this person
+        // a buy button, so the refusal has to name the purchase, not deny the
+        // endpoint exists. A signed-in caller poking the API by hand learns
+        // only that something here is purchasable, which the pricing page
+        // already says.
+        const balance = await voiceCreditBalance(user.id);
+        if (balance <= 0) {
+          return json({ error: "No voiced analysis credit on this account. It's a one-time $2.99 purchase." }, 402);
+        }
+        meter = "voice";
       }
-      if (!budget) return json({ error: "Not found." }, 404);
-      // Past the door, the refusal turns honest: a member over budget is told
-      // exactly that, because "not found" to somebody who rendered here
-      // yesterday reads as an outage, not a limit.
-      if (budget.used >= budget.quota) {
+      if (budget && budget.used >= budget.quota) {
         return json(
-          meter === "voice"
-            ? { error: `That's all ${budget.quota} voiced exports for this month — it resets on the 1st.` }
-            : { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st — or ask for a raise.` },
+          { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st — or ask for a raise.` },
           429,
         );
       }
@@ -216,12 +218,14 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     // The meter ticks only after audio actually came back — a failed upstream
-    // call must not spend a quota slot. And a failed LOG must not spend a
-    // render: the audio exists, so it ships, and the miss is logged instead.
+    // call must not spend a quota slot or a paid credit. And a failed SPEND
+    // must not fail the render: the audio exists, so it ships, and the miss
+    // is logged instead — the cost of that error mode lands on us, not on
+    // somebody who paid $2.99 and got nothing.
     if (meter === "league") {
       await recordLeagueRender(user.id, "tts").catch((e) => console.error("render log failed", safeMessage(e)));
     } else if (meter === "voice") {
-      await recordVoiceExport(user.id).catch((e) => console.error("voice log failed", safeMessage(e)));
+      await spendVoiceCredit(user.id).catch((e) => console.error("credit spend failed", safeMessage(e)));
     }
 
     // The alignment is passed through rather than reshaped. It is the
