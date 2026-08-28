@@ -145,27 +145,37 @@ const sexNoun = (sex: Sex) => (sex === "male" ? "male" : "female");
 // nothing is added — a warmer sentence carrying a worse number would be the
 // flattery this whole product refuses.
 //
-// The greeting is gendered because a coach's is. It costs nothing, it is the
-// difference between a tool and somebody in your corner, and it is the thing
-// people quote back when they like an app. Used ONCE, at the top, and drawn
-// from a pool: "bro" on every tab of every scan stops being warmth and starts
-// being a verbal tic, which is the same failure Max's wave had.
+// The greeting is the user's NAME, with the emotion picked by their own
+// trend. "Alright man" tested badly: a coach who knows you uses your name,
+// and "man"/"bro"/"queen" on every tab stops being warmth and starts being a
+// verbal tic, which is the same failure Max's wave had. So:
 //
-// Deterministic, not random. The region name picks the opener, so the Eyes tab
-// says the same thing every time you open it — a line that reshuffles under a
-// typewriter effect on re-render looks like a glitch, and two people comparing
-// screenshots of the same face should see the same words.
+//   improving vs their history  →  "Nice, Nico. I see the improvements"
+//   moving down                 →  "Alright, Nico" (never down on them; the
+//                                   observation itself carries the news)
+//   first scan / guest / flat   →  "Let's get down to business, Nico"
+//
+// Only Coach Max speaks like this. Every other line in the product states
+// the observation plainly and scientifically; this greeting is the one place
+// the product is somebody in your corner rather than an instrument.
 // ---------------------------------------------------------------------------
-const OPENERS: Record<Sex, readonly string[]> = {
-  male: ["Alright man", "Good news first, bro", "Straight up, dude", "Right then, man", "Listen, bro"],
-  female: ["Alright queen", "Good news first, girl", "Straight up, girl", "Right then, you", "Listen, queen"],
-};
+export type CoachTrend = "up" | "down" | "flat";
 
-function opener(region: string, sex: Sex): string {
-  const pool = OPENERS[sex];
-  let h = 0;
-  for (let i = 0; i < region.length; i++) h = (h * 31 + region.charCodeAt(i)) >>> 0;
-  return pool[h % pool.length]!;
+// The chip threshold (results.ts deltaChip) reused so the voice and the chips
+// never disagree about whether a number moved.
+export function trendOf(delta: number | null | undefined): CoachTrend {
+  if (delta == null) return "flat";
+  return delta > 0.05 ? "up" : delta < -0.05 ? "down" : "flat";
+}
+
+// Takes the RAW name: regionSummary lands in textContent where escaping
+// would print entities, while coachRead lands in innerHTML and escapes at
+// its own boundary before calling in.
+function opener(trend: CoachTrend, name?: string): string {
+  const n = name?.trim() ? `, ${name.trim()}` : "";
+  if (trend === "up") return `Nice${n}. I see the improvements`;
+  if (trend === "down") return `Alright${n}`;
+  return `Let's get down to business${n}`;
 }
 
 // "top 15%" reads as a rank. "ahead of 85 in every 100 guys" reads as a room
@@ -188,7 +198,14 @@ function behindYou(pct: number, sex: Sex): string {
     : `only ${below} in every 100 ${peers(sex)} are below you there`;
 }
 
-export function regionSummary(r: RegionScore, sex: Sex): string {
+export function regionSummary(
+  r: RegionScore,
+  sex: Sex,
+  // Who Coach Max is talking to and how this region moved since their last
+  // scan. Both optional: a signed-out or first scan simply gets the
+  // down-to-business opener without a trend claim.
+  voice?: { name?: string; delta?: number | null },
+): string {
   // Only what was actually read. An unmeasured metric has a NaN z, which sorts
   // unpredictably and can land at either end — so the sentence would name the
   // one measurement that does not exist as the region's best or its weakest,
@@ -197,7 +214,7 @@ export function regionSummary(r: RegionScore, sex: Sex): string {
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
   const name = REGION_NAMES[r.region].toLowerCase();
-  const hi = opener(r.region, sex);
+  const hi = opener(trendOf(voice?.delta), voice?.name);
   // A region CAN now arrive with nothing in it: measurements that failed are
   // dropped from the report rather than carried as undefined (see
   // scoreFrontSet), and the side view scores no metric at all in some regions.
@@ -451,10 +468,15 @@ export interface CoachRead {
 export function coachRead(
   r: Report,
   delta: ScanDelta | null,
-  opts: { guestName?: string; scope: "front" | "side" } = { scope: "front" },
+  opts: { guestName?: string; selfName?: string; scope: "front" | "side" } = { scope: "front" },
 ): CoachRead {
   const sex = r.sex;
-  const hi = opener("coach", sex);
+  // A guest's delta is deliberately null, so a guest always gets the
+  // down-to-business opener with THEIR name, never a trend claim borrowed
+  // from the owner's history. Escaped here because these strings land in
+  // innerHTML; the region summary path stays raw for textContent.
+  const rawName = opts.guestName ?? opts.selfName;
+  const hi = opener(trendOf(delta?.overall), rawName ? escapeForCopy(rawName) : undefined);
   const peer = sex === "male" ? "guys" : "women";
 
   // What is noticeably standing out. Region-level, because that is the unit a

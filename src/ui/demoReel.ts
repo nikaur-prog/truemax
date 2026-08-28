@@ -27,9 +27,18 @@ const T = {
   score: [2400, 3150],
   pillars: [3150, 4400],
   regions: [4400, 6400],
-  out: 6500,
-  hold: 6800,
+  // The beat past the score: the reel used to end at the number, which sells
+  // "we measure" and nothing after it. Each face now closes on one product
+  // chapter — Coach Max's read, the plan, or the tracking — rotating so a
+  // full loop of the cast shows the whole product, not just the grade.
+  chapter: [6600, 8600],
+  out: 8700,
+  hold: 9000,
 };
+
+// One chapter per face, rotating. Copy rules: Coach Max's line is the one
+// warm voice in the product; the other two state facts, plainly.
+const CHAPTERS = ["coach", "plan", "tracked"] as const;
 
 // Count from the engine, not prose: the demo is front-only, and a hardcoded
 // number here drifted (it said 31 while the engine measured 33).
@@ -74,6 +83,27 @@ export function mountDemoReel(
     return img;
   });
 
+  // The living layer. Each face has a four-second micro-motion loop cropped
+  // to exactly the still's geometry, so the landmark fractions hold on both.
+  // The still paints first and the video takes over the moment it can play —
+  // and under prefers-reduced-motion the videos are never created at all.
+  const reducedMotion =
+    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const videos: Array<HTMLVideoElement | null> = REEL.map(() => null);
+  const ensureVideo = (i: number) => {
+    if (reducedMotion || videos[i]) return;
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    // NOT looped: the clip's last frame does not match its first, and a hard
+    // cut mid-breath reads as a glitch. It plays once and holds; the reset
+    // to frame zero happens on the face's next turn, behind a crossfade.
+    v.loop = false;
+    v.src = `/demo/${REEL[i].slug}.mp4`;
+    videos[i] = v;
+  };
+
   let idx = 0;
   let start = 0;
   let raf = 0;
@@ -87,6 +117,19 @@ export function mountDemoReel(
     const face = REEL[idx];
     const img = images[idx];
     if (!face) return;
+
+    // The live source: the video once it can paint, the still until then.
+    // Both carry identical geometry, so the swap is invisible.
+    ensureVideo(idx);
+    if (t > T.out - 500) ensureVideo((idx + 1) % REEL.length);
+    const vid = videos[idx];
+    const vidReady = Boolean(vid && vid.readyState >= 2 && vid.videoWidth > 0);
+    const live: HTMLImageElement | HTMLVideoElement = vidReady ? vid! : img;
+    if (vid && vidReady && vid.paused && !vid.ended) void vid.play().catch(() => {});
+    for (let i = 0; i < videos.length; i++) {
+      const v = videos[i];
+      if (v && i !== idx && !v.paused) v.pause();
+    }
 
     const w = canvas.clientWidth || canvas.width;
     const h = canvas.clientHeight || canvas.height;
@@ -146,21 +189,30 @@ export function mountDemoReel(
     // height this is an exact fill; as the dock closes, the box gets wider
     // than the picture and the fit crops equally off the top and the bottom,
     // which takes hair and collar and leaves the face untouched in the middle.
-    const rectOf = (source: HTMLImageElement, zoom: number) => {
-      const s = Math.max(w / source.naturalWidth, photoH / source.naturalHeight) * zoom;
-      const dw = source.naturalWidth * s;
-      const dh = source.naturalHeight * s;
+    const sizeOf = (source: HTMLImageElement | HTMLVideoElement) =>
+      source instanceof HTMLVideoElement
+        ? { sw: source.videoWidth, sh: source.videoHeight }
+        : { sw: source.naturalWidth, sh: source.naturalHeight };
+    const readyOf = (source: HTMLImageElement | HTMLVideoElement) =>
+      source instanceof HTMLVideoElement
+        ? source.readyState >= 2 && source.videoWidth > 0
+        : source.complete && source.naturalWidth > 0;
+    const rectOf = (source: HTMLImageElement | HTMLVideoElement, zoom: number) => {
+      const { sw, sh } = sizeOf(source);
+      const s = Math.max(w / sw, photoH / sh) * zoom;
+      const dw = sw * s;
+      const dh = sh * s;
       return { dx: (w - dw) / 2, dy: (photoH - dh) / 2, dw, dh };
     };
     // The live photo's rect — every point, line and callout is mapped through
     // THIS, so the mesh is locked to the picture at every frame of the dock
     // rather than drifting off it as the frame changes shape.
-    const rect = img.complete && img.naturalWidth ? rectOf(img, 1 + 0.04 * Math.min(1, t / T.hold)) : null;
+    const rect = readyOf(live) ? rectOf(live, 1 + 0.04 * Math.min(1, t / T.hold)) : null;
     const mapX = (px: number) => (rect ? rect.dx + px * rect.dw : px * w);
     const mapY = (py: number) => (rect ? rect.dy + py * rect.dh : py * photoH);
 
-    const drawCover = (source: HTMLImageElement, zoom: number, a: number) => {
-      if (!source.complete || !source.naturalWidth) return;
+    const drawCover = (source: HTMLImageElement | HTMLVideoElement, zoom: number, a: number) => {
+      if (!readyOf(source)) return;
       const r = rectOf(source, zoom);
       ctx.save();
       ctx.beginPath();
@@ -181,9 +233,11 @@ export function mountDemoReel(
     // where it will be drawn on its first frame as the current face, so the
     // handover is continuous rather than a four-per-cent pop.
     if (REEL.length > 1 && fadeOut < 1) {
-      drawCover(images[(idx + 1) % REEL.length], 1, 1);
+      const ni = (idx + 1) % REEL.length;
+      const nv = videos[ni];
+      drawCover(nv && nv.readyState >= 2 && nv.videoWidth > 0 ? nv : images[ni], 1, 1);
     }
-    drawCover(img, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
+    drawCover(live, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
     ctx.globalAlpha = alpha;
 
     // A quiet vignette over every photograph. The portraits come from many
@@ -441,6 +495,55 @@ export function mountDemoReel(
       });
     }
 
+    // ---- product chapter --------------------------------------------------
+    // One per face, rotating, so a full loop of the cast shows what happens
+    // AFTER the score: the coach, the plan, the tracking. Drawn as a card at
+    // the top of the photograph, where the frame is empty once the callouts
+    // have settled low.
+    if (t >= T.chapter[0]) {
+      const appear = ease(seg(t, T.chapter[0], T.chapter[0] + 420));
+      const chap = CHAPTERS[idx % CHAPTERS.length];
+      const rs = [...face.regions].sort((a, b) => b.score - a.score);
+      const best = rs[0];
+      const worst = rs[rs.length - 1];
+      const lname = (r?: { id: string }) => (r ? (REGION_LABEL[r.id] ?? r.id).toLowerCase() : "face");
+      const [kicker, l1, l2] =
+        chap === "coach"
+          ? [
+              "COACH MAX'S READ",
+              `The standout on this scan: your ${lname(best)}.`,
+              `The one to work: the ${lname(worst)}. Ask Max how.`,
+            ]
+          : chap === "plan"
+            ? [
+                "YOUR PLAN",
+                "Every weak point gets steps with evidence grades.",
+                "01 Sodium and alcohol   02 Slower carbohydrates",
+              ]
+            : [
+                "TRACKED EVERY SCAN",
+                "Rescan in a few weeks. The deltas show what worked.",
+                "Overall, four pillars, eight regions, on record.",
+              ];
+      const slide = (1 - appear) * -10;
+      ctx.globalAlpha = alpha * appear;
+      ctx.translate(0, slide);
+      ctx.fillStyle = "rgba(12,13,15,0.78)";
+      ctx.beginPath();
+      ctx.roundRect(14, 34, w - 28, 74, 10);
+      ctx.fill();
+      ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#8FF3E0";
+      ctx.fillText(kicker, 26, 52);
+      ctx.font = "500 10.5px Inter Variable, Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.94)";
+      ctx.fillText(l1, 26, 72, w - 52);
+      ctx.fillStyle = "rgba(255,255,255,0.66)";
+      ctx.fillText(l2, 26, 90, w - 52);
+      ctx.translate(0, -slide);
+      ctx.globalAlpha = alpha;
+    }
+
     // ---- attribution ------------------------------------------------------
     // Required by the image licence, not optional decoration.
     ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
@@ -475,6 +578,12 @@ export function mountDemoReel(
       idx = (idx + 1) % REEL.length;
       start = now;
       shownAny = true;
+      // The incoming face's clip restarts from its measured first frame; the
+      // handover happened behind the crossfade so no jump is visible.
+      const v = videos[idx];
+      if (v && v.readyState >= 2) {
+        try { v.currentTime = 0; } catch { /* not seekable yet */ }
+      }
     }
     raf = requestAnimationFrame(frame);
   };
@@ -501,6 +610,8 @@ export function mountDemoReel(
     if (paused || stopped) return;
     paused = true;
     cancelAnimationFrame(raf);
+    // The clip must not keep decoding behind a parked canvas.
+    for (const v of videos) v?.pause();
   };
   const resume = () => {
     if (!paused || stopped) return;
@@ -544,6 +655,13 @@ export function mountDemoReel(
       io?.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       cancelAnimationFrame(raf);
+      for (const v of videos) {
+        if (!v) continue;
+        v.pause();
+        // Release the decoder rather than leaving six parked players around.
+        v.removeAttribute("src");
+        v.load();
+      }
       const ctx = canvas.getContext("2d");
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
       scoreEl.textContent = "";

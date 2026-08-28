@@ -65,6 +65,10 @@ interface Ctx {
   // has to know, because a guest's delta is deliberately null and null also
   // means "your first scan".
   subjectName?: string;
+  // The account holder's first name, for Coach Max's greeting on their own
+  // scans. Absent when signed out or the profile has not loaded; the greeting
+  // simply drops the name rather than inventing one.
+  selfName?: string;
   // Opens the plan chooser. Absent on a build with no billing configured, in
   // which case the upgrade button simply is not rendered rather than dead.
   onUpgrade?: () => void;
@@ -850,7 +854,7 @@ function showOverall(): void {
 
   body().innerHTML = `
     <div class="reveal overview-reveal">
-      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta, "front", ctx.subjectName) : ""}
+      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta, "front", ctx.subjectName, ctx.selfName) : ""}
       <div class="score-head">
         <div><div class="klabel">${ctx.subjectName ? `${escapeHTML(ctx.subjectName.toUpperCase())} · ` : ""}${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
@@ -1020,7 +1024,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
-      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side") : ""}
+      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
@@ -1321,7 +1325,7 @@ function mountProtocolIfDue(delta: ScanDelta | null): void {
   protocolCard = mountProtocolCard(slot, delta);
 }
 
-function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string): string {
+function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string, selfName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
   // Built in templates.ts, where the rest of the voice lives. It used to be
@@ -1329,7 +1333,11 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
   // first: ... is the LEVER, and it MOVES WITHOUT SURGERY" — two pieces of
   // jargon in one sentence, on the tab that is supposed to read as a coach
   // talking rather than a report printing.
-  const read = coachRead(r, delta, { scope, ...(guestName ? { guestName } : {}) });
+  const read = coachRead(r, delta, {
+    scope,
+    ...(guestName ? { guestName } : {}),
+    ...(selfName ? { selfName } : {}),
+  });
 
   return `<div class="maxan">
     <div class="maxan-face">${maxCharacterMarkup(pose)}</div>
@@ -1538,7 +1546,12 @@ function showRegion(id: RegionId): void {
         .forEach((i) => (i.style.left = `${i.dataset.l}%`)),
     120,
   );
-  typewrite(document.getElementById("tw")!, regionSummary(r, ctx.report.sex));
+  // A guest's delta is deliberately null, so a guest scan cannot borrow the
+  // owner's trend; they get the neutral opener with their own name.
+  typewrite(document.getElementById("tw")!, regionSummary(r, ctx.report.sex, {
+    name: ctx.subjectName || ctx.selfName,
+    delta: ctx.delta?.regions.find((d) => d.region === r.region)?.delta ?? null,
+  }));
   wireMeasurementTaps(r, id);
 
   const deck = document.getElementById("deck")!;

@@ -11,6 +11,14 @@ import { getSupabaseAdmin } from "./_shared.js";
 // ---------------------------------------------------------------------------
 
 export const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
+
+// Env values arrive however they were pasted. A key copied with a trailing
+// newline produced client_key=%0Asbaw... in the authorize URL and TikTok
+// refused the whole flow with "correct the following: client_key" — an error
+// that reads like a portal misconfiguration and cost a debugging session.
+// Trimming here fixes every paste of that shape at once.
+export const tiktokClientKey = (): string => (process.env.TIKTOK_CLIENT_KEY || "").trim();
+export const tiktokClientSecret = (): string => (process.env.TIKTOK_CLIENT_SECRET || "").trim();
 const VIDEOS_URL =
   "https://open.tiktokapis.com/v2/video/list/?fields=id,title,view_count,like_count,comment_count,share_count,create_time,share_url";
 
@@ -28,8 +36,8 @@ export async function tiktokTokenRequest(fields: Record<string, string>): Promis
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_key: process.env.TIKTOK_CLIENT_KEY || "",
-      client_secret: process.env.TIKTOK_CLIENT_SECRET || "",
+      client_key: tiktokClientKey(),
+      client_secret: tiktokClientSecret(),
       ...fields,
     }).toString(),
   });

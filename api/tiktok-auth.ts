@@ -1,5 +1,5 @@
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
-import { freshTikTokAccess, listOwnTikTokVideos, tiktokTokenRequest } from "./_tiktok.js";
+import { freshTikTokAccess, listOwnTikTokVideos, tiktokClientKey, tiktokClientSecret, tiktokTokenRequest } from "./_tiktok.js";
 
 // ---------------------------------------------------------------------------
 // TikTok Login Kit + Display API, for League creators.
@@ -48,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!user) return json({ error: "Sign in first." }, 401);
     if (!(await memberOrStaff(user.id))) return json({ error: "Not found." }, 404);
 
-    if (!process.env.TIKTOK_CLIENT_KEY || !process.env.TIKTOK_CLIENT_SECRET) {
+    if (!tiktokClientKey() || !tiktokClientSecret()) {
       return json({ error: "TikTok is not configured on this deployment." }, 503);
     }
 
@@ -64,7 +64,7 @@ export async function POST(request: Request): Promise<Response> {
       // forged redirect cannot attach an attacker's TikTok to someone else.
       const state = crypto.randomUUID();
       const url =
-        `${AUTH_URL}?client_key=${encodeURIComponent(process.env.TIKTOK_CLIENT_KEY)}` +
+        `${AUTH_URL}?client_key=${encodeURIComponent(tiktokClientKey())}` +
         `&scope=${encodeURIComponent(SCOPES)}&response_type=code` +
         `&redirect_uri=${encodeURIComponent(redirectUri())}&state=${state}`;
       return json({ url, state });

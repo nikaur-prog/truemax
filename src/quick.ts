@@ -241,7 +241,8 @@ function openFromHashInner(): void {
 }
 
 async function loadPreviewPhoto(): Promise<void> {
-  const response = await fetch("/demo/michael-b-jordan.jpg");
+  // One of the reel's AI-generated portraits; the celebrity set is gone.
+  const response = await fetch("/demo/dev.jpg");
   const blob = await response.blob();
   const image = await loadImage(new File([blob], "preview.jpg", { type: blob.type }));
   const canvas = document.createElement("canvas");
