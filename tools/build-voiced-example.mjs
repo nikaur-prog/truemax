@@ -36,6 +36,9 @@ if (mode !== "narration" && mode !== "render") {
 }
 const voicePath = mode === "render" ? rest[0] : null;
 const name = (mode === "render" ? rest[1] : rest[0]) ?? "Dev";
+// Which cut to build. The $2.99 product is the short cut, so the example the
+// pop-out plays should be the short cut too.
+const CUT = process.env.TM_CUT === "full" ? "full" : "short";
 const NOTE =
   "One more thing. Dev is an AI generated demonstration face, so nobody's real face had to stand in a product demo. The scan, the numbers and this voice are exactly what the product produces.";
 
@@ -56,7 +59,7 @@ try {
   const voiceB64 = voicePath ? readFileSync(voicePath).toString("base64") : null;
 
   const setup = await page.evaluate(
-    async ([dataUrl, mode2, audioB64, personName, note]) => {
+    async ([dataUrl, mode2, audioB64, personName, note, cut]) => {
       const { detect } = await import("/src/engine/landmarker.ts");
       const { analyze } = await import("/src/engine/scoring.ts");
       const { buildReelScript, narrationFrom } = await import("/src/engine/reelScript.ts");
@@ -75,7 +78,7 @@ try {
       const lm = detect(photo)?.faceLandmarks?.[0];
       if (!lm?.length) return { error: "no face found" };
       const report = analyze(lm, photo.width, photo.height, "male", photo);
-      const beats = buildReelScript(report, { name: personName, note });
+      const beats = buildReelScript(report, { name: personName, note, cut });
       if (mode2 === "narration") return { narration: narrationFrom(beats) };
 
       const { buildTimeline, fitTimeline } = await import("/src/engine/rundownTimeline.ts");
@@ -131,6 +134,7 @@ try {
         name: personName.trim().split(/\s+/)[0],
         disclaimerLine: note.trim(),
         disclaimerClip: undefined,
+        cut,
       };
       window.__vframe = (frame, fps) => {
         ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
@@ -143,7 +147,7 @@ try {
       };
       return { wav: btoa(wb), duration: audio.duration };
     },
-    [photoB64, mode, voiceB64, name, NOTE],
+    [photoB64, mode, voiceB64, name, NOTE, CUT],
   );
 
   if (setup.error) {

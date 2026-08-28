@@ -1060,6 +1060,9 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
     const result = await rundown.downloadRundownVideo(frontPhoto, ctx.landmarks, report, {
       name,
       accessToken,
+      // The $2.99 product is the SHORT cut: trait-led, the number on screen,
+      // about fifty seconds. The full read stays a creator tool.
+      cut: "short",
       onProgress: (p, stage) => say(`${stage} · ${Math.round(p * 100)}%`),
     });
     if (result.outcome === "cancelled") {

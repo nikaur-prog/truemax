@@ -1,3 +1,4 @@
+import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
@@ -204,6 +205,18 @@ export interface RundownInput {
    * for it.
    */
   disclaimerLine?: string;
+  /**
+   * Which cut is being rendered.
+   *
+   * "short" cuts the SUBJECT OUT: on measurement beats the photograph is
+   * matted to the face and floated on the dark ground, so the face is the
+   * only thing in the frame — the reference format's look, achieved with the
+   * landmarks the scan already has rather than a segmentation model. The hook
+   * stays full bleed (the "how attractive is X" beat is the one place the
+   * whole photograph earns its frame), and the card, curve and search beats
+   * already own their compositions in both cuts.
+   */
+  cut?: "short" | "full";
 }
 
 interface Box {
@@ -629,6 +642,129 @@ function cutawayAlpha(beat: TimedBeat, t: number): number {
   return rise * fall;
 }
 
+// ---------------------------------------------------------------------------
+// The short cut's face matte.
+//
+// The reference format's single strongest visual is that the person is CUT
+// OUT: nothing in the frame but the face on darkness, so there is nothing to
+// look at except the thing being measured. A segmentation model would buy a
+// pixel-perfect edge at the cost of a multi-megabyte download; the scan
+// already carries a face oval in its landmarks, and a generously expanded,
+// heavily feathered hull of that oval reads as a deliberate spotlight rather
+// than a cheap cutout — the feather is doing the honesty work of admitting
+// this is a matte, not a segmentation.
+//
+// The hull is expanded upward far more than outward because MediaPipe's oval
+// stops at the hairline: without the crown allowance the matte would guillotine
+// the hair, which is the one mistake that makes a cutout look broken rather
+// than stylised.
+// ---------------------------------------------------------------------------
+
+const MATTE_EXPAND = 1.3;
+const MATTE_CROWN = 0.62;
+const MATTE_FEATHER = 0.055;
+
+let matteCanvas: HTMLCanvasElement | null = null;
+let maskCanvas: HTMLCanvasElement | null = null;
+
+function scratch(store: "matte" | "mask", W: number, H: number): HTMLCanvasElement {
+  let c = store === "matte" ? matteCanvas : maskCanvas;
+  if (!c) {
+    c = document.createElement("canvas");
+    if (store === "matte") matteCanvas = c;
+    else maskCanvas = c;
+  }
+  if (c.width !== W || c.height !== H) {
+    c.width = W;
+    c.height = H;
+  }
+  return c;
+}
+
+// The face-oval hull in FRAME coordinates, ordered by angle about its own
+// centroid — the oval is star-shaped around its centre, so an angle sort is a
+// correct ring without walking MediaPipe's edge list.
+function ovalRing(
+  landmarks: NormalizedLandmark[],
+  photo: { width: number; height: number },
+  crop: Crop,
+  W: number,
+  H: number,
+): Array<[number, number]> {
+  const idx = new Set<number>();
+  for (const edge of FaceLandmarker.FACE_LANDMARKS_FACE_OVAL) {
+    idx.add(edge.start);
+    idx.add(edge.end);
+  }
+  const pts: Array<[number, number]> = [];
+  for (const i of idx) {
+    const p = landmarks[i];
+    if (!p) continue;
+    pts.push([
+      ((p.x * photo.width - crop.x) / crop.w) * W,
+      ((p.y * photo.height - crop.y) / crop.h) * H,
+    ]);
+  }
+  if (pts.length < 3) return pts;
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  return pts
+    .map(([x, y]) => {
+      // Expand about the centroid, with extra headroom above it for the crown.
+      const ex = cx + (x - cx) * MATTE_EXPAND;
+      let ey = cy + (y - cy) * MATTE_EXPAND;
+      if (y < cy) ey -= (cy - y) * MATTE_CROWN;
+      return [ex, ey, Math.atan2(y - cy, x - cx)] as [number, number, number];
+    })
+    .sort((a, b) => a[2] - b[2])
+    .map(([x, y]) => [x, y]);
+}
+
+function drawMattedPhoto(
+  ctx: CanvasRenderingContext2D,
+  photo: HTMLCanvasElement,
+  landmarks: NormalizedLandmark[],
+  crop: Crop,
+  W: number,
+  H: number,
+): void {
+  const ring = ovalRing(landmarks, photo, crop, W, H);
+  if (ring.length < 3) {
+    ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+    return;
+  }
+  const mask = scratch("mask", W, H);
+  const mctx = mask.getContext("2d")!;
+  mctx.clearRect(0, 0, W, H);
+  mctx.filter = `blur(${Math.round(W * MATTE_FEATHER)}px)`;
+  mctx.fillStyle = "#fff";
+  mctx.beginPath();
+  mctx.moveTo(ring[0][0], ring[0][1]);
+  for (const [x, y] of ring.slice(1)) mctx.lineTo(x, y);
+  mctx.closePath();
+  mctx.fill();
+  mctx.filter = "none";
+
+  const matte = scratch("matte", W, H);
+  const tctx = matte.getContext("2d")!;
+  tctx.clearRect(0, 0, W, H);
+  tctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+  tctx.globalCompositeOperation = "destination-in";
+  tctx.drawImage(mask, 0, 0);
+  tctx.globalCompositeOperation = "source-over";
+
+  // A soft pool of light behind the head, so the subject sits IN the dark
+  // rather than pasted onto it.
+  const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+  const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+  const glow = ctx.createRadialGradient(cx, cy, W * 0.05, cx, cy, W * 0.75);
+  glow.addColorStop(0, "rgba(38,48,50,0.55)");
+  glow.addColorStop(1, "rgba(5,6,6,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(matte, 0, 0);
+}
+
 export function drawRundownFrame(
   ctx: CanvasRenderingContext2D,
   photo: HTMLCanvasElement,
@@ -733,6 +869,8 @@ export function drawRundownFrame(
     fade.addColorStop(1, "#050606");
     ctx.fillStyle = fade;
     ctx.fillRect(0, boxH * 0.55, W, boxH * 0.45 + 2);
+  } else if (input.cut === "short" && kind === "metric") {
+    drawMattedPhoto(ctx, photo, landmarks, crop, W, H);
   } else {
     ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
   }
@@ -747,7 +885,16 @@ export function drawRundownFrame(
   // to feel like it has more than one shot in it. Enough is kept at the top and
   // bottom to hold the caption and the bar, which carry their own shadows.
   const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  if (cutaway) {
+  const matted = input.cut === "short" && kind === "metric" && !cutaway;
+  if (matted) {
+    // The ground is already dark on a matted frame — the scrim's only
+    // remaining job is holding the caption and the bar, so it keeps the top
+    // and bottom bands and stays out of the face.
+    scrim.addColorStop(0, "rgba(3,5,5,.40)");
+    scrim.addColorStop(0.34, "rgba(3,5,5,.02)");
+    scrim.addColorStop(0.68, "rgba(3,5,5,.10)");
+    scrim.addColorStop(1, "rgba(3,5,5,.72)");
+  } else if (cutaway) {
     scrim.addColorStop(0, "rgba(3,5,5,.46)");
     scrim.addColorStop(0.34, "rgba(3,5,5,.06)");
     scrim.addColorStop(0.68, "rgba(3,5,5,.20)");

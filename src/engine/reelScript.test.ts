@@ -463,3 +463,66 @@ test("the name still appears only once, however the opening is written", () => {
   const rest = beats.slice(1).map((b) => b.line).join(" ");
   assert.ok(!rest.includes("Ethan Garcia"), "the full name leaked past the hook");
 });
+
+// ---------------------------------------------------------------------------
+// The short cut.
+// ---------------------------------------------------------------------------
+
+// The same spread with the values the classifier reads set to something real:
+// a hunter-band tilt so the eye beat can name the shape.
+const SHORT_METRICS = [
+  { ...metric("canthalTilt", "eyes", 1.6), value: 8 } as ScoredMetric,
+  metric("browTilt", "eyes", -1.4),
+  metric("midfaceRatio", "midface", 0.9),
+  metric("lipRatio", "lips", 1.1),
+  metric("jawCheekRatio", "jaw", -1.9),
+  metric("philtrumChinRatio", "chin", 0.7),
+  metric("facialIndex", "proportions", -0.6),
+];
+
+test("short cut: the voice never says a figure, the badge still carries it", () => {
+  const beats = buildReelScript(report(SHORT_METRICS), { name: "Test", cut: "short" });
+  for (const b of beats.filter((x) => x.kind === "metric")) {
+    assert.doesNotMatch(b.line, /\d/, b.line);
+    assert.ok(b.badge, "the on-screen number is the badge");
+  }
+});
+
+test("short cut: a hunter-band tilt is named as the eye shape", () => {
+  const beats = buildReelScript(report(SHORT_METRICS), { name: "Test", cut: "short" });
+  const eyes = beats.find((b) => b.kind === "metric" && b.metricId === "canthalTilt");
+  assert.ok(eyes);
+  assert.match(eyes.line, /hunter eyes/);
+});
+
+test("short cut: strengths carry graded adjectives from their own zEff", () => {
+  const beats = buildReelScript(report(SHORT_METRICS), { name: "Test", cut: "short" });
+  const mid = beats.find((b) => b.kind === "metric" && b.metricId === "midfaceRatio");
+  assert.ok(mid);
+  // 0.9 sits in the "great" band.
+  assert.match(mid.line, /a great|a very strong/);
+});
+
+test("short cut: the ending is compressed and the full cut's is not", () => {
+  const short = buildReelScript(report(SHORT_METRICS), { name: "Test", cut: "short" });
+  const full = buildReelScript(report(SHORT_METRICS), { name: "Test" });
+  assert.equal(short.filter((b) => b.kind === "card").length, 2);
+  assert.equal(short.filter((b) => b.kind === "curve").length, 1);
+  assert.equal(full.filter((b) => b.kind === "card").length, 3);
+  assert.equal(full.filter((b) => b.kind === "curve").length, 2);
+  // Both keep the signature close: curve, then the search bar, then the ask.
+  const shortKinds = short.map((b) => b.kind);
+  assert.ok(shortKinds.indexOf("curve") < shortKinds.indexOf("search"));
+  assert.equal(shortKinds[shortKinds.length - 1], "cta");
+});
+
+test("short cut: the narration is meaningfully shorter than the full cut's", () => {
+  const short = buildReelScript(report(SHORT_METRICS), { name: "Test", cut: "short" });
+  const full = buildReelScript(report(SHORT_METRICS), { name: "Test" });
+  const seconds = (beats: typeof short) =>
+    beats.reduce((total, b) => total + spokenSeconds(b.spoken ?? b.line), 0);
+  assert.ok(
+    seconds(short) < seconds(full) * 0.72,
+    `short ${seconds(short).toFixed(1)}s vs full ${seconds(full).toFixed(1)}s`,
+  );
+});

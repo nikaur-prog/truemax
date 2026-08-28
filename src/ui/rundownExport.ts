@@ -107,6 +107,13 @@ export interface RundownOptions {
   disclaimer?: { clips: Array<{ video: HTMLVideoElement; startAt: number; length: number }> };
   /** Supabase access token; the TTS route is staff-gated. */
   accessToken?: string;
+  /**
+   * Which cut to render. "short" is the fast, trait-led cut (the $2.99
+   * product and the TikTok default); "full" (default) is the deep read.
+   * One flag, threaded to the script builder and the frame renderer — the
+   * pacing difference comes free, because the timeline fits the narration.
+   */
+  cut?: "short" | "full";
   /** How far off level the capture is, for the publish guard. */
   offAxisDeg?: number;
   jawWarnDeg?: number;
@@ -153,6 +160,7 @@ export async function downloadRundownVideo(
     // The operator's chosen register, so the video and the page it was exported
     // from call one face the same thing.
     tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
+    cut: options.cut,
   });
 
   onProgress?.(0.05, "Recording the voiceover");
@@ -256,6 +264,7 @@ export async function downloadRundownVideo(
     disclaimerLine: options.note?.trim() || undefined,
     // Set per frame below: which clip is on screen depends on t.
     disclaimerClip: undefined as CanvasImageSource | undefined,
+    cut: options.cut,
   };
 
   // The disclaimer beat, so the clip can be seeked to the right frame rather
