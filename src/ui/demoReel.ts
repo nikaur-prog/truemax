@@ -2,7 +2,6 @@ import { METRICS } from "../engine/metrics.js";
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
-import { reelContours, reelOvalPoints } from "./reelMesh.js";
 
 // The landing reel shows display scores rather than the engine's output, for
 // the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
@@ -21,24 +20,21 @@ import type { ReelFace } from "./demoReelData.js";
 // Every value on screen is this engine's real output on that photograph.
 // ---------------------------------------------------------------------------
 
+// The shape the owner settled on after watching it live: a scan line sweeps
+// DOWN the face, comes back UP while the measuring copy runs, and then the
+// results arrive — score, pillars, region callouts. No landmark mesh (the
+// drawn contours never sat perfectly on the features, and nearly right is
+// worse than absent), and no product chapters (the demo's one job is the
+// scan-and-score; the product explains itself past the fold).
 const T = {
-  scan: [260, 1500],
-  measure: [1500, 2400],
-  score: [2400, 3150],
-  pillars: [3150, 4400],
-  regions: [4400, 6400],
-  // The beat past the score: the reel used to end at the number, which sells
-  // "we measure" and nothing after it. Each face now closes on one product
-  // chapter — Coach Max's read, the plan, or the tracking — rotating so a
-  // full loop of the cast shows the whole product, not just the grade.
-  chapter: [6600, 8600],
-  out: 8700,
-  hold: 9000,
+  scan: [260, 1350],
+  measure: [1350, 2350],
+  score: [2550, 3300],
+  pillars: [3300, 4550],
+  regions: [4550, 6550],
+  out: 6650,
+  hold: 6950,
 };
-
-// One chapter per face, rotating. Copy rules: Coach Max's line is the one
-// warm voice in the product; the other two state facts, plainly.
-const CHAPTERS = ["coach", "plan", "tracked"] as const;
 
 // Count from the engine, not prose: the demo is front-only, and a hardcoded
 // number here drifted (it said 31 while the engine measured 33).
@@ -83,26 +79,9 @@ export function mountDemoReel(
     return img;
   });
 
-  // The living layer. Each face has a four-second micro-motion loop cropped
-  // to exactly the still's geometry, so the landmark fractions hold on both.
-  // The still paints first and the video takes over the moment it can play —
-  // and under prefers-reduced-motion the videos are never created at all.
-  const reducedMotion =
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const videos: Array<HTMLVideoElement | null> = REEL.map(() => null);
-  const ensureVideo = (i: number) => {
-    if (reducedMotion || videos[i]) return;
-    const v = document.createElement("video");
-    v.muted = true;
-    v.playsInline = true;
-    v.preload = "auto";
-    // NOT looped: the clip's last frame does not match its first, and a hard
-    // cut mid-breath reads as a glitch. It plays once and holds; the reset
-    // to frame zero happens on the face's next turn, behind a crossfade.
-    v.loop = false;
-    v.src = `/demo/${REEL[i].slug}.mp4`;
-    videos[i] = v;
-  };
+  // Stills only, by decision. The living-portrait loops were tried and cut:
+  // a photograph that blinks reads as a photograph malfunctioning, not as a
+  // person — the scan line supplies all the motion this card needs.
 
   let idx = 0;
   let start = 0;
@@ -118,18 +97,7 @@ export function mountDemoReel(
     const img = images[idx];
     if (!face) return;
 
-    // The live source: the video once it can paint, the still until then.
-    // Both carry identical geometry, so the swap is invisible.
-    ensureVideo(idx);
-    if (t > T.out - 500) ensureVideo((idx + 1) % REEL.length);
-    const vid = videos[idx];
-    const vidReady = Boolean(vid && vid.readyState >= 2 && vid.videoWidth > 0);
-    const live: HTMLImageElement | HTMLVideoElement = vidReady ? vid! : img;
-    if (vid && vidReady && vid.paused && !vid.ended) void vid.play().catch(() => {});
-    for (let i = 0; i < videos.length; i++) {
-      const v = videos[i];
-      if (v && i !== idx && !v.paused) v.pause();
-    }
+    const live: HTMLImageElement = img;
 
     const w = canvas.clientWidth || canvas.width;
     const h = canvas.clientHeight || canvas.height;
@@ -204,13 +172,6 @@ export function mountDemoReel(
       const dh = sh * s;
       return { dx: (w - dw) / 2, dy: (photoH - dh) / 2, dw, dh };
     };
-    // The live photo's rect — every point, line and callout is mapped through
-    // THIS, so the mesh is locked to the picture at every frame of the dock
-    // rather than drifting off it as the frame changes shape.
-    const rect = readyOf(live) ? rectOf(live, 1 + 0.04 * Math.min(1, t / T.hold)) : null;
-    const mapX = (px: number) => (rect ? rect.dx + px * rect.dw : px * w);
-    const mapY = (py: number) => (rect ? rect.dy + py * rect.dh : py * photoH);
-
     const drawCover = (source: HTMLImageElement | HTMLVideoElement, zoom: number, a: number) => {
       if (!readyOf(source)) return;
       const r = rectOf(source, zoom);
@@ -233,9 +194,7 @@ export function mountDemoReel(
     // where it will be drawn on its first frame as the current face, so the
     // handover is continuous rather than a four-per-cent pop.
     if (REEL.length > 1 && fadeOut < 1) {
-      const ni = (idx + 1) % REEL.length;
-      const nv = videos[ni];
-      drawCover(nv && nv.readyState >= 2 && nv.videoWidth > 0 ? nv : images[ni], 1, 1);
+      drawCover(images[(idx + 1) % REEL.length], 1, 1);
     }
     drawCover(live, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
     ctx.globalAlpha = alpha;
@@ -270,86 +229,36 @@ export function mountDemoReel(
     ctx.fillStyle = botScrim;
     ctx.fillRect(0, scrimTop, w, 120);
 
-    // ---- points sweep -----------------------------------------------------
-    const swept = ease(seg(t, T.scan[0], T.scan[1]));
-    const settled = t > T.scan[1];
-
-    // No geometry over a crossfade, full stop. Mid-fade the frame is two
-    // faces at partial opacity, and any mesh drawn then belongs to only one
-    // of them — a still of that instant reads as a misaligned overlay on a
-    // double exposure, which is exactly the frame that got screenshotted and
-    // called ugly. The lines wait for one face to own the frame.
-    const meshAlpha = alpha >= 1 ? 1 : 0;
-
-    // The mesh, not a cloud.
-    //
-    // These were loose dots, and loose dots read as glitter over a photograph
-    // rather than as a model being fitted to a face. They were never loose:
-    // they are the vertices of the face oval, the eyes, the brows and the lips,
-    // and reelMesh rebuilds the edges between them from the same MediaPipe sets
-    // the point list itself is derived from.
-    //
-    // An edge is drawn only once BOTH its ends have been swept, so the outline
-    // assembles behind the scan line instead of appearing whole — the contour
-    // closing around an eye as the line passes it is the moment the animation
-    // is selling. Lines under the dots so the vertices stay the brightest thing.
-    const pts = face.points;
-    ctx.globalAlpha = alpha * meshAlpha;
-    ctx.lineWidth = 0.9;
-    ctx.lineJoin = "round";
-    // Features only — reelMesh no longer returns the face oval at all. A ring
-    // traced round the silhouette read as a cut-out laid over the photograph,
-    // and it sat on the one boundary the mesh is least sure of.
-    const rings = reelContours();
-    ctx.strokeStyle = `rgba(255,255,255,${settled ? 0.22 : 0.4})`;
-    for (const ring of rings) {
-      ctx.beginPath();
-      let open = false;
-      // Closed rings: the wrap-around edge is the last-to-first pair, so the
-      // walk runs one past the end.
-      for (let k = 0; k <= ring.length; k++) {
-        const a = pts[ring[k % ring.length]];
-        if (!a || a[1] > swept) {
-          open = false;
-          continue;
-        }
-        if (open) ctx.lineTo(mapX(a[0]), mapY(a[1]));
-        else ctx.moveTo(mapX(a[0]), mapY(a[1]));
-        open = true;
-      }
-      ctx.stroke();
-    }
-
-    // The oval's own vertices go with its outline. Leaving them behind as a
-    // ring of loose dots is the same cut-out shape with the lines removed.
-    const oval = reelOvalPoints();
-    for (let i = 0; i < pts.length; i++) {
-      if (oval.has(i)) continue;
-      const [px, py] = pts[i];
-      if (py > swept || meshAlpha === 0) continue;
-      const fresh = !settled && swept - py < 0.09;
-      // After the sweep the model stays ALIVE: a slow luminance wave travels
-      // down the settled vertices, a few points at a time barely brightening.
-      // A static mesh over a photograph reads as a sticker; one that breathes
-      // reads as a fit being held. The amplitude is deliberately at the edge
-      // of perception — this should be felt, not watched.
-      const settle = settled ? 0.3 + 0.1 * Math.max(0, Math.sin(now / 640 - py * 7)) : 0.62;
-      ctx.fillStyle = fresh ? "#8FF3E0" : `rgba(255,255,255,${settle.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(mapX(px), mapY(py), fresh ? 2.4 : 1.4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    if (swept > 0 && swept < 1) {
-      const y = mapY(swept);
-      const g = ctx.createLinearGradient(0, y - 26, 0, y + 2);
-      g.addColorStop(0, "rgba(143,243,224,0)");
-      g.addColorStop(1, "rgba(143,243,224,0.85)");
+    // ---- the scan sweep ---------------------------------------------------
+    // Down once, then back up, and that is the whole scan visual. The drawn
+    // landmark mesh is gone by decision: the contours never sat perfectly on
+    // the lips and eyes, and an overlay that is nearly right undermines the
+    // exact claim the product makes. The line owns the motion instead — a
+    // second, dimmer echo line trails it so the pass reads as an instrument
+    // sweeping rather than a loading bar.
+    const down = ease(seg(t, T.scan[0], T.scan[1]));
+    const up = ease(seg(t, T.measure[0], T.measure[1]));
+    const goingUp = t >= T.measure[0];
+    const sweepPos = goingUp ? 1 - up : down;
+    if (t >= T.scan[0] && t < T.measure[1] && sweepPos > 0.001 && sweepPos < 0.999) {
+      const y = sweepPos * photoH;
+      // The glow trails BEHIND the direction of travel.
+      const trail = goingUp ? 1 : -1;
+      const g = ctx.createLinearGradient(0, y, 0, y + trail * 28);
+      g.addColorStop(0, "rgba(143,243,224,0.85)");
+      g.addColorStop(1, "rgba(143,243,224,0)");
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = g;
-      ctx.fillRect(0, y - 26, w, 27);
-      // A hairline at the sweep's leading edge. The gradient alone is a glow
-      // with no address; the one-pixel line is the instrument.
+      ctx.fillRect(0, Math.min(y, y + trail * 28), w, 28);
+      // A hairline at the leading edge — the gradient alone is a glow with no
+      // address; the one-pixel line is the instrument.
       ctx.fillStyle = "rgba(220,255,247,0.9)";
       ctx.fillRect(0, y, w, 1);
+      const echoY = y + trail * 44;
+      if (echoY > 0 && echoY < photoH) {
+        ctx.fillStyle = "rgba(143,243,224,0.22)";
+        ctx.fillRect(0, echoY, w, 1);
+      }
     }
 
     // ---- phase label ------------------------------------------------------
@@ -495,64 +404,18 @@ export function mountDemoReel(
       });
     }
 
-    // ---- product chapter --------------------------------------------------
-    // One per face, rotating, so a full loop of the cast shows what happens
-    // AFTER the score: the coach, the plan, the tracking. Drawn as a card at
-    // the top of the photograph, where the frame is empty once the callouts
-    // have settled low.
-    if (t >= T.chapter[0]) {
-      const appear = ease(seg(t, T.chapter[0], T.chapter[0] + 420));
-      const chap = CHAPTERS[idx % CHAPTERS.length];
-      const rs = [...face.regions].sort((a, b) => b.score - a.score);
-      const best = rs[0];
-      const worst = rs[rs.length - 1];
-      const lname = (r?: { id: string }) => (r ? (REGION_LABEL[r.id] ?? r.id).toLowerCase() : "face");
-      const [kicker, l1, l2] =
-        chap === "coach"
-          ? [
-              "COACH MAX'S READ",
-              `The standout on this scan: your ${lname(best)}.`,
-              `The one to work: the ${lname(worst)}. Ask Max how.`,
-            ]
-          : chap === "plan"
-            ? [
-                "YOUR PLAN",
-                "Every weak point gets steps with evidence grades.",
-                "01 Sodium and alcohol   02 Slower carbohydrates",
-              ]
-            : [
-                "TRACKED EVERY SCAN",
-                "Rescan in a few weeks. The deltas show what worked.",
-                "Overall, four pillars, eight regions, on record.",
-              ];
-      const slide = (1 - appear) * -10;
-      ctx.globalAlpha = alpha * appear;
-      ctx.translate(0, slide);
-      ctx.fillStyle = "rgba(12,13,15,0.78)";
-      ctx.beginPath();
-      ctx.roundRect(14, 34, w - 28, 74, 10);
-      ctx.fill();
-      ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
-      ctx.fillStyle = "#8FF3E0";
-      ctx.fillText(kicker, 26, 52);
-      ctx.font = "500 10.5px Inter Variable, Inter, system-ui, sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,0.94)";
-      ctx.fillText(l1, 26, 72, w - 52);
-      ctx.fillStyle = "rgba(255,255,255,0.66)";
-      ctx.fillText(l2, 26, 90, w - 52);
-      ctx.translate(0, -slide);
-      ctx.globalAlpha = alpha;
-    }
-
     // ---- attribution ------------------------------------------------------
-    // Required by the image licence, not optional decoration.
-    ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.42)";
-    ctx.textAlign = "right";
-    // Sits with the picture it credits — on the photograph's own bottom edge,
-    // which travels up with the dock.
-    ctx.fillText(face.credit, w - 12, photoH - 8);
-    ctx.textAlign = "left";
+    // Drawn only for a face whose licence requires it (a CC photograph, if
+    // one ever returns to the roster). The synthetic cast's provenance moved
+    // to the page's own fine print at the owner's call: on the picture it
+    // labelled a demo nobody mistook for a testimonial.
+    if (!face.credit.startsWith("AI-GENERATED")) {
+      ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.42)";
+      ctx.textAlign = "right";
+      ctx.fillText(face.credit, w - 12, photoH - 8);
+      ctx.textAlign = "left";
+    }
     ctx.globalAlpha = 1;
 
     // Overall counts up only once the measuring beat is over. The instant it
@@ -578,12 +441,6 @@ export function mountDemoReel(
       idx = (idx + 1) % REEL.length;
       start = now;
       shownAny = true;
-      // The incoming face's clip restarts from its measured first frame; the
-      // handover happened behind the crossfade so no jump is visible.
-      const v = videos[idx];
-      if (v && v.readyState >= 2) {
-        try { v.currentTime = 0; } catch { /* not seekable yet */ }
-      }
     }
     raf = requestAnimationFrame(frame);
   };
@@ -610,8 +467,6 @@ export function mountDemoReel(
     if (paused || stopped) return;
     paused = true;
     cancelAnimationFrame(raf);
-    // The clip must not keep decoding behind a parked canvas.
-    for (const v of videos) v?.pause();
   };
   const resume = () => {
     if (!paused || stopped) return;
@@ -655,13 +510,6 @@ export function mountDemoReel(
       io?.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       cancelAnimationFrame(raf);
-      for (const v of videos) {
-        if (!v) continue;
-        v.pause();
-        // Release the decoder rather than leaving six parked players around.
-        v.removeAttribute("src");
-        v.load();
-      }
       const ctx = canvas.getContext("2d");
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
       scoreEl.textContent = "";
