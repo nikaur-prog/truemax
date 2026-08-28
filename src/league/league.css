@@ -75,6 +75,23 @@ label { display: block; font-size: 13px; color: var(--lg-mut); margin: 14px 0 6p
   color: #06231a;
 }
 .lg-btn.pri:hover { background: #37b585; }
+/* The gate's one job is this button — it gets the only glow on the page. */
+.lg-btn.lg-cta {
+  padding: 15px 34px;
+  font-size: 17px;
+  background: linear-gradient(180deg, #3fbd8c, var(--lg-mint));
+  box-shadow: 0 0 0 1px rgba(121, 232, 210, 0.35), 0 0 22px rgba(47, 158, 115, 0.55);
+  animation: lg-cta-pulse 2.6s ease-in-out infinite;
+}
+.lg-btn.lg-cta:hover {
+  background: linear-gradient(180deg, #4ccb98, #37b585);
+  box-shadow: 0 0 0 1px rgba(121, 232, 210, 0.55), 0 0 30px rgba(63, 189, 140, 0.75);
+  animation-play-state: paused;
+}
+@keyframes lg-cta-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(121, 232, 210, 0.35), 0 0 18px rgba(47, 158, 115, 0.45); }
+  50% { box-shadow: 0 0 0 1px rgba(121, 232, 210, 0.6), 0 0 34px rgba(63, 189, 140, 0.8); }
+}
 .lg-btn.danger { color: var(--lg-danger); }
 .lg-btn[disabled] { opacity: 0.5; cursor: default; }
 
@@ -242,4 +259,5 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
 
 @media (prefers-reduced-motion: reduce) {
   .lg-btn { transition: none; }
+  .lg-btn.lg-cta { animation: none; }
 }
