@@ -74,5 +74,10 @@ exports/
 
 # Contact sheets from tools/rundown-sheet.mjs — regenerate, never commit.
 .rundown-sheet/
+
+# Working files from tools/build-voiced-example.mjs. The finished example
+# ships as public/demo/voiced-example.mp4; the voice track and narration are
+# intermediates.
+.voiced-example/
 .celeb-cache/
 .cta-assets/
