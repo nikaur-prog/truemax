@@ -173,6 +173,26 @@ export function startScanCreditCheckout(): Promise<BillingResult> {
   return billingRedirect("/api/create-checkout-session", { purchase: "scan" });
 }
 
+// ---------------------------------------------------------------------------
+// Voiced-analysis credits: $2.99 buys one narrated export. Same shape as the
+// scan credit, except the SPEND is server-side in /api/tts (where the
+// synthesis actually happens), so the client only reads and buys.
+// ---------------------------------------------------------------------------
+
+export async function loadVoiceCredits(): Promise<number> {
+  const client = await getSupabaseClient();
+  const { data, error } = await client
+    .from("voice_credits")
+    .select("balance")
+    .maybeSingle<{ balance: number }>();
+  if (error) throw new Error(error.message);
+  return data?.balance ?? 0;
+}
+
+export function startVoiceCreditCheckout(): Promise<BillingResult> {
+  return billingRedirect("/api/create-checkout-session", { purchase: "voice" });
+}
+
 // Returns the remaining balance, or -1 when there was nothing to spend. Fire
 // and forget from the scan path — a consumption that fails to record is a free
 // scan, which is the survivable direction of that error.

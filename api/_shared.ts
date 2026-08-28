@@ -118,41 +118,30 @@ export async function recordLeagueRender(userId: string, kind: string): Promise<
 // ---------------------------------------------------------------------------
 // Max-plan voice exports — the member-facing counterpart of League metering.
 //
-// A Max member can voice their own analysis video a few times a month; the
-// allowance is a plan perk with a bounded cost, not a budget the owner set
-// per person, so the quota is a constant here rather than a column. Same
-// discipline as the League ledger otherwise: counted since the first of the
-// current UTC month, recorded server-side after delivery.
+// A voiced analysis is a $2.99 purchase, one credit per export. The webhook
+// grants (grant_voice_credit, service role only) and /api/tts spends —
+// atomically, server-side, and only after audio actually came back. This
+// replaced a Max-plan monthly allowance: every render costs real synthesis
+// money, so every render is paid for, whatever plan the buyer holds.
 // ---------------------------------------------------------------------------
 
-export const MAX_VOICE_QUOTA = 8;
-
-/**
- * The caller's voice-export budget, or null if they do not hold a live Max
- * plan. Live means active or trialing — the same definition max-chat uses,
- * so the two Max perks can never disagree about who is a member.
- */
-export async function maxVoiceBudget(userId: string): Promise<LeagueRenderBudget | null> {
-  const admin = getSupabaseAdmin();
-  const { data: entitlement } = await admin
-    .from("entitlements")
-    .select("tier,status")
+/** How many voiced exports this account has bought and not yet used. */
+export async function voiceCreditBalance(userId: string): Promise<number> {
+  const { data } = await getSupabaseAdmin()
+    .from("voice_credits")
+    .select("balance")
     .eq("user_id", userId)
-    .maybeSingle<{ tier: string; status: string }>();
-  if (!entitlement || entitlement.tier !== "max" || !["active", "trialing"].includes(entitlement.status)) {
-    return null;
-  }
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-  const { count } = await admin
-    .from("voice_export_log")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .gte("created_at", monthStart);
-  return { quota: MAX_VOICE_QUOTA, used: count ?? 0 };
+    .maybeSingle<{ balance: number }>();
+  return data?.balance ?? 0;
 }
 
-/** After the audio came back — same never-fail-the-render rule as the League. */
-export async function recordVoiceExport(userId: string): Promise<void> {
-  await getSupabaseAdmin().from("voice_export_log").insert({ user_id: userId });
+/**
+ * Spend one credit, after delivery. Atomic in SQL (spend_voice_credit), so
+ * two simultaneous renders cannot both ride one credit. Returns the balance
+ * after the spend, or -1 when there was nothing left to spend.
+ */
+export async function spendVoiceCredit(userId: string): Promise<number> {
+  const { data, error } = await getSupabaseAdmin().rpc("spend_voice_credit", { p_user_id: userId });
+  if (error) throw new Error(error.message);
+  return typeof data === "number" ? data : -1;
 }

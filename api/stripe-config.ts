@@ -34,6 +34,7 @@ const PRICES: Array<{ label: string; names: string[] }> = [
   { label: "Max annual", names: ["STRIPE_MAX_ANNUAL_PRICE_ID", "STRIPE_PRICE_MAX_ANNUAL"] },
   { label: "Extra scan", names: ["STRIPE_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_STANDARD"] },
   { label: "Extra scan (member)", names: ["STRIPE_MEMBER_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_MEMBER"] },
+  { label: "Voiced analysis", names: ["STRIPE_VOICED_PRICE_ID", "STRIPE_PRICE_VOICED_ANALYSIS"] },
 ];
 
 interface PriceReport {

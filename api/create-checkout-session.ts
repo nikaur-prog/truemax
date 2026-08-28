@@ -115,6 +115,40 @@ export async function POST(request: Request): Promise<Response> {
       return json({ url: session.url });
     }
 
+    // One voiced analysis export — a payment like the scan credit, one flat
+    // price for everyone. There is no member price on purpose: the cost being
+    // covered is the synthesis call, and that costs the same whoever asks.
+    if (body?.purchase === "voice") {
+      const { data: ent } = await getSupabaseAdmin()
+        .from("entitlements")
+        .select("stripe_customer_id")
+        .eq("user_id", user.id)
+        .maybeSingle<{ stripe_customer_id: string | null }>();
+      const voicePrice =
+        process.env.STRIPE_VOICED_PRICE_ID || process.env.STRIPE_PRICE_VOICED_ANALYSIS || null;
+      if (!voicePrice) return json({ error: "Voiced analysis checkout is still being connected." }, 503);
+      const session = await getStripe().checkout.sessions.create(
+        {
+          mode: "payment",
+          expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+          line_items: [{ price: voicePrice, quantity: 1 }],
+          success_url: `${origin}/?purchase=voice-success`,
+          cancel_url: `${origin}/?purchase=voice-cancelled`,
+          client_reference_id: user.id,
+          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
+          metadata: { supabase_user_id: user.id, purpose: "voice_credit" },
+          custom_text: {
+            submit: { message: "One voiced analysis video, unlocked the moment payment completes. No subscription." },
+          },
+        },
+        request.headers.get("x-idempotency-key")
+          ? { idempotencyKey: request.headers.get("x-idempotency-key") as string }
+          : undefined,
+      );
+      if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+      return json({ url: session.url });
+    }
+
     if (!isPaidTier(body?.tier)) return json({ error: "Choose Starter or Max to continue." }, 400);
     const tier = body.tier;
     // Unrecognised or absent billing falls back to monthly, which is the

@@ -6274,3 +6274,25 @@ select.q-input { appearance: auto; }
    floating above the words. */
 .btn svg { flex: none; }
 .btn:has(svg) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* ---- voiced-analysis example pop-out ------------------------------------ */
+.veg-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(10, 11, 13, 0.72);
+  display: flex; align-items: center; justify-content: center; padding: 18px;
+}
+.veg-box {
+  width: min(420px, 94vw);
+  background: #101113; color: #fff;
+  border-radius: 16px; padding: 14px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+.veg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.veg-head .klabel { color: rgba(255, 255, 255, 0.66); }
+.veg-close {
+  background: none; border: none; color: rgba(255, 255, 255, 0.8);
+  font-size: 22px; line-height: 1; padding: 2px 8px; cursor: pointer; border-radius: 8px;
+}
+.veg-close:hover { background: rgba(255, 255, 255, 0.08); }
+.veg-box video { width: 100%; border-radius: 10px; background: #000; aspect-ratio: 9 / 16; max-height: 62vh; object-fit: contain; }
+.veg-note { margin: 10px 2px 2px; font-size: 12.5px; color: rgba(255, 255, 255, 0.62); }
