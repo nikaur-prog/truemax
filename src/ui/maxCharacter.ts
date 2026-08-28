@@ -203,6 +203,22 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       <g class="mx-arm${options.waving ? " waving" : ""}">
         <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
       </g>
+      <!-- Crossed forearms for the fight-club block (wireMaxFight): two limb
+           slabs crossing in an X over the lower body, each ending in a fist.
+           The front arm wears a deep-body stroke so the two read as two —
+           without it the pair merges into one hatch-like bar. Hidden until
+           the block; while it shows, the hanging arms are hidden so he does
+           not grow extras. -->
+      <g class="mx-alt mx-arms-block">
+        <g transform="rotate(-12 75 114)">
+          <rect x="41" y="107" width="66" height="15" rx="7.5" fill="url(#mxg-limb)"/>
+          <ellipse cx="107" cy="114.5" rx="9" ry="8.2" fill="url(#mxg-limb)"/>
+        </g>
+        <g transform="rotate(12 75 114)">
+          <rect x="43" y="107" width="66" height="15" rx="7.5" fill="url(#mxg-limb)" stroke="${BODY_DEEP}" stroke-width="1.7"/>
+          <ellipse cx="43" cy="114.5" rx="9" ry="8.2" fill="url(#mxg-limb)" stroke="${BODY_DEEP}" stroke-width="1.7"/>
+        </g>
+      </g>
       <!-- Props for the idle acts (ui/maxIdle.ts). All hidden by default and
            shown one at a time by the act's class, so a character standing
            still costs nothing and the whole repertoire is one SVG rather than
@@ -369,7 +385,7 @@ export function celebrateMax(stage: HTMLElement | null): void {
 // document, so a dismissed offer screen cannot leak a document-level handler.
 export function wireMaxInteractions(
   stage: HTMLElement | null,
-  options: { knockable?: boolean } = {},
+  options: { knockable?: boolean; fight?: boolean } = {},
 ): void {
   if (!stage) return;
   const svg = stage.querySelector<SVGSVGElement>(".mx-svg");
@@ -412,6 +428,18 @@ export function wireMaxInteractions(
       pupils.style.transform = `translate(${((dx / reach) * r).toFixed(2)}px, ${((dy / reach) * r).toFixed(2)}px)`;
     };
     document.addEventListener("pointermove", onMove, { passive: true });
+  }
+
+  // The fight club (the pet). Taps escalate instead of poking — see
+  // wireFight. The default poke-and-greet handler below would double-fire on
+  // the same click, so a fighting stage skips it entirely.
+  if (options.fight) {
+    wireFight(stage, svg);
+    stage.addEventListener("pointerenter", (e) => {
+      if (reduced || (e as PointerEvent).pointerType === "touch") return;
+      greet(svg);
+    });
+    return;
   }
 
   stage.addEventListener("click", () => {
@@ -457,6 +485,99 @@ export function wireMaxInteractions(
   stage.addEventListener("pointerenter", (e) => {
     if (reduced || (e as PointerEvent).pointerType === "touch") return;
     greet(svg);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The fight club: what happens when you keep poking the pet.
+//
+// One tap is an accident, four is a bit, and he plays along with escalating
+// commitment:
+//
+//   1. shoved back — a recoil slide, then the confused tilt and the "?"
+//   2. shoved OVER — the shock, the fall, getting up by himself, and a few
+//      seconds of the ticked-off face
+//   3. he's ready this time: DODGES the tap, squares up mad, and throws a
+//      jab combo at the screen
+//   4+ he's done playing: crossed-arms block, a head shake, back to idle
+//
+// The counter forgets after thirty seconds so the gag replays on the next
+// visit instead of being a once-per-lifetime easter egg. Wired on click (not
+// pointerdown) so picking him up to drag never starts a fight — the drag
+// code already swallows the click that ends a drag.
+// ---------------------------------------------------------------------------
+
+const FIGHT_RESET_MS = 30_000;
+
+function wireFight(stage: HTMLElement, svg: SVGSVGElement): void {
+  let count = 0;
+  let lastTap = 0;
+  let busy = false;
+
+  const hold = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+  const drop = (...classes: string[]) => svg.classList.remove(...classes);
+  // The pet's resting mood is happy; a stage borrows a face and gives it back.
+  const face = (mood: "concerned" | "mad" | "happy") => {
+    svg.classList.remove("mx-mood-happy", "mx-mood-concerned", "mx-mood-mad");
+    svg.classList.add(`mx-mood-${mood}`);
+  };
+  // A tap mid-act would stack a fight transform on a skateboard transform.
+  const stopIdle = () => {
+    svg.classList.remove("mx-windup", "mx-settle");
+    for (const cls of [...svg.classList]) if (cls.startsWith("mx-act-")) svg.classList.remove(cls);
+  };
+
+  const run = async (): Promise<void> => {
+    if (busy) return;
+    const now = Date.now();
+    if (now - lastTap > FIGHT_RESET_MS) count = 0;
+    lastTap = now;
+    count += 1;
+    busy = true;
+    stopIdle();
+    try {
+      if (count === 1) {
+        svg.classList.add("mx-fight-shove");
+        await hold(620);
+        drop("mx-fight-shove");
+        svg.classList.add("mx-fight-huh");
+        await hold(1500);
+        drop("mx-fight-huh");
+      } else if (count === 2) {
+        svg.classList.add("mx-shock");
+        await hold(420);
+        drop("mx-shock");
+        svg.classList.add("mx-down");
+        await hold(750);
+        drop("mx-down");
+        svg.classList.add("mx-rise");
+        await hold(700);
+        drop("mx-rise");
+        face("concerned");
+        await hold(2400);
+        face("happy");
+      } else if (count === 3) {
+        svg.classList.add("mx-fight-dodge");
+        await hold(420);
+        drop("mx-fight-dodge");
+        face("mad");
+        svg.classList.add("mx-fight-combo");
+        await hold(1900);
+        drop("mx-fight-combo");
+        face("happy");
+      } else {
+        svg.classList.add("mx-fight-block");
+        await hold(1400);
+        drop("mx-fight-block");
+      }
+    } finally {
+      busy = false;
+    }
+  };
+
+  stage.addEventListener("click", () => {
+    if (!svg.isConnected) return;
+    void run();
   });
 }
 

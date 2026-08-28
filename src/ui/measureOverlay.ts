@@ -270,7 +270,7 @@ export interface OverlayFade {
   cancel(): void;
 }
 
-const FADE_MS = 240;
+const FADE_MS = 170;
 
 export function transitionMeasurement(
   canvas: HTMLCanvasElement,
@@ -643,7 +643,7 @@ const STAGGER = 0.45;
 // Draw a measurement on, over `DRAW_MS`. Returns a handle so a fast hover down
 // the list can cancel the previous one instead of leaving two rAF loops
 // fighting over the same canvas.
-const DRAW_MS = 300;
+const DRAW_MS = 220;
 
 export function animateMeasurement(
   canvas: HTMLCanvasElement,

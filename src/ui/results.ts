@@ -45,7 +45,7 @@ import { maxCharacterMarkup } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import { readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
-import { mountMaxPet, unmountMaxPet } from "./maxPet.js";
+import { armMaxPetReveal, mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 
@@ -463,6 +463,10 @@ function resultActions(merged: boolean, ctx: Ctx): string {
 function select(id: string): void {
   if (!ctx) return;
   stopTypewriter();
+  // Leaving Coach Max's read is the signal that the first read is over —
+  // which is what arms the pet's entrance (ten seconds later, from the edge).
+  // Arming is idempotent and a no-op when he is hidden or not mounted.
+  if (id !== "overall") armMaxPetReveal();
   // Two tabs belong to neither view. Max reads the whole scan and the plan is
   // built from every measurement in it, so reaching either from the profile
   // row must not throw the row back to the front tabs — that would take away
