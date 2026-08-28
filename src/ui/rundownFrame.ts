@@ -889,26 +889,39 @@ export function drawRundownFrame(
     // rather than to be replaced. A hard cut here loses the connection between
     // the face just measured and the numbers now being read off it, which is
     // the one thing the card is for.
-    // Settled against the FIRST card beat, not this one.
+    // Settled against the FIRST card beat, not this one — the card is one
+    // continuous state narrated over two sentences, so the entrance belongs
+    // to the state, not to the sentence.
     //
-    // There are two card beats — the verdict and the ceiling — and each was
-    // running its own full-screen-to-top-third move, so the same transition
-    // played twice with a cut back to full screen in between. From the viewer's
-    // side the card arrived, left, and arrived again.
-    //
-    // The card is one continuous state that happens to be narrated over two
-    // sentences, so the move belongs to the state, not to the sentence.
+    // The entrance itself is a FLASH-SWIPE, not a squish. The previous move
+    // eased the full-bleed photograph up into the top band, which meant a
+    // second of the face visibly compressing — watched back it read as the
+    // frame buckling rather than as a cut. The verdict deserves an arrival:
+    // a hard cut to the card composition, the photo band sliding down into
+    // place from a few percent above, under a brief white flash that reads
+    // as the camera's shutter. Same grammar as the short cut's cutaways.
     const settle = cardSettle(input, beat, t);
-    const boxH = lerp(H, H * CARD_PHOTO, settle);
+    const boxH = H * CARD_PHOTO;
     const target = regionCrop(photo, landmarks, "proportions", W / boxH);
-    const c = lerpCrop(crop, target, settle);
-    ctx.drawImage(photo, c.x, c.y, c.w, c.h, 0, 0, W, boxH);
+    const slide = (1 - settle) * -boxH * 0.22;
+    ctx.drawImage(photo, target.x, target.y, target.w, target.h, 0, slide, W, boxH);
     // The photograph fades into the card rather than ending on a hard edge.
     const fade = ctx.createLinearGradient(0, boxH * 0.55, 0, boxH);
     fade.addColorStop(0, "rgba(5,6,6,0)");
     fade.addColorStop(1, "#050606");
     ctx.fillStyle = fade;
     ctx.fillRect(0, boxH * 0.55, W, boxH * 0.45 + 2);
+    // The flash is far faster than the settle: a shutter is over in a quarter
+    // second, while the band is still easing into place behind it.
+    const firstCard = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
+    const flash = 1 - clamp01((t - firstCard.start) / 0.28);
+    if (flash > 0) {
+      ctx.save();
+      ctx.globalAlpha = flash * 0.4;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
   } else if (input.cut === "short" && kind === "metric") {
     drawMattedPhoto(ctx, photo, landmarks, crop, W, H);
   } else {

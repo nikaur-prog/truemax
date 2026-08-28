@@ -21,7 +21,7 @@ import { askVerdictTone } from "./ui/tonePrompt.js";
 import { drawLandmarksAnimated } from "./ui/overlay.js";
 import type { Report, ScoredMetric, Sex } from "./engine/types.js";
 import { hasSideOverlay } from "./ui/sideMeasureOverlay.js";
-import { downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
+import { downloadCtaOutro, downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
@@ -1719,6 +1719,9 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn gho" id="q-video-download">Breakdown MP4</button>
       <button class="btn gho" id="q-verdict-download">Verdict MP4</button>
       <button class="btn gho" id="q-rundown-download">Rundown MP4</button>
+      <!-- The endcard on its own, for the operator cutting an edit elsewhere.
+           Every export already closes on it; this hands over just the card. -->
+      <button class="btn gho" id="q-cta-download">CTA outro MP4</button>
       <!-- Calibration, not a user feature. A screenshot of the region cards
            says the jaw is wrong; only the metric table says WHICH jaw metric,
            by how far, and whether the ideal or the spread is at fault. -->
@@ -1809,6 +1812,19 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(editedReport(r), "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(editedReport(r), "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(editedReport(r));
+  document.getElementById("q-cta-download")!.onclick = async () => {
+    const btn = document.getElementById("q-cta-download") as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      const outcome = await downloadCtaOutro((p) => (btn.textContent = `Rendering · ${Math.round(p * 100)}%`));
+      btn.textContent =
+        outcome === "cancelled" ? "Not saved — tap to retry" : outcome === "shared" ? "Sent to share sheet" : "Outro downloaded";
+    } catch {
+      btn.textContent = "Export failed — tap to retry";
+    }
+    btn.disabled = false;
+    window.setTimeout(() => (btn.textContent = "CTA outro MP4"), 2600);
+  };
   // The before half, exported on its own. Only present after a Reel Creator run
   // — there is no before to render otherwise, and a disabled button explaining
   // that would be a control for a mode you are not in.
