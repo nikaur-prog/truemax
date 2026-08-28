@@ -108,13 +108,26 @@ export async function downloadQuickVideo(
   // this cut is a hairline mesh and small type — the first things a compression
   // pass destroys when they arrive already soft.
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(W * EXPORT_SCALE);
-  canvas.height = Math.round(H * EXPORT_SCALE);
   const format = new Mp4OutputFormat({ fastStart: "in-memory" });
-  const codec = await getFirstEncodableVideoCodec(
-    format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
-    { width: canvas.width, height: canvas.height, quality: QUALITY_HIGH },
-  );
+  // 1080p first; 720p when the encoder refuses. Mobile browsers report codec
+  // support per RESOLUTION, and "Couldn't render" on a phone was this refusal
+  // surfacing as a dead button. The composition is authored at 720x1280, so
+  // the fallback is a pure raster change: same layout, softer pixels, a video
+  // in the camera roll instead of an error.
+  let scale = EXPORT_SCALE;
+  let codec = null as Awaited<ReturnType<typeof getFirstEncodableVideoCodec>>;
+  for (const tryScale of [EXPORT_SCALE, 1]) {
+    canvas.width = Math.round(W * tryScale);
+    canvas.height = Math.round(H * tryScale);
+    codec = await getFirstEncodableVideoCodec(
+      format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
+      { width: canvas.width, height: canvas.height, quality: QUALITY_HIGH },
+    );
+    if (codec) {
+      scale = tryScale;
+      break;
+    }
+  }
   if (!codec) throw new Error("This browser cannot encode an H.264 MP4.");
 
   const target = new BufferTarget();
@@ -123,8 +136,9 @@ export async function downloadQuickVideo(
     codec,
     // Raised with the resolution. 6 Mbps across 2.25x the pixels would be a
     // sharper image described in fewer bits per pixel than before, which is a
-    // way to make a bigger file that looks worse.
-    bitrate: 12_000_000,
+    // way to make a bigger file that looks worse. Scaled back down with the
+    // 720p fallback for the same bits-per-pixel reason in reverse.
+    bitrate: scale >= EXPORT_SCALE ? 12_000_000 : 6_000_000,
     keyFrameInterval: 2,
   });
   output.addVideoTrack(source, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
@@ -138,7 +152,7 @@ export async function downloadQuickVideo(
       g.setTransform(1, 0, 0, 1, 0, 0);
       drawCtaCard(g, canvas.width, canvas.height, t - body, 0.5);
     } else {
-      drawFrame(canvas, photo, landmarks, sex, scores, t, variant, EXPORT_SCALE, dual);
+      drawFrame(canvas, photo, landmarks, sex, scores, t, variant, scale, dual);
     }
     await source.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
     if (frame % 6 === 0) onProgress?.(frame / frameCount);
@@ -168,18 +182,31 @@ export async function downloadCtaOutro(onProgress?: (progress: number) => void):
     await import("mediabunny");
 
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(W * EXPORT_SCALE);
-  canvas.height = Math.round(H * EXPORT_SCALE);
   const format = new Mp4OutputFormat({ fastStart: "in-memory" });
-  const codec = await getFirstEncodableVideoCodec(
-    format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
-    { width: canvas.width, height: canvas.height, quality: QUALITY_HIGH },
-  );
+  // Same 1080p-then-720p ladder as downloadQuickVideo, for the same phones.
+  let scale = EXPORT_SCALE;
+  let codec = null as Awaited<ReturnType<typeof getFirstEncodableVideoCodec>>;
+  for (const tryScale of [EXPORT_SCALE, 1]) {
+    canvas.width = Math.round(W * tryScale);
+    canvas.height = Math.round(H * tryScale);
+    codec = await getFirstEncodableVideoCodec(
+      format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
+      { width: canvas.width, height: canvas.height, quality: QUALITY_HIGH },
+    );
+    if (codec) {
+      scale = tryScale;
+      break;
+    }
+  }
   if (!codec) throw new Error("This browser cannot encode an H.264 MP4.");
 
   const target = new BufferTarget();
   const output = new Output({ format, target });
-  const source = new CanvasSource(canvas, { codec, bitrate: 12_000_000, keyFrameInterval: 2 });
+  const source = new CanvasSource(canvas, {
+    codec,
+    bitrate: scale >= EXPORT_SCALE ? 12_000_000 : 6_000_000,
+    keyFrameInterval: 2,
+  });
   output.addVideoTrack(source, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
   output.setMetadataTags({ title: "TrueMax outro", artist: "TrueMax" });
   await output.start();

@@ -1065,6 +1065,7 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
       cut: "short",
       onProgress: (p, stage) => say(`${stage} · ${Math.round(p * 100)}%`),
     });
+    const { outcomeMessage } = await import("./saveFile.js");
     if (result.outcome === "cancelled") {
       done("Not saved");
     } else if (!result.narrated) {
@@ -1073,7 +1074,7 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
       // only spent when audio comes back, so nothing was paid for nothing.
       done("Saved — no voice (credit not used)");
     } else {
-      done(result.outcome === "shared" ? "Sent to share sheet" : "Downloaded");
+      done(outcomeMessage(result.outcome));
     }
   } catch (error) {
     // A capture the app itself would warn about must not be published with a

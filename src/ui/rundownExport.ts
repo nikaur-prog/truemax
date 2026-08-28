@@ -61,7 +61,6 @@ const FPS = 30;
 // bigger, which is the whole of what was asked for.
 const LOGICAL_W = 720;
 const LOGICAL_H = 1280;
-const SCALE = W / LOGICAL_W;
 
 export interface RundownOptions {
   /** The full name, said once in the hook. */
@@ -223,11 +222,27 @@ export async function downloadRundownVideo(
   } = await import("mediabunny");
 
   const format = new Mp4OutputFormat({ fastStart: "in-memory" });
-  const videoCodec = await getFirstEncodableVideoCodec(
-    format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
-    { width: W, height: H, quality: QUALITY_HIGH },
-  );
+  // 1080p first, 720p when the encoder refuses. Mobile browsers report codec
+  // support per RESOLUTION, and "Couldn't render" on a phone was that refusal
+  // surfacing as a dead button. The compositor is authored at 720x1280 and
+  // drawn through a transform, so the fallback changes only the raster: same
+  // layout, softer pixels, a video that actually exists.
+  let outW = W;
+  let outH = H;
+  let videoCodec = null as Awaited<ReturnType<typeof getFirstEncodableVideoCodec>>;
+  for (const [tryW, tryH] of [[W, H], [LOGICAL_W, LOGICAL_H]]) {
+    videoCodec = await getFirstEncodableVideoCodec(
+      format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
+      { width: tryW, height: tryH, quality: QUALITY_HIGH },
+    );
+    if (videoCodec) {
+      outW = tryW;
+      outH = tryH;
+      break;
+    }
+  }
   if (!videoCodec) throw new Error("This browser cannot encode an H.264 MP4.");
+  const scale = outW / LOGICAL_W;
   const audioCodec = await getFirstEncodableAudioCodec(
     format.getSupportedAudioCodecs().filter((candidate) => candidate === "aac"),
     { numberOfChannels: 1, sampleRate: audio.buffer.sampleRate },
@@ -235,8 +250,8 @@ export async function downloadRundownVideo(
   if (!audioCodec) throw new Error("This browser cannot encode AAC audio.");
 
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingQuality = "high";
 
@@ -251,7 +266,9 @@ export async function downloadRundownVideo(
   const output = new Output({ format, target });
   const videoSource = new CanvasSource(canvas, {
     codec: videoCodec,
-    bitrate: 6_000_000,
+    // Scaled with the raster: 6 Mbps was chosen for 1080p, and spending it on
+    // 44% of the pixels would be a bigger file that looks no better.
+    bitrate: outW >= W ? 6_000_000 : 3_500_000,
     keyFrameInterval: 2,
   });
   const audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 128_000 });
@@ -317,7 +334,7 @@ export async function downloadRundownVideo(
     // Reset and re-apply per frame rather than once outside the loop: the
     // compositor saves and restores freely, and a transform that survived a
     // stray restore would silently draw one frame at the wrong size.
-    ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
     drawRundownFrame(ctx, photo, landmarks, input, t, {
       width: LOGICAL_W,
       height: LOGICAL_H,

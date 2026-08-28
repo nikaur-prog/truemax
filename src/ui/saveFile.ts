@@ -209,6 +209,30 @@ function shareWithFreshTap(file: File): Promise<SaveOutcome | "fallback"> {
   });
 }
 
+/**
+ * The user-facing sentence for a save outcome.
+ *
+ * "Downloaded" was the message for every non-share outcome, and on a phone it
+ * is a lie of omission: the file went to the Files app's Downloads folder,
+ * which is not where anybody looks for a video, and the button gave no clue.
+ * One helper so every export button tells the same truth about where the
+ * file actually went — and so the phrasing is edited in one place.
+ */
+export function outcomeMessage(outcome: SaveOutcome): string {
+  switch (outcome) {
+    case "shared":
+      return "Sent to your share sheet";
+    case "filed":
+      return "Saved to your chosen folder";
+    case "opened":
+      return "Opened — save it from there";
+    case "cancelled":
+      return "Not saved";
+    default:
+      return isHandheld() ? "Saved to Files › Downloads" : "Downloaded";
+  }
+}
+
 export async function saveFile(
   blob: Blob,
   filename: string,
