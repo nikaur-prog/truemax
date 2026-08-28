@@ -126,4 +126,15 @@ test("a front-only scan plans a front-only pass", () => {
   assert.ok(plan.every((s) => s.view === "front"));
 });
 
+test("the pass walks EVERY honest measurement in a region, not one speaker", () => {
+  // The old plan featured one metric per region and the whole show was over in
+  // eight beats — three lines of front analysis, then the profile. The scan
+  // has to show all of its work; the honesty filters still apply to each one.
+  const ids = ["browTilt", "canthalTilt", "browPosition", "eyeAspectRatio"];
+  const plan = buildPassPlan(report([region("eyes", ids)]), null);
+  const expected = ids.filter((id) => hasOverlay(id) && reliabilityOf(id) >= RELIABLE_MIN);
+  assert.equal(plan.length, expected.length);
+  assert.deepEqual(new Set(plan.map((s) => s.metric.def.id)), new Set(expected));
+});
+
 

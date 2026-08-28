@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   MIN_WEEKS_TO_JUDGE,
   WEEKS_BEFORE_ADDING,
+  commitProtocol,
   judge,
   nextPrompt,
   ripeForJudgement,
+  startKindFor,
   verdictCopy,
   weeksRunning,
 } from "./protocol.js";
@@ -75,6 +77,69 @@ test("the floor applies even to a recommendation that claims to be fast", () => 
   const p = running({ weeksToJudge: 1 });
   assert.equal(ripeForJudgement(p, T0 + 2 * WEEK), false);
   assert.equal(ripeForJudgement(p, T0 + MIN_WEEKS_TO_JUDGE * WEEK), true);
+});
+
+// ---------------------------------------------------------------------------
+// How a thing begins decides what gets asked. A diet is not delivered, an
+// appointment is not a parcel, and a brow tint is finished the day it happens
+// — one acquire-shaped flow was being worn by all four.
+// ---------------------------------------------------------------------------
+
+test("an instant thing is ripe the moment it is done, floor or no floor", () => {
+  const p = running({ start: "instant", weeksToJudge: 1, recId: "brow-tint", title: "Brow tinting" });
+  assert.equal(ripeForJudgement(p, T0), true);
+  assert.equal(nextPrompt(p, T0)?.kind, "judge");
+  // And the judge question does not count weeks that never ran.
+  assert.doesNotMatch(nextPrompt(p, T0)!.ask, /\d+ weeks?/);
+  // Not started yet: nothing to judge.
+  assert.equal(ripeForJudgement(running({ start: "instant", startedAt: null }), T0), false);
+});
+
+test("a commitment is never asked when it will be in your hands", () => {
+  const offered = running({ start: "commit", status: "offered", startedAt: null, startBy: null });
+  const decide = nextPrompt(offered, T0)!;
+  assert.match(decide.ask, /commit/i);
+  assert.doesNotMatch(decide.ask, /in your hands/i);
+  // The yes sets a near check-back, so the "when" question can never fire.
+  const committed = commitProtocol(offered, T0);
+  assert.equal(committed.status, "committed");
+  assert.ok(committed.startBy != null, "no check-back date was set");
+  assert.notEqual(nextPrompt(committed, T0 + WEEK)?.kind, "when");
+  assert.equal(nextPrompt(committed, T0 + WEEK)?.kind, "started");
+  assert.match(nextPrompt(committed, T0 + WEEK)!.ask, /actually begun/i);
+});
+
+test("an instant yes queues 'did you do it', not a delivery date", () => {
+  const offered = running({ start: "instant", status: "offered", startedAt: null, startBy: null });
+  const committed = commitProtocol(offered, T0);
+  assert.ok(committed.startBy != null);
+  const started = nextPrompt(committed, T0 + 2 * WEEK)!;
+  assert.equal(started.kind, "started");
+  assert.match(started.ask, /done/i);
+  assert.doesNotMatch(started.ask, /in your hands/i);
+});
+
+test("a product still gets the delivery question, unchanged", () => {
+  const committed = commitProtocol(
+    running({ start: "acquire", status: "offered", startedAt: null, startBy: null }),
+    T0,
+  );
+  assert.equal(committed.startBy, null, "an acquire got a date it never named");
+  assert.equal(nextPrompt(committed, T0)?.kind, "when");
+  assert.match(nextPrompt(committed, T0)!.ask, /in your hands/i);
+});
+
+test("start kinds derive from what kind of thing the recommendation is", () => {
+  assert.equal(startKindFor({ group: "topical" }), "acquire");
+  assert.equal(startKindFor({ group: "food" }), "commit");
+  assert.equal(startKindFor({ group: "habit" }), "commit");
+  assert.equal(startKindFor({ group: "professional" }), "book");
+  assert.equal(startKindFor({ group: "topical", start: "instant" }), "instant");
+  // The catalogue marks the instant cosmetics explicitly.
+  for (const id of ["brow-tint", "brow-shape", "hair-colour"]) {
+    const rec = RECS.find((r) => r.id === id);
+    if (rec) assert.equal(startKindFor(rec), "instant", `${id} is not instant`);
+  }
 });
 
 // ---------------------------------------------------------------------------

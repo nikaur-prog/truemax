@@ -1,7 +1,9 @@
 import {
+  commitProtocol,
   judge,
   nextPrompt,
   readProtocols,
+  startKindOf,
   verdictCopy,
   writeProtocols,
 } from "../engine/protocol.js";
@@ -50,9 +52,11 @@ function save(list: Protocol[], updated: Protocol): void {
 export function applyAnswer(p: Protocol, prompt: ProtocolPrompt, yes: boolean, at: number): Protocol {
   switch (prompt.kind) {
     case "decide":
-      // A yes does NOT start the clock. The next question is when they will
-      // actually have the thing, because a protocol starts when it starts.
-      return { ...p, status: yes ? "committed" : "declined" };
+      // A yes does NOT start the clock. What it queues depends on how the
+      // thing begins: a product still needs a date it will be in hand, while a
+      // commitment or an instant job gets a near check-back set for it — see
+      // commitProtocol. A protocol starts when it starts, in every case.
+      return yes ? commitProtocol(p, at) : { ...p, status: "declined" };
     case "started":
       return yes
         ? { ...p, status: "running", startedAt: at }
@@ -168,8 +172,13 @@ export function mountProtocolCard(
       onChange?.();
       return;
     }
+    // An instant thing that just got done has nothing to "keep up" — the next
+    // conversation is the verdict, so say that instead of promising check-ins.
+    const instantDone = said && prompt.kind === "started" && startKindOf(p) === "instant";
     settle(el, said
-      ? "Good. I'll leave you to it and check in next week."
+      ? instantDone
+        ? "Good. Have a proper look in decent light, and next time you're here I'll ask whether you can see it."
+        : "Good. I'll leave you to it and check in next week."
       : prompt.kind === "adherence"
         ? "Fair enough, and thanks for being straight with me. Nothing changes yet. Pick it back up when you can and the clock carries on from where it was."
         : "No problem. I'll ask again in a week.");

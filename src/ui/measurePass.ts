@@ -79,36 +79,37 @@ const LABELS: Record<RegionId, string> = {
 };
 
 /**
- * Pick the measurement that speaks for a region.
+ * Every measurement a region can honestly show, best first.
  *
- * Highest effective weight — the metric's own weight times how reproducibly it
- * measures the same face twice. That is deliberately the same quantity the
+ * Ordered by effective weight — the metric's own weight times how reproducibly
+ * it measures the same face twice. That is deliberately the same quantity the
  * scoring code uses to decide how much a metric counts toward the region's
- * number, so the measurement shown IS the one doing the most work behind the
- * score, rather than whichever one happens to look best drawn.
+ * number, so the first measurement shown IS the one doing the most work behind
+ * the score, and everything after it is shown in the order it matters.
+ *
+ * ALL of them, not a single speaker. The pass used to feature one measurement
+ * per region and be done in eight beats, which read as three lines of front
+ * analysis and a jump to the profile — the scan visibly doing less work than
+ * the report it produces. The screen exists to show the work, so it shows the
+ * work. The honesty rules are unchanged: implausible readings, undrawable
+ * constructions and anything under RELIABLE_MIN never appear at any length.
  */
-function speakerFor(
+function speakersFor(
   metrics: ScoredMetric[],
   drawable: (id: string) => boolean,
-): ScoredMetric | null {
-  let best: ScoredMetric | null = null;
-  let bestW = 0;
-  for (const m of metrics) {
-    if (m.implausible) continue;
-    if (!drawable(m.def.id)) continue;
-    const r = reliabilityOf(m.def.id);
-    if (r < RELIABLE_MIN) continue;
-    const w = m.def.weight * r;
-    if (w > bestW) {
-      bestW = w;
-      best = m;
-    }
-  }
-  return best;
+): ScoredMetric[] {
+  return metrics
+    .filter((m) => !m.implausible && drawable(m.def.id) && reliabilityOf(m.def.id) >= RELIABLE_MIN)
+    .sort((a, b) => b.def.weight * reliabilityOf(b.def.id) - a.def.weight * reliabilityOf(a.def.id));
 }
 
 export interface PlanOptions {
-  /** Hard cap on beats, so a face with everything measurable is still watchable. */
+  /**
+   * Hard cap on beats. Default is uncapped: the pass walks every measurement
+   * the report can honestly show, front then side, because the whole point of
+   * the screen is the scan showing its work — and the render behind it gets
+   * that much more time to finish. The per-beat pacing is tightened to match.
+   */
   maxSteps?: number;
 }
 
@@ -124,7 +125,7 @@ export function buildPassPlan(
   side: Report | null,
   opts: PlanOptions = {},
 ): PassStep[] {
-  const max = opts.maxSteps ?? 8;
+  const max = opts.maxSteps ?? Infinity;
   const out: PassStep[] = [];
 
   const collect = (
@@ -136,9 +137,9 @@ export function buildPassPlan(
     for (const id of order) {
       const region = report.regions.find((r) => r.region === id);
       if (!region || !regionIsScored(region)) continue;
-      const metric = speakerFor(region.metrics, drawable);
-      if (!metric) continue;
-      out.push({ view, region: id, label: LABELS[id], metric });
+      for (const metric of speakersFor(region.metrics, drawable)) {
+        out.push({ view, region: id, label: LABELS[id], metric });
+      }
     }
   };
 
@@ -162,10 +163,18 @@ export function buildPassPlan(
 // The runner.
 // ---------------------------------------------------------------------------
 
-/** Milliseconds a beat spends drawing its construction on. */
-const ARRIVE_MS = 340;
+/**
+ * Milliseconds a beat spends drawing its construction on.
+ *
+ * Tightened from 340/220/120 when the plan went from one measurement per
+ * region to all of them: thirty-odd beats at the old pacing is over twenty
+ * seconds of holds, and each individual line needs less dwell when the next
+ * one is also worth watching. The pass is still longer overall — that is the
+ * point — but each beat is brisker.
+ */
+const ARRIVE_MS = 300;
 /** …and then holding it, so there is time to actually look at the line. */
-const HOLD_MS = 220;
+const HOLD_MS = 150;
 /**
  * The breath between constructions. The camera used to push in on every
  * point here, and the loading screen spent most of its runtime travelling:
@@ -175,7 +184,7 @@ const HOLD_MS = 220;
  * before the next line draws. (The hover on the report keeps its zoom: there
  * the person chose the point, so the camera going to it is an answer.)
  */
-const BREATH_MS = 120;
+const BREATH_MS = 70;
 /**
  * Opening beat: the mesh landing, before any single measurement is featured.
  * Matches REVEAL_MS in overlay.ts, which is what actually runs during it when
@@ -407,11 +416,13 @@ export function runMeasurePass(
       await crossTo(step.view);
       if (signal.cancelled) return;
       opts.onStep?.(step, i);
-      // The region name alone. The values were here once and were cut on
-      // purpose: while the face is being read the construction is the show,
-      // and eight numbers flashing past in ten seconds is noise wearing a
-      // lab coat. The report is where the numbers live.
-      say(step.label, "");
+      // Region plus the measurement's name — no values. The values were here
+      // once and were cut on purpose: while the face is being read the
+      // construction is the show, and numbers flashing past is noise wearing
+      // a lab coat. The report is where the numbers live. The NAME earns its
+      // place now that a region runs several beats: the same label four times
+      // over four different constructions read as the screen being stuck.
+      say(step.label, step.metric.def.name);
       if (!reduced) {
         // No camera move — see BREATH_MS. The face stays put; the lines come
         // to it.

@@ -45,7 +45,7 @@ import type { RatedFace } from "./engine/calibrationSet.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
-import { canShareFiles, exportName, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
+import { canShareFiles, exportName, outcomeMessage, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -1817,8 +1817,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     btn.disabled = true;
     try {
       const outcome = await downloadCtaOutro((p) => (btn.textContent = `Rendering · ${Math.round(p * 100)}%`));
-      btn.textContent =
-        outcome === "cancelled" ? "Not saved — tap to retry" : outcome === "shared" ? "Sent to share sheet" : "Outro downloaded";
+      btn.textContent = outcome === "cancelled" ? "Not saved — tap to retry" : outcomeMessage(outcome);
     } catch {
       btn.textContent = "Export failed — tap to retry";
     }
@@ -2519,7 +2518,7 @@ async function downloadVideo(
     if (outcome === "cancelled") {
       if (btn) btn.textContent = "Not saved — tap to retry";
     } else {
-      if (btn) btn.textContent = outcome === "shared" ? "Sent to your share sheet" : "MP4 downloaded";
+      if (btn) btn.textContent = outcomeMessage(outcome);
       track("quick-video-downloaded");
       // The words to post it with, next to the file that was just saved. This
       // step existed only inside the before/after producer, so the two cuts an
@@ -2599,12 +2598,7 @@ async function downloadScoreCard(
     if (!blob) throw new Error("The card would not encode.");
     const outcome = await saveFile(blob, exportName("card", "png", from ? "before" : "after"), "card");
     if (btn) {
-      btn.textContent =
-        outcome === "cancelled"
-          ? "Not saved — tap to retry"
-          : outcome === "shared"
-            ? "Sent to your share sheet"
-            : "Card downloaded";
+      btn.textContent = outcome === "cancelled" ? "Not saved — tap to retry" : outcomeMessage(outcome);
     }
     if (outcome !== "cancelled") track("quick-card-downloaded");
   } catch (error) {
@@ -2685,10 +2679,8 @@ async function downloadRundown(r: Report): Promise<void> {
       // in — so the message has to name the cause, not just the symptom.
       if (btn) {
         btn.textContent = result.narrated
-          ? result.outcome === "shared"
-            ? "Sent to your share sheet"
-            : "Rundown downloaded"
-          : "Downloaded — no voiceover";
+          ? outcomeMessage(result.outcome)
+          : `${outcomeMessage(result.outcome)} — no voiceover`;
       }
       track("quick-rundown-downloaded");
       showCaption({
