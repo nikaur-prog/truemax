@@ -73,7 +73,7 @@ const DRAW_AT = 0.16;
 // "pop" existed for the curve and is no longer emitted — see cuesFor. The kind
 // stays in the union so the mixer keeps its sample and re-enabling it is one
 // line rather than a re-import.
-export type SfxKind = "key" | "click" | "pop";
+export type SfxKind = "key" | "click" | "pop" | "whoosh";
 
 export interface SfxCue {
   at: number;

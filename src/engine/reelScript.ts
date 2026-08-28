@@ -272,8 +272,40 @@ const REEL_RELIABLE_MIN = 0.35;
 // balance is achieved instead at SELECTION time — take the most notable
 // strengths and the most notable weaknesses in roughly equal number — and then
 // a single sort down the face is the last thing that touches the order.
-function selectBalanced(candidates: ScoredMetric[], limit: number): ScoredMetric[] {
-  const byInterest = [...candidates].sort((a, b) => Math.abs(b.zEff) - Math.abs(a.zEff));
+// The measurements the reference format always covers, and the ones a viewer
+// who knows the genre expects to hear: thirds, face shape, midface, the
+// marquee eye and lip reads. In the short cut these get a selection boost so
+// they make the running order whenever they were measured, even at a
+// middling grade — "balanced facial thirds" is a sentence the format owes its
+// audience, and a face can be notable for being BALANCED, which a pure
+// |zEff| ranking treats as unremarkable. fWHR is deliberately not here: its
+// measured reliability is 0.00 (two photographs of one person disagree about
+// it completely), and nothing with that number may carry a sentence in a
+// published video, however famous the acronym.
+const MARQUEE = new Set([
+  "middleLowerBalance",
+  "facialIndex",
+  "midfaceRatio",
+  "topThirdEst",
+  "cheekboneHeight",
+  "canthalTilt",
+  "intercanthalEyeWidth",
+  "lipRatio",
+]);
+const MARQUEE_BOOST = 0.5;
+// A marquee STRENGTH has no floor at all in the short cut: near the mean is a
+// legitimate read for these — "balanced facial thirds" is precisely what is
+// true of a face whose thirds sit in the population's normal band, and the
+// grade words scale down honestly ("a decent", "an alright") as zEff does. A
+// marquee FLAW still has to clear NOTABLE_Z like everything else: calling a
+// barely-off midface "top-heavy" would be overclaiming, and the flaw section
+// is where the credibility lives.
+const marqueeFloor = (m: ScoredMetric) => (m.zEff >= 0 ? 0 : NOTABLE_Z);
+
+function selectBalanced(candidates: ScoredMetric[], limit: number, marquee = false): ScoredMetric[] {
+  const interest = (m: ScoredMetric) =>
+    Math.abs(m.zEff) + (marquee && MARQUEE.has(m.def.id) ? MARQUEE_BOOST : 0);
+  const byInterest = [...candidates].sort((a, b) => interest(b) - interest(a));
   const good = byInterest.filter((m) => m.zEff >= 0);
   const bad = byInterest.filter((m) => m.zEff < 0);
 
@@ -562,14 +594,14 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   const candidates = report.metrics.filter(
     (m) =>
       !m.implausible &&
-      Math.abs(m.zEff) >= NOTABLE_Z &&
+      Math.abs(m.zEff) >= (short && MARQUEE.has(m.def.id) ? marqueeFloor(m) : NOTABLE_Z) &&
       reliabilityOf(m.def.id) >= REEL_RELIABLE_MIN &&
       hasPhrase(m.def.id),
   );
 
   // Selection is by interest AND tone balance; the running order is by anatomy.
   // This sort is the last thing that touches the order — see selectBalanced.
-  const byRegion = selectBalanced(candidates, limit).sort(
+  const byRegion = selectBalanced(candidates, limit, short).sort(
     (a, b) => REGION_ORDER.indexOf(a.def.region) - REGION_ORDER.indexOf(b.def.region),
   );
 

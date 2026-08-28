@@ -329,7 +329,11 @@ export function regionCrop(
     // exact clip this block exists to prevent.
     const pad = 0.32;
     const needW = (mustContain.x1 - mustContain.x0) * photo.width * (1 + pad * 2);
-    const needH = (mustContain.y1 - mustContain.y0) * photo.height * (1 + pad * 2);
+    // The vertical need is stricter than the horizontal: the bottom of the
+    // frame carries the caption band, so a tall measurement gets only ~70% of
+    // the frame's height to live in. Sizing to the padded height alone put a
+    // cheekbone-height line's bottom endpoint flush against the caption.
+    const needH = ((mustContain.y1 - mustContain.y0) * photo.height) / 0.7;
     if (needW > sw || needH > sh) {
       sw = Math.max(sw, needW, needH * aspect);
       sh = sw / aspect;
@@ -346,6 +350,14 @@ export function regionCrop(
       sh = photo.height;
       sw = sh * aspect;
     }
+    // And POSITION the window so the drawn figure actually sits in the safe
+    // area: top of the figure at least 8% into the frame, bottom above the
+    // caption band. The bottom constraint is applied last because a collision
+    // with the caption is the fault that was actually shipped.
+    const mcY0 = mustContain.y0 * photo.height;
+    const mcY1 = mustContain.y1 * photo.height;
+    cy = Math.min(cy, mcY0 + sh * 0.42);
+    cy = Math.max(cy, mcY1 - sh * 0.28);
   }
 
   // NEVER cut the face in half.
@@ -362,8 +374,11 @@ export function regionCrop(
   // for. HEAD_FIT below is deliberately under 1: a close-up may still crop the
   // ears and the very top of the hair, which is what a close-up is. What it may
   // not do is cut through the features.
-  const headW = faceW * 1.04;
-  const headH = faceH * (1 + CROWN) * 1.04;
+  // 1.12, up from 1.04, after the short cut's tighter look shipped a frame
+  // with the crown shaved mid-hair: the CROWN allowance models the average
+  // head and this is the margin for the heads it underestimates.
+  const headW = faceW * 1.06;
+  const headH = faceH * (1 + CROWN) * 1.12;
   // Raised from 0.86 after real exports: at 0.86 the crop was allowed to cut
   // 14% of the head, and on tight source photographs that 14% was the top of
   // the skull and the chin — the two cuts a viewer reads as a broken renderer.
@@ -424,12 +439,17 @@ export function cropAt(
    * region bands alone, which is what it did before and is still usable.
    */
   metrics?: Map<string, ScoredMetric>,
+  /** Widen each beat's frame for its companion line too — short cut only. */
+  withCompanions = false,
 ): Crop {
   // The union of every measurement named in a beat, since a sentence may name
   // more than one and the frame has to hold all of them at once.
   const bounds = (b: TimedBeat) => {
     if (!metrics) return undefined;
-    const ids = b.beat.metricIds ?? (b.beat.metricId ? [b.beat.metricId] : []);
+    const named = b.beat.metricIds ?? (b.beat.metricId ? [b.beat.metricId] : []);
+    const ids = withCompanions
+      ? [...named, ...named.map((id) => COMPANIONS[id]).filter(Boolean)]
+      : named;
     let out: { x0: number; y0: number; x1: number; y1: number } | undefined;
     for (const id of ids) {
       const m = metrics.get(id);
@@ -476,7 +496,7 @@ export function cropAt(
  *
  * Zero for beats that draw nothing, so the caller does not have to ask twice.
  */
-export function drawProgress(beat: TimedBeat, t: number): number {
+export function drawProgress(beat: TimedBeat, t: number, snappy = false): number {
   if (beat.drawAt === undefined) return 0;
   // The figure arrives over the run-up to drawAt, so it COMPLETES on the click
   // rather than starting there. The sound is the measurement landing.
@@ -489,7 +509,7 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   // 0.38, down from 0.5. At the new narration rate a half-second run-up ate
   // most of a short clause; the line should land just before its number is
   // spoken, not draw through the whole sentence.
-  const DRAW = 0.38;
+  const DRAW = snappy ? 0.3 : 0.38;
   const from = Math.max(beat.start, beat.drawAt - DRAW);
   const span = Math.max(0.001, beat.drawAt - from);
   const drawn = clamp01((t - from) / span);
@@ -507,8 +527,8 @@ export function drawProgress(beat: TimedBeat, t: number): number {
   // Costs nothing extra: drawMeasurement already renders any partial progress
   // as a strict subset of the true figure, so running it back down is as
   // geometrically honest as running it up.
-  const RETRACT = 0.42;
-  const leaving = clamp01((overlayEnds(beat) - t) / RETRACT);
+  const RETRACT = snappy ? 0.26 : 0.42;
+  const leaving = clamp01((overlayEnds(beat, snappy) - t) / RETRACT);
   return Math.min(drawn, leaving);
 }
 
@@ -526,8 +546,12 @@ export function drawProgress(beat: TimedBeat, t: number): number {
  * vanished on the cut and the retraction was invisible on exactly the beats
  * that have one. Found by rendering it, after the tests for it passed.
  */
-function overlayEnds(beat: TimedBeat): number {
-  const cut = beat.start + beat.duration - CUT_CLEAR;
+function overlayEnds(beat: TimedBeat, snappy = false): number {
+  // The short cut holds almost no clean frame before the cut: the reference
+  // format's feel is that one figure is still leaving while the next arrives,
+  // so the retraction runs nearly to the boundary and the next beat's draw is
+  // already running its run-up on the other side of the cut.
+  const cut = beat.start + beat.duration - (snappy ? 0.03 : CUT_CLEAR);
   if (beat.beat.kind !== "metric") return cut;
   // The cutaway takes over here — see brollFor, which owns the same fraction.
   const cutaway = beat.start + beat.duration * (1 - CUTAWAY_TAIL);
@@ -554,7 +578,7 @@ const CUT_CLEAR = 0.12;
  * between two frames reads as a glitch, and one that dissolves reads as the
  * video moving on.
  */
-export function overlayAlpha(beat: TimedBeat, t: number): number {
+export function overlayAlpha(beat: TimedBeat, t: number, snappy = false): number {
   // The figure now RETRACTS rather than dissolving — see drawProgress — so the
   // alpha's job on the way out is much smaller than it was. It only has to stop
   // the last few pixels of a line popping off at zero length, which a fast fade
@@ -562,7 +586,7 @@ export function overlayAlpha(beat: TimedBeat, t: number): number {
   //
   // Kept as its own function because the cutaway path scales it separately and
   // because "is any of this on screen" is a question several callers ask.
-  const drawn = drawProgress(beat, t);
+  const drawn = drawProgress(beat, t, snappy);
   // Fully opaque as soon as there is any meaningful line, and only softening
   // once the retraction has nearly finished.
   return smoother(clamp01(drawn / 0.12));
@@ -793,7 +817,7 @@ export function drawRundownFrame(
   const local = clamp01((t - beat.start) / Math.max(0.001, beat.duration));
   const release = smoother(clamp01((beat.start + beat.duration - t) / 0.55));
   const crop = pushInCrop(
-    cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics),
+    cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics, input.cut === "short"),
     photo,
     local * release,
   );
@@ -819,8 +843,24 @@ export function drawRundownFrame(
     const dip = cutawayAlpha(beat, t);
     ctx.save();
     ctx.globalAlpha = dip;
+    // Short cut: the shot ARRIVES rather than fades — it slides the last few
+    // percent of a frame-width in, direction alternating per beat so the cuts
+    // do not all move the same way, with a brief brightness flash on top. The
+    // whoosh cue the exporter stamps is the sound of this move.
+    if (input.cut === "short") {
+      const settle = smoother(dip);
+      const dir = Math.round(beat.start * 7) % 2 === 0 ? 1 : -1;
+      ctx.translate((1 - settle) * W * 0.08 * dir, 0);
+    }
     const fit = coverDraw(ctx, cutaway.image, W, H);
     ctx.restore();
+    if (input.cut === "short" && dip < 1) {
+      ctx.save();
+      ctx.globalAlpha = (1 - dip) * 0.2;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
     // The same measurement, drawn where it actually is on THIS face.
     //
     // Without this a cutaway is a gap in the analysis: the video stops
@@ -1048,7 +1088,7 @@ export function overlayVisible(input: RundownInput, beat: TimedBeat, t: number):
 // How much of a measurement beat's tail a cutaway may take. A third leaves the
 // line on screen for the majority of the sentence that describes it, which is
 // the ordering that makes it evidence rather than illustration.
-const CUTAWAY_TAIL = 0.34;
+export const CUTAWAY_TAIL = 0.34;
 
 // Cover-fit, centred. No crop maths and no face box: there are no landmarks for
 // a cutaway, and inventing a bounding box for one is precisely the guess this
@@ -1629,7 +1669,8 @@ function drawOverlayForBeat(
   if (!id) return;
   const metric = input.metrics.get(id);
   if (!metric) return;
-  const progress = drawProgress(beat, t);
+  const snappy = input.cut === "short";
+  const progress = drawProgress(beat, t, snappy);
   if (progress <= 0) return;
 
   // Drawn at the photograph's own resolution in normalized landmark space, then
@@ -1640,11 +1681,42 @@ function drawOverlayForBeat(
   ctx.save();
   // The line's own draw is a subset of the true figure; the ALPHA is what makes
   // it arrive and leave rather than blink. See overlayAlpha.
-  ctx.globalAlpha = overlayAlpha(beat, t);
+  ctx.globalAlpha = overlayAlpha(beat, t, snappy);
   ctx.drawImage(overlayCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
   ctx.restore();
 
+  // The COMPANION line, short cut only: the second measurement of the same
+  // feature, arriving late and dim. This is the reference format's trick of
+  // giving every clause more than one thing moving — the eye beat draws the
+  // tilt AND the aperture, the lips draw the ratio AND the corner tilt — while
+  // staying honest: both lines are real measurements of this face, both from
+  // the same landmark space, and the primary keeps the number.
+  if (snappy) {
+    const companionId = COMPANIONS[id];
+    const companion = companionId ? input.metrics.get(companionId) : undefined;
+    if (companion && Number.isFinite(companion.value) && !companion.implausible) {
+      const late = clamp01((progress - 0.45) / 0.55);
+      if (late > 0) {
+        drawMeasurement(overlayCanvas, landmarks, photo.width, photo.height, companion, late);
+        ctx.save();
+        ctx.globalAlpha = 0.42 * overlayAlpha(beat, t, snappy);
+        ctx.drawImage(overlayCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+        ctx.restore();
+      }
+    }
+  }
 }
+
+// Which second measurement rides along on a beat, keyed by the primary. Only
+// pairs that measure the SAME visible feature: a companion from another part
+// of the face would drag the eye away from the thing being narrated.
+const COMPANIONS: Record<string, string> = {
+  canthalTilt: "eyeAspectRatio",
+  intercanthalEyeWidth: "fifthsEyeRatio",
+  lipRatio: "mouthCornerTilt",
+  jawCheekRatio: "chinWidthRatio",
+  midfaceRatio: "middleLowerBalance",
+};
 
 // ---------------------------------------------------------------------------
 // The trait ledger: the analysis, accumulating on screen.

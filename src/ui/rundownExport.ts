@@ -4,7 +4,7 @@ import type { Beat } from "../engine/reelScript.js";
 import { buildReelScript, narrationFrom, narrationOffsets, reelBlockers } from "../engine/reelScript.js";
 import { alignTimeline, buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
 import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
-import { drawRundownFrame } from "./rundownFrame.js";
+import { CUTAWAY_TAIL, brollFor, drawRundownFrame } from "./rundownFrame.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { exportName, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
@@ -194,6 +194,18 @@ export async function downloadRundownVideo(
       : estimated;
 
   onProgress?.(0.12, "Mixing the audio");
+  // The cutaway whoosh, stamped where a shot will actually arrive. The
+  // timeline cannot know whether B-roll exists, so the cues are appended here
+  // — after fitting, before mixing — by asking the same brollFor the renderer
+  // will ask, so a cue can never sound over a cut that does not happen.
+  if (options.broll?.length) {
+    const probe = { timeline, broll: options.broll } as Parameters<typeof brollFor>[0];
+    for (const b of timeline.beats) {
+      const at = b.beat.kind === "metric" ? b.start + b.duration * (1 - CUTAWAY_TAIL) : b.start;
+      if (brollFor(probe, b, at + 0.01)) timeline.sfx.push({ at, kind: "whoosh" });
+    }
+    timeline.sfx.sort((a, b) => a.at - b.at);
+  }
   const audio = await mixRundownAudio(voice, timeline);
 
   const metrics = new Map<string, ScoredMetric>();
