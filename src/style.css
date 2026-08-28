@@ -397,7 +397,7 @@ body {
    zoomTransform.ts), so this one transition tweens the whole move — pan and
    zoom together — instead of scaling around a pivot that already jumped. A
    little longer than the old 0.34s: it is now a camera move worth watching. */
-.zoomable { transition: transform 0.48s cubic-bezier(0.3, 0, 0.15, 1); transform-origin: 0 0; }
+.zoomable { transition: transform 0.36s cubic-bezier(0.3, 0, 0.1, 1); transform-origin: 0 0; }
 @media (prefers-reduced-motion: reduce) { .zoomable { transition: none; } }
 .zoomable canvas { width: 100%; height: auto; display: block; }
 #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -454,7 +454,7 @@ body {
    The transform transition is restated here because `transition` is one
    property: an opacity-only value would silently switch off the region zoom
    this element animates on the results screen. */
-.zoomable { transition: transform 0.48s cubic-bezier(0.3, 0, 0.15, 1), opacity .17s ease; }
+.zoomable { transition: transform 0.36s cubic-bezier(0.3, 0, 0.1, 1), opacity .17s ease; }
 .zoomable.viewfade { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .scan-ellipsis i { animation: none; opacity: .6; }
@@ -3794,6 +3794,61 @@ body.auth-modal-open { overflow: hidden; }
   66% { transform: translateX(-3px) rotate(-2deg); }
   84% { transform: translateX(2px) rotate(1deg); }
 }
+/* --------------------------------------------------------------------------
+   The fight club (ui/maxCharacter.ts wireFight): the pet's tap escalation.
+   Each stage is one class for its own duration; everything is on .mx-bob or
+   .mx-arm so it composes with the resting breath and never touches layout.
+   -------------------------------------------------------------------------- */
+.mx-svg.mx-fight-shove .mx-bob { animation: mx-shoved .62s cubic-bezier(.2,.9,.3,1.35); }
+@keyframes mx-shoved {
+  0% { transform: translateX(0) scale(1); }
+  18% { transform: translateX(9px) scale(.92, 1.06) rotate(4deg); }
+  55% { transform: translateX(4px) scale(1.05, .95) rotate(1deg); }
+  100% { transform: translateX(0) scale(1); }
+}
+/* The confused beat borrows the confused act's own "?" and tilt. */
+.mx-fight-huh .mx-prop-question {
+  display: block;
+  animation: mx-prop-in .3s ease-out both, mx-q-float 1.1s ease-in-out .3s 1;
+  transform-box: fill-box; transform-origin: center bottom;
+}
+.mx-svg.mx-fight-huh .mx-bob { animation: mx-huh-tilt 1.5s ease-in-out; }
+@keyframes mx-huh-tilt {
+  0%, 100% { transform: rotate(0); }
+  30%, 70% { transform: rotate(-6deg) translateY(-1px); }
+}
+/* The dodge: your tap whiffs. Fast out, spring back. */
+.mx-svg.mx-fight-dodge .mx-bob { animation: mx-dodge .42s cubic-bezier(.25,.8,.3,1.2); }
+@keyframes mx-dodge {
+  0% { transform: translateX(0) rotate(0); }
+  40% { transform: translateX(-13px) rotate(-10deg) scale(.97, 1.03); }
+  100% { transform: translateX(0) rotate(0); }
+}
+/* The combo: bouncing on his feet while the arm throws jabs at the screen. */
+.mx-svg.mx-fight-combo .mx-bob { animation: mx-stance .38s ease-in-out 5; }
+.mx-svg.mx-fight-combo .mx-arm { animation: mx-jab .31s cubic-bezier(.3,.7,.4,1) 6; }
+@keyframes mx-stance {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(2px) rotate(2deg) scale(1.02, .98); }
+}
+@keyframes mx-jab {
+  0%, 100% { transform: rotate(0); }
+  45% { transform: translate(-14px, -22px) rotate(-76deg); }
+}
+/* The block: crossed forearms up, hanging arms hidden, a firm head shake.
+   "No." */
+.mx-fight-block .mx-arms-block { display: block; animation: mx-prop-in .16s ease-out both; }
+.mx-fight-block .mx-arm,
+.mx-fight-block .mx-arm-rest { display: none; }
+.mx-svg.mx-fight-block .mx-bob { animation: mx-block-shake 1.4s ease-in-out; }
+@keyframes mx-block-shake {
+  0%, 18%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-3px) rotate(-2deg); }
+  45% { transform: translateX(3px) rotate(2deg); }
+  60% { transform: translateX(-2px) rotate(-1.5deg); }
+  75% { transform: translateX(2px) rotate(1.5deg); }
+}
+
 /* The cheer borrows the excited face without touching the mood classes, so
    whatever the surface set resumes untouched when the reaction ends. Placed
    after the mood rules, so at equal specificity these win while present. */
@@ -4438,11 +4493,30 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    --------------------------------------------------------------------------- */
 .maxpet {
   position: fixed; right: 0; bottom: 112px; z-index: 80;
-  width: 76px; padding: 0; margin: 0; border: none; background: none;
+  /* A decent presence on a desktop; the phone override below keeps him from
+     standing on the numbers. */
+  width: 96px; padding: 0; margin: 0; border: none; background: none;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, .16));
   transform: translateX(105%);
-  transition: transform .5s cubic-bezier(.3, 1.3, .4, 1);
+  transition: transform .5s cubic-bezier(.3, 1.3, .4, 1), opacity .4s ease;
+}
+@media (max-width: 700px) { .maxpet { width: 64px; } }
+/* Before armMaxPetReveal + ten seconds: he does not exist yet, whatever spot
+   he was left in. Opacity as well as the edge transform, because a loose
+   spot stands in open page space where the edge cannot hide him. */
+.maxpet.unrevealed { opacity: 0; pointer-events: none; }
+/* The entrance: fingers over the edge, an effort wobble, then the haul out —
+   overshooting past the peek and settling back into it. The keyframes end on
+   the exact peek transform so the class swap at animationend cannot jump. */
+.maxpet.hauling { animation: pet-haul 1.7s cubic-bezier(.3, 1, .4, 1) both; }
+@keyframes pet-haul {
+  0% { transform: translateX(105%) rotate(0); }
+  20% { transform: translateX(86%) rotate(-4deg); }
+  32% { transform: translateX(88%) rotate(3deg); }
+  44% { transform: translateX(83%) rotate(-6deg); }
+  76% { transform: translateX(36%) rotate(-20deg); }
+  100% { transform: translateX(50%) rotate(-16deg); }
 }
 /* Half in, half out, with a lean: the hide-and-seek pose. Hover and he leans
    further out to meet you. */
@@ -4450,7 +4524,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxpet.peeking:hover, .maxpet.peeking:focus-visible { transform: translateX(26%) rotate(-7deg); }
 .maxpet.out, .maxpet.out:hover { transform: translateX(105%); }
 .maxpet:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 50%; }
-@media (prefers-reduced-motion: reduce) { .maxpet { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .maxpet { transition: none; } .maxpet.hauling { animation: none; transform: translateX(50%) rotate(-16deg); } }
 
 /* ---------------------------------------------------------------------------
    Max's analysis, at the top of the overview, for accounts that hold him.
@@ -5187,36 +5261,60 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
    Hence the field treatment, the muted placeholder-coloured label, and a send
    affordance that looks like the one inside every messaging app.
    --------------------------------------------------------------------------- */
+/* Quieter than an input has any right to be. The old cut was a fat white
+   pill with a heavy Send inside a tinted card — three nested rounded shapes
+   shouting over each other. This one is a hairline field that sits INTO the
+   card (soft inset ambience instead of a border fighting the card edge),
+   with a compact Send chip that only comes up to full strength when the box
+   is engaged. */
 .maxan-ask {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  width: 100%; margin-top: 14px; padding: 6px 6px 6px 18px;
+  width: 100%; margin-top: 14px; padding: 5px 5px 5px 17px;
   font: inherit; text-align: left; cursor: text;
-  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
-  transition: border-color .18s, box-shadow .18s, background .18s;
+  background: color-mix(in srgb, var(--card) 88%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(20, 21, 24, 0.04);
+  transition: border-color .16s, box-shadow .16s, background .16s;
 }
-.maxan-ask:hover { border-color: var(--acc); }
+.maxan-ask:hover {
+  border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+  background: var(--card);
+}
 .maxan-ask:focus-visible {
-  outline: none; border-color: var(--acc);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 18%, transparent);
+  outline: none; border-color: var(--acc); background: var(--card);
+  box-shadow: inset 0 1px 2px rgba(20, 21, 24, 0.04),
+    0 0 0 3px color-mix(in srgb, var(--acc) 16%, transparent);
 }
 /* Placeholder-coloured, because it is standing in for placeholder text. */
 .maxan-ask > span {
-  flex: 1; min-width: 0; font-size: 14.5px; color: var(--mut);
+  flex: 1; min-width: 0; font-size: 14.5px; letter-spacing: .1px;
+  color: color-mix(in srgb, var(--mut) 88%, var(--ink));
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .maxan-ask > b {
-  flex: none; font-size: 13px; font-weight: 600; letter-spacing: .2px;
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 620; letter-spacing: .3px;
   color: #fff; background: var(--acc);
-  padding: 9px 20px; border-radius: 999px;
-  transition: filter .18s;
+  padding: 8px 16px; border-radius: 999px;
+  opacity: .92;
+  transition: filter .16s, opacity .16s, transform .16s;
 }
-.maxan-ask:hover > b { filter: brightness(1.08); }
-.maxan-ask:active > b { filter: brightness(.94); }
+/* The arrow is drawn, not another icon font: one glyph, always crisp. */
+.maxan-ask > b::after {
+  content: "";
+  width: 7px; height: 7px; flex: none;
+  border-top: 2px solid currentColor; border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+.maxan-ask:hover > b { opacity: 1; filter: brightness(1.05); transform: translateX(1px); }
+.maxan-ask:active > b { filter: brightness(.94); transform: translateX(0); }
+@media (prefers-reduced-motion: reduce) { .maxan-ask:hover > b { transform: none; } }
 
 @media (max-width: 560px) {
-  .maxan-ask { padding-left: 15px; }
+  .maxan-ask { padding-left: 14px; }
   .maxan-ask > span { font-size: 14px; }
-  .maxan-ask > b { padding: 9px 17px; }
+  .maxan-ask > b { padding: 8px 14px; }
 }
 
 /* Max asking whether he is welcome. Shown once, seven seconds after he arrives,

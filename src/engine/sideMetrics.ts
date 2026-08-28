@@ -20,6 +20,13 @@ export const SIDE_POINTS = [
   { id: "labialeInferius", label: "Lower lip", hint: "Fullest point of the lower lip" },
   { id: "pogonion", label: "Chin front", hint: "Furthest-forward point of the chin" },
   { id: "menton", label: "Chin bottom", hint: "Lowest point of the chin" },
+  // The neck point comes straight after the chin bottom, not after the jaw
+  // run: the guided walkthrough places points in THIS array's order, and the
+  // natural path down a profile finishes the under-chin line (menton →
+  // cervicale) before jumping back up to the jaw corner. Placing the jaw
+  // first meant the flow went chin → jaw → hinge → back down to the neck,
+  // which reads as a mistake mid-walkthrough.
+  { id: "cervicale", label: "Neck point", hint: "Where the under-chin meets the neck" },
   { id: "gonion", label: "Jaw corner", hint: "The angle where the jaw turns upward" },
   // "Jaw top" was the wrong name and it cost a measurement. The top of the
   // visible jaw region is the temple, so that is where people put it — 26mm
@@ -28,7 +35,6 @@ export const SIDE_POINTS = [
   // face. This point is a JOINT: the knuckle the jaw pivots on, level with the
   // ear canal and just in front of it.
   { id: "condylion", label: "Jaw hinge", hint: "The pivot just in front of the ear canal, level with it" },
-  { id: "cervicale", label: "Neck point", hint: "Where the under-chin meets the neck" },
   { id: "tragion", label: "Ear notch", hint: "Notch at the front of the ear" },
 ] as const;
 

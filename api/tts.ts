@@ -3,7 +3,9 @@ import {
   getSupabaseAdmin,
   json,
   leagueRenderBudget,
+  maxVoiceBudget,
   recordLeagueRender,
+  recordVoiceExport,
   requestOrigin,
   safeMessage,
   type LeagueRenderBudget,
@@ -98,17 +100,28 @@ export async function POST(request: Request): Promise<Response> {
       .maybeSingle<{ user_id: string }>();
     // Deliberately vague to an outside caller. "Not found" rather than "you
     // are not a member" — an endpoint that confirms its own existence to
-    // everyone is an invitation to keep pushing at it.
+    // everyone is an invitation to keep pushing at it. Three doors in:
+    // staff (unmetered), League creators (the owner's per-creator budget),
+    // and Max-plan members (the plan's voiced-analysis allowance). Which
+    // ledger the render lands in follows from which door admitted it.
     let budget: LeagueRenderBudget | null = null;
+    let meter: "league" | "voice" | null = null;
     if (!staff) {
       budget = await leagueRenderBudget(user.id);
+      meter = budget ? "league" : null;
+      if (!budget) {
+        budget = await maxVoiceBudget(user.id);
+        meter = budget ? "voice" : null;
+      }
       if (!budget) return json({ error: "Not found." }, 404);
       // Past the door, the refusal turns honest: a member over budget is told
       // exactly that, because "not found" to somebody who rendered here
       // yesterday reads as an outage, not a limit.
       if (budget.used >= budget.quota) {
         return json(
-          { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st — or ask for a raise.` },
+          meter === "voice"
+            ? { error: `That's all ${budget.quota} voiced exports for this month — it resets on the 1st.` }
+            : { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st — or ask for a raise.` },
           429,
         );
       }
@@ -205,8 +218,10 @@ export async function POST(request: Request): Promise<Response> {
     // The meter ticks only after audio actually came back — a failed upstream
     // call must not spend a quota slot. And a failed LOG must not spend a
     // render: the audio exists, so it ships, and the miss is logged instead.
-    if (budget) {
+    if (meter === "league") {
       await recordLeagueRender(user.id, "tts").catch((e) => console.error("render log failed", safeMessage(e)));
+    } else if (meter === "voice") {
+      await recordVoiceExport(user.id).catch((e) => console.error("voice log failed", safeMessage(e)));
     }
 
     // The alignment is passed through rather than reshaped. It is the

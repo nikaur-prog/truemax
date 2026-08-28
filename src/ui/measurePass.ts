@@ -3,9 +3,9 @@ import type { RegionId, Report, ScoredMetric } from "../engine/types.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { regionIsScored } from "../engine/scoring.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
-import { hasOverlay, measurementBounds, drawMeasurement } from "./measureOverlay.js";
-import { hasSideOverlay, sideMeasurementBounds, drawSideMeasurement } from "./sideMeasureOverlay.js";
-import { applyZoom, zoomToBounds, IDENTITY_ZOOM } from "./zoomTransform.js";
+import { hasOverlay, drawMeasurement } from "./measureOverlay.js";
+import { hasSideOverlay, drawSideMeasurement } from "./sideMeasureOverlay.js";
+import { applyZoom, IDENTITY_ZOOM } from "./zoomTransform.js";
 import { prefersReducedMotion } from "./countUp.js";
 
 // ---------------------------------------------------------------------------
@@ -163,11 +163,19 @@ export function buildPassPlan(
 // ---------------------------------------------------------------------------
 
 /** Milliseconds a beat spends drawing its construction on. */
-const ARRIVE_MS = 480;
-/** …and then holding it, so there is time to actually look at the number. */
-const HOLD_MS = 360;
-/** The camera move is CSS (.zoomable), and this is its duration in style.css. */
-const CAMERA_MS = 480;
+const ARRIVE_MS = 340;
+/** …and then holding it, so there is time to actually look at the line. */
+const HOLD_MS = 220;
+/**
+ * The breath between constructions. The camera used to push in on every
+ * point here, and the loading screen spent most of its runtime travelling:
+ * eight zooms in ten seconds reads as the picture lurching, not as
+ * measuring. The camera now HOLDS one wide framing for the whole pass — the
+ * constructions do the moving — and each beat just takes a short breath
+ * before the next line draws. (The hover on the report keeps its zoom: there
+ * the person chose the point, so the camera going to it is an answer.)
+ */
+const BREATH_MS = 120;
 /**
  * Opening beat: the mesh landing, before any single measurement is featured.
  * Matches REVEAL_MS in overlay.ts, which is what actually runs during it when
@@ -227,8 +235,7 @@ export interface PassRun {
  * there — which reads as the app having hung on the last one.
  */
 export function passDurationMs(plan: PassStep[]): number {
-  const preRoll = Math.round(CAMERA_MS * 0.45);
-  return OPEN_MS + plan.length * (preRoll + ARRIVE_MS + HOLD_MS) + CLOSE_MS;
+  return OPEN_MS + plan.length * (BREATH_MS + ARRIVE_MS + HOLD_MS) + CLOSE_MS;
 }
 
 const sleep = (ms: number, signal: { cancelled: boolean }): Promise<void> =>
@@ -351,14 +358,6 @@ export function runMeasurePass(
     }
   };
 
-  const boundsFor = (step: PassStep) => {
-    if (step.view === "side") {
-      const s = sources.side;
-      return s ? sideMeasurementBounds(step.metric, s.points, s.width, s.height) : undefined;
-    }
-    return measurementBounds(step.metric, sources.front.landmarks);
-  };
-
   // Draw the construction on over ARRIVE_MS. Resolves when it is whole; the
   // caller then holds it. Cancelling stops the loop and leaves whatever was on
   // the canvas, which the results screen immediately overpaints anyway.
@@ -414,11 +413,9 @@ export function runMeasurePass(
       // lab coat. The report is where the numbers live.
       say(step.label, "");
       if (!reduced) {
-        const b = boundsFor(step);
-        if (b) applyZoom(host.zoomable, zoomToBounds(b, { fill: 0.62, max: 2.2 }));
-        // Let the camera get most of the way there before the line starts, or
-        // the construction draws itself across a face that is still moving.
-        await sleep(Math.round(CAMERA_MS * 0.45), signal);
+        // No camera move — see BREATH_MS. The face stays put; the lines come
+        // to it.
+        await sleep(BREATH_MS, signal);
         if (signal.cancelled) return;
         await arrive(step);
         if (signal.cancelled) return;

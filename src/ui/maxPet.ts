@@ -1,5 +1,5 @@
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
-import { openMaxChat, isMaxChatOpen } from "./maxChat.js";
+import { isMaxChatOpen } from "./maxChat.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 
 // ---------------------------------------------------------------------------
@@ -65,59 +65,80 @@ export function mountMaxPet(chatContext: MaxChatContext): void {
 
   host = document.createElement("button");
   host.type = "button";
-  host.className = "maxpet";
-  host.setAttribute("aria-label", "Chat with Coach Max");
+  // Unrevealed until armMaxPetReveal fires — covers the loose-spot case,
+  // where he stands in open page space and the edge cannot hide him.
+  host.className = "maxpet unrevealed";
+  host.setAttribute("aria-label", "Coach Max");
   // Waving is opt-in, and this is the one place that earns it: he is arriving.
   // The CSS runs it twice and then leaves the arm down for good, so the
   // greeting is an event rather than the idle loop it used to be.
   host.innerHTML = maxCharacterMarkup({ mood: "happy", waving: true });
   document.body.appendChild(host);
 
-  // His eyes follow the pointer. Already built for the character wherever it
-  // appears; he just never had it, which is why he read as a sticker rather
-  // than as something aware of you — and it matters far more now that he can
-  // be picked up and put down anywhere.
-  wireMaxInteractions(host);
+  // His eyes follow the pointer, and TAPS are the fight club rather than a
+  // chat opener: pushing him is the joke, and the chat keeps its two proper
+  // doors (the ask box on the analysis and the Coach tab), both of which say
+  // what they do. A character you can shove is worth more than a third
+  // button.
+  wireMaxInteractions(host, { fight: true });
 
   // Back to wherever he was left, on whichever side of the screen that was.
   const spot = loadSpot();
   if (spot) applySpot(host, spot);
   wireDrag(host);
 
-  // He waits a beat, then peeks. Arriving with the page would make him
-  // furniture; arriving after it makes him a discovery. Skipped when he was
-  // left standing in open space: peeking is an edge behaviour, and playing
-  // hide-and-seek with the middle of the screen is just a twitch.
-  if (spot?.kind !== "loose") {
-    window.setTimeout(() => host?.classList.add("peeking"), 1200);
+  // He does NOT appear yet. Mounting used to peek him out on a timer, which
+  // put a cartoon on the corner of the score while it was still being read.
+  // He now waits for armMaxPetReveal() — the person opening a region tab —
+  // plus ten seconds, so by the time he hauls himself out the first read is
+  // genuinely over. See reveal() for the entrance itself.
+}
+
+/**
+ * The results screen calls this when a region tab other than Coach Max's
+ * read is opened — the honest signal that the first read is over and the
+ * person is exploring. Ten seconds later, he makes his entrance. One-shot.
+ */
+export function armMaxPetReveal(): void {
+  if (!host || revealed || revealTimer) return;
+  revealTimer = window.setTimeout(reveal, 10_000);
+}
+
+let revealTimer: number | null = null;
+let revealed = false;
+
+function reveal(): void {
+  revealTimer = null;
+  if (!host || revealed) return;
+  revealed = true;
+  host.classList.remove("unrevealed");
+  const spot = loadSpot();
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduced && (!spot || (spot.kind === "tucked" && spot.side === "right"))) {
+    // The entrance: fingers over the edge first, an effort wobble, then the
+    // haul out — landing in the familiar peek. Driven by one keyframe run;
+    // the peek class takes over at its final pose so nothing jumps. A
+    // fallback timer stands in for animationend in case the animation is
+    // interrupted — a Max stuck invisible is the worst outcome available.
+    host.classList.add("hauling");
+    const settle = () => {
+      host?.classList.remove("hauling");
+      host?.classList.add("peeking");
+    };
+    host.addEventListener("animationend", settle, { once: true });
+    window.setTimeout(settle, 2200);
+  } else if (!spot || spot.kind === "tucked") {
+    host.classList.add("peeking");
   }
-
-  showPetTipOnce();
-
-  host.addEventListener("click", () => {
-    if (isMaxChatOpen()) return;
-    // He hops out of hiding as the chat opens, and hides again when it is
-    // this screen's turn again.
-    host?.classList.add("out");
-    openMaxChat(context, {
-      greeting: "Hi, I'm Max, here to help. Got any questions from your last scan?",
-    });
-    // The chat covers him while open; when it closes he slips back to his
-    // corner rather than standing in the middle of the page.
-    const watcher = window.setInterval(() => {
-      if (!host) {
-        clearInterval(watcher);
-        return;
-      }
-      if (!isMaxChatOpen()) {
-        host.classList.remove("out");
-        clearInterval(watcher);
-      }
-    }, 400);
-  });
+  // The stay-or-hide question arrives with him, once ever — asking is only
+  // considerate when he has just interrupted, which is exactly now.
+  window.setTimeout(showPetTipOnce, 1900);
 }
 
 export function unmountMaxPet(): void {
+  if (revealTimer) window.clearTimeout(revealTimer);
+  revealTimer = null;
+  revealed = false;
   host?.remove();
   host = null;
   context = null;
@@ -324,32 +345,11 @@ function showPetTipOnce(): void {
     return;
   }
 
-  // Waits for the reader, not for the clock.
-  //
-  // A bare timer put this over the pillar cards about seven seconds into
-  // somebody's first look at their own face — the single worst moment in the
-  // product to interrupt, and it covered a score to do it. The offer is only
-  // considerate if it arrives when the first read is OVER, and the honest
-  // signal for that is scrolling: somebody who has moved past the opening
-  // screen has finished looking at it. Somebody who never scrolls is still
-  // reading, so he simply does not ask this visit.
-  const READ_PAST = 600;
-  let armed = false;
-  const offer = () => {
-    if (armed) return;
-    armed = true;
-    window.removeEventListener("scroll", onScroll);
-    window.setTimeout(show, 1200);
-  };
-  const onScroll = () => {
-    if (window.scrollY > READ_PAST) offer();
-  };
-  window.addEventListener("scroll", onScroll, { passive: true });
-  // A page too short to scroll can never satisfy the gate, so it falls back to
-  // the old timer — generously long, and only where scrolling is impossible.
-  window.setTimeout(() => {
-    if (document.documentElement.scrollHeight <= window.innerHeight + READ_PAST) offer();
-  }, 20000);
+  // Called from reveal(), which is itself gated on the person having moved
+  // past Coach Max's read and ten further seconds — the "first read is over"
+  // signal this function used to infer from scrolling. By the time he has
+  // hauled himself out, asking is exactly on time.
+  show();
 
   function show(): void {
     if (!host || isMaxChatOpen()) return;
