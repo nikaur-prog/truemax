@@ -57,6 +57,28 @@ export const WEEKS_BEFORE_ADDING = 8;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * How a recommendation actually begins, which decides what question makes
+ * sense after somebody says yes.
+ *
+ *   acquire  a product that has to arrive. "When will you have it in your
+ *            hands" is a real question with a real answer, and the clock
+ *            cannot start before the parcel does.
+ *   book     an appointment. There is a date, but it is a booking rather
+ *            than a delivery, so the question is when it will happen.
+ *   commit   a diet or a habit. Nothing arrives and nothing is booked; the
+ *            only honest question is whether they are going to start and
+ *            stick with it. Asking when a diet will be "in your hands" was
+ *            the sound of one flow being worn by three different things.
+ *   instant  cosmetic and immediate, like a brow tint. It shows the day it
+ *            is done, so there is no waiting clock and no delivery question.
+ *            The only questions are "will you", "did you", and "can you see
+ *            it".
+ */
+export type StartKind = "acquire" | "book" | "commit" | "instant";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export interface CheckIn {
   at: number;
   /** Did they say they were still running it? Null means they did not answer. */
@@ -91,6 +113,8 @@ export interface Protocol {
   metricId: string;
   /** Honest weeks-to-effect for this specific thing. */
   weeksToJudge: number;
+  /** How it begins. Absent on entries stored before the field existed. */
+  start?: StartKind;
   offeredAt: number;
   /** When they said they would have it in hand. */
   startBy: number | null;
@@ -114,27 +138,78 @@ export interface Protocol {
  * entry for this recId wins, including a declined one.
  */
 export function offerProtocol(
-  rec: { id: string; title: string; channel: AdviceChannel; weeksToJudge?: number },
+  rec: {
+    id: string;
+    title: string;
+    channel: AdviceChannel;
+    weeksToJudge?: number;
+    group?: "topical" | "food" | "habit" | "professional";
+    start?: StartKind;
+  },
   metricId: string,
   at: number = Date.now(),
 ): Protocol {
   const existing = readProtocols().find((p) => p.recId === rec.id);
   if (existing) return existing;
+  const start = startKindFor(rec);
   const p: Protocol = {
     id: `${rec.id}-${at}`,
     recId: rec.id,
     title: rec.title,
     channel: rec.channel,
     metricId,
-    weeksToJudge: Math.max(MIN_WEEKS_TO_JUDGE, rec.weeksToJudge ?? MIN_WEEKS_TO_JUDGE),
+    // The floor protects rule 1, and rule 1 is about biology that needs time.
+    // An instant cosmetic has no biology to wait on — flooring brow tinting to
+    // four weeks made Max ask a month of questions about a thing that was
+    // finished the day it happened.
+    weeksToJudge:
+      start === "instant"
+        ? Math.max(1, rec.weeksToJudge ?? 1)
+        : Math.max(MIN_WEEKS_TO_JUDGE, rec.weeksToJudge ?? MIN_WEEKS_TO_JUDGE),
     offeredAt: at,
     startBy: null,
     startedAt: null,
     checkIns: [],
     status: "offered",
+    start,
   };
   writeProtocols([...readProtocols(), p]);
   return p;
+}
+
+/** The start kind, explicit or derived from what kind of thing this is. */
+export function startKindFor(rec: {
+  group?: "topical" | "food" | "habit" | "professional";
+  start?: StartKind;
+}): StartKind {
+  if (rec.start) return rec.start;
+  if (rec.group === "professional") return "book";
+  if (rec.group === "food" || rec.group === "habit") return "commit";
+  return "acquire";
+}
+
+/** How a stored protocol begins, defaulting entries that predate the field. */
+export function startKindOf(p: Protocol): StartKind {
+  return p.start ?? "acquire";
+}
+
+/**
+ * The yes on a decision, with the right next question queued.
+ *
+ * A product still needs a delivery date, so acquire and book leave startBy
+ * unset and the "when" question follows. A commitment can start at the next
+ * meal and an instant job just needs doing, so both get a near date instead —
+ * the next thing Max asks is "have you started", never "when will you have it
+ * in your hands".
+ */
+export function commitProtocol(p: Protocol, at: number): Protocol {
+  const kind = startKindOf(p);
+  const soonDays = kind === "commit" ? 3 : kind === "instant" ? 7 : null;
+  return {
+    ...p,
+    status: "committed",
+    startBy: soonDays == null ? p.startBy : at + soonDays * DAY_MS,
+  };
 }
 
 /** Has this recommendation already been offered, taken or turned down? */
@@ -186,6 +261,10 @@ export function weeksRunning(p: Protocol, now: number): number | null {
  * say a word about whether something worked has to come through here first.
  */
 export function ripeForJudgement(p: Protocol, now: number): boolean {
+  // Instant things are ripe the moment they are done. The whole point of the
+  // clock is not judging biology early; a brow tint has no biology to wait on
+  // and the result is on the face the same day.
+  if (startKindOf(p) === "instant") return p.startedAt != null;
   const weeks = weeksRunning(p, now);
   return weeks != null && weeks >= Math.max(MIN_WEEKS_TO_JUDGE, p.weeksToJudge);
 }
@@ -217,32 +296,60 @@ export function nextPrompt(p: Protocol, now: number): ProtocolPrompt | null {
   if (p.status === "declined" || p.status === "judged") return null;
 
   const thing = p.title.toLowerCase();
+  const kind = startKindOf(p);
   if (p.status === "offered") {
+    // The decision question has to match what saying yes actually means.
+    // "Are you getting it" is right for a parcel and nonsense for a diet —
+    // nothing arrives; the only thing they can commit to is doing it.
+    const ask =
+      kind === "commit"
+        ? `Are you going to start ${thing} and actually commit to it? No pressure either way, I just want to know whether to start the clock on it.`
+        : kind === "instant"
+          ? `Are you going to give ${thing} a go? It shows straight away, so there is no waiting clock on this one. I will just ask how it turned out.`
+          : kind === "book"
+            ? `Are you going to get ${thing} booked in? No pressure either way, I just want to know whether to follow it up.`
+            : `Are you going to give ${thing} a go? No pressure either way, I just want to know whether to start the clock on it.`;
     return {
       kind: "decide",
       protocol: p,
-      ask: `Are you going to give ${thing} a go? No pressure either way, I just want to know whether to start the clock on it.`,
-      yes: "Yeah, I'm getting it",
+      ask,
+      yes:
+        kind === "commit" ? "Yeah, I'm starting"
+        : kind === "instant" ? "Yeah, I'll do it"
+        : kind === "book" ? "Yeah, I'll book it"
+        : "Yeah, I'm getting it",
       no: "Not right now",
     };
   }
 
   if (p.status === "committed" && p.startBy == null) {
+    // Only things that wait on the world get the date question — a delivery or
+    // an appointment. Commitments and instant jobs had a near date set the
+    // moment they said yes, so this prompt never fires for them.
     return {
       kind: "when",
       protocol: p,
-      ask: `When do you reckon you'll actually have it in your hands? Rough is fine. I only ask because ${thing} needs about ${p.weeksToJudge} weeks before anyone could honestly tell you whether it worked, and that clock starts the day you start, not today.`,
+      ask:
+        kind === "book"
+          ? `When do you reckon you'll actually get it done? Rough is fine, I'll check back in after that.`
+          : `When do you reckon you'll actually have it in your hands? Rough is fine. I only ask because ${thing} needs about ${p.weeksToJudge} weeks before anyone could honestly tell you whether it worked, and that clock starts the day you start, not today.`,
     };
   }
 
   if (p.status === "committed") {
     // The date they named has come round. Did they actually begin?
     if (p.startBy != null && now >= p.startBy) {
+      const ask =
+        kind === "commit"
+          ? `You said you'd start ${thing}. Have you actually begun?`
+          : kind === "instant" || kind === "book"
+            ? `Have you had ${thing} done yet?`
+            : `You reckoned you'd have ${thing} by about now. Have you started on it?`;
       return {
         kind: "started",
         protocol: p,
-        ask: `You reckoned you'd have ${thing} by about now. Have you started on it?`,
-        yes: "Started",
+        ask,
+        yes: kind === "instant" || kind === "book" ? "Done" : "Started",
         no: "Not yet",
       };
     }
@@ -271,7 +378,13 @@ export function nextPrompt(p: Protocol, now: number): ProtocolPrompt | null {
   return {
     kind: "judge",
     protocol: p,
-    ask: `That's ${w} weeks on ${thing}, which is long enough to actually call it. Forget the score for a second: are YOU seeing a difference?`,
+    // An instant thing is judged the visit after it happened, not after a run
+    // of weeks — asking "that's 0 weeks on brow tinting" would be the clock
+    // talking about itself.
+    ask:
+      kind === "instant"
+        ? `You've had ${thing} done. Forget the score for a second: can YOU see the difference?`
+        : `That's ${w} ${w === 1 ? "week" : "weeks"} on ${thing}, which is long enough to actually call it. Forget the score for a second: are YOU seeing a difference?`,
     yes: "Yeah, I can see it",
     no: "Honestly, no",
     weeks: w,
@@ -333,14 +446,23 @@ export function judge(p: Protocol, now: number, scanMoved: boolean): Verdict {
  */
 export function verdictCopy(v: Verdict): string {
   const thing = v.protocol.title.toLowerCase();
+  // An instant thing was judged the visit after it happened, so "N weeks on"
+  // framing would be counting a clock that never ran.
+  const quick = v.kind !== "tooEarly" && startKindOf(v.protocol) === "instant";
+  const weeks = v.kind === "tooEarly" ? 0 : v.weeks;
+  const span = `${weeks} ${weeks === 1 ? "week" : "weeks"}`;
   switch (v.kind) {
     case "tooEarly":
       return `Still early on ${thing}. Give it another ${v.weeksLeft} ${v.weeksLeft === 1 ? "week" : "weeks"} before we read anything into the number. Changing things this soon just means neither of us finds out what worked.`;
     case "notRun":
-      return `${v.weeks} weeks in on ${thing}, but from your answers it hasn't really been running. So we don't know yet whether it works for you. Want to give it a proper go from here, or would something easier to stick to suit you better?`;
+      return `${span} in on ${thing}, but from your answers it hasn't really been running. So we don't know yet whether it works for you. Want to give it a proper go from here, or would something easier to stick to suit you better?`;
     case "worked":
-      return `${v.weeks} weeks on ${thing} and the scan agrees with you. That's a real result and it's yours. Keep doing exactly what you're doing.`;
+      return quick
+        ? `${thing} done and you can see it. That's a clean win, and the scan will pick it up next capture. Keep it maintained.`
+        : `${span} on ${thing} and the scan agrees with you. That's a real result and it's yours. Keep doing exactly what you're doing.`;
     case "addAlongside":
-      return `${v.weeks} weeks on ${thing} and you stuck with it, but the number hasn't moved yet. Stay on it. The change might just not be showing up in a scan yet, and stopping now means we never find out. What I'd recommend as well is adding one more thing alongside it. Ask me and I'll tell you which one I'd pick for you and why.`;
+      return quick
+        ? `You've had ${thing} done and it isn't reading better to you yet. Give it one more look in decent light before you call it. If it still isn't landing, ask me and I'll pick the next thing for the same area alongside it.`
+        : `${span} on ${thing} and you stuck with it, but the number hasn't moved yet. Stay on it. The change might just not be showing up in a scan yet, and stopping now means we never find out. What I'd recommend as well is adding one more thing alongside it. Ask me and I'll tell you which one I'd pick for you and why.`;
   }
 }

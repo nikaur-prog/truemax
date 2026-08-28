@@ -52,6 +52,13 @@ export interface Rec {
   // telling somebody nine days into an eight-week acne routine that it is not
   // working. Absent means the default floor applies.
   weeksToJudge?: number;
+  // How this begins, when the group's default is wrong. The check-in clock
+  // derives its questions from this: topicals are acquired ("when will you
+  // have it in your hands"), food and habits are committed to ("are you going
+  // to start and stick with it"), professionals are booked. `instant` is the
+  // override for cosmetic jobs that show the day they are done — a brow tint
+  // has no delivery to wait on and no weeks-to-effect to respect.
+  start?: "acquire" | "book" | "commit" | "instant";
   detail: string;
   // Required for anything applied to the body. Prescription items are absent
   // from this file entirely; this asserts the remainder really is over-counter.
@@ -425,7 +432,8 @@ export const RECS: Rec[] = [
     title: "Brow shaping",
     what: "Shaping the underside lifts the measured brow-to-eye gap",
     evidence: "strong",
-    weeksToJudge: 2,
+    weeksToJudge: 1,
+    start: "instant",
     detail:
       "This one is not a claim about biology. It directly changes a number on your report, because brow position is measured from the brow's lower edge. The fastest-moving metric you have.",
   },
@@ -438,6 +446,7 @@ export const RECS: Rec[] = [
     what: "Darkening reads as density without changing hair count",
     evidence: "moderate",
     weeksToJudge: 1,
+    start: "instant",
     detail: "Cosmetic and immediate. Salon or at-home kits both work; patch test first, because dye reactions are the common problem.",
     otc: true,
   },
@@ -618,7 +627,8 @@ export const RECS: Rec[] = [
     title: "Colour",
     what: "Cosmetic, immediate, no medical claim attached",
     evidence: "moderate",
-    weeksToJudge: 4,
+    weeksToJudge: 1,
+    start: "instant",
     detail:
       "Darker colour reads as more density at the same hair count, the same way brow tinting does. Bleaching does the reverse and damages the shaft.",
     otc: true,

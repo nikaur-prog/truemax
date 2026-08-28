@@ -21,7 +21,7 @@ import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
 import { mountProtocolCard } from "./protocolCard.js";
-import { offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
+import { commitProtocol, offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
@@ -209,7 +209,12 @@ export function renderResults(c: Ctx): void {
   if (toggle) {
     toggle.classList.toggle("hidden", !c.sideReport);
     for (const b of toggle.querySelectorAll<HTMLButtonElement>(".vt-btn")) {
-      b.onclick = () => select(b.dataset.view === "side" ? "side" : "overall");
+      // The view is FORCED. select() keeps view-neutral tabs on whichever
+      // side of the scan you were reading, which is right for tab clicks and
+      // wrong for this control: pressing Front from Coach Max's read used to
+      // recompute "still side" from tabView and change nothing.
+      const view = b.dataset.view === "side" ? ("side" as const) : ("front" as const);
+      b.onclick = () => select(view === "side" ? "side" : "overall", view);
     }
     if (c.sideReport) floatToggleWhenScrolledPast(toggle);
   }
@@ -454,10 +459,12 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     // frontal mesh is usually right, which is exactly why this is quiet: it is
     // here for the person who can SEE a point in the wrong place, and beneath
     // notice for everyone else.
+    //
+    // No separate "See a voiced example" button any more: the example IS the
+    // shop window, so it opens from the voiced-analysis button itself, with
+    // the purchase underneath it. Two buttons for one product made the row
+    // longer and the flow harder to guess.
     ctx.onEditFront ? actionButton("btn-fedit", "Correct the points", "points", "quiet") : "",
-    // The shop window for the voiced analysis: a pop-out example so nobody
-    // pays $2.99 for a format they have not seen.
-    adultUser ? actionButton("btn-voiced-eg", "See a voiced example", "voice", "quiet") : "",
     actionButton("btn-diag", "Copy diagnostics", "copy", "quiet"),
   ].join("");
 
@@ -468,7 +475,7 @@ function resultActions(merged: boolean, ctx: Ctx): string {
   </div>`;
 }
 
-function select(id: string): void {
+function select(id: string, forceView?: "front" | "side"): void {
   if (!ctx) return;
   stopTypewriter();
   // Leaving Coach Max's read is the signal that the first read is over —
@@ -480,8 +487,10 @@ function select(id: string): void {
   // row must not throw the row back to the front tabs — that would take away
   // the profile's own regions as the price of reading the summary, and leave
   // the person hunting for the toggle under the photograph to get back.
+  // `forceView` is that toggle speaking: it names the view outright, because
+  // inferring it from tabView is exactly what made pressing Front a no-op.
   const viewNeutral = id === "overall" || id === "improve";
-  const onSide = id === "side" || id.startsWith("side:") || (viewNeutral && tabView === "side");
+  const onSide = id === "side" || id.startsWith("side:") || (viewNeutral && (forceView ?? tabView) === "side");
   // Swap the tab row before marking one selected, or the mark lands on buttons
   // that are about to be thrown away.
   const view = onSide ? "side" : "front";
@@ -518,6 +527,21 @@ function setZoom(region: RegionId | null): void {
   // same canvas; the newer one wins outright.
   transition?.cancel();
   transition = null;
+
+  // The view-neutral tabs (Coach Max's read, Plan) call this with null while
+  // the PROFILE can be on the pane — and the calm state below is the front
+  // mesh, drawn from front landmarks at front coordinates. Over the side
+  // photograph that lands as a cloud of dots nowhere near the face. While the
+  // profile is showing, the resting overlay is its thirteen verified points,
+  // and the front zoom geometry has nothing to say.
+  if (shownPhoto === "side") {
+    shownRegion = null;
+    applyZoom(ctx.zoomable, IDENTITY_ZOOM);
+    ctx.zoomable.style.removeProperty("--crop-x");
+    ctx.zoomable.style.removeProperty("--crop-y");
+    drawSidePoints();
+    return;
+  }
 
   if (region) {
     const z = zoomFor(region, ctx.landmarks);
@@ -942,7 +966,19 @@ function showOverall(): void {
   };
   const voicedBtn = document.getElementById("btn-voiced") as HTMLButtonElement | null;
   if (voicedBtn) {
-    voicedBtn.onclick = () => void voicedAnalysisFlow(voicedBtn);
+    // The pop-out first, purchase second. Clicking the button shows exactly
+    // what the $2.99 buys — the example clip — with the buy underneath it, so
+    // nobody lands on Stripe for a format they have not seen. An account that
+    // already holds a credit paid for exactly this, so it skips the shop
+    // window and renders.
+    voicedBtn.onclick = () => {
+      void loadVoiceCredits()
+        .catch(() => 0)
+        .then((balance) => {
+          if (balance > 0) void downloadVoicedAnalysis(voicedBtn);
+          else openVoicedExample(voicedBtn);
+        });
+    };
     // A credit already on the account takes the price off the button, so a
     // buyer coming back from Checkout sees "ready" rather than a second ask.
     void loadVoiceCredits()
@@ -952,8 +988,6 @@ function showOverall(): void {
       })
       .catch(() => undefined);
   }
-  const voicedEg = document.getElementById("btn-voiced-eg");
-  if (voicedEg) voicedEg.addEventListener("click", openVoicedExample);
   // The overview carries the real delta, so a protocol coming due here can be
   // judged against actual scan movement rather than against nothing.
   mountProtocolIfDue(ctx?.delta ?? null);
@@ -993,7 +1027,11 @@ async function voicedAnalysisFlow(btn: HTMLButtonElement): Promise<void> {
 // The example pop-out: exactly what a voiced analysis looks and sounds like,
 // before anybody pays for one. The clip is a demo scan of an AI-generated
 // face and says so on screen.
-function openVoicedExample(): void {
+//
+// This IS the purchase flow now, not a separate shop window: the voiced
+// analysis button opens it, and the buy sits underneath the clip. Watch what
+// it is, then decide — one button outside, one decision inside.
+function openVoicedExample(buyFrom?: HTMLButtonElement): void {
   document.getElementById("veg-overlay")?.remove();
   const overlay = document.createElement("div");
   overlay.id = "veg-overlay";
@@ -1006,12 +1044,22 @@ function openVoicedExample(): void {
       </div>
       <video src="/demo/voiced-example.mp4" controls autoplay playsinline></video>
       <p class="veg-note">A demo scan of an AI-generated face. Yours narrates your own numbers, in Coach Max's voice, ready to post.</p>
+      ${buyFrom ? `<button type="button" class="btn pri veg-buy">Get yours · $2.99</button>` : ""}
     </div>`;
   const close = () => overlay.remove();
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
   overlay.querySelector(".veg-close")?.addEventListener("click", close);
+  const buy = overlay.querySelector<HTMLButtonElement>(".veg-buy");
+  if (buy && buyFrom) {
+    buy.onclick = () => {
+      close();
+      // Progress and outcomes report on the row button, same as before —
+      // the dialog is gone by the time Stripe or the renderer answers.
+      void voicedAnalysisFlow(buyFrom);
+    };
+  }
   const video = overlay.querySelector("video");
   video?.addEventListener("error", () => {
     const note = overlay.querySelector<HTMLElement>(".veg-note");
@@ -1138,27 +1186,34 @@ function provenance(measured: number): string {
   </div>`;
 }
 
-// The profile's own version of the actions under the front's Overall tab. It
-// had none: the only way on from here was the view toggle, and the only way to
-// fix a mis-dragged point was a link buried mid-paragraph.
+// The profile's own version of the actions under the front's Overall tab.
 //
-// Same shape as the front row, because the destinations are the same shape —
-// but every action is the profile's. "New photo" becomes two, because on this
-// half of the scan there are two quite different things wrong you might be
-// trying to fix, and one of them is much cheaper: the photograph is usually
-// fine and it is the points that missed.
+// Same TREATMENT as the front row, not just the same destinations. This was
+// four identical ghost buttons in two rows while the front had its tiered
+// lead/support/quiet design — the profile read as the old app bolted onto the
+// new one. Same actionButton markup, so the two rows can never drift apart in
+// style again. Every action is still the profile's: "New photo" becomes two,
+// because on this half of the scan there are two quite different things wrong
+// you might be trying to fix, and one of them is much cheaper — the
+// photograph is usually fine and it is the points that missed.
 function sideNav(): string {
-  const redo = ctx?.onRedoSide
-    ? `<button class="btn gho" id="sn-redo">Re-verify the points</button>`
+  const lead = ctx?.onContinue
+    ? actionButton("sn-continue", "Build my pathway", "pathway", "lead")
     : "";
-  const retake = ctx?.onSideProfile
-    ? `<button class="btn gho" id="sn-retake">Retake profile</button>`
-    : "";
-  return `<div class="navrow">${redo}
-      <button class="btn pri" id="sn-plan">See your plan</button></div>
-    <div class="navrow">${retake}
-      <button class="btn gho" id="sn-share">Share card</button></div>
-    ${hasHistory() ? `<button class="hist-entry" id="sn-history">View all your scans →</button>` : ""}`;
+  const support = [
+    actionButton("sn-plan", "See your plan", "plan", "support"),
+    ctx?.onSideProfile ? actionButton("sn-retake", "Retake profile", "photo", "support") : "",
+    actionButton("sn-share", "Share card", "share", "support"),
+  ].join("");
+  const quiet = [
+    ctx?.onRedoSide ? actionButton("sn-redo", "Re-verify the points", "points", "quiet") : "",
+  ].join("");
+  return `<div class="ractions">
+    ${lead}
+    <div class="ract-row">${support}</div>
+    ${quiet ? `<div class="ract-row ract-utils">${quiet}</div>` : ""}
+  </div>
+  ${hasHistory() ? `<button class="hist-entry" id="sn-history">View all your scans →</button>` : ""}`;
 }
 
 function wireSideNav(): void {
@@ -1169,6 +1224,7 @@ function wireSideNav(): void {
   on("sn-redo", () => ctx?.onRedoSide?.());
   on("imp-redo", () => ctx?.onRedoSide?.());
   on("sn-retake", () => ctx?.onSideProfile?.());
+  on("sn-continue", () => ctx?.onContinue?.());
   on("sn-plan", () => select("improve"));
   on("sn-history", () => openHistory());
   on("sn-share", async () => {
@@ -1476,10 +1532,12 @@ function wireRecTracking(): void {
     // so an empty string is honest rather than a guess at the wrong metric.
     offerProtocol(rec, "");
     // Answer the decision immediately — they just pressed the button that IS
-    // the yes. The next question is when, which the check-in card asks.
+    // the yes. What follows depends on how the thing begins: a product gets
+    // the "when will you have it" question, a diet or an instant job gets a
+    // near check-back instead. commitProtocol is the one place that knows.
     const list = readProtocols();
     const made = list.find((p) => p.recId === rec.id);
-    if (made) writeProtocols(list.map((p) => (p.id === made.id ? { ...p, status: "committed" as const } : p)));
+    if (made) writeProtocols(list.map((p) => (p.id === made.id ? commitProtocol(p, Date.now()) : p)));
     hit.replaceWith(Object.assign(document.createElement("span"), {
       className: "rec-track rec-track-on",
       textContent: "On your list",
