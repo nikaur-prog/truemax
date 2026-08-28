@@ -154,6 +154,55 @@ export async function downloadQuickVideo(
   return outcome;
 }
 
+/**
+ * The CTA outro on its own: the endcard every export already closes on,
+ * rendered as a standalone clip for the operator who wants to drop it into an
+ * edit of their own. Two full animation periods plus a settle — long enough
+ * to cut on, short enough to loop. Silent on purpose: it lands in edits that
+ * already carry a soundtrack.
+ */
+export async function downloadCtaOutro(onProgress?: (progress: number) => void): Promise<SaveOutcome> {
+  const SECONDS = 4.4;
+  const frameCount = Math.round(FPS * SECONDS);
+  const { Output, BufferTarget, Mp4OutputFormat, CanvasSource, QUALITY_HIGH, getFirstEncodableVideoCodec } =
+    await import("mediabunny");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(W * EXPORT_SCALE);
+  canvas.height = Math.round(H * EXPORT_SCALE);
+  const format = new Mp4OutputFormat({ fastStart: "in-memory" });
+  const codec = await getFirstEncodableVideoCodec(
+    format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
+    { width: canvas.width, height: canvas.height, quality: QUALITY_HIGH },
+  );
+  if (!codec) throw new Error("This browser cannot encode an H.264 MP4.");
+
+  const target = new BufferTarget();
+  const output = new Output({ format, target });
+  const source = new CanvasSource(canvas, { codec, bitrate: 12_000_000, keyFrameInterval: 2 });
+  output.addVideoTrack(source, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
+  output.setMetadataTags({ title: "TrueMax outro", artist: "TrueMax" });
+  await output.start();
+
+  const g = canvas.getContext("2d")!;
+  for (let frame = 0; frame < frameCount; frame++) {
+    const t = frame / FPS;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    drawCtaCard(g, canvas.width, canvas.height, t, 0.5);
+    await source.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
+    if (frame % 6 === 0) onProgress?.(frame / frameCount);
+  }
+  await output.finalize();
+  if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
+  const outcome = await saveFile(
+    new Blob([target.buffer], { type: format.mimeType }),
+    exportName("reel", "mp4", "cta-outro"),
+    "reel",
+  );
+  onProgress?.(1);
+  return outcome;
+}
+
 // Development-only render hook used by the visual regression preview. It
 // exercises the exact production compositor without invoking WebCodecs or a
 // download, and is tree-shaken from the production quick page call path.
