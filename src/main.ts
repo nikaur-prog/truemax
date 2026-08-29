@@ -1625,11 +1625,19 @@ async function handleCanvas(
   if (!quality.faceFound) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "NO FACE FOUND";
-    el.status.innerHTML = "<b>No face detected.</b> Try a clearer, front-facing photo.";
+    // A real button, not a silent 2.6s timeout. The timeout used to be the
+    // only way out of this screen — nothing to press, nothing to read as
+    // "try again", just a wait that looked like the app had stalled. Same
+    // decision-screen rule as the rejection branch below: it holds until
+    // somebody presses something.
+    el.status.innerHTML = `<b>No face detected.</b> Try a clearer, front-facing photo.
+      <span class="reject-actions">
+        <button type="button" class="btn pri" id="noface-retake">Retake the photo</button>
+      </span>`;
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
-    setTimeout(() => {
+    document.getElementById("noface-retake")?.addEventListener("click", () => {
       if (scanIsCurrent(token, generation)) resetToUpload();
-    }, 2600);
+    });
     return;
   }
 
