@@ -692,6 +692,10 @@ function updateModeStep(): void {
 
 function leaveMode(): void {
   quickScanGeneration += 1;
+  // Hiding the takeover is also a privacy boundary. Cancel both an attached
+  // stream and a getUserMedia request still waiting for permission so a late
+  // result cannot keep recording behind the pillars screen.
+  stopCamera();
   last = null;
   shown = null;
   clearRundownMedia();
@@ -2147,6 +2151,7 @@ function editedExportScores(r: Report): { overall: number; percentile: number; r
 // redraw replaces.
 // ---------------------------------------------------------------------------
 const CUT_SLOTS = 4;
+let rundownPasteHandler: ((event: ClipboardEvent) => void) | null = null;
 interface Cutaway {
   image: HTMLImageElement;
   landmarks?: NormalizedLandmark[];
@@ -2174,15 +2179,22 @@ async function sharpenCutaway(index: number): Promise<void> {
   const cut = cutaways[index];
   if (!cut) return;
   const img = cut.image;
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
-  if (!w || !h) return;
+  const sourceW = img.naturalWidth;
+  const sourceH = img.naturalHeight;
+  if (!sourceW || !sourceH) return;
+  // The video raster is at most 1080x1920. Keeping more than 2560px on the
+  // long edge adds no visible detail, while a full 48MP unsharp mask can use
+  // several hundred megabytes and kill mobile Safari.
+  const ENHANCE_MAX = 2560;
+  const scale = Math.min(1, ENHANCE_MAX / Math.max(sourceW, sourceH));
+  const w = Math.max(1, Math.round(sourceW * scale));
+  const h = Math.max(1, Math.round(sourceH * scale));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(img, 0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h);
   applyEnhance(data.data, w, h, lookFor(LOOKS.standard, Math.max(w, h)));
   ctx.putImageData(data, 0, 0);
@@ -2342,18 +2354,11 @@ async function addCutaway(file: File, at: number): Promise<void> {
     revokeMediaUrl(image.src);
     return;
   }
-  // Measured off a canvas rather than the <img>: getImageData needs a 2D
-  // context, and this is the one moment the pixels are already in hand.
+  // assessPhotoQuality reads a bounded face crop from the image. Do not first
+  // copy a phone's full-resolution photo into another full-resolution canvas.
   let quality: PhotoQuality | undefined;
   try {
-    const probe = document.createElement("canvas");
-    probe.width = image.naturalWidth;
-    probe.height = image.naturalHeight;
-    const pctx = probe.getContext("2d", { willReadFrequently: true });
-    if (pctx && probe.width && probe.height) {
-      pctx.drawImage(image, 0, 0);
-      quality = assessPhotoQuality(probe, landmarks);
-    }
+    quality = assessPhotoQuality(image, landmarks);
   } catch {
     // A tainted or zero-sized canvas is not a reason to refuse the photograph.
     quality = undefined;
@@ -2391,10 +2396,11 @@ function mountCutaways(): void {
   // the other listener. Registering in the capture phase is what puts this one
   // ahead regardless of who registered first, and stopImmediatePropagation is
   // what keeps the scan handler from seeing an event this panel has consumed.
-  document.addEventListener("paste", async (event) => {
+  if (rundownPasteHandler) document.removeEventListener("paste", rundownPasteHandler, true);
+  rundownPasteHandler = async (event: ClipboardEvent) => {
     // Only while this panel is on screen, and only when a slot is armed or free.
     if (!document.getElementById("q-cut-slots")) return;
-    const data = (event as ClipboardEvent).clipboardData;
+    const data = event.clipboardData;
     if (!data) return;
     const images = [...data.files].filter((f) => /^image\//.test(f.type));
     if (!images.length) {
@@ -2417,7 +2423,8 @@ function mountCutaways(): void {
     }
     cutArmed = null;
     drawCutSlots();
-  }, true);
+  };
+  document.addEventListener("paste", rundownPasteHandler, true);
 }
 
 async function decodeImage(file: File): Promise<HTMLImageElement | null> {
@@ -2481,6 +2488,10 @@ function clearDisclaimerClips(): void {
 // and its object URLs before another person's result can be shown.
 function clearRundownMedia(): void {
   rundownMediaEpoch += 1;
+  if (rundownPasteHandler) {
+    document.removeEventListener("paste", rundownPasteHandler, true);
+    rundownPasteHandler = null;
+  }
   for (const cutaway of cutaways) {
     if (cutaway) revokeMediaUrl(cutaway.image.src);
   }

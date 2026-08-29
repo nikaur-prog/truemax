@@ -177,6 +177,45 @@ export async function downloadRundownVideo(
     cut: options.cut,
   });
 
+  // Prove this browser can produce the promised MP4 before asking a paid
+  // provider to synthesize anything. Codec discovery used to happen after the
+  // TTS reservation was consumed, so an unsupported iPhone/browser could spend
+  // a voice credit and then fail before encoding frame one.
+  const {
+    Output,
+    BufferTarget,
+    Mp4OutputFormat,
+    CanvasSource,
+    AudioBufferSource,
+    QUALITY_HIGH,
+    getFirstEncodableVideoCodec,
+    getFirstEncodableAudioCodec,
+  } = await import("mediabunny");
+  ensureCurrent();
+  const format = new Mp4OutputFormat({ fastStart: "in-memory" });
+  let outW = W;
+  let outH = H;
+  let videoCodec = null as Awaited<ReturnType<typeof getFirstEncodableVideoCodec>>;
+  for (const [tryW, tryH] of [[W, H], [LOGICAL_W, LOGICAL_H]]) {
+    videoCodec = await getFirstEncodableVideoCodec(
+      format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
+      { width: tryW, height: tryH, quality: QUALITY_HIGH },
+    );
+    if (videoCodec) {
+      outW = tryW;
+      outH = tryH;
+      break;
+    }
+  }
+  if (!videoCodec) throw new Error("This browser cannot encode an H.264 MP4.");
+  // mixRundownAudio deliberately produces mono 44.1kHz in every path, so this
+  // is the exact audio configuration the eventual output will use.
+  const audioCodec = await getFirstEncodableAudioCodec(
+    format.getSupportedAudioCodecs().filter((candidate) => candidate === "aac"),
+    { numberOfChannels: 1, sampleRate: 44100 },
+  );
+  if (!audioCodec) throw new Error("This browser cannot encode AAC audio.");
+
   onProgress?.(0.05, "Recording the voiceover");
   const spoken = options.accessToken
     ? await fetchNarration(narrationFrom(beats), options.accessToken)
@@ -233,45 +272,12 @@ export async function downloadRundownVideo(
   const metrics = new Map<string, ScoredMetric>();
   for (const metric of report.metrics) metrics.set(metric.def.id, metric);
 
-  const {
-    Output,
-    BufferTarget,
-    Mp4OutputFormat,
-    CanvasSource,
-    AudioBufferSource,
-    QUALITY_HIGH,
-    getFirstEncodableVideoCodec,
-    getFirstEncodableAudioCodec,
-  } = await import("mediabunny");
-  ensureCurrent();
-
-  const format = new Mp4OutputFormat({ fastStart: "in-memory" });
   // 1080p first, 720p when the encoder refuses. Mobile browsers report codec
   // support per RESOLUTION, and "Couldn't render" on a phone was that refusal
   // surfacing as a dead button. The compositor is authored at 720x1280 and
   // drawn through a transform, so the fallback changes only the raster: same
   // layout, softer pixels, a video that actually exists.
-  let outW = W;
-  let outH = H;
-  let videoCodec = null as Awaited<ReturnType<typeof getFirstEncodableVideoCodec>>;
-  for (const [tryW, tryH] of [[W, H], [LOGICAL_W, LOGICAL_H]]) {
-    videoCodec = await getFirstEncodableVideoCodec(
-      format.getSupportedVideoCodecs().filter((candidate) => candidate === "avc"),
-      { width: tryW, height: tryH, quality: QUALITY_HIGH },
-    );
-    if (videoCodec) {
-      outW = tryW;
-      outH = tryH;
-      break;
-    }
-  }
-  if (!videoCodec) throw new Error("This browser cannot encode an H.264 MP4.");
   const scale = outW / LOGICAL_W;
-  const audioCodec = await getFirstEncodableAudioCodec(
-    format.getSupportedAudioCodecs().filter((candidate) => candidate === "aac"),
-    { numberOfChannels: 1, sampleRate: audio.buffer.sampleRate },
-  );
-  if (!audioCodec) throw new Error("This browser cannot encode AAC audio.");
 
   const canvas = document.createElement("canvas");
   canvas.width = outW;

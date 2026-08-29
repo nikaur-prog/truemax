@@ -97,6 +97,9 @@ test("Creator League links, sprint writes and settlement are bounded in SQL", ()
   assert.match(migrations, /league_tiktok_accounts_open_id_unique[\s\S]*?\(open_id\)/i);
   assert.match(migrations, /create policy submissions_self_insert[\s\S]*?sprint\.status = 'active'[\s\S]*?now\(\) between sprint\.starts_at and sprint\.ends_at/i);
   assert.match(migrations, /create or replace function public\.record_league_payout[\s\S]*?status = 'closed'[\s\S]*?on conflict \(sprint_id, creator_id\)[\s\S]*?status = 'paid_out'/i);
+  assert.match(migrations, /add column if not exists formula jsonb/i);
+  assert.match(migrations, /snapshots_staff_write[\s\S]*?sprint\.status = 'active'/i);
+  assert.match(migrations, /revoke all on table public\.league_payouts from public, anon, authenticated[\s\S]*?grant select on table public\.league_payouts to authenticated/i);
 });
 
 test("guest scans do not spend the owner's depth allowance or enter Max context", () => {
@@ -113,8 +116,10 @@ test("late camera and rundown work cannot resurrect replaced user media", () => 
   const camera = read("src/ui/camera.ts");
   const quick = read("src/quick.ts");
   const exporter = read("src/ui/rundownExport.ts");
-  assert.match(camera, /const attempt = \+\+attachAttempt[\s\S]*?!live \|\| attempt !== attachAttempt[\s\S]*?nextStream\.getTracks\(\)/);
-  assert.match(camera, /stop\(\) \{[\s\S]*?live = false;[\s\S]*?attachAttempt\+\+[\s\S]*?removeEventListener\("visibilitychange"/);
+  assert.match(camera, /videoOwners = new WeakMap[\s\S]*?const ownsVideo[\s\S]*?videoOwners\.get\(opts\.video\)\?\.stop\(\)/);
+  assert.match(camera, /!live \|\| attempt !== attachAttempt \|\| !ownsVideo\(\)[\s\S]*?nextStream\.getTracks\(\)/);
+  assert.match(camera, /const stopInstance[\s\S]*?attachAttempt\+\+[\s\S]*?removeEventListener\("visibilitychange"[\s\S]*?if \(!ownsVideo\(\)\) return/);
+  assert.match(quick, /function leaveMode\(\)[\s\S]*?quickScanGeneration \+= 1;[\s\S]*?stopCamera\(\)/);
   assert.match(quick, /if \(!last \|\| rundownRendering\) return/);
   assert.match(quick, /shouldCancel: \(\) => mediaEpoch !== rundownMediaEpoch \|\| source !== last/);
   assert.match(exporter, /const ensureCurrent[\s\S]*?throw new RundownCancelled[\s\S]*?for \(let frame[\s\S]*?ensureCurrent\(\)/);
@@ -126,6 +131,31 @@ test("public diagnostics do not inventory infrastructure", () => {
     assert.match(source, /authorization[\s\S]*?Bearer \$\{secret\}/);
     assert.match(source, /return (?:Response\.)?json\(\{ ok: true \}/);
   }
+});
+
+test("Stripe diagnostics keep the cron secret out of the URL", () => {
+  const source = read("api/stripe-config.ts");
+  assert.match(source, /headers\.get\("authorization"\) !== `Bearer \$\{secret\}`/);
+  assert.doesNotMatch(source, /searchParams\.get\("key"\)/);
+});
+
+test("League close refreshes final counts and refuses incomplete settlement", () => {
+  const tracker = read("api/league-track.ts");
+  const league = read("src/league/main.ts");
+  assert.match(tracker, /if \(linksResult\.error\) throw[\s\S]*?if \(subsResult\.error\) throw/);
+  assert.doesNotMatch(tracker, /\.gt\("league_sprints\.ends_at"/);
+  assert.match(tracker, /const summary = await track\(sprintId\)[\s\S]*?summary\.pending \|\| summary\.deadLinks \|\| summary\.unresolved[\s\S]*?update\(\{ status: "closed" \}\)/);
+  assert.match(league, /fetch\("\/api\/league-track"[\s\S]*?sprintId: b\.dataset\.sprintClose/);
+});
+
+test("rundown media inspection is bounded before paid narration", () => {
+  const quick = read("src/quick.ts");
+  const quality = read("src/engine/photoQuality.ts");
+  const exporter = read("src/ui/rundownExport.ts");
+  assert.match(quality, /const SAMPLE_MAX = 768[\s\S]*?getImageData\(0, 0, sampleW, sampleH\)/);
+  assert.match(quick, /const ENHANCE_MAX = 2560/);
+  assert.match(quick, /rundownPasteHandler[\s\S]*?removeEventListener\("paste", rundownPasteHandler, true\)/);
+  assert.ok(exporter.indexOf("getFirstEncodableVideoCodec") < exporter.indexOf("fetchNarration("));
 });
 
 test("scan credits expose only owner reads and narrowly granted RPCs", () => {

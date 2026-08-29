@@ -36,15 +36,16 @@ interface Opts {
   onLost?: () => void;
 }
 
-let stream: MediaStream | null = null;
-let raf = 0;
-let scratch: HTMLCanvasElement | null = null;
+interface VideoOwner {
+  token: symbol;
+  stop(): void;
+}
 
-// Which way the active camera faces, and (on a desktop cycling real devices)
-// which device holds the preview. Module-level like `stream`: one camera at a
-// time is a standing assumption of this file.
-let facing: "user" | "environment" = "user";
-let deviceId: string | null = null;
+// Camera state belongs to one startCamera() call, not to the module. The only
+// shared state is ownership of a particular <video>: opening a replacement on
+// the same element cancels the older request before a late getUserMedia result
+// can overwrite (or later blank) the newer preview.
+const videoOwners = new WeakMap<HTMLVideoElement, VideoOwner>();
 
 /** How many cameras this machine has. Meaningful after permission is granted. */
 export async function cameraCount(): Promise<number> {
@@ -72,10 +73,15 @@ export async function permissionGranted(): Promise<boolean> {
 }
 
 export async function startCamera(opts: Opts): Promise<CameraHandle> {
-  facing = "user";
-  deviceId = null;
+  let stream: MediaStream | null = null;
+  let raf = 0;
+  let scratch: HTMLCanvasElement | null = null;
+  let facing: "user" | "environment" = "user";
+  let deviceId: string | null = null;
   let live = true;
   let attachAttempt = 0;
+  const token = Symbol("camera-owner");
+  const ownsVideo = () => videoOwners.get(opts.video)?.token === token;
 
   const constraints = (): MediaStreamConstraints => ({
     video: {
@@ -97,17 +103,18 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   };
 
   async function attach(): Promise<void> {
-    if (!live) throw new Error("Camera request was cancelled");
+    if (!live || !ownsVideo()) throw new Error("Camera request was cancelled");
     const attempt = ++attachAttempt;
     // Stop the old tracks BEFORE asking for new ones: many phones refuse to
     // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
+    stream?.getVideoTracks().forEach((t) => t.removeEventListener("ended", onTrackDown));
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
     const nextStream = await navigator.mediaDevices.getUserMedia(constraints());
     // getUserMedia cannot be aborted. A cancel, a newer swap, or a recovery
     // can therefore win while this permission/device request is in flight.
     // Never let the late result resurrect a preview its owner already closed.
-    if (!live || attempt !== attachAttempt) {
+    if (!live || attempt !== attachAttempt || !ownsVideo()) {
       nextStream.getTracks().forEach((t) => t.stop());
       throw new Error("Camera request was superseded");
     }
@@ -123,7 +130,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
       throw error;
     }
-    if (!live || attempt !== attachAttempt) {
+    if (!live || attempt !== attachAttempt || !ownsVideo()) {
       nextStream.getTracks().forEach((t) => t.stop());
       if (stream === nextStream) stream = null;
       if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
@@ -151,7 +158,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   let reacquireRetries = 0;
   let lostReported = false;
   const reportLost = () => {
-    if (!live || lostReported) return;
+    if (!live || !ownsVideo() || lostReported) return;
     lostReported = true;
     opts.onLost?.();
   };
@@ -193,7 +200,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     }
   }
   const onVisible = () => {
-    if (document.visibilityState !== "visible") return;
+    if (!ownsVideo() || document.visibilityState !== "visible") return;
     const track = stream?.getVideoTracks()[0];
     if (!track || track.readyState !== "live" || track.muted) {
       reacquireRetries = 0;
@@ -202,15 +209,38 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   };
   document.addEventListener("visibilitychange", onVisible);
 
+  const stopInstance = () => {
+    if (!live && !ownsVideo()) return;
+    live = false;
+    attachAttempt++;
+    cancelAnimationFrame(raf);
+    if (reacquireTimer !== null) clearTimeout(reacquireTimer);
+    reacquireTimer = null;
+    document.removeEventListener("visibilitychange", onVisible);
+    const held = stream;
+    held?.getVideoTracks().forEach((t) => t.removeEventListener("ended", onTrackDown));
+    held?.getTracks().forEach((t) => t.stop());
+    stream = null;
+    // A stale handle owns only its own tracks. It must never clear the srcObject,
+    // mirror class, guide, or owner record installed by a replacement camera.
+    if (!ownsVideo()) return;
+    videoOwners.delete(opts.video);
+    if (!held || opts.video.srcObject === held) opts.video.srcObject = null;
+    opts.video.classList.remove("unmirrored");
+    opts.guideCanvas.classList.remove("unmirrored");
+    const ctx = opts.guideCanvas.getContext("2d");
+    ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
+  };
+
+  // Supersede any active or in-flight owner of this exact preview before this
+  // request starts. Its late getUserMedia result will fail the ownership check.
+  videoOwners.get(opts.video)?.stop();
+  videoOwners.set(opts.video, { token, stop: stopInstance });
+
   try {
     await attach();
   } catch (err) {
-    live = false;
-    attachAttempt++;
-    document.removeEventListener("visibilitychange", onVisible);
-    stream?.getTracks().forEach((t) => t.stop());
-    stream = null;
-    opts.video.srcObject = null;
+    stopInstance();
     throw err;
   }
 
@@ -261,6 +291,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   let lastFrameAt = performance.now();
 
   const loop = () => {
+    if (!live || !ownsVideo()) return;
     const v = opts.video;
     if (v.readyState >= 2 && v.currentTime !== last) {
       last = v.currentTime;
@@ -301,30 +332,18 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       lastFrameAt = performance.now();
       void reacquire();
     }
-    raf = requestAnimationFrame(loop);
+    if (live && ownsVideo()) raf = requestAnimationFrame(loop);
   };
 
   raf = requestAnimationFrame(loop);
 
   return {
     stop() {
-      live = false;
-      attachAttempt++;
-      cancelAnimationFrame(raf);
-      if (reacquireTimer !== null) clearTimeout(reacquireTimer);
-      reacquireTimer = null;
-      document.removeEventListener("visibilitychange", onVisible);
-      stream?.getTracks().forEach((t) => t.stop());
-      stream = null;
-      opts.video.srcObject = null;
-      opts.video.classList.remove("unmirrored");
-      opts.guideCanvas.classList.remove("unmirrored");
-      const ctx = opts.guideCanvas.getContext("2d");
-      ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
+      stopInstance();
     },
     capture() {
       const v = opts.video;
-      if (!v.videoWidth) return null;
+      if (!live || !ownsVideo() || !v.videoWidth) return null;
       const c = document.createElement("canvas");
       c.width = v.videoWidth;
       c.height = v.videoHeight;
@@ -341,6 +360,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       return c;
     },
     async swap() {
+      if (!live || !ownsVideo()) return false;
       const wasFacing = facing;
       const wasDevice = deviceId;
       try {

@@ -52,9 +52,10 @@ Three places have to agree, and they have disagreed before:
   `STARTER_MONTHLY`. What the plan cards display.
 - **This table** — what was decided.
 
-`/api/stripe-config?key=CRON_SECRET` reports what Stripe actually holds for
-every configured price, which is how a drift like the $6.99/$7.99 one is
-caught without waiting for a customer to find it. Nothing in the client
+`GET /api/stripe-config` with `Authorization: Bearer $CRON_SECRET` reports what
+Stripe actually holds for every configured price, which is how a drift like
+the $6.99/$7.99 one is caught without waiting for a customer to find it. The
+secret stays out of query strings and access logs. Nothing in the client
 computes a price DIFFERENCE from these constants: the upgrade sheet quotes the
 Max price and lets Stripe show the prorated amount, because a subtraction of
 two hardcoded numbers is a claim this app cannot verify.

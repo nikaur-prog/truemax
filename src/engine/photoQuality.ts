@@ -163,17 +163,48 @@ export function detailEnergy(
  * answer, from the middle of the frame.
  */
 export function assessPhotoQuality(
-  source: HTMLCanvasElement,
+  source: HTMLCanvasElement | HTMLImageElement,
   landmarks?: NormalizedLandmark[] | null,
 ): PhotoQuality {
-  const { width, height } = source;
+  const width = source instanceof HTMLImageElement ? source.naturalWidth : source.width;
+  const height = source instanceof HTMLImageElement ? source.naturalHeight : source.height;
   const box = faceBox(width, height, landmarks);
-  const ctx = source.getContext("2d", { willReadFrequently: true });
-  if (!ctx || width < 8 || height < 8) {
+  if (width < 8 || height < 8) {
     return { facePx: box.h, sharpness: 1, verdict: "ok", reason: "", fixable: false };
   }
-  const px = ctx.getImageData(0, 0, width, height).data;
-  const sharpness = detailEnergy(px, width, box);
+
+  // Read only a bounded face crop. A modern phone image can be 48MP: copying
+  // the whole thing into a canvas and then getImageData() allocated hundreds
+  // of megabytes just to inspect the small region the rundown will display.
+  // The source face height is retained for the resolution verdict; only the
+  // sharpness sample is downscaled.
+  const pad = Math.max(2, Math.min(box.w, box.h) * 0.02);
+  const sx = Math.max(0, Math.floor(box.x - pad));
+  const sy = Math.max(0, Math.floor(box.y - pad));
+  const ex = Math.min(width, Math.ceil(box.x + box.w + pad));
+  const ey = Math.min(height, Math.ceil(box.y + box.h + pad));
+  const cropW = Math.max(1, ex - sx);
+  const cropH = Math.max(1, ey - sy);
+  const SAMPLE_MAX = 768;
+  const scale = Math.min(1, SAMPLE_MAX / Math.max(cropW, cropH));
+  const sampleW = Math.max(8, Math.round(cropW * scale));
+  const sampleH = Math.max(8, Math.round(cropH * scale));
+  const sample = document.createElement("canvas");
+  sample.width = sampleW;
+  sample.height = sampleH;
+  const ctx = sample.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    return { facePx: box.h, sharpness: 1, verdict: "ok", reason: "", fixable: false };
+  }
+  ctx.drawImage(source, sx, sy, cropW, cropH, 0, 0, sampleW, sampleH);
+  const px = ctx.getImageData(0, 0, sampleW, sampleH).data;
+  const sampleBox = {
+    x: (box.x - sx) * scale,
+    y: (box.y - sy) * scale,
+    w: box.w * scale,
+    h: box.h * scale,
+  };
+  const sharpness = detailEnergy(px, sampleW, sampleBox);
   const facePx = box.h;
 
   // Resolution is reported first when both are bad, because it is the one the

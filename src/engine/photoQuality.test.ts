@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { detailEnergy } from "./photoQuality.js";
+import { assessPhotoQuality, detailEnergy } from "./photoQuality.js";
 
 // The module's own entry point needs a canvas, which node does not have. The
 // measurement it rests on does not, so that is what is pinned here: the
@@ -83,4 +83,42 @@ test("a flat field is not reported as infinitely sharp", () => {
   const v = detailEnergy(flat, W, BOX);
   assert.ok(Number.isFinite(v), "flat field produced a non-finite reading");
   assert.ok(v < 1, `flat field read as ${v}`);
+});
+
+test("a very large phone photo is sampled from a bounded face crop", () => {
+  const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const priorImage = Object.getOwnPropertyDescriptor(globalThis, "HTMLImageElement");
+  let requested = { width: 0, height: 0 };
+  class FakeImage {}
+  const sample = {
+    width: 0,
+    height: 0,
+    getContext: () => ({
+      drawImage: () => undefined,
+      getImageData: (_x: number, _y: number, width: number, height: number) => {
+        requested = { width, height };
+        return { data: new Uint8ClampedArray(width * height * 4) };
+      },
+    }),
+  };
+  Object.defineProperty(globalThis, "HTMLImageElement", { configurable: true, value: FakeImage });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { createElement: () => sample },
+  });
+  try {
+    assessPhotoQuality(
+      { width: 12000, height: 9000 } as HTMLCanvasElement,
+      [
+        { x: 0.3, y: 0.2, z: 0, visibility: 1 },
+        { x: 0.7, y: 0.8, z: 0, visibility: 1 },
+      ],
+    );
+    assert.ok(requested.width <= 768 && requested.height <= 768, JSON.stringify(requested));
+  } finally {
+    if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
+    else delete (globalThis as { document?: unknown }).document;
+    if (priorImage) Object.defineProperty(globalThis, "HTMLImageElement", priorImage);
+    else delete (globalThis as { HTMLImageElement?: unknown }).HTMLImageElement;
+  }
 });

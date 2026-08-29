@@ -80,6 +80,23 @@ interface SubmissionRow {
 
 const root = document.getElementById("league")!;
 
+interface QueryError {
+  code?: string;
+  message: string;
+}
+
+function requireQuery(error: QueryError | null, operation: string): void {
+  if (!error) return;
+  console.error(`league ${operation} failed`, error.code ?? "query_failed");
+  throw new Error(`${operation} could not be completed.`);
+}
+
+function showPageFailure(mount: HTMLElement): void {
+  mount.innerHTML = `<h1 class="lg-h">Couldn't load this page</h1>
+    <div class="lg-card"><p class="lg-error">Nothing was changed. Check the connection and try again.</p>
+    <button class="lg-btn" id="lg-retry-page">Retry</button></div>`;
+}
+
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -337,7 +354,11 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
   const go = (page: Page) => {
     for (const b of nav) b.classList.toggle("on", b.dataset.page === page);
     location.hash = page;
-    void PAGES[page](mount, me);
+    void Promise.resolve(PAGES[page](mount, me)).catch((error) => {
+      console.error("league page failed", error);
+      showPageFailure(mount);
+      document.getElementById("lg-retry-page")?.addEventListener("click", () => go(page));
+    });
   };
   for (const b of nav) b.onclick = () => go(b.dataset.page as Page);
   const initial = (location.hash.slice(1) || "overview") as Page;
@@ -346,21 +367,23 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
 
 async function loadSprints(): Promise<SprintRow[]> {
   const client = await getSupabaseClient();
-  const { data } = await client
+  const { data, error } = await client
     .from("league_sprints")
     .select("*")
     .in("status", ["active", "closed"])
     .order("starts_at", { ascending: false });
+  requireQuery(error, "sprints load");
   return (data ?? []) as SprintRow[];
 }
 
 async function loadMySubmissions(userId: string): Promise<SubmissionRow[]> {
   const client = await getSupabaseClient();
-  const { data } = await client
+  const { data, error } = await client
     .from("league_submissions")
     .select("*")
     .eq("creator_id", userId)
     .order("created_at", { ascending: false });
+  requireQuery(error, "submissions load");
   return (data ?? []) as SubmissionRow[];
 }
 
@@ -372,18 +395,20 @@ async function loadMySubmissions(userId: string): Promise<SubmissionRow[]> {
  */
 async function myVideoTotalsFor(sprint: SprintRow, userId: string): Promise<VideoTotals[]> {
   const client = await getSupabaseClient();
-  const { data: subs } = await client
+  const { data: subs, error: submissionsError } = await client
     .from("league_submissions")
     .select("id")
     .eq("creator_id", userId)
     .eq("sprint_id", sprint.id)
     .in("status", ["approved", "earning", "paid_out"]);
+  requireQuery(submissionsError, "earning submissions load");
   const ids = (subs ?? []).map((s: { id: string }) => s.id);
   if (!ids.length) return [];
-  const { data: snaps } = await client
+  const { data: snaps, error: snapshotsError } = await client
     .from("league_stat_snapshots")
     .select("submission_id, at, views, comments")
     .in("submission_id", ids);
+  requireQuery(snapshotsError, "earning snapshots load");
   const latest = new Map<string, { at: number; views: number; comments: number }>();
   for (const s of (snaps ?? []) as Array<{ submission_id: string; at: string; views: number; comments: number }>) {
     const at = Date.parse(s.at);
@@ -422,11 +447,16 @@ async function apiTikTok<T = Record<string, unknown>>(
  */
 async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> {
   const client = await getSupabaseClient();
-  const { data } = await client
+  const { data, error } = await client
     .from("league_tiktok_accounts")
     .select("display_name, open_id")
     .eq("user_id", me.user_id)
     .maybeSingle<{ display_name: string | null; open_id: string }>();
+  if (error) {
+    console.error("league TikTok link load failed", error.code);
+    el.innerHTML = `<p class="lg-error">TikTok connection status couldn't be loaded. Try again shortly.</p>`;
+    return;
+  }
   const oauthError = sessionStorage.getItem("lg-tt-error");
   if (oauthError) sessionStorage.removeItem("lg-tt-error");
 
@@ -593,7 +623,10 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           : error.message;
         return;
       }
-      void PAGES.mine(mount, me);
+      void Promise.resolve(PAGES.mine(mount, me)).catch((loadError) => {
+        console.error("league submissions refresh failed", loadError);
+        showPageFailure(mount);
+      });
     };
   },
 
@@ -639,11 +672,12 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async money(mount, me) {
     mount.innerHTML = `<h1 class="lg-h">Money</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const { data } = await client
+    const { data, error } = await client
       .from("league_payouts")
       .select("amount_cents, note, status, created_at")
       .eq("creator_id", me.user_id)
       .order("created_at", { ascending: false });
+    requireQuery(error, "payout history load");
     const rows = (data ?? []) as Array<{ amount_cents: number; note: string | null; status: string; created_at: string }>;
     const total = rows.filter((r) => r.status === "paid").reduce((a, r) => a + r.amount_cents, 0);
     // Live accrual for formula sprints: the number that moves between
@@ -747,11 +781,12 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       const client = await getSupabaseClient();
       const now = new Date();
       const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-      const { count } = await client
+      const { count, error } = await client
         .from("league_render_log")
         .select("id", { count: "exact", head: true })
         .eq("creator_id", me.user_id)
         .gte("created_at", monthStart);
+      requireQuery(error, "render usage load");
       const used = count ?? 0;
       const num = mount.querySelector<HTMLElement>("#lg-quota-num");
       const fill = mount.querySelector<HTMLElement>("#lg-quota-fill");
@@ -765,16 +800,19 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async admin(mount) {
     mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const [{ data: apps }, { data: pending }, { data: allSprints }] = await Promise.all([
+    const [appsResult, pendingResult, sprintsResult] = await Promise.all([
       client.from("league_creators").select("*").eq("status", "applied").order("created_at"),
       client.from("league_submissions").select("*").eq("status", "pending").order("created_at"),
       // Every status, drafts included — loadSprints deliberately hides drafts
       // from creators, and the admin is exactly who drafts exist for.
       client.from("league_sprints").select("*").order("starts_at", { ascending: false }),
     ]);
-    const applications = (apps ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
-    const subs = (pending ?? []) as SubmissionRow[];
-    const sprints = (allSprints ?? []) as SprintRow[];
+    requireQuery(appsResult.error, "applications load");
+    requireQuery(pendingResult.error, "pending submissions load");
+    requireQuery(sprintsResult.error, "admin sprints load");
+    const applications = (appsResult.data ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
+    const subs = (pendingResult.data ?? []) as SubmissionRow[];
+    const sprints = (sprintsResult.data ?? []) as SprintRow[];
     const f = DEFAULT_FORMULA;
 
     const sprintChip = (s: string) =>
@@ -915,24 +953,27 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         : `<p class="lg-sub">No closed formula sprint ready to settle.</p>`;
       mount.querySelectorAll<HTMLButtonElement>("[data-settle]").forEach((b) => {
         b.onclick = async () => {
-          const sprint = sprints.find((s) => s.id === b.dataset.settle)!;
-          const f = sprintFormula(sprint)!;
-          out.innerHTML = `<p class="lg-sub">Computing…</p>`;
-          const { data: creators } = await client
+          try {
+            const sprint = sprints.find((s) => s.id === b.dataset.settle)!;
+            const f = sprintFormula(sprint)!;
+            out.innerHTML = `<p class="lg-sub">Computing…</p>`;
+            const { data: creators, error: creatorsError } = await client
             .from("league_creators").select("user_id, display_name, handle").eq("status", "approved");
-          const rows = await Promise.all(((creators ?? []) as CreatorRow[]).map(async (c) => {
-            const videos = await myVideoTotalsFor(sprint, c.user_id);
-            return { c, accrued: creatorAccruedCents(f, videos), totals: sumTotals(videos) };
-          }));
-          const earning = rows.filter((r) => r.accrued > 0).sort((a, b2) => b2.accrued - a.accrued);
-          const totalAccrued = earning.reduce((a, r) => a + r.accrued, 0);
-          const scale = poolScale(sprint.pool_cents, totalAccrued);
-          const { data: paidRows } = await client
-            .from("league_payouts")
-            .select("creator_id")
-            .eq("sprint_id", sprint.id);
-          const paid = new Set((paidRows ?? []).map((row: { creator_id: string }) => row.creator_id));
-          out.innerHTML = `
+            requireQuery(creatorsError, "settlement creators load");
+            const rows = await Promise.all(((creators ?? []) as CreatorRow[]).map(async (c) => {
+              const videos = await myVideoTotalsFor(sprint, c.user_id);
+              return { c, accrued: creatorAccruedCents(f, videos), totals: sumTotals(videos) };
+            }));
+            const earning = rows.filter((r) => r.accrued > 0).sort((a, b2) => b2.accrued - a.accrued);
+            const totalAccrued = earning.reduce((a, r) => a + r.accrued, 0);
+            const scale = poolScale(sprint.pool_cents, totalAccrued);
+            const { data: paidRows, error: paidError } = await client
+              .from("league_payouts")
+              .select("creator_id")
+              .eq("sprint_id", sprint.id);
+            requireQuery(paidError, "settlement payouts load");
+            const paid = new Set((paidRows ?? []).map((row: { creator_id: string }) => row.creator_id));
+            out.innerHTML = `
             <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
             <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00 — pool covers everyone" : scale.toFixed(3)}</b></div>
@@ -949,21 +990,25 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           // creator's own Money page, and both promise "real money that
           // actually moved". Per row rather than one big button, because each
           // transfer is its own decision and its own bank action.
-          out.querySelectorAll<HTMLButtonElement>("[data-pay]").forEach((btn) => {
-            btn.onclick = async () => {
-              const r = earning[Number(btn.dataset.pay)];
-              if (!r) return;
-              btn.disabled = true;
-              const { data: recorded, error } = await client.rpc("record_league_payout", {
-                p_sprint_id: sprint.id,
-                p_creator_id: r.c.user_id,
-                p_amount_cents: Math.round(r.accrued * scale),
-                p_note: sprint.name,
-              });
-              btn.textContent = error ? "Failed — retry" : recorded === false ? "Already recorded" : "Recorded";
-              if (error) btn.disabled = false;
-            };
-          });
+            out.querySelectorAll<HTMLButtonElement>("[data-pay]").forEach((btn) => {
+              btn.onclick = async () => {
+                const r = earning[Number(btn.dataset.pay)];
+                if (!r) return;
+                btn.disabled = true;
+                const { data: recorded, error } = await client.rpc("record_league_payout", {
+                  p_sprint_id: sprint.id,
+                  p_creator_id: r.c.user_id,
+                  p_amount_cents: Math.round(r.accrued * scale),
+                  p_note: sprint.name,
+                });
+                btn.textContent = error ? "Failed — retry" : recorded === false ? "Already recorded" : "Recorded";
+                if (error) btn.disabled = false;
+              };
+            });
+          } catch (error) {
+            console.error("league settlement computation failed", error);
+            out.innerHTML = `<p class="lg-error">Settlement could not be computed. Nothing was changed; retry when the connection is stable.</p>`;
+          }
         };
       });
     }
@@ -973,13 +1018,38 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     // enforces — these buttons are the convenience, not the boundary.
     mount.querySelectorAll<HTMLButtonElement>("[data-sprint-activate]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_sprints").update({ status: "active" }).eq("id", b.dataset.sprintActivate!);
+        b.disabled = true;
+        const { error } = await client.from("league_sprints").update({ status: "active" }).eq("id", b.dataset.sprintActivate!);
+        if (error) {
+          console.error("league sprint activation failed", error.code);
+          b.textContent = "Failed — retry";
+          b.disabled = false;
+          return;
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-sprint-close]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_sprints").update({ status: "closed" }).eq("id", b.dataset.sprintClose!);
+        b.disabled = true;
+        b.textContent = "Refreshing final counts…";
+        const token = await currentAccessToken().catch(() => null);
+        const response = await fetch("/api/league-track", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ sprintId: b.dataset.sprintClose }),
+        }).catch(() => null);
+        const result = response
+          ? await response.json().catch(() => null) as { error?: string } | null
+          : null;
+        if (!response?.ok) {
+          b.textContent = result?.error ?? "Close failed — retry";
+          b.disabled = false;
+          return;
+        }
         refresh();
       };
     });
@@ -1037,35 +1107,66 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       };
     });
 
-    const refresh = () => void PAGES.admin(mount, undefined as never);
+    const refresh = () => void Promise.resolve(PAGES.admin(mount, undefined as never)).catch((error) => {
+      console.error("league admin refresh failed", error);
+      showPageFailure(mount);
+    });
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {
       b.onclick = async () => {
+        b.disabled = true;
         const row = b.closest(".lg-row")!;
         const grants: Record<string, boolean> = {};
         row.querySelectorAll<HTMLInputElement>("[data-grant]").forEach((g) => (grants[g.dataset.grant!] = g.checked));
         const quota = Number(row.querySelector<HTMLInputElement>("[data-quota]")?.value || 30);
-        await client.from("league_creators").update({
+        const { error } = await client.from("league_creators").update({
           status: "approved", pillar_grants: grants, monthly_render_quota: quota,
           approved_at: new Date().toISOString(),
         }).eq("user_id", b.dataset.approve!);
+        if (error) {
+          console.error("league creator approval failed", error.code);
+          b.textContent = "Failed — retry";
+          b.disabled = false;
+          return;
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-reject]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_creators").update({ status: "rejected" }).eq("user_id", b.dataset.reject!);
+        b.disabled = true;
+        const { error } = await client.from("league_creators").update({ status: "rejected" }).eq("user_id", b.dataset.reject!);
+        if (error) {
+          console.error("league creator rejection failed", error.code);
+          b.textContent = "Failed — retry";
+          b.disabled = false;
+          return;
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-sub-approve]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_submissions").update({ status: "approved" }).eq("id", b.dataset.subApprove!);
+        b.disabled = true;
+        const { error } = await client.from("league_submissions").update({ status: "approved" }).eq("id", b.dataset.subApprove!);
+        if (error) {
+          console.error("league submission approval failed", error.code);
+          b.textContent = "Failed — retry";
+          b.disabled = false;
+          return;
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-sub-reject]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_submissions").update({ status: "rejected" }).eq("id", b.dataset.subReject!);
+        b.disabled = true;
+        const { error } = await client.from("league_submissions").update({ status: "rejected" }).eq("id", b.dataset.subReject!);
+        if (error) {
+          console.error("league submission rejection failed", error.code);
+          b.textContent = "Failed — retry";
+          b.disabled = false;
+          return;
+        }
         refresh();
       };
     });
@@ -1074,11 +1175,21 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         const id = b.dataset.snap!;
         const num = (sel: string) =>
           Math.max(0, Number(mount.querySelector<HTMLInputElement>(`[data-${sel}="${id}"]`)?.value || 0));
-        await client.from("league_stat_snapshots").insert({
+        b.disabled = true;
+        const { error } = await client.from("league_stat_snapshots").insert({
           submission_id: id, views: num("v"), likes: num("l"), comments: num("c"), source: "manual",
         });
+        if (error) {
+          console.error("league manual snapshot failed", error.code);
+          b.textContent = "Failed — retry";
+          b.disabled = false;
+          return;
+        }
         b.textContent = "Recorded";
-        window.setTimeout(() => (b.textContent = "Record counts"), 1400);
+        window.setTimeout(() => {
+          b.textContent = "Record counts";
+          b.disabled = false;
+        }, 1400);
       };
     });
   },
@@ -1111,10 +1222,14 @@ async function boot(): Promise<void> {
   }
 
   const client = await getSupabaseClient();
-  const [{ data: me }, { data: staffRow }] = await Promise.all([
+  const [creatorResult, staffResult] = await Promise.all([
     client.from("league_creators").select("*").eq("user_id", user.id).maybeSingle(),
     client.from("app_admins").select("user_id").maybeSingle(),
   ]);
+  requireQuery(creatorResult.error, "creator account load");
+  requireQuery(staffResult.error, "staff access load");
+  const me = creatorResult.data;
+  const staffRow = staffResult.data;
   const staff = Boolean(staffRow);
   const row = me as CreatorRow | null;
   if (!row) {
@@ -1132,4 +1247,8 @@ async function boot(): Promise<void> {
   return renderDash(row, staff);
 }
 
-void boot();
+void boot().catch((error) => {
+  console.error("league boot failed", error);
+  root.innerHTML = `${topBarHTML()}<div class="lg-gate"><h1>Couldn't load the League</h1>
+    <p class="lg-error">Nothing was changed. Check the connection and reload this page.</p></div>`;
+});

@@ -51,10 +51,13 @@ interface PriceReport {
 
 export async function GET(request: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
-  const supplied = new URL(request.url).searchParams.get("key");
   // Fails closed when CRON_SECRET is unset, rather than open. An unconfigured
-  // deployment is exactly where a leak would go unnoticed.
-  if (!secret || supplied !== secret) return json({ error: "Not found" }, 404);
+  // deployment is exactly where a leak would go unnoticed. Keep the secret in
+  // the Authorization header: query strings are routinely retained in access
+  // logs, browser history, screenshots, and copied diagnostic URLs.
+  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+    return json({ error: "Not found" }, 404);
+  }
 
   const key = process.env.STRIPE_SECRET_KEY ?? "";
   // The prefix, not a value. sk_live_ vs sk_test_ is the single most useful

@@ -36,22 +36,38 @@ function isBilling(value: unknown): value is Billing {
   return value === "monthly" || value === "annual";
 }
 
+export function isStripePriceId(value: unknown): value is string {
+  return typeof value === "string" && /^price_[A-Za-z0-9]+$/.test(value);
+}
+
+function envPrice(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name];
+    if (!value) continue;
+    if (isStripePriceId(value)) return value;
+    // Product ids (prod_...) are the common mistake. Name the broken variable
+    // server-side without ever printing its value into logs or the response.
+    console.error(`Checkout price configuration is invalid: ${name} must contain a Stripe price id`);
+  }
+  return null;
+}
+
 // Each price answers to two names: the one the code was written against and
 // the one the values were actually stored under in Vercel. Renaming deployed
 // environment variables to satisfy the code is exactly the kind of manual step
 // that keeps a checkout dead for days; the code can just look in both places.
 function configuredPrice(tier: PaidTier, billing: Billing): string | null {
   if (tier === "starter") {
-    return process.env.STRIPE_STARTER_PRICE_ID || process.env.STRIPE_PRICE_STARTER_MONTHLY || null;
+    return envPrice("STRIPE_STARTER_PRICE_ID", "STRIPE_PRICE_STARTER_MONTHLY");
   }
   if (billing === "annual") {
     // No monthly fallback on purpose. If the annual price is not configured,
     // the honest failure is "the yearly plan is not connected yet" — silently
     // charging somebody monthly when they chose and expected to be charged for
     // a year is the one outcome worse than a broken button.
-    return process.env.STRIPE_MAX_ANNUAL_PRICE_ID || process.env.STRIPE_PRICE_MAX_ANNUAL || null;
+    return envPrice("STRIPE_MAX_ANNUAL_PRICE_ID", "STRIPE_PRICE_MAX_ANNUAL");
   }
-  return process.env.STRIPE_MAX_PRICE_ID || process.env.STRIPE_PRICE_MAX_MONTHLY || null;
+  return envPrice("STRIPE_MAX_PRICE_ID", "STRIPE_PRICE_MAX_MONTHLY");
 }
 
 async function releaseReservation(userId: string, reservationId: string): Promise<void> {
@@ -91,8 +107,8 @@ export async function POST(request: Request): Promise<Response> {
       if (entitlementError) throw new Error(`Scan pricing lookup failed: ${entitlementError.message}`);
       const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
       const scanPrice = member
-        ? process.env.STRIPE_MEMBER_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER || null
-        : process.env.STRIPE_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_STANDARD || null;
+        ? envPrice("STRIPE_MEMBER_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_MEMBER")
+        : envPrice("STRIPE_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_STANDARD");
       if (!scanPrice) return json({ error: "Single scans are still being connected." }, 503);
       const session = await getStripe().checkout.sessions.create(
         {
@@ -126,8 +142,7 @@ export async function POST(request: Request): Promise<Response> {
         .eq("user_id", user.id)
         .maybeSingle<{ stripe_customer_id: string | null }>();
       if (entitlementError) throw new Error(`Voice checkout lookup failed: ${entitlementError.message}`);
-      const voicePrice =
-        process.env.STRIPE_VOICED_PRICE_ID || process.env.STRIPE_PRICE_VOICED_ANALYSIS || null;
+      const voicePrice = envPrice("STRIPE_VOICED_PRICE_ID", "STRIPE_PRICE_VOICED_ANALYSIS");
       if (!voicePrice) return json({ error: "Voiced analysis checkout is still being connected." }, 503);
       const session = await getStripe().checkout.sessions.create(
         {
