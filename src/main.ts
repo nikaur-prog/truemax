@@ -17,6 +17,7 @@ import {
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
 import { loadArchive, pruneArchivesTo, saveArchive } from "./engine/scanArchive.js";
+import { setSidePriorSuspended, writeSidePrior } from "./engine/sidePrior.js";
 import { closeScanRecall, setScanReopen } from "./ui/scanRecall.js";
 import type { StoredScan } from "./engine/history.js";
 import { maybeAdoptAvatar } from "./engine/avatar.js";
@@ -584,6 +585,7 @@ function ensureSex(then: () => void): void {
         selectedSex = sex;
         sexChosen = true;
         scanSubject = subject;
+        setSidePriorSuspended(scanSubject !== null);
         // A guest's answer is about the guest, so it must not overwrite the
         // owner's remembered population.
         if (!subject) storeSex(sex);
@@ -618,6 +620,7 @@ function ensureSex(then: () => void): void {
         selectedSex = own;
         sexChosen = true;
         scanSubject = null;
+        setSidePriorSuspended(false);
         storeSex(own);
         paintRefPop();
         showGuide(own);
@@ -633,6 +636,7 @@ function ensureSex(then: () => void): void {
           selectedSex = sex;
           sexChosen = true;
           scanSubject = null;
+          setSidePriorSuspended(false);
           storeSex(sex);
           paintRefPop();
           showGuide(sex);
@@ -664,6 +668,7 @@ function askLateSubject(): Promise<boolean> {
       (answer) => {
         subjectAsked = true;
         scanSubject = answer.self ? null : { name: answer.subject.name };
+        setSidePriorSuspended(scanSubject !== null);
         resolve(true);
       },
       () => {
@@ -1193,29 +1198,31 @@ async function openCamera(): Promise<void> {
     // under the sticky header. The result is a capture screen whose subject —
     // the live preview — is the one thing off screen.
     //
-    // Corrected after a frame rather than immediately: the collapse is a CSS
-    // transition, so the layout this is measuring against does not exist yet on
-    // the same tick.
+    // Corrected REPEATEDLY across the collapse, not once. The single-frame
+    // version measured a layout the CSS transition had not finished producing:
+    // one rAF after `camera-live` the headline still holds most of its height,
+    // the measurement says "nothing to correct", and then the collapse
+    // completes and scroll anchoring drags the page down — which is how the
+    // directive pill ("Move up", "Hold still") ended up above the viewport on
+    // a phone, on the one screen where that pill is the whole interface. So
+    // the correction re-checks through the transition window and pins the
+    // frame's top a breath below the header, in BOTH directions: wherever the
+    // page was, the directive is on screen when the camera is.
     //
-    // A hard jump, not a smooth one. This is a correction of something the
-    // viewer never asked for, and animating it would read as the page moving on
-    // its own a second time.
-    //
-    // And it only ever scrolls UP. The old version scrolled TO the frame, which
-    // on a laptop — where the whole capture screen already fits above the fold —
-    // meant opening the camera pushed the page down a few hundred pixels and
-    // took the instructions above the frame with it. That is the same class of
-    // bug this was written to fix, in the opposite direction: the page moving on
-    // its own when nothing was wrong. If the frame is already sitting
-    // comfortably below the header there is nothing to correct, so nothing
-    // happens.
-    requestAnimationFrame(() => {
-      const rect = el.stage.getBoundingClientRect();
-      // A little air above, so the frame is not flush under the header.
+    // Hard jumps, not smooth ones. These are corrections of movement the
+    // viewer never asked for, and animating them would read as the page
+    // moving on its own a second time.
+    {
       const AIR = 72;
-      if (rect.top >= AIR - 1) return;
-      window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - AIR), behavior: "auto" });
-    });
+      const settle = (deadline: number) => {
+        const rect = el.stage.getBoundingClientRect();
+        if (Math.abs(rect.top - AIR) > 8) {
+          window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - AIR), behavior: "auto" });
+        }
+        if (performance.now() < deadline) requestAnimationFrame(() => settle(deadline));
+      };
+      requestAnimationFrame(() => settle(performance.now() + 700));
+    }
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";
@@ -1470,6 +1477,7 @@ function resetToUpload(): void {
   lastSide = null;
   captureMethod = null;
   scanSubject = null;
+  setSidePriorSuspended(false);
   subjectAsked = false;
   skipCoveringCheck = false;
   feedbackInFlight = null;
@@ -1942,6 +1950,10 @@ async function runFullAnalysis(
     const guest = scanSubject !== null;
     const subjectName = scanSubject?.name;
     const sidePoints = lastSide?.points ?? null;
+    const sideDims = lastSide?.photo ? { w: lastSide.photo.width, h: lastSide.photo.height } : null;
+    // The owner's confirmed points become the prior for their next scan —
+    // their own ears instead of the population template. Never a guest's.
+    if (!guest && sidePoints && sideDims) writeSidePrior(sidePoints, sideDims.w, sideDims.h);
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
