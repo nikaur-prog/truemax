@@ -5,6 +5,9 @@ import { detect } from "../engine/landmarker.js";
 import { cloneSidePoints } from "../engine/sideFeedbackPayload.js";
 import type { SideSeedMethod } from "../engine/sideFeedbackPayload.js";
 import type { SideSilhouetteCheck } from "../engine/photoEligibility.js";
+import { sideMaskGeometry } from "../engine/sideMask.js";
+import type { SideMaskGeometry } from "../engine/sideMask.js";
+import { readSidePrior } from "../engine/sidePrior.js";
 
 // Drag-to-verify landmark editor for the side profile. MediaPipe's visible-side
 // mesh is the primary seed; a background-independent silhouette estimate is a
@@ -371,8 +374,14 @@ export const TEMPLATE: Record<SidePointId, [number, number]> = {
   labialeSuperius: [-0.062, 0.651],
   labialeInferius: [-0.096, 0.789],
   pogonion: [-0.159, 0.942],
-  menton: [-0.305, 0.988],
-  gonion: [-0.940, 0.810],
+  // The five placed points below were refitted from the 33-face labeled
+  // synthetic dataset (tools/side-fit.mjs, .side-dataset/) in 2026-08. The
+  // striking result was how little they moved: gonion matched the old
+  // two-fixture fit to 0.004, which says the E/F fixtures were placed well
+  // and the template's residual error lives in the per-face head-width
+  // estimate, not in these constants.
+  menton: [-0.280, 0.986],
+  gonion: [-0.936, 0.808],
   // CORRECTED from the fitted 0.297, which put this 26mm ABOVE the ear notch —
   // up on the temple rather than on the jaw.
   //
@@ -394,9 +403,9 @@ export const TEMPLATE: Record<SidePointId, [number, number]> = {
   // reference profile the seeder is built from, and therefore very nearly every
   // real face put through it. At the corrected height the same template scores
   // 0.79, inside one sd of the 0.72 norm. sideTemplate.test.ts now holds this.
-  condylion: [-0.927, 0.420],
-  cervicale: [-0.678, 0.969],
-  tragion: [-1.0, 0.435],
+  condylion: [-0.963, 0.419],
+  cervicale: [-0.648, 0.967],
+  tragion: [-1.0, 0.426],
 };
 
 function silhouetteGeometry(canvas: HTMLCanvasElement): SilhouetteGeometry | null {
@@ -771,6 +780,261 @@ export function seedSidePoints(
     method: useMesh ? "mesh" : "silhouette",
     confidence: Math.max(0, useMesh ? meshScore : silhouetteScore),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The segmentation seeder: the profile CURVE, read off a real mask.
+//
+// The old silhouette path failed for one structural reason: its colour-model
+// mask returned nothing on ordinary photographs, so true profiles — exactly
+// the images where MediaPipe's mesh gives up — fell through to a blind,
+// centred ladder of fractions. Points on hair, points in the air, points a
+// face-width from the face. The dataset run that preceded this rewrite put
+// the mask's success rate at zero out of eleven ordinary bedroom photos.
+//
+// The segmentation model the app already ships answers the question properly.
+// Its face-skin class draws the actual face, and the face's front edge IS the
+// profile line the nine front landmarks live on. Better still, the landmarks
+// are the EXTREMA of that curve: walking down the edge, protrusion dips at
+// nasion, peaks at the nose tip, dips below the nose, peaks at the lips and
+// again at the chin. So the front points are found by reading the curve —
+// anatomy, not fractions — with fractional windows only bounding WHERE each
+// extremum is searched for. Trichion needs no search at all: the top of the
+// face-skin region is the hairline by the segmenter's own definition.
+//
+// The back points stay template-placed (they are not on any silhouette), but
+// the head width the template needs is now MEASURED: the head mask's span at
+// nose height runs nose tip to the back of the skull, and the ear canal sits
+// at a stable fraction of that depth.
+// ---------------------------------------------------------------------------
+
+// Ear canal depth as a fraction of the nose-to-back-of-skull span, and the
+// small backset of menton from the chin's front edge, in face heights.
+// Initial values from anatomy; refit against the labeled dataset.
+const SEG_EAR_DEPTH = 0.62;
+const MENTON_BACKSET = 0.05;
+
+function seedFromMask(
+  g: SideMaskGeometry,
+): { points: SidePoints; faceDir: number; clipped: boolean } | null {
+  const { faceTop, faceBottom, front, faceDir } = g;
+  const H = faceBottom - faceTop;
+  if (H < 12) return null;
+
+  // A clipped profile bends every window below: with the nose against the
+  // frame edge the front curve flattens onto the border and the extrema mean
+  // less. The seed is still built — a mostly-right seed beats the blind
+  // centred ladder that is the only alternative when the mesh is absent —
+  // but it is FLAGGED, which halves its score in arbitration (so a real mesh
+  // wins) and drops the reported confidence (so the verifier asks loudly).
+  let clippedRows = 0;
+  let rows = 0;
+  const edgePad = g.w * 0.015;
+  for (let y = faceTop; y <= faceBottom; y++) {
+    const v = front[y];
+    if (Number.isNaN(v)) continue;
+    rows++;
+    if (v <= edgePad || v >= g.w - edgePad) clippedRows++;
+  }
+  if (rows === 0) return null;
+  const clipped = clippedRows / rows > 0.2;
+
+  // Smoothed protrusion per row: larger = further forward, whatever the
+  // facing. A 5-row box kills single-row mask jitter without flattening the
+  // real extrema, which are tens of rows apart at this resolution.
+  const prot = new Float32Array(g.h).fill(NaN);
+  for (let y = faceTop; y <= faceBottom; y++) {
+    let sum = 0;
+    let n = 0;
+    for (let k = -2; k <= 2; k++) {
+      const v = front[y + k];
+      if (!Number.isNaN(v)) {
+        sum += v;
+        n++;
+      }
+    }
+    if (n) prot[y] = (faceDir * sum) / n;
+  }
+
+  const rowAt = (f: number) => faceTop + Math.round(f * H);
+  const extremum = (y0: number, y1: number, sign: 1 | -1): number => {
+    let best = -1;
+    let bestV = -Infinity;
+    const lo = Math.max(faceTop, Math.min(y0, y1));
+    const hi = Math.min(faceBottom, Math.max(y0, y1));
+    for (let y = lo; y <= hi; y++) {
+      const v = prot[y];
+      if (Number.isNaN(v)) continue;
+      if (sign * v > bestV) {
+        bestV = sign * v;
+        best = y;
+      }
+    }
+    return best;
+  };
+
+  // The anchors, in the order the curve produces them. Each window is wide —
+  // it bounds the search, it does not place the point — and every step is
+  // ordered off the one before it so a weak extremum cannot reorder anatomy.
+  const noseY = extremum(rowAt(0.28), rowAt(0.75), 1);
+  if (noseY < 0) return null;
+  // Nose-anchored, never hairline-anchored. The forehead tapers back toward
+  // the hairline on most heads — and on a bald head the dome does the same
+  // higher up — so a window that reaches far above the nose hands the argmin
+  // the taper instead of the nasofrontal dip: nasion at the hairline,
+  // glabella above it on the hair. Across the labeled dataset the real
+  // nasion sits 0.19-0.20 face heights above the nose tip, so the window
+  // brackets that and nothing more.
+  const nasionY = extremum(noseY - Math.round(0.24 * H), noseY - Math.round(0.08 * H), -1);
+  // Just above the nasion dip, not anywhere on the forehead: on a sloped
+  // forehead the hairline protrudes more than the brow ridge, and a window
+  // reaching the hairline put glabella on the hair.
+  const glabellaY =
+    nasionY > 0 ? extremum(nasionY - Math.round(0.15 * H), nasionY - Math.round(0.03 * H), 1) : -1;
+  const subnasaleY = extremum(noseY + 2, noseY + Math.round(0.14 * H), -1);
+  const lipTopY =
+    subnasaleY > 0 ? extremum(subnasaleY + 1, subnasaleY + Math.round(0.12 * H), 1) : -1;
+  const lipLowY =
+    lipTopY > 0 ? extremum(lipTopY + Math.round(0.02 * H), lipTopY + Math.round(0.14 * H), 1) : -1;
+  const pogonionY =
+    lipLowY > 0 ? extremum(lipLowY + Math.round(0.03 * H), faceBottom, 1) : -1;
+  if (nasionY < 0 || subnasaleY < 0 || lipTopY < 0 || lipLowY < 0 || pogonionY < 0) return null;
+
+  const edge = (y: number): Pt | null => {
+    const v = front[y];
+    if (Number.isNaN(v)) return null;
+    return { x: v * g.scaleX, y: y * g.scaleY };
+  };
+  const need = (y: number): Pt => edge(y) ?? { x: (faceDir * prot[y] || 0) * g.scaleX, y: y * g.scaleY };
+
+  const mentonEdge = need(faceBottom);
+  const points = {
+    trichion: need(faceTop),
+    glabella: need(glabellaY > 0 ? glabellaY : rowAt(0.1)),
+    nasion: need(nasionY),
+    pronasale: need(noseY),
+    subnasale: need(subnasaleY),
+    labialeSuperius: need(lipTopY),
+    labialeInferius: need(lipLowY),
+    pogonion: need(pogonionY),
+    // The chin's lowest point sits a little behind its front edge.
+    menton: {
+      x: mentonEdge.x - faceDir * MENTON_BACKSET * H * g.scaleY,
+      y: mentonEdge.y,
+    },
+    // Overwritten by placeBackPoints below; present so the object is complete.
+    gonion: mentonEdge,
+    condylion: mentonEdge,
+    cervicale: mentonEdge,
+    tragion: mentonEdge,
+  } as SidePoints;
+
+  const f = headFrame(points);
+  if (!f) return null;
+  // Head width, measured: the head mask's span at nose height runs from the
+  // nose tip to the back of the skull, and the ear canal sits at a stable
+  // fraction of that depth. Falls back to the population average when the
+  // span degenerates (hair out of frame, mask clipped).
+  const span = g.headSpan(noseY);
+  let estimate = Number.NaN;
+  if (span) {
+    const back = faceDir === 1 ? span[0] : span[1];
+    estimate = Math.abs(front[noseY] - back) * g.scaleX * SEG_EAR_DEPTH;
+  }
+  placeBackPoints(points, f, headWidthFrom(estimate, f.vlen));
+  return { points, faceDir, clipped };
+}
+
+/** onHeadFraction, but against the segmentation head mask. */
+function onMaskFraction(points: SidePoints, g: SideMaskGeometry, canvasW: number): number {
+  const ids = Object.keys(points) as SidePointId[];
+  let on = 0;
+  for (const id of ids) {
+    const p = points[id];
+    const span = g.headSpan(p.y / g.scaleY);
+    const pad = canvasW * 0.02;
+    if (span && p.x >= span[0] * g.scaleX - pad && p.x <= span[1] * g.scaleX + pad) on++;
+  }
+  return on / ids.length;
+}
+
+/**
+ * The seeding entry the app uses: segmentation-aware, async because the
+ * segmenter is. Candidates are scored by how much of them lands on the head,
+ * against the best mask available. The mesh keeps winning ties — it measures
+ * named anatomy — but it now has to actually beat a seed whose front points
+ * were read off the person's real profile edge, instead of only ever
+ * competing with a blind ladder.
+ *
+ * The sync seedSidePoints below survives as the no-segmentation fallback and
+ * for callers that cannot await.
+ */
+export async function seedSidePointsSmart(canvas: HTMLCanvasElement): Promise<SideSeed> {
+  let g: SideMaskGeometry | null = null;
+  try {
+    g = await sideMaskGeometry(canvas);
+  } catch {
+    g = null;
+  }
+  if (!g) return seedSidePoints(canvas);
+
+  const mesh = seedFromLandmarks(canvas);
+  const maskSeed = seedFromMask(g);
+  const meshScore = mesh ? onMaskFraction(mesh.points, g, canvas.width) : -1;
+  const maskScore = maskSeed
+    ? onMaskFraction(maskSeed.points, g, canvas.width) * (maskSeed.clipped ? 0.5 : 1)
+    : -1;
+  if (!mesh && !maskSeed) return seedSidePoints(canvas);
+
+  const useMesh = mesh !== null && meshScore >= maskScore;
+  const seed = useMesh ? mesh! : maskSeed!;
+  const cleaned = sanitizeSeed(seed, canvas.width, canvas.height);
+  applyOwnPrior(cleaned.points);
+  return {
+    points: keepSeedReachable(cleaned.points, canvas.width, canvas.height),
+    faceDir: cleaned.faceDir,
+    method: useMesh ? "mesh" : "segmentation",
+    confidence: Math.max(0, useMesh ? meshScore : maskScore),
+  };
+}
+
+// The returning person's own ears, instead of the population's.
+//
+// The template's residual error is the head-width estimate, and a person who
+// has confirmed their points once has already measured their own head: their
+// last confirmed set says where THEIR tragion, condylion, gonion and
+// cervicale sit in their head's own frame. That frame is rebuilt from the
+// fresh seed's front points — which the edge and the mesh place well — and
+// the stored cluster is projected through it, scaled by the ratio of head
+// heights, so it lands correctly whatever the new photo's size, position or
+// facing. The head frame flips its own u-axis toward the nose, which is what
+// makes the transfer facing-independent.
+//
+// Owner only: engine/sidePrior.ts returns nothing while a guest is being
+// scanned, and the write side is gated in main.ts to the owner's own scans.
+const PRIOR_POINTS: SidePointId[] = ["gonion", "condylion", "cervicale", "tragion"];
+
+function applyOwnPrior(points: SidePoints): boolean {
+  const prior = readSidePrior();
+  if (!prior) return false;
+  const pf = headFrame(prior.points);
+  const nf = headFrame(points);
+  if (!pf || !nf) return false;
+  const priorHeadW = Math.abs(alongU(pf, prior.points.tragion.x, prior.points.tragion.y) - pf.uNose);
+  if (!(priorHeadW > 1)) return false;
+  const scale = nf.vlen / pf.vlen;
+  const V = (f: HeadFrame, x: number, y: number) => (x - f.ox) * f.vx + (y - f.oy) * f.vy;
+  for (const id of PRIOR_POINTS) {
+    const fu = alongU(pf, prior.points[id].x, prior.points[id].y) - pf.uNose;
+    const fv = V(pf, prior.points[id].x, prior.points[id].y);
+    const u = nf.uNose + fu * scale;
+    const v = fv * scale;
+    points[id] = {
+      x: nf.ox + nf.ux * u + nf.vx * v,
+      y: nf.oy + nf.uy * u + nf.vy * v,
+    };
+  }
+  return true;
 }
 
 // How much of a seed actually sits on the person.

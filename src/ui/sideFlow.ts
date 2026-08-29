@@ -15,7 +15,7 @@ import {
   stopThinking,
 } from "./scanSounds.js";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
-import { mountVerifier, seedSidePoints } from "./sideVerify.js";
+import { mountVerifier, seedSidePointsSmart } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
@@ -551,7 +551,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // and mirroring somebody's photo on a wrong guess is worse than leaving a
   // left-facing photo alone — the analysis handles either direction; this
   // flip exists for consistency, not correctness.
-  let seed = seedSidePoints(e.canvas);
+  let seed = await seedSidePointsSmart(e.canvas);
   if (seed.faceDir === -1 && (seed.method === "mesh" || seed.confidence >= 0.5)) {
     const w2 = e.canvas.width;
     const flipped = document.createElement("canvas");

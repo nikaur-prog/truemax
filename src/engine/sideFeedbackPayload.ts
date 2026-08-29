@@ -4,7 +4,9 @@ import type { SidePointId, SidePoints } from "./sideMetrics.js";
 export const SIDE_FEEDBACK_CONSENT_VERSION = "side-landmark-feedback-v1";
 export const SIDE_FEEDBACK_RETENTION_DAYS = 90;
 
-export type SideSeedMethod = "mesh" | "silhouette" | "existing";
+export type SideSeedMethod = "mesh" | "silhouette" | "segmentation" | "existing";
+
+const SEED_METHODS: ReadonlySet<string> = new Set(["mesh", "silhouette", "segmentation", "existing"]);
 
 export interface SideFeedbackIntent {
   scanId: string;
@@ -61,7 +63,7 @@ export function sideFeedbackMetadataIssues(value: unknown): string[] {
   if (m.consentVersion !== SIDE_FEEDBACK_CONSENT_VERSION) issues.push("Consent version is invalid");
   if (m.faceDir !== 1 && m.faceDir !== -1) issues.push("Face direction is invalid");
   if (!dimension(m.width) || !dimension(m.height)) issues.push("Image dimensions are invalid");
-  if (m.seedMethod !== "mesh" && m.seedMethod !== "silhouette" && m.seedMethod !== "existing") {
+  if (typeof m.seedMethod !== "string" || !SEED_METHODS.has(m.seedMethod)) {
     issues.push("Seed method is invalid");
   }
   if (dimension(m.width) && dimension(m.height)) {
@@ -78,7 +80,7 @@ export function sideFeedbackIntentIssues(value: unknown, width: number, height: 
   if (!uuid(intent.scanId)) issues.push("Scan ID is invalid");
   if (!uuid(intent.submissionId)) issues.push("Submission ID is invalid");
   if (intent.consentVersion !== SIDE_FEEDBACK_CONSENT_VERSION) issues.push("Consent version is invalid");
-  if (intent.seedMethod !== "mesh" && intent.seedMethod !== "silhouette" && intent.seedMethod !== "existing") {
+  if (typeof intent.seedMethod !== "string" || !SEED_METHODS.has(intent.seedMethod)) {
     issues.push("Seed method is invalid");
   }
   issues.push(...pointIssues(intent.automaticPoints, width, height, "Automatic"));
