@@ -89,20 +89,22 @@ export interface LeagueRenderBudget {
  */
 export async function leagueRenderBudget(userId: string): Promise<LeagueRenderBudget | null> {
   const admin = getSupabaseAdmin();
-  const { data: creator } = await admin
+  const { data: creator, error: creatorError } = await admin
     .from("league_creators")
-    .select("status, monthly_render_quota")
+    .select("status, monthly_render_quota,pillar_grants")
     .eq("user_id", userId)
-    .maybeSingle<{ status: string; monthly_render_quota: number }>();
-  if (!creator || creator.status !== "approved") return null;
+    .maybeSingle<{ status: string; monthly_render_quota: number; pillar_grants: Record<string, unknown> | null }>();
+  if (creatorError) throw new Error(creatorError.message);
+  if (!creator || creator.status !== "approved" || creator.pillar_grants?.cta !== true) return null;
 
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-  const { count } = await admin
+  const { count, error: countError } = await admin
     .from("league_render_log")
     .select("id", { count: "exact", head: true })
     .eq("creator_id", userId)
     .gte("created_at", monthStart);
+  if (countError) throw new Error(countError.message);
   return { quota: creator.monthly_render_quota, used: count ?? 0 };
 }
 
@@ -112,7 +114,35 @@ export async function leagueRenderBudget(userId: string): Promise<LeagueRenderBu
  * into an error for the person who just paid a quota slot for it.
  */
 export async function recordLeagueRender(userId: string, kind: string): Promise<void> {
-  await getSupabaseAdmin().from("league_render_log").insert({ creator_id: userId, kind });
+  const { error } = await getSupabaseAdmin().from("league_render_log").insert({ creator_id: userId, kind });
+  if (error) throw new Error(error.message);
+}
+
+export type TtsMeter = "league" | "voice";
+
+export async function claimTtsRender(userId: string, meter: TtsMeter): Promise<string | null> {
+  const { data, error } = await getSupabaseAdmin().rpc("claim_tts_render", {
+    p_user_id: userId,
+    p_meter: meter,
+  });
+  if (error) throw new Error(error.message);
+  return typeof data === "string" && data ? data : null;
+}
+
+export async function finalizeTtsRender(reservationId: string, userId: string): Promise<void> {
+  const { data, error } = await getSupabaseAdmin().rpc("finalize_tts_render", {
+    p_reservation_id: reservationId,
+    p_user_id: userId,
+  });
+  if (error || data !== true) throw new Error(error?.message || "Narration reservation could not be finalized");
+}
+
+export async function refundTtsRender(reservationId: string, userId: string): Promise<void> {
+  const { error } = await getSupabaseAdmin().rpc("refund_tts_render", {
+    p_reservation_id: reservationId,
+    p_user_id: userId,
+  });
+  if (error) throw new Error(error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -127,11 +157,12 @@ export async function recordLeagueRender(userId: string, kind: string): Promise<
 
 /** How many voiced exports this account has bought and not yet used. */
 export async function voiceCreditBalance(userId: string): Promise<number> {
-  const { data } = await getSupabaseAdmin()
+  const { data, error } = await getSupabaseAdmin()
     .from("voice_credits")
     .select("balance")
     .eq("user_id", userId)
     .maybeSingle<{ balance: number }>();
+  if (error) throw new Error(error.message);
   return data?.balance ?? 0;
 }
 

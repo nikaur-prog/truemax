@@ -67,11 +67,12 @@ export async function POST(request: Request): Promise<Response> {
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in to generate a pair." }, 401);
 
-    const { data: staff } = await getSupabaseAdmin()
+    const { data: staff, error: staffError } = await getSupabaseAdmin()
       .from("app_admins")
       .select("user_id")
       .eq("user_id", user.id)
       .maybeSingle<{ user_id: string }>();
+    if (staffError) throw new Error(`Image access check failed: ${staffError.message}`);
     // Vague on purpose, same as the voiceover route: an endpoint that confirms
     // its own existence to everyone is an invitation to keep pushing at it.
     if (!staff) return json({ error: "Not found." }, 404);

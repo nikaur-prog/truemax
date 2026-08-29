@@ -211,6 +211,7 @@ export async function POST(request: Request): Promise<Response> {
   const declaredLength = Number(request.headers.get("content-length") || 0);
   if (declaredLength > MAX_BODY_BYTES) return json({ error: "Feedback upload is too large." }, 413);
 
+  let uploadClaim: { userId: string; submissionId: string } | null = null;
   try {
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in before sharing feedback." }, 401);
@@ -273,26 +274,31 @@ export async function POST(request: Request): Promise<Response> {
     //
     // Same gate as the /quick endpoints: a row in app_admins, granted by hand
     // in the SQL editor. Non-staff behaviour is unchanged, including the 429.
-    const { data: staff } = await admin
+    const { data: staff, error: staffError } = await admin
       .from("app_admins")
       .select("user_id")
       .eq("user_id", user.id)
       .maybeSingle<{ user_id: string }>();
+    if (staffError) throw new Error(`Feedback access check failed: ${staffError.message}`);
 
     if (!staff) {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { count: recentCount, error: countError } = await admin
-        .from("side_landmark_feedback")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .gte("created_at", since);
-      if (countError) throw new Error(`Feedback rate check failed: ${countError.message}`);
-      if ((recentCount ?? 0) >= MAX_SUBMISSIONS_PER_24_HOURS) {
+      const { data: claimOutcome, error: claimError } = await admin.rpc("claim_side_feedback_upload", {
+        p_user_id: user.id,
+        p_submission_id: metadata.submissionId,
+        p_limit: MAX_SUBMISSIONS_PER_24_HOURS,
+      });
+      if (claimError) throw new Error(`Feedback rate check failed: ${claimError.message}`);
+      if (claimOutcome === "rate_limited") {
         return json(
           { error: "Feedback limit reached for today. Your analysis can still continue." },
           429,
         );
       }
+      if (claimOutcome === "in_progress") {
+        return json({ error: "This feedback upload is already in progress." }, 409);
+      }
+      if (claimOutcome !== "claimed") throw new Error("Feedback rate check returned an invalid outcome");
+      uploadClaim = { userId: user.id, submissionId: metadata.submissionId };
     }
 
     const storagePath = `${user.id}/${metadata.submissionId}.jpg`;
@@ -329,7 +335,10 @@ export async function POST(request: Request): Promise<Response> {
       app_commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
     });
     if (insertError) {
-      await admin.storage.from(BUCKET).remove([storagePath]);
+      const { error: removeError } = await admin.storage.from(BUCKET).remove([storagePath]);
+      if (removeError) {
+        await admin.from("side_feedback_storage_cleanup").upsert({ storage_path: storagePath });
+      }
       throw new Error(`Feedback metadata insert failed: ${insertError.message}`);
     }
 
@@ -350,15 +359,42 @@ export async function POST(request: Request): Promise<Response> {
         .eq("id", metadata.submissionId)
         .eq("scan_id", metadata.scanId)
         .eq("user_id", user.id);
-      const { error: removeError } = await admin.storage.from(BUCKET).remove([storagePath]);
-      if (!rollbackError && !removeError) {
-        await admin.from("side_feedback_storage_cleanup").delete().eq("storage_path", storagePath);
+      // If the row could not be rolled back, leave its object in place. A retry
+      // can then repair the missing consent event without finding metadata that
+      // points at a photo this error path already deleted.
+      if (!rollbackError) {
+        const { error: removeError } = await admin.storage.from(BUCKET).remove([storagePath]);
+        if (!removeError) {
+          await admin.from("side_feedback_storage_cleanup").delete().eq("storage_path", storagePath);
+        }
       }
       throw new Error(`Feedback consent audit failed: ${auditError.message}`);
     }
 
+    if (uploadClaim) {
+      const { data: finalized, error: finalizeError } = await admin.rpc("finalize_side_feedback_upload", {
+        p_user_id: uploadClaim.userId,
+        p_submission_id: uploadClaim.submissionId,
+      });
+      if (finalizeError || finalized !== true) {
+        throw new Error(`Feedback upload claim could not be finalized: ${finalizeError?.message || "unknown"}`);
+      }
+      uploadClaim = null;
+    }
+
     return json({ received: true, submissionId: metadata.submissionId });
   } catch (error) {
+    if (uploadClaim) {
+      try {
+        await getSupabaseAdmin().rpc("release_side_feedback_upload", {
+          p_user_id: uploadClaim.userId,
+          p_submission_id: uploadClaim.submissionId,
+        });
+      } catch {
+        // The next claim reclaims stale reservations; the upload failure remains
+        // the user-facing error even if this best-effort cleanup also failed.
+      }
+    }
     console.error("side-correction-feedback", safeMessage(error));
     return json({ error: "Feedback could not be saved. Your analysis can still continue." }, 503);
   }

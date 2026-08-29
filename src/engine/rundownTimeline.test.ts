@@ -62,6 +62,23 @@ test("only beats that draw something get a click", () => {
   }
 });
 
+test("the typewriter follows the compact cue, not the narration", () => {
+  const labelled: Beat[] = [
+    {
+      kind: "metric",
+      line: "A deliberately long editorial sentence that is never typed over the face.",
+      spoken: "A different and still fairly long voice line.",
+      label: "SHARP JAW",
+      metricId: "gonialProxy",
+      region: "jaw",
+      positive: true,
+    },
+  ];
+  const keys = buildTimeline(labelled).sfx.filter((cue) => cue.kind === "key");
+  assert.equal(keys.length, Math.floor("SHARP JAW".length / 2));
+  assert.ok(keys.length < labelled[0].line.length / 4, "the full subtitle is still driving the keyboard track");
+});
+
 test("every sound effect lands inside the beat that owns it", () => {
   // A keystroke firing after its caption has gone is the kind of drift nobody
   // notices in code review and everybody notices in the video.

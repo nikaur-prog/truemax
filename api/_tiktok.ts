@@ -41,7 +41,8 @@ export async function tiktokTokenRequest(fields: Record<string, string>): Promis
       ...fields,
     }).toString(),
   });
-  return (await response.json().catch(() => ({}))) as TikTokTokenPayload;
+  const payload = (await response.json().catch(() => ({}))) as TikTokTokenPayload;
+  return response.ok ? payload : { error: payload.error || "upstream_error" };
 }
 
 export interface LinkedTokens {
@@ -59,13 +60,29 @@ export interface LinkedTokens {
 export async function freshTikTokAccess(userId: string, row: LinkedTokens): Promise<string | null> {
   if (Date.parse(row.expires_at) >= Date.now() + 60_000) return row.access_token;
   const refreshed = await tiktokTokenRequest({ grant_type: "refresh_token", refresh_token: row.refresh_token });
-  if (!refreshed.access_token) return null;
-  await getSupabaseAdmin().from("league_tiktok_accounts").update({
+  const persistedWinner = async (): Promise<string | null> => {
+    const { data, error } = await getSupabaseAdmin()
+      .from("league_tiktok_accounts")
+      .select("access_token,refresh_token,expires_at")
+      .eq("user_id", userId)
+      .maybeSingle<LinkedTokens>();
+    if (error || !data || data.refresh_token === row.refresh_token) return null;
+    return Date.parse(data.expires_at) >= Date.now() + 30_000 ? data.access_token : null;
+  };
+  if (!refreshed.access_token) return persistedWinner();
+  const { data: updated, error } = await getSupabaseAdmin().from("league_tiktok_accounts").update({
     access_token: refreshed.access_token,
     refresh_token: refreshed.refresh_token ?? row.refresh_token,
     expires_at: new Date(Date.now() + (refreshed.expires_in ?? 3600) * 1000).toISOString(),
-  }).eq("user_id", userId);
-  return refreshed.access_token;
+  })
+    .eq("user_id", userId)
+    // Only the request holding the refresh token it used may rotate the row.
+    // A concurrent loser reads the persisted winner below.
+    .eq("refresh_token", row.refresh_token)
+    .select("access_token");
+  if (error) return null;
+  const saved = (updated as Array<{ access_token: string }> | null)?.[0]?.access_token;
+  return saved || persistedWinner();
 }
 
 export interface TikTokVideo {
@@ -84,17 +101,22 @@ export interface TikTokVideo {
  * and walking a five-hundred-video back catalogue nightly is cost with no
  * customer.
  */
-export async function listOwnTikTokVideos(access: string, max = 40): Promise<TikTokVideo[] | null> {
+export async function listOwnTikTokVideos(
+  access: string,
+  max = 40,
+  wantedIds?: ReadonlySet<string>,
+): Promise<TikTokVideo[] | null> {
   const out: TikTokVideo[] = [];
+  const seen = new Set<string>();
   let cursor: number | undefined;
   for (let page = 0; page < Math.ceil(max / 20); page++) {
-    const listing = (await (
-      await fetch(VIDEOS_URL, {
+    const response = await fetch(VIDEOS_URL, {
         method: "POST",
         headers: { Authorization: `Bearer ${access}`, "content-type": "application/json" },
-        body: JSON.stringify({ max_count: 20, ...(cursor ? { cursor } : {}) }),
-      })
-    ).json().catch(() => ({}))) as {
+        body: JSON.stringify({ max_count: 20, ...(cursor !== undefined ? { cursor } : {}) }),
+      });
+    if (!response.ok) return page === 0 ? null : out;
+    const listing = (await response.json().catch(() => ({}))) as {
       data?: {
         videos?: Array<{ id?: string; title?: string; view_count?: number; like_count?: number; comment_count?: number; share_count?: number; share_url?: string }>;
         cursor?: number;
@@ -105,8 +127,10 @@ export async function listOwnTikTokVideos(access: string, max = 40): Promise<Tik
     const videos = listing.data?.videos;
     if (!videos) return page === 0 ? null : out;
     for (const v of videos) {
+      if (!v.id || seen.has(v.id) || out.length >= max) continue;
+      seen.add(v.id);
       out.push({
-        id: v.id ?? "",
+        id: v.id,
         title: v.title ?? "",
         views: v.view_count ?? 0,
         likes: v.like_count ?? 0,
@@ -115,8 +139,11 @@ export async function listOwnTikTokVideos(access: string, max = 40): Promise<Tik
         url: v.share_url ?? "",
       });
     }
+    if (wantedIds?.size && [...wantedIds].every((id) => out.some((video) => video.id === id))) break;
     if (!listing.data?.has_more || out.length >= max) break;
-    cursor = listing.data.cursor;
+    const nextCursor = listing.data.cursor;
+    if (typeof nextCursor !== "number" || !Number.isFinite(nextCursor) || nextCursor === cursor) break;
+    cursor = nextCursor;
   }
   return out;
 }
@@ -131,6 +158,12 @@ export async function listOwnTikTokVideos(access: string, max = 40): Promise<Tik
  * every night, which is a scraper, not an API client.
  */
 export function tiktokVideoIdFromUrl(url: string): string | null {
-  const match = /\/video\/(\d{6,})/.exec(url);
-  return match ? match[1] : null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !/(^|\.)tiktok\.com$/i.test(parsed.hostname)) return null;
+    const match = /\/video\/(\d{6,})/.exec(parsed.pathname);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
 }

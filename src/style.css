@@ -1692,12 +1692,14 @@ body.cam-takeover #capture-stage {
   position: fixed; inset: 0; z-index: 320; width: auto; max-width: none;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: rgba(12, 13, 15, 0.88); backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   gap: 0; padding: 0; margin: 0;
 }
 /* Phone: the frame IS the screen. */
 body.cam-takeover .cam-frame,
 body.cam-takeover #oval-frame {
-  width: 100vw; height: 100dvh; max-width: none; max-height: none; aspect-ratio: auto;
+  width: 100vw; height: 100vh; height: 100dvh;
+  max-width: none; max-height: none; aspect-ratio: auto;
   border-radius: 0; border: none; box-shadow: none; margin: 0;
 }
 /* No desktop exception any more. The takeover used to become a rounded 4:5
@@ -1766,6 +1768,7 @@ body.cam-takeover .cam-actions .btn.gho,
 body.cam-takeover .cam-actions .btn.cancel {
   background: rgba(16, 17, 19, 0.5); color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.26); backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 body.cam-takeover .cam-actions .btn.gho:hover,
 body.cam-takeover .cam-actions .btn.cancel:hover {
@@ -1800,6 +1803,7 @@ body.cam-takeover .cam-swap { top: calc(12px + env(safe-area-inset-top, 0px)); }
   width: 30px; height: 30px; border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(12, 20, 18, 0.55); backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: rgba(255, 255, 255, 0.9);
   cursor: pointer; display: grid; place-items: center; padding: 0;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.3s ease;

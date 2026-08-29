@@ -303,14 +303,18 @@ function drawChat(ctx: CanvasRenderingContext2D, w: number, h: number, local: nu
 
 // --- beat 4: the plan, taught -----------------------------------------------
 
-function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: number, a: Cta2Assets): void {
+// `a` is gone from the body with teacher Max, and stays in the signature so
+// every beat renderer is called the same way by the dispatcher below.
+function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: number, _a: Cta2Assets): void {
   const u = w / 1080;
   ground(ctx, w, h, local + 7);
 
-  // The chart plan glides in on the left; teacher Max owns the right.
+  // The plan card glides in and takes the frame. It used to be 44% of the
+  // width with teacher Max in a panel beside it; with him gone the card has
+  // the room, and the beat is about what the plan SAYS.
   const inP = seg(local, 0, 0.7);
-  const px = w * 0.05 - (1 - inP) * w * 0.3;
-  const pw2 = w * 0.44;
+  const px = w * 0.08 - (1 - inP) * w * 0.3;
+  const pw2 = w * 0.84;
   const py = h * 0.2;
   const ph2 = h * 0.52;
   ctx.save();
@@ -362,38 +366,14 @@ function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: nu
   ctx.fillText("WEEK 8", px + pw2 - 40 * u, py + ph2 - 24 * u);
   ctx.restore();
 
-  // Teacher Max, cropped from the clip's right half into his own rounded
-  // stage panel — a flat-panel framing, not a failed blend. He points left,
-  // straight at the plan card.
-  const frame = a.teacherFrame(local);
-  const tIn = seg(local, 0.3, 0.9);
-  if (frame && tIn > 0) {
-    const fw = frame as CanvasImageSource & { width?: number; height?: number };
-    const iw = fw.width || 1920;
-    const ih = fw.height || 1080;
-    const srcX = iw * 0.58; // the character lives in the clip's right third
-    const srcW = iw * 0.4;
-    const dh = h * 0.4;
-    const dw = dh * (srcW / ih);
-    const dx = w * 0.97 - dw + (1 - tIn) * w * 0.2;
-    const dy = py + ph2 - dh;
-    ctx.save();
-    ctx.globalAlpha = tIn;
-    ctx.fillStyle = NAVY_HI;
-    ctx.strokeStyle = "rgba(121,232,210,0.22)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(dx, dy, dw, dh, 26 * u);
-    ctx.fill();
-    ctx.stroke();
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(dx, dy, dw, dh, 26 * u);
-    ctx.clip();
-    ctx.drawImage(frame, srcX, 0, srcW, ih, dx, dy, dw, dh);
-    ctx.restore();
-    ctx.restore();
-  }
+  // No Max here any more.
+  //
+  // He was cropped out of a clip into a panel on the right, pointing at the
+  // plan card on the left. Removed at the owner's call: the clip framing
+  // never read as well as the flat-vector beats around it, and the pointer
+  // he holds was not even visible on his first entrance. The plan card takes
+  // the width he was using — the beat is about what the plan SAYS, and a
+  // card at nearly full width is more of it on screen for longer.
 
   // The three pillars, pinned to the plan card he is pointing at.
   const PILLS = ["PRODUCT", "DIET", "LIFESTYLE"];
@@ -420,6 +400,23 @@ function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: nu
     ctx.restore();
   }
   ctx.textBaseline = "alphabetic";
+}
+
+/**
+ * The eight-week trend, as a fraction of the chart's height at each week.
+ *
+ * Exported with its interpolator because the smoothness of this line is the
+ * thing that was wrong with the beat, and a number that only exists inside a
+ * draw call cannot be tested. See the note at the draw site.
+ */
+export const WEEK_TREND: readonly number[] = [0, 0.05, 0.11, 0.2, 0.31, 0.45, 0.62, 0.82, 1];
+
+/** The trend at a fractional week, linearly between its own points. */
+export function weekTrendAt(f: number): number {
+  const last = WEEK_TREND.length - 1;
+  const c = Math.max(0, Math.min(last, f));
+  const i = Math.min(last - 1, Math.floor(c));
+  return WEEK_TREND[i]! + (WEEK_TREND[i + 1]! - WEEK_TREND[i]!) * (c - i);
 }
 
 // --- beat 5: the progress, swiped up ----------------------------------------
@@ -456,23 +453,45 @@ function drawProgress2(ctx: CanvasRenderingContext2D, w: number, h: number, loca
     ctx.lineTo(gx, yBase + 20 * u);
     ctx.stroke();
   }
+  // The trend. Reported as not smooth, and it was not, for two reasons that
+  // both live in this loop.
+  //
+  //  1. It grew a WHOLE WEEK at a time. `k <= steps * grow` only admits a new
+  //     point when steps*grow crosses an integer, so over the beat the line
+  //     jumped forward eight times instead of extending. The dot was worse:
+  //     its x was the continuous position and its y was WOB[floor(...)], so it
+  //     slid along flat and then snapped up.
+  //
+  //  2. Complete, it was eight straight segments with visible corners at every
+  //     week — a chart of a plan, drawn like a sawtooth.
+  //
+  // Sampled finely and drawn through a lerp of the same eight values now: the
+  // shape is unchanged, the corners and the stutter are gone, and the head of
+  // the line is wherever the clock actually is.
+  const steps = WEEK_TREND.length - 1;
+  const pointAt = (f: number): [number, number] => [
+    x0 + ((x1 - x0) * f) / steps,
+    yBase - (yBase - yTop) * weekTrendAt(f),
+  ];
+  const head = steps * grow;
   ctx.strokeStyle = MINT_BRIGHT;
   ctx.lineWidth = 6 * u;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.beginPath();
-  const WOB = [0, 0.05, 0.11, 0.2, 0.31, 0.45, 0.62, 0.82, 1];
-  const steps = 8;
-  for (let k = 0; k <= steps * grow; k++) {
-    const fx = x0 + ((x1 - x0) * k) / steps;
-    const fy = yBase - (yBase - yTop) * WOB[Math.min(8, k)];
-    if (k === 0) ctx.moveTo(fx, fy);
+  // A twentieth of a week per sample: finer than a pixel at this width, so the
+  // polyline reads as a curve without needing a spline through the points.
+  const SAMPLE = 0.05;
+  for (let f = 0; f <= head + 1e-9; f = Math.min(head, f + SAMPLE)) {
+    const [fx, fy] = pointAt(f);
+    if (f === 0) ctx.moveTo(fx, fy);
     else ctx.lineTo(fx, fy);
+    if (f >= head) break;
   }
   ctx.stroke();
-  // The line's own endpoints, marked.
+  // The head of the line, on the line rather than near it.
   if (grow > 0) {
-    const k = Math.min(8, Math.floor(8 * grow));
-    const fx = x0 + ((x1 - x0) * 8 * grow) / 8;
-    const fy = yBase - (yBase - yTop) * WOB[k];
+    const [fx, fy] = pointAt(head);
     ctx.fillStyle = MINT_BRIGHT;
     ctx.beginPath();
     ctx.arc(fx, Math.max(yTop, fy), 9 * u, 0, Math.PI * 2);
@@ -505,38 +524,9 @@ function drawProgress2(ctx: CanvasRenderingContext2D, w: number, h: number, loca
     ctx.restore();
   }
 
-  // Max cannot contain himself.
-  const frame = a.celebrateFrame(Math.max(0, local - 2.3));
-  const cIn = seg(local, 2.3, 2.8);
-  if (frame && cIn > 0) {
-    const fw = frame as CanvasImageSource & { width?: number; height?: number };
-    const iw = fw.width || 1920;
-    const ih = fw.height || 1080;
-    // Crop to the character's middle third; rounded panel, same framing
-    // grammar as the teacher.
-    const srcW = iw * 0.34;
-    const srcX = (iw - srcW) / 2;
-    const dh = h * 0.3;
-    const dw = dh * (srcW / ih);
-    const dx = w * 0.95 - dw;
-    const dy = h - (dh + 40 * u) * cIn;
-    ctx.save();
-    ctx.globalAlpha = cIn;
-    ctx.fillStyle = NAVY_HI;
-    ctx.strokeStyle = "rgba(121,232,210,0.22)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(dx, dy, dw, dh, 24 * u);
-    ctx.fill();
-    ctx.stroke();
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(dx, dy, dw, dh, 24 * u);
-    ctx.clip();
-    ctx.drawImage(frame, srcX, 0, srcW, ih, dx, dy, dw, dh);
-    ctx.restore();
-    ctx.restore();
-  }
+  // No Max here either. Same call as the plan beat: the celebrate clip was
+  // a cropped panel in the corner competing with the one thing this beat is
+  // for, which is the week-one face becoming the week-eight face.
   ctx.restore();
 }
 

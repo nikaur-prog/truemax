@@ -196,9 +196,24 @@ export function startVoiceCreditCheckout(): Promise<BillingResult> {
 // Returns the remaining balance, or -1 when there was nothing to spend. Fire
 // and forget from the scan path — a consumption that fails to record is a free
 // scan, which is the survivable direction of that error.
-export async function consumeScanCredit(): Promise<number> {
+export interface ScanCreditUse {
+  consumed: boolean;
+  remaining: number;
+}
+
+/**
+ * Spend at most one credit for a completed scan.
+ *
+ * The scan ID is the idempotency key: re-rendering or correcting the same scan
+ * returns the existing use instead of charging it again.
+ */
+export async function consumeScanCreditForScan(scanId: string): Promise<ScanCreditUse> {
   const client = await getSupabaseClient();
-  const { data, error } = await client.rpc("consume_scan_credit");
+  const { data, error } = await client.rpc("consume_scan_credit_for_scan", { p_scan_id: scanId });
   if (error) throw new Error(error.message);
-  return typeof data === "number" ? data : -1;
+  const row = data as { consumed?: unknown; remaining?: unknown } | null;
+  return {
+    consumed: row?.consumed === true,
+    remaining: typeof row?.remaining === "number" ? row.remaining : -1,
+  };
 }

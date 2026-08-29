@@ -217,10 +217,15 @@ test("the context beat says what the face is not measuring", () => {
   assert.match(context.line, /four championships/);
 });
 
-test("narration matches the captions exactly", () => {
+test("short visual cues stay separate from the voice script", () => {
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
   const spoken = narrationFrom(beats);
-  for (const beat of beats) assert.ok(spoken.includes(beat.line), `missing: ${beat.line}`);
+  const metric = beats.find((beat) => beat.kind === "metric")!;
+  assert.ok(metric.label, "metric has no compact on-screen cue");
+  assert.ok(metric.spoken, "metric has no voice line");
+  assert.ok(spoken.includes(metric.spoken!), "voice line is absent from narration");
+  assert.ok(!spoken.includes(metric.line), "long editorial caption leaked back into narration");
+  assert.ok(metric.label!.length < metric.line.length, "visual cue is not actually compact");
 });
 
 test("a tilted capture blocks the reel", () => {
@@ -326,12 +331,12 @@ test("no disclaimer leaves the script exactly as it was", () => {
 test("the spoken-length estimate is usable for planning footage", () => {
   assert.equal(spokenSeconds(""), 0);
   assert.equal(spokenSeconds("   "), 0);
-  // Roughly 165 words a minute plus a beat of air. Twenty words is about eight
+  // Roughly 206 words a minute plus a beat of air. Twenty words is about six
   // seconds — the number an operator uses to decide how much B-roll to find, so
   // it has to be in the right neighbourhood rather than merely monotonic.
   const twenty = new Array(20).fill("word").join(" ");
   const s = spokenSeconds(twenty);
-  assert.ok(s > 6.5 && s < 9, `twenty words estimated at ${s.toFixed(1)}s`);
+  assert.ok(s > 5.8 && s < 7.5, `twenty words estimated at ${s.toFixed(1)}s`);
   assert.ok(spokenSeconds(twenty + " more") > s, "a longer line must estimate longer");
 });
 

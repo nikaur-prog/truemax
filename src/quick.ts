@@ -24,7 +24,7 @@ import { hasSideOverlay } from "./ui/sideMeasureOverlay.js";
 import { downloadCtaOutro, downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
-import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
+import { RundownBlocked, RundownCancelled, downloadRundownVideo } from "./ui/rundownExport.js";
 import { NarrationFailed } from "./ui/rundownAudio.js";
 import { showCaptionStep } from "./ui/captionStep.js";
 import { spokenSeconds } from "./engine/reelScript.js";
@@ -45,11 +45,14 @@ import {
 import type { RatedFace } from "./engine/calibrationSet.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
-import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
+import { activateScanOwner, activeScanOwner, scopedStorageKey } from "./engine/scanScope.js";
 import { canShareFiles, exportName, outcomeMessage, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
+import { assessPhotoQuality } from "./engine/photoQuality.js";
+import type { PhotoQuality } from "./engine/photoQuality.js";
+import { LOOKS, applyEnhance, lookFor } from "./engine/enhance.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -124,6 +127,8 @@ const SWEEP_MS = 2500; // two passes of the scan line
 const DOTS_HOLD_MS = 550; // beat after the dots land, before the photo moves
 
 let cam: CameraHandle | null = null;
+let camOpening = false;
+let camOpenAttempt = 0;
 let ready = false;
 
 // Checked before anything else starts.
@@ -281,10 +286,12 @@ async function loadPreviewPhoto(): Promise<void> {
 }
 
 async function openCamera(): Promise<void> {
-  if (cam || !isSupported()) return;
+  if (cam || camOpening || !isSupported()) return;
+  const attempt = ++camOpenAttempt;
+  camOpening = true;
   el.frame.classList.add("live");
   try {
-    cam = await startCamera({
+    const started = await startCamera({
       video: el.video,
       guideCanvas: el.guide,
       onCheck: (c) => {
@@ -304,11 +311,20 @@ async function openCamera(): Promise<void> {
         el.shoot.disabled = !ready;
       },
     });
+    if (attempt !== camOpenAttempt) {
+      started.stop();
+      await setRunningMode("IMAGE");
+      return;
+    }
+    cam = started;
   } catch {
+    if (attempt !== camOpenAttempt) return;
     el.frame.classList.remove("live");
     el.hintTitle.textContent = "Camera unavailable";
     el.hintDetail.textContent = "Upload a photo instead";
     return;
+  } finally {
+    if (attempt === camOpenAttempt) camOpening = false;
   }
   el.shoot.textContent = "Capture";
   el.shoot.disabled = true;
@@ -469,9 +485,11 @@ async function useFile(f: File): Promise<void> {
 }
 
 function stopCamera(): void {
-  if (!cam) return;
-  cam.stop();
+  camOpenAttempt++;
+  camOpening = false;
+  const held = cam;
   cam = null;
+  held?.stop();
   el.frame.classList.remove("live");
   // Hand the detector back to still-image mode. Everything past this point
   // works on stills, and leaving it in VIDEO mode makes them throw — the same
@@ -1692,6 +1710,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         always come from the photo above.</small>
       </div>
       <div class="q-cut-slots" id="q-cut-slots"></div>
+      <p class="q-cut-status hidden" id="q-cut-status" role="status"></p>
       <input id="q-rundown-broll" type="file" accept="image/*" multiple hidden />
     </div>
 
@@ -1979,7 +1998,7 @@ function countTo(node: HTMLElement, target: number): void {
 
 // Every number is editable, because a demo scan that came out wrong should be
 // fixable in place rather than by reshooting. Keeps it to one decimal, clamps
-// to 0.0–9.9, and refills the bar under a region score so the edit stays
+// to 0.0–10.0, and refills the bar under a region score so the edit stays
 // consistent with what it draws.
 function wireEditing(): void {
   for (const n of el.cards.querySelectorAll<HTMLElement>(".q-num")) {
@@ -1997,7 +2016,7 @@ function wireEditing(): void {
       }
     });
     n.addEventListener("blur", () => {
-      const v = Math.max(0, Math.min(9.9, parseFloat(n.textContent ?? "") || 0));
+      const v = Math.max(0, Math.min(10, parseFloat(n.textContent ?? "") || 0));
       n.textContent = v.toFixed(1);
       const bar = n.parentElement?.querySelector<HTMLElement>(".q-bar i");
       if (bar) bar.style.width = `${Math.max(2, Math.min(100, v * 10))}%`;
@@ -2046,12 +2065,29 @@ function refreshVerdictWord(percentile: number): void {
  */
 function editedReport(r: Report): Report {
   const scores = editedExportScores(r);
-  if (scores.overall === r.overall) return r;
-  return { ...r, overall: scores.overall, overallPercentile: scores.percentile };
+  const editedRegions = new Map(scores.regions.map((region) => [region.name, region.score]));
+  const regions = r.regions.map((region) => {
+    const score = editedRegions.get(REGION_NAMES[region.region]);
+    if (score === undefined || score === region.score) return region;
+    return { ...region, score, percentile: aggregateScoreToPercentile(score) };
+  });
+  const changedRegion = regions.some((region, index) => region !== r.regions[index]);
+  if (scores.overall === r.overall && !changedRegion) return r;
+  return {
+    ...r,
+    overall: scores.overall,
+    overallPercentile: scores.percentile,
+    // A manually raised score cannot export with a lower "potential" ceiling.
+    potential: Math.max(scores.overall, r.potential),
+    regions,
+  };
 }
 
 function editedExportScores(r: Report): { overall: number; percentile: number; regions: Array<{ name: string; score: number }> } {
-  const overall = parseFloat(el.cards.querySelector<HTMLElement>(".q-score-num")?.textContent ?? "") || r.overall;
+  const parsedOverall = parseFloat(el.cards.querySelector<HTMLElement>(".q-score-num")?.textContent ?? "");
+  // Zero is a valid canonical 0–10 edit. `parsed || original` silently turned
+  // that one value back into the engine score while every other edit exported.
+  const overall = Number.isFinite(parsedOverall) ? Math.max(0, Math.min(10, parsedOverall)) : r.overall;
   const cells = [...el.cards.querySelectorAll<HTMLElement>(".q-cell")];
   return {
     overall,
@@ -2080,6 +2116,66 @@ const CUT_SLOTS = 4;
 interface Cutaway {
   image: HTMLImageElement;
   landmarks?: NormalizedLandmark[];
+  /**
+   * How this photograph will hold up at video size.
+   *
+   * Read once, when the file arrives, rather than at render time: the point is
+   * to tell somebody BEFORE they commit to a sixty-second encode, which is the
+   * same reason the disclaimer's length counter sits above the render button.
+   */
+  quality?: PhotoQuality;
+  /** True once the sharpen has been run on this slot, so it is offered once. */
+  sharpened?: boolean;
+}
+
+/**
+ * Run the unsharp mask over one cutaway, in place.
+ *
+ * The same on-device pass the Enhance panel uses, at the "standard" look with
+ * its radius scaled for this image. It cannot add detail that is not there —
+ * the copy is careful to say "helps", never "fixes" — but on a soft-but-large
+ * photograph it is the difference between mush and a face.
+ */
+async function sharpenCutaway(index: number): Promise<void> {
+  const cut = cutaways[index];
+  if (!cut) return;
+  const img = cut.image;
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!w || !h) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, w, h);
+  applyEnhance(data.data, w, h, lookFor(LOOKS.standard, Math.max(w, h)));
+  ctx.putImageData(data, 0, 0);
+  const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", 0.94));
+  if (!blob) return;
+  const next = new Image();
+  const url = URL.createObjectURL(blob);
+  await new Promise<void>((res) => {
+    next.onload = () => res();
+    next.onerror = () => res();
+    next.src = url;
+  });
+  if (cutaways[index] !== cut) {
+    // The slot was replaced or cleared while the pass ran.
+    URL.revokeObjectURL(url);
+    return;
+  }
+  revokeMediaUrl(img.src);
+  // Re-read rather than assume: the sharpen is honest about what it achieved,
+  // and a photograph that was too SMALL is still too small afterwards.
+  cutaways[index] = {
+    ...cut,
+    image: next,
+    quality: assessPhotoQuality(canvas, cut.landmarks),
+    sharpened: true,
+  };
+  drawCutSlots();
 }
 const cutaways: Array<Cutaway | null> = Array(CUT_SLOTS).fill(null);
 let cutArmed: number | null = null;
@@ -2088,15 +2184,37 @@ function drawCutSlots(): void {
   const host = document.getElementById("q-cut-slots");
   if (!host) return;
   host.innerHTML = "";
+  // Gathered across the slots so the strip says one thing rather than three.
+  const fixable: number[] = [];
+  const flaggedReads: PhotoQuality[] = [];
   cutaways.forEach((image, i) => {
     const cell = document.createElement("div");
     cell.className = "q-cut-cell";
     if (image) {
+      // The quality read, when there is something worth saying about it.
+      //
+      // Said HERE and not at render time on purpose. A cutaway that will not
+      // hold up is worth knowing about while swapping it is still one tap, not
+      // after a sixty-second encode has produced the picture the owner
+      // described as "absolutely horrible".
+      const q = image.quality;
+      const flagged = Boolean(q && q.verdict !== "ok");
+      const canFix = Boolean(flagged && q!.fixable && !image.sharpened);
+      // The slot itself is 84x108, which holds a word and not a sentence. The
+      // badge names the fault, the title carries the sentence for a pointer,
+      // and the strip's status line below spells it out with the fix.
       cell.innerHTML = `<img alt="Cutaway ${i + 1}" />
-        <button type="button" class="q-cut-x" title="Remove">✕</button>`;
+        <button type="button" class="q-cut-x" title="Remove">✕</button>${
+          flagged ? `<span class="q-cut-badge">${q!.facePx < 520 ? "SMALL" : "SOFT"}</span>` : ""
+        }`;
       cell.querySelector("img")!.src = image.image.src;
+      if (flagged) cell.title = q!.reason;
       if (!image.landmarks) cell.classList.add("q-cut-noface");
+      if (flagged) cell.classList.add(q!.verdict === "poor" ? "q-cut-poor" : "q-cut-soft");
+      if (canFix) fixable.push(i);
+      if (flagged) flaggedReads.push(q!);
       cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+        rundownMediaEpoch += 1;
         revokeMediaUrl(image.image.src);
         cutaways[i] = null;
         drawCutSlots();
@@ -2118,6 +2236,32 @@ function drawCutSlots(): void {
     }
     host.append(cell);
   });
+
+  // One line under the strip, naming the fault and offering the pass that can
+  // do something about it. The worst reading wins: told about the small photo
+  // and the soft one at once, nobody acts on either.
+  const status = document.getElementById("q-cut-status");
+  // A "poor" outranks a "soft": the worse fault is the one worth acting on.
+  const worst = flaggedReads.find((x) => x.verdict === "poor") ?? flaggedReads[0];
+  if (status) {
+    if (!worst) {
+      status.textContent = "";
+      status.classList.add("hidden");
+    } else {
+      status.classList.remove("hidden");
+      status.innerHTML = `<span>${worst.reason}</span>${
+        fixable.length ? `<button type="button" id="q-cut-fixall">Sharpen ${fixable.length > 1 ? "them" : "it"}</button>` : ""
+      }`;
+      document.getElementById("q-cut-fixall")?.addEventListener("click", async (event) => {
+        const btn = event.currentTarget as HTMLButtonElement;
+        btn.disabled = true;
+        btn.textContent = "Sharpening…";
+        // Sequential, not parallel: each pass is a full-resolution unsharp mask
+        // on the main thread, and three at once locks the page.
+        for (const i of fixable) await sharpenCutaway(i);
+      });
+    }
+  }
 }
 
 function firstFreeCut(from = 0): number {
@@ -2164,7 +2308,24 @@ async function addCutaway(file: File, at: number): Promise<void> {
     revokeMediaUrl(image.src);
     return;
   }
-  cutaways[at] = { image, landmarks };
+  // Measured off a canvas rather than the <img>: getImageData needs a 2D
+  // context, and this is the one moment the pixels are already in hand.
+  let quality: PhotoQuality | undefined;
+  try {
+    const probe = document.createElement("canvas");
+    probe.width = image.naturalWidth;
+    probe.height = image.naturalHeight;
+    const pctx = probe.getContext("2d", { willReadFrequently: true });
+    if (pctx && probe.width && probe.height) {
+      pctx.drawImage(image, 0, 0);
+      quality = assessPhotoQuality(probe, landmarks);
+    }
+  } catch {
+    // A tainted or zero-sized canvas is not a reason to refuse the photograph.
+    quality = undefined;
+  }
+  cutaways[at] = { image, landmarks, quality };
+  rundownMediaEpoch += 1;
 }
 
 function mountCutaways(): void {
@@ -2268,6 +2429,7 @@ interface DiscClip {
 }
 const discClips: Array<DiscClip | null> = Array(DISC_SLOTS).fill(null);
 let rundownMediaEpoch = 0;
+let rundownRendering = false;
 
 function revokeMediaUrl(url: string): void {
   if (url.startsWith("blob:")) URL.revokeObjectURL(url);
@@ -2370,6 +2532,7 @@ function drawDiscClips(): void {
     video.src = clip.video.src;
     video.currentTime = clip.startAt;
     cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
+      rundownMediaEpoch += 1;
       revokeMediaUrl(clip.video.src);
       discClips[i] = null;
       // Close the gap so the slots stay contiguous — a hole in the middle would
@@ -2381,6 +2544,7 @@ function drawDiscClips(): void {
     });
     for (const range of cell.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
       range.addEventListener("input", () => {
+        rundownMediaEpoch += 1;
         const value = Number(range.value);
         if (range.dataset.k === "start") {
           clip.startAt = value;
@@ -2403,7 +2567,10 @@ let discPickInto = 0;
 function mountDisclaimerClips(): void {
   drawDiscClips();
   const note = document.getElementById("q-rundown-note") as HTMLTextAreaElement | null;
-  note?.addEventListener("input", drawDiscClips);
+  note?.addEventListener("input", () => {
+    rundownMediaEpoch += 1;
+    drawDiscClips();
+  });
   const input = document.getElementById("q-disc-clip") as HTMLInputElement | null;
   input?.addEventListener("change", async () => {
     const file = input.files?.[0];
@@ -2420,6 +2587,7 @@ function mountDisclaimerClips(): void {
     const left = Math.max(0, discBudget() - discUsed());
     const length = Math.max(0.5, Math.min(video.duration, left || video.duration));
     discClips[discPickInto] = { video, startAt: 0, length };
+    rundownMediaEpoch += 1;
     drawDiscClips();
   });
 }
@@ -2639,13 +2807,14 @@ async function downloadScoreCard(
 // The long cut: a full walk down the face, narrated, about a minute.
 //
 // Unlike the other two this one talks to the network — speech synthesis needs a
-// key the browser must never hold — so it is the only export that can be
-// degraded rather than simply working. It never fails for that reason though:
-// no session, no quota or a refused key all produce a silent rundown with its
-// sound effects intact, and the button says so. A finished composite is worth
-// far more than a strict guarantee about its audio.
+// key the browser must never hold. A provider failure stops before rendering:
+// a silent rundown has neither the promised narration nor useful captions, so
+// presenting it as a successful export would hide the thing the operator must
+// fix before publishing.
 async function downloadRundown(r: Report): Promise<void> {
-  if (!last) return;
+  if (!last || rundownRendering) return;
+  const source = last;
+  const mediaEpoch = rundownMediaEpoch;
   const btn = document.getElementById("q-rundown-download") as HTMLButtonElement | null;
   const field = document.getElementById("q-rundown-name") as HTMLInputElement | null;
   const name = (field?.value ?? "").trim();
@@ -2653,20 +2822,6 @@ async function downloadRundown(r: Report): Promise<void> {
     (document.getElementById("q-rundown-short") as HTMLInputElement | null)?.value.trim() || undefined;
   const opening =
     (document.getElementById("q-rundown-opening") as HTMLInputElement | null)?.value.trim() || undefined;
-  // Cutaways, each carrying its own landmark cloud so the analysis can play
-  // out ON them (rundownFrame's stage system). They never touch the scoring
-  // or the report — the landmarks position lines, the values stay the
-  // measured photograph's. Any photo that missed its landmarking when it was
-  // attached (engine still booting, transient failure) gets one more chance
-  // here, when the engine is certainly up: a cutaway without landmarks
-  // renders as a bare picture under a floating score card, which is the
-  // failure this feature exists to remove.
-  const broll = cutaways.filter((c): c is Cutaway => !!c);
-  for (const c of broll) {
-    if (!c.landmarks) c.landmarks = await landmarkCutaway(c.image);
-  }
-  drawCutSlots();
-  const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name) {
     // Point at the missing thing rather than explaining it. The field is six
     // inches from the button that was just pressed.
@@ -2678,16 +2833,29 @@ async function downloadRundown(r: Report): Promise<void> {
     return;
   }
 
+  rundownRendering = true;
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Starting…";
   }
   try {
+    // Cutaways, each carrying its own landmark cloud so the analysis can play
+    // out ON them (rundownFrame's stage system). They never touch the scoring
+    // or the report — the landmarks position lines, the values stay the
+    // measured photograph's. Any photo that missed its landmarking when it was
+    // attached gets one more chance here, when the engine is certainly up.
+    const broll = cutaways.filter((c): c is Cutaway => !!c);
+    for (const c of broll) {
+      if (!c.landmarks) c.landmarks = await landmarkCutaway(c.image);
+      if (mediaEpoch !== rundownMediaEpoch || source !== last) throw new RundownCancelled();
+    }
+    drawCutSlots();
+    const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
     // The token is what gets past the staff gate on /api/tts. Absent for a
     // signed-out operator, which is not an error here — it means no voice.
     const accessToken = (await currentAccessToken()) ?? undefined;
     const cutChoice = (document.getElementById("q-rundown-cut") as HTMLSelectElement | null)?.value;
-    const result = await downloadRundownVideo(last.photo, last.lm, r, {
+    const result = await downloadRundownVideo(source.photo, source.lm, r, {
       name,
       shortName,
       opening,
@@ -2701,6 +2869,7 @@ async function downloadRundown(r: Report): Promise<void> {
       onProgress: (progress, stage) => {
         if (btn) btn.textContent = `${stage} · ${Math.round(progress * 100)}%`;
       },
+      shouldCancel: () => mediaEpoch !== rundownMediaEpoch || source !== last,
     });
     if (result.outcome === "cancelled") {
       if (btn) btn.textContent = "Not saved — tap to retry";
@@ -2742,6 +2911,8 @@ async function downloadRundown(r: Report): Promise<void> {
         // sent the operator off to re-shoot a head angle that was fine.
         error instanceof RundownBlocked
           ? error.blockers.join(" ")
+          : error instanceof RundownCancelled
+            ? error.message
           : error instanceof NarrationFailed
             // Every voice service failed. Stopping here rather than rendering
             // is deliberate: a silent rundown also has no captions, and the
@@ -2751,6 +2922,7 @@ async function downloadRundown(r: Report): Promise<void> {
             : "Rundown unavailable here";
     }
   } finally {
+    rundownRendering = false;
     if (btn) {
       window.setTimeout(() => {
         btn.disabled = false;
@@ -2938,17 +3110,29 @@ el.aiForm.onsubmit = async (event) => {
 function showAiPair(name: string, before: string, after: string): void {
   const host = document.getElementById("q-ai-preview");
   if (!host) return;
+  const isImageData = (value: string) => /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+=*$/i.test(value);
+  if (!isImageData(before) || !isImageData(after)) {
+    el.aiMsg.classList.add("err");
+    el.aiMsg.textContent = "The image service returned an unsafe image response.";
+    return;
+  }
   host.classList.remove("hidden");
   host.innerHTML = `
     <div class="q-ai-pair">
-      <figure><img src="${before}" alt="${name}, before" /><figcaption>BEFORE</figcaption></figure>
-      <figure><img src="${after}" alt="${name}, after" /><figcaption>AFTER</figcaption></figure>
+      <figure><img data-pair="before" /><figcaption>BEFORE</figcaption></figure>
+      <figure><img data-pair="after" /><figcaption>AFTER</figcaption></figure>
     </div>
     <div class="q-ai-pair-actions">
       <button type="button" class="btn pri" data-save="before">Save the before</button>
       <button type="button" class="btn pri" data-save="after">Save the after</button>
     </div>
     <p class="q-ai-note">Scan these two in Reel Creator to get the measured before/after.</p>`;
+  const beforeImage = host.querySelector<HTMLImageElement>('[data-pair="before"]')!;
+  const afterImage = host.querySelector<HTMLImageElement>('[data-pair="after"]')!;
+  beforeImage.src = before;
+  beforeImage.alt = `${name}, before`;
+  afterImage.src = after;
+  afterImage.alt = `${name}, after`;
   for (const button of host.querySelectorAll<HTMLButtonElement>("[data-save]")) {
     button.onclick = async () => {
       const which = button.dataset.save === "after" ? after : before;
@@ -2986,9 +3170,11 @@ const AI_CHARACTERS_KEY = "truemax.aiCharacters";
 
 function saveAiCharacter(character: AiCharacter): void {
   try {
-    const raw = JSON.parse(localStorage.getItem(AI_CHARACTERS_KEY) ?? "[]") as AiCharacter[];
+    const key = scopedStorageKey(AI_CHARACTERS_KEY);
+    if (!key) return;
+    const raw = JSON.parse(localStorage.getItem(key) ?? "[]") as AiCharacter[];
     const next = [character, ...raw.filter((c) => c.name !== character.name)].slice(0, 24);
-    localStorage.setItem(AI_CHARACTERS_KEY, JSON.stringify(next));
+    localStorage.setItem(key, JSON.stringify(next));
   } catch {
     /* storage disabled: the character lives for this session only */
   }

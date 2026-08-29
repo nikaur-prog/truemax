@@ -31,7 +31,13 @@ import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAcc
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
-import { closeScanGate, ensureScanAllowed, recordScanRun } from "./ui/scanGate.js";
+import {
+  closeScanGate,
+  consumePendingScanCredit,
+  discardPendingScanCredit,
+  ensureScanAllowed,
+  recordScanRun,
+} from "./ui/scanGate.js";
 import { setMemberPricing } from "./engine/scanPricing.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
@@ -51,7 +57,13 @@ import { createSettler } from "./engine/captureSettle.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import type { OpenAccountOptions } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
-import { consumeScanCredit, hasMaxAccess, loadEntitlement, loadIsAdmin, loadScanCredits } from "./engine/entitlement.js";
+import {
+  consumeScanCreditForScan,
+  hasMaxAccess,
+  loadEntitlement,
+  loadIsAdmin,
+  loadScanCredits,
+} from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
@@ -102,6 +114,13 @@ const MAX_IMAGE_DIM = 1280;
 // into a canvas that is no longer on the page.
 let gateDemo: { stop(): void } | null = null;
 
+// Access to the report that is currently on screen is priced against the
+// history that existed BEFORE that report was stored. Otherwise the second
+// included scan writes row two and immediately locks itself. A paid scan keeps
+// the credit it consumed attached to this one report, even though the balance
+// is now zero.
+let resultAccessContext: { scanId: string; priorScanCount: number } | null = null;
+
 // Read the entitlement and tell the results screen. Never throws: a billing
 // read that fails leaves the plan locked, which is the safe direction — it
 // shows a paywall to a paying customer, who can retry, rather than handing the
@@ -113,7 +132,7 @@ async function refreshMaxAccess(): Promise<void> {
   // is not a billing fact: it decides how much of the analysis to show, not
   // what anyone is charged. Reading it from the device keeps a free allowance
   // working before there is anything on the server to read.
-  const scanCount = readAllHistory().length;
+  const scanCount = resultAccessContext?.priorScanCount ?? ownScans(readAllHistory()).length;
   try {
     // Credits and the staff flag each fall back to "no" on their own failure,
     // so one unreachable table cannot take the whole entitlement read down with
@@ -124,25 +143,25 @@ async function refreshMaxAccess(): Promise<void> {
       loadIsAdmin().catch(() => false),
     ]);
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
+    let currentPaidScan = false;
+    if (
+      resultAccessContext
+      && !admin
+      && tierOf(entitlement) === "free"
+      && scanCount >= TRIAL_SCANS
+    ) {
+      const use = await consumeScanCreditForScan(resultAccessContext.scanId).catch(() => null);
+      if (owner !== activeScanOwner() || generation !== scanGeneration) return;
+      currentPaidScan = use?.consumed === true;
+    }
     setMaxAccess(hasMaxAccess(entitlement) || admin);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     setMemberPricing(tierOf(entitlement) !== "free");
     setDepth(
-      depthFor({ entitlement, scanCount, credits, admin }),
+      depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
       freeScansLeft({ entitlement, scanCount }),
     );
-
-    // A credit is consumed by the scan it unlocked: free tier, past the
-    // allowance, holding credits, looking at a full-depth result. Recorded
-    // fire-and-forget — a spend that fails to record is a free scan, which is
-    // the survivable direction of that error, where blocking a paid-for result
-    // on the recording is not.
-    // Staff excluded: a credit must not be spent on a scan the staff flag
-    // already opened.
-    if (!admin && tierOf(entitlement) === "free" && scanCount > TRIAL_SCANS && credits > 0) {
-      void consumeScanCredit().catch(() => undefined);
-    }
   } catch {
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     // Both fail closed. A wall shown to a paying customer is recoverable — they
@@ -848,20 +867,6 @@ if (pasteHintApplies()) {
     hint.hidden = false;
   }
 }
-el.ovalFrame.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  el.ovalFrame.classList.add("dragover");
-});
-el.ovalFrame.addEventListener("dragleave", () => el.ovalFrame.classList.remove("dragover"));
-el.ovalFrame.addEventListener("drop", (e) => {
-  e.preventDefault();
-  el.ovalFrame.classList.remove("dragover");
-  const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file) {
-    const generation = scanGeneration;
-    ensureSex(() => handleFile(file, generation));
-  }
-});
 
 // Wordmark goes home only for a signed-in member. Signed-out visitors already
 // are on the acquisition screen, so a fake "home" action would either do
@@ -1023,6 +1028,7 @@ function displayName(user: User): string | null {
 
 // ---- camera ----
 let cam: CameraHandle | null = null;
+let camOpening = false;
 let lastCheck: FrameCheck | null = null;
 let autoFront: AutoCapture | null = null;
 let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -1031,9 +1037,12 @@ let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
 
 async function openCamera(): Promise<void> {
+  if (cam || camOpening) return;
+  camOpening = true;
   const generation = scanGeneration;
   if (!isSupported()) {
     el.camHintDetail.textContent = "This browser can't open a camera, so upload a photo instead.";
+    camOpening = false;
     return;
   }
   // Started, not awaited. The camera permission prompt and the engine download
@@ -1170,6 +1179,8 @@ async function openCamera(): Promise<void> {
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";
+  } finally {
+    camOpening = false;
   }
 }
 
@@ -1375,10 +1386,13 @@ function canvasFromDataURL(url: string): Promise<HTMLCanvasElement | null> {
 }
 
 async function reopenArchivedScan(scan: StoredScan): Promise<void> {
+  const owner = activeScanOwner();
+  const generation = scanGeneration;
   const key = scanStorageKey(scan);
   const [archive, photos] = await Promise.all([loadArchive(key), loadPhotos(key)]);
-  if (!archive) return;
+  if (!archive || owner !== activeScanOwner() || generation !== scanGeneration) return;
   const front = photos?.front ? await canvasFromDataURL(photos.front) : null;
+  if (owner !== activeScanOwner() || generation !== scanGeneration) return;
   if (!front) {
     // The archive survived a photo prune, or the thumbnail never saved. The
     // report cannot be walked without the face it was measured on.
@@ -1386,6 +1400,7 @@ async function reopenArchivedScan(scan: StoredScan): Promise<void> {
     return;
   }
   const side = photos?.side ? await canvasFromDataURL(photos.side) : null;
+  if (owner !== activeScanOwner() || generation !== scanGeneration) return;
   closeHistory();
   closeScanRecall();
   // The results machinery lives on the main screen; a reopen from the landing
@@ -1422,6 +1437,8 @@ function resetToUpload(): void {
   scanGeneration++;
   scanSession.reset();
   clearPendingAnalysis();
+  discardPendingScanCredit();
+  resultAccessContext = null;
   // A new scan is a hard privacy boundary. Clearing only localStorage left the
   // previous front landmarks, full-resolution canvas and verified side points
   // alive in this tab. A second person could then capture only the side and
@@ -1891,12 +1908,24 @@ async function runFullAnalysis(
   // owns this element's zoom from here and must not inherit a half-finished
   // push-in on somebody's chin.
   applyZoom(el.zoomable, IDENTITY_ZOOM);
+  const historyBefore = readAllHistory();
+  const existingScan = historyBefore.some((scan) => scanStorageKey(scan) === token.scanId);
+  const priorScanCount = Math.max(
+    0,
+    ownScans(historyBefore).length - (existingScan && !scanSubject ? 1 : 0),
+  );
   const delta = compareAndStore(report, token.scanId, scanSubject ?? undefined);
+  resultAccessContext = { scanId: token.scanId, priorScanCount };
   // The weekly free-scan clock starts when an analysis finishes, not when a
   // photo is chosen — an abandoned capture must not cost the week's scan. A
   // guest's scan does not start it at all: it cannot move the owner's chart,
   // so it should not spend the week that would have.
   recordScanRun(scanSubject !== null);
+  // A credit used only to skip the weekly cadence is committed here, after a
+  // valid report exists. Bad photos, cancelled cameras and abandoned side
+  // flows never reach this point and therefore never spend it.
+  await consumePendingScanCredit(token.scanId).catch(() => false);
+  if (!scanIsCurrent(token, generation) || !pending) return;
 
   // Keep a thumbnail of each view against this scan's immutable ID. Thumbnails
   // only — see engine/photoStore.
@@ -2660,6 +2689,9 @@ if (isAuthAvailable()) {
       closeHistory();
       closeSettings();
       closeTrialFunnel();
+      closeScanRecall();
+      discardPendingScanCredit();
+      resultAccessContext = null;
     }
     // Signing out, or replacing one authenticated identity with another, is a
     // hard scan boundary. Anonymous -> authenticated is the intentional claim

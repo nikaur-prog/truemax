@@ -89,3 +89,13 @@ exports/
 .celeb-cache/
 .cta-assets/
 .side-dataset/
+
+# Scratch files from research harnesses. The side-seeder run drops probe copies
+# of modules and one-off Chromium drivers into the tree while it works, and a
+# `git add -A` has already carried two of them into a commit. They are working
+# files, never product code, and every one so far has been named with a leading
+# underscore.
+src/**/_*.ts
+tools/_*.mjs
+_*.mjs
+_*.html

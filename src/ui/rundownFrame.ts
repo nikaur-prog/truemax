@@ -398,6 +398,14 @@ export function regionCrop(
     sh = sw / aspect;
   }
 
+  // Fidelity floor. It prevents texture-level crops while remaining low enough
+  // that the vertical camera move still exists on a landscape photograph.
+  const fidelityWidth = photo.width * 0.34;
+  if (sw < fidelityWidth) {
+    sw = fidelityWidth;
+    sh = sw / aspect;
+  }
+
   // Re-clamped after growing: everything above may have pushed the crop past
   // the edge of the photograph, and drawing past the edge paints the void.
   if (sw > photo.width) {
@@ -617,6 +625,28 @@ export interface RundownFrameOptions {
 // cuts are. Every full-bleed beat drifts in by this much over its own length
 // — enough that the frame is visibly alive, small enough that nobody watching
 // could say where the move started.
+// How far the photograph sits inside the frame, as a fraction of each edge.
+//
+// The reported fault was that the video looks zoomed in, and it does — but the
+// crop was not the cause. Measured on a 1000x1000 source at 9:16, the crop is
+// already 507x900: ninety per cent of the photograph's height. The renderer is
+// showing very nearly every vertical pixel it has, and fitting a whole head
+// into 9:16 forces the crop's width to be height x 0.5625, which puts the face
+// at about four fifths of the frame width whatever the crop does.
+//
+// Two attempts at fixing it in the crop failed for the same reason and the
+// tests caught both: growing the crop hits the edge of the photograph, clamps,
+// and every band that clamps lands on an IDENTICAL frame — eyes, lips and chin
+// all in one place, the camera stopped dead. That is the failure the head-fit
+// comments already describe from the 1.12 floor.
+//
+// So the picture is made smaller instead of the crop being made bigger. The
+// photograph is drawn into the frame inset by this much on every side, on the
+// frame's own black, and because the measurement overlay is composited through
+// the same transform the lines shrink with it and stay on the features. The
+// crop maths is untouched, so the camera walk is untouched.
+const PHOTO_INSET = 0.06;
+
 const PUSH_IN = 0.035;
 
 // The push is a function of the crop, not a transform on the context, so the
@@ -857,6 +887,21 @@ export function drawRundownFrame(
     basePhoto,
     local * release,
   );
+
+  // The photograph, and everything drawn in its coordinates, sits inside the
+  // frame rather than bleeding to the edges. See PHOTO_INSET.
+  //
+  // A transform rather than an inset destination rect on each drawImage: this
+  // section draws the photo, the cutaways, the matte ring, the scrims and the
+  // measurement overlay through half a dozen different paths, and insetting
+  // them one at a time is how one of them gets missed and a line ends up
+  // beside a jaw instead of on it. One transform composes with all of them.
+  // The furniture below the restore — caption, bottom bar, cards, endcard —
+  // keeps the whole frame, which is what it is designed for.
+  ctx.save();
+  ctx.translate(W * PHOTO_INSET, H * PHOTO_INSET);
+  ctx.scale(1 - 2 * PHOTO_INSET, 1 - 2 * PHOTO_INSET);
+
   const kind = beat.beat.kind;
 
   // A cutaway, when this beat draws no measurement and there is one to show.
@@ -1035,6 +1080,7 @@ export function drawRundownFrame(
   if (overlayVisible(input, beat, t)) {
     drawOverlayForBeat(ctx, basePhoto, baseLandmarks, input, beat, t, crop, W, H, overlayCanvas);
   }
+  ctx.restore();
   // The two closing beats take over the frame rather than sitting beside the
   // face. Both are arguments about the viewer rather than about the subject —
   // where he lands against everyone, and what to do about it — and neither
@@ -1052,6 +1098,7 @@ export function drawRundownFrame(
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
   drawLedger(ctx, input, beat, t);
+  drawVisualCue(ctx, beat, t, W, H);
   // No chrome over the endcard. The bottom bar prints the SUBJECT'S name and
   // the watermark prints the URL — and the sign-off is the one beat that is
   // about the viewer, on a card that already carries the wordmark and the URL
@@ -1952,6 +1999,37 @@ function drawLedger(
     const y = y0 + i * LEDGER_PITCH + (last ? (1 - settle) * 12 : 0);
     ctx.fillText(`${sign} ${e.metric.def.name}`, SAFE_LEFT, y);
   }
+  ctx.restore();
+}
+
+// One short visual conclusion, typed quickly. The narration carries the full
+// sentence; the frame keeps the face and its geometry prominent on a phone.
+// Closing compositions already contain their own copy, so cues are limited to
+// the photo-first beats where they do not duplicate a card, curve or endcard.
+function drawVisualCue(
+  ctx: CanvasRenderingContext2D,
+  beat: TimedBeat,
+  t: number,
+  W: number,
+  H: number,
+): void {
+  if (beat.beat.kind !== "hook" && beat.beat.kind !== "metric" && beat.beat.kind !== "context") return;
+  const full = beat.beat.label?.trim();
+  if (!full) return;
+
+  ctx.save();
+  ctx.font = "700 42px Inter, Arial, sans-serif";
+  ctx.letterSpacing = "3px";
+  ctx.textAlign = "center";
+  const elapsed = Math.max(0, t - beat.start);
+  const reveal = clamp01(elapsed / Math.min(0.56, Math.max(0.26, beat.duration * 0.25)));
+  const count = Math.max(0, Math.min(full.length, Math.ceil(full.length * reveal)));
+  const exit = clamp01((beat.start + beat.duration - t) / 0.2);
+  ctx.globalAlpha = smoother(Math.min(reveal * 2, exit));
+  ctx.shadowColor = "rgba(0,0,0,.95)";
+  ctx.shadowBlur = 26;
+  ctx.fillStyle = "#f7f7f2";
+  ctx.fillText(full.slice(0, count), W / 2, H - SAFE_BOTTOM - 132);
   ctx.restore();
 }
 

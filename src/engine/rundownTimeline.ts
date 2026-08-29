@@ -58,6 +58,10 @@ const MIN_BEAT = 1.6;
 // and without a gap the video has no rhythm and no room to move the crop.
 const GAP = 0.35;
 
+// A subtle key tick for roughly every pair of visible characters. The compact
+// cue is decorative punctuation, so spaces share the same cadence as letters.
+const CHARS_PER_KEYSTROKE = 2;
+
 // Where in a beat the measurement finishes drawing itself, as a fraction.
 //
 // The line must be on the face while the sentence about it is still being said.
@@ -322,10 +326,15 @@ export function fitTimeline(
 function cuesFor(timed: TimedBeat[]): SfxCue[] {
   const sfx: SfxCue[] = [];
   for (const b of timed) {
-    // No keystroke cues any more. The rolling caption they accompanied is
-    // gone — one kicker per beat needs no typewriter — and ticks with no
-    // glyphs are noise under the voice. The click stays: it marks the
-    // measurement landing, which still happens.
+    // Only the compact visual cue is typed. The voice can now be changed or
+    // regenerated without creating a machine-gun track of key sounds for a
+    // sentence the video no longer prints.
+    const typing = Math.min(0.55, Math.max(0.2, (b.duration - GAP) * 0.24));
+    const drawsCue = b.beat.kind === "hook" || b.beat.kind === "metric" || b.beat.kind === "context";
+    const strokes = Math.floor((drawsCue ? b.beat.label?.length ?? 0 : 0) / CHARS_PER_KEYSTROKE);
+    for (let i = 0; i < strokes; i++) {
+      sfx.push({ at: b.start + (typing * i) / Math.max(1, strokes), kind: "key" });
+    }
     if (b.drawAt !== undefined) sfx.push({ at: b.drawAt, kind: "click" });
     // No sound on the curve.
     //
