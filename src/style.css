@@ -1758,11 +1758,25 @@ body.cam-takeover .cam-actions {
    Capture and Cancel off both edges with the middle button stretched between
    them. Reaching ID level is the only way to hand the width back to flex. */
 body.cam-takeover #side-actions .btn { min-width: 0; width: auto; }
+/* The same reset for the FRONT row, which never got it.
+   `.btn.cancel` carries `width: min(420px, 100%)` and `margin: 10px auto 0`
+   from its stacked-under-a-form life at (0,2,0), and nothing in this block
+   reached it — the line above only names #side-actions. As a flex item that
+   width becomes the basis, so Cancel demanded 420px of a 390px row, the
+   shutter (the only item with flex-shrink and min-width:0) absorbed the whole
+   deficit and was crushed to 99px against a 122px label, and "Capture anyway"
+   spilled out of its own pill and off the left edge of the screen. The stray
+   top margin is why Cancel also sat lower than the other two. */
+body.cam-takeover .cam-actions .btn.cancel { width: auto; margin: 0; }
 /* The shutter takes the room the other two do not need, rather than all three
    splitting the width evenly: on a 390px screen an even split leaves every
    button too narrow for its own label. */
 body.cam-takeover .cam-actions .btn { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
-body.cam-takeover .cam-actions .btn.pri { flex: 1 1 auto; }
+/* The shutter grows into spare room but never shrinks below its label. It
+   carries the longest and most important text in the row ("Capture anyway"),
+   so it is the wrong item to make the flexible one: with `flex-shrink: 1` and
+   `min-width: 0` it was the item that paid for every other button's demands. */
+body.cam-takeover .cam-actions .btn.pri { flex: 1 0 auto; }
 @media (max-width: 760px) {
   /* Upload keeps its icon and drops its words. Three labelled buttons do not
      fit across a phone, and the arrow-into-cloud is the one of the three that
