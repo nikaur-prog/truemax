@@ -374,18 +374,26 @@ export function celebrateMax(stage: HTMLElement | null): void {
 //     no hover, and pupils snapping to old tap positions read as a glitch);
 //   - poking him gets a happy hop and a wave. A character you can poke and
 //     who reacts is the cheapest aliveness there is, and Duolingo has been
-//     dining on it for a decade;
-//   - on knockable stages, the poke instead SHOCKS him and tips him over, and
-//     he stays down — he is a flying bot, he cannot right himself — until the
-//     next tap, which flies him back upright. Knockable is opt-in per stage,
-//     because on the surfaces where tapping him also opens the chat, a fall
-//     would fight the navigation.
+//     dining on it for a decade.
+//
+// There WAS a third: on the offer screen a poke tipped him over and left him
+// there until the next tap. It is gone at the owner's call, and the reason is
+// worth keeping. `.mx-down` is a single `transform: rotate(98deg)` on a
+// transition — no arc, no overshoot, no secondary motion on the antenna or
+// the arm — so he did not fall, he pivoted, like a layout bug. And because
+// the fall had to hold, the stage opted OUT of the idle repertoire, which is
+// why the one screen asking for money was also the one screen where he stood
+// perfectly still. Removing the knock returns his idle life to it.
+//
+// (The pet's fight sequence still uses mx-shock/mx-down/mx-rise on its second
+// tap. That one reads, because it is one beat of a scripted escalation and he
+// picks himself up 750ms later without being asked.)
 //
 // Listeners hang off the stage element and self-disarm once it leaves the
 // document, so a dismissed offer screen cannot leak a document-level handler.
 export function wireMaxInteractions(
   stage: HTMLElement | null,
-  options: { knockable?: boolean; fight?: boolean } = {},
+  options: { fight?: boolean } = {},
 ): void {
   if (!stage) return;
   const svg = stage.querySelector<SVGSVGElement>(".mx-svg");
@@ -394,20 +402,18 @@ export function wireMaxInteractions(
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // The idle repertoire, on every surface where he is big enough to be
-  // watched. Not on a knockable stage — a robot lying on his side who breaks
-  // into a dance undoes the joke — and not below about forty pixels, where he
-  // is a face beside a paragraph and a skateboard would be three grey pixels
-  // moving. Measured after a frame, because a stage mounted this tick has not
-  // been laid out yet and reports zero.
-  if (!options.knockable) {
-    requestAnimationFrame(() => {
-      if (!svg.isConnected) return;
-      if (svg.getBoundingClientRect().width < 40) return;
-      void import("./maxIdle.js").then((m) => {
-        if (svg.isConnected) m.mountMaxIdle(stage);
-      });
+  // watched — which now includes the offer screen, see the note above. Not
+  // below about forty pixels, where he is a face beside a paragraph and a
+  // skateboard would be three grey pixels moving. Measured after a frame,
+  // because a stage mounted this tick has not been laid out yet and reports
+  // zero.
+  requestAnimationFrame(() => {
+    if (!svg.isConnected) return;
+    if (svg.getBoundingClientRect().width < 40) return;
+    void import("./maxIdle.js").then((m) => {
+      if (svg.isConnected) m.mountMaxIdle(stage);
     });
-  }
+  });
 
   const pupils = svg.querySelector<SVGGElement>(".mx-pupils");
   if (pupils && !reduced && window.matchMedia("(pointer: fine)").matches) {
@@ -444,27 +450,6 @@ export function wireMaxInteractions(
 
   stage.addEventListener("click", () => {
     if (reduced) return;
-
-    if (options.knockable) {
-      // Down? This tap is the rescue: he flies back upright.
-      if (svg.classList.contains("mx-down")) {
-        svg.classList.remove("mx-down");
-        svg.classList.add("mx-rise");
-        window.setTimeout(() => svg.classList.remove("mx-rise"), 700);
-        return;
-      }
-      if (svg.classList.contains("mx-shock") || svg.classList.contains("mx-rise")) return;
-      // Up? The tap shocks him — wide eyes, small o of a mouth — and then
-      // tips him over. Two beats, not one: the shock is what makes the fall
-      // read as a reaction rather than as a layout bug.
-      svg.classList.add("mx-shock");
-      window.setTimeout(() => {
-        if (!svg.isConnected) return;
-        svg.classList.remove("mx-shock");
-        svg.classList.add("mx-down");
-      }, 420);
-      return;
-    }
 
     const sticker = stage.querySelector(".max-sticker") ?? stage;
     for (const el of [svg, sticker]) {

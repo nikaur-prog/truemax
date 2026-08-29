@@ -300,9 +300,6 @@ export async function openTrialFunnel(
     const say = activeHost.querySelector<HTMLElement>(".max-say");
     const svg = activeHost.querySelector<SVGSVGElement>(".max-stage .mx-svg");
     if (!feed || !say || !svg) return;
-    // He may be lying on his side from a knock. The demo picks him back up:
-    // answering a question face-down would be committing to the bit too hard.
-    svg.classList.remove("mx-down", "mx-shock");
 
     // Drawn per open rather than rotated in order, because the order would be
     // per page load and everybody would see the same first one anyway.
@@ -449,10 +446,11 @@ export async function openTrialFunnel(
         window.setTimeout(() => runMaxDemo(), 10_000);
       }, 900);
     }, 620);
-    // Knockable here: he is a toy on this screen. Tapping shocks him and tips
-    // him over; a flying bot with no legs stays down until the next tap
-    // flies him back up.
-    wireMaxInteractions(activeHost.querySelector<HTMLElement>(".max-stage"), { knockable: true });
+    // Plain interactions here. This screen used to opt into the knock, which
+    // cost it the idle repertoire as well as looking like a pivot rather than
+    // a fall; he stands, breathes and gets on with his acts now, and a poke
+    // gets the hop and the wave every other surface gives.
+    wireMaxInteractions(activeHost.querySelector<HTMLElement>(".max-stage"));
 
     // The stat counts up rather than appearing. A number that ticks reads as
     // something being measured; the same number sitting still reads as a claim.
