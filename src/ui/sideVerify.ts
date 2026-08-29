@@ -374,14 +374,16 @@ export const TEMPLATE: Record<SidePointId, [number, number]> = {
   labialeSuperius: [-0.062, 0.651],
   labialeInferius: [-0.096, 0.789],
   pogonion: [-0.159, 0.942],
-  // The five placed points below were refitted from the 33-face labeled
-  // synthetic dataset (tools/side-fit.mjs, .side-dataset/) in 2026-08. The
-  // striking result was how little they moved: gonion matched the old
-  // two-fixture fit to 0.004, which says the E/F fixtures were placed well
-  // and the template's residual error lives in the per-face head-width
-  // estimate, not in these constants.
-  menton: [-0.280, 0.986],
-  gonion: [-0.936, 0.808],
+  // The five placed points below are refitted from the labeled synthetic
+  // dataset (tools/side-fit.mjs, .side-dataset/): 33 faces in the first
+  // round, 56 in the second (2026-08-29, ear cluster hand-labeled on 54).
+  // The striking result both times was how little they moved — round two
+  // shifted no coordinate by more than 0.022 — which says the template's
+  // residual error lives in the per-face head-width estimate, not in these
+  // constants. That per-face error is what the own-ears prior erases for
+  // returning users.
+  menton: [-0.265, 0.984],
+  gonion: [-0.914, 0.806],
   // CORRECTED from the fitted 0.297, which put this 26mm ABOVE the ear notch —
   // up on the temple rather than on the jaw.
   //
@@ -403,9 +405,9 @@ export const TEMPLATE: Record<SidePointId, [number, number]> = {
   // reference profile the seeder is built from, and therefore very nearly every
   // real face put through it. At the corrected height the same template scores
   // 0.79, inside one sd of the 0.72 norm. sideTemplate.test.ts now holds this.
-  condylion: [-0.963, 0.419],
-  cervicale: [-0.648, 0.967],
-  tragion: [-1.0, 0.426],
+  condylion: [-0.978, 0.418],
+  cervicale: [-0.628, 0.965],
+  tragion: [-1.0, 0.421],
 };
 
 function silhouetteGeometry(canvas: HTMLCanvasElement): SilhouetteGeometry | null {
@@ -945,6 +947,33 @@ function seedFromMask(
   return { points, faceDir, clipped };
 }
 
+// The on-head test cannot tell a profile from a cheek. A mesh that survived a
+// true 90-degree turn usually lands its whole cloud ON the head while hugging
+// the cheek a centimetre inside the silhouette (s059 in the labeled dataset:
+// every front point on the face, none of them on the profile edge, and the
+// mesh still outscored a correct segmentation seed). The front landmarks have
+// a stronger obligation than being on the head — they LIVE on the profile
+// line — so the mesh's arbitration score is weighted by how many of its front
+// points actually touch the mask's front curve.
+const EDGE_IDS: SidePointId[] = [
+  "glabella", "nasion", "pronasale", "subnasale",
+  "labialeSuperius", "labialeInferius", "pogonion",
+];
+
+function frontAgreement(points: SidePoints, g: SideMaskGeometry, canvasW: number): number {
+  let n = 0;
+  let on = 0;
+  for (const id of EDGE_IDS) {
+    const p = points[id];
+    const row = Math.round(p.y / g.scaleY);
+    const v = row >= 0 && row < g.h ? g.front[row] : NaN;
+    if (Number.isNaN(v)) continue;
+    n++;
+    if (Math.abs(p.x - v * g.scaleX) <= canvasW * 0.035) on++;
+  }
+  return n ? on / n : 1;
+}
+
 /** onHeadFraction, but against the segmentation head mask. */
 function onMaskFraction(points: SidePoints, g: SideMaskGeometry, canvasW: number): number {
   const ids = Object.keys(points) as SidePointId[];
@@ -980,7 +1009,10 @@ export async function seedSidePointsSmart(canvas: HTMLCanvasElement): Promise<Si
 
   const mesh = seedFromLandmarks(canvas);
   const maskSeed = seedFromMask(g);
-  const meshScore = mesh ? onMaskFraction(mesh.points, g, canvas.width) : -1;
+  const meshScore = mesh
+    ? onMaskFraction(mesh.points, g, canvas.width)
+      * (0.55 + 0.45 * frontAgreement(mesh.points, g, canvas.width))
+    : -1;
   const maskScore = maskSeed
     ? onMaskFraction(maskSeed.points, g, canvas.width) * (maskSeed.clipped ? 0.5 : 1)
     : -1;

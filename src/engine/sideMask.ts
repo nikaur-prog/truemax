@@ -64,6 +64,8 @@ export async function sideMaskGeometry(canvas: HTMLCanvasElement): Promise<SideM
   const faceR = new Int16Array(h).fill(-1);
   const headL = new Int16Array(h).fill(-1);
   const headR = new Int16Array(h).fill(-1);
+  const hairL = new Int16Array(h).fill(-1);
+  const hairR = new Int16Array(h).fill(-1);
   let headPixels = 0;
   let faceSumX = 0;
   let faceN = 0;
@@ -78,6 +80,10 @@ export async function sideMaskGeometry(canvas: HTMLCanvasElement): Promise<SideM
         headSumX += x;
         if (headL[y] < 0) headL[y] = x;
         headR[y] = x;
+      }
+      if (c === HAIR) {
+        if (hairL[y] < 0) hairL[y] = x;
+        hairR[y] = x;
       }
       if (c === FACE_SKIN) {
         run++;
@@ -95,21 +101,82 @@ export async function sideMaskGeometry(canvas: HTMLCanvasElement): Promise<SideM
   }
   if (faceN < w * h * 0.005 || headPixels < w * h * 0.02) return null;
 
-  // The face sits forward of the head's centre of mass — that is what a
-  // profile IS — so the sign of that offset is the facing. This does not have
-  // the mesh-centroid flip failure: no hallucinated far side exists in a mask.
-  const faceDir: 1 | -1 = faceSumX / faceN >= headSumX / headPixels ? 1 : -1;
-
   let faceTop = -1;
   let faceBottom = -1;
-  const front = new Float32Array(h).fill(NaN);
   for (let y = 0; y < h; y++) {
     if (faceL[y] < 0) continue;
     if (faceTop < 0) faceTop = y;
     faceBottom = y;
-    front[y] = faceDir === 1 ? faceR[y] : faceL[y];
   }
   if (faceTop < 0 || faceBottom - faceTop < h * 0.08) return null;
+
+  // Which way does the face point? Three witnesses, in order of reliability,
+  // each validated against the 60-face labeled dataset.
+  //
+  // 1) HAIR. On a profile, head hair sits BEHIND the face — so on each face
+  //    row, note which side of the face span holds hair pixels, and the
+  //    heavier side is the back of the head. Restricted to the upper head
+  //    (crown down to 40% of face height) because a beard is "hair" too and
+  //    it sits IN FRONT: s038's beard was the single face this test got
+  //    wrong until the bottom rows were excluded. With any head hair at all
+  //    this signal was correct on every face in the dataset.
+  //
+  // 2) A bald head has no hair witness, but offers a better one: with the
+  //    scalp read as skin, the face mask's horizontal extremes are the nose
+  //    and the occiput — and only a handful of rows graze the nose tip,
+  //    while the round back of the skull is shared by a broad band. The
+  //    narrow extreme is the front.
+  //
+  // 3) The face-vs-head centroid offset survives as the last tiebreak. It
+  //    was the original, single test, and it is right except on bald or
+  //    heavily bearded heads — which the two shape tests above now decide.
+  const faceSpan = faceBottom - faceTop;
+  let headTop = faceTop;
+  for (let y = 0; y < h; y++) {
+    if (headL[y] >= 0) {
+      headTop = y;
+      break;
+    }
+  }
+  const upperLimit = faceTop + Math.round(faceSpan * 0.4);
+  let hairBehindL = 0;
+  let hairBehindR = 0;
+  for (let y = headTop; y <= upperLimit; y++) {
+    if (faceL[y] < 0) continue;
+    if (hairL[y] >= 0 && hairL[y] < faceL[y]) hairBehindL++;
+    if (hairR[y] >= 0 && hairR[y] > faceR[y]) hairBehindR++;
+  }
+
+  const tol = w * 0.03;
+  let faceMinX = w;
+  let faceMaxX = -1;
+  for (let y = faceTop; y <= faceBottom; y++) {
+    if (faceL[y] < 0) continue;
+    if (faceL[y] < faceMinX) faceMinX = faceL[y];
+    if (faceR[y] > faceMaxX) faceMaxX = faceR[y];
+  }
+  let rowsNearL = 0;
+  let rowsNearR = 0;
+  for (let y = faceTop; y <= faceBottom; y++) {
+    if (faceL[y] < 0) continue;
+    if (faceL[y] <= faceMinX + tol) rowsNearL++;
+    if (faceR[y] >= faceMaxX - tol) rowsNearR++;
+  }
+
+  let faceDir: 1 | -1;
+  if (Math.abs(hairBehindL - hairBehindR) >= Math.max(8, h * 0.02)) {
+    faceDir = hairBehindL > hairBehindR ? 1 : -1;
+  } else if (Math.abs(rowsNearL - rowsNearR) >= h * 0.02) {
+    faceDir = rowsNearL < rowsNearR ? -1 : 1;
+  } else {
+    faceDir = faceSumX / faceN >= headSumX / headPixels ? 1 : -1;
+  }
+
+  const front = new Float32Array(h).fill(NaN);
+  for (let y = 0; y < h; y++) {
+    if (faceL[y] < 0) continue;
+    front[y] = faceDir === 1 ? faceR[y] : faceL[y];
+  }
 
   return {
     w,

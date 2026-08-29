@@ -25,10 +25,17 @@ import { fileURLToPath } from "node:url";
 const APP_DIR = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const seeds = JSON.parse(readFileSync(`${APP_DIR}/.side-dataset/seeds.json`, "utf8"));
 
-const EXCLUDE = new Set(["s022"]);
+// s022: nose clipped at the frame. s037: braids hang over the whole profile
+// line. s051: over-rotated, more back-of-head than profile. All three are out
+// of capture spec — the app would coach a retake — so they teach nothing.
+const EXCLUDE = new Set(["s022", "s037", "s051"]);
 const PARTIAL = {
   s006: ["pronasale", "subnasale", "labialeSuperius", "labialeInferius", "pogonion", "menton", "cervicale"],
   s035: ["gonion", "condylion", "tragion"],
+  // Afro fully covers the ear; the cluster cannot be honestly labeled.
+  s043: ["gonion", "condylion", "tragion"],
+  // The beard hides the jaw angle.
+  s053: ["gonion"],
 };
 
 // Hand corrections in display pixels. Point ids in SIDE_POINTS order.
@@ -70,6 +77,29 @@ const CORRECTIONS = {
   s032: { 1: [100, 158], 2: [122, 298], 3: [118, 325], 12: [438, 440], 13: [412, 412] },
   s033: { 12: [330, 392], 13: [342, 382] },
   s034: { 11: [292, 528], 12: [265, 352], 13: [250, 345] },
+  // Round 2 (s036-s059, hand-labeled 2026-08-29). Mostly the ear cluster,
+  // which is what the fit needs; front points only where the seed missed.
+  s036: { 11: [330, 595], 12: [378, 448], 13: [392, 442] },
+  s038: { 1: [172, 315], 12: [393, 522], 13: [400, 510] },
+  s039: { 7: [548, 612], 12: [305, 500], 13: [315, 492] },
+  s040: { 12: [332, 438], 13: [340, 430] },
+  s041: { 12: [295, 448], 13: [302, 438] },
+  s042: { 3: [115, 420], 12: [315, 478], 13: [322, 468] },
+  s043: { 5: [558, 572], 6: [566, 594], 7: [560, 612], 8: [552, 625] },
+  s044: { 12: [420, 462], 13: [428, 452] },
+  s045: { 12: [300, 425], 13: [307, 415] },
+  s046: { 1: [220, 220] },
+  s047: { 12: [338, 502], 13: [345, 492] },
+  s048: { 12: [345, 518], 13: [352, 508] },
+  s049: { 12: [348, 445], 13: [355, 435] },
+  s050: { 8: [158, 545], 9: [175, 572], 10: [250, 590], 11: [312, 552], 13: [368, 440] },
+  s052: { 12: [348, 335], 13: [352, 322] },
+  s053: { 1: [420, 368], 9: [522, 758], 12: [240, 580], 13: [248, 568] },
+  s054: { 12: [296, 498], 13: [303, 488] },
+  s055: { 11: [295, 655], 12: [280, 482], 13: [288, 472] },
+  s056: { 12: [262, 442], 13: [268, 432] },
+  s057: { 1: [232, 222], 9: [138, 598] },
+  s058: { 1: [455, 295], 12: [250, 470], 13: [258, 458] },
 };
 
 // "eval" mode: compare the CURRENT seeds against the frozen labels.json
