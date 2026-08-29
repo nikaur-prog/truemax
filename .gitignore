@@ -62,6 +62,16 @@ clips/
 # this exception is explicit rather than a force-add nobody can see.
 !public/demo/*.mp4
 
+# The thirty-second CTA film, so /quick can hand it over as a finished file
+# for the end of a TikTok rather than rendering thirty seconds in a browser.
+#
+# Allowed under the face-video rule above for the same reason public/demo/*.mp4
+# is: the two people in it are AI-generated, tagged as such on screen, and the
+# whole point of the file is to be distributed. Nobody's real face is in it.
+# The 79MB of source frames, VO segments and actor stills it was built from
+# stay in .cta-assets/, which is ignored; only the 6MB master ships.
+!public/cta/*.mp4
+
 # The export folders, in every casing the sorter might produce.
 [Rr]eels/
 [Rr]undowns/
