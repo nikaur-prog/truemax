@@ -1134,6 +1134,12 @@ body.funnel-open { overflow: hidden; }
   transition: border-color .15s ease, background-color .15s ease, transform .12s ease;
   min-width: 0;
 }
+/* `display: flex` on .ract is an author declaration, so it outranks the user
+   agent's `[hidden] { display: none }` on ORIGIN alone - specificity never
+   enters into it. Without this the hidden attribute set by setPathwayState()
+   is inert and the duplicate "See your plan" stays on screen next to the lead
+   button that now goes to the same place. Same reason as .maxchat-chips[hidden]. */
+.ract[hidden] { display: none; }
 .ract span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ract-ico { width: 17px; height: 17px; flex: none; opacity: .62; }
 .ract:hover { border-color: #c9c7c0; background: var(--bg); }
