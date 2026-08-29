@@ -123,6 +123,12 @@ const SAFE_LEFT = 48;
 // The right-hand action rail. Only the bottom bar is wide enough to reach it.
 const SAFE_RIGHT = 132;
 
+// The video's stroke weight, over the report's hairline (1). The platform's
+// re-encode eats exactly the width a screen never loses, and the reference
+// channels' lines read a step heavier — this keeps the white line and the
+// endpoint nodes, just built to survive compression and bright skin.
+const VIDEO_LINE_WEIGHT = 1.35;
+
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 const smoother = (n: number) => n * n * n * (n * (n * 6 - 15) + 10);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -441,6 +447,14 @@ export function cropAt(
   metrics?: Map<string, ScoredMetric>,
   /** Widen each beat's frame for its companion line too — short cut only. */
   withCompanions = false,
+  /**
+   * Hold the beat's own crop instead of travelling toward the next beat's.
+   * Set when the next beat plays on a DIFFERENT photograph (see stageFor):
+   * lerping a crop toward a region computed on this photo for a move that
+   * will actually happen on another one is a drift toward nowhere, and the
+   * stage dip covers the cut it was smoothing.
+   */
+  holdAtEnd = false,
 ): Crop {
   // The union of every measurement named in a beat, since a sentence may name
   // more than one and the frame has to hold all of them at once.
@@ -479,7 +493,7 @@ export function cropAt(
 
   const here = regionCrop(photo, landmarks, current.beat.region, aspect, bounds(current));
   const next = timeline.beats[index + 1];
-  if (!next) return here;
+  if (!next || holdAtEnd) return here;
 
   // The move occupies the last 0.55s of the beat, or the whole tail if the beat
   // is shorter than that.
@@ -804,6 +818,19 @@ export function drawRundownFrame(
   const beat = beatNear(input.timeline, t);
   if (!beat) return;
 
+  // The STAGE: which photograph this beat plays on. Measurement beats are
+  // dealt out across the primary and every landmarked cutaway (stageFor), and
+  // from here down the whole grammar of the beat — crop, push-in, matte,
+  // measurement — runs on the stage photograph with the stage's own
+  // landmarks. The card, curve and closing beats always play on the primary.
+  const stage = stageFor(input, beat);
+  const basePhoto = (stage?.image ?? photo) as HTMLCanvasElement;
+  const baseLandmarks = stage?.landmarks ?? landmarks;
+  const beatIndex = input.timeline.beats.indexOf(beat);
+  const nextBeat = input.timeline.beats[beatIndex + 1];
+  const stageHolds = Boolean(nextBeat && stageFor(input, nextBeat) !== stage);
+  const dip = stageDip(input, beat, t);
+
   // The photograph is the frame. Full bleed rather than a card, because the
   // subject of a rundown is the face and every pixel spent on chrome is a pixel
   // not spent on the thing being measured.
@@ -817,8 +844,17 @@ export function drawRundownFrame(
   const local = clamp01((t - beat.start) / Math.max(0.001, beat.duration));
   const release = smoother(clamp01((beat.start + beat.duration - t) / 0.55));
   const crop = pushInCrop(
-    cropAt(photo, landmarks, input.timeline, t, W / H, input.metrics, input.cut === "short"),
-    photo,
+    cropAt(
+      basePhoto,
+      baseLandmarks,
+      input.timeline,
+      t,
+      W / H,
+      input.metrics,
+      input.cut === "short",
+      stageHolds,
+    ),
+    basePhoto,
     local * release,
   );
   const kind = beat.beat.kind;
@@ -872,7 +908,7 @@ export function drawRundownFrame(
     if (cutaway.landmarks && metric && overlayAlpha(beat, t) > 0.004) {
       const iw = (cutaway.image as HTMLImageElement).width || W;
       const ih = (cutaway.image as HTMLImageElement).height || H;
-      drawMeasurement(overlayCanvas, cutaway.landmarks, iw, ih, metric, 1);
+      drawMeasurement(overlayCanvas, cutaway.landmarks, iw, ih, metric, 1, { weight: VIDEO_LINE_WEIGHT });
       ctx.save();
       // The line rides the same dip as its photograph: a measurement at full
       // strength over an image still rising out of black is two layers
@@ -923,9 +959,17 @@ export function drawRundownFrame(
       ctx.restore();
     }
   } else if (input.cut === "short" && kind === "metric") {
-    drawMattedPhoto(ctx, photo, landmarks, crop, W, H);
+    // Through the stage dip: a change of photograph rises out of the frame's
+    // own black exactly the way a cutaway does, so the two cut grammars match.
+    ctx.save();
+    ctx.globalAlpha = dip;
+    drawMattedPhoto(ctx, basePhoto, baseLandmarks, crop, W, H);
+    ctx.restore();
   } else {
-    ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+    ctx.save();
+    ctx.globalAlpha = dip;
+    ctx.drawImage(basePhoto, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+    ctx.restore();
   }
 
   // Everything except the measurement goes dark. A uniform scrim rather than a
@@ -984,9 +1028,12 @@ export function drawRundownFrame(
   }
 
   // Never over a cutaway — see overlayVisible, which owns that rule so it is
-  // not a branch here that a later refactor can quietly drop.
+  // not a branch here that a later refactor can quietly drop. On a staged
+  // beat the overlay is drawn from the STAGE's landmarks through the stage's
+  // own crop, so the line sits on the face that is actually on screen; the
+  // value inside it is still the measured photograph's, stated once.
   if (overlayVisible(input, beat, t)) {
-    drawOverlayForBeat(ctx, photo, landmarks, input, beat, t, crop, W, H, overlayCanvas);
+    drawOverlayForBeat(ctx, basePhoto, baseLandmarks, input, beat, t, crop, W, H, overlayCanvas);
   }
   // The two closing beats take over the frame rather than sitting beside the
   // face. Both are arguments about the viewer rather than about the subject —
@@ -1058,28 +1105,105 @@ export function brollFor(
   // A beat that draws nothing can take a cutaway for its whole length.
   if (kind !== "metric") return pool[index % pool.length] ?? null;
 
-  // A MEASUREMENT beat takes one only in its tail, and this is the part worth
-  // being careful about.
-  //
-  // The measurement cannot be drawn over a cutaway — the overlay lives in the
-  // measured photograph's landmark space, so the same line over a different
-  // face lands somewhere arbitrary. But "no cutaways during the analysis" costs
-  // the format its only cuts through the longest stretch of the video, which is
-  // most of the reason a rundown made of one still frame looks like one still
-  // frame.
-  //
-  // So the beat is split. The line lands at DRAW_AT, holds on the measured
-  // photograph through the middle of the sentence — long enough to be read and
-  // to be the evidence it exists to be — and the last third cuts away while the
-  // sentence finishes. Every measurement is still shown on the face it was
-  // taken from, and there is now a cut on every beat instead of four in ninety
-  // seconds.
-  //
-  // The crop move to the next region happens behind that cutaway, which is a
-  // free improvement: the camera arrives already settled instead of gliding.
+  // Measurement beats belong to the STAGE system now — see stageFor. When any
+  // attached photograph carries its own landmarks, whole beats move onto it
+  // with the full analysis, and the old tail-flash cutaway would be a third
+  // cut fighting that structure. It survives only for the case the stages
+  // cannot serve: a pool where no photograph found a face, which can still
+  // interrupt the tail of a beat exactly as before.
+  if (stagePool(input).length) return null;
+
+  // The measurement cannot be drawn over a faceless cutaway — the overlay
+  // lives in landmark space and there are no landmarks to give it. So the
+  // beat is split: the line lands at DRAW_AT, holds on the measured
+  // photograph through the middle of the sentence, and the last third cuts
+  // away while the sentence finishes.
   const local = (t - beat.start) / Math.max(0.001, beat.duration);
   if (local < 1 - CUTAWAY_TAIL) return null;
   return pool[index % pool.length] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// PHOTO-FIRST staging.
+//
+// The cutaway system above treats extra photographs as decoration: the
+// analysis lives on one photograph and the others flash by in beat tails,
+// which — watched back — reads as the video showing you a picture and doing
+// nothing with it. The stage system inverts that. Every attached photograph
+// with a face becomes a full member of the analysis: measurement beats are
+// dealt out in PAIRS across the primary photograph and every landmarked
+// cutaway in turn, and the beat's whole grammar — the crop, the push-in, the
+// measurement line, the retraction — runs on whichever photograph holds the
+// stage, positioned by that photograph's own landmarks.
+//
+// The VALUE never moves: one face, one set of figures, measured once on the
+// controlled photograph and stated identically wherever the line is drawn.
+// The line on another photo of the same person is the same annotation licence
+// the cutaway system already took, extended from a flash to a full beat.
+//
+// Deterministic by metric index, so one scan always renders one video.
+// ---------------------------------------------------------------------------
+
+/** How many consecutive measurement beats each photograph holds. */
+export const STAGE_BEATS_PER_PHOTO = 2;
+
+type Stage = { image: CanvasImageSource; landmarks: NormalizedLandmark[] };
+
+/** The photographs able to hold a full analysis beat: face found, line drawable. */
+export function stagePool(input: RundownInput): Stage[] {
+  return (input.broll ?? []).filter((b): b is Stage => Boolean(b.landmarks?.length));
+}
+
+/**
+ * Which stage a beat plays on: 0 is the primary photograph, n>0 is pool[n-1].
+ * Non-metric beats always play on the primary.
+ */
+function stageIndexOf(input: RundownInput, beat: TimedBeat): number {
+  if (beat.beat.kind !== "metric") return 0;
+  const pool = stagePool(input);
+  if (!pool.length) return 0;
+  let mi = 0;
+  for (const b of input.timeline.beats) {
+    if (b === beat) break;
+    if (b.beat.kind === "metric") mi++;
+  }
+  return Math.floor(mi / STAGE_BEATS_PER_PHOTO) % (pool.length + 1);
+}
+
+/** The stage photograph for this beat, or null for the primary. */
+export function stageFor(input: RundownInput, beat: TimedBeat): Stage | null {
+  const index = stageIndexOf(input, beat);
+  return index === 0 ? null : (stagePool(input)[index - 1] ?? null);
+}
+
+/** Whether this beat opens on a different photograph than the one before it. */
+export function stageChanged(input: RundownInput, beat: TimedBeat): boolean {
+  const index = input.timeline.beats.indexOf(beat);
+  if (index <= 0) return stageIndexOf(input, beat) !== 0;
+  return stageIndexOf(input, beat) !== stageIndexOf(input, input.timeline.beats[index - 1]);
+}
+
+/**
+ * The dip that carries a stage change: the outgoing photograph falls to the
+ * frame's own near-black over CUT_DIP and the incoming one rises out of it —
+ * the same edit grammar the cutaways use, so the two systems cut alike.
+ * 1 anywhere away from a boundary between different stages.
+ */
+function stageDip(input: RundownInput, beat: TimedBeat, t: number): number {
+  if (!stagePool(input).length) return 1;
+  const index = input.timeline.beats.indexOf(beat);
+  const here = stageIndexOf(input, beat);
+  const prev = index > 0 ? stageIndexOf(input, input.timeline.beats[index - 1]) : here;
+  const next =
+    index >= 0 && index < input.timeline.beats.length - 1
+      ? stageIndexOf(input, input.timeline.beats[index + 1])
+      : here;
+  let a = 1;
+  if (here !== prev) a = Math.min(a, smoother(clamp01((t - beat.start) / CUT_DIP)));
+  if (here !== next) {
+    a = Math.min(a, smoother(clamp01((beat.start + beat.duration - t) / CUT_DIP)));
+  }
+  return a;
 }
 
 /**
@@ -1690,7 +1814,7 @@ function drawOverlayForBeat(
   // composited through the SAME crop rectangle as the photograph. That is what
   // guarantees the line sits on the feature: both are the same projection of the
   // same coordinates, so there is no second transform to get wrong.
-  drawMeasurement(overlayCanvas, landmarks, photo.width, photo.height, metric, progress);
+  drawMeasurement(overlayCanvas, landmarks, photo.width, photo.height, metric, progress, { weight: VIDEO_LINE_WEIGHT });
   ctx.save();
   // The line's own draw is a subset of the true figure; the ALPHA is what makes
   // it arrive and leave rather than blink. See overlayAlpha.
@@ -1710,7 +1834,7 @@ function drawOverlayForBeat(
     if (companion && Number.isFinite(companion.value) && !companion.implausible) {
       const late = clamp01((progress - 0.45) / 0.55);
       if (late > 0) {
-        drawMeasurement(overlayCanvas, landmarks, photo.width, photo.height, companion, late);
+        drawMeasurement(overlayCanvas, landmarks, photo.width, photo.height, companion, late, { weight: VIDEO_LINE_WEIGHT });
         ctx.save();
         ctx.globalAlpha = 0.42 * overlayAlpha(beat, t, snappy);
         ctx.drawImage(overlayCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);

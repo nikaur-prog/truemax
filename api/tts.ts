@@ -129,9 +129,6 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) return json({ error: "Voiceover is not configured on this deployment." }, 503);
-
     const body = (await request.json().catch(() => null)) as { text?: unknown } | null;
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     if (!text) return json({ error: "Nothing to say." }, 400);
@@ -139,83 +136,42 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: `Narration is ${text.length} characters; the ceiling is ${MAX_CHARS}.` }, 413);
     }
 
-    const voice = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE;
-    const model = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL;
-
-    const upstream = await fetch(
-      // WITH TIMESTAMPS, which is the whole reason this route returns JSON.
-      //
-      // The renderer used to estimate where each sentence fell inside the audio,
-      // first by scaling a word count and then by weighing syllables. Both got
-      // closer and both were still visibly late, because both are models of how
-      // a synthesiser reads and the synthesiser is the only thing that knows.
-      // This endpoint returns the start and end time of every CHARACTER it
-      // spoke, so the captions stop being predicted and start being looked up.
-      //
-      // The cost is that the response is base64 JSON rather than audio bytes,
-      // which is roughly a third larger over the wire and needs decoding on the
-      // client. For a file rendered once, in the background, that is nothing
-      // against a caption that lands on the word.
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/with-timestamps`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKey,
-          "content-type": "application/json",
-          accept: "application/json",
-        },
-        body: JSON.stringify({
-          text,
-          model_id: model,
-          // Stability low-ish and similarity high is the documented shape for
-          // narration that varies its delivery without drifting off the voice.
-          // A completely stable setting reads every sentence identically, which
-          // is the station-announcement problem again, one layer down.
-          //
-          // speed is a native delivery control, not a resample: the voice talks
-          // faster, it does not get played faster, so nothing shifts in pitch.
-          // Doing this here rather than with an ffmpeg atempo pass afterwards is
-          // also what keeps the video in sync for free — rundownExport fits the
-          // visual beats onto the REAL audio duration, so a shorter read
-          // compresses the whole rundown to match and nothing else changes.
-          voice_settings: {
-            stability: 0.4,
-            similarity_boost: 0.8,
-            style: 0.15,
-            speed: VOICE_SPEED,
-          },
-        }),
-      },
-    );
-
-    if (!upstream.ok) {
-      // The upstream body can carry quota and voice-id detail worth seeing in a
-      // log, but it is not echoed to the caller: it is ElevenLabs' account
-      // state, not this user's, and some of it names the plan and its limits.
-      // The body may repeat narration supplied by the user. Status is enough to
-      // diagnose account/quota failures without putting content in logs.
-      console.error("ElevenLabs refused", upstream.status);
-      const message =
-        upstream.status === 401
-          ? "The voiceover key was rejected."
-          : upstream.status === 429
-            ? "Voiceover quota is exhausted."
-            : "Voiceover generation failed.";
-      return json({ error: message }, upstream.status === 429 ? 429 : 502);
-    }
-
-    const payload = (await upstream.json()) as {
-      audio_base64?: string;
+    // A CHAIN of providers, best first, and the render only fails when every
+    // one of them has. ElevenLabs leads because it is the only one that
+    // returns per-character timestamps — the word-accurate captions — but an
+    // unpaid subscription or an exhausted quota there must degrade to the
+    // next voice, not to a silent video: a rundown without narration also has
+    // no captions, and the export it produced looked broken, not minimal.
+    // Every attempt is recorded so the caller can be told exactly which
+    // services failed and why, instead of a generic shrug.
+    const attempts: string[] = [];
+    let spoken: {
+      audio: string;
+      provider: string;
       alignment?: {
         characters?: string[];
         character_start_times_seconds?: number[];
         character_end_times_seconds?: number[];
       };
-    };
-    if (!payload.audio_base64) {
-      console.error("ElevenLabs returned no audio");
-      return json({ error: "Voiceover generation failed." }, 502);
+    } | null = null;
+
+    if (process.env.ELEVENLABS_API_KEY) {
+      spoken = await speakWithElevenLabs(text, process.env.ELEVENLABS_API_KEY, attempts);
+    } else {
+      attempts.push("ElevenLabs is not configured.");
     }
+    if (!spoken) {
+      if (process.env.OPENAI_API_KEY) {
+        spoken = await speakWithOpenAI(text, process.env.OPENAI_API_KEY, attempts);
+      } else {
+        attempts.push("The fallback voice is not configured.");
+      }
+    }
+    if (!spoken) {
+      console.error("all voice providers failed", attempts.join(" | "));
+      return json({ error: `No voice service produced audio. ${attempts.join(" ")}` }, 502);
+    }
+    const payload = { audio_base64: spoken.audio, alignment: spoken.alignment };
 
     // The meter ticks only after audio actually came back — a failed upstream
     // call must not spend a quota slot or a paid credit. And a failed SPEND
@@ -241,6 +197,10 @@ export async function POST(request: Request): Promise<Response> {
     return json(
       {
         audio: payload.audio_base64,
+        // Which service spoke, so the exporter can say so — an operator who
+        // hears the fallback voice deserves to know it was the fallback and
+        // not a new default.
+        provider: spoken.provider,
         alignment:
           alignment?.characters && alignment.character_start_times_seconds
             ? {
@@ -258,5 +218,148 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     console.error("tts failed", safeMessage(error));
     return json({ error: safeMessage(error) }, 500);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The providers. Each returns base64 audio or null, and appends a one-line
+// reason to `attempts` when it fails — those lines are what the operator sees
+// when the whole chain comes up empty, so they name the service and the class
+// of failure, never account internals.
+// ---------------------------------------------------------------------------
+
+async function speakWithElevenLabs(
+  text: string,
+  apiKey: string,
+  attempts: string[],
+): Promise<{
+  audio: string;
+  provider: string;
+  alignment?: {
+    characters?: string[];
+    character_start_times_seconds?: number[];
+    character_end_times_seconds?: number[];
+  };
+} | null> {
+  const voice = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE;
+  const model = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL;
+  try {
+    const upstream = await fetch(
+      // WITH TIMESTAMPS, which is the whole reason this route returns JSON:
+      // the start and end time of every CHARACTER spoken, so captions are
+      // looked up rather than predicted. Two generations of estimating where
+      // sentences fall were both visibly late — the synthesiser is the only
+      // thing that knows how it reads.
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/with-timestamps`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: model,
+          // Stability low-ish and similarity high is the documented shape for
+          // narration that varies its delivery without drifting off the voice.
+          //
+          // speed is a native delivery control, not a resample: the voice
+          // talks faster, it does not get played faster, so nothing shifts in
+          // pitch — and the visual timeline fits itself to the real audio, so
+          // a faster read compresses the whole rundown for free.
+          voice_settings: {
+            stability: 0.4,
+            similarity_boost: 0.8,
+            style: 0.15,
+            speed: VOICE_SPEED,
+          },
+        }),
+      },
+    );
+    if (!upstream.ok) {
+      // The upstream body can carry quota and voice-id detail worth seeing in
+      // a log, but it is not echoed to the caller: it is the provider's
+      // account state, not this user's.
+      console.error("ElevenLabs refused", upstream.status);
+      attempts.push(
+        upstream.status === 401
+          ? "ElevenLabs rejected the key."
+          : upstream.status === 429
+            ? "ElevenLabs quota is exhausted."
+            : `ElevenLabs failed (${upstream.status}).`,
+      );
+      return null;
+    }
+    const payload = (await upstream.json()) as {
+      audio_base64?: string;
+      alignment?: {
+        characters?: string[];
+        character_start_times_seconds?: number[];
+        character_end_times_seconds?: number[];
+      };
+    };
+    if (!payload.audio_base64) {
+      attempts.push("ElevenLabs returned no audio.");
+      return null;
+    }
+    return { audio: payload.audio_base64, provider: "elevenlabs", alignment: payload.alignment };
+  } catch (error) {
+    console.error("ElevenLabs call failed", safeMessage(error));
+    attempts.push("ElevenLabs was unreachable.");
+    return null;
+  }
+}
+
+// The fallback voice, spoken through the OpenAI account the deployment
+// already holds for image generation — one existing credential, no new
+// service to stand up. No character timestamps, so a rundown narrated by the
+// fallback times its captions by fitting the estimate onto the real audio
+// span: sentence-level sync, the same as before alignment existed.
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "tts-1-hd";
+const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "onyx";
+
+async function speakWithOpenAI(
+  text: string,
+  apiKey: string,
+  attempts: string[],
+): Promise<{ audio: string; provider: string } | null> {
+  try {
+    const upstream = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_TTS_MODEL,
+        voice: OPENAI_TTS_VOICE,
+        input: text,
+        response_format: "mp3",
+        // The same delivery pace as the lead voice, natively — see VOICE_SPEED.
+        speed: VOICE_SPEED,
+      }),
+    });
+    if (!upstream.ok) {
+      console.error("OpenAI TTS refused", upstream.status);
+      attempts.push(
+        upstream.status === 401
+          ? "The fallback voice rejected the key."
+          : upstream.status === 429
+            ? "The fallback voice quota is exhausted."
+            : `The fallback voice failed (${upstream.status}).`,
+      );
+      return null;
+    }
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    if (!bytes.length) {
+      attempts.push("The fallback voice returned no audio.");
+      return null;
+    }
+    return { audio: bytes.toString("base64"), provider: "openai" };
+  } catch (error) {
+    console.error("OpenAI TTS call failed", safeMessage(error));
+    attempts.push("The fallback voice was unreachable.");
+    return null;
   }
 }

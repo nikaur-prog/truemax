@@ -338,7 +338,17 @@ export function drawMeasurement(
    * the face is being read, the construction itself is the show, and eight
    * numbers flashing past in ten seconds is noise pretending to be data.
    */
-  opts: { labels?: boolean } = {},
+  opts: {
+    labels?: boolean;
+    /**
+     * Stroke weight multiplier. 1 is the report's hairline; the video
+     * renderer passes ~1.35 so the line survives a platform re-encode and
+     * bright skin — the compression pass eats exactly the width the report's
+     * screen never loses. Presence still comes from the bloom, so the heavier
+     * line keeps the instrument look rather than turning into a marker pen.
+     */
+    weight?: number;
+  } = {},
 ): boolean {
   // Only resize when the size actually changed. Assigning to canvas.width or
   // canvas.height reallocates the whole backing buffer and resets the context,
@@ -372,7 +382,7 @@ export function drawMeasurement(
 
   // Thinner than it was: the premium stroke gets its presence from the bloom
   // pass in strokePremium, not from width.
-  const lw = Math.max(1.2, width / 520);
+  const lw = Math.max(1.2, width / 520) * (opts.weight ?? 1);
   const fs = Math.max(9, width / 62);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";

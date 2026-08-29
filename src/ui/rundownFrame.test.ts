@@ -4,6 +4,9 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import {
   brollFor,
   cropAt,
+  stageChanged,
+  stageFor,
+  stagePool,
   drawProgress,
   fitFont,
   overlayAlpha,
@@ -705,4 +708,73 @@ test("the value chip sits clear of the arc, outside the figure", () => {
 test("a straight line does not produce a NaN label position", () => {
   const at = angleLabelAt({ x: 100, y: 100 }, { x: 0, y: 100 }, { x: 200, y: 100 }, 300, 5);
   assert.ok(Number.isFinite(at.x) && Number.isFinite(at.y));
+});
+
+// ---------------------------------------------------------------------------
+// The stage system: photo-first pacing.
+//
+// When attached photographs carry their own landmarks, they stop being
+// decoration and become stages: measurement beats are dealt out in pairs
+// across the primary and every landmarked cutaway in turn, and the whole
+// analysis — crop, line, retraction — plays on whichever photograph holds
+// the stage. These tests pin the dealing order, its determinism, and the
+// rule that the old tail-flash cutaway stands down when stages are active.
+// ---------------------------------------------------------------------------
+const STAGE_BEATS: Beat[] = [
+  { kind: "hook", line: "How attractive is Test?" },
+  { kind: "metric", line: "One.", metricId: "m1", region: "eyes", positive: true },
+  { kind: "metric", line: "Two.", metricId: "m2", region: "eyes", positive: true },
+  { kind: "metric", line: "Three.", metricId: "m3", region: "jaw", positive: true },
+  { kind: "metric", line: "Four.", metricId: "m4", region: "jaw", positive: false },
+  { kind: "metric", line: "Five.", metricId: "m5", region: "lips", positive: true },
+  { kind: "metric", line: "Six.", metricId: "m6", region: "lips", positive: false },
+  { kind: "cta", line: "Who next?" },
+] as Beat[];
+
+test("stages deal measurement beats out in pairs across every landmarked photo", () => {
+  const timeline = buildTimeline(STAGE_BEATS);
+  const staged = { image: {} as CanvasImageSource, landmarks: FACE };
+  const bare = { image: {} as CanvasImageSource };
+  const input = { timeline, metrics: new Map(), name: "Test", broll: [staged, bare] };
+
+  assert.equal(stagePool(input).length, 1, "only the landmarked photo can hold a stage");
+  const stages = timeline.beats.map((b) => stageFor(input, b));
+  // Hook plays on the primary; metric pairs alternate primary, cutaway,
+  // primary… with one landmarked cutaway in the pool.
+  assert.equal(stages[0], null);
+  assert.equal(stages[1], null);
+  assert.equal(stages[2], null);
+  assert.equal(stages[3], staged);
+  assert.equal(stages[4], staged);
+  assert.equal(stages[5], null);
+  assert.equal(stages[6], null);
+  assert.equal(stages[7], null, "the sign-off always plays on the primary");
+  // Deterministic: the same input deals the same stages every render.
+  assert.deepEqual(timeline.beats.map((b) => stageFor(input, b)), stages);
+});
+
+test("stageChanged marks exactly the boundaries where the photograph changes", () => {
+  const timeline = buildTimeline(STAGE_BEATS);
+  const staged = { image: {} as CanvasImageSource, landmarks: FACE };
+  const input = { timeline, metrics: new Map(), name: "Test", broll: [staged] };
+  const changes = timeline.beats.map((b) => stageChanged(input, b));
+  assert.deepEqual(changes, [false, false, false, true, false, true, false, false]);
+});
+
+test("the tail-flash cutaway stands down while stages are active", () => {
+  const timeline = buildTimeline(STAGE_BEATS);
+  const staged = { image: {} as CanvasImageSource, landmarks: FACE };
+  const input = { timeline, metrics: new Map(), name: "Test", broll: [staged] };
+  for (const b of timeline.beats) {
+    if (b.beat.kind !== "metric") continue;
+    // At every instant of a metric beat, including the old cutaway tail.
+    for (const f of [0.05, 0.5, 0.9]) {
+      assert.equal(brollFor(input, b, b.start + b.duration * f), null);
+    }
+  }
+  // And with no landmarked photo in the pool, the old behaviour stands: the
+  // tail of a metric beat still cuts away.
+  const bare = { timeline, metrics: new Map(), name: "Test", broll: [{ image: {} as CanvasImageSource }] };
+  const metric = timeline.beats.find((b) => b.beat.kind === "metric")!;
+  assert.notEqual(brollFor(bare, metric, metric.start + metric.duration * 0.9), null);
 });
