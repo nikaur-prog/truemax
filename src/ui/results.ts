@@ -454,8 +454,9 @@ function actionButton(
   label: string,
   icon: keyof typeof ACT_ICON,
   tier: "lead" | "support" | "quiet",
+  hidden = false,
 ): string {
-  return `<button type="button" class="ract ract-${tier}" id="${id}">
+  return `<button type="button" class="ract ract-${tier}" id="${id}"${hidden ? " hidden" : ""}>
     <svg class="ract-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACT_ICON[icon]}</svg>
     <span>${label}</span>
   </button>`;
@@ -472,10 +473,12 @@ function resultActions(merged: boolean, ctx: Ctx): string {
   const lead = wantsSide
     ? actionButton("btn-side", "Add side profile", "side", "lead")
     : !plain && ctx.onContinue
-      ? actionButton("btn-continue", "Build my pathway", "pathway", "lead")
+      ? actionButton("btn-continue", pathwayLabel(), "pathway", "lead")
       : "";
   const support = [
-    plain ? "" : actionButton("btn-plan", "See your plan", "plan", "support"),
+    // Hidden rather than dropped when the lead button already goes here: the
+    // session read that decides that lands after this string is built.
+    plain ? "" : actionButton("btn-plan", "See your plan", "plan", "support", pathway === "plan"),
     actionButton("btn-new", wantsSide ? "Start over" : "New photo", "photo", "support"),
     actionButton("btn-share", "Share card", "share", "support"),
     // The voiced analysis: this scan as the narrated video, Coach Max's
@@ -1027,7 +1030,7 @@ function showOverall(): void {
   };
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");
-  if (continueBtn) continueBtn.onclick = () => ctx?.onContinue?.();
+  if (continueBtn) continueBtn.onclick = () => goPathway();
   const sideBtn = document.getElementById("btn-side");
   if (sideBtn) sideBtn.onclick = () => ctx?.onSideProfile?.();
   const nudge = document.getElementById("side-nudge");
@@ -1275,10 +1278,10 @@ function provenance(measured: number): string {
 function sideNav(): string {
   const plain = observationsOnly();
   const lead = !plain && ctx?.onContinue
-    ? actionButton("sn-continue", "Build my pathway", "pathway", "lead")
+    ? actionButton("sn-continue", pathwayLabel(), "pathway", "lead")
     : "";
   const support = [
-    plain ? "" : actionButton("sn-plan", "See your plan", "plan", "support"),
+    plain ? "" : actionButton("sn-plan", "See your plan", "plan", "support", pathway === "plan"),
     ctx?.onSideProfile ? actionButton("sn-retake", "Retake profile", "photo", "support") : "",
     actionButton("sn-share", "Share card", "share", "support"),
   ].join("");
@@ -1301,7 +1304,7 @@ function wireSideNav(): void {
   on("sn-redo", () => ctx?.onRedoSide?.());
   on("imp-redo", () => ctx?.onRedoSide?.());
   on("sn-retake", () => ctx?.onSideProfile?.());
-  on("sn-continue", () => ctx?.onContinue?.());
+  on("sn-continue", () => goPathway());
   on("sn-plan", () => select("improve"));
   on("sn-history", () => openHistory());
   on("sn-share", async () => {
@@ -2199,6 +2202,25 @@ function wireModeSwitcher(_rerender?: () => void): void {}
 // rather than giving the paid product away, and the person can retry.
 let maxAccess = false;
 
+// What the lead action under a finished scan should offer.
+//
+// "build" - nobody is signed in, so the pathway genuinely has to be set up:
+// an account, the questions, a plan. "plan" - this account exists, so there is
+// nothing to build and the button goes straight to the plan it already has.
+//
+// This is the fault the owner reported: the lead button said "Build my
+// pathway" to everyone, and pressing it replayed the whole six-step quiz and
+// then offered a trial - to people who had already answered it and were
+// already paying. Signing in is what changes the offer, not the entitlement:
+// the plan tab renders from the scan in front of them and their saved goals,
+// so it has something to show whether or not they have ever bought anything.
+//
+// Defaults to "build", the safe direction. Offering to build a pathway to
+// somebody who has one costs a tap; promising "your current plan" to a
+// stranger who has no account is a promise the screen cannot keep.
+export type PathwayState = "build" | "plan";
+let pathway: PathwayState = "build";
+
 // Whether the signed-in person is an adult. Defaults to FALSE, which is the
 // only safe direction: every Max surface on this screen is 18+, and an age we
 // could not read must behave like an age that is too young.
@@ -2232,6 +2254,7 @@ export function clearResultsIdentityState(): void {
   ctx = null;
   maxAccess = false;
   adultUser = false;
+  pathway = "build";
   depth = "rating";
   scansLeft = 0;
   unmountMaxPet();
@@ -2241,6 +2264,39 @@ export function setMaxAccess(value: boolean): void {
   if (value === maxAccess) return;
   maxAccess = value;
   syncMaxSurfaces();
+}
+
+// Arrives late, like maxAccess: knowing whether anyone is signed in is a
+// session read, and a finished analysis does not wait on one. The row is
+// already on screen by the time this lands, so the label is patched in place
+// rather than repainting the tab under the reader's thumb. The click handler
+// reads the live value, so the button can never act on a stale label.
+export function setPathwayState(next: PathwayState): void {
+  if (next === pathway) return;
+  pathway = next;
+  for (const id of ["btn-continue", "sn-continue"]) {
+    const span = document.getElementById(id)?.querySelector("span");
+    if (span) span.textContent = pathwayLabel();
+  }
+  // "See your plan" in the support row goes to the same tab as the lead
+  // button now does, and two buttons for one destination is how the row got
+  // confusing in the first place. Drop the duplicate rather than render it.
+  for (const id of ["btn-plan", "sn-plan"]) {
+    const b = document.getElementById(id);
+    if (b) b.hidden = next === "plan";
+  }
+}
+
+function pathwayLabel(): string {
+  return pathway === "plan" ? "See my current plan" : "Build my pathway";
+}
+
+// Read at click time, never captured at render time. The label is painted
+// before the session read returns, so a handler that closed over the value it
+// was rendered with would send an account holder back through the quiz.
+function goPathway(): void {
+  if (pathway === "plan") select("improve");
+  else ctx?.onContinue?.();
 }
 
 // Both flags arrive from network reads AFTER the screen is usually up — the

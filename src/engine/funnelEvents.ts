@@ -10,6 +10,11 @@ export const FUNNEL_EVENTS = [
   "results-shown",
   "plan-opened",
   "offer-shown",
+  // Reached the end of the pathway questions already holding a live
+  // subscription, so the plan cards were replaced by "you are already on X".
+  // Counted separately from offer-shown because it is not an offer: a rise
+  // here means people are being walked through onboarding they did not need.
+  "offer-already-subscribed",
   "checkout-started",
   "single-scan-started",
   "quick-visit",

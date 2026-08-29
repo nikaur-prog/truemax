@@ -27,7 +27,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
-import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAccess } from "./ui/results.js";
+import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
@@ -125,6 +125,37 @@ let resultAccessContext: { scanId: string; priorScanCount: number } | null = nul
 // read that fails leaves the plan locked, which is the safe direction — it
 // shows a paywall to a paying customer, who can retry, rather than handing the
 // paid product to everyone the moment Supabase has a bad minute.
+// Whether the lead action offers to build a pathway or to open the one that
+// already exists.
+//
+// Only the session decides it. Somebody signed in has answered the questions
+// (`ensureOnboarded` makes sure of that on every route into the app) and the
+// plan tab renders from their scan and their saved goals, so there is nothing
+// left for a six-step quiz to collect. This is a much cheaper read than the
+// entitlement one, and it deliberately does not consult billing: a free
+// account still has a plan to look at, and the quiz would not sell them
+// anything they have not already been offered.
+//
+// Failure leaves it at "build", the safe direction: worst case an account
+// holder taps once more than they needed to.
+async function refreshPathwayState(): Promise<void> {
+  const generation = scanGeneration;
+  try {
+    // No owner guard around this await, deliberately, unlike refreshMaxAccess.
+    // currentUser() calls activateScanOwner() itself, so comparing a
+    // pre-call owner against the post-call one compares against a value this
+    // very call may have just rewritten — and it rewrites it precisely when
+    // the session has gone away, which is the one case the state MUST update.
+    // The generation check alone is the correct guard: it discards a result
+    // belonging to a previous scan without also discarding a sign-out.
+    const user = await currentUser();
+    if (generation !== scanGeneration) return;
+    setPathwayState(user ? "plan" : "build");
+  } catch {
+    /* Left at "build". */
+  }
+}
+
 async function refreshMaxAccess(): Promise<void> {
   const owner = activeScanOwner();
   const generation = scanGeneration;
@@ -2201,6 +2232,10 @@ async function runFullAnalysis(
   // Deliberately not awaited: a finished analysis must never wait on a billing
   // read, and a failed read leaves the paywall up rather than giving Max away.
   void refreshMaxAccess();
+  // Same treatment for the lead button's wording: it renders as "Build my
+  // pathway" and becomes "See my current plan" in place once the session read
+  // says there is an account behind it.
+  void refreshPathwayState();
 
   exposeDev(report, landmarks, quality);
   // Any redirect-survival copy has served its one purpose. The full-size
@@ -2722,6 +2757,11 @@ if (isAuthAvailable()) {
     // first moment the app needs a name or an age — means the questions arrive
     // as part of signing up instead of interrupting a scan.
     if (user) void ensureOnboarded(user);
+    // Signing in or out while a report is on screen changes what its lead
+    // button should offer. Without this the label stays whatever it was when
+    // the report rendered, which is how somebody who signed in mid-session
+    // still got sent back to the quiz.
+    void refreshPathwayState();
     // Give an in-page password flow the first chance to continue with its
     // full-resolution canvases. OAuth and email-confirmation returns have no
     // in-page callback, so the saved scan resumes on the next navigation.

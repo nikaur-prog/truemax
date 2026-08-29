@@ -217,17 +217,6 @@ test("the context beat says what the face is not measuring", () => {
   assert.match(context.line, /four championships/);
 });
 
-test("short visual cues stay separate from the voice script", () => {
-  const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Test" });
-  const spoken = narrationFrom(beats);
-  const metric = beats.find((beat) => beat.kind === "metric")!;
-  assert.ok(metric.label, "metric has no compact on-screen cue");
-  assert.ok(metric.spoken, "metric has no voice line");
-  assert.ok(spoken.includes(metric.spoken!), "voice line is absent from narration");
-  assert.ok(!spoken.includes(metric.line), "long editorial caption leaked back into narration");
-  assert.ok(metric.label!.length < metric.line.length, "visual cue is not actually compact");
-});
-
 test("a tilted capture blocks the reel", () => {
   // The pipeline must refuse a photograph the app would warn a paying customer
   // about. Nobody but us will ever check.

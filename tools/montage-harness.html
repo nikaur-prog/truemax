@@ -52,7 +52,7 @@ const seg = (local, a, b) => easeOutCubic(clamp01((local - a) / (b - a)));
 // engagement raising it, an unlock threshold, a pay day.
 const TIERS = [
   { money: "$2.00", req: "per 1,000 views — every view counts" },
-  { money: "×1.3", req: "engagement multiplier on real comments" },
+  { money: "×1.3", req: "real comments raise your rate" },
   { money: "25k", req: "views to unlock — then it all counts" },
   { money: "7 days", req: "from sprint close to payout" },
 ];
@@ -396,7 +396,10 @@ try {
       ctx.fillText(TIERS[i].money, x + 28, y + 66);
       ctx.fillStyle = MUT;
       ctx.font = `500 22px ${SANS}`;
-      ctx.fillText(TIERS[i].req, x + 28, y + 110);
+      // Bounded to the card. Without a maxWidth this ran past the card, past
+      // the canvas, and off the frame entirely, which is how the line above
+      // shipped truncated mid-word.
+      ctx.fillText(TIERS[i].req, x + 28, y + 110, 380 - 56);
       ctx.restore();
       ctx.textAlign = "center";
     }
@@ -510,7 +513,7 @@ try {
     ctx.fillStyle = "rgba(238,241,238,0.35)";
     ctx.font = `400 19px ${SANS}`;
     ctx.fillText(
-      "Screens show a demo scan. Demo face: Cillian Murphy — photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+      "Screens show a demo scan. The demo face is AI-generated.",
       W / 2, 1010,
     );
     ctx.restore();

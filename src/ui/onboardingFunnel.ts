@@ -7,10 +7,12 @@ import {
   loadOnboardingProfile,
   profileIsAdult,
   saveOnboardingProfile,
+  firstUnansweredStep,
   validateOnboardingStep,
 } from "../engine/onboarding.js";
 import type { OnboardingProfile } from "../engine/onboarding.js";
-import { startTrialCheckout } from "../engine/entitlement.js";
+import { hasPaidAccess, loadEntitlement, openBillingPortal, startTrialCheckout } from "../engine/entitlement.js";
+import type { Entitlement } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
 import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { typewriteBlock } from "./typewriter.js";
@@ -183,6 +185,7 @@ export interface FunnelOptions {
   required?: boolean;
 }
 
+
 export async function openTrialFunnel(
   user: User,
   preview?: FunnelPreview,
@@ -224,9 +227,22 @@ export async function openTrialFunnel(
   if (!profile.primaryObjectives.length && localGoals.goals.length) profile.primaryObjectives = [...localGoals.goals];
   if (!profile.quietTopics.length && localGoals.quiet.length) profile.quietTopics = [...localGoals.quiet];
 
-  let step = 0;
-  let busy = false;
   const total = 6;
+  // Open on the first question this profile has not answered, not on step 0.
+  //
+  // Every one of the six steps re-renders the answer already stored against
+  // the account, so a returning person was shown their own name, their own
+  // date of birth and their own goals and made to press Continue past each of
+  // them. `validateOnboardingStep` is the same predicate the Continue button
+  // uses, so "answered" here means exactly what "may proceed" means there and
+  // the two cannot drift apart.
+  //
+  // Steps 4 and 5 are optional, so they always validate; a profile that is
+  // complete therefore lands on the last step rather than running off the end,
+  // and one Continue reaches the offer. A first run has nothing stored, fails
+  // at step 0, and behaves exactly as it always has.
+  let step = firstUnansweredStep(profile, total);
+  let busy = false;
   // Only lock once the profile has loaded, so a network failure on the way in
   // leaves the retry screen closable rather than trapping somebody in a dialog
   // that cannot succeed.
@@ -336,6 +352,47 @@ export async function openTrialFunnel(
         }, 5600);
       }, 2100);
     }, 700);
+  };
+
+  // What an existing subscriber sees instead of the plan cards.
+  //
+  // The offer screen used to be unconditional, so somebody already paying
+  // reached the end of the questions and was invited to start a free trial.
+  // Tapping it did not even fail politely: create-checkout-session answers 409
+  // "This account already has a subscription", which landed as red error text
+  // on the last screen of their own onboarding.
+  const drawAlreadySubscribed = (entitlement: Entitlement) => {
+    if (!alive()) return;
+    // Same rule as drawOffer: the wrapped native build renders no purchase or
+    // billing surface at all. Apple requires in-app digital subscriptions to
+    // go through IAP, and outside the US an app may not even link out to a web
+    // checkout — which a "Manage billing" button plainly is.
+    if (isNativeApp()) {
+      close();
+      return;
+    }
+    track("offer-already-subscribed");
+    const plan = entitlement.tier === "max" ? "Max" : "Starter";
+    const trialing = entitlement.status === "trialing";
+    activeHost.innerHTML = `<div class="trial-shell trial-offer offer-enter" role="dialog" aria-modal="true" aria-labelledby="trial-title">
+      <button class="trial-close" type="button" aria-label="Close">✕</button>
+      <div class="trial-offer-head">
+        <div><span class="trial-eyebrow">YOUR PATHWAY IS READY</span>
+          <h2 id="trial-title">You are already on ${plan}.</h2>
+          <p>${trialing
+            ? `Your trial is running. Nothing to set up: your pathway is saved and your plan is on your report.`
+            : `Nothing to set up: your pathway is saved and your plan is on your report.`}</p></div>
+      </div>
+      <div class="trial-actions">
+        <button class="btn pri" id="trial-done" type="button">Back to my plan</button>
+        <button class="btn gho" id="trial-billing" type="button">Manage billing</button>
+      </div>
+    </div>`;
+    activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    activeHost.querySelector("#trial-done")?.addEventListener("click", close);
+    activeHost.querySelector("#trial-billing")?.addEventListener("click", () => {
+      void openBillingPortal();
+    });
   };
 
   const drawOffer = () => {
@@ -603,7 +660,33 @@ export async function openTrialFunnel(
     // questions were compulsory; being sold to is not, and a paywall you cannot
     // close is a different product to the one this is trying to be.
     locked = false;
-    drawOffer();
+    await showSell();
+  };
+
+  // The offer, or the reason there isn't one.
+  //
+  // The entitlement read is awaited rather than raced, because the whole point
+  // is not to show plan cards to a subscriber, and drawing them first would
+  // put the wrong screen up and snatch it back. It is the last step of a flow
+  // that has already done several round trips, so one more is not what makes
+  // this slow. A failed read falls through to the offer: that is the direction
+  // that stays recoverable, since the server refuses a duplicate subscription
+  // anyway, whereas wrongly telling somebody they are subscribed hides the
+  // only route they have to buy.
+  const showSell = async () => {
+    if (preview) {
+      drawOffer();
+      return;
+    }
+    let entitlement: Entitlement | null = null;
+    try {
+      entitlement = await loadEntitlement();
+    } catch {
+      entitlement = null;
+    }
+    if (!alive()) return;
+    if (entitlement && hasPaidAccess(entitlement)) drawAlreadySubscribed(entitlement);
+    else drawOffer();
   };
 
   const draw = () => {
@@ -699,7 +782,13 @@ export async function openTrialFunnel(
   };
 
   if (preview?.offer) drawOffer();
-  else draw();
+  else if (step === total - 1 && !validateOnboardingStep(profile, total - 1) && profile.completedAt) {
+    // Nothing left to ask. Opening on the last answered question and making
+    // somebody press Continue to reach a screen that may say "you are already
+    // subscribed" is the long way round to a dead end, so go straight there.
+    locked = false;
+    await showSell();
+  } else draw();
 }
 
 // Local visual QA only. Vite folds import.meta.env.DEV to false in production,

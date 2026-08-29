@@ -121,6 +121,36 @@ export function onboardingComplete(profile: OnboardingProfile): boolean {
   return Boolean(profile.completedAt) && Boolean(profile.firstName.trim()) && ageOnDate(profile.dateOfBirth) !== null;
 }
 
+/**
+ * The first step this profile has not answered, or the last step if it has
+ * answered everything.
+ *
+ * The funnel opens here rather than at zero. Every step re-renders the answer
+ * already stored against the account, so a returning person was shown their
+ * own name, their own date of birth and their own goals, and made to press
+ * Continue past each of them.
+ *
+ * `validateOnboardingStep` is the same predicate the Continue button uses, so
+ * "answered" here means exactly what "may proceed" means there and the two
+ * cannot drift apart. The clamp matters: the last two steps collect optional
+ * fields and so always validate, which means a fully answered profile walks
+ * off the end of the loop and would open on a step that does not exist.
+ */
+export function firstUnansweredStep(profile: OnboardingProfile, total: number): number {
+  // Only a STORED profile carries answers. A first run can already arrive with
+  // a name: emptyOnboardingProfile seeds firstName/lastName from OAuth
+  // metadata, splitting `full_name`, so a Google signup validates step 0
+  // without anybody having seen or confirmed the name the product will greet
+  // them by. Resuming past it would make step 2 of 6 the first screen they
+  // ever see. `profiles.completed_at` is NOT NULL and the only writer always
+  // stamps it, so this is exactly "a row came back from the database".
+  if (!profile.completedAt) return 0;
+  for (let i = 0; i < total; i++) {
+    if (validateOnboardingStep(profile, i) !== null) return i;
+  }
+  return Math.max(0, total - 1);
+}
+
 export function validateOnboardingStep(profile: OnboardingProfile, step: number): string | null {
   if (step === 0) {
     if (!profile.firstName.trim() || !profile.lastName.trim()) return "Add your first and last name to continue.";
