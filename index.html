@@ -56,7 +56,7 @@
         <summary>What gets measured</summary>
         <p>
           Jaw angularity, canthal tilt, facial thirds, midface ratio, cheekbone
-          height, lip fullness, nose harmony and symmetry: 31 measurements,
+          height, lip fullness, nose harmony and symmetry: 43 measurements,
           each scored against a population reference, showing what already works
           and what is worth changing.
         </p>
@@ -68,8 +68,8 @@
            live test was that the way IN never scrolls away. Scrolling shrinks
            the demo so it yields the screen without leaving it. -->
       <div class="capture-dock" id="capture-dock">
-      <div class="stage" id="capture-stage">
-        <div class="oval-frame" id="oval-frame">
+      <div class="stage cam-stage" id="capture-stage">
+        <div class="oval-frame cam-frame" id="oval-frame">
           <video id="cam-video" playsinline muted></video>
           <canvas id="cam-guide"></canvas>
           <div class="oval-mask"></div>
@@ -145,8 +145,8 @@
            reach the one control the page exists for. The claim is worth making
            and worth reading; it is not worth making first. -->
       <p class="sub">
-        <b class="sub-num">478</b> points measured on your face, compared against
-        real population data.
+        <b class="sub-num">478</b> facial landmarks detected, supporting 43
+        measurements compared against real population data.
         <!-- The provenance line moved here from the demo card itself: the
              owner's call that a caption stamped on the picture over-explained
              a demo, while dropping the disclosure entirely would let a named,
@@ -223,10 +223,19 @@
            a loop, and the loop is the only reason a subscription makes sense.
            Nothing here is illustrated with an invented before-and-after or a
            fabricated progress chart: the numbers quoted are the real ones the
-           engine uses (0.6 is the conservative calibrated spread between two photographs of
-           one face, see DELTA_SD in ui/templates.ts), and step three is a
+           engine uses (0.6 is DELTA_SD in ui/templates.ts, the threshold a change
+           must clear before the app will call it progress), and step three is a
            thing the app genuinely says to people, which is what makes it worth
-           putting on the page at all. -->
+           putting on the page at all.
+
+           The page deliberately does NOT claim "two photographs of one face
+           land 0.6 apart". That is an empirical property of the whole pipeline
+           and it has never been measured end to end — engine/aggregation.test.ts
+           records the open TODO and a real observed swing of 2.1 points. Stating
+           the THRESHOLD we enforce is true and checkable; stating the SPREAD we
+           achieve would be a number we cannot stand behind. When the multi-photo
+           fixture set exists and the acceptance test passes, this can become a
+           measured claim. -->
       <section class="journey">
         <h2 class="journey-title">The score is the start, not the answer</h2>
         <ol class="journey-steps">
@@ -243,7 +252,7 @@
           <li>
             <span class="journey-n">3</span>
             <b>Rescan, and find out whether it worked</b>
-            <p>Two photographs of one face land about 0.6 points apart on the calibrated scale. So when your change is smaller than that, we tell you it is noise instead of selling it to you as progress.</p>
+            <p>A rescan is only progress if it clears the noise. We hold a change to at least 0.6 points on the calibrated scale before we call it real — anything smaller and we say so, instead of selling it to you as progress.</p>
           </li>
         </ol>
         <p class="journey-foot">
@@ -311,8 +320,8 @@
     <!-- Side profile: upload + drag-to-verify landmarks -->
     <section id="v-side" class="hidden">
       <div class="side-inner">
-        <div class="side-photo">
-          <div class="face-frame" id="side-frame">
+        <div class="side-photo cam-stage">
+          <div class="face-frame cam-frame" id="side-frame">
             <canvas id="side-canvas"></canvas>
             <!-- What the frame shows before there is a photo in it.
                  An empty black rectangle asks for a side profile without ever
@@ -387,7 +396,7 @@
           <!-- Under the photo, not off in the text column. The shutter belongs
                next to the thing it acts on: with the buttons in the right-hand
                panel you had to look away from your own framing to find them. -->
-          <div class="navrow" id="side-actions"></div>
+          <div class="navrow cam-actions" id="side-actions"></div>
         </div>
         <div class="side-panel" id="side-panel">
           <div id="side-panel-copy">

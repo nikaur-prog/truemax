@@ -43,6 +43,7 @@ import type { SidePoints } from "./engine/sideMetrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { cameraCount, isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
+import { enterCameraTakeover, exitCameraTakeover } from "./ui/camTakeover.js";
 import { mountDemoReel } from "./ui/demoReel.js";
 import { closeHistory, openHistory } from "./ui/historyView.js";
 import { loadPhotos } from "./engine/photoStore.js";
@@ -1030,58 +1031,6 @@ let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
 
-// ---------------------------------------------------------------------------
-// The full-screen viewfinder.
-//
-// The camera used to open inside the landing card, and the landing paid for it
-// twice: the headline collapsed to make room (which fought scroll anchoring on
-// phones — the directive pill kept ending up above the viewport), and the
-// preview itself was a postage stamp of the one thing the person is trying to
-// aim. Now the capture stage takes the whole screen — a viewfinder, the way a
-// camera app does it — with the capture, upload and cancel controls floating
-// translucent on the glass. Nothing behind it moves, so there is nothing for
-// scroll anchoring to fight about.
-//
-// The EXPANSION is a FLIP: measure the card where it sits, let the takeover
-// class land, measure the full-screen rectangle it produced, then play the
-// transform from the inverse of the difference. The browser animates on the
-// compositor and cannot disagree with the final layout, because the final
-// layout is what it was measured against. Same trick in reverse on close, so
-// the viewfinder folds back into the card it came from.
-// ---------------------------------------------------------------------------
-function flipStage(applyClass: () => void): void {
-  const card = document.getElementById("capture-stage");
-  if (!card) {
-    applyClass();
-    return;
-  }
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    applyClass();
-    return;
-  }
-  const first = card.getBoundingClientRect();
-  applyClass();
-  // Read back on the next frame: style recalculation has happened by then,
-  // where a microtask would land before it.
-  requestAnimationFrame(() => {
-    const last = card.getBoundingClientRect();
-    if (!first.width || !first.height || !last.width || !last.height) return;
-    const sx = first.width / last.width;
-    const sy = first.height / last.height;
-    const dx = first.left + first.width / 2 - (last.left + last.width / 2);
-    const dy = first.top + first.height / 2 - (last.top + last.height / 2);
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01)
-      return;
-    card.animate(
-      [
-        { transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})` },
-        { transform: "none" },
-      ],
-      { duration: 560, easing: "cubic-bezier(.22, .61, .36, 1)", fill: "none" },
-    );
-  });
-}
-
 async function openCamera(): Promise<void> {
   const generation = scanGeneration;
   if (!isSupported()) {
@@ -1104,6 +1053,15 @@ async function openCamera(): Promise<void> {
     const started = await startCamera({
       video: el.camVideo,
       guideCanvas: el.camGuide,
+      // Both cameras refused during a swap and the working one is already
+      // released: close the viewfinder rather than leave controls over a dead
+      // frame, and say why.
+      onLost: () => {
+        void closeCamera().then(() => {
+          el.camHintTitle.textContent = "Camera unavailable";
+          el.camHintDetail.textContent = "Switching cameras failed. Try again, or upload a photo.";
+        });
+      },
       onCheck: (c) => {
         lastCheck = c;
         // Hold the opening instruction for a beat before the live coaching
@@ -1191,7 +1149,7 @@ async function openCamera(): Promise<void> {
     // no headline collapse, no scroll correction, nothing for scroll anchoring
     // to fight about; the directive pill is on screen because the whole
     // interface is.
-    flipStage(() => document.body.classList.add("cam-takeover"));
+    enterCameraTakeover(document.getElementById("capture-stage"));
     // Offer the switch only when there is something to switch to. The count is
     // trustworthy here — permission was just granted, so the device list is
     // fully labeled.
@@ -1229,7 +1187,7 @@ async function closeCamera(): Promise<void> {
   cam?.stop();
   cam = null;
   lastCheck = null;
-  flipStage(() => document.body.classList.remove("cam-takeover"));
+  exitCameraTakeover(document.getElementById("capture-stage"));
   el.camSwap.classList.add("hidden");
   el.ovalFrame.classList.remove("live", "ready", "tracking");
   el.stage.classList.remove("live-cam");

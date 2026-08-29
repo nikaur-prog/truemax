@@ -173,15 +173,57 @@ export async function POST(request: Request): Promise<Response> {
     }
     const payload = { audio_base64: spoken.audio, alignment: spoken.alignment };
 
+    // The audio has to BE audio before anybody is charged for it.
+    //
+    // The balance check happens before synthesis and the spend after it, which
+    // is the right order — a provider that refuses must not cost a credit. But
+    // "the provider answered" is not the same as "the answer is playable": a
+    // 200 carrying an HTML error page, a truncated body, or a JSON blob would
+    // all have passed as success, spent the credit, and produced a silent
+    // video that the buyer only discovers after the render. So the bytes are
+    // checked for a real MP3 signature first, and a provider that hands back
+    // something else is treated as a failure of that provider.
+    if (!looksLikeMp3(spoken.audio)) {
+      console.error("voice provider returned non-audio", spoken.provider);
+      return json(
+        { error: "The voice service returned unplayable audio. Nothing was charged — try again." },
+        502,
+      );
+    }
+
     // The meter ticks only after audio actually came back — a failed upstream
-    // call must not spend a quota slot or a paid credit. And a failed SPEND
-    // must not fail the render: the audio exists, so it ships, and the miss
-    // is logged instead — the cost of that error mode lands on us, not on
-    // somebody who paid $2.99 and got nothing.
+    // call must not spend a quota slot or a paid credit.
+    //
+    // The RESULT of the spend is checked, not discarded. spend_voice_credit is
+    // atomic in SQL and answers -1 when there was nothing left to spend, which
+    // is exactly what a second simultaneous render sees: both requests read a
+    // balance of 1 before either spent, both synthesised, and one of them is
+    // riding a credit that no longer exists. Ignoring that return value let
+    // two renders share one purchase. A render that could not be paid for is
+    // refused rather than delivered — the audio is already made and that cost
+    // is ours, but it is not handed over unpaid.
     if (meter === "league") {
       await recordLeagueRender(user.id, "tts").catch((e) => console.error("render log failed", safeMessage(e)));
     } else if (meter === "voice") {
-      await spendVoiceCredit(user.id).catch((e) => console.error("credit spend failed", safeMessage(e)));
+      let spent = -1;
+      try {
+        spent = await spendVoiceCredit(user.id);
+      } catch (e) {
+        // The ledger is unreachable. The buyer holds a credit we could not
+        // read, so they get their render and the miss is logged: an infra
+        // fault must not eat a purchase.
+        console.error("credit spend failed", safeMessage(e));
+        spent = 0;
+      }
+      if (spent < 0) {
+        return json(
+          {
+            error:
+              "That credit was already used by another render in flight. Nothing extra was charged.",
+          },
+          409,
+        );
+      }
     }
 
     // The alignment is passed through rather than reshaped. It is the
@@ -216,9 +258,39 @@ export async function POST(request: Request): Promise<Response> {
       200,
     );
   } catch (error) {
+    // Logged in full, reported generically. safeMessage strips the obvious
+    // secrets but an internal Error.message is still our stack talking to a
+    // stranger — it can name tables, columns and upstream hosts. The operator
+    // gets the log; the caller gets the fact.
     console.error("tts failed", safeMessage(error));
-    return json({ error: safeMessage(error) }, 500);
+    return json({ error: "The voiceover could not be produced." }, 500);
   }
+}
+
+/**
+ * Does this base64 payload actually start like an MP3?
+ *
+ * Both providers are asked for mp3 and both normally deliver it. This catches
+ * the case where one answers 200 with something else — an error page, a
+ * truncated body — which would otherwise be charged for and shipped as a
+ * silent video. Deliberately a signature check, not a decode: the server has
+ * no audio stack, and every real failure mode here is "these bytes are not an
+ * MP3 at all" rather than "this MP3 is subtly corrupt".
+ *
+ * An MP3 begins either with an ID3 tag ("ID3") or with a frame sync — eleven
+ * set bits, so 0xFF followed by a byte whose top three bits are set.
+ */
+export function looksLikeMp3(base64: string): boolean {
+  if (!base64 || base64.length < 32) return false;
+  let head: Buffer;
+  try {
+    head = Buffer.from(base64.slice(0, 64), "base64");
+  } catch {
+    return false;
+  }
+  if (head.length < 3) return false;
+  if (head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) return true;
+  return head[0] === 0xff && (head[1] & 0xe0) === 0xe0;
 }
 
 // ---------------------------------------------------------------------------

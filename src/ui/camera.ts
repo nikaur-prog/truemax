@@ -26,6 +26,14 @@ interface Opts {
   // detector NOT seeing a front-on face.
   mode?: "front" | "side";
   onCheck: (c: FrameCheck) => void;
+  /**
+   * The preview is unrecoverably gone — a swap that could not open either
+   * camera, having already released the working one. Distinct from a swap
+   * that merely declined (swap() resolves false and the old preview lives).
+   * The capture screen closes itself rather than showing controls over a
+   * dead frame.
+   */
+  onLost?: () => void;
 }
 
 let stream: MediaStream | null = null;
@@ -269,7 +277,15 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         try {
           await attach();
         } catch {
-          /* the recovery path picks this up on the next visibility change */
+          // BOTH failed: the new camera refused and the old one would not come
+          // back. The stream was stopped before the swap was attempted (phones
+          // refuse to hold two cameras open), so there is now nothing behind
+          // the viewfinder — and leaving live camera chrome over a dead black
+          // frame is the worst of the three outcomes. Tell the caller the
+          // preview is GONE, not merely unswapped, so it can close the
+          // takeover instead of decorating a corpse.
+          opts.onLost?.();
+          return false;
         }
         return false;
       }
