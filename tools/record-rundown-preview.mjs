@@ -5,6 +5,7 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import ffmpegPath from "ffmpeg-static";
 
 // Bundle the module-based harness into one file so this command does not need a
 // localhost server. That makes the visual check usable on a normal Mac even
@@ -96,7 +97,11 @@ await browser.close();
 const exportsDir = join(root, "exports");
 mkdirSync(exportsDir, { recursive: true });
 const mp4Path = join(exportsDir, "truemax-rundown-preview.mp4");
-const encode = spawnSync("ffmpeg", [
+// ffmpeg-static, not a bare "ffmpeg": this container has the dependency at
+// node_modules/ffmpeg-static/ffmpeg and nothing on PATH, so the bare name sent
+// every render down the "ffmpeg was unavailable" branch and quietly shipped a
+// webm. Same fault the CTA builders had.
+const encode = spawnSync(ffmpegPath, [
   "-y", "-i", webmPath,
   "-c:v", "libx264", "-preset", "medium", "-crf", "18",
   "-c:a", "aac", "-b:a", "128k",
