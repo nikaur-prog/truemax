@@ -28,6 +28,12 @@ import type { RundownTimeline, SfxKind } from "../engine/rundownTimeline.js";
 // it is supposed to be decorating.
 const KEY_GAIN = 0.14;
 const CLICK_GAIN = 0.32;
+// Well under the click, and it has to be: the click is four milliseconds of
+// tone and the whoosh is three hundred of broadband noise, so at equal peak
+// the whoosh carries far more energy and sits far louder in the ear. It was
+// 0.34 — a shade ABOVE the click — and reported as drowning the voice. This
+// is about nine decibels down from that.
+const WHOOSH_GAIN = 0.12;
 
 // Nothing about a real keyboard is longer than this, and a long "click" reads
 // as a thud.
@@ -104,7 +110,7 @@ function whoosh(sampleRate: number): Float32Array {
     const open = 0.08 + 0.3 * Math.sin(Math.PI * u);
     low += (noise - low) * open;
     const envelope = Math.sin(Math.PI * Math.min(1, u * 1.15)) ** 2;
-    out[i] = low * envelope * 0.34;
+    out[i] = low * envelope * WHOOSH_GAIN;
   }
   return out;
 }

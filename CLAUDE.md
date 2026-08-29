@@ -41,6 +41,17 @@ if a change would contradict one, raise it rather than quietly reversing it.
 - Never put a model identifier in a commit message, PR title or body, code comment,
   or any other pushed artifact.
 
+## Verdict wording
+
+The plain ladder is a reading, not a compliment: needs work / needs improving /
+below average / okay / alright / decent / good / very good / top of the scale.
+No "attractive", "handsome" or "beautiful" anywhere on it, and the spoken
+descriptors match. Pinned by tests in `analysisMode.test.ts`.
+
+No verdict word may name a real person. "Marlon level" shipped, and the rundown
+that surfaced it was about Marlon — the video's verdict on Marlon was that he is
+Marlon level.
+
 ## Claims
 
 - Never print a rarity claim the data cannot support. **"1 in N" is never said.**
@@ -53,7 +64,8 @@ if a change would contradict one, raise it rather than quietly reversing it.
 - Only Coach Max's read is coach-toned. Every other surface is plain, factual and
   scientific.
 - **No em dashes** in user-facing copy.
-- Voice speed is locked at 1.25x.
+- Voice speed is 1.125x (was 1.25x, which outran the measurement lines on screen).
+  `VOICE_SPEED` in `api/tts.ts`; `SYLLABLES_PER_SECOND` and `WPM` track it.
 - TTS provider chain: ElevenLabs (with timestamps), falling back to OpenAI
   (`tts-1-hd`, `onyx`). Higgsfield has no TTS endpoint — verified against their
   OpenAPI spec, which is image and video only. Do not add it as a voice provider.

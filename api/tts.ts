@@ -84,7 +84,7 @@ const DEFAULT_MODEL = "eleven_multilingual_v2";
 // — on the short cut the beats are terse enough that pace reads as energy,
 // not as reciting. If it still drags, 1.5 is the next stop; anything between
 // is unlikely to be distinguishable by ear.
-const VOICE_SPEED = 1.25;
+const VOICE_SPEED = 1.125;
 
 export async function POST(request: Request): Promise<Response> {
   try {
