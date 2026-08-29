@@ -1,7 +1,7 @@
 import { ownScans, readAllHistory } from "../engine/history.js";
 import { currentAccessToken } from "../engine/auth.js";
 import {
-  consumeScanCredit,
+  consumeScanCreditForScan,
   loadEntitlement,
   loadIsAdmin,
   loadScanCredits,
@@ -56,6 +56,21 @@ function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
 // carry ISO dates too, and the newer of the two wins, so the gate still works
 // for scans that predate this stamp existing.
 const STAMP_KEY = "truemax.lastScanAt";
+let pendingWeeklyCreditOwner: string | null = null;
+
+/** Clear an unspent weekly-skip intent when its capture is abandoned. */
+export function discardPendingScanCredit(): void {
+  pendingWeeklyCreditOwner = null;
+}
+
+/** Spend a weekly-skip credit only after that scan has produced a report. */
+export async function consumePendingScanCredit(scanId: string): Promise<boolean> {
+  const owner = activeScanOwner();
+  if (!owner || pendingWeeklyCreditOwner !== owner) return false;
+  const result = await consumeScanCreditForScan(scanId);
+  if (result.consumed) pendingWeeklyCreditOwner = null;
+  return result.consumed;
+}
 
 export function recordScanRun(guest = false): void {
   // A scan of somebody else's face does not spend the week.
@@ -181,8 +196,8 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
     // past its trial, where the depth gate on the results screen already
     // spends one credit per full-depth scan. Spending it here too would
     // charge that account twice for one scan.
-    const alsoSpentByDepthGate = !member && readAllHistory().length >= TRIAL_SCANS;
-    if (!alsoSpentByDepthGate) void consumeScanCredit().catch(() => undefined);
+    const alsoSpentByDepthGate = !member && ownScans(readAllHistory()).length >= TRIAL_SCANS;
+    if (!alsoSpentByDepthGate) pendingWeeklyCreditOwner = owner;
     proceed();
     return true;
   }

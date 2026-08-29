@@ -83,11 +83,12 @@ export async function POST(request: Request): Promise<Response> {
     // cancelled member is a non-member and pricing that flatters them is a
     // discount nobody agreed to fund.
     if (body?.purchase === "scan") {
-      const { data: ent } = await getSupabaseAdmin()
+      const { data: ent, error: entitlementError } = await getSupabaseAdmin()
         .from("entitlements")
         .select("stripe_customer_id,status,tier")
         .eq("user_id", user.id)
         .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
+      if (entitlementError) throw new Error(`Scan pricing lookup failed: ${entitlementError.message}`);
       const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
       const scanPrice = member
         ? process.env.STRIPE_MEMBER_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER || null
@@ -119,11 +120,12 @@ export async function POST(request: Request): Promise<Response> {
     // price for everyone. There is no member price on purpose: the cost being
     // covered is the synthesis call, and that costs the same whoever asks.
     if (body?.purchase === "voice") {
-      const { data: ent } = await getSupabaseAdmin()
+      const { data: ent, error: entitlementError } = await getSupabaseAdmin()
         .from("entitlements")
         .select("stripe_customer_id")
         .eq("user_id", user.id)
         .maybeSingle<{ stripe_customer_id: string | null }>();
+      if (entitlementError) throw new Error(`Voice checkout lookup failed: ${entitlementError.message}`);
       const voicePrice =
         process.env.STRIPE_VOICED_PRICE_ID || process.env.STRIPE_PRICE_VOICED_ANALYSIS || null;
       if (!voicePrice) return json({ error: "Voiced analysis checkout is still being connected." }, 503);

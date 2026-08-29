@@ -75,6 +75,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   facing = "user";
   deviceId = null;
   let live = true;
+  let attachAttempt = 0;
 
   const constraints = (): MediaStreamConstraints => ({
     video: {
@@ -96,14 +97,40 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   };
 
   async function attach(): Promise<void> {
+    if (!live) throw new Error("Camera request was cancelled");
+    const attempt = ++attachAttempt;
     // Stop the old tracks BEFORE asking for new ones: many phones refuse to
     // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
     stream?.getTracks().forEach((t) => t.stop());
-    stream = await navigator.mediaDevices.getUserMedia(constraints());
-    opts.video.srcObject = stream;
+    stream = null;
+    const nextStream = await navigator.mediaDevices.getUserMedia(constraints());
+    // getUserMedia cannot be aborted. A cancel, a newer swap, or a recovery
+    // can therefore win while this permission/device request is in flight.
+    // Never let the late result resurrect a preview its owner already closed.
+    if (!live || attempt !== attachAttempt) {
+      nextStream.getTracks().forEach((t) => t.stop());
+      throw new Error("Camera request was superseded");
+    }
+    stream = nextStream;
+    opts.video.srcObject = nextStream;
     opts.video.muted = true;
     opts.video.playsInline = true;
-    await opts.video.play();
+    try {
+      await opts.video.play();
+    } catch (error) {
+      nextStream.getTracks().forEach((t) => t.stop());
+      if (stream === nextStream) stream = null;
+      if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
+      throw error;
+    }
+    if (!live || attempt !== attachAttempt) {
+      nextStream.getTracks().forEach((t) => t.stop());
+      if (stream === nextStream) stream = null;
+      if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
+      throw new Error("Camera request was superseded");
+    }
+    if (reacquireTimer !== null) clearTimeout(reacquireTimer);
+    reacquireTimer = null;
     const track = stream.getVideoTracks()[0];
     // Believe the track over the request — a phone with no back camera hands
     // back the front one whatever was asked for.
@@ -120,34 +147,70 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   // camera chrome. Two signals cover it — the track's own "ended" event, and
   // the tab becoming visible again holding a track that is no longer live.
   let reacquiring = false;
+  let reacquireTimer: number | null = null;
+  let reacquireRetries = 0;
+  let lostReported = false;
+  const reportLost = () => {
+    if (!live || lostReported) return;
+    lostReported = true;
+    opts.onLost?.();
+  };
+  const scheduleReacquire = () => {
+    if (!live || document.visibilityState !== "visible" || reacquireTimer !== null) return;
+    if (reacquireRetries >= 3) {
+      reportLost();
+      return;
+    }
+    const delay = [250, 750, 1500][reacquireRetries++] ?? 1500;
+    reacquireTimer = window.setTimeout(() => {
+      reacquireTimer = null;
+      void reacquire();
+    }, delay);
+  };
   async function reacquire(): Promise<void> {
     if (!live || reacquiring) return;
     reacquiring = true;
     try {
       await attach();
+      reacquireRetries = 0;
+      lostReported = false;
     } catch {
       // Permission revoked or the camera is genuinely busy. The guidance
-      // already shows its "looking for a face" state over a black frame; the
-      // next visibility change tries again.
+      // already shows its "looking for a face" state over a black frame.
+      // Retry transient camera-busy failures while visible; a later visibility
+      // change remains the recovery path after the bounded retries are spent.
+      const track = stream?.getVideoTracks()[0];
+      if (!track || track.readyState !== "live" || track.muted) scheduleReacquire();
     }
     reacquiring = false;
   }
   function onTrackDown(): void {
     // Recover into a visible tab immediately; a hidden one would just lose
     // the fresh track the same way, so it reacquires on return instead.
-    if (document.visibilityState === "visible") void reacquire();
+    if (document.visibilityState === "visible") {
+      reacquireRetries = 0;
+      void reacquire();
+    }
   }
   const onVisible = () => {
     if (document.visibilityState !== "visible") return;
     const track = stream?.getVideoTracks()[0];
-    if (!track || track.readyState !== "live" || track.muted) void reacquire();
+    if (!track || track.readyState !== "live" || track.muted) {
+      reacquireRetries = 0;
+      void reacquire();
+    }
   };
   document.addEventListener("visibilitychange", onVisible);
 
   try {
     await attach();
   } catch (err) {
+    live = false;
+    attachAttempt++;
     document.removeEventListener("visibilitychange", onVisible);
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+    opts.video.srcObject = null;
     throw err;
   }
 
@@ -246,7 +309,10 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   return {
     stop() {
       live = false;
+      attachAttempt++;
       cancelAnimationFrame(raf);
+      if (reacquireTimer !== null) clearTimeout(reacquireTimer);
+      reacquireTimer = null;
       document.removeEventListener("visibilitychange", onVisible);
       stream?.getTracks().forEach((t) => t.stop());
       stream = null;
@@ -300,18 +366,17 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         // The other camera would not open. Go back to the one that did.
         facing = wasFacing;
         deviceId = wasDevice;
-        try {
-          await attach();
-        } catch {
-          // BOTH failed: the new camera refused and the old one would not come
-          // back. The stream was stopped before the swap was attempted (phones
-          // refuse to hold two cameras open), so there is now nothing behind
-          // the viewfinder — and leaving live camera chrome over a dead black
-          // frame is the worst of the three outcomes. Tell the caller the
-          // preview is GONE, not merely unswapped, so it can close the
-          // takeover instead of decorating a corpse.
-          opts.onLost?.();
-          return false;
+        if (live) {
+          try {
+            await attach();
+          } catch {
+            // Restoring a camera can fail for one scheduling tick after the OS
+            // releases the attempted replacement. Retry while the preview is
+            // visible so a failed swap cannot leave a dead rectangle waiting
+            // for an unrelated tab switch.
+            reacquireRetries = 0;
+            scheduleReacquire();
+          }
         }
         return false;
       }

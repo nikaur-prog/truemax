@@ -44,7 +44,7 @@ import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js
 import { buildMaxContext } from "../engine/maxContext.js";
 import { maxCharacterMarkup } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
-import { readAllHistory } from "../engine/history.js";
+import { ownScans, readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
 import { armMaxPetReveal, mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
@@ -2428,7 +2428,7 @@ function chatContext() {
   return buildMaxContext({
     report: ctx.report,
     tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
-    scans: readAllHistory().length,
+    scans: ownScans(readAllHistory()).length,
     potential: maxAccess ? ctx.report.potential : undefined,
     movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,
   });

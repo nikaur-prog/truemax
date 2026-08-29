@@ -60,6 +60,14 @@ function client(): Anthropic {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  let claimedUserId: string | null = null;
+  const releaseClaim = async () => {
+    const userId = claimedUserId;
+    claimedUserId = null;
+    if (!userId) return;
+    const { error } = await getSupabaseAdmin().rpc("release_max_chat_turn", { p_user_id: userId });
+    if (error) throw new Error(error.message);
+  };
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin chat is not allowed." }, 403);
 
@@ -67,11 +75,16 @@ export async function POST(request: Request): Promise<Response> {
     if (!user) return json({ error: "Sign in to talk to Max." }, 401);
 
     const admin = getSupabaseAdmin();
-    const [{ data: profile }, { data: entitlement }, { data: staff }] = await Promise.all([
+    const [profileResult, entitlementResult, staffResult] = await Promise.all([
       admin.from("profiles").select("date_of_birth").eq("user_id", user.id).maybeSingle<ProfileRow>(),
       admin.from("entitlements").select("tier,status").eq("user_id", user.id).maybeSingle<EntitlementRow>(),
       admin.from("app_admins").select("user_id").eq("user_id", user.id).maybeSingle<{ user_id: string }>(),
     ]);
+    const accessError = profileResult.error || entitlementResult.error || staffResult.error;
+    if (accessError) throw new Error(`Max access check failed: ${accessError.message}`);
+    const profile = profileResult.data;
+    const entitlement = entitlementResult.data;
+    const staff = staffResult.data;
 
     // No date of birth means the pathway questions were never finished, and
     // without an age there is no way to know which set of rules applies. Fail
@@ -125,6 +138,7 @@ export async function POST(request: Request): Promise<Response> {
         429,
       );
     }
+    claimedUserId = user.id;
 
     const { shared, scoped } = buildSystemBlocks(context);
     const stream = client().messages.stream({
@@ -146,11 +160,13 @@ export async function POST(request: Request): Promise<Response> {
     // is. The remaining allowance rides in a header so the UI can warn before
     // somebody types the message that gets refused.
     const encoder = new TextEncoder();
+    let deliveredText = false;
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
           for await (const event of stream) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              deliveredText = deliveredText || event.delta.text.length > 0;
               controller.enqueue(encoder.encode(event.delta.text));
             }
           }
@@ -162,6 +178,16 @@ export async function POST(request: Request): Promise<Response> {
           console.error("max-chat stream", safeMessage(error));
           controller.enqueue(encoder.encode("\n\nSorry, I lost my train of thought there. Ask me again?"));
         } finally {
+          // A provider that failed before delivering any answer did not provide
+          // the turn the member paid for. Partial answers still count: tokens
+          // were delivered and the retry request is a new generation.
+          if (!deliveredText) {
+            await releaseClaim().catch((releaseError) => {
+              console.error("max-chat allowance release", safeMessage(releaseError));
+            });
+          } else {
+            claimedUserId = null;
+          }
           controller.close();
         }
       },
@@ -169,6 +195,9 @@ export async function POST(request: Request): Promise<Response> {
         // The reader went away, usually because the person navigated off or hit
         // stop. Abort the generation rather than paying for tokens nobody will
         // ever see.
+        // A user-cancelled response still consumed provider work, so it keeps
+        // its turn; only provider/setup failures are refunded above.
+        claimedUserId = null;
         stream.abort();
       },
     });
@@ -190,6 +219,9 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     console.error("max-chat", safeMessage(error));
+    await releaseClaim().catch((releaseError) => {
+      console.error("max-chat allowance release", safeMessage(releaseError));
+    });
     return json({ error: "Max is not available right now. Try again shortly." }, 503);
   }
 }

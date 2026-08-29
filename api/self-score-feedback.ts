@@ -62,70 +62,23 @@ export async function POST(request: Request): Promise<Response> {
 
     const admin = getSupabaseAdmin();
 
-    // One opinion per scan is the useful unit; a retry of the same scan is
-    // acknowledged, not stored twice. The uniqueness constraint is the
-    // authority — this early return just keeps the rate check honest.
-    const { data: existing, error: existingError } = await admin
-      .from("self_score_feedback")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("scan_id", payload.scanId)
-      .maybeSingle<{ id: string }>();
-    if (existingError) throw new Error(`Self-score lookup failed: ${existingError.message}`);
-    if (existing) return json({ received: true, duplicate: true });
-
-    // A small ceiling. Ten distinct scans a day is far beyond genuine use of a
-    // two-scans-a-week product; anything past it is a client writing garbage.
-    //
-    // Counted BEFORE the insert and re-counted after it, because a count and
-    // an insert are two statements and concurrent requests can both pass the
-    // first one. The re-count is what actually holds the line: a row that
-    // turns out to be over the ceiling is deleted again, so the cap bounds
-    // what is STORED rather than what was checked. Cheaper and clearer than a
-    // transaction for a table whose worst case is a few extra rows of two
-    // numbers — and unlike the first check alone, it converges.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: recentCount, error: countError } = await admin
-      .from("self_score_feedback")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("created_at", since);
-    if (countError) throw new Error(`Self-score rate check failed: ${countError.message}`);
-    if ((recentCount ?? 0) >= MAX_SUBMISSIONS_PER_24_HOURS) {
-      return json({ error: "Feedback limit reached for today." }, 429);
-    }
-
-    const { error: insertError } = await admin.from("self_score_feedback").insert({
-      user_id: user.id,
-      scan_id: payload.scanId,
-      our_score: payload.ourScore,
-      self_score: payload.selfScore,
-      sex: payload.sex,
-      consent_version: payload.consentVersion,
-      app_commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+    // Duplicate detection, the rolling cap and insertion are one database
+    // operation under a per-user lock. A burst of concurrent requests cannot
+    // all observe nine rows and each insert a tenth.
+    const { data: outcome, error } = await admin.rpc("submit_self_score_feedback", {
+      p_user_id: user.id,
+      p_scan_id: payload.scanId,
+      p_our_score: payload.ourScore,
+      p_self_score: payload.selfScore,
+      p_sex: payload.sex,
+      p_consent_version: payload.consentVersion,
+      p_app_commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      p_limit: MAX_SUBMISSIONS_PER_24_HOURS,
     });
-    if (insertError) {
-      // A racing duplicate hits the unique constraint; that is still success
-      // from the client's point of view.
-      if (insertError.code === "23505") return json({ received: true, duplicate: true });
-      throw new Error(`Self-score insert failed: ${insertError.message}`);
-    }
-
-    // The other half of the cap. If simultaneous requests both passed the
-    // check above, the loser of the re-count takes its own row back out.
-    const { count: settled } = await admin
-      .from("self_score_feedback")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("created_at", since);
-    if ((settled ?? 0) > MAX_SUBMISSIONS_PER_24_HOURS) {
-      await admin
-        .from("self_score_feedback")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("scan_id", payload.scanId);
-      return json({ error: "Feedback limit reached for today." }, 429);
-    }
+    if (error) throw new Error(`Self-score submission failed: ${error.message}`);
+    if (outcome === "duplicate") return json({ received: true, duplicate: true });
+    if (outcome === "rate_limited") return json({ error: "Feedback limit reached for today." }, 429);
+    if (outcome !== "inserted") throw new Error("Self-score submission returned an invalid outcome");
 
     return json({ received: true });
   } catch (error) {

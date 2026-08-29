@@ -41,6 +41,7 @@ interface SubmissionRow {
   url: string;
   status: string;
   tiktok_video_id: string | null;
+  league_sprints?: { status?: string; starts_at?: string; ends_at?: string } | null;
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -58,8 +59,11 @@ export async function GET(request: Request): Promise<Response> {
       // is a decision — neither needs another number.
       admin
         .from("league_submissions")
-        .select("id, creator_id, url, status, tiktok_video_id")
-        .in("status", ["pending", "approved", "earning"]),
+        .select("id, creator_id, url, status, tiktok_video_id, league_sprints!inner(status,starts_at,ends_at)")
+        .in("status", ["pending", "approved", "earning"])
+        .eq("league_sprints.status", "active")
+        .lte("league_sprints.starts_at", new Date().toISOString())
+        .gt("league_sprints.ends_at", new Date().toISOString()),
     ]);
 
     const linked = (links ?? []) as LinkedRow[];
@@ -88,7 +92,13 @@ export async function GET(request: Request): Promise<Response> {
         deadLinks += 1;
         continue;
       }
-      const videos = await listOwnTikTokVideos(access, 40);
+      const wantedIds = new Set(
+        own.map((sub) => sub.tiktok_video_id ?? tiktokVideoIdFromUrl(sub.url)).filter((id): id is string => Boolean(id)),
+      );
+      // Continue through recent pages until every submitted ID is found (or a
+      // bounded 200-video ceiling), instead of silently forgetting submissions
+      // older than the newest forty posts.
+      const videos = await listOwnTikTokVideos(access, 200, wantedIds);
       if (!videos) {
         deadLinks += 1;
         continue;
@@ -100,7 +110,11 @@ export async function GET(request: Request): Promise<Response> {
         const video = videoId ? byId.get(videoId) : undefined;
         if (!video) continue;
         if (!sub.tiktok_video_id) {
-          await admin.from("league_submissions").update({ tiktok_video_id: video.id }).eq("id", sub.id);
+          const { error } = await admin.from("league_submissions").update({ tiktok_video_id: video.id }).eq("id", sub.id);
+          if (error) {
+            console.error("league-track match failed", error.code);
+            continue;
+          }
           matched += 1;
         }
         if (sub.status === "approved" || sub.status === "earning") {
@@ -112,7 +126,8 @@ export async function GET(request: Request): Promise<Response> {
             shares: video.shares,
             source: "api",
           });
-          if (!error) snapshots += 1;
+          if (error) console.error("league-track snapshot failed", error.code);
+          else snapshots += 1;
         }
       }
     }
@@ -120,6 +135,6 @@ export async function GET(request: Request): Promise<Response> {
     return json({ accounts, deadLinks, matched, snapshots });
   } catch (error) {
     console.error("league-track failed", safeMessage(error));
-    return json({ error: safeMessage(error) }, 500);
+    return json({ error: "Tracking failed." }, 500);
   }
 }

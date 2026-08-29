@@ -117,12 +117,21 @@ export interface RundownOptions {
   offAxisDeg?: number;
   jawWarnDeg?: number;
   onProgress?: (progress: number, stage: string) => void;
+  /** Stops an export whose owning scan/media set has been replaced. */
+  shouldCancel?: () => boolean;
 }
 
 export class RundownBlocked extends Error {
   constructor(readonly blockers: string[]) {
     super(blockers.join(" "));
     this.name = "RundownBlocked";
+  }
+}
+
+export class RundownCancelled extends Error {
+  constructor() {
+    super("The scan changed, so the old export was stopped.");
+    this.name = "RundownCancelled";
   }
 }
 
@@ -143,6 +152,10 @@ export async function downloadRundownVideo(
   options: RundownOptions,
 ): Promise<RundownResult> {
   const { onProgress } = options;
+  const ensureCurrent = () => {
+    if (options.shouldCancel?.()) throw new RundownCancelled();
+  };
+  ensureCurrent();
 
   // The refusal comes first, before any work and before any billable call. A
   // capture the app itself would warn a paying customer about must not be
@@ -168,7 +181,9 @@ export async function downloadRundownVideo(
   const spoken = options.accessToken
     ? await fetchNarration(narrationFrom(beats), options.accessToken)
     : null;
+  ensureCurrent();
   const voice = await decodeVoice(spoken?.audio ?? null);
+  ensureCurrent();
 
   // Time before mixing. See the header — this is the ordering that matters.
   //
@@ -213,6 +228,7 @@ export async function downloadRundownVideo(
     timeline.sfx.sort((a, b) => a.at - b.at);
   }
   const audio = await mixRundownAudio(voice, timeline);
+  ensureCurrent();
 
   const metrics = new Map<string, ScoredMetric>();
   for (const metric of report.metrics) metrics.set(metric.def.id, metric);
@@ -227,6 +243,7 @@ export async function downloadRundownVideo(
     getFirstEncodableVideoCodec,
     getFirstEncodableAudioCodec,
   } = await import("mediabunny");
+  ensureCurrent();
 
   const format = new Mp4OutputFormat({ fastStart: "in-memory" });
   // 1080p first, 720p when the encoder refuses. Mobile browsers report codec
@@ -259,7 +276,8 @@ export async function downloadRundownVideo(
   const canvas = document.createElement("canvas");
   canvas.width = outW;
   canvas.height = outH;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { alpha: false })!;
+  ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
   // One overlay canvas for the whole render. drawMeasurement reallocates its
@@ -273,9 +291,11 @@ export async function downloadRundownVideo(
   const output = new Output({ format, target });
   const videoSource = new CanvasSource(canvas, {
     codec: videoCodec,
-    // Scaled with the raster: 6 Mbps was chosen for 1080p, and spending it on
-    // 44% of the pixels would be a bigger file that looks no better.
-    bitrate: outW >= W ? 6_000_000 : 3_500_000,
+    // Retain texture through social-platform recompression. The old six-megabit
+    // encode was technically 1080p but visibly softened hair and thin overlays
+    // before TikTok compressed it a second time. Scale the compatibility
+    // fallback rather than spending 1080p bitrate on a 720p raster.
+    bitrate: outW >= W ? 12_000_000 : 6_000_000,
     keyFrameInterval: 2,
   });
   const audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 128_000 });
@@ -310,6 +330,7 @@ export async function downloadRundownVideo(
     : undefined;
 
   for (let frame = 0; frame < frameCount; frame++) {
+    ensureCurrent();
     const t = frame / FPS;
     // Seeked per frame, and only while its own beat is on screen. A video
     // element left running would drift against a timeline that is fitted to the
@@ -352,6 +373,7 @@ export async function downloadRundownVideo(
   }
 
   await output.finalize();
+  ensureCurrent();
   if (!target.buffer) throw new Error("The MP4 encoder returned no file.");
 
   onProgress?.(0.98, "Saving");

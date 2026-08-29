@@ -321,8 +321,10 @@ export async function currentAccessToken(expectedUserId?: string): Promise<strin
 }
 
 // App Store guideline 5.1.1(v): an account that can be created in the app must
-// be deletable in the app. The server cancels any Stripe subscription first,
-// deletes the Supabase identity second, then the browser clears its session.
+// be deletable in the app. The server first schedules any Stripe subscription
+// to stop at the end of its paid period, deletes the Supabase identity second,
+// then the browser clears its session. If identity deletion fails, the server
+// restores a subscription it newly scheduled so the operation is compensatable.
 export async function deleteAccount(): Promise<AuthResult> {
   try {
     const token = await currentAccessToken();

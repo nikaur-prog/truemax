@@ -753,6 +753,36 @@ test("stages deal measurement beats out in pairs across every landmarked photo",
   assert.deepEqual(timeline.beats.map((b) => stageFor(input, b)), stages);
 });
 
+test("stage edge cases stay finite and deterministic", () => {
+  const cases: Beat[][] = [
+    [{ kind: "hook", line: "No metrics." }],
+    [{ kind: "metric", line: "One.", metricId: "m1", region: "eyes" }],
+    STAGE_BEATS,
+  ] as Beat[][];
+  const fourStages = Array.from({ length: 4 }, () => ({ image: {} as CanvasImageSource, landmarks: FACE }));
+  const mixed = [
+    { image: {} as CanvasImageSource },
+    fourStages[0],
+    { image: {} as CanvasImageSource },
+    fourStages[1],
+  ];
+
+  for (const beats of cases) {
+    const timeline = buildTimeline(beats);
+    for (const broll of [undefined, [], fourStages, mixed]) {
+      const input = { timeline, metrics: new Map(), name: "Test", broll };
+      const first = timeline.beats.map((beat) => stageFor(input, beat));
+      const second = timeline.beats.map((beat) => stageFor(input, beat));
+      assert.deepEqual(second, first);
+      for (const beat of timeline.beats) {
+        const picked = brollFor(input, beat, beat.start + beat.duration / 2);
+        assert.ok(Number.isFinite(beat.start) && Number.isFinite(beat.duration));
+        assert.ok(picked === null || Boolean(picked.image));
+      }
+    }
+  }
+});
+
 test("stageChanged marks exactly the boundaries where the photograph changes", () => {
   const timeline = buildTimeline(STAGE_BEATS);
   const staged = { image: {} as CanvasImageSource, landmarks: FACE };

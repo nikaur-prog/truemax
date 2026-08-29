@@ -34,10 +34,11 @@ function redirectUri(): string {
 
 async function memberOrStaff(userId: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
-  const [{ data: staff }, { data: creator }] = await Promise.all([
+  const [{ data: staff, error: staffError }, { data: creator, error: creatorError }] = await Promise.all([
     admin.from("app_admins").select("user_id").eq("user_id", userId).maybeSingle<{ user_id: string }>(),
     admin.from("league_creators").select("status").eq("user_id", userId).maybeSingle<{ status: string }>(),
   ]);
+  if (staffError || creatorError) throw new Error(staffError?.message || creatorError?.message);
   return Boolean(staff) || creator?.status === "approved";
 }
 
@@ -82,13 +83,22 @@ export async function POST(request: Request): Promise<Response> {
         console.error("TikTok exchange refused", token.error, token.error_description);
         return json({ error: "TikTok did not accept that sign-in. Try connecting again." }, 502);
       }
-      const info = (await (
-        await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${token.access_token}` } })
-      ).json().catch(() => ({}))) as { data?: { user?: { open_id?: string; display_name?: string } } };
+      const infoResponse = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${token.access_token}` } });
+      if (!infoResponse.ok) {
+        console.error("TikTok user info refused", infoResponse.status);
+        return json({ error: "TikTok account details could not be verified. Try connecting again." }, 502);
+      }
+      const info = (await infoResponse.json().catch(() => ({}))) as {
+        data?: { user?: { open_id?: string; display_name?: string } };
+      };
       const tiktokUser = info.data?.user;
+      const openId = tiktokUser?.open_id?.trim() || token.open_id?.trim();
+      if (!openId) {
+        return json({ error: "TikTok account details could not be verified. Try connecting again." }, 502);
+      }
       const { error } = await admin.from("league_tiktok_accounts").upsert({
         user_id: user.id,
-        open_id: tiktokUser?.open_id ?? token.open_id ?? "",
+        open_id: openId,
         display_name: tiktokUser?.display_name ?? null,
         access_token: token.access_token,
         refresh_token: token.refresh_token,
@@ -99,11 +109,12 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     if (body?.action === "videos") {
-      const { data: row } = await admin
+      const { data: row, error: rowError } = await admin
         .from("league_tiktok_accounts")
         .select("access_token, refresh_token, expires_at")
         .eq("user_id", user.id)
         .maybeSingle<{ access_token: string; refresh_token: string; expires_at: string }>();
+      if (rowError) throw new Error(rowError.message);
       if (!row) return json({ error: "No TikTok account is linked." }, 400);
 
       // Refresh-and-persist lives in _tiktok.ts, shared with the nightly
@@ -119,13 +130,14 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     if (body?.action === "disconnect") {
-      await admin.from("league_tiktok_accounts").delete().eq("user_id", user.id);
+      const { error } = await admin.from("league_tiktok_accounts").delete().eq("user_id", user.id);
+      if (error) throw new Error(error.message);
       return json({ ok: true });
     }
 
     return json({ error: "Unknown action." }, 400);
   } catch (error) {
     console.error("tiktok-auth failed", safeMessage(error));
-    return json({ error: safeMessage(error) }, 500);
+    return json({ error: "TikTok could not be reached safely. Try again shortly." }, 500);
   }
 }

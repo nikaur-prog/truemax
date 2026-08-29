@@ -350,7 +350,8 @@ export interface Narration {
 
 /**
  * Thrown when the narration route answered but no voice service produced
- * audio, carrying the route's own account of which providers failed and why.
+ * audio. The route deliberately returns a provider-neutral message so upstream
+ * account or quota details never reach the browser.
  * Distinct from a null return (no session, no quota — the legitimately silent
  * cases) so the exporter can stop a render that was going to come out broken.
  */
@@ -374,20 +375,12 @@ export async function fetchNarration(text: string, accessToken: string): Promise
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       console.warn("narration unavailable", response.status, detail);
-      // Which refusals stop the render, and which quietly degrade it.
-      //
-      // 502 is the chain's own verdict — every voice service was tried and
-      // every one failed, or one returned something that was not audio. 409
-      // means the credit was spent by another render already in flight. Both
-      // are cases where the operator asked for a narrated video and would
-      // otherwise get a mute file they only discover after the edit, so both
-      // stop and report.
-      //
-      // 401/402/429 — not signed in, no credit, quota reached — still degrade
-      // to a silent cut on purpose. Those are answerable conditions the
-      // button already names, and losing a finished composite over them
-      // would cost more than the missing narration does.
-      if (response.status === 502 || response.status === 409) {
+      // 502 is the chain's own verdict: every voice service was tried and
+      // every one failed. That is not a silent-render case — the operator
+      // asked for a narrated video and should get a clear failure, not a mute
+      // file discovered after the edit. Quota, sign-in and entitlement
+      // refusals (401/402/429) keep the old degrade-to-silent behaviour.
+      if (response.status === 502) {
         let message = "No voice service produced audio.";
         try {
           const parsed = JSON.parse(detail) as { error?: string };

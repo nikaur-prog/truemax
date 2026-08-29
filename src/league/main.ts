@@ -55,6 +55,16 @@ interface SprintRow {
 
 const sprintFormula = (s: SprintRow): EarningsFormula | null => formulaFrom(s.formula);
 
+function sprintIsLive(sprint: SprintRow, at = Date.now()): boolean {
+  const starts = Date.parse(sprint.starts_at);
+  const ends = Date.parse(sprint.ends_at);
+  return sprint.status === "active"
+    && Number.isFinite(starts)
+    && Number.isFinite(ends)
+    && starts <= at
+    && at <= ends;
+}
+
 interface SubmissionRow {
   id: string;
   sprint_id: string;
@@ -72,6 +82,36 @@ const root = document.getElementById("league")!;
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+function httpsUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function platformUrl(value: string, platform: string): URL | null {
+  const url = httpsUrl(value);
+  if (!url) return null;
+  const host = url.hostname.toLowerCase();
+  const valid = platform === "tiktok"
+    ? /(^|\.)tiktok\.com$/.test(host)
+    : platform === "instagram"
+      ? /(^|\.)instagram\.com$/.test(host)
+      : platform === "youtube"
+        ? /(^|\.)youtube\.com$/.test(host) || host === "youtu.be"
+        : false;
+  return valid ? url : null;
+}
+
+function externalLink(value: string, label: string): string {
+  const url = httpsUrl(value);
+  return url
+    ? `<a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`
+    : `<span>${esc(label)}</span>`;
+}
 
 function tierCardsHTML(tiers: readonly Tier[]): string {
   return `<div class="lg-tiers">${tiers
@@ -181,6 +221,10 @@ function renderGate(): void {
     const si = await signIn(email, pass);
     if (si.ok) return void boot();
     const su = await signUp(email, pass);
+    if (su.ok && su.needsConfirmation) {
+      err.textContent = `Check ${email} for the confirmation link, then return here to apply.`;
+      return;
+    }
     if (su.ok) return void boot();
     err.textContent = su.message || si.message || "That didn't work — try again.";
   };
@@ -232,7 +276,11 @@ function renderApply(): void {
     if (!user) return renderGate();
     const client = await getSupabaseClient();
     const links = (document.getElementById("ap-links") as HTMLTextAreaElement).value
-      .split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 6);
+      .split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3);
+    if (links.length < 2 || links.some((link) => !httpsUrl(link))) {
+      err.textContent = "Add 2–3 full https:// links to your work.";
+      return;
+    }
     const { error } = await client.from("league_creators").insert({
       user_id: user.id,
       display_name: name,
@@ -379,6 +427,8 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
     .select("display_name, open_id")
     .eq("user_id", me.user_id)
     .maybeSingle<{ display_name: string | null; open_id: string }>();
+  const oauthError = sessionStorage.getItem("lg-tt-error");
+  if (oauthError) sessionStorage.removeItem("lg-tt-error");
 
   if (!data) {
     el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
@@ -387,13 +437,19 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
       on review day.</p></div>
       <button class="lg-btn pri" id="lg-tt-go">Connect</button></div>
       <p class="lg-error" id="lg-tt-err"></p>`;
+    if (oauthError) el.querySelector("#lg-tt-err")!.textContent = oauthError;
     el.querySelector<HTMLButtonElement>("#lg-tt-go")!.onclick = async () => {
       const res = await apiTikTok<{ url: string; state: string }>("start");
       if (res?.url && res.state) {
         // The state is checked on the way back — a redirect carrying somebody
         // else's code gets ignored rather than exchanged.
         sessionStorage.setItem("lg-tt-state", res.state);
-        location.href = res.url;
+        const authUrl = httpsUrl(res.url);
+        if (!authUrl || authUrl.hostname !== "www.tiktok.com" || authUrl.pathname !== "/v2/auth/authorize/") {
+          el.querySelector("#lg-tt-err")!.textContent = "TikTok returned an unsafe sign-in address.";
+          return;
+        }
+        location.href = authUrl.href;
         return;
       }
       el.querySelector("#lg-tt-err")!.textContent = res?.error ?? "Couldn't reach TikTok just now.";
@@ -411,6 +467,9 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
     </span></div>
     <div id="lg-tt-list"></div>
     <p class="lg-error" id="lg-tt-err"></p>`;
+  if (oauthError) {
+    el.querySelector("#lg-tt-err")!.textContent = oauthError;
+  }
   el.querySelector<HTMLButtonElement>("#lg-tt-videos")!.onclick = async () => {
     const list = el.querySelector<HTMLElement>("#lg-tt-list")!;
     list.innerHTML = `<p class="lg-sub">Loading…</p>`;
@@ -421,7 +480,7 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
       return;
     }
     list.innerHTML = res.videos.map((v) => `<div class="lg-row">
-      <span>${v.url ? `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title || "Untitled video")}</a>` : esc(v.title || "Untitled video")}</span>
+      <span>${v.url ? externalLink(v.url, v.title || "Untitled video") : esc(v.title || "Untitled video")}</span>
       <b class="lg-num">${fmtCount(v.views)} views · ${fmtCount(v.comments)} comments</b>
     </div>`).join("") || `<p class="lg-sub">No videos on the account yet.</p>`;
   };
@@ -435,7 +494,7 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
 const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> | void> = {
   async overview(mount, me) {
     mount.innerHTML = `<h1 class="lg-h">Overview</h1><p class="lg-sub">Loading…</p>`;
-    const sprints = (await loadSprints()).filter((s) => s.status === "active");
+    const sprints = (await loadSprints()).filter((s) => sprintIsLive(s));
     if (!sprints.length) {
       mount.innerHTML = `<h1 class="lg-h">Overview</h1>
         <div class="lg-card"><h3>No live sprint right now</h3>
@@ -466,11 +525,14 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           </div>`;
         }
         const accrued = creatorAccruedCents(f, videos);
-        const eOverall = engagementFactor(f, totals);
+        const factors = videos.map((video) => engagementFactor(f, video));
+        const low = factors.length ? Math.min(...factors) : f.eMin;
+        const high = factors.length ? Math.max(...factors) : f.eMin;
+        const factorText = low === high ? `${low.toFixed(2)}×` : `${low.toFixed(2)}×–${high.toFixed(2)}×`;
         return `<div class="lg-card">${head}
           <div class="lg-row"><span>Accrued this sprint</span><span class="lg-money">${fmtMoney(accrued)}</span></div>
-          <div class="lg-bar-note">$${(f.rpmCents / 100).toFixed(2)} per 1,000 views ×
-          ${eOverall.toFixed(2)} engagement — locks at sprint close, paid within 7 days.</div>
+          <div class="lg-bar-note">$${(f.rpmCents / 100).toFixed(2)} per 1,000 views; each video earned at
+          its own ${factorText} engagement factor — locks at sprint close, paid within 7 days.</div>
         </div>`;
       }
       const earned = earnedCents(s.tiers, totals);
@@ -490,7 +552,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   },
 
   async submit(mount, me) {
-    const sprints = (await loadSprints()).filter((s) => s.status === "active");
+    const sprints = (await loadSprints()).filter((s) => sprintIsLive(s));
     mount.innerHTML = `<h1 class="lg-h">Submit a video</h1>
       <p class="lg-sub">Paste the link the moment it's live. Only submitted, approved links count
       toward your totals — if we can't see it, we can't pay on it.</p>
@@ -512,16 +574,18 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       const err = document.getElementById("sb-err")!;
       err.textContent = "";
       const url = (document.getElementById("sb-url") as HTMLInputElement).value.trim();
-      if (!/^https:\/\//.test(url)) {
-        err.textContent = "That needs to be a full https:// link.";
+      const platform = (document.getElementById("sb-platform") as HTMLSelectElement).value;
+      const validated = platformUrl(url, platform);
+      if (!validated) {
+        err.textContent = `That needs to be a full ${platform} https:// link.`;
         return;
       }
       const client = await getSupabaseClient();
       const { error } = await client.from("league_submissions").insert({
         creator_id: me.user_id,
         sprint_id: (document.getElementById("sb-sprint") as HTMLSelectElement).value,
-        url,
-        platform: (document.getElementById("sb-platform") as HTMLSelectElement).value,
+        url: validated.href,
+        platform,
       });
       if (error) {
         err.textContent = /duplicate/i.test(error.message)
@@ -543,7 +607,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     mount.innerHTML = `<h1 class="lg-h">Your submissions</h1>
       ${subs.length ? `<div class="lg-card">${subs.map((s) => `
         <div class="lg-row">
-          <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url.replace(/^https:\/\/(www\.)?/, "").slice(0, 48))}</a>
+          ${externalLink(s.url, s.url.replace(/^https:\/\/(www\.)?/, "").slice(0, 48))}
           <span style="display:flex;gap:8px">
             ${s.tiktok_video_id ? `<span class="lg-chip ok">AUTO-TRACKED</span>` : ""}
             ${chip(s.status)}
@@ -585,7 +649,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     // Live accrual for formula sprints: the number that moves between
     // payouts, clearly marked as accruing rather than owed. Locked totals
     // become payout rows below at sprint close.
-    const active = (await loadSprints()).filter((s) => s.status === "active" && sprintFormula(s));
+    const active = (await loadSprints()).filter((s) => sprintIsLive(s) && sprintFormula(s));
     const accrualCards = await Promise.all(active.map(async (s) => {
       const f = sprintFormula(s)!;
       const videos = await myVideoTotalsFor(s, me.user_id);
@@ -756,7 +820,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         <div class="lg-row" style="align-items:flex-start;flex-direction:column">
           <div style="width:100%"><b>${esc(a.display_name)}</b> <span class="lg-note">${esc(a.handle)} · ${esc(a.niche ?? "")}</span>
           ${a.pitch ? `<p class="lg-sub" style="margin:6px 0">${esc(a.pitch)}</p>` : ""}
-          ${(a.links ?? []).map((l) => `<div><a href="${esc(l)}" target="_blank" rel="noopener">${esc(l.slice(0, 60))}</a></div>`).join("")}</div>
+          ${(a.links ?? []).map((l) => `<div>${externalLink(l, l.slice(0, 60))}</div>`).join("")}</div>
           <div class="lg-grants">
             <label><input type="checkbox" data-grant="cta" checked />CTA Generator</label>
             <label><input type="checkbox" data-grant="clips" checked />Clips Library</label>
@@ -776,7 +840,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         ${subs.map((s) => `
         <div class="lg-row" style="flex-wrap:wrap">
           <span style="display:flex;gap:10px;align-items:center;min-width:0">
-            <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url.slice(0, 52))}</a>
+            ${externalLink(s.url, s.url.slice(0, 52))}
             ${s.tiktok_video_id ? `<span class="lg-chip ok">ON LINKED ACCOUNT</span>` : ""}
           </span>
           <span style="display:flex;gap:8px;align-items:center">
@@ -843,12 +907,12 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     // dashboards use produces these numbers, so what a creator watched
     // accrue all month and what settlement offers can never disagree.
     {
-      const sprints = (await loadSprints()).filter((s) => s.status === "active" && sprintFormula(s));
+      const sprints = (await loadSprints()).filter((s) => s.status === "closed" && sprintFormula(s));
       const box = mount.querySelector<HTMLElement>("#lg-settle-sprints")!;
       const out = mount.querySelector<HTMLElement>("#lg-settle-out")!;
       box.innerHTML = sprints.length
         ? sprints.map((s) => `<button class="lg-btn" data-settle="${s.id}" style="margin:6px 8px 0 0">Compute · ${esc(s.name)}</button>`).join("")
-        : `<p class="lg-sub">No active formula sprint.</p>`;
+        : `<p class="lg-sub">No closed formula sprint ready to settle.</p>`;
       mount.querySelectorAll<HTMLButtonElement>("[data-settle]").forEach((b) => {
         b.onclick = async () => {
           const sprint = sprints.find((s) => s.id === b.dataset.settle)!;
@@ -863,6 +927,11 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           const earning = rows.filter((r) => r.accrued > 0).sort((a, b2) => b2.accrued - a.accrued);
           const totalAccrued = earning.reduce((a, r) => a + r.accrued, 0);
           const scale = poolScale(sprint.pool_cents, totalAccrued);
+          const { data: paidRows } = await client
+            .from("league_payouts")
+            .select("creator_id")
+            .eq("sprint_id", sprint.id);
+          const paid = new Set((paidRows ?? []).map((row: { creator_id: string }) => row.creator_id));
           out.innerHTML = `
             <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
@@ -872,7 +941,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
               ${fmtCount(r.totals.views)} views</span></span>
               <span style="display:flex;gap:10px;align-items:center">
                 <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
-                <button class="lg-btn" data-pay="${i}">Record paid</button>
+                <button class="lg-btn" data-pay="${i}" ${paid.has(r.c.user_id) ? "disabled" : ""}>${paid.has(r.c.user_id) ? "Recorded" : "Record paid"}</button>
               </span>
             </div>`).join("") || `<p class="lg-sub">Nobody over the threshold yet.</p>`}`;
           // Recording a payout is the LAST step, pressed after the money has
@@ -885,13 +954,13 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
               const r = earning[Number(btn.dataset.pay)];
               if (!r) return;
               btn.disabled = true;
-              const { error } = await client.from("league_payouts").insert({
-                creator_id: r.c.user_id,
-                amount_cents: Math.round(r.accrued * scale),
-                note: sprint.name,
-                status: "paid",
+              const { data: recorded, error } = await client.rpc("record_league_payout", {
+                p_sprint_id: sprint.id,
+                p_creator_id: r.c.user_id,
+                p_amount_cents: Math.round(r.accrued * scale),
+                p_note: sprint.name,
               });
-              btn.textContent = error ? "Failed — retry" : "Recorded";
+              btn.textContent = error ? "Failed — retry" : recorded === false ? "Already recorded" : "Recorded";
               if (error) btn.disabled = false;
             };
           });
@@ -1027,9 +1096,17 @@ async function boot(): Promise<void> {
   // server-side against the signed-in user before the URL is cleaned.
   const params = new URLSearchParams(location.search);
   const oauthCode = params.get("code");
-  if (oauthCode && params.get("state") && params.get("state") === sessionStorage.getItem("lg-tt-state")) {
+  if (oauthCode) {
+    const expectedState = sessionStorage.getItem("lg-tt-state");
     sessionStorage.removeItem("lg-tt-state");
-    await apiTikTok("exchange", { code: oauthCode }).catch(() => null);
+    if (params.get("state") && params.get("state") === expectedState) {
+      const exchanged = await apiTikTok("exchange", { code: oauthCode }).catch(() => null);
+      if (!exchanged || exchanged.error) {
+        sessionStorage.setItem("lg-tt-error", exchanged?.error ?? "TikTok could not be connected. Try again.");
+      }
+    } else {
+      sessionStorage.setItem("lg-tt-error", "TikTok sign-in expired or did not match this browser. Try again.");
+    }
     history.replaceState(null, "", location.pathname + location.hash);
   }
 
