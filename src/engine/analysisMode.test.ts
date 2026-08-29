@@ -54,9 +54,9 @@ test("each rung starts exactly where it says it does", () => {
   assert.ok(["Chopped", "Undercooked", "Raw"].includes(at(25.9)));
   assert.ok(["Mildly chopped", "Rough", "Half baked", "Unfinished"].includes(at(26)));
   assert.ok(["Mid", "NPC", "Background character"].includes(at(40)));
-  assert.ok(["Aight", "Decent", "Solid"].includes(at(52)));
+  assert.ok(["Aight", "Solid", "Not bad"].includes(at(52)));
   assert.ok(["Good looking", "Attractive", "Sharp"].includes(at(65)));
-  assert.ok(["Mogger", "Marlon level"].includes(at(82)));
+  assert.ok(["Mogger", "Cracked", "Built different"].includes(at(82)));
   assert.equal(at(95), "Looksmaxxing final boss");
   assert.equal(at(98.9), "Looksmaxxing final boss");
   assert.equal(at(99), "True Adam");
@@ -137,7 +137,7 @@ test("every mode reads the same underlying score", () => {
   // Basic is the same 0-10 score. Percentile is metadata for the rarity line,
   // never a replacement score.
   const strong = report({ overall: 7.1, overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
-  assert.ok(["Mogger", "Marlon level"].includes(verdictFor(strong, "blunt").word));
+  assert.ok(["Mogger", "Cracked", "Built different"].includes(verdictFor(strong, "blunt").word));
   assert.equal(basicScores(strong)[0].value, 7.1);
   assert.equal(basicScores(strong)[0].percentile, 91);
 });
@@ -237,10 +237,10 @@ test("polite is the default, so an unasked caller gets ordinary English", () => 
   // people who never opted into anything. "Chopped" is the joke this audience
   // came for and it is also the word that decides a stranger scrolling past
   // that this is a red-pill account rather than a measurement tool.
-  assert.equal(verdictForPercentile(5).word, "Room to improve");
-  assert.equal(verdictForPercentile(5, "male").word, "Room to improve");
-  assert.equal(verdictForPercentile(85).word, "Very attractive");
-  assert.equal(verdictForPercentile(96, "female").word, "Beautiful");
+  assert.equal(verdictForPercentile(5).word, "Needs work");
+  assert.equal(verdictForPercentile(5, "male").word, "Needs work");
+  assert.equal(verdictForPercentile(85).word, "Good");
+  assert.equal(verdictForPercentile(96, "female").word, "Very good");
 });
 
 test("the polite ladder is the words a person would actually say", () => {
@@ -248,14 +248,24 @@ test("the polite ladder is the words a person would actually say", () => {
   // slang anywhere on it at any height.
   const at = (pct: number, sex: "male" | "female" = "male") =>
     verdictForPercentile(pct, sex, "polite").word;
-  assert.equal(at(45), "Okay-looking");
-  assert.equal(at(55), "Above average");
-  assert.equal(at(70), "Attractive");
-  assert.equal(at(85), "Very attractive");
-  assert.equal(at(96), "Handsome");
-  assert.equal(at(96, "female"), "Beautiful");
-  assert.equal(at(99.5), "Very handsome");
-  assert.equal(at(99.5, "female"), "Very beautiful");
+  assert.equal(at(45), "Okay");
+  assert.equal(at(55), "Alright");
+  assert.equal(at(70), "Decent");
+  assert.equal(at(85), "Good");
+  assert.equal(at(96), "Very good");
+  assert.equal(at(96, "female"), "Very good");
+  assert.equal(at(99.5), "Top of the scale");
+  assert.equal(at(99.5, "female"), "Top of the scale");
+
+  // Nothing on the plain ladder flatters. The register the owner asked for
+  // is "decent, okay, alright, needs improving" — a reading, not a
+  // compliment — so the words a compliment would reach for are barred.
+  const flattery = /attractive|handsome|beautiful|gorgeous|stunning|striking|model/i;
+  for (const sex of ["male", "female"] as const) {
+    for (let pct = 0; pct <= 100; pct += 0.5) {
+      assert.ok(!flattery.test(at(pct, sex)), `${sex} ${pct}: ${at(pct, sex)}`);
+    }
+  }
 
   const slang = /cooked|chopped|npc|mogger|shyt|baddie|final boss|adam|eve|aight|mid\b/i;
   for (const sex of ["male", "female"] as const) {
@@ -316,10 +326,19 @@ test("the descriptor climbs with the ladder and never insults the floor", () => 
   assert.ok(!/unattractive|ugly/i.test(verdictForPercentile(2).descriptor));
   assert.ok(!/unattractive|ugly/i.test(verdictForPercentile(15).descriptor));
 
-  assert.equal(verdictForPercentile(45).descriptor, "a perfectly average male");
-  assert.equal(verdictForPercentile(70).descriptor, "an attractive male");
-  assert.equal(verdictForPercentile(85).descriptor, "a very attractive male");
-  assert.equal(verdictForPercentile(85, "female").descriptor, "a very attractive female");
+  assert.equal(verdictForPercentile(45).descriptor, "a male right on the middle");
+  assert.equal(verdictForPercentile(70).descriptor, "a decent-looking male");
+  assert.equal(verdictForPercentile(85).descriptor, "a good-looking male");
+  assert.equal(verdictForPercentile(85, "female").descriptor, "a good-looking female");
+
+  // Same register as the word ladder: the spoken half says what a person
+  // would say, not what a compliment would.
+  for (const pct of [2, 15, 30, 45, 55, 70, 85, 96, 99.5]) {
+    for (const sex of ["male", "female"] as const) {
+      const d = verdictForPercentile(pct, sex).descriptor;
+      assert.ok(!/attractive|handsome|beautiful/i.test(d), `${sex} ${pct}: ${d}`);
+    }
+  }
 });
 
 test("the descriptor does not move with the tone", () => {

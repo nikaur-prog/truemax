@@ -229,9 +229,16 @@ const LADDER: Array<{
    * The ordinary-English ladder, and the one the exports use by default.
    *
    * One word per rung rather than alternates: these are the words a person
-   * actually says about a face, and there are not five synonyms for "handsome"
-   * that a viewer would not read as the app straining. The variety the slang
-   * ladder gets from alternates, this one gets from having nine rungs.
+   * actually says about a face, and the variety the slang ladder gets from
+   * alternates, this one gets from having nine rungs.
+   *
+   * PLAIN, not flattering. It used to climb "Okay-looking / Above average /
+   * Attractive / Very attractive / Handsome / Very handsome" — the register of
+   * a compliment rather than of a reading, and the owner's call was that a
+   * measurement tool should not be handing out "very attractive" at all. The
+   * ladder now says what somebody would actually say out loud: needs work,
+   * okay, alright, decent, good. Nothing on it flatters and nothing on it is
+   * gendered, because a number does not change with who is reading it.
    */
   polite: Record<Sex, string[]>;
   // The rung in plain English, said out loud after the slang one. See Verdict.
@@ -253,8 +260,8 @@ const LADDER: Array<{
     // grow" is what a person actually says to someone at the bottom of a scale
     // and it is not a euphemism — it is the honest reading of a face whose gap
     // is almost entirely the part that moves.
-    polite: { male: ["Room to improve"], female: ["Room to improve"] },
-    descriptor: { male: "a male with a long way to climb", female: "a female with a long way to climb" },
+    polite: { male: ["Needs work"], female: ["Needs work"] },
+    descriptor: { male: "a male with a lot to work on", female: "a female with a lot to work on" },
     tone: "low",
     line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
   },
@@ -265,8 +272,8 @@ const LADDER: Array<{
       male: ["Plenty to work with", "Lots of upside"],
       female: ["Plenty to work with", "Lots of upside"],
     },
-    polite: { male: ["Below average"], female: ["Below average"] },
-    descriptor: { male: "a well below average male", female: "a well below average female" },
+    polite: { male: ["Needs improving"], female: ["Needs improving"] },
+    descriptor: { male: "a male well below the middle", female: "a female well below the middle" },
     tone: "low",
     line: "Bottom fifth. The gap is real, and most of it is the part that moves without surgery.",
   },
@@ -277,8 +284,8 @@ const LADDER: Array<{
       female: ["Mildly chopped", "Rough", "Half baked", "Unfinished"],
     },
     kind: { male: ["Coming along", "On the way up"], female: ["Coming along", "On the way up"] },
-    polite: { male: ["Slightly below average"], female: ["Slightly below average"] },
-    descriptor: { male: "a below average male", female: "a below average female" },
+    polite: { male: ["Below average"], female: ["Below average"] },
+    descriptor: { male: "a male below the middle", female: "a female below the middle" },
     tone: "low",
     line: "Below the middle. One or two numbers are doing the damage rather than all of them.",
   },
@@ -307,23 +314,23 @@ const LADDER: Array<{
       male: ["Right in the middle", "Middle of the pack", "Bang on average"],
       female: ["Right in the middle", "Middle of the pack", "Bang on average"],
     },
-    polite: { male: ["Okay-looking"], female: ["Okay-looking"] },
-    descriptor: { male: "a perfectly average male", female: "a perfectly average female" },
+    polite: { male: ["Okay"], female: ["Okay"] },
+    descriptor: { male: "a male right on the middle", female: "a female right on the middle" },
     tone: "mid",
     line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
   },
   {
     min: 52,
     words: {
-      male: ["Aight", "Decent", "Solid", "Alright", "Not bad", "Passable", "Respectable"],
-      female: ["Aight", "Cute", "Solid", "Alright", "Not bad", "Passable", "Respectable"],
+      male: ["Aight", "Solid", "Not bad", "Passable", "Respectable"],
+      female: ["Aight", "Cute", "Solid", "Not bad", "Passable", "Respectable"],
     },
     kind: {
       male: ["Good base", "Solid footing", "Comfortably above average"],
       female: ["Good base", "Solid footing", "Comfortably above average"],
     },
-    polite: { male: ["Above average"], female: ["Above average"] },
-    descriptor: { male: "a slightly above average male", female: "a slightly above average female" },
+    polite: { male: ["Alright"], female: ["Alright"] },
+    descriptor: { male: "a male a little above the middle", female: "a female a little above the middle" },
     tone: "mid",
     line: "Just above the middle. Nothing is wrong; nothing is carrying you either.",
   },
@@ -337,23 +344,28 @@ const LADDER: Array<{
       male: ["Good looking", "Handsome", "Well put together"],
       female: ["Good looking", "Lovely", "Well put together"],
     },
-    polite: { male: ["Attractive"], female: ["Attractive"] },
-    descriptor: { male: "an attractive male", female: "an attractive female" },
+    polite: { male: ["Decent"], female: ["Decent"] },
+    descriptor: { male: "a decent-looking male", female: "a decent-looking female" },
     tone: "high",
     line: "Top third. Measurably ahead of two out of three faces in the reference set.",
   },
   {
     min: 82,
+    // "Marlon level" is gone. It named a real person, and the rundown that
+    // surfaced it was a rundown ABOUT Marlon — so the video's verdict on
+    // Marlon was that he is Marlon level, which is not a measurement, it is a
+    // tautology with a name in it. Any word naming a specific person has the
+    // same failure waiting in it the moment that person is the subject.
     words: {
-      male: ["Mogger", "Marlon level"],
+      male: ["Mogger", "Cracked", "Built different"],
       female: ["She-mogger", "Fine shyt"],
     },
     kind: {
       male: ["Striking", "Turns heads", "Exceptional"],
       female: ["Striking", "Turns heads", "Exceptional"],
     },
-    polite: { male: ["Very attractive"], female: ["Very attractive"] },
-    descriptor: { male: "a very attractive male", female: "a very attractive female" },
+    polite: { male: ["Good"], female: ["Good"] },
+    descriptor: { male: "a good-looking male", female: "a good-looking female" },
     tone: "high",
     line: "Top fifth. Four out of five faces in the reference set measure below this.",
   },
@@ -370,11 +382,8 @@ const LADDER: Array<{
       male: ["Remarkable", "Genuinely rare"],
       female: ["Remarkable", "Genuinely rare"],
     },
-    // The ladder switches families at the top two rungs, from "-looking" to the
-    // classic gendered compliment. That switch is the signal: a viewer hears
-    // handsome and knows it is not another notch on the same word.
-    polite: { male: ["Handsome"], female: ["Beautiful"] },
-    descriptor: { male: "an exceptionally attractive male", female: "an exceptionally attractive female" },
+    polite: { male: ["Very good"], female: ["Very good"] },
+    descriptor: { male: "a very good-looking male", female: "a very good-looking female" },
     tone: "peak",
     line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
   },
@@ -386,8 +395,8 @@ const LADDER: Array<{
     min: 99,
     words: { male: ["True Adam"], female: ["True Eve"] },
     kind: { male: ["One in a hundred"], female: ["One in a hundred"] },
-    polite: { male: ["Very handsome"], female: ["Very beautiful"] },
-    descriptor: { male: "a one in a hundred male", female: "a one in a hundred female" },
+    polite: { male: ["Top of the scale"], female: ["Top of the scale"] },
+    descriptor: { male: "a male at the top of the scale", female: "a female at the top of the scale" },
     tone: "peak",
     line: "Top one per cent. There is nothing above this — the scale ends here.",
   },

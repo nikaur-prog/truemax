@@ -40,9 +40,13 @@ import type { Beat } from "./reelScript.js";
 // corrects the absolute value whenever there is real audio to correct it
 // against, so this number matters only for a silent render.
 // Tracks VOICE_SPEED in api/tts.ts: 4.6 was measured at speed 1.12, and the
-// voice now runs 1.25, so the estimate scales with it. Only the starting
+// voice runs 1.125, so the estimate scales with it. Only the starting
 // proportion either way — real audio still refits the whole timeline.
-const SYLLABLES_PER_SECOND = 5.13;
+//
+// Was 5.13, scaled for a 1.25 voice. 1.25 was a shade too fast to watch
+// against — the measurement lines were gone before you had read them — so the
+// voice came back to 1.125 and this came with it.
+const SYLLABLES_PER_SECOND = 4.62;
 
 // No beat is shorter than this however few words it has. "The jaw is
 // excellent." is four words and would otherwise flash past in under a second,
