@@ -51,8 +51,11 @@ clips/
 !public/tutorial/*.mp4
 
 # Same category, same decision: the League gate montage is a deterministic
-# render (tools/build-montage.mjs) whose only face is the Wikimedia demo
-# portrait already versioned under public/demo, credited on its endcard.
+# render (tools/build-montage.mjs) whose only face comes from the demo cast
+# already versioned under public/demo, credited on its endcard. NOTE: the
+# committed montage.mp4 predates that cast and still shows the Wikimedia
+# portrait the harness used to load; re-rendering it replaces that face with a
+# synthetic one.
 !public/league/montage.mp4
 
 # Same decision again: the landing reel's living-portrait loops and the
@@ -61,6 +64,16 @@ clips/
 # living-portrait clips out of the PR that shipped the reel, which is why
 # this exception is explicit rather than a force-add nobody can see.
 !public/demo/*.mp4
+
+# The thirty-second CTA film, so /quick can hand it over as a finished file
+# for the end of a TikTok rather than rendering thirty seconds in a browser.
+#
+# Allowed under the face-video rule above for the same reason public/demo/*.mp4
+# is: the two people in it are AI-generated, tagged as such on screen, and the
+# whole point of the file is to be distributed. Nobody's real face is in it.
+# The 79MB of source frames, VO segments and actor stills it was built from
+# stay in .cta-assets/, which is ignored; only the 6MB master ships.
+!public/cta/*.mp4
 
 # The export folders, in every casing the sorter might produce.
 [Rr]eels/
@@ -93,9 +106,11 @@ exports/
 # Scratch files from research harnesses. The side-seeder run drops probe copies
 # of modules and one-off Chromium drivers into the tree while it works, and a
 # `git add -A` has already carried two of them into a commit. They are working
-# files, never product code, and every one so far has been named with a leading
-# underscore.
+# files, never product code. Most are named with a leading underscore; the
+# side-seeder run also leaves probe-*.html drivers at the root, so those are
+# named here too rather than waiting for one to be committed first.
 src/**/_*.ts
 tools/_*.mjs
 _*.mjs
 _*.html
+probe-*.html

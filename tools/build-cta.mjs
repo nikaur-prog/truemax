@@ -88,8 +88,13 @@ try {
   const girlParam = girlMeta
     ? `?girldir=${encodeURIComponent("/@fs/" + girlDir)}&girlfps=${girlMeta.fps}&girlcount=${girlMeta.count}`
     : "";
+    // Not "networkidle". Chromium keeps its own background requests going
+    // (variations, safe browsing) and behind a proxy that never answers them
+    // they never settle, so networkidle turned a harness error into a hang
+    // with no output. The harness announces itself through window.__ready,
+    // which is the barrier that actually matters; the wait below is it.
   await page.goto(`http://localhost:${port}/tools/cta-harness.html${girlParam}`, {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(() => window.__ready, { timeout: 120000 });
   const err = await page.evaluate(() => (window.__ready === "error" ? window.__error : null));

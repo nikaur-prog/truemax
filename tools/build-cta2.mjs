@@ -8,12 +8,12 @@
 //  - The VO is seven per-phrase segments (.cta-assets/v2/vo-seg0..6.mp3),
 //    each mixed in at its beat's start, so the narration and the visuals
 //    are aligned by construction rather than by eye.
-//  - The two Max clips are exploded to frame sequences and composited by
-//    the renderer, girl-clip style.
+//  - Coach Max does not appear. The two clips this script used to explode and
+//    composite were cut from the film, so nothing here decodes video any more.
 //
 // --fps 12 --seconds 6 exist for quick previews.
 import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { launchChromium } from "./launchChromium.mjs";
@@ -41,22 +41,6 @@ const frameDir = join(V2, "frames");
 rmSync(frameDir, { recursive: true, force: true });
 mkdirSync(frameDir, { recursive: true });
 
-// Explode the two Max clips to JPEG sequences.
-function explode(name, file, maxSeconds) {
-  const dir = join(V2, `${name}-frames`);
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  const clipFps = 24;
-  execFileSync(ffmpegPath, [
-    "-y", "-i", file, "-t", String(maxSeconds), "-vf", `fps=${clipFps},scale=1280:-2`,
-    "-q:v", "3", join(dir, "f%04d.jpg"),
-  ], { stdio: "pipe" });
-  const count = readdirSync(dir).length;
-  console.log(`${name} clip → ${count} frames`);
-  return { dir, fps: clipFps, count };
-}
-const teacher = explode("teacher", join(V2, "max-teacher.mp4"), 6);
-const celebrate = explode("celebrate", join(V2, "max-celebrate.mp4"), 4.2);
 
 const server = spawn("npx", ["vite", "--port", String(port), "--strictPort"], {
   cwd: ROOT,
@@ -73,15 +57,14 @@ try {
     before: "/@fs/" + join(V2, "actor-before2.png"),
     after: "/@fs/" + join(V2, "actor-after.png"),
     person: "/@fs/" + join(V2, "linkbio-person.png"),
-    teacher: "/@fs/" + teacher.dir,
-    teacherfps: String(teacher.fps),
-    teachercount: String(teacher.count),
-    celebrate: "/@fs/" + celebrate.dir,
-    celebratefps: String(celebrate.fps),
-    celebratecount: String(celebrate.count),
   });
+    // Not "networkidle". Chromium keeps its own background requests going
+    // (variations, safe browsing) and behind a proxy that never answers them
+    // they never settle, so networkidle turned a harness error into a hang
+    // with no output. The harness announces itself through window.__ready,
+    // which is the barrier that actually matters; the wait below is it.
   await page.goto(`http://localhost:${port}/tools/cta2-harness.html?${q}`, {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(() => window.__ready, undefined, { timeout: 120000 });
   const err = await page.evaluate(() => (window.__ready === "error" ? window.__error : null));

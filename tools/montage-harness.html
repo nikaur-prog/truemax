@@ -7,9 +7,9 @@
 
      The montage shows what the League tools actually render - the score card,
      the measure pass, the weekly trend - playing inside phone frames beside
-     the payout ladder. No AI-actor footage here: this file's output is
-     committed to the public repo, so the only face it may contain is the
-     Wikimedia demo face, credited on the endcard. -->
+     the payout ladder. This file's output is committed to the public repo,
+     so the only face it may contain is a synthetic one from the demo cast,
+     tagged as such on the endcard. -->
 <head><meta charset="utf-8"></head>
 <body style="margin:0;background:#0b0d0f">
 <canvas id="out"></canvas>
@@ -60,7 +60,10 @@ const TIERS = [
 const img = (src) => new Promise((res, rej) => {
   const i = new Image();
   i.onload = () => res(i);
-  i.onerror = rej;
+  // Named, because the browser hands onerror a bare Event and the builder
+  // prints it as "[object Event]" — which says a build failed but not that an
+  // image is missing, let alone which one.
+  i.onerror = () => rej(new Error("could not load image: " + src));
   i.src = src;
 });
 
@@ -71,7 +74,10 @@ try {
     document.fonts.ready,
   ]);
 
-  const face = await img("/demo/cillian-murphy.jpg");
+  // A synthetic demo portrait. This was a Wikimedia photograph of a real
+  // person; that file is no longer in public/demo, so the montage could not be
+  // rebuilt at all until this pointed somewhere that exists.
+  const face = await img("/demo/adrian.jpg");
   const photo = document.createElement("canvas");
   photo.width = face.naturalWidth;
   photo.height = face.naturalHeight;
@@ -95,7 +101,7 @@ try {
     photo,
     landmarks,
     metrics,
-    credit: "Cillian Murphy photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+    credit: "AI-GENERATED DEMONSTRATION",
     maxAvatar,
     mark,
     girlFrame: () => null,

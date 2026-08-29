@@ -72,10 +72,6 @@ export interface Cta2Assets extends CtaAssets {
   actorBefore: CanvasImageSource & { width: number; height: number };
   /** The same actor at week 8: clear, rested, defined. */
   actorAfter: CanvasImageSource & { width: number; height: number };
-  /** Frame of the teacher-Max clip at `local` seconds, if exploded. */
-  teacherFrame: (local: number) => CanvasImageSource | null;
-  /** Frame of the jump-clap celebration clip at `local` seconds. */
-  celebrateFrame: (local: number) => CanvasImageSource | null;
   /** The cartoon person holding a blank phone, for the link-in-bio beat. */
   linkbioPerson: (CanvasImageSource & { width: number; height: number }) | null;
   /**
@@ -316,7 +312,10 @@ function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: nu
   const px = w * 0.08 - (1 - inP) * w * 0.3;
   const pw2 = w * 0.84;
   const py = h * 0.2;
-  const ph2 = h * 0.52;
+  // Shorter than it was. At 0.52 the card kept the height it needed when Max
+  // stood inside it, and with him gone the four rows sat at the top and the
+  // chart at the bottom with a third of the frame empty between them.
+  const ph2 = h * 0.42;
   ctx.save();
   ctx.globalAlpha = inP;
   ctx.fillStyle = NAVY_HI;
@@ -353,7 +352,9 @@ function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: nu
   for (let i = 0; i < bars; i++) {
     const bp = seg(local, 0.6 + i * 0.12, 1.0 + i * 0.12);
     if (bp <= 0) continue;
-    const bh2 = (40 + i * 26) * u * bp;
+    // Taller per step than before, so eight bars still climb the full chart
+    // inside the shorter card rather than hugging its floor.
+    const bh2 = (46 + i * 30) * u * bp;
     ctx.fillStyle = i === bars - 1 ? MINT_BRIGHT : "rgba(121,232,210,0.4)";
     ctx.beginPath();
     ctx.roundRect(px + 40 * u + i * bw2 + 6 * u, py + ph2 - 60 * u - bh2, bw2 - 12 * u, bh2, 8 * u);

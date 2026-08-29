@@ -1750,6 +1750,14 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <!-- The endcard on its own, for the operator cutting an edit elsewhere.
            Every export already closes on it; this hands over just the card. -->
       <button class="btn gho" id="q-cta-download">CTA outro MP4</button>
+      <!-- The thirty-second film, as a finished file rather than a render.
+           Two different things wear the word CTA on this page: the OUTRO above
+           is the endcard every export already closes on, rendered client-side
+           in a few seconds, and this is the standalone story film that goes on
+           the end of a TikTok. Asking for one and getting the other is the
+           reported fault ("it made me download a shitty 8 second one"), so
+           they say which they are. -->
+      <button class="btn gho" id="q-ctafilm-download">CTA film MP4 · 30s</button>
       <!-- Calibration, not a user feature. A screenshot of the region cards
            says the jaw is wrong; only the metric table says WHICH jaw metric,
            by how far, and whether the ideal or the spread is at fault. -->
@@ -1840,6 +1848,32 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   document.getElementById("q-video-download")!.onclick = () => void downloadVideo(editedReport(r), "breakdown");
   document.getElementById("q-verdict-download")!.onclick = () => void downloadVideo(editedReport(r), "verdict");
   document.getElementById("q-rundown-download")!.onclick = () => void downloadRundown(editedReport(r));
+  // The film is a shipped asset, not a render: it is built offline by
+  // tools/build-cta2.mjs from real VO segments and actor stills, and there is
+  // nothing per-scan in it. So this fetches the finished file and hands it to
+  // the same save path every other export uses — share sheet on a phone, a
+  // download on a laptop.
+  document.getElementById("q-ctafilm-download")!.onclick = async () => {
+    const btn = document.getElementById("q-ctafilm-download") as HTMLButtonElement;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Fetching…";
+    try {
+      const res = await fetch("/cta/cta2.mp4", { cache: "force-cache" });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const outcome = await saveFile(blob, exportName("reel", "mp4", "cta-film"), "reel");
+      btn.textContent = outcome === "cancelled" ? "Not saved — tap to retry" : outcomeMessage(outcome);
+    } catch {
+      btn.textContent = "Could not fetch — tap to retry";
+    } finally {
+      btn.disabled = false;
+      // Back to what it says on the tin once the outcome has been read.
+      window.setTimeout(() => {
+        if (btn.isConnected) btn.textContent = label;
+      }, 4000);
+    }
+  };
   document.getElementById("q-cta-download")!.onclick = async () => {
     const btn = document.getElementById("q-cta-download") as HTMLButtonElement;
     btn.disabled = true;

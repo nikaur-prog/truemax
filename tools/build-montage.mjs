@@ -41,8 +41,13 @@ try {
   const page = await browser.newPage({ viewport: { width: 990, height: 580 } });
   page.on("pageerror", (e) => console.error("[pageerror]", String(e).slice(0, 300)));
 
+    // Not "networkidle". Chromium keeps its own background requests going
+    // (variations, safe browsing) and behind a proxy that never answers them
+    // they never settle, so networkidle turned a harness error into a hang
+    // with no output. The harness announces itself through window.__ready,
+    // which is the barrier that actually matters; the wait below is it.
   await page.goto(`http://localhost:${port}/tools/montage-harness.html`, {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
   });
   await page.waitForFunction(() => window.__ready, undefined, { timeout: 120000 });
   const err = await page.evaluate(() => (window.__ready === "error" ? window.__error : null));
