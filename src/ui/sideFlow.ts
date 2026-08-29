@@ -31,7 +31,7 @@ import type {
   SideFeedbackIntent,
   SideSeedMethod,
 } from "../engine/sideFeedbackPayload.js";
-import { startCamera } from "./camera.js";
+import { cameraCount, startCamera } from "./camera.js";
 import { setRunningMode } from "../engine/landmarker.js";
 import { resetSideTracking } from "../engine/captureGuide.js";
 import { createAutoCapture } from "./autoCapture.js";
@@ -148,6 +148,7 @@ const el = () => ({
   lamp: document.getElementById("side-lamp")!,
   lampFill: document.getElementById("side-lamp-fill")!,
   turnCue: document.getElementById("side-turn-cue")!,
+  swap: document.getElementById("side-swap") as HTMLButtonElement,
 });
 
 function renderSideCaptureCopy(copy: HTMLElement): void {
@@ -389,6 +390,19 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     e.hintTitle.textContent = "Camera unavailable";
     return;
   }
+  // The switch appears only when there is a second camera to switch to. On the
+  // side shot this is the one most people actually want: a second person
+  // taking the photo holds the phone the way a photographer does, back camera
+  // out.
+  void cameraCount().then((n) => {
+    e.swap.classList.toggle("hidden", n < 2 || !sideCam);
+  });
+  e.swap.onclick = async () => {
+    if (!sideCam) return;
+    e.swap.disabled = true;
+    await sideCam.swap();
+    e.swap.disabled = false;
+  };
   // Same order as the front screen: the shutter first, upload second. They were
   // reversed here, so the button under your thumb changed meaning between the
   // two steps of the same flow.
@@ -458,6 +472,8 @@ function stopSideCamera(): void {
   e.live.classList.add("hidden");
   e.turnCue.classList.add("hidden");
   e.frame.classList.remove("live");
+  e.swap.classList.add("hidden");
+  e.swap.onclick = null;
 }
 
 // Re-open the verifier on a profile that has already been captured, so the

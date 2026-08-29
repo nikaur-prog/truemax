@@ -91,6 +91,11 @@
                other route to the walkthrough from the capture screen. Small,
                out of the frame's centre, and it costs nothing to ignore. -->
           <button class="cam-info" id="cam-info" type="button" aria-label="How to take this photo">i</button>
+          <!-- Switch camera: front/back on a phone, next device on a desktop.
+               Only rendered while the preview is live AND the machine reports
+               more than one camera — a button that cannot do anything is
+               clutter on the one screen that must stay clean. -->
+          <button class="cam-swap hidden" id="cam-swap" type="button" aria-label="Switch camera"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 5v5h-5"/><path d="M1 19v-5h5"/><path d="M3.8 9.5a9 9 0 0 1 14.9-3.2L23 10"/><path d="M20.2 14.5a9 9 0 0 1-14.9 3.2L1 14"/></svg></button>
 
           <div class="cam-hud">
             <div class="cam-hint" id="cam-hint">
@@ -116,21 +121,21 @@
                label onto two lines beside "Use camera" on a phone. Same
                cloud-and-arrow glyph as the side screen (sideFlow.ts). -->
           <button class="btn gho" id="btn-upload"><span>Upload photo</span><svg class="btn-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 18.5a4 4 0 0 0 .3-8 6 6 0 0 0-11.5-1.4 3.6 3.6 0 0 0 .2 7.2"/><path d="M12 21V11"/><path d="M8.5 14.2 12 10.7l3.5 3.5"/></svg></button>
+          <!-- Lives in the action row so the full-screen viewfinder carries
+               its whole exit path on the glass. Hidden except while the
+               camera is live, exactly as before the move. -->
+          <button class="btn cancel hidden" id="btn-cancel">Cancel</button>
         </div>
-      </div>
-        <!-- Filled in by script, and only on a device that actually has a
-             keyboard and a pointer. Telling a phone to press Cmd-V is worse
-             than saying nothing. -->
-        <p class="paste-hint" id="paste-hint" hidden></p>
-        <!-- Only while the camera is live. Backing out of an open camera had no
-             exit before this: the only ways out were to take a photo you did
-             not want or to reload the page. -->
-        <button class="btn cancel hidden" id="btn-cancel">Cancel</button>
         <!-- The glasses gate holds the shutter, and it is right about six of
              every seven faces it fires on. This is for the seventh: someone
              with nothing on their face cannot comply with "take your glasses
              off", so they can say so. Only shown while that block is active. -->
         <button class="linkish hidden" id="btn-noglasses">I'm not wearing glasses</button>
+      </div>
+        <!-- Filled in by script, and only on a device that actually has a
+             keyboard and a pointer. Telling a phone to press Cmd-V is worse
+             than saying nothing. -->
+        <p class="paste-hint" id="paste-hint" hidden></p>
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
 
@@ -140,7 +145,8 @@
            reach the one control the page exists for. The claim is worth making
            and worth reading; it is not worth making first. -->
       <p class="sub">
-        478 points measured on your face, compared against real population data.
+        <b class="sub-num">478</b> points measured on your face, compared against
+        real population data.
         <!-- The provenance line moved here from the demo card itself: the
              owner's call that a caption stamped on the picture over-explained
              a demo, while dropping the disclosure entirely would let a named,
@@ -358,6 +364,10 @@
                other route to the walkthrough from the capture screen. Small,
                out of the frame's centre, and it costs nothing to ignore. -->
           <button class="cam-info" id="side-info" type="button" aria-label="How to take this photo">i</button>
+              <!-- Same switch as the front camera; the side shot is the one a
+                   second person most often takes, which is exactly when the
+                   back camera is the better lens. -->
+              <button class="cam-swap hidden" id="side-swap" type="button" aria-label="Switch camera"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 5v5h-5"/><path d="M1 19v-5h5"/><path d="M3.8 9.5a9 9 0 0 1 14.9-3.2L23 10"/><path d="M20.2 14.5a9 9 0 0 1-14.9 3.2L1 14"/></svg></button>
 
           <div class="cam-hud">
                 <div class="cam-hint" id="side-hint">

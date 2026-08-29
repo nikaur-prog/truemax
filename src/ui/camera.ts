@@ -10,6 +10,12 @@ import type { FrameCheck, Viewport } from "../engine/captureGuide.js";
 export interface CameraHandle {
   stop(): void;
   capture(): HTMLCanvasElement | null;
+  /**
+   * Switch to another camera: a phone flips between the front and back faces,
+   * a desktop cycles through whatever cameras are plugged in. Resolves false
+   * when there was nothing to switch to (the preview keeps the camera it had).
+   */
+  swap(): Promise<boolean>;
 }
 
 interface Opts {
@@ -25,6 +31,22 @@ interface Opts {
 let stream: MediaStream | null = null;
 let raf = 0;
 let scratch: HTMLCanvasElement | null = null;
+
+// Which way the active camera faces, and (on a desktop cycling real devices)
+// which device holds the preview. Module-level like `stream`: one camera at a
+// time is a standing assumption of this file.
+let facing: "user" | "environment" = "user";
+let deviceId: string | null = null;
+
+/** How many cameras this machine has. Meaningful after permission is granted. */
+export async function cameraCount(): Promise<number> {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    return devs.filter((d) => d.kind === "videoinput").length;
+  } catch {
+    return 0;
+  }
+}
 
 export function isSupported(): boolean {
   return !!navigator.mediaDevices?.getUserMedia;
@@ -42,18 +64,84 @@ export async function permissionGranted(): Promise<boolean> {
 }
 
 export async function startCamera(opts: Opts): Promise<CameraHandle> {
-  stream = await navigator.mediaDevices.getUserMedia({
+  facing = "user";
+  deviceId = null;
+  let live = true;
+
+  const constraints = (): MediaStreamConstraints => ({
     video: {
-      facingMode: "user",
+      ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: facing }),
       width: { ideal: 1280 },
       height: { ideal: 1280 },
     },
     audio: false,
   });
-  opts.video.srcObject = stream;
-  opts.video.muted = true;
-  opts.video.playsInline = true;
-  await opts.video.play();
+
+  // The preview mirrors like a mirror ONLY for a camera pointed at its own
+  // user. The back camera shows the world, and a mirrored world — someone
+  // else's face, text on a wall — reads as wrong immediately. capture() below
+  // makes the matching call, so the saved frame is always true orientation.
+  const applyMirror = () => {
+    const rear = facing === "environment";
+    opts.video.classList.toggle("unmirrored", rear);
+    opts.guideCanvas.classList.toggle("unmirrored", rear);
+  };
+
+  async function attach(): Promise<void> {
+    // Stop the old tracks BEFORE asking for new ones: many phones refuse to
+    // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia(constraints());
+    opts.video.srcObject = stream;
+    opts.video.muted = true;
+    opts.video.playsInline = true;
+    await opts.video.play();
+    const track = stream.getVideoTracks()[0];
+    // Believe the track over the request — a phone with no back camera hands
+    // back the front one whatever was asked for.
+    const f = track?.getSettings?.().facingMode;
+    if (f === "environment" || f === "user") facing = f;
+    applyMirror();
+    track?.addEventListener("ended", onTrackDown);
+  }
+
+  // ---- stream recovery ------------------------------------------------------
+  // Backgrounding the tab, taking a phone call, or the OS reclaiming the
+  // camera kills the video track, and a dead track does not come back on its
+  // own: returning to the tab used to show a black rectangle wearing live-
+  // camera chrome. Two signals cover it — the track's own "ended" event, and
+  // the tab becoming visible again holding a track that is no longer live.
+  let reacquiring = false;
+  async function reacquire(): Promise<void> {
+    if (!live || reacquiring) return;
+    reacquiring = true;
+    try {
+      await attach();
+    } catch {
+      // Permission revoked or the camera is genuinely busy. The guidance
+      // already shows its "looking for a face" state over a black frame; the
+      // next visibility change tries again.
+    }
+    reacquiring = false;
+  }
+  function onTrackDown(): void {
+    // Recover into a visible tab immediately; a hidden one would just lose
+    // the fresh track the same way, so it reacquires on return instead.
+    if (document.visibilityState === "visible") void reacquire();
+  }
+  const onVisible = () => {
+    if (document.visibilityState !== "visible") return;
+    const track = stream?.getVideoTracks()[0];
+    if (!track || track.readyState !== "live" || track.muted) void reacquire();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+
+  try {
+    await attach();
+  } catch (err) {
+    document.removeEventListener("visibilitychange", onVisible);
+    throw err;
+  }
 
   // The preview goes up without waiting for the landmarker.
   //
@@ -67,7 +155,6 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   // So the mode switch waits for the boot instead, and the loop below starts
   // immediately. Until the switch lands detectVideo returns null and the
   // guidance shows its "looking for a face" state, which is true.
-  let live = true;
   void initLandmarker()
     .then(() => {
       if (live) return setRunningMode("VIDEO");
@@ -126,9 +213,12 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     stop() {
       live = false;
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisible);
       stream?.getTracks().forEach((t) => t.stop());
       stream = null;
       opts.video.srcObject = null;
+      opts.video.classList.remove("unmirrored");
+      opts.guideCanvas.classList.remove("unmirrored");
       const ctx = opts.guideCanvas.getContext("2d");
       ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
     },
@@ -141,11 +231,48 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       const ctx = c.getContext("2d")!;
       // Un-mirror: the preview is flipped so it behaves like a mirror, but the
       // captured frame must be the true orientation or left/right metrics
-      // (and any text in shot) come out reversed.
-      ctx.translate(c.width, 0);
-      ctx.scale(-1, 1);
+      // (and any text in shot) come out reversed. The back camera's preview is
+      // never mirrored, so its frame is already true.
+      if (facing !== "environment") {
+        ctx.translate(c.width, 0);
+        ctx.scale(-1, 1);
+      }
       ctx.drawImage(v, 0, 0);
       return c;
+    },
+    async swap() {
+      const wasFacing = facing;
+      const wasDevice = deviceId;
+      try {
+        const coarse = matchMedia("(pointer: coarse)").matches;
+        if (coarse) {
+          // Front/back flip. facingMode is a preference, not a demand, so a
+          // phone with one camera resolves it without an error — attach()
+          // reads the real facing off the track and reports honestly.
+          deviceId = null;
+          facing = facing === "user" ? "environment" : "user";
+        } else {
+          const devs = (await navigator.mediaDevices.enumerateDevices()).filter(
+            (d) => d.kind === "videoinput",
+          );
+          if (devs.length < 2) return false;
+          const cur = stream?.getVideoTracks()[0]?.getSettings?.().deviceId;
+          const i = devs.findIndex((d) => d.deviceId === cur);
+          deviceId = devs[(Math.max(0, i) + 1) % devs.length].deviceId;
+        }
+        await attach();
+        return coarse ? facing !== wasFacing : true;
+      } catch {
+        // The other camera would not open. Go back to the one that did.
+        facing = wasFacing;
+        deviceId = wasDevice;
+        try {
+          await attach();
+        } catch {
+          /* the recovery path picks this up on the next visibility change */
+        }
+        return false;
+      }
     },
   };
 }
