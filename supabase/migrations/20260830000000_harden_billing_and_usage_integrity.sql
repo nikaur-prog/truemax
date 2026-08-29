@@ -464,8 +464,18 @@ where stale.open_id = current.open_id
     stale.created_at < current.created_at
     or (stale.created_at = current.created_at and stale.user_id::text < current.user_id::text)
   );
-alter table public.league_tiktok_accounts
-  add constraint league_tiktok_accounts_open_id_not_blank check (btrim(open_id) <> '');
+-- Guarded rather than a bare `add constraint`, which is the one statement in
+-- this file that cannot be run twice. A hand-applied migration gets retried
+-- after an unrelated failure, and a second run should be a no-op, not an
+-- error that hides the real one.
+do $$
+begin
+  alter table public.league_tiktok_accounts
+    add constraint league_tiktok_accounts_open_id_not_blank check (btrim(open_id) <> '');
+exception
+  when duplicate_object then null;
+end;
+$$;
 create unique index if not exists league_tiktok_accounts_open_id_unique
   on public.league_tiktok_accounts (open_id);
 
