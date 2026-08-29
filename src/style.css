@@ -5004,6 +5004,17 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo.shrunk .photo-caption,
   .pane-photo.shrunk .scan-status,
   .pane-photo.shrunk .bar { max-height: 0; opacity: 0; margin-top: 0; margin-bottom: 0; }
+  /* A rejected-photo decision is not a caption. The 40px cap above exists so
+     a one-line "Front captured." can collapse smoothly while scrolling a
+     finished report — it has never had to hold a title, two sentences of
+     detail and a row of buttons at once. On a phone it clipped every pixel
+     of "Retake the photo" and the override button below the fold of a 40px
+     box with overflow hidden: the buttons existed, rendered, and were
+     invisible. Uncapped the moment this element is actually holding a
+     decision rather than a caption. */
+  .pane-photo:has(.reject-actions) .scan-status {
+    max-height: none; overflow: visible;
+  }
   /* Clipping a portrait to 96px from the top shows hair and background and no
      face, which makes the shrunk state useless as a reminder of what is being
      measured. Crop to the upper third instead, which is where a face sits in a
