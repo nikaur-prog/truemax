@@ -36,14 +36,15 @@ export function mountGateDemo(host: HTMLElement): GateDemoHandle {
         <canvas class="gatedemo-canvas"></canvas>
       </div>
       <div class="gatedemo-read">
-        <b class="gatedemo-name"></b>
-        <span class="gatedemo-score"></span>
+        <b class="gatedemo-score"></b>
       </div>
     </div>`;
   host.appendChild(strip);
 
   const canvas = strip.querySelector<HTMLCanvasElement>(".gatedemo-canvas")!;
-  const name = strip.querySelector<HTMLElement>(".gatedemo-name")!;
+  // The score is the whole read now. The line above it held the face's name
+  // and then the AI-generated disclosure; both are gone, so the number that
+  // was the small print becomes the thing beside the picture.
   const score = strip.querySelector<HTMLElement>(".gatedemo-score")!;
 
   let reel: ReelHandle | null = null;
@@ -52,7 +53,7 @@ export function mountGateDemo(host: HTMLElement): GateDemoHandle {
   // an animation looping in a scrolled-past region is heat for nothing.
   const io = new IntersectionObserver((entries) => {
     for (const entry of entries) {
-      if (entry.isIntersecting && !reel) reel = mountDemoReel(canvas, score, name);
+      if (entry.isIntersecting && !reel) reel = mountDemoReel(canvas, score);
       else if (!entry.isIntersecting && reel) {
         reel.stop();
         reel = null;

@@ -222,7 +222,6 @@ const el = {
   reelCanvas: document.getElementById("reel-canvas") as HTMLCanvasElement,
   outlineCanvas: document.getElementById("outline-canvas") as HTMLCanvasElement,
   reelScore: document.getElementById("reel-score")!,
-  reelName: document.getElementById("reel-name")!,
   stage: document.getElementById("capture-stage")!,
   camLight: document.getElementById("cam-light")!,
   camLamp: document.getElementById("cam-lamp")!,
@@ -379,7 +378,7 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
 ).__truemaxMeasure;
 
 // The idle frame runs the demo reel — real scans of public-domain portraits.
-mountDemoReel(el.reelCanvas, el.reelScore, el.reelName);
+mountDemoReel(el.reelCanvas, el.reelScore);
 
 // The docked demo neither pins nor shrinks. Both were tried, the resize was
 // re-tuned twice, and it still read as choppy on a real phone — a card that
