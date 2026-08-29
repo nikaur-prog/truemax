@@ -2433,6 +2433,61 @@ async function resumePendingAfterAuth(): Promise<void> {
   await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex), token);
 }
 
+// One step back from the side capture, rather than out of the scan.
+//
+// Cancelling the profile camera used to run resetToUpload(), which threw away
+// a finished front photograph to escape a shot that had not been taken yet.
+// The step back lands here instead: the front capture is put back on screen
+// with the three things somebody actually wants from this point — carry on to
+// the profile, shoot the front again, or leave.
+//
+// The scan stays in the `side` phase throughout. Nothing about the front has
+// been undone; this screen is a stop on the way to the profile, and the
+// forward button re-enters startSide() (side -> side is a no-op transition).
+function showFrontReview(): void {
+  const token = scanSession.currentToken();
+  // No front to show means there is nothing to come back to. Not reachable
+  // from the capture flow, which always has `pending` by the time the side
+  // step opens, but the fallback keeps the cancel button honest either way.
+  if (!token || !pending) {
+    closeSide();
+    resetToUpload();
+    return;
+  }
+  const { photo, landmarks, width, height } = pending;
+  // The pane is shared — the side flow draws its own photograph on it — so the
+  // front is repainted from the copy this scan owns rather than assumed to
+  // still be there. Same reason PendingFront owns its canvas at all.
+  closeSide();
+  el.main.classList.remove("hidden");
+  el.frame.classList.remove("scanning");
+  el.photoCanvas.width = photo.width;
+  el.photoCanvas.height = photo.height;
+  el.photoCanvas.getContext("2d")!.drawImage(photo, 0, 0);
+  drawCalm(el.overlayCanvas, landmarks, width, height);
+  el.capRight.textContent = "FRONT CAPTURED";
+  el.analysis.innerHTML = "";
+  el.status.innerHTML = `<b>Front captured.</b> The profile has not been taken yet.
+    <span class="reject-actions">
+      <button type="button" class="btn pri" id="front-continue">Continue to the side profile</button>
+      <button type="button" class="btn gho" id="front-redo">Retake the front photo</button>
+      <button type="button" class="btn cancel" id="front-quit">Cancel the scan</button>
+    </span>`;
+  document.getElementById("front-continue")?.addEventListener("click", () => {
+    if (scanSession.isCurrent(token)) startSide();
+  });
+  // Retake reopens the camera when the front came from one, because that is
+  // the whole reason somebody backs out here — they want another go at the
+  // front, not the chooser. Read before resetToUpload(), which clears it.
+  const method = captureMethod;
+  document.getElementById("front-redo")?.addEventListener("click", () => {
+    resetToUpload();
+    if (method === "camera") el.btnCamera.click();
+  });
+  document.getElementById("front-quit")?.addEventListener("click", () => resetToUpload());
+  el.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function startSide(): void {
   const token = scanSession.currentToken();
   if (!token || !scanSession.transition(token, "side")) return;
@@ -2444,9 +2499,10 @@ function startSide(): void {
     // Carry the front's capture method so the side does not make the user
     // switch: camera stays camera, upload stays upload.
     method: captureMethod ?? undefined,
-    // There is no "back to results" any more, because there are no results yet.
-    // The only way out of this step is forward, or starting over.
-    onBack: () => resetToUpload(),
+    // There is no "back to results" here, because there are no results yet —
+    // so back means back one step, to the front photograph that was just
+    // taken. Leaving the scan entirely is a button on that screen.
+    onBack: () => showFrontReview(),
     onDone: async (sideReport, points, faceDir, review) => {
       // Copy the profile out before the side screen is torn down — the results
       // panel shows it under the Side tab, and after closeSide() the canvas it

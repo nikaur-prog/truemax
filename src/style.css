@@ -200,7 +200,11 @@ body {
   #v-upload > .journey,
   #v-upload > .recent,
   #v-upload > .engine-status { grid-column: 1 / -1; justify-self: stretch; }
-  #capture-stage { width: 100%; max-width: 460px; }
+  /* :not(.cam-takeover) because these size the stage by ID, which outranks
+     the takeover's class selectors — the full-screen scrim inherited the
+     card's 460px and the frame inside overflowed it. The takeover replaces
+     this layout entirely, so the in-card rules simply do not apply to it. */
+  body:not(.cam-takeover) #capture-stage { width: 100%; max-width: 460px; }
 
   /* ---- and then the camera opens ----------------------------------------
      The split is right for reading and wrong for aiming. The moment the
@@ -249,7 +253,7 @@ body {
      would push its own shutter button off the bottom of a laptop screen.
      `width` rather than `max-width` because a later rule sets an explicit
      width on this element — a max-width cannot widen past it. */
-  #v-upload:has(.oval-frame.live) #capture-stage {
+  body:not(.cam-takeover) #v-upload:has(.oval-frame.live) #capture-stage {
     width: min(600px, 58vh); max-width: none; margin-inline: auto;
   }
   /* The dock stretches across the column it was given, so the stage inside it
@@ -1679,21 +1683,24 @@ body.funnel-open { overflow: hidden; }
    (see index.html); ui/camTakeover.ts is the switch. Only one section is ever
    visible, so both stages matching costs nothing. */
 body.cam-takeover { overflow: hidden; }
-body.cam-takeover .cam-stage {
+body.cam-takeover .cam-stage,
+body.cam-takeover #capture-stage {
   position: fixed; inset: 0; z-index: 320; width: auto; max-width: none;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: rgba(12, 13, 15, 0.88); backdrop-filter: blur(12px);
   gap: 0; padding: 0; margin: 0;
 }
 /* Phone: the frame IS the screen. */
-body.cam-takeover .cam-frame {
+body.cam-takeover .cam-frame,
+body.cam-takeover #oval-frame {
   width: 100vw; height: 100dvh; max-width: none; max-height: none; aspect-ratio: auto;
   border-radius: 0; border: none; box-shadow: none; margin: 0;
 }
 /* Desktop: a large centred frame on the scrim — a webcam blown to the edges of
    a monitor is not premium, it is grain. Keeps the capture aspect. */
 @media (min-width: 761px) {
-  body.cam-takeover .cam-frame {
+  body.cam-takeover .cam-frame,
+  body.cam-takeover #oval-frame {
     width: auto; height: min(90dvh, 860px); aspect-ratio: 4 / 5;
     border-radius: 24px; box-shadow: 0 44px 140px rgba(0, 0, 0, 0.55);
   }
@@ -1701,8 +1708,16 @@ body.cam-takeover .cam-frame {
 /* The side frame carries its own live sizing (3/4, capped at 66vh) for the
    card layout; the takeover has to win over it, and over the caption and
    panel that share the profile screen. */
+/* The side frame carries aspect-ratio 3/4 by ID, which outranks .cam-frame.
+   On a phone the takeover sets BOTH dimensions so the aspect must get out of
+   the way; on a desktop the frame is sized by height alone, so removing the
+   aspect there left width:auto with nothing to derive a width from and the
+   frame collapsed to zero — a full-screen black scrim with no preview in it. */
 body.cam-takeover #side-frame.live {
   aspect-ratio: auto; max-height: none;
+}
+@media (min-width: 761px) {
+  body.cam-takeover #side-frame.live { aspect-ratio: 3 / 4; max-height: none; }
 }
 body.cam-takeover .side-inner { display: block; }
 body.cam-takeover .side-photo .photo-caption,
