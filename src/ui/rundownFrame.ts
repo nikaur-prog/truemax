@@ -1098,7 +1098,6 @@ export function drawRundownFrame(
   // region rows the first time round; the card is compressed now — a shorter
   // photo band, a tighter row pitch — specifically so both fit.
   drawLedger(ctx, input, beat, t);
-  drawVisualCue(ctx, beat, t, W, H);
   // No chrome over the endcard. The bottom bar prints the SUBJECT'S name and
   // the watermark prints the URL — and the sign-off is the one beat that is
   // about the viewer, on a card that already carries the wordmark and the URL
@@ -2002,36 +2001,6 @@ function drawLedger(
   ctx.restore();
 }
 
-// One short visual conclusion, typed quickly. The narration carries the full
-// sentence; the frame keeps the face and its geometry prominent on a phone.
-// Closing compositions already contain their own copy, so cues are limited to
-// the photo-first beats where they do not duplicate a card, curve or endcard.
-function drawVisualCue(
-  ctx: CanvasRenderingContext2D,
-  beat: TimedBeat,
-  t: number,
-  W: number,
-  H: number,
-): void {
-  if (beat.beat.kind !== "hook" && beat.beat.kind !== "metric" && beat.beat.kind !== "context") return;
-  const full = beat.beat.label?.trim();
-  if (!full) return;
-
-  ctx.save();
-  ctx.font = "700 42px Inter, Arial, sans-serif";
-  ctx.letterSpacing = "3px";
-  ctx.textAlign = "center";
-  const elapsed = Math.max(0, t - beat.start);
-  const reveal = clamp01(elapsed / Math.min(0.56, Math.max(0.26, beat.duration * 0.25)));
-  const count = Math.max(0, Math.min(full.length, Math.ceil(full.length * reveal)));
-  const exit = clamp01((beat.start + beat.duration - t) / 0.2);
-  ctx.globalAlpha = smoother(Math.min(reveal * 2, exit));
-  ctx.shadowColor = "rgba(0,0,0,.95)";
-  ctx.shadowBlur = 26;
-  ctx.fillStyle = "#f7f7f2";
-  ctx.fillText(full.slice(0, count), W / 2, H - SAFE_BOTTOM - 132);
-  ctx.restore();
-}
 
 // The mid-frame value kicker is GONE, and the section that drew it with it.
 //

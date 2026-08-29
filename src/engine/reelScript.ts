@@ -82,16 +82,6 @@ export interface Beat {
   /** The line as it appears on screen. */
   line: string;
   /**
-   * The short visual cue typed over the photograph.
-   *
-   * `line` remains the full editorial thought and `spoken` remains the voice
-   * script. A rundown is not improved by printing either of those back at the
-   * viewer: the reference format gives the eye one compact conclusion while
-   * the geometry supplies the proof. Keeping this separate is also what makes
-   * audio alignment independent of caption length.
-   */
-  label?: string;
-  /**
    * The line as it should be READ ALOUD, when that differs from the screen.
    *
    * Metric names are written for a results table, not a microphone. "Facial
@@ -150,7 +140,7 @@ export interface ReelScriptOptions {
    * that it has to be overridable rather than merely derived.
    */
   shortName?: string;
-  /** How many measurement beats to keep. Six is about forty-five seconds. */
+  /** How many measurement beats to keep. Ten is about ninety seconds. */
   metricBeats?: number;
   /** Non-facial context — height, status, whatever makes the ending fair. */
   context?: string[];
@@ -414,62 +404,6 @@ function shortClauseFor(m: ScoredMetric, sex: Sex, report: Report, cycle: number
   return phrase.bad(high);
 }
 
-type CueSet = { good: string; low: string; high: string };
-
-// Short enough to understand before the line finishes drawing. These are
-// editorial labels, not alternate metric names: the exact name and value stay
-// in the fixed bottom bar, while this says what the viewer should notice.
-const VISUAL_CUES: Record<string, CueSet> = {
-  canthalTilt: { good: "POSITIVE TILT", low: "DOWNTURNED", high: "STEEP TILT" },
-  browTilt: { good: "CLEAN BROWS", low: "DROPPING BROWS", high: "ARCHED BROWS" },
-  browPosition: { good: "LOW SET", low: "CROWDED", high: "HIGH SET" },
-  intercanthal: { good: "BALANCED", low: "CLOSE SET", high: "WIDE SET" },
-  fifths: { good: "BALANCED WIDTH", low: "SMALL EYES", high: "WIDE EYES" },
-  midfaceRatio: { good: "COMPACT", low: "CROWDED", high: "LONG MIDFACE" },
-  cheekboneHeight: { good: "HIGH SET", low: "LOW SET", high: "VERY HIGH" },
-  cheekFullness: { good: "LEAN", low: "HOLLOW", high: "FULL" },
-  jawCheekRatio: { good: "WIDE JAW", low: "TAPERED", high: "SQUARE" },
-  philtrumChinRatio: { good: "STRONG CHIN", low: "SHORT CHIN", high: "LONG CHIN" },
-  chinWidthRatio: { good: "BROAD CHIN", low: "NARROW CHIN", high: "BLUNT CHIN" },
-  lowerFacePct: { good: "BALANCED THIRD", low: "SHORT THIRD", high: "LONG THIRD" },
-  lipRatio: { good: "BALANCED LIPS", low: "THIN LOWER LIP", high: "FULL LOWER LIP" },
-  mouthCornerTilt: { good: "UPTURNED", low: "DOWNTURNED", high: "HELD SMILE" },
-  facialIndex: { good: "BALANCED SHAPE", low: "WIDE FACE", high: "LONG FACE" },
-  middleLowerBalance: { good: "BALANCED THIRDS", low: "SHORT LOWER THIRD", high: "LONG LOWER THIRD" },
-  topThirdEst: { good: "BALANCED THIRD", low: "SHORT FOREHEAD", high: "TALL FOREHEAD" },
-  foreheadRatio: { good: "BALANCED FOREHEAD", low: "LOW FOREHEAD", high: "TALL FOREHEAD" },
-  midlineDeviation: { good: "STRAIGHT MIDLINE", low: "MIDLINE SHIFT", high: "MIDLINE SHIFT" },
-  gonialAngle: { good: "SHARP GONIAL", low: "VERY SHARP", high: "SOFT GONIAL" },
-  ramusMandible: { good: "DEEP RAMUS", low: "SHORT RAMUS", high: "TALL RAMUS" },
-  submentalCervical: { good: "CLEAN NECKLINE", low: "TIGHT NECKLINE", high: "SOFT NECKLINE" },
-  mandibularPlane: { good: "CLEAN PLANE", low: "FLAT PLANE", high: "STEEP PLANE" },
-  chinProjection: { good: "PROJECTED", low: "RECESSED", high: "OVERPROJECTED" },
-  facialConvexity: { good: "BALANCED PROFILE", low: "CONCAVE", high: "CONVEX" },
-  totalFacialConvexity: { good: "BALANCED PROFILE", low: "CONCAVE", high: "CONVEX" },
-  nasofrontalAngle: { good: "CLEAN NASION", low: "DEEP NASION", high: "FLAT NASION" },
-  nasolabialAngle: { good: "BALANCED BASE", low: "ROTATED DOWN", high: "ROTATED UP" },
-  nasalProjection: { good: "BALANCED NOSE", low: "LOW PROJECTION", high: "HIGH PROJECTION" },
-  upperLipELine: { good: "BALANCED UPPER LIP", low: "RETRUSIVE", high: "PROTRUSIVE" },
-  lowerLipELine: { good: "BALANCED LOWER LIP", low: "RETRUSIVE", high: "PROTRUSIVE" },
-  lowerThirdDepth: { good: "BALANCED DEPTH", low: "SHALLOW", high: "DEEP" },
-  foreheadSlope: { good: "BALANCED SLOPE", low: "UPRIGHT", high: "SLOPED" },
-  midfaceRatioSide: { good: "BALANCED MIDFACE", low: "SHALLOW", high: "DEEP" },
-};
-
-function visualCue(m: ScoredMetric, sex: Sex): string {
-  const cues = VISUAL_CUES[m.def.id];
-  if (!cues) return m.zEff >= 0 ? "BALANCED" : "OFF BALANCE";
-  if (m.zEff > 0) return cues.good;
-  const [lo, hi] = m.idealRange ?? [];
-  const high =
-    Number.isFinite(hi) && Number.isFinite(lo)
-      ? m.value > (hi as number)
-      : directionFor(m.def, sex) === "lower"
-        ? m.z > 0
-        : m.z > 0;
-  return high ? cues.high : cues.low;
-}
-
 /** "a, b and c" — an Oxford-less list, because it is being spoken. */
 function listOf(parts: string[]): string {
   if (parts.length <= 1) return parts[0] ?? "";
@@ -556,16 +490,9 @@ function groupedBeats(
     // produced three consecutive sentences opening "There is also".
     const opener = n === 0 ? openers[0] : openers[1 + ((n - 1) % (openers.length - 1))];
     const positive = kind === "positive" || kind === "side";
-    const clauses = listOf(chunk.map((m) => clause(m, n)));
-    const cue = visualCue(chunk[0], sex);
     beats.push({
       kind: "metric",
-      line: `${opener} ${clauses}.`,
-      label: cue,
-      // The cue gives the ear the same conclusion the eye gets, then the
-      // authored clause explains it. The longer editorial opener remains
-      // available to the operator without being read back as a caption.
-      spoken: `${capitalize(cue.toLowerCase())}. ${capitalize(clauses)}.`,
+      line: `${opener} ${listOf(chunk.map((m) => clause(m, n)))}.`,
       metricId: chunk[0].def.id,
       region: chunk[0].def.region as Beat["region"],
       positive,
@@ -713,7 +640,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
   };
   const beats: Beat[] = [
-    { kind: "hook", line: openingLine(options.opening, name), label: "FACE ANALYSIS" },
+    { kind: "hook", line: openingLine(options.opening, name) },
     ...metricBeats,
     // The number and the curve, never the number alone — a score with no
     // distribution beside it gets read against a school mark, which is the
@@ -732,6 +659,10 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // It is a spoken line only. The SHOWN ask is the search bar at the end,
     // which needs the curve to have landed first to mean anything, so the two
     // are deliberately not the same beat.
+    {
+      kind: "cta",
+      line: options.cta ?? "Before the rating, go get yours at truemax.app.",
+    },
     // THE CARD. The face shrinks to the top of the frame and the whole
     // breakdown arrives under it.
     //
@@ -796,7 +727,6 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     {
       kind: "card",
       line: `Ceiling: ${report.potential.toFixed(1)}. That's the same bone structure with everything soft fixed.`,
-      spoken: `Potential: ${report.potential.toFixed(1)} with the same bone structure.`,
       card: cardData(report, options.tone),
     },
         ] satisfies Beat[])),
@@ -830,7 +760,6 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     {
       kind: "curve",
       line: spreadLine(report.sex),
-      label: "PERCENTILE",
       percentile: report.overallPercentile,
       badge: `${ord(pct)} percentile`,
     },
@@ -842,7 +771,6 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
           {
             kind: "curve" as const,
             line: `${SPREAD.median.toFixed(1)} is dead average. That band is most of them.`,
-            label: "DISTRIBUTION",
             percentile: report.overallPercentile,
           },
         ]),
@@ -855,12 +783,11 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       // at the face invites the subject's audience to argue with it; naming
       // what the face is not measuring ends the argument before it starts.
       line: `This measures a face and nothing else. ${shortName}: ${options.context.join(", ")}.`,
-      label: "CONTEXT",
     });
   }
 
   if (options.note?.trim()) {
-    beats.push({ kind: "context", line: options.note.trim(), label: "CONTEXT" });
+    beats.push({ kind: "context", line: options.note.trim() });
   }
 
   // The address, typed into a search bar on screen.
@@ -874,7 +801,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
 
   // Ends on a question rather than a statement. The rundowns that collect
   // comments all close by asking for the next subject, and it costs one line.
-  beats.push({ kind: "cta", line: "Who should we measure next?", label: "WHO NEXT?" });
+  beats.push({ kind: "cta", line: "Who should we measure next?" });
 
   return beats;
 }
