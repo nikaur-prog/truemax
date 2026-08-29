@@ -949,8 +949,22 @@ function showOverall(): void {
       window.setTimeout(() => (label.textContent = "Copy diagnostics"), 2600);
     };
   }
-  document.getElementById("btn-fedit")?.addEventListener("click", () => ctx?.onEditFront?.());
-  document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
+  document.getElementById("btn-fedit")?.addEventListener("click", () => {
+    // "Correct the points" corrects the points of the view being LOOKED AT.
+    // The overall tab renders on both sides of the toggle, and on the side
+    // view this button used to open the FRONT editor — the one set of points
+    // the person was not looking at. The side's points are the thirteen they
+    // placed by hand, so that is the editor this opens there.
+    if (tabView === "side" && ctx?.onRedoSide) ctx.onRedoSide();
+    else ctx?.onEditFront?.();
+  });
+  const newBtn = document.getElementById("btn-new")!;
+  newBtn.onclick = () => {
+    // Leaving the report throws away the screen somebody may have spent ten
+    // minutes reading, and this button sits one slip below "See your plan".
+    // A genuine press costs one extra tap; an accidental one costs nothing.
+    if (window.confirm("Start over with a new photo? This report will close.")) ctx?.onNewPhoto();
+  };
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");
   if (continueBtn) continueBtn.onclick = () => ctx?.onContinue?.();
@@ -2053,7 +2067,9 @@ function showImprove(): void {
   paintCeilingCta(body(), frontPhoto);
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
-  document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
+  document.getElementById("btn-again")!.onclick = () => {
+    if (window.confirm("Scan another face? This report will close.")) ctx?.onNewPhoto();
+  };
   const upgrade = document.getElementById("btn-upgrade");
   if (upgrade) upgrade.onclick = () => ctx?.onUpgrade?.();
   const edit = document.getElementById("goal-edit");

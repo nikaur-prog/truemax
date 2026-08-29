@@ -1319,7 +1319,70 @@ el.btnNoGlasses.addEventListener("click", () => {
 // is both worse as a first impression and startling on a page people open in
 // public. Explicit intent only.
 
+// ---------------------------------------------------------------------------
+// The leave guard: a finished report is expensive to lose.
+//
+// A refresh, a back-swipe, or a mis-tap on the browser chrome used to throw
+// the whole analysis away silently — and on a phone the back gesture sits a
+// centimetre from where a thumb scrolls. Both exits now ask first, only while
+// a report is actually on screen: the guard arms when results render and
+// disarms the moment the person deliberately starts over, so the landing page
+// and the capture flow stay exactly as cheap to leave as they should be.
+//
+// Two mechanisms because the browser splits the exits in two. beforeunload
+// covers refresh, tab close and typed navigation with the browser's own
+// dialog. The back button is a history pop, which beforeunload does not see —
+// so arming pushes one sentinel history entry, and popping it while guarded
+// asks in words. Declining re-pushes the sentinel; accepting steps back past
+// where the sentinel sat.
+// ---------------------------------------------------------------------------
+let leaveGuard = false;
+let guardEntryPushed = false;
+
+function armLeaveGuard(): void {
+  leaveGuard = true;
+  if (!guardEntryPushed) {
+    try {
+      history.pushState({ tmReport: true }, "");
+      guardEntryPushed = true;
+    } catch {
+      /* history unavailable: beforeunload still covers refresh and close */
+    }
+  }
+}
+
+function disarmLeaveGuard(): void {
+  leaveGuard = false;
+}
+
+window.addEventListener("beforeunload", (event) => {
+  if (!leaveGuard) return;
+  event.preventDefault();
+  // Ignored by modern browsers in favour of their own wording; required by
+  // older ones for the dialog to appear at all.
+  event.returnValue = "";
+});
+
+window.addEventListener("popstate", () => {
+  if (!leaveGuard) {
+    guardEntryPushed = false;
+    return;
+  }
+  if (window.confirm("Leave this report? It closes when you leave the page.")) {
+    disarmLeaveGuard();
+    guardEntryPushed = false;
+    history.back();
+  } else {
+    try {
+      history.pushState({ tmReport: true }, "");
+    } catch {
+      guardEntryPushed = false;
+    }
+  }
+});
+
 function resetToUpload(): void {
+  disarmLeaveGuard();
   scanGeneration++;
   scanSession.reset();
   clearPendingAnalysis();
@@ -1511,26 +1574,37 @@ async function handleCanvas(
   if (rejection) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "PHOTO NOT VALID";
-    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}${
-      coveringRejection
-        ? ` <button type="button" class="linkish" id="covering-override">Nothing covering your face? Use this photo</button>`
-        : ""
-    }`;
+    // Real buttons, not a footnote. The old screen offered the override as a
+    // small text link and no retake at all — the two things a person actually
+    // does from here are "take a better photo" and, on the overridable check,
+    // "the scanner is wrong, analyse it". Both are decisions, so both get
+    // buttons, and the screen holds until one is pressed.
+    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}
+      <span class="reject-actions">
+        <button type="button" class="btn pri" id="reject-retake">Retake the photo</button>
+        ${
+          coveringRejection
+            ? `<button type="button" class="btn gho" id="covering-override">Nothing is covering, analyse it anyway</button>`
+            : ""
+        }
+      </span>`;
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
+    document.getElementById("reject-retake")?.addEventListener("click", () => {
+      if (scanIsCurrent(token, generation)) resetToUpload();
+    });
     if (coveringRejection) {
-      // Re-enter the same pipeline with the check waived for one pass. No
-      // timeout here: a screen with a decision on it must not dissolve while
-      // somebody is reading it.
+      // Re-enter the same pipeline with the check waived for one pass. The
+      // override exists because the covering check is a heuristic over a
+      // segmentation model and the person can see their own head — on this
+      // one question they outrank the model.
       document.getElementById("covering-override")?.addEventListener("click", () => {
         if (!scanIsCurrent(token, generation)) return;
         skipCoveringCheck = true;
         void handleCanvas(src, exifOrientation, generation, token, extraFrames);
       });
-      return;
     }
-    setTimeout(() => {
-      if (scanIsCurrent(token, generation)) resetToUpload();
-    }, 4200);
+    // No auto-dissolve in either case: a screen with a decision on it must
+    // not vanish while somebody is reading it.
     return;
   }
 
@@ -2017,6 +2091,7 @@ async function runFullAnalysis(
     },
   };
   track("results-shown");
+  armLeaveGuard();
   // The report does not cut in — it arrives. The pass has just spent ten
   // seconds moving smoothly over the face; a hard innerHTML swap at the end
   // of it is the one jolt that would undo all of that. The class fades and
