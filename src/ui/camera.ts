@@ -182,10 +182,26 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   // times a second, and the last verdict is held in between.
   let glasses = { advise: false, block: false };
 
+  // ---- the stall watchdog ---------------------------------------------------
+  // The `ended` event and the visibility check cover a track that DIES. They do
+  // not cover one that simply stops delivering frames while still reporting
+  // readyState "live" — an iOS camera interrupted by another app, a driver
+  // hiccup, a backgrounded PWA that came back without a visibility event. The
+  // preview freezes on its last frame, the guidance loop stops being called,
+  // and the shutter goes dead with no error anywhere. Reported from a phone as
+  // the camera "just getting stuck".
+  //
+  // So the frame clock itself is the signal: if currentTime has not advanced
+  // for STALL_MS while the page is visible and the camera is supposed to be
+  // running, the stream is gone whatever it claims, and it is reacquired.
+  const STALL_MS = 2600;
+  let lastFrameAt = performance.now();
+
   const loop = () => {
     const v = opts.video;
     if (v.readyState >= 2 && v.currentTime !== last) {
       last = v.currentTime;
+      lastFrameAt = performance.now();
       const ts = performance.now();
       let result = null;
       try {
@@ -211,6 +227,16 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
       opts.onCheck(check);
       drawGuide(opts.guideCanvas, v);
+    } else if (
+      live &&
+      !reacquiring &&
+      document.visibilityState === "visible" &&
+      performance.now() - lastFrameAt > STALL_MS
+    ) {
+      // Reset the clock before the attempt so a slow reacquire does not
+      // retrigger itself every frame.
+      lastFrameAt = performance.now();
+      void reacquire();
     }
     raf = requestAnimationFrame(loop);
   };

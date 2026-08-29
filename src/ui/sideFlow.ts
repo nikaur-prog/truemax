@@ -223,8 +223,13 @@ export function openSideCapture(ctx: SideCtx): void {
   // the profile camera straight away; uploaded it → offer only the file drop.
   // With no method known, both choices are shown as before.
   if (ctx.method === "camera") {
-    void openSideCamera(ctx);
+    // Inputs FIRST, camera second. wireSideInputs writes the awaiting caption,
+    // and openSideCamera writes the live one before its first await — so in
+    // the old order the awaiting text landed on top of a running camera and
+    // the screen read "AWAITING PHOTO · PASTE, DROP OR UPLOAD" over a live
+    // preview. The camera owns the caption once it starts.
     wireSideInputs(e, ctx);
+    void openSideCamera(ctx);
     return;
   }
 
@@ -301,9 +306,18 @@ function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
   };
 }
 
+// Set synchronously the moment a start begins, and cleared when it settles.
+// `sideCam` cannot do this job: it is only assigned after `await startCamera`
+// resolves — seconds on a phone, during which every re-entry passed the guard
+// and built a second camera over the first. The symptom was a screen with a
+// live preview, the awaiting caption, and a Capture button wired to a
+// different attempt's state than the one holding the stream.
+let sideCamStarting = false;
+
 async function openSideCamera(ctx: SideCtx): Promise<void> {
   const e = el();
-  if (sideCam) return;
+  if (sideCam || sideCamStarting) return;
+  sideCamStarting = true;
   // The retake button reaches here without going through openSideCapture, and
   // it is the path that produced the bug: a walkthrough part-way through, then
   // a live camera underneath the point it had reached.
@@ -393,10 +407,18 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         e.lampFill.className = c.status === "green" ? "green" : c.status;
         e.lampFill.style.width = `${Math.round((c.status === "green" ? 1 : c.progress) * 100)}%`;
         const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
-        if (shoot) shoot.disabled = false;
+        // The first frame is what makes the shutter real. Until onCheck has
+        // fired at least once the camera has produced nothing, and a Capture
+        // button that silently ignores taps is indistinguishable from a
+        // crashed app — which is exactly how it was reported.
+        if (shoot && shoot.disabled) {
+          shoot.disabled = false;
+          shoot.textContent = "Capture";
+        }
       },
     });
   } catch {
+    sideCamStarting = false;
     clearCameraTakeover();
     e.live.classList.add("hidden");
     e.frame.classList.remove("live");
@@ -405,6 +427,8 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     e.hintTitle.textContent = "Camera unavailable";
     return;
   }
+  sideCamStarting = false;
+
   // The same full-screen viewfinder the front shot gets. This step needs it
   // more, not less: the profile is taken with your head turned away from the
   // display, so the directive and the shutter have to be as large and as
@@ -428,13 +452,25 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // reversed here, so the button under your thumb changed meaning between the
   // two steps of the same flow.
   e.actions.innerHTML = `
-    <button class="btn pri" id="side-shoot">Capture</button>
+    <button class="btn pri" id="side-shoot" disabled>Starting camera…</button>
     <button class="btn gho" id="side-stop">${UPLOAD_ICON}<span>Upload a photo</span></button>`;
   e.actions.insertAdjacentHTML(
     "beforeend",
     `<button class="btn cancel" id="side-quit2">Cancel</button>`,
   );
   document.getElementById("side-quit2")!.onclick = () => {
+    // Back one step, NOT out of the scan.
+    //
+    // This used to run resetToUpload() directly, so cancelling the profile
+    // camera threw away the finished FRONT photo and returned to the very
+    // start. Reported from a phone: "I clicked redo for the side profile and
+    // it took me all the way back to the front photo." Cancelling a shot you
+    // have not taken yet should cost you the shot, nothing else.
+    //
+    // onBack is now the caller's one-step-back, not its abandon: the capture
+    // flow shows the front photograph again with retake / continue / cancel on
+    // it, and the adjust flow returns to the results it was opened from.
+    stopSideCamera();
     close();
     ctx.onBack();
   };
@@ -686,6 +722,9 @@ function mountVerify(
   // which is the point of moving it out of the button rows below.
   retake?.destroy();
   retake = mountRetakeGlyph(e.frame, "Retake this photo", () => openSideCapture(ctx));
+  // Retake reopens the SIDE step only — never the front. openSideCapture with
+  // ctx.method === "camera" goes straight back to the profile camera, which is
+  // what "retake this photo" means on this screen.
   drawGuides(e.lines, seed.points, w, h);
 
   // Whether the person told us the placement was wrong, and what they said to
