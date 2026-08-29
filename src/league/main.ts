@@ -622,19 +622,29 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     const granted = (id: string) => me.pillar_grants?.[id] === true;
     // The pillars, in the order a member meets them. Each granted card is a
     // real door: the hash tells /quick which room to open on arrival.
+    // The Rundown was buried inside "CTA Generator", which nobody decodes —
+    // the tool people click most is the narrated analysis video, so it stands
+    // as its own door. Both video doors share the cta grant: they are the
+    // same room in /quick and the same render meter; splitting the card is a
+    // navigation fix, not a new entitlement.
     const tools = [
       {
-        id: "cta", n: "01", name: "CTA Generator",
+        id: "cta", n: "01", name: "The Rundown",
+        body: "The narrated analysis video: measurement by measurement across every photo you attach, voiced and captioned, ready to post.",
+        needs: "A scan and 1-4 extra photos of the same face", href: "/league/tools#rundown",
+      },
+      {
+        id: "cta", n: "02", name: "Video Studio",
         body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, voiced, ready to post.",
         needs: "One photo · a face worth talking about", href: "/league/tools#cta",
       },
       {
-        id: "polisher", n: "02", name: "The Polisher",
+        id: "polisher", n: "03", name: "The Polisher",
         body: "Clean up a soft clip on this device: sharpen, colour — and a 4K upscale for the ones worth it.",
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
-        id: "clips", n: "03", name: "Clips Library",
+        id: "clips", n: "04", name: "Clips Library",
         body: "Saved faces, celebrity references and demo exports to cut from — scored instantly, no rescan.",
         needs: "Nothing · it's all in the library", href: "/league/tools#clips",
       },
@@ -659,7 +669,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             : `<span class="lg-chip">NOT IN YOUR PLAN</span>`}
         </div></div>`).join("")}
       <div class="lg-card lg-tool off">
-        <div class="lg-tool-kicker">04</div>
+        <div class="lg-tool-kicker">05</div>
         <div class="lg-row" style="border:none;padding:0">
           <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
           the house palette — how every TrueMax video gets its look.</p>

@@ -338,6 +338,21 @@ export interface Narration {
   audio: ArrayBuffer;
   /** Absent when the model or voice returned none; the caller falls back. */
   alignment?: Alignment;
+  /** Which service spoke — "elevenlabs" leads, "openai" is the fallback. */
+  provider?: string;
+}
+
+/**
+ * Thrown when the narration route answered but no voice service produced
+ * audio, carrying the route's own account of which providers failed and why.
+ * Distinct from a null return (no session, no quota — the legitimately silent
+ * cases) so the exporter can stop a render that was going to come out broken.
+ */
+export class NarrationFailed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NarrationFailed";
+  }
 }
 
 export async function fetchNarration(text: string, accessToken: string): Promise<Narration | null> {
@@ -351,11 +366,28 @@ export async function fetchNarration(text: string, accessToken: string): Promise
       body: JSON.stringify({ text }),
     });
     if (!response.ok) {
-      console.warn("narration unavailable", response.status, await response.text().catch(() => ""));
+      const detail = await response.text().catch(() => "");
+      console.warn("narration unavailable", response.status, detail);
+      // 502 is the chain's own verdict: every voice service was tried and
+      // every one failed. That is not a silent-render case — the operator
+      // asked for a narrated video and should get the reasons, not a mute
+      // file discovered after the edit. Quota, sign-in and entitlement
+      // refusals (401/402/429) keep the old degrade-to-silent behaviour.
+      if (response.status === 502) {
+        let message = "No voice service produced audio.";
+        try {
+          const parsed = JSON.parse(detail) as { error?: string };
+          if (parsed.error) message = parsed.error;
+        } catch {
+          /* the generic line stands */
+        }
+        throw new NarrationFailed(message);
+      }
       return null;
     }
     const payload = (await response.json()) as {
       audio?: string;
+      provider?: string;
       alignment?: { characters?: string[]; starts?: number[]; ends?: number[] };
     };
     if (!payload.audio) return null;
@@ -372,8 +404,9 @@ export async function fetchNarration(text: string, accessToken: string): Promise
       a?.characters && a.starts && a.ends && a.characters.length === a.starts.length
         ? { characters: a.characters, starts: a.starts, ends: a.ends }
         : undefined;
-    return { audio: bytes.buffer, alignment };
+    return { audio: bytes.buffer, alignment, provider: payload.provider };
   } catch (error) {
+    if (error instanceof NarrationFailed) throw error;
     console.warn("narration request failed", error);
     return null;
   }

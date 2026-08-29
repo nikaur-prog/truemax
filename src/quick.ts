@@ -25,6 +25,7 @@ import { downloadCtaOutro, downloadQuickVideo, renderQuickVideoFrame } from "./u
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, downloadRundownVideo } from "./ui/rundownExport.js";
+import { NarrationFailed } from "./ui/rundownAudio.js";
 import { showCaptionStep } from "./ui/captionStep.js";
 import { spokenSeconds } from "./engine/reelScript.js";
 import { toAvatarThumb } from "./engine/avatar.js";
@@ -204,9 +205,17 @@ function applyPillarGrants(access: { staff: boolean; grants: Record<string, bool
 // member does not hold (or that was removed above) lands on the pillars too —
 // the locked card explains itself better than an error would.
 function openFromHash(): void {
-  const target = { polisher: "enhance", enhance: "enhance", cta: "reel", reel: "reel", analysis: "analysis" }[
-    location.hash.slice(1).toLowerCase()
-  ];
+  const target = {
+    polisher: "enhance",
+    enhance: "enhance",
+    cta: "reel",
+    reel: "reel",
+    analysis: "analysis",
+    // The Rundown's own door on the League Tools page. It lives inside the
+    // analysis room — the video is built from a scan — so the door opens that
+    // room.
+    rundown: "analysis",
+  }[location.hash.slice(1).toLowerCase()];
   if (target) {
     const button = document.querySelector<HTMLButtonElement>(`.q-pillar[data-mode="${target}"]`);
     if (!button || button.disabled) return;
@@ -225,7 +234,7 @@ function openFromHashInner(): void {
     enterMode("reel");
     return;
   }
-  if (hash === "analysis") {
+  if (hash === "analysis" || hash === "rundown") {
     enterMode("analysis");
     return;
   }
@@ -2116,6 +2125,21 @@ function firstFreeCut(from = 0): number {
   return cutaways.findIndex((c) => !c);
 }
 
+// One boot, however early the first photo arrives, then a still-image detect.
+// Returns undefined rather than throwing for every failure mode: a cutaway
+// that will not landmark is still a perfectly good picture, it just cannot
+// hold a measurement.
+async function landmarkCutaway(image: HTMLImageElement): Promise<NormalizedLandmark[] | undefined> {
+  try {
+    await initLandmarker();
+    await setRunningMode("IMAGE");
+    const found = detect(image)?.faceLandmarks?.[0];
+    return found?.length ? found : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function addCutaway(file: File, at: number): Promise<void> {
   const epoch = rundownMediaEpoch;
   const image = await decodeImage(file);
@@ -2128,16 +2152,14 @@ async function addCutaway(file: File, at: number): Promise<void> {
   // the measured photograph and stated once. This only supplies geometry, and a
   // cutaway with no face in it (a hand, a silhouette, the back of a head) simply
   // carries no line rather than failing.
-  let landmarks: NormalizedLandmark[] | undefined;
-  try {
-    if (isReady()) {
-      await setRunningMode("IMAGE");
-      const found = detect(image)?.faceLandmarks?.[0];
-      if (found?.length) landmarks = found;
-    }
-  } catch {
-    // A cutaway that will not landmark is still a perfectly good cutaway.
-  }
+  //
+  // WAITED for, not checked for. This used to be `if (isReady())`, which
+  // silently skipped landmarking whenever a photo was attached before the
+  // engine finished booting — and a cutaway without landmarks renders as a
+  // bare picture with a score card floating over it, the exact failure the
+  // whole feature exists to avoid. The boot is idempotent and takes a couple
+  // of seconds once per page; a cutaway is worth waiting that long for.
+  const landmarks = await landmarkCutaway(image);
   if (epoch !== rundownMediaEpoch) {
     revokeMediaUrl(image.src);
     return;
@@ -2631,10 +2653,19 @@ async function downloadRundown(r: Report): Promise<void> {
     (document.getElementById("q-rundown-short") as HTMLInputElement | null)?.value.trim() || undefined;
   const opening =
     (document.getElementById("q-rundown-opening") as HTMLInputElement | null)?.value.trim() || undefined;
-  // Cutaways. Decoded here as plain pictures and handed to the compositor —
-  // they never touch the landmarker, the scoring or the report, which is the
-  // reason they cannot move a measurement.
+  // Cutaways, each carrying its own landmark cloud so the analysis can play
+  // out ON them (rundownFrame's stage system). They never touch the scoring
+  // or the report — the landmarks position lines, the values stay the
+  // measured photograph's. Any photo that missed its landmarking when it was
+  // attached (engine still booting, transient failure) gets one more chance
+  // here, when the engine is certainly up: a cutaway without landmarks
+  // renders as a bare picture under a floating score card, which is the
+  // failure this feature exists to remove.
   const broll = cutaways.filter((c): c is Cutaway => !!c);
+  for (const c of broll) {
+    if (!c.landmarks) c.landmarks = await landmarkCutaway(c.image);
+  }
+  drawCutSlots();
   const note = (document.getElementById("q-rundown-note") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name) {
     // Point at the missing thing rather than explaining it. The field is six
@@ -2681,6 +2712,12 @@ async function downloadRundown(r: Report): Promise<void> {
         btn.textContent = result.narrated
           ? outcomeMessage(result.outcome)
           : `${outcomeMessage(result.outcome)} — no voiceover`;
+        // Which service actually spoke. The fallback voice is a different
+        // narrator; an operator who hears it should learn that here rather
+        // than assume the default changed.
+        if (result.narrated && result.voiceProvider === "openai") {
+          btn.textContent = `${outcomeMessage(result.outcome)} — fallback voice`;
+        }
       }
       track("quick-rundown-downloaded");
       showCaption({
@@ -2705,7 +2742,13 @@ async function downloadRundown(r: Report): Promise<void> {
         // sent the operator off to re-shoot a head angle that was fine.
         error instanceof RundownBlocked
           ? error.blockers.join(" ")
-          : "Rundown unavailable here";
+          : error instanceof NarrationFailed
+            // Every voice service failed. Stopping here rather than rendering
+            // is deliberate: a silent rundown also has no captions, and the
+            // export it produces looks broken, not minimal. The message names
+            // which providers refused and why.
+            ? error.message
+            : "Rundown unavailable here";
     }
   } finally {
     if (btn) {

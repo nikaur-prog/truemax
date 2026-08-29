@@ -4,7 +4,7 @@ import type { Beat } from "../engine/reelScript.js";
 import { buildReelScript, narrationFrom, narrationOffsets, reelBlockers } from "../engine/reelScript.js";
 import { alignTimeline, buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
 import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
-import { CUTAWAY_TAIL, brollFor, drawRundownFrame } from "./rundownFrame.js";
+import { CUTAWAY_TAIL, brollFor, drawRundownFrame, stageChanged } from "./rundownFrame.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { exportName, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
@@ -132,6 +132,8 @@ export interface RundownResult {
   duration: number;
   /** False when the voice track could not be produced and the cut is silent. */
   narrated: boolean;
+  /** Which service spoke ("elevenlabs" | "openai"), absent on a silent cut. */
+  voiceProvider?: string;
 }
 
 export async function downloadRundownVideo(
@@ -200,6 +202,11 @@ export async function downloadRundownVideo(
   if (options.broll?.length) {
     const probe = { timeline, broll: options.broll } as Parameters<typeof brollFor>[0];
     for (const b of timeline.beats) {
+      // A stage change is a cut to a different photograph — the same event a
+      // cutaway's whoosh marks, so it takes the same sound, at the boundary.
+      if (b.beat.kind === "metric" && stageChanged(probe, b)) {
+        timeline.sfx.push({ at: b.start, kind: "whoosh" });
+      }
       const at = b.beat.kind === "metric" ? b.start + b.duration * (1 - CUTAWAY_TAIL) : b.start;
       if (brollFor(probe, b, at + 0.01)) timeline.sfx.push({ at, kind: "whoosh" });
     }
@@ -354,7 +361,13 @@ export async function downloadRundownVideo(
     "rundown",
   );
   onProgress?.(1, "Done");
-  return { outcome, beats, duration: audio.duration, narrated: Boolean(voice) };
+  return {
+    outcome,
+    beats,
+    duration: audio.duration,
+    narrated: Boolean(voice),
+    voiceProvider: voice ? spoken?.provider : undefined,
+  };
 }
 
 const totalOf = (clips: Array<{ length: number }>) => clips.reduce((a, c) => a + c.length, 0);
