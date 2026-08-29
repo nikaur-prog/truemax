@@ -21,7 +21,14 @@
   --bg: #f4f3ef;
   --card: #ffffff;
   --ink: #141518;
-  --mut: #8b8e94;
+  /* Muted text, at the darkest value that still reads as secondary.
+     #8b8e94 measured 2.96:1 against the page ground and 3.28:1 on a card —
+     under the 4.5:1 needed for normal text, and this token carries privacy
+     notes, capture instructions and every measurement caption, most of it
+     between 8.5 and 13.5px. #6b6e74 measures 4.60:1 and 5.11:1: it clears the
+     bar on the HARDER surface and still sits clearly below --ink, so the
+     hierarchy the design depends on survives. */
+  --mut: #6b6e74;
   --line: #e6e4dd;
   --soft: #efede7;
   --acc: #0e7a68;
@@ -1664,26 +1671,42 @@ body.funnel-open { overflow: hidden; }
    it — and the landing behind it does not move at all. That retires the whole
    headline-collapse / scroll-anchoring fight: the directive pill is on screen
    because the entire interface is. main.ts plays the expansion as a FLIP. */
+/* BOTH capture screens, not just the front. The front shot got the viewfinder
+   first and the profile did not, which left the scan with two different
+   cameras — and the profile is the harder shot, taken with your head turned
+   away from the display, so the step that needed the screen most had the
+   least. `.cam-stage` / `.cam-frame` / `.cam-actions` are carried by both
+   (see index.html); ui/camTakeover.ts is the switch. Only one section is ever
+   visible, so both stages matching costs nothing. */
 body.cam-takeover { overflow: hidden; }
-body.cam-takeover #capture-stage {
-  position: fixed; inset: 0; z-index: 320; width: auto;
+body.cam-takeover .cam-stage {
+  position: fixed; inset: 0; z-index: 320; width: auto; max-width: none;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: rgba(12, 13, 15, 0.88); backdrop-filter: blur(12px);
-  gap: 0;
+  gap: 0; padding: 0; margin: 0;
 }
 /* Phone: the frame IS the screen. */
-body.cam-takeover .oval-frame {
-  width: 100vw; height: 100dvh; aspect-ratio: auto;
-  border-radius: 0; border: none; box-shadow: none;
+body.cam-takeover .cam-frame {
+  width: 100vw; height: 100dvh; max-width: none; max-height: none; aspect-ratio: auto;
+  border-radius: 0; border: none; box-shadow: none; margin: 0;
 }
 /* Desktop: a large centred frame on the scrim — a webcam blown to the edges of
    a monitor is not premium, it is grain. Keeps the capture aspect. */
 @media (min-width: 761px) {
-  body.cam-takeover .oval-frame {
+  body.cam-takeover .cam-frame {
     width: auto; height: min(90dvh, 860px); aspect-ratio: 4 / 5;
     border-radius: 24px; box-shadow: 0 44px 140px rgba(0, 0, 0, 0.55);
   }
 }
+/* The side frame carries its own live sizing (3/4, capped at 66vh) for the
+   card layout; the takeover has to win over it, and over the caption and
+   panel that share the profile screen. */
+body.cam-takeover #side-frame.live {
+  aspect-ratio: auto; max-height: none;
+}
+body.cam-takeover .side-inner { display: block; }
+body.cam-takeover .side-photo .photo-caption,
+body.cam-takeover #side-panel { display: none; }
 /* The controls float translucent on the glass, clear of the phone's home
    indicator. */
 body.cam-takeover .cam-actions {

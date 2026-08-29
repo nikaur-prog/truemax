@@ -32,6 +32,7 @@ import type {
   SideSeedMethod,
 } from "../engine/sideFeedbackPayload.js";
 import { cameraCount, startCamera } from "./camera.js";
+import { clearCameraTakeover, enterCameraTakeover, exitCameraTakeover } from "./camTakeover.js";
 import { setRunningMode } from "../engine/landmarker.js";
 import { resetSideTracking } from "../engine/captureGuide.js";
 import { createAutoCapture } from "./autoCapture.js";
@@ -319,6 +320,12 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   e.live.classList.remove("hidden");
   e.frame.classList.add("live");
   e.frame.classList.remove("awaiting");
+  // fitFrameToViewport stamps an inline max-width on the frame for the VERIFY
+  // step, sized to that photograph's aspect. It is stale the moment the camera
+  // reopens, and an inline width beats the takeover's stylesheet — so a
+  // retake after a verify would open the full-screen viewfinder pinned to the
+  // last photo's width. Cleared here rather than fought with !important.
+  e.frame.style.maxWidth = "";
   e.turnCue.classList.remove("hidden");
   e.cap.textContent = "LINE UP YOUR PROFILE";
   // The gate remembers having seen the head turn, so that losing the face can
@@ -351,6 +358,13 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       video: e.video,
       guideCanvas: e.guide,
       mode: "side",
+      // See main.ts: a swap that loses both cameras leaves nothing behind the
+      // viewfinder, so the screen closes instead of decorating a dead frame.
+      onLost: () => {
+        stopSideCamera();
+        openSideCapture(ctx);
+        e.hintTitle.textContent = "Camera unavailable";
+      },
       onCheck: (c) => {
         // Guidance and auto-capture can wait for the ideal turn. Manual
         // capture cannot: side detection is deliberately uncertain at a true
@@ -383,6 +397,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       },
     });
   } catch {
+    clearCameraTakeover();
     e.live.classList.add("hidden");
     e.frame.classList.remove("live");
     e.frame.classList.add("awaiting");
@@ -390,6 +405,12 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     e.hintTitle.textContent = "Camera unavailable";
     return;
   }
+  // The same full-screen viewfinder the front shot gets. This step needs it
+  // more, not less: the profile is taken with your head turned away from the
+  // display, so the directive and the shutter have to be as large and as
+  // findable as the hardware allows.
+  enterCameraTakeover(e.frame.closest(".cam-stage"));
+
   // The switch appears only when there is a second camera to switch to. On the
   // side shot this is the one most people actually want: a second person
   // taking the photo holds the phone the way a photographer does, back camera
@@ -469,6 +490,7 @@ function stopSideCamera(): void {
   // screen.
   void setRunningMode("IMAGE");
   const e = el();
+  exitCameraTakeover(e.frame.closest(".cam-stage"));
   e.live.classList.add("hidden");
   e.turnCue.classList.add("hidden");
   e.frame.classList.remove("live");

@@ -76,6 +76,14 @@ export async function POST(request: Request): Promise<Response> {
 
     // A small ceiling. Ten distinct scans a day is far beyond genuine use of a
     // two-scans-a-week product; anything past it is a client writing garbage.
+    //
+    // Counted BEFORE the insert and re-counted after it, because a count and
+    // an insert are two statements and concurrent requests can both pass the
+    // first one. The re-count is what actually holds the line: a row that
+    // turns out to be over the ceiling is deleted again, so the cap bounds
+    // what is STORED rather than what was checked. Cheaper and clearer than a
+    // transaction for a table whose worst case is a few extra rows of two
+    // numbers — and unlike the first check alone, it converges.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { count: recentCount, error: countError } = await admin
       .from("self_score_feedback")
@@ -101,6 +109,22 @@ export async function POST(request: Request): Promise<Response> {
       // from the client's point of view.
       if (insertError.code === "23505") return json({ received: true, duplicate: true });
       throw new Error(`Self-score insert failed: ${insertError.message}`);
+    }
+
+    // The other half of the cap. If simultaneous requests both passed the
+    // check above, the loser of the re-count takes its own row back out.
+    const { count: settled } = await admin
+      .from("self_score_feedback")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", since);
+    if ((settled ?? 0) > MAX_SUBMISSIONS_PER_24_HOURS) {
+      await admin
+        .from("self_score_feedback")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("scan_id", payload.scanId);
+      return json({ error: "Feedback limit reached for today." }, 429);
     }
 
     return json({ received: true });

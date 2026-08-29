@@ -426,7 +426,15 @@ export function mountDemoReel(
     scoreEl.textContent = t >= T.score[0] ? shown.toFixed(1) : "";
     scoreEl.style.opacity = String(alpha);
     scoreEl.classList.toggle("landed", t >= T.score[1]);
-    nameEl.textContent = face.name;
+    // No name under the face.
+    //
+    // These portraits are synthetic and the names were invented to go with
+    // them — which is a fabricated identity presented under a real score, and
+    // it buys nothing: nobody is persuaded by "Dev", and anybody who assumes
+    // the person is real has been misled by a decoration. The slot the name
+    // occupied says what the picture actually is instead, so the disclosure
+    // rides the frame everyone looks at rather than only the fine print.
+    nameEl.textContent = "AI-GENERATED DEMONSTRATION";
     nameEl.style.opacity = String(alpha * 0.85);
     // The caption is DOM (the serif face and the landing animation are CSS),
     // so it travels into the panel by having its offset driven from here —
