@@ -26,7 +26,10 @@ const ctx = canvas.getContext("2d");
 const img = (src) => new Promise((res, rej) => {
   const i = new Image();
   i.onload = () => res(i);
-  i.onerror = rej;
+  // Named, because the browser hands onerror a bare Event and the builder
+  // prints it as "[object Event]" — which says a build failed but not that an
+  // image is missing, let alone which one.
+  i.onerror = () => rej(new Error("could not load image: " + src));
   i.src = src;
 });
 
@@ -39,10 +42,11 @@ try {
     document.fonts.ready,
   ]);
 
-  // The demo face, measured by the real engine. Cillian Murphy — Wikimedia
-  // Commons (credit rendered by the series), and the strongest-reading of the
-  // demo set so the opening card is not selling with a number that reads flat.
-  const face = await img("/demo/cillian-murphy.jpg");
+  // The demo face, measured by the real engine. One of the app's own synthetic
+  // portraits: this was a Wikimedia photograph of a real person until that file
+  // was dropped from public/demo, which left this harness asking for a file
+  // that is not there and every build failing on it.
+  const face = await img("/demo/adrian.jpg");
   const photo = document.createElement("canvas");
   photo.width = face.naturalWidth;
   photo.height = face.naturalHeight;
@@ -83,7 +87,7 @@ try {
     photo,
     landmarks,
     metrics,
-    credit: "Cillian Murphy photo: Netflix · CC BY-SA 4.0 · Wikimedia Commons",
+    credit: "AI-GENERATED DEMONSTRATION",
     maxAvatar,
     mark,
     girlFrame: (local) => girlFrames.length
