@@ -50,6 +50,9 @@ import { canShareFiles, exportName, outcomeMessage, saveFile, savesDirectly, set
 import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
+import { assessPhotoQuality } from "./engine/photoQuality.js";
+import type { PhotoQuality } from "./engine/photoQuality.js";
+import { LOOKS, applyEnhance, lookFor } from "./engine/enhance.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -1707,6 +1710,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         always come from the photo above.</small>
       </div>
       <div class="q-cut-slots" id="q-cut-slots"></div>
+      <p class="q-cut-status hidden" id="q-cut-status" role="status"></p>
       <input id="q-rundown-broll" type="file" accept="image/*" multiple hidden />
     </div>
 
@@ -2112,6 +2116,66 @@ const CUT_SLOTS = 4;
 interface Cutaway {
   image: HTMLImageElement;
   landmarks?: NormalizedLandmark[];
+  /**
+   * How this photograph will hold up at video size.
+   *
+   * Read once, when the file arrives, rather than at render time: the point is
+   * to tell somebody BEFORE they commit to a sixty-second encode, which is the
+   * same reason the disclaimer's length counter sits above the render button.
+   */
+  quality?: PhotoQuality;
+  /** True once the sharpen has been run on this slot, so it is offered once. */
+  sharpened?: boolean;
+}
+
+/**
+ * Run the unsharp mask over one cutaway, in place.
+ *
+ * The same on-device pass the Enhance panel uses, at the "standard" look with
+ * its radius scaled for this image. It cannot add detail that is not there —
+ * the copy is careful to say "helps", never "fixes" — but on a soft-but-large
+ * photograph it is the difference between mush and a face.
+ */
+async function sharpenCutaway(index: number): Promise<void> {
+  const cut = cutaways[index];
+  if (!cut) return;
+  const img = cut.image;
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!w || !h) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, w, h);
+  applyEnhance(data.data, w, h, lookFor(LOOKS.standard, Math.max(w, h)));
+  ctx.putImageData(data, 0, 0);
+  const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", 0.94));
+  if (!blob) return;
+  const next = new Image();
+  const url = URL.createObjectURL(blob);
+  await new Promise<void>((res) => {
+    next.onload = () => res();
+    next.onerror = () => res();
+    next.src = url;
+  });
+  if (cutaways[index] !== cut) {
+    // The slot was replaced or cleared while the pass ran.
+    URL.revokeObjectURL(url);
+    return;
+  }
+  revokeMediaUrl(img.src);
+  // Re-read rather than assume: the sharpen is honest about what it achieved,
+  // and a photograph that was too SMALL is still too small afterwards.
+  cutaways[index] = {
+    ...cut,
+    image: next,
+    quality: assessPhotoQuality(canvas, cut.landmarks),
+    sharpened: true,
+  };
+  drawCutSlots();
 }
 const cutaways: Array<Cutaway | null> = Array(CUT_SLOTS).fill(null);
 let cutArmed: number | null = null;
@@ -2120,14 +2184,35 @@ function drawCutSlots(): void {
   const host = document.getElementById("q-cut-slots");
   if (!host) return;
   host.innerHTML = "";
+  // Gathered across the slots so the strip says one thing rather than three.
+  const fixable: number[] = [];
+  const flaggedReads: PhotoQuality[] = [];
   cutaways.forEach((image, i) => {
     const cell = document.createElement("div");
     cell.className = "q-cut-cell";
     if (image) {
+      // The quality read, when there is something worth saying about it.
+      //
+      // Said HERE and not at render time on purpose. A cutaway that will not
+      // hold up is worth knowing about while swapping it is still one tap, not
+      // after a sixty-second encode has produced the picture the owner
+      // described as "absolutely horrible".
+      const q = image.quality;
+      const flagged = Boolean(q && q.verdict !== "ok");
+      const canFix = Boolean(flagged && q!.fixable && !image.sharpened);
+      // The slot itself is 84x108, which holds a word and not a sentence. The
+      // badge names the fault, the title carries the sentence for a pointer,
+      // and the strip's status line below spells it out with the fix.
       cell.innerHTML = `<img alt="Cutaway ${i + 1}" />
-        <button type="button" class="q-cut-x" title="Remove">✕</button>`;
+        <button type="button" class="q-cut-x" title="Remove">✕</button>${
+          flagged ? `<span class="q-cut-badge">${q!.facePx < 520 ? "SMALL" : "SOFT"}</span>` : ""
+        }`;
       cell.querySelector("img")!.src = image.image.src;
+      if (flagged) cell.title = q!.reason;
       if (!image.landmarks) cell.classList.add("q-cut-noface");
+      if (flagged) cell.classList.add(q!.verdict === "poor" ? "q-cut-poor" : "q-cut-soft");
+      if (canFix) fixable.push(i);
+      if (flagged) flaggedReads.push(q!);
       cell.querySelector(".q-cut-x")!.addEventListener("click", () => {
         rundownMediaEpoch += 1;
         revokeMediaUrl(image.image.src);
@@ -2151,6 +2236,32 @@ function drawCutSlots(): void {
     }
     host.append(cell);
   });
+
+  // One line under the strip, naming the fault and offering the pass that can
+  // do something about it. The worst reading wins: told about the small photo
+  // and the soft one at once, nobody acts on either.
+  const status = document.getElementById("q-cut-status");
+  // A "poor" outranks a "soft": the worse fault is the one worth acting on.
+  const worst = flaggedReads.find((x) => x.verdict === "poor") ?? flaggedReads[0];
+  if (status) {
+    if (!worst) {
+      status.textContent = "";
+      status.classList.add("hidden");
+    } else {
+      status.classList.remove("hidden");
+      status.innerHTML = `<span>${worst.reason}</span>${
+        fixable.length ? `<button type="button" id="q-cut-fixall">Sharpen ${fixable.length > 1 ? "them" : "it"}</button>` : ""
+      }`;
+      document.getElementById("q-cut-fixall")?.addEventListener("click", async (event) => {
+        const btn = event.currentTarget as HTMLButtonElement;
+        btn.disabled = true;
+        btn.textContent = "Sharpening…";
+        // Sequential, not parallel: each pass is a full-resolution unsharp mask
+        // on the main thread, and three at once locks the page.
+        for (const i of fixable) await sharpenCutaway(i);
+      });
+    }
+  }
 }
 
 function firstFreeCut(from = 0): number {
@@ -2197,7 +2308,23 @@ async function addCutaway(file: File, at: number): Promise<void> {
     revokeMediaUrl(image.src);
     return;
   }
-  cutaways[at] = { image, landmarks };
+  // Measured off a canvas rather than the <img>: getImageData needs a 2D
+  // context, and this is the one moment the pixels are already in hand.
+  let quality: PhotoQuality | undefined;
+  try {
+    const probe = document.createElement("canvas");
+    probe.width = image.naturalWidth;
+    probe.height = image.naturalHeight;
+    const pctx = probe.getContext("2d", { willReadFrequently: true });
+    if (pctx && probe.width && probe.height) {
+      pctx.drawImage(image, 0, 0);
+      quality = assessPhotoQuality(probe, landmarks);
+    }
+  } catch {
+    // A tainted or zero-sized canvas is not a reason to refuse the photograph.
+    quality = undefined;
+  }
+  cutaways[at] = { image, landmarks, quality };
   rundownMediaEpoch += 1;
 }
 

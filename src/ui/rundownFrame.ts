@@ -625,6 +625,28 @@ export interface RundownFrameOptions {
 // cuts are. Every full-bleed beat drifts in by this much over its own length
 // — enough that the frame is visibly alive, small enough that nobody watching
 // could say where the move started.
+// How far the photograph sits inside the frame, as a fraction of each edge.
+//
+// The reported fault was that the video looks zoomed in, and it does — but the
+// crop was not the cause. Measured on a 1000x1000 source at 9:16, the crop is
+// already 507x900: ninety per cent of the photograph's height. The renderer is
+// showing very nearly every vertical pixel it has, and fitting a whole head
+// into 9:16 forces the crop's width to be height x 0.5625, which puts the face
+// at about four fifths of the frame width whatever the crop does.
+//
+// Two attempts at fixing it in the crop failed for the same reason and the
+// tests caught both: growing the crop hits the edge of the photograph, clamps,
+// and every band that clamps lands on an IDENTICAL frame — eyes, lips and chin
+// all in one place, the camera stopped dead. That is the failure the head-fit
+// comments already describe from the 1.12 floor.
+//
+// So the picture is made smaller instead of the crop being made bigger. The
+// photograph is drawn into the frame inset by this much on every side, on the
+// frame's own black, and because the measurement overlay is composited through
+// the same transform the lines shrink with it and stay on the features. The
+// crop maths is untouched, so the camera walk is untouched.
+const PHOTO_INSET = 0.06;
+
 const PUSH_IN = 0.035;
 
 // The push is a function of the crop, not a transform on the context, so the
@@ -865,6 +887,21 @@ export function drawRundownFrame(
     basePhoto,
     local * release,
   );
+
+  // The photograph, and everything drawn in its coordinates, sits inside the
+  // frame rather than bleeding to the edges. See PHOTO_INSET.
+  //
+  // A transform rather than an inset destination rect on each drawImage: this
+  // section draws the photo, the cutaways, the matte ring, the scrims and the
+  // measurement overlay through half a dozen different paths, and insetting
+  // them one at a time is how one of them gets missed and a line ends up
+  // beside a jaw instead of on it. One transform composes with all of them.
+  // The furniture below the restore — caption, bottom bar, cards, endcard —
+  // keeps the whole frame, which is what it is designed for.
+  ctx.save();
+  ctx.translate(W * PHOTO_INSET, H * PHOTO_INSET);
+  ctx.scale(1 - 2 * PHOTO_INSET, 1 - 2 * PHOTO_INSET);
+
   const kind = beat.beat.kind;
 
   // A cutaway, when this beat draws no measurement and there is one to show.
@@ -1043,6 +1080,7 @@ export function drawRundownFrame(
   if (overlayVisible(input, beat, t)) {
     drawOverlayForBeat(ctx, basePhoto, baseLandmarks, input, beat, t, crop, W, H, overlayCanvas);
   }
+  ctx.restore();
   // The two closing beats take over the frame rather than sitting beside the
   // face. Both are arguments about the viewer rather than about the subject —
   // where he lands against everyone, and what to do about it — and neither
