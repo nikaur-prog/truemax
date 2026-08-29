@@ -66,11 +66,52 @@ function calloutsFor(face: ReelFace) {
   return [rs[0], rs[rs.length >> 1], rs[rs.length - 1]];
 }
 
+export interface ReelOptions {
+  /**
+   * Render the thumbnail cut of the reel: the photograph and the scan sweep,
+   * and nothing else.
+   *
+   * Every measurement in this renderer is an absolute pixel value tuned for
+   * the landing card, which is about 300x575. The gate strip asks for the
+   * same composition in an 84x84 box, and absolute values do not survive
+   * that: the top scrim covers 86% of the frame, the caption scrim is 210%
+   * of it, and the four pillar bars come out 8px wide while still carrying an
+   * 8.5px label and an 11px number. That is the unreadable smudge in the
+   * strip — four numbers and four labels stacked inside eight pixels.
+   *
+   * Scaling the whole composition by width does not fix it. At 84px the scale
+   * factor is 0.28, which turns the 8.5px label into a 2.4px speck: tidy
+   * arithmetic, still illegible. A box that small cannot hold four labelled
+   * bars and three region callouts at ANY scale, so the honest answer is to
+   * draw less rather than to draw the same thing smaller.
+   *
+   * What survives is what still reads at 84px: a face, and an instrument
+   * sweeping down it. The score is not lost — it is the DOM element beside
+   * the thumbnail, which this renderer already drives.
+   */
+  compact?: boolean;
+}
+
+// The thumbnail cut ends once the score has landed and been readable for a
+// moment. The full card spends 2350ms to 6950ms docking the photograph and
+// laying out pillars and callouts; compact draws none of that, so running the
+// same clock would park a still photograph on screen for three and a half
+// seconds of every seven. Scan, measure, score, a beat to read it, next face
+// — 4.5s a face against the card's 6.95s.
+//
+// The 900ms between the count-up finishing (3300) and the fade starting is
+// the point of these numbers, not slack: at 3500 the number was on screen at
+// its final value for 200ms, which is a flicker rather than a result.
+const COMPACT_TAIL = { out: 4200, hold: 4500 };
+
 export function mountDemoReel(
   canvas: HTMLCanvasElement,
   scoreEl: HTMLElement,
+  opts: ReelOptions = {},
 ): ReelHandle {
   if (!REEL.length) return { stop: () => {} };
+  const compact = opts.compact === true;
+  const TT = compact ? { ...T, ...COMPACT_TAIL } : T;
 
   const images = REEL.map((f) => {
     const img = new Image();
@@ -113,8 +154,13 @@ export function mountDemoReel(
     //
     // It expands back over the out-beat so the next face begins its scan
     // full-frame and the crossfade never happens between two different shapes.
-    const dockT =
-      ease(seg(t, T.score[0], T.score[0] + 700)) * (1 - seg(t, T.out, T.hold));
+    // No dock in the thumbnail cut. The dock exists to clear a black panel for
+    // the score and the pillar row; compact draws neither, so retreating the
+    // photograph into two thirds of an already tiny frame would cost a third
+    // of the only thing worth showing.
+    const dockT = compact
+      ? 0
+      : ease(seg(t, T.score[0], T.score[0] + 700)) * (1 - seg(t, TT.out, TT.hold));
     const photoH = h - h * (1 / 3) * dockT;
     const panelH = h - photoH;
     // Capped at 3, not 2. This canvas is around 300x375 CSS pixels, so even
@@ -143,7 +189,7 @@ export function mountDemoReel(
     // Only the first face has nothing to cross from, so only the first face
     // fades up from the card.
     const fadeIn = shownAny ? 1 : Math.min(1, t / 200);
-    const fadeOut = t > T.out ? Math.max(0, (T.hold - t) / (T.hold - T.out)) : 1;
+    const fadeOut = t > TT.out ? Math.max(0, (TT.hold - t) / (TT.hold - TT.out)) : 1;
     const alpha = Math.min(fadeIn, fadeOut);
 
     // Cover-fit with a slow push-in. Four per cent over the whole beat is
@@ -195,7 +241,7 @@ export function mountDemoReel(
     if (REEL.length > 1 && fadeOut < 1) {
       drawCover(images[(idx + 1) % REEL.length], 1, 1);
     }
-    drawCover(live, 1 + 0.04 * Math.min(1, t / T.hold), alpha);
+    drawCover(live, 1 + 0.04 * Math.min(1, t / TT.hold), alpha);
     ctx.globalAlpha = alpha;
 
     // A quiet vignette over every photograph. The portraits come from many
@@ -212,21 +258,28 @@ export function mountDemoReel(
     // Overlay text is white and the photograph underneath it is not reliably
     // dark — a lit forehead put "MEASURING" at almost no contrast. Two scrims
     // rather than one flat wash, so the middle of the face stays untouched.
-    const topScrim = ctx.createLinearGradient(0, 0, 0, 72);
-    topScrim.addColorStop(0, "rgba(10,11,13,0.55)");
-    topScrim.addColorStop(1, "rgba(10,11,13,0)");
-    ctx.fillStyle = topScrim;
-    ctx.fillRect(0, 0, w, 72);
-    // The seam. Undocked this is the old caption scrim; docked it is what
-    // makes the black panel read as the photograph's own falloff instead of a
-    // bar bolted underneath — the picture darkens INTO the panel, and the join
-    // has no visible edge.
-    const scrimTop = photoH - 120;
-    const botScrim = ctx.createLinearGradient(0, scrimTop, 0, photoH);
-    botScrim.addColorStop(0, "rgba(10,11,13,0)");
-    botScrim.addColorStop(1, `rgba(10,11,13,${(0.72 + 0.28 * dockT).toFixed(3)})`);
-    ctx.fillStyle = botScrim;
-    ctx.fillRect(0, scrimTop, w, 120);
+    // Both scrims exist to put overlay text on a reliable ground, and their
+    // heights (72px, 120px) are absolute. Compact has no overlay text and is
+    // 84px tall, so these would darken 86% and 143% of the frame to make
+    // nothing legible. The vignette above is already written in fractions of
+    // the frame, so it carries at both sizes and stays.
+    if (!compact) {
+      const topScrim = ctx.createLinearGradient(0, 0, 0, 72);
+      topScrim.addColorStop(0, "rgba(10,11,13,0.55)");
+      topScrim.addColorStop(1, "rgba(10,11,13,0)");
+      ctx.fillStyle = topScrim;
+      ctx.fillRect(0, 0, w, 72);
+      // The seam. Undocked this is the old caption scrim; docked it is what
+      // makes the black panel read as the photograph's own falloff instead of a
+      // bar bolted underneath — the picture darkens INTO the panel, and the join
+      // has no visible edge.
+      const scrimTop = photoH - 120;
+      const botScrim = ctx.createLinearGradient(0, scrimTop, 0, photoH);
+      botScrim.addColorStop(0, "rgba(10,11,13,0)");
+      botScrim.addColorStop(1, `rgba(10,11,13,${(0.72 + 0.28 * dockT).toFixed(3)})`);
+      ctx.fillStyle = botScrim;
+      ctx.fillRect(0, scrimTop, w, 120);
+    }
 
     // ---- the scan sweep ---------------------------------------------------
     // Down once, then back up, and that is the whole scan visual. The drawn
@@ -243,17 +296,23 @@ export function mountDemoReel(
       const y = sweepPos * photoH;
       // The glow trails BEHIND the direction of travel.
       const trail = goingUp ? 1 : -1;
-      const g = ctx.createLinearGradient(0, y, 0, y + trail * 28);
+      // Sized from the frame rather than fixed at 28px. On the landing card
+      // the clamp holds it at exactly the 28 it has always been; in an 84px
+      // thumbnail a 28px trail is a third of the picture, which reads as a
+      // wash rather than an instrument.
+      const glow = Math.max(8, Math.min(28, photoH * 0.075));
+      const echo = glow * (44 / 28);
+      const g = ctx.createLinearGradient(0, y, 0, y + trail * glow);
       g.addColorStop(0, "rgba(143,243,224,0.85)");
       g.addColorStop(1, "rgba(143,243,224,0)");
       ctx.globalAlpha = alpha;
       ctx.fillStyle = g;
-      ctx.fillRect(0, Math.min(y, y + trail * 28), w, 28);
+      ctx.fillRect(0, Math.min(y, y + trail * glow), w, glow);
       // A hairline at the leading edge — the gradient alone is a glow with no
       // address; the one-pixel line is the instrument.
       ctx.fillStyle = "rgba(220,255,247,0.9)";
       ctx.fillRect(0, y, w, 1);
-      const echoY = y + trail * 44;
+      const echoY = y + trail * echo;
       if (echoY > 0 && echoY < photoH) {
         ctx.fillStyle = "rgba(143,243,224,0.22)";
         ctx.fillRect(0, echoY, w, 1);
@@ -261,146 +320,153 @@ export function mountDemoReel(
     }
 
     // ---- phase label ------------------------------------------------------
-    const phase =
-      t < T.scan[1] ? "SCANNING" : t < T.measure[1] ? "MEASURING" : "ANALYSIS";
-    ctx.font = "600 9.5px Inter Variable, Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.72)";
-    ctx.textAlign = "left";
-    ctx.fillText(phase, 14, 22);
+    // Everything from here down is absolute-pixel furniture for the landing
+    // card: the phase label, the staged working lines, the black panel, the
+    // pillar row and the region callouts. None of it fits an 84px thumbnail,
+    // and none of it is missed there — the strip's own headline says what is
+    // running, and the score sits beside the picture in the DOM.
+    if (!compact) {
+      const phase =
+        t < T.scan[1] ? "SCANNING" : t < T.measure[1] ? "MEASURING" : "ANALYSIS";
+      ctx.font = "600 9.5px Inter Variable, Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.72)";
+      ctx.textAlign = "left";
+      ctx.fillText(phase, 14, 22);
 
-    // ---- staged working lines --------------------------------------------
-    if (t >= T.measure[0] && t < T.measure[1]) {
-      const p = seg(t, T.measure[0], T.measure[1]);
-      const i = Math.min(STAGES.length - 1, Math.floor(p * STAGES.length));
-      ctx.font = "500 11.5px Inter Variable, Inter, system-ui, sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.fillText(`${STAGES[i]}…`, 14, 42);
-      ctx.fillStyle = "rgba(255,255,255,0.22)";
-      ctx.fillRect(14, 50, w - 28, 2);
-      ctx.fillStyle = "#8FF3E0";
-      ctx.fillRect(14, 50, (w - 28) * p, 2);
-    }
-
-    // ---- the panel --------------------------------------------------------
-    // Solid, opaque, and painted before the numbers: this is the surface the
-    // score is legible against. Nothing of the photograph reaches it.
-    if (panelH > 0.5) {
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#0A0B0D";
-      ctx.fillRect(0, photoH, w, panelH + 1);
-      ctx.globalAlpha = alpha;
-    }
-
-    // ---- pillars ----------------------------------------------------------
-    if (t >= T.pillars[0]) {
-      const names = Object.keys(face.pillars);
-      const bw = (w - 28 - (names.length - 1) * 8) / names.length;
-      names.forEach((n, i) => {
-        const appear = seg(t, T.pillars[0] + i * 170, T.pillars[0] + i * 170 + 380);
-        if (appear <= 0) return;
-        const x = 14 + i * (bw + 8);
-        // Anchored a fixed distance off the BOTTOM of the frame, not to a
-        // fraction of the panel. The fraction put the row wherever the panel
-        // happened to be tall, while the name above it is positioned in CSS
-        // from the same bottom edge — two coordinate systems for one stack,
-        // which is exactly how the name ended up printed through the bars.
-        // One origin now, and the gap between them is arithmetic rather than
-        // luck. Undocked, it rides the seam down as before.
-        const y = dockT > 0.001 ? h - 32 - (1 - dockT) * (h - 32 - photoH) : photoH;
-        ctx.globalAlpha = alpha * appear;
-        ctx.fillStyle = "rgba(255,255,255,0.2)";
-        ctx.fillRect(x, y + 16, bw, 3);
+      // ---- staged working lines --------------------------------------------
+      if (t >= T.measure[0] && t < T.measure[1]) {
+        const p = seg(t, T.measure[0], T.measure[1]);
+        const i = Math.min(STAGES.length - 1, Math.floor(p * STAGES.length));
+        ctx.font = "500 11.5px Inter Variable, Inter, system-ui, sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillText(`${STAGES[i]}…`, 14, 42);
+        ctx.fillStyle = "rgba(255,255,255,0.22)";
+        ctx.fillRect(14, 50, w - 28, 2);
         ctx.fillStyle = "#8FF3E0";
-        // Eased, not linear: a bar that decelerates into its value reads as a
-        // measurement arriving; one that fills at constant speed reads as a
-        // loading indicator.
-        ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * ease(appear), 3);
-        ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
-        ctx.fillStyle = "rgba(255,255,255,0.66)";
-        ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
-        ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#fff";
-        ctx.textAlign = "right";
-        ctx.fillText(face.pillars[n].toFixed(1), x + bw, y + 10);
-        ctx.textAlign = "left";
-        ctx.globalAlpha = alpha;
-      });
-    }
+        ctx.fillRect(14, 50, (w - 28) * p, 2);
+      }
 
-    // ---- region callouts --------------------------------------------------
-    if (t >= T.regions[0]) {
-      const outs = calloutsFor(face);
-      // Docked, the score is on its own panel and the whole photograph is
-      // free — only a small margin off the bottom edge so a label never
-      // straddles the seam.
-      const placed = placeCallouts(outs, w, photoH, 150 - 132 * dockT);
-      const appearOf = (i: number) => seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
-
-      // Two passes with a scrim between them. The layout keeps LABELS out of
-      // the caption band, but a connector from a chin anchor to a label above
-      // it has to cross that band — and it crossed straight through the score.
-      // Lines first; then the caption's backing scrim re-stamped so any line
-      // under the score drops to a murmur; then dots and labels on top, crisp.
-      outs.forEach((_, i) => {
-        const appear = appearOf(i);
-        if (appear <= 0) return;
-        ctx.globalAlpha = alpha * appear;
-        const { ax, ay, lx, ly, left } = placed[i]!;
-        // The connector DRAWS from the anchor to the label rather than
-        // appearing whole — the eye follows it from the feature to the
-        // number, which is the causal order the interface is claiming.
-        const grow = ease(appear);
-        const tx = left ? lx + LABEL_W : lx;
-        ctx.strokeStyle = "rgba(143,243,224,0.85)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(ax + (tx - ax) * grow, ay + (ly + 9 - ay) * grow);
-        ctx.stroke();
-      });
-
-      ctx.globalAlpha = alpha;
-      // Docked, the panel already owns the caption band and re-stamping a
-      // scrim over the picture would only mute the callouts sitting in it.
-      if (dockT < 1) {
-        ctx.globalAlpha = alpha * (1 - dockT);
-        const capScrim = ctx.createLinearGradient(0, photoH - 176, 0, photoH);
-        capScrim.addColorStop(0, "rgba(10,11,13,0)");
-        capScrim.addColorStop(0.45, "rgba(10,11,13,0.5)");
-        capScrim.addColorStop(1, "rgba(10,11,13,0.78)");
-        ctx.fillStyle = capScrim;
-        ctx.fillRect(0, photoH - 176, w, 176);
+      // ---- the panel --------------------------------------------------------
+      // Solid, opaque, and painted before the numbers: this is the surface the
+      // score is legible against. Nothing of the photograph reaches it.
+      if (panelH > 0.5) {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#0A0B0D";
+        ctx.fillRect(0, photoH, w, panelH + 1);
         ctx.globalAlpha = alpha;
       }
 
-      outs.forEach((r, i) => {
-        const appear = appearOf(i);
-        if (appear <= 0) return;
-        ctx.globalAlpha = alpha * appear;
-        const { ax, ay, lx, ly, left } = placed[i]!;
-        const grow = ease(appear);
-        ctx.fillStyle = "#8FF3E0";
-        ctx.beginPath();
-        ctx.arc(ax, ay, 3, 0, Math.PI * 2);
-        ctx.fill();
+      // ---- pillars ----------------------------------------------------------
+      if (t >= T.pillars[0]) {
+        const names = Object.keys(face.pillars);
+        const bw = (w - 28 - (names.length - 1) * 8) / names.length;
+        names.forEach((n, i) => {
+          const appear = seg(t, T.pillars[0] + i * 170, T.pillars[0] + i * 170 + 380);
+          if (appear <= 0) return;
+          const x = 14 + i * (bw + 8);
+          // Anchored a fixed distance off the BOTTOM of the frame, not to a
+          // fraction of the panel. The fraction put the row wherever the panel
+          // happened to be tall, while the name above it is positioned in CSS
+          // from the same bottom edge — two coordinate systems for one stack,
+          // which is exactly how the name ended up printed through the bars.
+          // One origin now, and the gap between them is arithmetic rather than
+          // luck. Undocked, it rides the seam down as before.
+          const y = dockT > 0.001 ? h - 32 - (1 - dockT) * (h - 32 - photoH) : photoH;
+          ctx.globalAlpha = alpha * appear;
+          ctx.fillStyle = "rgba(255,255,255,0.2)";
+          ctx.fillRect(x, y + 16, bw, 3);
+          ctx.fillStyle = "#8FF3E0";
+          // Eased, not linear: a bar that decelerates into its value reads as a
+          // measurement arriving; one that fills at constant speed reads as a
+          // loading indicator.
+          ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * ease(appear), 3);
+          ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillStyle = "rgba(255,255,255,0.66)";
+          ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
+          ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "right";
+          ctx.fillText(face.pillars[n].toFixed(1), x + bw, y + 10);
+          ctx.textAlign = "left";
+          ctx.globalAlpha = alpha;
+        });
+      }
 
-        // The label settles its last few pixels into place along the same
-        // direction the line travelled.
-        const slide = (1 - grow) * (left ? 6 : -6);
-        ctx.translate(slide, 0);
-        ctx.fillStyle = "rgba(16,17,19,0.72)";
-        ctx.beginPath();
-        ctx.roundRect(lx, ly - 4, LABEL_W, LABEL_H, 7);
-        ctx.fill();
-        ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
-        ctx.fillStyle = "rgba(255,255,255,0.62)";
-        ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
-        ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#fff";
-        ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
-        ctx.translate(-slide, 0);
+      // ---- region callouts --------------------------------------------------
+      if (t >= T.regions[0]) {
+        const outs = calloutsFor(face);
+        // Docked, the score is on its own panel and the whole photograph is
+        // free — only a small margin off the bottom edge so a label never
+        // straddles the seam.
+        const placed = placeCallouts(outs, w, photoH, 150 - 132 * dockT);
+        const appearOf = (i: number) => seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
+
+        // Two passes with a scrim between them. The layout keeps LABELS out of
+        // the caption band, but a connector from a chin anchor to a label above
+        // it has to cross that band — and it crossed straight through the score.
+        // Lines first; then the caption's backing scrim re-stamped so any line
+        // under the score drops to a murmur; then dots and labels on top, crisp.
+        outs.forEach((_, i) => {
+          const appear = appearOf(i);
+          if (appear <= 0) return;
+          ctx.globalAlpha = alpha * appear;
+          const { ax, ay, lx, ly, left } = placed[i]!;
+          // The connector DRAWS from the anchor to the label rather than
+          // appearing whole — the eye follows it from the feature to the
+          // number, which is the causal order the interface is claiming.
+          const grow = ease(appear);
+          const tx = left ? lx + LABEL_W : lx;
+          ctx.strokeStyle = "rgba(143,243,224,0.85)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(ax + (tx - ax) * grow, ay + (ly + 9 - ay) * grow);
+          ctx.stroke();
+        });
+
         ctx.globalAlpha = alpha;
-      });
+        // Docked, the panel already owns the caption band and re-stamping a
+        // scrim over the picture would only mute the callouts sitting in it.
+        if (dockT < 1) {
+          ctx.globalAlpha = alpha * (1 - dockT);
+          const capScrim = ctx.createLinearGradient(0, photoH - 176, 0, photoH);
+          capScrim.addColorStop(0, "rgba(10,11,13,0)");
+          capScrim.addColorStop(0.45, "rgba(10,11,13,0.5)");
+          capScrim.addColorStop(1, "rgba(10,11,13,0.78)");
+          ctx.fillStyle = capScrim;
+          ctx.fillRect(0, photoH - 176, w, 176);
+          ctx.globalAlpha = alpha;
+        }
+
+        outs.forEach((r, i) => {
+          const appear = appearOf(i);
+          if (appear <= 0) return;
+          ctx.globalAlpha = alpha * appear;
+          const { ax, ay, lx, ly, left } = placed[i]!;
+          const grow = ease(appear);
+          ctx.fillStyle = "#8FF3E0";
+          ctx.beginPath();
+          ctx.arc(ax, ay, 3, 0, Math.PI * 2);
+          ctx.fill();
+
+          // The label settles its last few pixels into place along the same
+          // direction the line travelled.
+          const slide = (1 - grow) * (left ? 6 : -6);
+          ctx.translate(slide, 0);
+          ctx.fillStyle = "rgba(16,17,19,0.72)";
+          ctx.beginPath();
+          ctx.roundRect(lx, ly - 4, LABEL_W, LABEL_H, 7);
+          ctx.fill();
+          ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillStyle = "rgba(255,255,255,0.62)";
+          ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
+          ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillStyle = "#fff";
+          ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
+          ctx.translate(-slide, 0);
+          ctx.globalAlpha = alpha;
+        });
+      }
     }
 
     // ---- attribution ------------------------------------------------------
@@ -408,7 +474,7 @@ export function mountDemoReel(
     // one ever returns to the roster). The synthetic cast's provenance moved
     // to the page's own fine print at the owner's call: on the picture it
     // labelled a demo nobody mistook for a testimonial.
-    if (!face.credit.startsWith("AI-GENERATED")) {
+    if (!compact && !face.credit.startsWith("AI-GENERATED")) {
       ctx.font = "500 7.5px Inter Variable, Inter, system-ui, sans-serif";
       ctx.fillStyle = "rgba(255,255,255,0.42)";
       ctx.textAlign = "right";
@@ -437,7 +503,10 @@ export function mountDemoReel(
     // The caption is DOM (the serif face and the landing animation are CSS),
     // so it travels into the panel by having its offset driven from here —
     // the number ends up on black above the pillar row, never on a cheek.
-    const cap = scoreEl.parentElement;
+    // Only the landing card's caption is positioned from here. In the strip
+    // the score's parent is a static flex child, so writing `bottom` on it
+    // did nothing but leave an inline style behind.
+    const cap = compact ? null : scoreEl.parentElement;
     // The second line used to occupy 24px under the number, and the number's
     // own resting place was tuned against the pillar row below it — so the
     // offsets carry that 24px now the line is gone, and the score stays
@@ -445,7 +514,7 @@ export function mountDemoReel(
     // pillar labels (which top out at 30.5px).
     if (cap) cap.style.bottom = `${(108 - 32 * dockT).toFixed(1)}px`;
 
-    if (t >= T.hold) {
+    if (t >= TT.hold) {
       idx = (idx + 1) % REEL.length;
       start = now;
       shownAny = true;

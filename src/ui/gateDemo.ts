@@ -53,7 +53,7 @@ export function mountGateDemo(host: HTMLElement): GateDemoHandle {
   // an animation looping in a scrolled-past region is heat for nothing.
   const io = new IntersectionObserver((entries) => {
     for (const entry of entries) {
-      if (entry.isIntersecting && !reel) reel = mountDemoReel(canvas, score);
+      if (entry.isIntersecting && !reel) reel = mountDemoReel(canvas, score, { compact: true });
       else if (!entry.isIntersecting && reel) {
         reel.stop();
         reel = null;

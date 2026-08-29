@@ -265,9 +265,14 @@ body {
   #v-upload > .proof, #v-upload > .journey, #capture-stage { transition: none; }
 }
 /* Ordered after the width rules above so the growing frame is not capped by
-   them. Same media condition, restated rather than nested. */
+   them. Same media condition, restated rather than nested.
+   :not(.cam-takeover) for the same reason as its twin above, and this is the
+   copy that was missed the first time: :has() sits at (2,2,0), which outranks
+   the takeover's (1,1,1), so the full-screen scrim kept resolving to 522px
+   while the frame inside it rendered 648px and hung over the edge. Two rules
+   with the same job need the same guard. */
 @media (min-width: 1100px) {
-  #v-upload:has(.oval-frame.live) #capture-stage {
+  body:not(.cam-takeover) #v-upload:has(.oval-frame.live) #capture-stage {
     width: min(600px, 58vh); max-width: none; margin-inline: auto;
     transition: width .62s cubic-bezier(.22, .61, .36, 1);
   }
@@ -1695,28 +1700,23 @@ body.cam-takeover #oval-frame {
   width: 100vw; height: 100dvh; max-width: none; max-height: none; aspect-ratio: auto;
   border-radius: 0; border: none; box-shadow: none; margin: 0;
 }
-/* Desktop: a large centred frame on the scrim — a webcam blown to the edges of
-   a monitor is not premium, it is grain. Keeps the capture aspect. */
-@media (min-width: 761px) {
-  body.cam-takeover .cam-frame,
-  body.cam-takeover #oval-frame {
-    width: auto; height: min(90dvh, 860px); aspect-ratio: 4 / 5;
-    border-radius: 24px; box-shadow: 0 44px 140px rgba(0, 0, 0, 0.55);
-  }
-}
-/* The side frame carries its own live sizing (3/4, capped at 66vh) for the
-   card layout; the takeover has to win over it, and over the caption and
-   panel that share the profile screen. */
-/* The side frame carries aspect-ratio 3/4 by ID, which outranks .cam-frame.
-   On a phone the takeover sets BOTH dimensions so the aspect must get out of
-   the way; on a desktop the frame is sized by height alone, so removing the
-   aspect there left width:auto with nothing to derive a width from and the
-   frame collapsed to zero — a full-screen black scrim with no preview in it. */
+/* No desktop exception any more. The takeover used to become a rounded 4:5
+   card floating on a blurred landing page above 760px, which is not what "the
+   camera takes the screen" means on a laptop: it left the frame at 648px of a
+   1440px screen with the page still legible around it, and on a machine whose
+   webcam is landscape it cropped the sides off the feed to do it. Full-bleed
+   at every size now, phone and desktop alike, front and side alike.
+   The guide canvas shares the video's box and the same cover mapping (see
+   coverMap in camera.ts), so the silhouette follows whatever shape the frame
+   takes — the aspect ratio is free to change under it.
+
+   The side frame carries aspect-ratio 3/4 by ID, which outranks .cam-frame,
+   so the takeover has to clear it explicitly. Both dimensions are set above,
+   so there is nothing left for an aspect to decide; the earlier desktop
+   carve-out that restored 3/4 existed only because the frame was sized by
+   height alone there, and full-bleed retires it. */
 body.cam-takeover #side-frame.live {
   aspect-ratio: auto; max-height: none;
-}
-@media (min-width: 761px) {
-  body.cam-takeover #side-frame.live { aspect-ratio: 3 / 4; max-height: none; }
 }
 body.cam-takeover .side-inner { display: block; }
 body.cam-takeover .side-photo .photo-caption,
@@ -1728,7 +1728,40 @@ body.cam-takeover .cam-actions {
   justify-content: center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   background: linear-gradient(transparent, rgba(10, 11, 13, 0.5));
 }
-body.cam-takeover .cam-actions .btn { flex: 0 1 200px; }
+/* A ROW, explicitly, and at a specificity that reaches #side-actions.
+   The phone rule `#side-actions { flex-direction: column }` sits at (1,0,0)
+   and outranks `body.cam-takeover .cam-actions` at (0,2,1), so in the
+   takeover the profile's action row was still a column — and `flex-basis` in
+   a column is HEIGHT, so `flex: 0 1 200px` below turned three buttons into
+   three 200px-tall slabs stacked down the screen over the live preview.
+   Reported from a phone with a screenshot of exactly that. */
+body.cam-takeover #side-actions,
+body.cam-takeover .cam-actions {
+  flex-direction: row; flex-wrap: nowrap; align-items: center;
+  /* Full width on a phone, a centred cluster on a monitor. Without the cap
+     the shutter's `flex: 1 1 auto` grew it to 818px across a 1440px screen —
+     a button the width of a wall. */
+  max-width: 520px; margin-inline: auto;
+}
+/* The same phone block sets `#side-actions .btn { min-width: 130px;
+   width: 100% }` at (1,1,0), which outranks the button rule below. Stacked
+   that is right; in a row it gives every button the full width of the screen,
+   so three of them wanted 1170px across a 390px phone and the overflow hung
+   Capture and Cancel off both edges with the middle button stretched between
+   them. Reaching ID level is the only way to hand the width back to flex. */
+body.cam-takeover #side-actions .btn { min-width: 0; width: auto; }
+/* The shutter takes the room the other two do not need, rather than all three
+   splitting the width evenly: on a 390px screen an even split leaves every
+   button too narrow for its own label. */
+body.cam-takeover .cam-actions .btn { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+body.cam-takeover .cam-actions .btn.pri { flex: 1 1 auto; }
+@media (max-width: 760px) {
+  /* Upload keeps its icon and drops its words. Three labelled buttons do not
+     fit across a phone, and the arrow-into-cloud is the one of the three that
+     survives losing its text — a shutter and a Cancel do not. */
+  body.cam-takeover .cam-actions .btn.gho > span { display: none; }
+  body.cam-takeover .cam-actions .btn.gho { flex: 0 0 auto; padding-inline: 18px; }
+}
 body.cam-takeover .cam-actions .btn.gho,
 body.cam-takeover .cam-actions .btn.cancel {
   background: rgba(16, 17, 19, 0.5); color: #fff;
@@ -1747,6 +1780,15 @@ body.cam-takeover #btn-noglasses {
 body.cam-takeover .cam-hud {
   padding: calc(16px + env(safe-area-inset-top, 0px)) 16px
     calc(88px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 761px) {
+  /* Full-bleed made the frame the width of the monitor, and the HUD furniture
+     is written as fractions of it: the guidance pill is width 78% and the
+     light meter is width 100%, so on a 1440px screen they became a 1123px
+     pill and a metre-long level bar. Capped to the same 520px column the
+     shutter row uses, so the whole overlay reads as one centred cluster
+     rather than three things stretched across a wall. */
+  body.cam-takeover .cam-hud > * { width: 100%; max-width: 520px; margin-inline: auto; }
 }
 body.cam-takeover .cam-info,
 body.cam-takeover .cam-swap { top: calc(12px + env(safe-area-inset-top, 0px)); }
