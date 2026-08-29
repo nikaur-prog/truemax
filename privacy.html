@@ -21,7 +21,7 @@
     <main class="legal-shell">
       <p class="legal-kicker">TrueMax</p>
       <h1>Privacy Policy</h1>
-      <p class="legal-meta">Last updated 20 August 2026</p>
+      <p class="legal-meta">Last updated 29 August 2026</p>
 
       <!-- The summary is not decoration and it is not marketing. Almost nobody
            reads a privacy policy end to end, so the two facts that actually
@@ -104,9 +104,15 @@
             <td>Supabase</td>
           </tr>
           <tr>
-            <td>Your saved scans — numbers only, never images</td>
+            <td>Your saved scans, including score data and thumbnail images</td>
             <td>So your history and progress exist</td>
-            <td>Supabase, readable only by you</td>
+            <td>Your browser only. They are not synchronized to your account</td>
+          </tr>
+          <tr>
+            <td>Your onboarding profile — name, optional mobile number, date of
+              birth, discovery source, goals, expectations and boundaries</td>
+            <td>To establish age-appropriate access and personalise your pathway</td>
+            <td>Supabase, readable only by your account and the service</td>
           </tr>
           <tr>
             <td>Subscription status</td>
@@ -121,7 +127,31 @@
           <tr>
             <td>Your stated goals and preferences</td>
             <td>To personalise your plan</td>
-            <td>Your browser</td>
+            <td>Your browser, and Supabase when supplied through onboarding</td>
+          </tr>
+          <tr>
+            <td>Optional self-score feedback — your measured score, the score
+              you chose, sex reference, scan ID and account ID</td>
+            <td>To review calibration. It never changes your score</td>
+            <td>Supabase, service-only; no photograph or free text is included</td>
+          </tr>
+          <tr>
+            <td>Max messages, recent chat history and a bounded summary of your
+              scan scores and recommendations</td>
+            <td>To answer when you choose to use Coach Max</td>
+            <td>Sent through our server to Anthropic; no scan photograph is included</td>
+          </tr>
+          <tr>
+            <td>Rundown narration text</td>
+            <td>To generate voice audio when you request a narrated export</td>
+            <td>Sent through our server to ElevenLabs or, if it fails, OpenAI</td>
+          </tr>
+          <tr>
+            <td>Creator League application, post links and statistics, TikTok
+              account link and tokens, and earnings records</td>
+            <td>To operate the League if you apply or connect TikTok</td>
+            <td>Supabase and TikTok. TikTok tokens are server-only and are not
+              exposed to your browser</td>
           </tr>
           <tr>
             <td>Pseudonymous side-feedback consent events</td>
@@ -144,6 +174,11 @@
         <li><b>Supabase</b> — accounts, database and storage.</li>
         <li><b>Vercel</b> — hosting and delivery of the website.</li>
         <li><b>Stripe</b> — payments and subscription management.</li>
+        <li><b>Anthropic</b> — Coach Max replies, only when you use Max.</li>
+        <li><b>ElevenLabs and OpenAI</b> — generated narration, with OpenAI used
+          as a fallback. OpenAI also generates staff-only fictional model images.</li>
+        <li><b>TikTok</b> — account linking and post statistics, only for Creator
+          League participants who connect TikTok.</li>
       </ul>
       <p>
         We may also disclose information where the law requires it.
@@ -153,8 +188,12 @@
       <p>
         You can revoke an individual side-feedback submission from Settings, or
         <b>delete your account from inside the app</b> at any time. Account
-        deletion removes your account and your saved scans, and queues any
-        remaining side-profile feedback images you contributed for deletion.
+        deletion removes your server-side account data, schedules any active
+        subscription to stop, and queues any remaining side-profile feedback
+        images you contributed for deletion. Scan history and thumbnails stored
+        in your browser do not leave that browser and therefore are not removed
+        from the device by server-side account deletion. Use the in-app history
+        controls or clear this site's browser data to remove them.
         If you have uninstalled the app or cannot sign in, there is a route that
         does not need either — see <a href="/delete-account">deleting your
         account</a>.

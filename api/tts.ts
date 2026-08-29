@@ -1,12 +1,13 @@
 import {
   authenticatedUser,
+  claimTtsRender,
+  finalizeTtsRender,
   getSupabaseAdmin,
   json,
   leagueRenderBudget,
-  recordLeagueRender,
+  refundTtsRender,
   requestOrigin,
   safeMessage,
-  spendVoiceCredit,
   voiceCreditBalance,
   type LeagueRenderBudget,
 } from "./_shared.js";
@@ -87,17 +88,19 @@ const DEFAULT_MODEL = "eleven_multilingual_v2";
 const VOICE_SPEED = 1.25;
 
 export async function POST(request: Request): Promise<Response> {
+  let reservation: { id: string; userId: string } | null = null;
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin narration is not allowed." }, 403);
 
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in to render a voiceover." }, 401);
 
-    const { data: staff } = await getSupabaseAdmin()
+    const { data: staff, error: staffError } = await getSupabaseAdmin()
       .from("app_admins")
       .select("user_id")
       .eq("user_id", user.id)
       .maybeSingle<{ user_id: string }>();
+    if (staffError) throw new Error(`Narration access check failed: ${staffError.message}`);
     // Deliberately vague to an outside caller. "Not found" rather than "you
     // are not a member" — an endpoint that confirms its own existence to
     // everyone is an invitation to keep pushing at it. Three doors in:
@@ -136,6 +139,19 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: `Narration is ${text.length} characters; the ceiling is ${MAX_CHARS}.` }, 413);
     }
 
+    // Reserve the actual billable unit before any provider call. The SQL claim
+    // serializes requests for this account, so two simultaneous renders cannot
+    // both pass the last credit or the last League slot.
+    if (meter) {
+      const id = await claimTtsRender(user.id, meter);
+      if (!id) {
+        return meter === "league"
+          ? json({ error: "Monthly render quota reached. It resets on the 1st." }, 429)
+          : json({ error: "No voiced analysis credit is available on this account." }, 402);
+      }
+      reservation = { id, userId: user.id };
+    }
+
     // A CHAIN of providers, best first, and the render only fails when every
     // one of them has. ElevenLabs leads because it is the only one that
     // returns per-character timestamps — the word-accurate captions — but an
@@ -169,61 +185,17 @@ export async function POST(request: Request): Promise<Response> {
     }
     if (!spoken) {
       console.error("all voice providers failed", attempts.join(" | "));
-      return json({ error: `No voice service produced audio. ${attempts.join(" ")}` }, 502);
+      if (reservation) {
+        await refundTtsRender(reservation.id, reservation.userId);
+        reservation = null;
+      }
+      return json({ error: "Voice generation is temporarily unavailable. Try again shortly." }, 502);
     }
     const payload = { audio_base64: spoken.audio, alignment: spoken.alignment };
 
-    // The audio has to BE audio before anybody is charged for it.
-    //
-    // The balance check happens before synthesis and the spend after it, which
-    // is the right order — a provider that refuses must not cost a credit. But
-    // "the provider answered" is not the same as "the answer is playable": a
-    // 200 carrying an HTML error page, a truncated body, or a JSON blob would
-    // all have passed as success, spent the credit, and produced a silent
-    // video that the buyer only discovers after the render. So the bytes are
-    // checked for a real MP3 signature first, and a provider that hands back
-    // something else is treated as a failure of that provider.
-    if (!looksLikeMp3(spoken.audio)) {
-      console.error("voice provider returned non-audio", spoken.provider);
-      return json(
-        { error: "The voice service returned unplayable audio. Nothing was charged — try again." },
-        502,
-      );
-    }
-
-    // The meter ticks only after audio actually came back — a failed upstream
-    // call must not spend a quota slot or a paid credit.
-    //
-    // The RESULT of the spend is checked, not discarded. spend_voice_credit is
-    // atomic in SQL and answers -1 when there was nothing left to spend, which
-    // is exactly what a second simultaneous render sees: both requests read a
-    // balance of 1 before either spent, both synthesised, and one of them is
-    // riding a credit that no longer exists. Ignoring that return value let
-    // two renders share one purchase. A render that could not be paid for is
-    // refused rather than delivered — the audio is already made and that cost
-    // is ours, but it is not handed over unpaid.
-    if (meter === "league") {
-      await recordLeagueRender(user.id, "tts").catch((e) => console.error("render log failed", safeMessage(e)));
-    } else if (meter === "voice") {
-      let spent = -1;
-      try {
-        spent = await spendVoiceCredit(user.id);
-      } catch (e) {
-        // The ledger is unreachable. The buyer holds a credit we could not
-        // read, so they get their render and the miss is logged: an infra
-        // fault must not eat a purchase.
-        console.error("credit spend failed", safeMessage(e));
-        spent = 0;
-      }
-      if (spent < 0) {
-        return json(
-          {
-            error:
-              "That credit was already used by another render in flight. Nothing extra was charged.",
-          },
-          409,
-        );
-      }
+    if (reservation) {
+      await finalizeTtsRender(reservation.id, reservation.userId);
+      reservation = null;
     }
 
     // The alignment is passed through rather than reshaped. It is the
@@ -263,41 +235,19 @@ export async function POST(request: Request): Promise<Response> {
     // stranger — it can name tables, columns and upstream hosts. The operator
     // gets the log; the caller gets the fact.
     console.error("tts failed", safeMessage(error));
-    return json({ error: "The voiceover could not be produced." }, 500);
+    if (reservation) {
+      await refundTtsRender(reservation.id, reservation.userId).catch((refundError) => {
+        console.error("tts refund failed", safeMessage(refundError));
+      });
+    }
+    return json({ error: "Voice generation is temporarily unavailable. Try again shortly." }, 500);
   }
-}
-
-/**
- * Does this base64 payload actually start like an MP3?
- *
- * Both providers are asked for mp3 and both normally deliver it. This catches
- * the case where one answers 200 with something else — an error page, a
- * truncated body — which would otherwise be charged for and shipped as a
- * silent video. Deliberately a signature check, not a decode: the server has
- * no audio stack, and every real failure mode here is "these bytes are not an
- * MP3 at all" rather than "this MP3 is subtly corrupt".
- *
- * An MP3 begins either with an ID3 tag ("ID3") or with a frame sync — eleven
- * set bits, so 0xFF followed by a byte whose top three bits are set.
- */
-export function looksLikeMp3(base64: string): boolean {
-  if (!base64 || base64.length < 32) return false;
-  let head: Buffer;
-  try {
-    head = Buffer.from(base64.slice(0, 64), "base64");
-  } catch {
-    return false;
-  }
-  if (head.length < 3) return false;
-  if (head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) return true;
-  return head[0] === 0xff && (head[1] & 0xe0) === 0xe0;
 }
 
 // ---------------------------------------------------------------------------
 // The providers. Each returns base64 audio or null, and appends a one-line
-// reason to `attempts` when it fails — those lines are what the operator sees
-// when the whole chain comes up empty, so they name the service and the class
-// of failure, never account internals.
+// reason to `attempts` when it fails. Those lines go only to the server log;
+// the browser receives a provider-neutral error with no account details.
 // ---------------------------------------------------------------------------
 
 async function speakWithElevenLabs(
@@ -371,7 +321,7 @@ async function speakWithElevenLabs(
         character_end_times_seconds?: number[];
       };
     };
-    if (!payload.audio_base64) {
+    if (!payload.audio_base64 || !validMp3Base64(payload.audio_base64)) {
       attempts.push("ElevenLabs returned no audio.");
       return null;
     }
@@ -424,7 +374,7 @@ async function speakWithOpenAI(
       return null;
     }
     const bytes = Buffer.from(await upstream.arrayBuffer());
-    if (!bytes.length) {
+    if (!validMp3Bytes(bytes)) {
       attempts.push("The fallback voice returned no audio.");
       return null;
     }
@@ -434,4 +384,70 @@ async function speakWithOpenAI(
     attempts.push("The fallback voice was unreachable.");
     return null;
   }
+}
+
+export function validMp3Base64(value: string): boolean {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) return false;
+  try {
+    return validMp3Bytes(Buffer.from(value, "base64"));
+  } catch {
+    return false;
+  }
+}
+
+function mpegFrameLengthAt(bytes: Uint8Array, offset: number): number | null {
+  if (offset < 0 || offset + 3 >= bytes.length) return null;
+  if (bytes[offset] !== 0xff || (bytes[offset + 1] & 0xe0) !== 0xe0) return null;
+  const version = (bytes[offset + 1] >> 3) & 0x03;
+  const layer = (bytes[offset + 1] >> 1) & 0x03;
+  const bitrateIndex = (bytes[offset + 2] >> 4) & 0x0f;
+  const sampleRateIndex = (bytes[offset + 2] >> 2) & 0x03;
+  if (version === 1 || layer === 0 || bitrateIndex === 0 || bitrateIndex === 15 || sampleRateIndex === 3) {
+    return null;
+  }
+
+  const mpeg1 = version === 3;
+  const bitrates = mpeg1
+    ? layer === 3
+      ? [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
+      : layer === 2
+        ? [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384]
+        : [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
+    : layer === 3
+      ? [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256]
+      : [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+  const baseRates = [44_100, 48_000, 32_000];
+  const sampleRate = baseRates[sampleRateIndex] / (version === 3 ? 1 : version === 2 ? 2 : 4);
+  const bitrate = bitrates[bitrateIndex] * 1000;
+  const padding = (bytes[offset + 2] >> 1) & 1;
+  const length = layer === 3
+    ? Math.floor((12 * bitrate / sampleRate + padding) * 4)
+    : Math.floor(((layer === 1 && !mpeg1 ? 72 : 144) * bitrate) / sampleRate + padding);
+  return length >= 24 ? length : null;
+}
+
+function validMp3Bytes(bytes: Uint8Array): boolean {
+  if (bytes.length < 128) return false;
+  const id3 = bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33;
+  const twoCompleteFramesAt = (at: number): boolean => {
+    const first = mpegFrameLengthAt(bytes, at);
+    if (!first || at + first > bytes.length) return false;
+    const secondAt = at + first;
+    const second = mpegFrameLengthAt(bytes, secondAt);
+    return Boolean(second && secondAt + second <= bytes.length);
+  };
+  if (!id3) return twoCompleteFramesAt(0);
+  if (bytes.length < 10 || [bytes[6], bytes[7], bytes[8], bytes[9]].some((part) => (part & 0x80) !== 0)) {
+    return false;
+  }
+  const tagSize = (bytes[6] << 21) | (bytes[7] << 14) | (bytes[8] << 7) | bytes[9];
+  const footer = (bytes[5] & 0x10) !== 0 ? 10 : 0;
+  const audioStart = 10 + tagSize + footer;
+  // Encoders may add a short pad after the tag. Bound the search so arbitrary
+  // bytes later in a corrupt response cannot masquerade as an audio frame.
+  const limit = Math.min(bytes.length - 4, audioStart + 4096);
+  for (let at = audioStart; at <= limit; at++) {
+    if (twoCompleteFramesAt(at)) return true;
+  }
+  return false;
 }

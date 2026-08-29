@@ -172,9 +172,7 @@ test("a face at the sample maximum claims the sample-max percentile, not the 99.
 // The data to do it properly exists — multi-photo scans per person from the
 // reliability work — and wiring that into an acceptance test is the honest
 // next step.
-test("one face photographed twice scores within half a point", { todo: true }, () => {
-  assert.fail("needs multi-photo fixtures through the real pipeline");
-});
+test.todo("one face photographed twice scores within half a point — needs multi-photo fixtures through the real pipeline");
 
 // ---------------------------------------------------------------------------
 // The side profile must not be scored against front tables.

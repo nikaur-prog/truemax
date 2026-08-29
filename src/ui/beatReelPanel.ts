@@ -9,6 +9,7 @@ import { quickVideoDuration, renderQuickVideoFrame } from "./quickVideoExport.js
 import type { QuickExportScores } from "./quickVideoExport.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Sex } from "../engine/types.js";
+import { aggregateScoreToPercentile } from "../engine/scoring.js";
 
 // ---------------------------------------------------------------------------
 // Attach clips. Attach a song. Get a cut.
@@ -543,7 +544,24 @@ function startReelPreview(): void {
 
 export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
   closeBeatReelPanel();
-  analysisSource = analysis ?? null;
+  // Creator edits are production copy, not a second measurement pass. Keep a
+  // private copy so changing a reel score never mutates the saved scan behind
+  // the panel.
+  analysisSource = analysis
+    ? {
+        ...analysis,
+        scores: { ...analysis.scores, regions: analysis.scores.regions.map((region) => ({ ...region })) },
+        before: analysis.before
+          ? {
+              ...analysis.before,
+              scores: {
+                ...analysis.before.scores,
+                regions: analysis.before.scores.regions.map((region) => ({ ...region })),
+              },
+            }
+          : undefined,
+      }
+    : null;
   analysisOn = Boolean(analysis);
   const el = document.createElement("div");
   host = el;
@@ -557,6 +575,24 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
           ? "Your clips before, your analysis at 2×, your clips after — every cut lands on a beat of the song you attach."
           : "Attach your clips, then a song. The tempo decides how long each clip is — you never pick a duration."
       }</p>
+
+      ${
+        analysis
+          ? `<section class="brp-score-panel" aria-label="Scores shown in this reel">
+        ${
+          analysis.before
+            ? `<label><span>Before score</span>
+          <input class="q-input" id="brp-before-score" type="number" min="0" max="10" step="0.1"
+            inputmode="decimal" value="${analysis.before.scores.overall.toFixed(1)}"></label>`
+            : ""
+        }
+        <label><span>${analysis.before ? "After score" : "Analysis score"}</span>
+          <input class="q-input" id="brp-current-score" type="number" min="0" max="10" step="0.1"
+            inputmode="decimal" value="${analysis.scores.overall.toFixed(1)}"></label>
+        <p>These are the numbers shown in this reel. Editing them does not change the saved facial analysis.</p>
+      </section>`
+          : ""
+      }
 
       <section class="brp-sec">
         <div class="brp-head"><span>1 · YOUR CLIPS</span><small id="brp-clipnote">Nothing attached yet.</small></div>
@@ -676,6 +712,23 @@ function wire(el: HTMLElement): void {
   el.onclick = (e) => {
     if (e.target === el && !busy) closeBeatReelPanel();
   };
+
+  const wireScore = (id: string, scores: QuickExportScores | undefined) => {
+    const input = el.querySelector<HTMLInputElement>(`#${id}`);
+    if (!input || !scores) return;
+    const commit = () => {
+      const parsed = Number(input.value);
+      const value = Number.isFinite(parsed) ? Math.max(0, Math.min(10, parsed)) : scores.overall;
+      scores.overall = Math.round(value * 10) / 10;
+      scores.percentile = aggregateScoreToPercentile(scores.overall);
+      input.value = scores.overall.toFixed(1);
+      paint();
+    };
+    input.addEventListener("change", commit);
+    input.addEventListener("blur", commit);
+  };
+  wireScore("brp-before-score", analysisSource?.before?.scores);
+  wireScore("brp-current-score", analysisSource?.scores);
 
   const clipInput = el.querySelector<HTMLInputElement>("#brp-clip-input")!;
   clipInput.onchange = async () => {
@@ -1298,7 +1351,7 @@ function paintSong(): void {
   wrap.innerHTML = `
     <div class="brp-songcard${sure ? "" : " unsure"}">
       <b>${g.bpm ? g.bpm.toFixed(1) : "—"} BPM</b>
-      <span>${song.name}</span>
+      <span>${escapeHTML(song.name)}</span>
       <em>${
         !g.bpm
           ? "No steady tempo found — this track cannot be cut to automatically."
@@ -1311,6 +1364,16 @@ function paintSong(): void {
   wrap.querySelector<HTMLButtonElement>("#brp-song-swap")!.onclick = () =>
     host!.querySelector<HTMLInputElement>("#brp-song-input")!.click();
   note("brp-songnote", `Decoded on this device — ${fmt(song.duration)} long. Nothing was uploaded.`);
+}
+
+function escapeHTML(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char]!);
 }
 
 function paintWindow(): void {

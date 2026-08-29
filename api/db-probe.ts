@@ -25,9 +25,8 @@ import { getSupabaseAdmin, json, safeMessage } from "./_shared.js";
 //             no table to exist. Separates "bad key" from "missing table".
 //   table     whether the analytics table is really there.
 //
-// What it never discloses: a key. Errors are scrubbed of anything key-shaped
-// and truncated, so this is safe to hit from anywhere while a deploy is being
-// fixed.
+// What it never discloses: a key. Public callers receive only {ok:true}; the
+// scrubbed project and database diagnostics require CRON_SECRET.
 // ---------------------------------------------------------------------------
 
 function scrub(message: string): string {
@@ -46,7 +45,11 @@ function projectRef(url: string): string {
   }
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+    return json({ ok: true });
+  }
   const url = process.env.SUPABASE_URL || "";
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   const ref = projectRef(url);

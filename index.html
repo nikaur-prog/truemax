@@ -204,7 +204,7 @@
         </div>
         <div class="proof-item">
           <b>Your photo never leaves your phone</b>
-          <p>The whole engine runs in your browser. The account saves your results and your history; it never sees your photograph.</p>
+          <p>The whole engine runs in your browser. Scan numbers and thumbnails stay in this browser, scoped to your account; the server never receives your front photograph.</p>
         </div>
         <div class="proof-item">
           <b>Every number shows its working</b>
@@ -222,19 +222,8 @@
            a loop, and the loop is the only reason a subscription makes sense.
            Nothing here is illustrated with an invented before-and-after or a
            fabricated progress chart: the numbers quoted are the real ones the
-           engine uses (0.6 is DELTA_SD in ui/templates.ts, the threshold a change
-           must clear before the app will call it progress), and step three is a
-           thing the app genuinely says to people, which is what makes it worth
-           putting on the page at all.
-
-           The page deliberately does NOT claim "two photographs of one face
-           land 0.6 apart". That is an empirical property of the whole pipeline
-           and it has never been measured end to end — engine/aggregation.test.ts
-           records the open TODO and a real observed swing of 2.1 points. Stating
-           the THRESHOLD we enforce is true and checkable; stating the SPREAD we
-           achieve would be a number we cannot stand behind. When the multi-photo
-           fixture set exists and the acceptance test passes, this can become a
-           measured claim. -->
+           engine uses, and step three is a thing the app genuinely says to
+           people, which is what makes it worth putting on the page at all. -->
       <section class="journey">
         <h2 class="journey-title">The score is the start, not the answer</h2>
         <ol class="journey-steps">
@@ -251,7 +240,7 @@
           <li>
             <span class="journey-n">3</span>
             <b>Rescan, and find out whether it worked</b>
-            <p>A rescan is only progress if it clears the noise. We hold a change to at least 0.6 points on the calibrated scale before we call it real — anything smaller and we say so, instead of selling it to you as progress.</p>
+            <p>We compare rescans conservatively and flag small movements as likely capture noise. The repeat-photo benchmark is still being expanded, so we do not promise a fixed error from one pair of images.</p>
           </li>
         </ol>
         <p class="journey-foot">

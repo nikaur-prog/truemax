@@ -109,7 +109,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    if (event.type === "checkout.session.completed") {
+    if (
+      event.type === "checkout.session.completed"
+      || event.type === "checkout.session.async_payment_succeeded"
+    ) {
       const session = event.data.object;
       // Scan-credit purchases are payments with a purpose marker the server
       // stamped at Checkout creation. Payment status is checked because a
@@ -118,7 +121,13 @@ export async function POST(request: Request): Promise<Response> {
       if (session.metadata?.purpose === "scan_credit" && session.payment_status === "paid") {
         const userId = session.metadata.supabase_user_id;
         if (userId) {
-          const { error } = await getSupabaseAdmin().rpc("grant_scan_credit", { p_user_id: userId });
+          const { error } = await getSupabaseAdmin().rpc("apply_one_time_credit", {
+            p_event_id: event.id,
+            p_checkout_session_id: session.id,
+            p_user_id: userId,
+            p_credit_kind: "scan",
+            p_credits: 1,
+          });
           if (error) throw new Error(`Scan credit grant failed: ${error.message}`);
         }
       }
@@ -127,7 +136,13 @@ export async function POST(request: Request): Promise<Response> {
       if (session.metadata?.purpose === "voice_credit" && session.payment_status === "paid") {
         const userId = session.metadata.supabase_user_id;
         if (userId) {
-          const { error } = await getSupabaseAdmin().rpc("grant_voice_credit", { p_user_id: userId });
+          const { error } = await getSupabaseAdmin().rpc("apply_one_time_credit", {
+            p_event_id: event.id,
+            p_checkout_session_id: session.id,
+            p_user_id: userId,
+            p_credit_kind: "voice",
+            p_credits: 1,
+          });
           if (error) throw new Error(`Voice credit grant failed: ${error.message}`);
         }
       }
@@ -150,7 +165,10 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     let update: EntitlementUpdate | null = null;
-    if (event.type === "checkout.session.completed") {
+    if (
+      event.type === "checkout.session.completed"
+      || event.type === "checkout.session.async_payment_succeeded"
+    ) {
       update = await fromCheckout(event.data.object);
     } else if (
       event.type === "customer.subscription.created" ||

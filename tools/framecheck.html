@@ -4,6 +4,7 @@
 import { drawRundownFrame } from "/src/ui/rundownFrame.ts";
 import { buildTimeline } from "/src/engine/rundownTimeline.ts";
 import { METRICS } from "/src/engine/metrics.ts";
+import { mixRundownAudio } from "/src/ui/rundownAudio.ts";
 
 // A stand-in photograph: a flat portrait with a face-shaped blob, enough for
 // the crop maths to have a bounding box to work against.
@@ -67,18 +68,19 @@ c.fillStyle = "#e8c9a8"; c.beginPath(); c.ellipse(430,560,210,270,0.12,0,7); c.f
 c.fillStyle = "#fff"; c.font = "bold 90px sans-serif"; c.textAlign = "center";
 c.fillText("CUTAWAY", 450, 1080);
 
+// A compact current-style sequence: one phrase per beat, photo changes where
+// they add energy, then the result.  This is the structure used by the social
+// rundown now; the old harness still described the caption-heavy version.
 const beats = [
-  { kind: "metric", line: "Marlon has a canthal tilt of 6.4 degrees, so the outer corner sits above the inner.", metricId: "canthalTilt", region: "eyes", positive: true },
+  { kind: "hook", line: "How attractive is Marlon?", label: "FACE ANALYSIS" },
+  { kind: "metric", line: "Marlon has a canthal tilt of 6.4 degrees, so the outer corner sits above the inner.", label: "POSITIVE TILT", metricId: "canthalTilt", region: "eyes", positive: true },
   // A second metric beat so the trait ledger's stacking — the previous entry
   // stepping back as the new one arrives — is visible in a still.
-  { kind: "metric", line: "The jaw angle comes in wide, which costs him the lower third.", metricId: "jawFrontalAngle", region: "jaw", positive: false },
-  { kind: "card", line: "The verdict: Great-looking. A very attractive male.", card },
-  { kind: "card", line: "Marlon measures 7.6 out of 10.", card },
-  // Two curve beats, because they render differently: the first carries a
-  // badge and shows his standing, the second drops it and shows the crowd.
-  { kind: "curve", line: "That's 1 in 10. Two thirds of men measure between 4.1 and 6.3.", percentile: 92, badge: "92th percentile" },
-  { kind: "curve", line: "5.0 is the exact middle, and that shaded band is where most of them are.", percentile: 92 },
-  { kind: "search", line: "Want yours analysed? truemax.app." },
+  { kind: "metric", line: "The jaw angle comes in wide, which costs him the lower third.", label: "WIDE JAW", metricId: "jawFrontalAngle", region: "jaw", positive: false },
+  { kind: "context", line: "Measured from the photograph.", label: "MEASURED", broll: true },
+  { kind: "card", line: "The verdict.", label: "VERDICT", card },
+  { kind: "curve", line: "Top eight percent.", label: "TOP 8%", percentile: 92, badge: "92nd percentile" },
+  { kind: "search", line: "Your turn.", label: "YOUR TURN" },
 ];
 // A REAL scored metric, so the overlay actually draws.
 //
@@ -150,5 +152,13 @@ window.shotAt = (i, frac) => {
   frame(b.start + b.duration * frac);
   return true;
 };
+// Used by the preview recorder. Keeping this in the harness means the preview
+// exercises the exact production frame renderer rather than a look-alike.
+window.frameAt = (t) => {
+  frame(Math.max(0, Math.min(t, timeline.duration - 0.001)));
+  return true;
+};
+window.previewDuration = timeline.duration;
+window.makePreviewAudio = () => mixRundownAudio(null, timeline);
 window.ready = true;
 </script>

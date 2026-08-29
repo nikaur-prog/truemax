@@ -126,6 +126,8 @@ let reference: ReferenceHandle | null = null;
 let retake: RetakeHandle | null = null;
 let soundToggle: { destroy(): void } | null = null;
 let sideCam: CameraHandle | null = null;
+let sideCamOpening = false;
+let sideCamAttempt = 0;
 let auto: AutoCapture | null = null;
 let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
@@ -306,18 +308,11 @@ function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
   };
 }
 
-// Set synchronously the moment a start begins, and cleared when it settles.
-// `sideCam` cannot do this job: it is only assigned after `await startCamera`
-// resolves — seconds on a phone, during which every re-entry passed the guard
-// and built a second camera over the first. The symptom was a screen with a
-// live preview, the awaiting caption, and a Capture button wired to a
-// different attempt's state than the one holding the stream.
-let sideCamStarting = false;
-
 async function openSideCamera(ctx: SideCtx): Promise<void> {
   const e = el();
-  if (sideCam || sideCamStarting) return;
-  sideCamStarting = true;
+  if (sideCam || sideCamOpening) return;
+  const attempt = ++sideCamAttempt;
+  sideCamOpening = true;
   // The retake button reaches here without going through openSideCapture, and
   // it is the path that produced the bug: a walkthrough part-way through, then
   // a live camera underneath the point it had reached.
@@ -368,7 +363,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     },
   });
   try {
-    sideCam = await startCamera({
+    const started = await startCamera({
       video: e.video,
       guideCanvas: e.guide,
       mode: "side",
@@ -417,8 +412,14 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         }
       },
     });
+    if (attempt !== sideCamAttempt) {
+      started.stop();
+      await setRunningMode("IMAGE");
+      return;
+    }
+    sideCam = started;
   } catch {
-    sideCamStarting = false;
+    if (attempt !== sideCamAttempt) return;
     clearCameraTakeover();
     e.live.classList.add("hidden");
     e.frame.classList.remove("live");
@@ -426,8 +427,9 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     e.drop.classList.remove("hidden");
     e.hintTitle.textContent = "Camera unavailable";
     return;
+  } finally {
+    if (attempt === sideCamAttempt) sideCamOpening = false;
   }
-  sideCamStarting = false;
 
   // The same full-screen viewfinder the front shot gets. This step needs it
   // more, not less: the profile is taken with your head turned away from the
@@ -512,9 +514,11 @@ function stopSideCamera(): void {
     window.removeEventListener("keydown", sideKeyHandler);
     sideKeyHandler = null;
   }
-  if (!sideCam) return;
-  sideCam.stop();
+  sideCamAttempt++;
+  sideCamOpening = false;
+  const held = sideCam;
   sideCam = null;
+  held?.stop();
   // Hand the detector back to still-image mode. Anything downstream of here
   // works on stills, and leaving it in VIDEO mode makes them throw.
   //

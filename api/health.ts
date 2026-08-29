@@ -15,10 +15,8 @@
 // Adding an import here to save a few lines would destroy the only thing it is
 // for.
 //
-// On what it discloses: names only, never values, never lengths, and only for a
-// fixed allowlist. Whether STRIPE_WEBHOOK_SECRET is set is not a secret — the
-// webhook already answers "Webhook is not configured" to anyone who asks — and
-// an outage you cannot see is worth more to an attacker than a boolean.
+// Public callers receive only {ok:true}. The fixed environment inventory below
+// is returned only to an operator presenting CRON_SECRET.
 // ---------------------------------------------------------------------------
 
 const CHECKED = [
@@ -39,7 +37,13 @@ const CHECKED = [
   "ANTHROPIC_API_KEY",
 ] as const;
 
-export function GET(): Response {
+export function GET(request: Request): Response {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+    // Public uptime check, without an inventory of configured vendors, prices
+    // or secrets. Operators use the protected response below for diagnostics.
+    return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+  }
   // Alternate names the server code also accepts. The report answers "will
   // the feature work", not "is this exact string in the dashboard" — a value
   // stored under its accepted fallback name must not read as missing.
