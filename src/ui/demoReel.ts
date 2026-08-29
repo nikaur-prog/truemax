@@ -69,7 +69,6 @@ function calloutsFor(face: ReelFace) {
 export function mountDemoReel(
   canvas: HTMLCanvasElement,
   scoreEl: HTMLElement,
-  nameEl: HTMLElement,
 ): ReelHandle {
   if (!REEL.length) return { stop: () => {} };
 
@@ -426,24 +425,25 @@ export function mountDemoReel(
     scoreEl.textContent = t >= T.score[0] ? shown.toFixed(1) : "";
     scoreEl.style.opacity = String(alpha);
     scoreEl.classList.toggle("landed", t >= T.score[1]);
-    // No name under the face.
+    // Nothing under the number.
     //
-    // These portraits are synthetic and the names were invented to go with
-    // them — which is a fabricated identity presented under a real score, and
-    // it buys nothing: nobody is persuaded by "Dev", and anybody who assumes
-    // the person is real has been misled by a decoration. The slot the name
-    // occupied says what the picture actually is instead, so the disclosure
-    // rides the frame everyone looks at rather than only the fine print.
-    nameEl.textContent = "AI-GENERATED DEMONSTRATION";
-    nameEl.style.opacity = String(alpha * 0.85);
+    // The slot held the invented name first ("Dev", "Adrian"), which was a
+    // fabricated identity presented under a real score, then the words
+    // AI-GENERATED DEMONSTRATION. Both are gone at the owner's call: the card
+    // is plainly a product demo, and the page's fine print carries the
+    // provenance ("Demo faces are AI-generated") for anyone who wants it.
+    // A caption on the picture bought nothing the fine print does not.
+    //
     // The caption is DOM (the serif face and the landing animation are CSS),
     // so it travels into the panel by having its offset driven from here —
     // the number ends up on black above the pillar row, never on a cheek.
     const cap = scoreEl.parentElement;
-    // Docked, the name's baseline lands 52px off the bottom: the pillar labels
-    // top out at 30.5px, so the two clear each other by about thirteen pixels
-    // at every frame size rather than colliding at some of them.
-    if (cap) cap.style.bottom = `${(84 - 32 * dockT).toFixed(1)}px`;
+    // The second line used to occupy 24px under the number, and the number's
+    // own resting place was tuned against the pillar row below it — so the
+    // offsets carry that 24px now the line is gone, and the score stays
+    // exactly where it has always sat rather than sliding down into the
+    // pillar labels (which top out at 30.5px).
+    if (cap) cap.style.bottom = `${(108 - 32 * dockT).toFixed(1)}px`;
 
     if (t >= T.hold) {
       idx = (idx + 1) % REEL.length;
@@ -521,7 +521,6 @@ export function mountDemoReel(
       const ctx = canvas.getContext("2d");
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
       scoreEl.textContent = "";
-      nameEl.textContent = "";
     },
   };
 }

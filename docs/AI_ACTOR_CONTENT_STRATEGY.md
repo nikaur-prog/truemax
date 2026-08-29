@@ -25,6 +25,10 @@
 ## Trust rules
 
 - Label the character **“AI-generated demonstration”** on-screen. Do not present an AI actor as a real customer or testimonial.
+  - This rule is scoped to PUBLISHED VIDEO with an AI actor in it — a before/after story a viewer could read as a
+    real customer. It does not extend to the product’s own UI. The landing demo card and the gate strip carry no
+    on-picture label: they are plainly a product demo, nobody reads them as a testimonial, and the provenance sits
+    in the page’s fine print (“Demo faces are AI-generated” in index.html). Do not add the caption back to them.
 - Describe the after image as a visualisation of a pathway, not a guaranteed result.
 - Do not imply the scan diagnoses medical or dermatological conditions.
 - Avoid humiliating “ugly” language. The stronger TrueMax position is clarity and confidence: poorly presented → intentionally presented.
