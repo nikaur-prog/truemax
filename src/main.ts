@@ -16,6 +16,9 @@ import {
 } from "./engine/history.js";
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
+import { loadArchive, pruneArchivesTo, saveArchive } from "./engine/scanArchive.js";
+import { closeScanRecall, setScanReopen } from "./ui/scanRecall.js";
+import type { StoredScan } from "./engine/history.js";
 import { maybeAdoptAvatar } from "./engine/avatar.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
@@ -1381,6 +1384,79 @@ window.addEventListener("popstate", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Reopening an archived scan as the full interactive report.
+//
+// The recall sheet stays what it is — the summary — and this is the way
+// through it: the stored report, landmarks and side points re-enter the same
+// renderResults the live flow uses, so the hover-to-draw measurements, the
+// region tabs and the metric drill-down all work on a scan taken weeks ago.
+// The photographs are the stored 320px thumbnails, which is soft on a big
+// screen and irrelevant to the overlays: landmarks are normalised, so every
+// line lands on the anatomy at any resolution.
+//
+// Rendered as ctx.archived: observations and numbers only. Max reads the
+// present and the plan is built from the current scan, so neither speaks
+// over a record — the same gating a guest's scan gets.
+// ---------------------------------------------------------------------------
+function canvasFromDataURL(url: string): Promise<HTMLCanvasElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext("2d")!.drawImage(img, 0, 0);
+      resolve(c);
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+async function reopenArchivedScan(scan: StoredScan): Promise<void> {
+  const key = scanStorageKey(scan);
+  const [archive, photos] = await Promise.all([loadArchive(key), loadPhotos(key)]);
+  if (!archive) return;
+  const front = photos?.front ? await canvasFromDataURL(photos.front) : null;
+  if (!front) {
+    // The archive survived a photo prune, or the thumbnail never saved. The
+    // report cannot be walked without the face it was measured on.
+    window.alert("The photograph for this scan is no longer stored on this device, so it cannot be reopened in full.");
+    return;
+  }
+  const side = photos?.side ? await canvasFromDataURL(photos.side) : null;
+  closeHistory();
+  closeScanRecall();
+  // The results machinery lives on the main screen; a reopen from the landing
+  // page has to reveal it exactly as a finished analysis would.
+  el.main.classList.remove("hidden");
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "RECALLED";
+  el.status.textContent = "";
+  renderResults({
+    report: archive.report,
+    delta: null,
+    landmarks: archive.landmarks,
+    photoW: front.width,
+    photoH: front.height,
+    analysis: el.analysis,
+    zoomable: el.zoomable,
+    overlay: el.overlayCanvas,
+    onNewPhoto: () => resetToUpload(),
+    subjectName: archive.subjectName,
+    sideReport: archive.sideReport ?? undefined,
+    sidePhoto: side ?? undefined,
+    sidePoints: archive.sidePoints ?? undefined,
+    frontPhoto: front,
+    archived: true,
+    archivedDate: archive.date,
+  });
+  el.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+setScanReopen((scan) => void reopenArchivedScan(scan));
+
 function resetToUpload(): void {
   disarmLeaveGuard();
   scanGeneration++;
@@ -1864,6 +1940,8 @@ async function runFullAnalysis(
     // nulls, and the IndexedDB write below is a real gap — an owner tapping
     // "New photo" mid-write must not turn a guest's scan into "not a guest".
     const guest = scanSubject !== null;
+    const subjectName = scanSubject?.name;
+    const sidePoints = lastSide?.points ?? null;
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
@@ -1875,12 +1953,26 @@ async function runFullAnalysis(
     // (cross-tab auth swaps the scope synchronously), and this scan's face
     // must not become THAT account's anything.
     if (!scanSession.isCurrent(token, owner)) return;
+    // Everything the recall sheet needs to REOPEN this scan interactively —
+    // the full report, the landmarks, the side points — beside the thumbnails
+    // and pruned by the same history list. See engine/scanArchive.ts.
+    await saveArchive(token.scanId, {
+      report,
+      sideReport: sideReport ?? null,
+      landmarks,
+      sidePoints,
+      subjectName,
+      date: new Date().toISOString(),
+    });
+    if (!scanSession.isCurrent(token, owner)) return;
     // The first front photo a member scans OF THEMSELVES becomes their
     // profile picture. A guest's face must never become the owner's avatar,
     // and an avatar already chosen is never overwritten from here — settings
     // owns changes.
     if (!guest) maybeAdoptAvatar(frontShot);
-    await pruneTo(readAllHistory().map(scanStorageKey));
+    const keep = readAllHistory().map(scanStorageKey);
+    await pruneTo(keep);
+    await pruneArchivesTo(keep);
   })();
 
   el.frame.classList.remove("scanning");

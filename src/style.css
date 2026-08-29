@@ -6333,3 +6333,7 @@ select.q-input { appearance: auto; }
 /* The decision, under the evidence. Full width so the dialog reads as one
    column: the clip, what it is, and whether you want yours. */
 .veg-buy { width: 100%; margin-top: 12px; }
+
+/* The way through the recall sheet: full width at the bottom, after the
+   summary it upgrades. Only rendered when the scan's archive exists. */
+.recall-full { width: 100%; margin-top: 14px; }
