@@ -3,6 +3,7 @@ import type { StoredScan } from "../engine/history.js";
 import { REGION_NAMES } from "../engine/scoring.js";
 import type { RegionId } from "../engine/types.js";
 import { loadPhotos } from "../engine/photoStore.js";
+import { hasArchive } from "../engine/scanArchive.js";
 import { curveLegend, curveSVG } from "./curve.js";
 import { populationLine, rankShort } from "./templates.js";
 
@@ -35,6 +36,15 @@ import { populationLine, rankShort } from "./templates.js";
 
 export interface RecallHandle {
   close(): void;
+}
+
+// Where "View the full analysis" goes. Registered once by main.ts, which owns
+// the results machinery this module must not import — the recall sheet knows
+// WHETHER a scan can be reopened (the archive exists), the app knows HOW.
+let reopenScan: ((scan: StoredScan) => void) | null = null;
+
+export function setScanReopen(fn: (scan: StoredScan) => void): void {
+  reopenScan = fn;
 }
 
 let active: HTMLElement | null = null;
@@ -182,6 +192,26 @@ export function openScanRecall(scan: StoredScan, previous?: StoredScan): RecallH
   wrap.querySelector(".hist-close")?.addEventListener("click", close);
   document.addEventListener("keydown", esc);
   document.body.appendChild(wrap);
+
+  // The full interactive analysis, for scans whose archive was kept. The
+  // sheet above stays exactly as it is — this is the way THROUGH it for
+  // anybody who wants to walk the measurements again rather than read the
+  // summary. Scans from before archives shipped never grow the button, in
+  // keeping with the footnote right above it.
+  void hasArchive(scanStorageKey(scan)).then((ok) => {
+    if (!ok || !reopenScan) return;
+    const panel = wrap.querySelector<HTMLElement>(".recall-panel");
+    if (!panel || !panel.isConnected) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn pri recall-full";
+    btn.textContent = "View the full analysis";
+    btn.onclick = () => {
+      close();
+      reopenScan?.(scan);
+    };
+    panel.appendChild(btn);
+  });
 
   // The photographs are a separate, frequently-empty store, so they arrive
   // after the numbers rather than holding them up.

@@ -27,10 +27,12 @@ const DB_NAME = "truemax";
 // Its own store inside the existing database. A second database would mean a
 // second version ladder to keep in step for no benefit.
 const STORE = "faceLibrary";
-// Bumped from 1: photoStore.ts owns version 1 and creates scanPhotos. Both
-// modules must agree on the version and both upgrade handlers must be
-// idempotent, or whichever opens second fails and takes its feature with it.
-const DB_VERSION = 2;
+// Bumped from 1: photoStore.ts owns version 1 and creates scanPhotos. All
+// three modules sharing this database (photoStore, this, scanArchive) must
+// agree on the version and every upgrade handler must be idempotent, or
+// whichever opens second fails and takes its feature with it. Bumped to 3
+// when scan archives were added.
+const DB_VERSION = 3;
 
 // Enough for a filming session with room to spare. Beyond this the oldest go,
 // because an unbounded store of face photographs on somebody's device is a
@@ -71,6 +73,7 @@ function open(): Promise<IDBDatabase | null> {
         // mean this file never destroys the other feature's data.
         if (!db.objectStoreNames.contains("scanPhotos")) db.createObjectStore("scanPhotos");
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+        if (!db.objectStoreNames.contains("scanArchive")) db.createObjectStore("scanArchive");
       };
       req.onsuccess = () => resolve(req.result);
       // Private browsing, disabled storage, quota refusal. Every one of these

@@ -108,9 +108,28 @@ interface Ctx {
   // chin take most of it — so beyond a few degrees the Basic grid says so
   // rather than presenting a dragged-down number with full confidence.
   offAxisDeg?: number;
+  /**
+   * A past scan reopened from its archive rather than freshly measured.
+   * Renders the same interactive report — hover the measurements, walk the
+   * regions — with the coaching stripped: Max reads the PRESENT and the plan
+   * is built from the CURRENT scan, so neither may speak over a record.
+   * Observations and numbers only, exactly as they were scored.
+   */
+  archived?: boolean;
+  /** ISO date of the archived scan, for its label. */
+  archivedDate?: string;
 }
 
 let ctx: Ctx | null = null;
+
+// Whether the screen is showing observations only — a guest's scan or a
+// recalled one. Every coaching surface (Max's read, the pet, the plan, the
+// check-ins, the pathway) gates on this: a guest gets the science without the
+// owner's coach talking to them, and a recalled scan is a record, not a
+// session. The numbers render identically either way.
+function observationsOnly(): boolean {
+  return Boolean(ctx?.subjectName || ctx?.archived);
+}
 
 // A guest's name is typed by whoever is holding the phone, so it is escaped
 // wherever it is printed. Local to this module for the same reason the other
@@ -149,7 +168,8 @@ export function renderResults(c: Ctx): void {
   // Plan holders get Max himself, peeking from the edge of the screen with
   // this scan's numbers in hand. Everybody else gets the card (askMaxCard),
   // and under-18s get neither — the standing rule for every Max surface.
-  if (maxAccess && adultUser) {
+  // A guest's scan and a recalled one get no Max at all: observations only.
+  if (maxAccess && adultUser && !c.subjectName && !c.archived) {
     const cc = chatContext();
     if (cc) mountMaxPet(cc);
     // A scan that moved up gets a reaction from him, once he has peeked out.
@@ -332,7 +352,13 @@ function buildTabs(view: "front" | "side"): void {
     b.onclick = () => select(id);
     tabs.appendChild(b);
   };
-  const headline = maxAccess && adultUser ? "Coach Max’s read" : "Overall";
+  // A guest's scan and a recalled one carry no coaching, so the row does not
+  // promise any: the headline tab is a plain Overview and the Plan tab is
+  // absent — the plan is built from the owner's CURRENT scan and goals, and
+  // rendering it over somebody else's face or a weeks-old record would be
+  // advice about the wrong thing.
+  const plain = observationsOnly();
+  const headline = !plain && maxAccess && adultUser ? "Coach Max’s read" : "Overview";
   if (view === "side" && ctx.sideReport) {
     mk("Profile", "side");
     for (const r of ctx.sideReport.regions) {
@@ -345,12 +371,12 @@ function buildTabs(view: "front" | "side"): void {
     // and the only way back was to notice the front/side toggle under the
     // photograph and use it. They belong on both rows.
     mk(headline, "overall");
-    mk("Plan →", "improve");
+    if (!plain) mk("Plan →", "improve");
     return;
   }
   mk(headline, "overall");
   for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
-  mk("Plan →", "improve");
+  if (!plain) mk("Plan →", "improve");
 }
 
 // Overall, front and side side by side, so the merge is legible: two views went
@@ -434,17 +460,20 @@ function actionButton(
 }
 
 function resultActions(merged: boolean, ctx: Ctx): string {
+  // Observations-only screens (a guest's scan, a recalled one) carry no
+  // coaching actions: no plan, no pathway. The measurement actions stay.
+  const plain = Boolean(ctx.subjectName || ctx.archived);
   // Until the profile is in, adding it IS the next step, so it takes the lead
   // slot. A scan is not finished at one view, and putting that in a ghost
   // button next to "Share card" said the opposite.
   const wantsSide = !merged && ctx.onSideProfile;
   const lead = wantsSide
     ? actionButton("btn-side", "Add side profile", "side", "lead")
-    : ctx.onContinue
+    : !plain && ctx.onContinue
       ? actionButton("btn-continue", "Build my pathway", "pathway", "lead")
       : "";
   const support = [
-    actionButton("btn-plan", "See your plan", "plan", "support"),
+    plain ? "" : actionButton("btn-plan", "See your plan", "plan", "support"),
     actionButton("btn-new", wantsSide ? "Start over" : "New photo", "photo", "support"),
     actionButton("btn-share", "Share card", "share", "support"),
     // The voiced analysis: this scan as the narrated video, Coach Max's
@@ -452,7 +481,9 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     // every export is a real synthesis call, so every export is paid for.
     // The price rides on the button until the account holds a credit; the
     // wire-up below swaps the label the moment the balance says otherwise.
-    adultUser ? actionButton("btn-voiced", "Voiced analysis · $2.99", "voice", "support") : "",
+    // Not on a recalled scan: the stored photograph is a 320px thumbnail,
+    // and $2.99 must never buy a soft render.
+    adultUser && !ctx.archived ? actionButton("btn-voiced", "Voiced analysis · $2.99", "voice", "support") : "",
   ].join("");
   const quiet = [
     // The front counterpart of the profile's "Re-verify the points". The
@@ -882,7 +913,12 @@ function showOverall(): void {
 
   body().innerHTML = `
     <div class="reveal overview-reveal">
-      ${maxAccess && adultUser ? maxAnalysisHTML(r, delta, "front", ctx.subjectName, ctx.selfName) : ""}
+      ${
+        ctx.archived
+          ? `<p class="ego">Recalled scan from ${ctx.archivedDate ? new Date(ctx.archivedDate).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : "this device"}. Shown exactly as it was measured. Observations and numbers only.</p>`
+          : ""
+      }
+      ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(r, delta, "front", ctx.subjectName, ctx.selfName) : ""}
       <div class="score-head">
         <div><div class="klabel">${ctx.subjectName ? `${escapeHTML(ctx.subjectName.toUpperCase())} · ` : ""}${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
@@ -949,8 +985,22 @@ function showOverall(): void {
       window.setTimeout(() => (label.textContent = "Copy diagnostics"), 2600);
     };
   }
-  document.getElementById("btn-fedit")?.addEventListener("click", () => ctx?.onEditFront?.());
-  document.getElementById("btn-new")!.onclick = () => ctx?.onNewPhoto();
+  document.getElementById("btn-fedit")?.addEventListener("click", () => {
+    // "Correct the points" corrects the points of the view being LOOKED AT.
+    // The overall tab renders on both sides of the toggle, and on the side
+    // view this button used to open the FRONT editor — the one set of points
+    // the person was not looking at. The side's points are the thirteen they
+    // placed by hand, so that is the editor this opens there.
+    if (tabView === "side" && ctx?.onRedoSide) ctx.onRedoSide();
+    else ctx?.onEditFront?.();
+  });
+  const newBtn = document.getElementById("btn-new")!;
+  newBtn.onclick = () => {
+    // Leaving the report throws away the screen somebody may have spent ten
+    // minutes reading, and this button sits one slip below "See your plan".
+    // A genuine press costs one extra tap; an accidental one costs nothing.
+    if (window.confirm("Start over with a new photo? This report will close.")) ctx?.onNewPhoto();
+  };
   document.getElementById("btn-plan")!.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");
   if (continueBtn) continueBtn.onclick = () => ctx?.onContinue?.();
@@ -989,8 +1039,10 @@ function showOverall(): void {
       .catch(() => undefined);
   }
   // The overview carries the real delta, so a protocol coming due here can be
-  // judged against actual scan movement rather than against nothing.
-  mountProtocolIfDue(ctx?.delta ?? null);
+  // judged against actual scan movement rather than against nothing. The
+  // check-ins are the OWNER'S promises about their own face — never surfaced
+  // over a guest's scan or a recalled record.
+  if (!observationsOnly()) mountProtocolIfDue(ctx?.delta ?? null);
 }
 
 // The $2.99 gate in front of the render. No credit: straight to Checkout,
@@ -1154,7 +1206,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
-      ${maxAccess && adultUser ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
+      ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
         ${curveLegend()}
         <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
@@ -1164,7 +1216,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
     </div>`;
 
   revealBars();
-  mountProtocolIfDue(null);
+  if (!observationsOnly()) mountProtocolIfDue(null);
   wireModeSwitcher(showSide);
   wireSideNav();
 }
@@ -1197,11 +1249,12 @@ function provenance(measured: number): string {
 // you might be trying to fix, and one of them is much cheaper — the
 // photograph is usually fine and it is the points that missed.
 function sideNav(): string {
-  const lead = ctx?.onContinue
+  const plain = observationsOnly();
+  const lead = !plain && ctx?.onContinue
     ? actionButton("sn-continue", "Build my pathway", "pathway", "lead")
     : "";
   const support = [
-    actionButton("sn-plan", "See your plan", "plan", "support"),
+    plain ? "" : actionButton("sn-plan", "See your plan", "plan", "support"),
     ctx?.onSideProfile ? actionButton("sn-retake", "Retake profile", "photo", "support") : "",
     actionButton("sn-share", "Share card", "share", "support"),
   ].join("");
@@ -1929,6 +1982,10 @@ const PRIORITY = ["FIRST PRIORITY", "SECOND PRIORITY", "DO THIS THIRD", "DO THIS
 
 function showImprove(): void {
   if (!ctx) return;
+  // The plan is the OWNER'S plan, built from THEIR current scan and goals.
+  // A guest's scan and a recalled record have no plan to show — the tab is
+  // not rendered for them, and any stray path here lands on the overview.
+  if (observationsOnly()) return select("overall");
   track("plan-opened");
   const { report: r, delta } = ctx;
   setZoom(null);
@@ -2053,7 +2110,9 @@ function showImprove(): void {
   paintCeilingCta(body(), frontPhoto);
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
-  document.getElementById("btn-again")!.onclick = () => ctx?.onNewPhoto();
+  document.getElementById("btn-again")!.onclick = () => {
+    if (window.confirm("Scan another face? This report will close.")) ctx?.onNewPhoto();
+  };
   const upgrade = document.getElementById("btn-upgrade");
   if (upgrade) upgrade.onclick = () => ctx?.onUpgrade?.();
   const edit = document.getElementById("goal-edit");
@@ -2169,7 +2228,7 @@ export function setMaxAccess(value: boolean): void {
 // mount decision had already been taken with the flag still false.
 function syncMaxSurfaces(): void {
   if (!ctx) return;
-  if (maxAccess && adultUser) {
+  if (maxAccess && adultUser && !observationsOnly()) {
     const cc = chatContext();
     if (cc) mountMaxPet(cc);
   } else {
@@ -2179,7 +2238,7 @@ function syncMaxSurfaces(): void {
   // row has no overall tab to rename.
   if (tabView === "front") {
     const tab = ctx.analysis.querySelector<HTMLButtonElement>('.rtab[data-id="overall"]');
-    if (tab) tab.textContent = maxAccess && adultUser ? "Coach Max’s read" : "Overall";
+    if (tab) tab.textContent = maxAccess && adultUser && !observationsOnly() ? "Coach Max’s read" : "Overview";
   }
   // Re-render the open tab if it is one whose content keys on the flags: the
   // overview carries Max's analysis, the plan carries the CTA card and the

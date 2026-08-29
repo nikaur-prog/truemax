@@ -1784,6 +1784,12 @@ body.funnel-open { overflow: hidden; }
 .viewnote.done { color: var(--acc); }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--acc); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
+/* The rejected-photo decision row. Buttons, not a footnote: retake leads,
+   the override sits beside it at full button weight so the person who knows
+   the scanner is wrong is not asked to hunt for an underlined phrase. */
+.reject-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.reject-actions .btn { font-size: 13.5px; padding: 11px 18px; }
+
 /* Live side-profile capture, layered over the same frame the still will use.
    The frame is given an explicit portrait ratio while live, because with no
    photo loaded yet the canvas inside it has no intrinsic size and the box
@@ -4907,10 +4913,25 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   @media (prefers-reduced-motion: reduce) {
     .pane-photo.shrunk .face-frame .zoomable canvas { transition: none; }
   }
-  /* The mesh is drawn to the photo's full geometry, so once the photo is
-     cropped the two no longer line up. At this size the overlay is noise
-     anyway. */
-  .pane-photo.shrunk #overlay-canvas { display: none; }
+  /* The overlay stays VISIBLE in the strip, cropped exactly like the photo.
+     It used to be display:none here, on the theory that the mesh no longer
+     lined up once the photo was cropped — but both canvases share the same
+     intrinsic geometry, so giving the overlay the same object-fit crop keeps
+     every line on the anatomy it measures. Hiding it meant that on a phone,
+     tapping a measurement drew its construction onto an invisible canvas:
+     the single best thing on the results screen, silently absent on the
+     platform where nearly everybody is. The strip crop already follows the
+     selected region (--crop-x/--crop-y), so the drawn measurement is also
+     what the strip is looking at. */
+  .pane-photo.shrunk #overlay-canvas {
+    height: 112px;
+    object-fit: cover;
+    object-position: var(--crop-x, center) var(--crop-y, 34%);
+    transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pane-photo.shrunk #overlay-canvas { transition: none; }
+  }
   /* One column here, so the rail has the photo column above it rather than
      beside it and has to clear whatever height that column is currently
      pinned at. ui/scoreStrip.ts measures it — full height before the shrink,
@@ -6312,3 +6333,7 @@ select.q-input { appearance: auto; }
 /* The decision, under the evidence. Full width so the dialog reads as one
    column: the clip, what it is, and whether you want yours. */
 .veg-buy { width: 100%; margin-top: 12px; }
+
+/* The way through the recall sheet: full width at the bottom, after the
+   summary it upgrades. Only rendered when the scan's archive exists. */
+.recall-full { width: 100%; margin-top: 14px; }

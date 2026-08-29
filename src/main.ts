@@ -16,6 +16,9 @@ import {
 } from "./engine/history.js";
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
+import { loadArchive, pruneArchivesTo, saveArchive } from "./engine/scanArchive.js";
+import { closeScanRecall, setScanReopen } from "./ui/scanRecall.js";
+import type { StoredScan } from "./engine/history.js";
 import { maybeAdoptAvatar } from "./engine/avatar.js";
 import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
@@ -1319,7 +1322,143 @@ el.btnNoGlasses.addEventListener("click", () => {
 // is both worse as a first impression and startling on a page people open in
 // public. Explicit intent only.
 
+// ---------------------------------------------------------------------------
+// The leave guard: a finished report is expensive to lose.
+//
+// A refresh, a back-swipe, or a mis-tap on the browser chrome used to throw
+// the whole analysis away silently — and on a phone the back gesture sits a
+// centimetre from where a thumb scrolls. Both exits now ask first, only while
+// a report is actually on screen: the guard arms when results render and
+// disarms the moment the person deliberately starts over, so the landing page
+// and the capture flow stay exactly as cheap to leave as they should be.
+//
+// Two mechanisms because the browser splits the exits in two. beforeunload
+// covers refresh, tab close and typed navigation with the browser's own
+// dialog. The back button is a history pop, which beforeunload does not see —
+// so arming pushes one sentinel history entry, and popping it while guarded
+// asks in words. Declining re-pushes the sentinel; accepting steps back past
+// where the sentinel sat.
+// ---------------------------------------------------------------------------
+let leaveGuard = false;
+let guardEntryPushed = false;
+
+function armLeaveGuard(): void {
+  leaveGuard = true;
+  if (!guardEntryPushed) {
+    try {
+      history.pushState({ tmReport: true }, "");
+      guardEntryPushed = true;
+    } catch {
+      /* history unavailable: beforeunload still covers refresh and close */
+    }
+  }
+}
+
+function disarmLeaveGuard(): void {
+  leaveGuard = false;
+}
+
+window.addEventListener("beforeunload", (event) => {
+  if (!leaveGuard) return;
+  event.preventDefault();
+  // Ignored by modern browsers in favour of their own wording; required by
+  // older ones for the dialog to appear at all.
+  event.returnValue = "";
+});
+
+window.addEventListener("popstate", () => {
+  if (!leaveGuard) {
+    guardEntryPushed = false;
+    return;
+  }
+  if (window.confirm("Leave this report? It closes when you leave the page.")) {
+    disarmLeaveGuard();
+    guardEntryPushed = false;
+    history.back();
+  } else {
+    try {
+      history.pushState({ tmReport: true }, "");
+    } catch {
+      guardEntryPushed = false;
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Reopening an archived scan as the full interactive report.
+//
+// The recall sheet stays what it is — the summary — and this is the way
+// through it: the stored report, landmarks and side points re-enter the same
+// renderResults the live flow uses, so the hover-to-draw measurements, the
+// region tabs and the metric drill-down all work on a scan taken weeks ago.
+// The photographs are the stored 320px thumbnails, which is soft on a big
+// screen and irrelevant to the overlays: landmarks are normalised, so every
+// line lands on the anatomy at any resolution.
+//
+// Rendered as ctx.archived: observations and numbers only. Max reads the
+// present and the plan is built from the current scan, so neither speaks
+// over a record — the same gating a guest's scan gets.
+// ---------------------------------------------------------------------------
+function canvasFromDataURL(url: string): Promise<HTMLCanvasElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext("2d")!.drawImage(img, 0, 0);
+      resolve(c);
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+async function reopenArchivedScan(scan: StoredScan): Promise<void> {
+  const key = scanStorageKey(scan);
+  const [archive, photos] = await Promise.all([loadArchive(key), loadPhotos(key)]);
+  if (!archive) return;
+  const front = photos?.front ? await canvasFromDataURL(photos.front) : null;
+  if (!front) {
+    // The archive survived a photo prune, or the thumbnail never saved. The
+    // report cannot be walked without the face it was measured on.
+    window.alert("The photograph for this scan is no longer stored on this device, so it cannot be reopened in full.");
+    return;
+  }
+  const side = photos?.side ? await canvasFromDataURL(photos.side) : null;
+  closeHistory();
+  closeScanRecall();
+  // The results machinery lives on the main screen; a reopen from the landing
+  // page has to reveal it exactly as a finished analysis would.
+  el.main.classList.remove("hidden");
+  el.frame.classList.remove("scanning");
+  el.capRight.textContent = "RECALLED";
+  el.status.textContent = "";
+  renderResults({
+    report: archive.report,
+    delta: null,
+    landmarks: archive.landmarks,
+    photoW: front.width,
+    photoH: front.height,
+    analysis: el.analysis,
+    zoomable: el.zoomable,
+    overlay: el.overlayCanvas,
+    onNewPhoto: () => resetToUpload(),
+    subjectName: archive.subjectName,
+    sideReport: archive.sideReport ?? undefined,
+    sidePhoto: side ?? undefined,
+    sidePoints: archive.sidePoints ?? undefined,
+    frontPhoto: front,
+    archived: true,
+    archivedDate: archive.date,
+  });
+  el.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+setScanReopen((scan) => void reopenArchivedScan(scan));
+
 function resetToUpload(): void {
+  disarmLeaveGuard();
   scanGeneration++;
   scanSession.reset();
   clearPendingAnalysis();
@@ -1511,26 +1650,37 @@ async function handleCanvas(
   if (rejection) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "PHOTO NOT VALID";
-    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}${
-      coveringRejection
-        ? ` <button type="button" class="linkish" id="covering-override">Nothing covering your face? Use this photo</button>`
-        : ""
-    }`;
+    // Real buttons, not a footnote. The old screen offered the override as a
+    // small text link and no retake at all — the two things a person actually
+    // does from here are "take a better photo" and, on the overridable check,
+    // "the scanner is wrong, analyse it". Both are decisions, so both get
+    // buttons, and the screen holds until one is pressed.
+    el.status.innerHTML = `<b>${rejection.title}</b> ${rejection.detail}
+      <span class="reject-actions">
+        <button type="button" class="btn pri" id="reject-retake">Retake the photo</button>
+        ${
+          coveringRejection
+            ? `<button type="button" class="btn gho" id="covering-override">Nothing is covering, analyse it anyway</button>`
+            : ""
+        }
+      </span>`;
     el.overlayCanvas.getContext("2d")?.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
+    document.getElementById("reject-retake")?.addEventListener("click", () => {
+      if (scanIsCurrent(token, generation)) resetToUpload();
+    });
     if (coveringRejection) {
-      // Re-enter the same pipeline with the check waived for one pass. No
-      // timeout here: a screen with a decision on it must not dissolve while
-      // somebody is reading it.
+      // Re-enter the same pipeline with the check waived for one pass. The
+      // override exists because the covering check is a heuristic over a
+      // segmentation model and the person can see their own head — on this
+      // one question they outrank the model.
       document.getElementById("covering-override")?.addEventListener("click", () => {
         if (!scanIsCurrent(token, generation)) return;
         skipCoveringCheck = true;
         void handleCanvas(src, exifOrientation, generation, token, extraFrames);
       });
-      return;
     }
-    setTimeout(() => {
-      if (scanIsCurrent(token, generation)) resetToUpload();
-    }, 4200);
+    // No auto-dissolve in either case: a screen with a decision on it must
+    // not vanish while somebody is reading it.
     return;
   }
 
@@ -1790,6 +1940,8 @@ async function runFullAnalysis(
     // nulls, and the IndexedDB write below is a real gap — an owner tapping
     // "New photo" mid-write must not turn a guest's scan into "not a guest".
     const guest = scanSubject !== null;
+    const subjectName = scanSubject?.name;
+    const sidePoints = lastSide?.points ?? null;
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
@@ -1801,12 +1953,26 @@ async function runFullAnalysis(
     // (cross-tab auth swaps the scope synchronously), and this scan's face
     // must not become THAT account's anything.
     if (!scanSession.isCurrent(token, owner)) return;
+    // Everything the recall sheet needs to REOPEN this scan interactively —
+    // the full report, the landmarks, the side points — beside the thumbnails
+    // and pruned by the same history list. See engine/scanArchive.ts.
+    await saveArchive(token.scanId, {
+      report,
+      sideReport: sideReport ?? null,
+      landmarks,
+      sidePoints,
+      subjectName,
+      date: new Date().toISOString(),
+    });
+    if (!scanSession.isCurrent(token, owner)) return;
     // The first front photo a member scans OF THEMSELVES becomes their
     // profile picture. A guest's face must never become the owner's avatar,
     // and an avatar already chosen is never overwritten from here — settings
     // owns changes.
     if (!guest) maybeAdoptAvatar(frontShot);
-    await pruneTo(readAllHistory().map(scanStorageKey));
+    const keep = readAllHistory().map(scanStorageKey);
+    await pruneTo(keep);
+    await pruneArchivesTo(keep);
   })();
 
   el.frame.classList.remove("scanning");
@@ -2017,6 +2183,7 @@ async function runFullAnalysis(
     },
   };
   track("results-shown");
+  armLeaveGuard();
   // The report does not cut in — it arrives. The pass has just spent ten
   // seconds moving smoothly over the face; a hard innerHTML swap at the end
   // of it is the one jolt that would undo all of that. The class fades and

@@ -29,12 +29,13 @@ import { activeScanOwner } from "./scanScope.js";
 
 const DB_NAME = "truemax";
 const STORE = "scanPhotos";
-// MUST match engine/faceLibrary.ts, which shares this database. Opening an
-// IndexedDB that already sits at a higher version throws VersionError, so if
-// these two ever disagree, whichever module opens second silently loses its
-// feature — thumbnails vanish, or the face library does, depending on load
-// order. Bumped to 2 when the library was added.
-const DB_VERSION = 2;
+// MUST match engine/faceLibrary.ts and engine/scanArchive.ts, which share
+// this database. Opening an IndexedDB that already sits at a higher version
+// throws VersionError, so if these ever disagree, whichever module opens
+// second silently loses its feature — thumbnails vanish, or the face library
+// does, depending on load order. Bumped to 2 when the library was added, 3
+// when scan archives were.
+const DB_VERSION = 3;
 
 // Long edge of the stored thumbnail, in pixels.
 const THUMB = 320;
@@ -72,6 +73,7 @@ function open(): Promise<IDBDatabase | null> {
         // version mismatch does.
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
         if (!db.objectStoreNames.contains("faceLibrary")) db.createObjectStore("faceLibrary");
+        if (!db.objectStoreNames.contains("scanArchive")) db.createObjectStore("scanArchive");
       };
       req.onsuccess = () => resolve(req.result);
       // Private browsing, disabled storage, quota refusal. All of these mean
