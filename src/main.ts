@@ -42,7 +42,7 @@ import { analyzeSide } from "./engine/scoring.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
-import { isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
+import { cameraCount, isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
 import { mountDemoReel } from "./ui/demoReel.js";
 import { closeHistory, openHistory } from "./ui/historyView.js";
 import { loadPhotos } from "./engine/photoStore.js";
@@ -210,6 +210,7 @@ const el = {
   ovalFrame: document.getElementById("oval-frame")!,
   camVideo: document.getElementById("cam-video") as HTMLVideoElement,
   camGuide: document.getElementById("cam-guide") as HTMLCanvasElement,
+  camSwap: document.getElementById("cam-swap") as HTMLButtonElement,
   camHint: document.getElementById("cam-hint")!,
   camHintTitle: document.getElementById("cam-hint-title")!,
   camHintDetail: document.getElementById("cam-hint-detail")!,
@@ -1030,45 +1031,53 @@ let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
 
 // ---------------------------------------------------------------------------
-// The frame travelling to the middle.
+// The full-screen viewfinder.
 //
-// On a wide screen the landing is two columns — the argument on the left, the
-// demo on the right — and the moment the camera opens the person stops reading
-// and starts aiming, so the frame belongs in the middle at a size worth aiming
-// into. The layout change is pure CSS; the MOVEMENT is not, because a grid
-// track cannot animate from a pixel width into a flexible one and snaps
-// instead. The frame appeared in the centre and only then grew, which reads as
-// a jump followed by an animation rather than as one gesture.
+// The camera used to open inside the landing card, and the landing paid for it
+// twice: the headline collapsed to make room (which fought scroll anchoring on
+// phones — the directive pill kept ending up above the viewport), and the
+// preview itself was a postage stamp of the one thing the person is trying to
+// aim. Now the capture stage takes the whole screen — a viewfinder, the way a
+// camera app does it — with the capture, upload and cancel controls floating
+// translucent on the glass. Nothing behind it moves, so there is nothing for
+// scroll anchoring to fight about.
 //
-// So: FLIP. Measure where the card is, let the class land, measure where it
-// ended up, then start it from the inverse of the difference and release it.
-// The browser animates a transform on the compositor — the smoothest thing
-// available, and the only one that cannot disagree with the final layout,
-// because the final layout is what it was measured against.
-//
-// Called BEFORE the class changes, on both the open and the close, so the
-// journey plays in both directions.
+// The EXPANSION is a FLIP: measure the card where it sits, let the takeover
+// class land, measure the full-screen rectangle it produced, then play the
+// transform from the inverse of the difference. The browser animates on the
+// compositor and cannot disagree with the final layout, because the final
+// layout is what it was measured against. Same trick in reverse on close, so
+// the viewfinder folds back into the card it came from.
 // ---------------------------------------------------------------------------
-function beginCaptureMove(): void {
+function flipStage(applyClass: () => void): void {
   const card = document.getElementById("capture-stage");
-  if (!card || window.innerWidth < 1100) return;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!card) {
+    applyClass();
+    return;
+  }
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    applyClass();
+    return;
+  }
   const first = card.getBoundingClientRect();
-  // Read back on the next frame: the caller applies the class immediately
-  // after this returns, and a microtask would land before style recalculation.
+  applyClass();
+  // Read back on the next frame: style recalculation has happened by then,
+  // where a microtask would land before it.
   requestAnimationFrame(() => {
     const last = card.getBoundingClientRect();
+    if (!first.width || !first.height || !last.width || !last.height) return;
+    const sx = first.width / last.width;
+    const sy = first.height / last.height;
     const dx = first.left + first.width / 2 - (last.left + last.width / 2);
-    if (Math.abs(dx) < 1) return;
-    // The Web Animations API rather than an inline transition, and the reason
-    // is specific: suppressing the inline transition to seat the inverted
-    // position also suppresses the CSS width transition running on the same
-    // element, so the card slid to the middle at its final size — half the
-    // gesture, played twice. WAAPI animates the transform on its own timeline
-    // and leaves the width transition alone, so the card grows AS it travels.
+    const dy = first.top + first.height / 2 - (last.top + last.height / 2);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01)
+      return;
     card.animate(
-      [{ transform: `translateX(${dx.toFixed(1)}px)` }, { transform: "translateX(0)" }],
-      { duration: 620, easing: "cubic-bezier(.22, .61, .36, 1)", fill: "none" },
+      [
+        { transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})` },
+        { transform: "none" },
+      ],
+      { duration: 560, easing: "cubic-bezier(.22, .61, .36, 1)", fill: "none" },
     );
   });
 }
@@ -1160,6 +1169,13 @@ async function openCamera(): Promise<void> {
     });
     // Space or Enter fires the shutter now instead of waiting out the count.
     frontKeyHandler = (e: KeyboardEvent) => {
+      // Escape backs out of the viewfinder — a full-screen surface without an
+      // Escape route reads as a trap on a keyboard machine.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        el.btnCancel.click();
+        return;
+      }
       if (e.key !== " " && e.key !== "Enter") return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
@@ -1169,12 +1185,19 @@ async function openCamera(): Promise<void> {
       el.btnCamera.click();
     };
     window.addEventListener("keydown", frontKeyHandler);
-    beginCaptureMove();
     el.ovalFrame.classList.add("live");
     el.stage.classList.add("live-cam");
-    // Headline and sub collapse so the preview can take the space — the
-    // camera becomes the subject the moment it is granted.
-    el.upload.classList.add("camera-live");
+    // The viewfinder takes the screen. The landing behind it does not move —
+    // no headline collapse, no scroll correction, nothing for scroll anchoring
+    // to fight about; the directive pill is on screen because the whole
+    // interface is.
+    flipStage(() => document.body.classList.add("cam-takeover"));
+    // Offer the switch only when there is something to switch to. The count is
+    // trustworthy here — permission was just granted, so the device list is
+    // fully labeled.
+    void cameraCount().then((n) => {
+      el.camSwap.classList.toggle("hidden", n < 2 || !cam);
+    });
     // Starts on the male silhouette and morphs once the shape vote settles —
     // waiting for the vote would leave the frame empty at the exact moment
     // someone needs help positioning.
@@ -1187,42 +1210,6 @@ async function openCamera(): Promise<void> {
     setCameraLabel("Capture");
     el.btnCamera.disabled = true;
 
-    // Put the preview back at the top of the viewport.
-    //
-    // Nothing here calls scrollIntoView, and that is the point — the scroll is
-    // the browser's, not ours. The headline and the sub both collapse to
-    // max-height 0 the moment `camera-live` lands, which removes several
-    // hundred pixels from ABOVE the button somebody has just tapped. Scroll
-    // anchoring then does exactly what it is designed to do and holds that
-    // button where their thumb left it, which on a phone drags the camera up
-    // under the sticky header. The result is a capture screen whose subject —
-    // the live preview — is the one thing off screen.
-    //
-    // Corrected REPEATEDLY across the collapse, not once. The single-frame
-    // version measured a layout the CSS transition had not finished producing:
-    // one rAF after `camera-live` the headline still holds most of its height,
-    // the measurement says "nothing to correct", and then the collapse
-    // completes and scroll anchoring drags the page down — which is how the
-    // directive pill ("Move up", "Hold still") ended up above the viewport on
-    // a phone, on the one screen where that pill is the whole interface. So
-    // the correction re-checks through the transition window and pins the
-    // frame's top a breath below the header, in BOTH directions: wherever the
-    // page was, the directive is on screen when the camera is.
-    //
-    // Hard jumps, not smooth ones. These are corrections of movement the
-    // viewer never asked for, and animating them would read as the page
-    // moving on its own a second time.
-    {
-      const AIR = 72;
-      const settle = (deadline: number) => {
-        const rect = el.stage.getBoundingClientRect();
-        if (Math.abs(rect.top - AIR) > 8) {
-          window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - AIR), behavior: "auto" });
-        }
-        if (performance.now() < deadline) requestAnimationFrame(() => settle(deadline));
-      };
-      requestAnimationFrame(() => settle(performance.now() + 700));
-    }
   } catch {
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";
@@ -1242,10 +1229,10 @@ async function closeCamera(): Promise<void> {
   cam?.stop();
   cam = null;
   lastCheck = null;
-  beginCaptureMove();
+  flipStage(() => document.body.classList.remove("cam-takeover"));
+  el.camSwap.classList.add("hidden");
   el.ovalFrame.classList.remove("live", "ready", "tracking");
   el.stage.classList.remove("live-cam");
-  el.upload.classList.remove("camera-live");
   el.camLight.classList.add("hidden");
   el.btnCancel.classList.add("hidden");
   el.btnNoGlasses.classList.add("hidden");
@@ -1315,6 +1302,15 @@ el.btnCamera.addEventListener("click", async () => {
 
 el.btnCancel.addEventListener("click", async () => {
   await closeCamera();
+});
+
+el.camSwap.addEventListener("click", async () => {
+  if (!cam) return;
+  // Disabled while the switch is in flight: a second tap mid-switch would race
+  // two getUserMedia calls for one camera.
+  el.camSwap.disabled = true;
+  await cam.swap();
+  el.camSwap.disabled = false;
 });
 
 el.btnNoGlasses.addEventListener("click", () => {

@@ -20,6 +20,25 @@ import { scopedStorageKey } from "./scanScope.js";
 
 const KEY = () => scopedStorageKey("truemax:avatar");
 
+// The header's account disc renders whatever this module holds, and it is
+// painted at auth time — which on the very first scan is BEFORE any avatar
+// exists. Announcing every write lets that disc (or anything else showing the
+// face) repaint the moment the first front capture is adopted, instead of the
+// picture only appearing after a reload.
+const CHANGE_EVENT = "truemax:avatar-changed";
+
+export function onAvatarChange(listener: () => void): void {
+  window.addEventListener(CHANGE_EVENT, listener);
+}
+
+function announceAvatarChange(): void {
+  try {
+    window.dispatchEvent(new Event(CHANGE_EVENT));
+  } catch {
+    /* no window (tests) — nothing is listening anyway */
+  }
+}
+
 export function loadAvatar(): string | null {
   try {
     const key = KEY();
@@ -34,7 +53,10 @@ export function loadAvatar(): string | null {
 export function saveAvatar(dataUrl: string): void {
   try {
     const key = KEY();
-    if (key) localStorage.setItem(key, dataUrl);
+    if (key) {
+      localStorage.setItem(key, dataUrl);
+      announceAvatarChange();
+    }
   } catch {
     /* storage refused — the avatar just doesn't persist */
   }
@@ -43,7 +65,10 @@ export function saveAvatar(dataUrl: string): void {
 export function clearAvatar(): void {
   try {
     const key = KEY();
-    if (key) localStorage.removeItem(key);
+    if (key) {
+      localStorage.removeItem(key);
+      announceAvatarChange();
+    }
   } catch {
     /* nothing to clear */
   }

@@ -20,6 +20,7 @@ import type { AuthMode } from "./authForm.js";
 import { announceMembershipBrand } from "./membershipBrand.js";
 import { openTrialFunnel } from "./onboardingFunnel.js";
 import { isNativeApp } from "../engine/platform.js";
+import { loadAvatar, onAvatarChange } from "../engine/avatar.js";
 
 // ---------------------------------------------------------------------------
 // The account modal, and the header button that opens it.
@@ -149,6 +150,29 @@ export function mountAccountButton(): void {
   // this also restores a returning, already-signed-in visitor.
   const checkoutResult = consumeCheckoutResult();
   let checkoutHandled = false;
+  // The disc shows the person's own face when the account has one — that is
+  // the profile picture the scan adopts — and the email initial until then.
+  // Painted from a helper because it has two triggers: the auth change, and
+  // the avatar being written LATER (the first scan of a fresh account adopts
+  // its face after this button already rendered).
+  let signedInEmail: string | null = null;
+  const paintDisc = () => {
+    if (!signedInEmail) return;
+    const face = loadAvatar();
+    if (face) {
+      const img = document.createElement("img");
+      img.className = "acct-disc acct-disc-face";
+      img.src = face;
+      img.alt = "";
+      btn.replaceChildren(img);
+    } else {
+      const disc = document.createElement("span");
+      disc.className = "acct-disc";
+      disc.textContent = initials(signedInEmail);
+      btn.replaceChildren(disc);
+    }
+  };
+  onAvatarChange(paintDisc);
   onAuthChange((user) => {
     if (overlayUserId && overlayUserId !== user?.id) close();
     if (user?.email) {
@@ -157,11 +181,10 @@ export function mountAccountButton(): void {
       btn.classList.add("in");
       btn.title = user.email;
       btn.setAttribute("aria-label", `Open account for ${user.email}`);
-      const disc = document.createElement("span");
-      disc.className = "acct-disc";
-      disc.textContent = initials(user.email);
-      btn.replaceChildren(disc);
+      signedInEmail = user.email;
+      paintDisc();
     } else {
+      signedInEmail = null;
       signupBtn.classList.remove("hidden");
       btn.classList.remove("in");
       btn.title = "";
@@ -302,7 +325,12 @@ function renderSignedIn(
   body.innerHTML = `
     <h2>Your account</h2>
     <div class="acct-who">
-      <span class="acct-disc lg">${initials(user.email || "?")}</span>
+      ${(() => {
+        const face = loadAvatar();
+        return face
+          ? `<img class="acct-disc lg acct-disc-face" src="${face}" alt="" />`
+          : `<span class="acct-disc lg">${initials(user.email || "?")}</span>`;
+      })()}
       <div>
         <b>${escapeHtml(user.email || "Signed in")}</b>
         <span>Your membership is linked here. Scan history stays on this device for now.</span>

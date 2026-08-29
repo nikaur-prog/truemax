@@ -49,6 +49,7 @@ import { renderScoreStrip } from "./scoreStrip.js";
 import { armMaxPetReveal, mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
+import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
 
 interface Ctx {
   report: Report;
@@ -445,6 +446,7 @@ const ACT_ICON: Record<string, string> = {
   points: `<circle cx="7" cy="8" r="1.8"/><circle cx="17.2" cy="12" r="1.8"/><circle cx="9" cy="17.4" r="1.8"/><path d="M8.6 8.7 15.6 11M15.9 13.4 10.4 16.4" stroke-dasharray="1.6 1.8"/>`,
   copy: `<rect x="9" y="9" width="11" height="11" rx="2.4"/><path d="M15 9V6.4a2 2 0 0 0-2-2H6.4a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/>`,
   voice: `<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v2.6"/>`,
+  gauge: `<path d="M4.5 18a8.5 8.5 0 1 1 15 0"/><path d="m12 14 3.4-4.6"/><circle cx="12" cy="14.5" r="1.4"/>`,
 };
 
 function actionButton(
@@ -497,6 +499,17 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     // longer and the flow harder to guess.
     ctx.onEditFront ? actionButton("btn-fedit", "Correct the points", "points", "quiet") : "",
     actionButton("btn-diag", "Copy diagnostics", "copy", "quiet"),
+    // The calibration ear. Quiet on purpose: it is for the person who already
+    // disagrees, not an invitation to doubt the number. Own live scans only —
+    // a guest's face or a recalled record is not the owner's self-assessment.
+    !plain && ctx.capture?.scanId
+      ? actionButton(
+          "btn-selfscore",
+          selfScoreSent(ctx.capture.scanId) ? "Your score is recorded" : "Think we scored you wrong?",
+          "gauge",
+          "quiet",
+        )
+      : "",
   ].join("");
 
   return `<div class="ractions">
@@ -983,6 +996,17 @@ function showOverall(): void {
       const label = diagBtn.querySelector("span") ?? diagBtn;
       label.textContent = copied ? "Copied" : "Copy from the box";
       window.setTimeout(() => (label.textContent = "Copy diagnostics"), 2600);
+    };
+  }
+  const selfScoreBtn = document.getElementById("btn-selfscore") as HTMLButtonElement | null;
+  if (selfScoreBtn) {
+    selfScoreBtn.onclick = () => {
+      const scanId = ctx?.capture?.scanId;
+      if (!ctx || !scanId || selfScoreSent(scanId)) return;
+      openSelfScoreDialog({ scanId, ourScore: ctx.report.overall, sex: ctx.report.sex }, () => {
+        const label = selfScoreBtn.querySelector("span") ?? selfScoreBtn;
+        label.textContent = "Your score is recorded";
+      });
     };
   }
   document.getElementById("btn-fedit")?.addEventListener("click", () => {
