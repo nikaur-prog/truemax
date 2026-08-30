@@ -87,13 +87,24 @@ export function clickIdFrom(metadata: Record<string, string> | null | undefined)
 const ENDPOINT = "https://business-api.tiktok.com/open_api/v1.3/event/track/";
 
 /**
- * How long the conversion report may hold the webhook open.
+ * How long the conversion report may hold the webhook open. IN TOTAL.
  *
- * Generous for a single small POST and far short of the platform's own
- * function ceiling, so a slow ad network costs one conversion rather than a
- * failed webhook that Stripe then retries.
+ * A budget shared across both attempts rather than a timeout applied to each,
+ * and the difference is not pedantry: settle() awaits this before the response
+ * is constructed, so Stripe has NOT been answered while it runs. Three seconds
+ * per attempt with one retry is a six second bound on a webhook, described in
+ * the code as three.
+ *
+ * Sharing the deadline keeps the retry worth having, because the failure it
+ * exists for is a fast one: a 500 or a rejected code comes back in
+ * milliseconds and leaves nearly the whole budget for a second try. Only a
+ * timeout consumes the budget, and a timeout is the case where retrying
+ * immediately was least likely to help anyway.
  */
-const TIMEOUT_MS = 3000;
+const TOTAL_BUDGET_MS = 3000;
+
+/** Below this there is not enough left for a second attempt to be worth making. */
+const MIN_RETRY_MS = 300;
 
 /**
  * Tell TikTok a purchase happened, server side.
@@ -142,9 +153,11 @@ export async function reportPurchase(opts: {
   // still loses the conversion, and closing that properly needs a table, a
   // retry worker and a migration. Left as a decision rather than built
   // silently.
-  const first = await attemptReport(pixel, token, opts);
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const first = await attemptReport(pixel, token, opts, deadline);
   if (first !== "failed") return first;
-  return attemptReport(pixel, token, opts);
+  if (deadline - Date.now() < MIN_RETRY_MS) return "failed";
+  return attemptReport(pixel, token, opts, deadline);
 }
 
 async function attemptReport(
@@ -158,6 +171,7 @@ async function attemptReport(
     currency: string;
     occurredAt?: number;
   },
+  deadline: number,
 ): Promise<"sent" | "skipped" | "failed"> {
 
   // BOUNDED, because an unbounded call to somebody else's server inside a
@@ -167,7 +181,7 @@ async function attemptReport(
   // fulfilment now, so a timeout costs one unreported conversion and nothing
   // else, which is the correct thing for it to cost.
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(), Math.max(0, deadline - Date.now()));
 
   try {
     const response = await fetch(ENDPOINT, {
@@ -179,7 +193,13 @@ async function attemptReport(
         event_source_id: pixel,
         data: [
           {
-            event: "CompletePayment",
+            // TikTok's CURRENT standard event name. It was CompletePayment,
+            // and the old name is still accepted and mapped on their side, so
+            // this is not a conversion-loss fix. It is that a configuration
+            // being set up now should be set up against the standard as it
+            // stands, or the next person reading either end has to know the
+            // history to see that the two agree.
+            event: "Purchase",
             // Seconds, and the payment's own time rather than now: a webhook
             // retried an hour later must not report an hour-late conversion.
             event_time: Math.floor((opts.occurredAt ?? Date.now()) / 1000),

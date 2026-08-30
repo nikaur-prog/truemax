@@ -141,7 +141,12 @@ test("the payload carries a click id and money, and no person", async () => {
     // looked at what came back, so it passed while the function reported that
     // exact response as a success.
     assert.equal(outcome, "sent");
-    const body = sent as unknown as { data: [{ properties: { value: number; currency: string }; event_time: number; event_id: string; user: Record<string, unknown> }] };
+    const body = sent as unknown as { data: [{ event: string; properties: { value: number; currency: string }; event_time: number; event_id: string; user: Record<string, unknown> }] };
+    // TikTok's current standard name. It was CompletePayment, and the old name
+    // is still accepted and mapped, so this is not a conversion-loss fix: it is
+    // that a configuration being set up now should match the standard as it
+    // stands, rather than needing its history known to see that both ends agree.
+    assert.equal(body.data[0].event, "Purchase");
     // Stripe counts minor units; TikTok wants the major one.
     assert.equal(body.data[0].properties.value, 11.99);
     assert.equal(body.data[0].properties.currency, "USD");
@@ -268,4 +273,49 @@ test("a transient failure is retried once, and the retry cannot double-count", a
 
 test("a sustained failure stops after the retry rather than looping", async () => {
   assert.equal(await outcomeFor({ code: 40100 }), "failed");
+});
+
+test("the retry shares one budget rather than doubling the bound", async () => {
+  // settle() awaits this before the response is constructed, so Stripe has NOT
+  // been answered while it runs. A timeout applied per attempt with one retry
+  // is a six second hold on a payment webhook, described in the code as three.
+  const source = (await import("node:fs")).readFileSync(
+    new URL("./_attribution.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /const deadline = Date\.now\(\) \+ TOTAL_BUDGET_MS/);
+  assert.match(source, /deadline - Date\.now\(\) < MIN_RETRY_MS/, "no retry without budget left");
+  assert.match(source, /deadline - Date\.now\(\)/, "each attempt is bounded by what is LEFT");
+  assert.doesNotMatch(source, /setTimeout\(\(\) => abort\.abort\(\), TOTAL_BUDGET_MS\)/);
+});
+
+test("a first attempt that eats the whole budget is not retried", async () => {
+  process.env.TIKTOK_PIXEL_ID = "test-pixel";
+  process.env.TIKTOK_EVENTS_TOKEN = "test-token";
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  console.error = () => {};
+  let calls = 0;
+  // Consumes the budget and then fails, exactly as a timeout does.
+  globalThis.fetch = (() => {
+    calls++;
+    return new Promise((resolve) =>
+      setTimeout(() => resolve(new Response("{}", { status: 500 })), 3100),
+    );
+  }) as typeof fetch;
+  try {
+    const result = await reportPurchase({
+      eventId: "evt_slow",
+      ttclid: "ABC",
+      valueMinor: 299,
+      currency: "usd",
+    });
+    assert.equal(result, "failed");
+    assert.equal(calls, 1, "the budget was spent, so there is nothing left to retry with");
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realError;
+    delete process.env.TIKTOK_PIXEL_ID;
+    delete process.env.TIKTOK_EVENTS_TOKEN;
+  }
 });

@@ -219,3 +219,45 @@ test("the decision itself is exhaustive over the three cases", () => {
   assert.equal(attributionActionFor("INITIAL_SESSION", null), "leave");
   assert.equal(attributionActionFor("TOKEN_REFRESHED", null), "leave");
 });
+
+// WHAT THE PRIVACY PAGE SAYS HAS TO BE WHAT THE CODE DOES.
+//
+// The page said that without clicking an advert nothing is stored and nothing
+// is sent. The second half was true; the first was not. captureAttribution
+// writes on ANY campaign parameter, so a newsletter or bio link stores a record
+// and the checkout copies it to Stripe. Only the report to TikTok is gated on a
+// click identifier. The page now describes all three separately, and these pin
+// the behaviour it describes so the two cannot drift apart again.
+
+test("a newsletter link with no click id IS stored", () => {
+  reset();
+  captureAttribution("?utm_source=newsletter&utm_campaign=aug");
+  const a = attributionForCheckout();
+  assert.equal(a?.source, "newsletter", "any campaign parameter is a touch");
+  assert.equal(a?.ttclid, undefined, "and it carries no click identifier");
+  assert.ok(store.size > 0, "the privacy page must not claim nothing is stored");
+});
+
+test("a link with no campaign parameters at all stores nothing", () => {
+  reset();
+  captureAttribution("");
+  captureAttribution("?ref=friend&fbclid=xyz");
+  assert.equal(store.size, 0, "which is most visits, and the page says so");
+});
+
+test("only a click identifier can produce a report to TikTok", async () => {
+  // The client half of the promise. The server half is asserted in
+  // api/_attribution.test.ts, where reportPurchase returns "skipped" with no
+  // ttclid or ttp even when credentials exist.
+  reset();
+  captureAttribution("?utm_source=newsletter&utm_campaign=aug");
+  const { clickIdFrom } = await import("../../api/_attribution.js");
+  const { attributionMetadata } = await import("../../api/_attribution.js");
+  const meta = attributionMetadata(attributionForCheckout());
+  assert.equal(meta.attr_src, "newsletter", "the placement does reach Stripe");
+  assert.deepEqual(
+    clickIdFrom(meta),
+    { ttclid: undefined, ttp: undefined },
+    "and there is nothing for the TikTok report to match on",
+  );
+});
