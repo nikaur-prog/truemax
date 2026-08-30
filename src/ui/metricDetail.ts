@@ -38,7 +38,27 @@ import { metricRead } from "../engine/metricReads.js";
 // ---------------------------------------------------------------------------
 
 export interface MetricDetailOpts {
+  /**
+   * The region the deck was opened FROM, used only where a metric of its own
+   * cannot say. Every per-measurement label, zoom and comparison is taken from
+   * that measurement's own `def.region` instead, because a deck no longer has
+   * to come from one region: tapping a pillar opens the measurements that
+   * build it, and those are spread across the face by definition.
+   */
   region: RegionId;
+  /**
+   * Prefix for the eyebrow, naming what the deck IS when it is not a region.
+   * "HARMONY" over "MIDFACE · FRONT", so the card says which grouping you
+   * opened and which part of the face you are looking at.
+   */
+  deckLabel?: string;
+  /**
+   * One line about the DECK, held above the readout while you step through it.
+   * A pillar needs this and a region does not: "Jaw" is self-explanatory and
+   * "Dimorphism" is a word people will read as a compliment unless it is told
+   * plainly what it measures.
+   */
+  deckNote?: string;
   /** The measured metrics of the deck being browsed, in display order. */
   metrics: ScoredMetric[];
   index: number;
@@ -273,7 +293,7 @@ function stageZoom(m: ScoredMetric, view: "side" | "front"): ZoomSpec {
   if (opts.landmarks) {
     const b = measurementBounds(m, opts.landmarks);
     if (b) return zoomToBounds(b, { fill: 0.6, min: 1.35, max: 2.8 });
-    const z = zoomFor(opts.region, opts.landmarks);
+    const z = zoomFor(m.def.region ?? opts.region, opts.landmarks);
     return { scale: z.scale, originX: z.originX, originY: z.originY };
   }
   return { scale: 1.15, originX: 50, originY: 50 };
@@ -331,8 +351,15 @@ function showAt(next: number): void {
   // Header
   active.querySelector(".mdx-count")!.textContent = `${index + 1} / ${opts.metrics.length}`;
   active.querySelector(".mdx-title")!.textContent = m.def.name;
+  const shownRegion = m.def.region ?? opts.region;
   active.querySelector(".mdx-eyebrow")!.textContent =
-    `${REGION_NAMES[opts.region].toUpperCase()} · ${view === "side" ? "PROFILE" : "FRONT"}`;
+    [
+      opts.deckLabel?.toUpperCase(),
+      REGION_NAMES[shownRegion]?.toUpperCase() ?? shownRegion.toUpperCase(),
+      view === "side" ? "PROFILE" : "FRONT",
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
   // Stage: pan the camera. Swapping photographs cannot pan, so that one case
   // dips through black instead — a cut, not a glitch.
@@ -389,7 +416,8 @@ function renderTab(): void {
     b.classList.toggle("on", b.dataset.tab === tab);
   }
   const body = active.querySelector<HTMLElement>(".mdx-tabbody")!;
-  body.innerHTML = tab === "overview" ? overviewHTML(m, opts.sex) : celebsHTML(m, opts.region, opts.sex);
+  body.innerHTML =
+    tab === "overview" ? overviewHTML(m, opts.sex) : celebsHTML(m, m.def.region ?? opts.region, opts.sex);
 }
 
 export function openMetricDetail(o: MetricDetailOpts): void {
@@ -419,6 +447,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
         <button class="mdx-step mdx-next" aria-label="Next measurement">›</button>
       </div>
       <div class="mdx-info">
+        <p class="mdx-decknote"></p>
         <div class="mdx-readout">
           <b class="mdx-value"></b>
           <span class="mdx-chip mdx-score"></span>
@@ -466,6 +495,10 @@ export function openMetricDetail(o: MetricDetailOpts): void {
     downX = null;
     if (Math.abs(dx) > 44) step(dx < 0 ? 1 : -1);
   });
+
+  const note = wrap.querySelector<HTMLElement>(".mdx-decknote")!;
+  note.textContent = o.deckNote ?? "";
+  note.hidden = !o.deckNote;
 
   document.addEventListener("keydown", onKey);
   // The report behind a fixed dialog must not scroll under it.

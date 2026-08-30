@@ -1013,6 +1013,41 @@ body.funnel-open { overflow: hidden; }
 .pillar span { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.12em; color: var(--mut); display: block; margin: 5px 0 8px; }
 .pillar .pbar { height: 2.5px; border-radius: 99px; background: var(--soft); overflow: hidden; }
 .pillar .pbar i { display: block; height: 100%; background: var(--acc); width: 0; transition: width 0.9s cubic-bezier(0.2, 0.6, 0.2, 1); }
+/* A pillar you can open. It stays a card rather than becoming a control: the
+   regions lead the report and four buttons across the top of it would read as
+   the primary navigation, which they are not. The affordance is the arrow and
+   the lift, nothing louder. */
+button.pillar {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+button.pillar::after {
+  content: "›";
+  position: absolute;
+  top: 9px;
+  right: 11px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--mut);
+  opacity: 0.45;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+button.pillar:hover,
+button.pillar:focus-visible { border-color: var(--acc); transform: translateY(-2px); }
+button.pillar:hover::after,
+button.pillar:focus-visible::after { opacity: 1; transform: translateX(2px); }
+button.pillar:active { transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  button.pillar,
+  button.pillar::after { transition: none; }
+  button.pillar:hover,
+  button.pillar:focus-visible { transform: none; }
+}
 
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 19px; margin-bottom: 14px; }
 .panel h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; color: var(--mut); font-weight: 500; margin-bottom: 10px; }
@@ -6330,6 +6365,17 @@ body.is-member .journey { display: none; }
 @keyframes mdx-in { from { opacity: 0; transform: translateY(7px); } }
 @media (prefers-reduced-motion: reduce) { .mdx-info.enter > * { animation: none; } }
 
+/* Held still while you step through the deck: it describes the deck, not the
+   measurement, so re-animating it on every step would say otherwise. */
+.mdx-info.enter > .mdx-decknote { animation: none; }
+.mdx-decknote {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--mut);
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
 .mdx-readout { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .mdx-value { font: 300 44px/1 var(--serif); letter-spacing: -0.01em; }
 .mdx-chip {

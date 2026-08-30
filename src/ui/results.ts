@@ -3,7 +3,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { copyDiagnostics } from "./diagnostics.js";
 import type { DiagnosticsCapture } from "./diagnostics.js";
 import { aggregateScoreToPercentile, phi, REGION_NAMES, regionIsScored } from "../engine/scoring.js";
-import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
+import type { PillarId, RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { SIDE_POINTS } from "../engine/sideMetrics.js";
@@ -20,6 +20,7 @@ import { animateMeasurement, measurementBounds, transitionMeasurement } from "./
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
+import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { mountProtocolCard } from "./protocolCard.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
@@ -817,6 +818,39 @@ function revealBars(): void {
 // the profile photo, the same credibility gesture the front regions have. The
 // calm state is the thirteen verified points; leaving a row returns to them.
 let sideActive: string | null = null;
+// Tapping a pillar opens the measurements behind it.
+//
+// The regions still lead — they are the tabs, they carry the photograph, they
+// are what the scan walked. This is the answer to "what IS Angularity", asked
+// in the one place the word appears, and it is answered with the same card and
+// the same measurements the region rows open rather than with a second screen
+// of its own.
+function wirePillarCards(report: Report): void {
+  for (const card of document.querySelectorAll<HTMLElement>(".pillar.can-open")) {
+    card.onclick = () => {
+      if (!ctx) return;
+      const pillar = card.dataset.pillar as PillarId | undefined;
+      if (!pillar) return;
+      const deck = pillarDeck(report, pillar);
+      if (!deck.length) return;
+      openMetricDetail({
+        // The deck spans regions by definition, so the card takes each
+        // measurement's own region from it. This is only the fallback.
+        region: deck[0].def.region,
+        deckLabel: pillar,
+        deckNote: PILLAR_BLURB[pillar],
+        metrics: deck,
+        index: 0,
+        sex: report.sex,
+        landmarks: ctx.landmarks,
+        frontPhoto: frontPhoto,
+        sidePhoto: ctx.sidePhoto ?? null,
+        sidePoints: ctx.sidePoints ?? null,
+      });
+    };
+  }
+}
+
 let sideFade: OverlayFade | null = null;
 function wireSideMeasurementTaps(report: Report): void {
   if (!ctx?.sidePoints || !ctx.sidePhoto) return;
@@ -1014,12 +1048,20 @@ function showOverall(): void {
             : ""
       }
       </div>
-      <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
-        .map(
-          ([p, s]) => `
-        <div class="pillar"><b data-count="${s}" data-decimals="1">0.0</b><span>${p.toUpperCase()}</span>
-        <div class="pbar"><i data-w="${s * 10}"></i></div></div>`,
-        )
+      <div class="pillars">${(Object.entries(r.pillars) as [PillarId, number][])
+        .map(([p, s]) => {
+          // A pillar with nothing measured behind it is not a button. It can
+          // happen: a front-only scan whose regions mostly failed the
+          // reliability bar leaves a pillar with an aggregate and an empty
+          // deck, and a card that opens onto nothing is worse than a card that
+          // does not offer.
+          const open = pillarDeck(r, p).length > 0;
+          const tag = open ? "button" : "div";
+          const attrs = open ? ` type="button" class="pillar can-open" data-pillar="${p}"` : ` class="pillar"`;
+          return `
+        <${tag}${attrs}><b data-count="${s}" data-decimals="1">0.0</b><span>${p.toUpperCase()}</span>
+        <div class="pbar"><i data-w="${s * 10}"></i></div></${tag}>`;
+        })
         .join("")}
       </div>
       ${populationBlock(r)}
@@ -1031,6 +1073,7 @@ function showOverall(): void {
   wireModeSwitcher();
   const overview = body().querySelector<HTMLElement>(".overview-reveal");
   if (overview) animateOverview(overview);
+  wirePillarCards(r);
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
   // Correcting the reference population where its effect is visible. Every
   // percentile on this screen comes from it, and it moves the overall score by
