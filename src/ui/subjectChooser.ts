@@ -82,7 +82,7 @@ export function openSubjectChooser(
       <button class="subjpick-cancel" type="button" aria-label="Cancel">✕</button>
       <div class="subjpick-step" data-step="who">
         <h2 id="subj-h">Who's getting scanned?</h2>
-        <p>Only your own scans count toward your progress — so a friend's face never moves your trend.</p>
+        <p>Only your own scans count toward your progress: so a friend's face never moves your trend.</p>
         <div class="subjpick-opts">
           <button class="subjpick-opt" data-who="me" type="button"${selfLocked ? " disabled" : ""}>
             <b>It's me</b><span>${selfLocked
@@ -107,7 +107,7 @@ export function openSubjectChooser(
             .map((o) => `<option value="${o}">${o}</option>`)
             .join("")}
         </select>
-        <p class="subjpick-note">This does not change a single measurement. There is one scale, and it is the same one for everybody — it is recorded so we can describe honestly who the reference set actually covers.</p>
+        <p class="subjpick-note">This does not change a single measurement. There is one scale, and it is the same one for everybody: it is recorded so we can describe honestly who the reference set actually covers.</p>
         <div class="subjpick-actions">
           <button class="btn gho" data-back type="button">Back</button>
           <button class="btn pri" data-go type="button">Continue</button>

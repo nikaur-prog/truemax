@@ -18,8 +18,8 @@
 import { ACTIVITY, GOAL_LABEL, macroPlan, oldEnoughForMacros, proteinReferenceKg } from "../engine/macros.js";
 import type { Activity, EnergyGoal, MacroPlan } from "../engine/macros.js";
 import { isStale, readBody, writeBody } from "../engine/bodyProfile.js";
+import { ageOnDate } from "../engine/age.js";
 import type { StoredBody } from "../engine/bodyProfile.js";
-import { ageOn } from "../engine/macros.js";
 import type { Sex } from "../engine/types.js";
 
 export interface MacroPanelCtx {
@@ -64,7 +64,12 @@ export function macroPanelHTML(ctx: MacroPanelCtx, now = new Date()): string {
 
   const body = readBody();
   if (!body) return shell(askHTML(), "mac-ask");
-  const age = ctx.dateOfBirth ? ageOn(new Date(ctx.dateOfBirth), now) : 0;
+  // ageOnDate, for the same reason oldEnoughForMacros uses it: the Date
+  // constructor rolls an impossible calendar date forward rather than refusing
+  // it. The gate above has already passed, so this cannot be null; the ?? 0 is
+  // there so a future change to that gate cannot quietly put NaN into every
+  // figure on the card.
+  const age = ageOnDate(ctx.dateOfBirth ?? "", now) ?? 0;
   const plan = macroPlan({
     age,
     sex: ctx.sex,

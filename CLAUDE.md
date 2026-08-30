@@ -63,7 +63,10 @@ Marlon level.
 
 - Only Coach Max's read is coach-toned. Every other surface is plain, factual and
   scientific.
-- **No em dashes** in user-facing copy.
+- **No em dashes** in user-facing copy. Swept and clean as of the #198 cycle; a
+  detector lives in the review notes. The one exception is the en dash `–` used
+  as the empty-cell glyph in a numeric column (`fmt`, `moveLabel`), which is a
+  typographic placeholder rather than prose.
 - Voice speed is 1.125x (was 1.25x, which outran the measurement lines on screen).
   `VOICE_SPEED` in `api/tts.ts`; `SYLLABLES_PER_SECOND` and `WPM` track it.
 - TTS provider chain: ElevenLabs (with timestamps), falling back to OpenAI

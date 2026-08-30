@@ -400,7 +400,7 @@ export function setHealth(faces: RatedFace[], sex: Sex): SetHealth {
   let note: string;
   if (!count) note = `no ${sex === "male" ? "men" : "women"} yet`;
   else if (spread < WANT_SPREAD) {
-    note = `ratings only span ${spread.toFixed(1)} points — add faces at the ends, not the middle`;
+    note = `ratings only span ${spread.toFixed(1)} points, add faces at the ends, not the middle`;
   } else if (count < WANT_PER_SEX) {
     note = `${WANT_PER_SEX - count} more to go`;
   } else note = "enough to fit directions from";

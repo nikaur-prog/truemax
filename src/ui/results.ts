@@ -786,7 +786,7 @@ function showSideRegion(id: RegionId): void {
     <div class="reveal">
       ${sideRegionDeck(r, report)}
       <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>
-        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against — the score above is real, the curve would be invented.</p></div>
+        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against: the score above is real, the curve would be invented.</p></div>
     </div>`;
 
   revealBars();
@@ -890,7 +890,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
             m.implausible ? " implausible" : ""
           }" data-pillar-row="${i}" style="animation-delay:${60 + i * 55}ms">
         <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${
-          m.implausible ? "—" : m.score.toFixed(1)
+          m.implausible ? "–" : m.score.toFixed(1)
         }</span></span></div>
         <div class="psx-where">${REGION_NAMES[m.def.region] ?? m.def.region}</div>
         ${
@@ -966,7 +966,7 @@ function wireSideMeasurementTaps(report: Report): void {
     for (const hint of hints) {
       hint.classList.toggle("on", !!name);
       hint.innerHTML = name
-        ? `<i>◱</i>Drawing <b>${name}</b> — tap to open`
+        ? `<i>◱</i>Drawing <b>${name}</b>, tap to open`
         : `<i>◱</i>Hover to draw it on your profile · tap to open`;
     }
   };
@@ -1396,7 +1396,7 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
       // The one silent-failure worth naming: the render still shipped, but
       // without the voice — a credit hiccup or a network blip. The credit is
       // only spent when audio comes back, so nothing was paid for nothing.
-      done("Saved — no voice (credit not used)");
+      done("Saved: no voice (credit not used)");
     } else {
       done(outcomeMessage(result.outcome));
     }
@@ -1404,7 +1404,7 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
     // A capture the app itself would warn about must not be published with a
     // number on it — the same rule the creator tools enforce.
     const blocked = error instanceof Error && error.name === "RundownBlocked";
-    done(blocked ? "Retake first — quality too low" : "Export failed");
+    done(blocked ? "Retake first, quality too low" : "Export failed");
     if (!blocked) console.error(error);
   }
 }
@@ -1600,7 +1600,7 @@ function indicativeNote(metrics: ScoredMetric[]): string {
 
 function indicativeTag(m: ScoredMetric): string {
   if (!isIndicative(m)) return "";
-  return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people — so it is shown and not scored.">not scored</span>`;
+  return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people: so it is shown and not scored.">not scored</span>`;
 }
 
 // The same rule as isIndicative, one level up.
@@ -1942,7 +1942,7 @@ function showRegion(id: RegionId): void {
             <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`
                 // Not measured on this photograph. It keeps its row and says so,
-                // rather than vanishing — the same region would otherwise show a
+                // rather than vanishing: the same region would otherwise show a
                 // different number of measurements from one scan to the next with
                 // no account of why. Not tappable and no range bar, because there
                 // is no reading to draw or to place.
@@ -2085,7 +2085,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     if (!hint) return;
     hint.classList.toggle("on", !!metric);
     hint.innerHTML = metric
-      ? `<i>◱</i>Drawing <b>${metric.def.name}</b> — tap to open`
+      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>, tap to open`
       : HINT_IDLE;
   };
 
@@ -2294,8 +2294,8 @@ function showImprove(): void {
               ? lever.body(m, r.sex)
               : lockedCopy(m, r.sex);
           const locked = !muted && !maxAccess;
-          // The list was already ranked — sorted by how far the metric sits
-          // below its reference, weighted by the goals this person chose — but
+          // The list was already ranked, sorted by how far the metric sits
+          // below its reference, weighted by the goals this person chose, but
           // nothing on screen said so, so four cards read as four equal
           // suggestions and the order looked arbitrary. Naming the rank turns
           // a list into a programme: it tells somebody what to do FIRST, which
@@ -2789,7 +2789,7 @@ function upsell(): string {
     <h4>WHAT MAX ADDS</h4>
     <p class="recs-note">Your measurements, your scores, your ranking and your progress over time are yours on every plan, and always will be. What Coach Max adds is the part that takes work to get right: the specific routine for your face, not a generic list.</p>
     <ul class="upsell-list">
-      <li><b>The method, not just the target.</b> The overview above says what to improve. Max writes how — for your face, in order, shaped by what you said you want.</li>
+      <li><b>The method, not just the target.</b> The overview above says what to improve. Max writes how, for your face, in order, shaped by what you said you want.</li>
       <li><b>Follow-up that reads your numbers.</b> Max checks whether what you are doing actually moved a measurement, says so either way, and rebuilds the plan when eight weeks of a routine has moved nothing.</li>
       <li><b>Your wishlist, kept honest.</b> Max keeps the list of what you are using, edits it with you, and is allowed to tell you something on it is not earning its place.</li>
     </ul>
@@ -2894,7 +2894,7 @@ function recTrackHTML(r: { id: string; weeksToJudge?: number }): string {
       : already.status === "judged"
         ? "Done and dusted"
         : already.startedAt
-          ? "Running — Max is tracking it"
+          ? "Running, Max is tracking it"
           : "On your list";
     return `<span class="rec-track rec-track-on">${label}</span>`;
   }

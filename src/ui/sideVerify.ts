@@ -1304,7 +1304,7 @@ export function mountVerifier(
     }
     if (guided) {
       const spec = SIDE_POINTS[guided.index];
-      labelEl.textContent = `${spec.label} — ${spec.hint}`;
+      labelEl.textContent = `${spec.label}, ${spec.hint}`;
       labelEl.classList.add("show");
     } else {
       labelEl.classList.remove("show");

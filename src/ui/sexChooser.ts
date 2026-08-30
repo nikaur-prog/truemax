@@ -47,7 +47,7 @@ export function openSexChooser(
   el.innerHTML = `
     <!-- The paragraph that used to sit under this heading explained that the
          choice moves the score by up to 4.5 points. True, and the reason the
-         question is asked at all rather than guessed — but it is an argument
+         question is asked at all rather than guessed, but it is an argument
          with somebody who has not disagreed yet, on a screen whose whole job is
          to take one tap. The two buttons already say what each one scores you
          against, which is the part that changes what someone picks. -->

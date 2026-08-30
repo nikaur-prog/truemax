@@ -80,7 +80,7 @@ function movability(m: ScoredMetric): string {
     return "the measured outline responds to soft-tissue change (leanness, water, sleep); the bone under it does not move";
   }
   if (m.def.fixability >= 0.2) {
-    return "moves a little — soft tissue and photo conditions, not the underlying structure";
+    return "moves a little, soft tissue and photo conditions, not the underlying structure";
   }
   return "essentially fixed skeletal geometry, not changeable";
 }

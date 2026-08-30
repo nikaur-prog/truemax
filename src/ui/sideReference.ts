@@ -88,7 +88,7 @@ export function openReferenceOverlay(faceDir: number, doc = document): () => voi
     <span class="klabel">WHERE EACH POINT BELONGS</span>
     <canvas class="sref-photo-full"></canvas>
     <p>Hold this against your photo. Any ring sitting somewhere different is the
-      one to drag — the five behind the face are the usual culprits, since a jaw
+      one to drag: the five behind the face are the usual culprits, since a jaw
       corner has no landmark and they are estimated from an average head.</p>
     <button type="button" class="btn gho sref-close">Back to my photo</button>
   </div>`;

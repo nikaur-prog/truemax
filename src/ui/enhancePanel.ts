@@ -63,7 +63,7 @@ export function openEnhancePanel(): void {
     <div class="brp-card" role="dialog" aria-modal="true" aria-labelledby="enh-h">
       <button class="brp-x" type="button" aria-label="Close">✕</button>
       <h2 id="enh-h">Enhance</h2>
-      <p class="brp-sub">Sharper, cleaner, richer — processed on this device. Nothing is uploaded.</p>
+      <p class="brp-sub">Sharper, cleaner, richer, processed on this device. Nothing is uploaded.</p>
 
       <section class="brp-sec">
         <div class="brp-head"><span>1 · YOUR FILES</span><small id="enh-note">Photos and clips, together is fine.</small></div>
@@ -80,8 +80,8 @@ export function openEnhancePanel(): void {
           <button type="button" class="q-mode" data-look="strong">Strong</button>
         </div>
         <div class="enh-tiers">
-          <span class="enh-tier on">On this device — free, private</span>
-          <span class="enh-tier off" title="The first server engine we evaluated plasticised faces. Not shipping that.">Studio · server — Max, coming soon</span>
+          <span class="enh-tier on">On this device, free, private</span>
+          <span class="enh-tier off" title="The first server engine we evaluated plasticised faces. Not shipping that.">Studio · server, Max, coming soon</span>
         </div>
       </section>
 
@@ -210,7 +210,7 @@ function paint(): void {
 
   const note = host.querySelector<HTMLElement>("#enh-note")!;
   note.textContent = items.length
-    ? `${items.length} file${items.length === 1 ? "" : "s"} — each is enhanced and saved separately.`
+    ? `${items.length} file${items.length === 1 ? "" : "s"}, each is enhanced and saved separately.`
     : "Photos and clips, together is fine.";
   host.querySelector<HTMLElement>("#enh-prev-sec")!.hidden = !items.length;
   host.querySelector<HTMLButtonElement>("#enh-go")!.disabled = busy || !items.length;
@@ -351,7 +351,7 @@ async function run(): Promise<void> {
           look: LOOKS[lookKey],
           scale: upscaleFor(v.videoWidth, v.videoHeight),
           onProgress: (f, label) => {
-            progress.textContent = `${tag}${label} ${it.name} — ${Math.round(f * 100)}%`;
+            progress.textContent = `${tag}${label} ${it.name}, ${Math.round(f * 100)}%`;
           },
         });
         download(out.blob, `${stem(it.name)}-enhanced.${out.extension}`);

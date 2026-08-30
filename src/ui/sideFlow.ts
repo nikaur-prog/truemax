@@ -1088,8 +1088,8 @@ function mountVerify(
     const low = (seed.confidence ?? 1) < 0.7;
     e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
       <p class="side-sub">${low
-        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names — the hollow centre shows the pixel underneath."
-        : "The front of the face is measured; the five behind it — jaw corner, ear, and the neck point — are estimated from an average head, so they are the ones worth checking. Drag any ring straight onto the feature it names."}</p>
+        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names: the hollow centre shows the pixel underneath."
+        : "The front of the face is measured; the five behind it, jaw corner, ear, and the neck point, are estimated from an average head, so they are the ones worth checking. Drag any ring straight onto the feature it names."}</p>
       <p class="side-review-note">Nothing leaves this device unless you separately choose to share it.</p>`;
     e.actions.innerHTML = `
       <button class="side-reset-glyph" id="side-reset" type="button" aria-label="Reset points to the automatic placement" title="Reset to automatic placement">
@@ -1116,11 +1116,11 @@ function mountVerify(
       consentAnswer = await askSideFeedbackConsent();
       const wrongButton = document.getElementById("side-wrong");
       wrongButton?.setAttribute("disabled", "true");
-      if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks — noted" : "Noted";
+      if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
       e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
         <p class="side-sub">${consentAnswer
-          ? "Thank you — that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
-          : "No problem — nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
+          ? "Thank you: that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
+          : "No problem: nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
         <p class="side-review-note">The circular arrow under the photo resets every point to the automatic placement.</p>`;
     };
   };
@@ -1191,7 +1191,7 @@ function mountVerify(
         });
         const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
         if (hint) {
-          hint.textContent = `${readings.join("; ")} — check ${
+          hint.textContent = `${readings.join("; ")}, check ${
             points.length ? points.join(", ") : "the points behind it"
           }`;
           hint.classList.add("show");
@@ -1223,10 +1223,10 @@ function mountVerify(
         }
         e.panelCopy.innerHTML = `<h2 class="side-title">Nothing was moved</h2>
           <p class="side-sub">These are the automatic positions exactly as they were estimated.
-          The five behind the face — jaw corner, ear and the neck point — are inferred from an
+          The five behind the face, jaw corner, ear and the neck point, are inferred from an
           average head rather than found in the photo, so they are the ones that drift.</p>
           <p class="side-review-note">If they are genuinely right, press Confirm as-is. If you
-          have not looked yet, this is the moment — a side score built on a guessed jaw corner
+          have not looked yet, this is the moment: a side score built on a guessed jaw corner
           measures the guess.</p>`;
         return;
       }
@@ -1294,7 +1294,7 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       <span class="klabel">OPTIONAL · YOUR CHOICE</span>
       <h2 id="side-feedback-title">${afterEdit ? "We noticed you adjusted the points" : "Help improve TrueMax?"}</h2>
       <p id="side-feedback-copy">${afterEdit
-        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them — corrections like yours are exactly what teaches the placement to land right next time."
+        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them, corrections like yours are exactly what teaches the placement to land right next time."
         : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
       <div class="side-feedback-actions">

@@ -572,8 +572,8 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
       <h2 id="brp-h">Make a TikTok</h2>
       <p class="brp-sub">${
         analysis
-          ? "Your clips before, your analysis at 2×, your clips after — every cut lands on a beat of the song you attach."
-          : "Attach your clips, then a song. The tempo decides how long each clip is — you never pick a duration."
+          ? "Your clips before, your analysis at 2×, your clips after, every cut lands on a beat of the song you attach."
+          : "Attach your clips, then a song. The tempo decides how long each clip is: you never pick a duration."
       }</p>
 
       ${
@@ -601,7 +601,7 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
       </section>
 
       <section class="brp-sec">
-        <div class="brp-head"><span>2 · THE SONG</span><small id="brp-songnote">Attach the full track — you pick the section next.</small></div>
+        <div class="brp-head"><span>2 · THE SONG</span><small id="brp-songnote">Attach the full track: you pick the section next.</small></div>
         <div class="brp-song" id="brp-song">
           <button class="brp-add" type="button" id="brp-song-add"><span>♪</span>Add a song</button>
         </div>
@@ -609,7 +609,7 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
       </section>
 
       <section class="brp-sec" id="brp-preview-sec" hidden>
-        <div class="brp-head"><span>▶ THE PREVIEW</span><small id="brp-prevnote">Loops until you stop it — what it shows is what renders.</small></div>
+        <div class="brp-head"><span>▶ THE PREVIEW</span><small id="brp-prevnote">Loops until you stop it, what it shows is what renders.</small></div>
         <div class="brp-prevwrap" id="brp-prevwrap" hidden>
           <canvas id="brp-prev" width="270" height="480"></canvas>
         </div>
@@ -622,34 +622,33 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
           <canvas class="brp-wave" id="brp-wave" width="1200" height="150"></canvas>
           <button type="button" class="btn gho brp-play" id="brp-play">► Play from the marker</button>
           <div class="brp-wave-foot">
-            <div class="brp-wave-hint" id="brp-wave-hint">Click the waveform to set where the reel starts — while playing, playback jumps with it. Listen for the drop, then shift-click to mark it.</div>
+            <div class="brp-wave-hint" id="brp-wave-hint">Click the waveform to set where the reel starts, while playing, playback jumps with it. Listen for the drop, then shift-click to mark it.</div>
             <div class="brp-step">
-              <button type="button" id="brp-step-back" title="One frame back — hold shift for a beat">◂</button>
-              <button type="button" id="brp-step-fwd" title="One frame forward — hold shift for a beat">▸</button>
+              <button type="button" id="brp-step-back" title="One frame back, hold shift for a beat">◂</button>
+              <button type="button" id="brp-step-fwd" title="One frame forward, hold shift for a beat">▸</button>
             </div>
           </div>
         </div>
         <div class="brp-controls">
           <label class="brp-ctl">Pace
             <select id="brp-pace" class="q-input">
-              <option value="1">1 beat a clip — frantic</option>
-              <option value="2" selected>2 beats a clip — standard</option>
+              <option value="1">1 beat a clip, frantic</option>
+              <option value="2" selected>2 beats a clip, standard</option>
               <option value="3">3 beats a clip</option>
-              <option value="4">4 beats a clip — cinematic</option>
+              <option value="4">4 beats a clip, cinematic</option>
             </select>
           </label>
           <!-- The same formula run backwards, for the common case of having a
                specific section in mind: type its length and the pace is chosen
-               to fill it with whole beats. Never leaves a fractional beat over
-               — it takes the largest whole number that fits and says what the
+               to fill it with whole beats. Never leaves a fractional beat over: it takes the largest whole number that fits and says what the
                window actually came out as. -->
           <label class="brp-ctl">Or fit a section of
             <input class="q-input" id="brp-fit" type="number" min="2" max="180" step="1" placeholder="20" />
           </label>
           <label class="brp-ctl">Quality
             <select id="brp-quality" class="q-input">
-              <option value="1080" selected>1080 × 1920 — the platform native</option>
-              <option value="4k">2160 × 3840 — 4K, about 4× the render time</option>
+              <option value="1080" selected>1080 × 1920: the platform native</option>
+              <option value="4k">2160 × 3840, 4K, about 4× the render time</option>
             </select>
           </label>
         </div>
@@ -1024,7 +1023,7 @@ function paintClips(): void {
     // instead of the tap silently doing nothing.
     cell.addEventListener("click", () => {
       if (!currentPlan()) {
-        note("brp-clipnote", "Attach the song first — then tap a clip to line it up with the beats it gets.");
+        note("brp-clipnote", "Attach the song first, then tap a clip to line it up with the beats it gets.");
         return;
       }
       openClip = openClip === i ? null : i;
@@ -1073,7 +1072,7 @@ function paintClips(): void {
     // tempo to price them in seconds.
     tile.addEventListener("click", () => {
       if (!currentPlan()) {
-        note("brp-clipnote", "Attach the song first — then tap the analysis to set how long it holds.");
+        note("brp-clipnote", "Attach the song first, then tap the analysis to set how long it holds.");
         return;
       }
       openAna = !openAna;
@@ -1151,7 +1150,7 @@ function paintClips(): void {
     const beatsField = `
         <label>Plays for
           <select class="q-input" data-k="beats">
-            <option value="">Auto — the pace decides</option>
+            <option value="">Auto: the pace decides</option>
             ${[1, 2, 3, 4, 6, 8]
               .map((b) => `<option value="${b}"${clip.beats === b ? " selected" : ""}>${b}♩ = ${(b * period).toFixed(2)}s</option>`)
               .join("")}
@@ -1160,7 +1159,7 @@ function paintClips(): void {
     const framingField = `
         <label>Framing
           <select class="q-input" data-k="bias">
-            <option value="-0.35"${clip.bias === -0.35 ? " selected" : ""}>Favour the top — heads in wide shots</option>
+            <option value="-0.35"${clip.bias === -0.35 ? " selected" : ""}>Favour the top, heads in wide shots</option>
             <option value="0"${!clip.bias ? " selected" : ""}>Centre</option>
             <option value="0.35"${clip.bias === 0.35 ? " selected" : ""}>Favour the bottom</option>
           </select>
@@ -1175,7 +1174,7 @@ function paintClips(): void {
       editor.innerHTML = `
       <img src="${clip.url}" alt="" />
       <div class="brp-trim-fields">
-        <b>Clip ${shownNumber(openClip)} · ${cut ? `${cut.beats}♩ = ${windowSec.toFixed(2)}s of song` : ""} — a photo holds its frame</b>
+        <b>Clip ${shownNumber(openClip)} · ${cut ? `${cut.beats}♩ = ${windowSec.toFixed(2)}s of song` : ""}: a photo holds its frame</b>
         ${beatsField}
         ${previewField}
         ${framingField}
@@ -1205,7 +1204,7 @@ function paintClips(): void {
               .map(
                 (s) =>
                   `<option value="${s}"${(clip.speed ?? 1) === s ? " selected" : ""}>${s}×${
-                    s === 0.5 ? " — slow motion" : s === 1 ? " — real time" : ""
+                    s === 0.5 ? ", slow motion" : s === 1 ? ", real time" : ""
                   }</option>`,
               )
               .join("")}
@@ -1306,7 +1305,7 @@ function paintClips(): void {
         <b>Your analysis · ${cut ? `${cut.beats}♩ = ${(cut.end - cut.start).toFixed(2)}s of song` : ""}</b>
         <label>Plays for
           <select class="q-input" data-k="abeats">
-            <option value="">Auto — long enough to play it all${auto ? ` (${auto}♩)` : ""}</option>
+            <option value="">Auto, long enough to play it all${auto ? ` (${auto}♩)` : ""}</option>
             ${[2, 3, 4, 6, 8, 10, 12]
               .map((b) => `<option value="${b}"${analysisBeats === b ? " selected" : ""}>${b}♩ = ${(b * period).toFixed(2)}s</option>`)
               .join("")}
@@ -1315,7 +1314,7 @@ function paintClips(): void {
         <label>Breakdown speed
           <select class="q-input" data-k="aspeed">
             ${[1, 1.5, 2]
-              .map((s) => `<option value="${s}"${analysisSpeed === s ? " selected" : ""}>${s}×${s === 1 ? " — real time" : s === 2 ? " — the format's pace" : ""}</option>`)
+              .map((s) => `<option value="${s}"${analysisSpeed === s ? " selected" : ""}>${s}×${s === 1 ? ", real time" : s === 2 ? ", the format's pace" : ""}</option>`)
               .join("")}
           </select>
         </label>
@@ -1350,11 +1349,11 @@ function paintSong(): void {
   const sure = g.confidence >= 0.5;
   wrap.innerHTML = `
     <div class="brp-songcard${sure ? "" : " unsure"}">
-      <b>${g.bpm ? g.bpm.toFixed(1) : "—"} BPM</b>
+      <b>${g.bpm ? g.bpm.toFixed(1) : ", "} BPM</b>
       <span>${escapeHTML(song.name)}</span>
       <em>${
         !g.bpm
-          ? "No steady tempo found — this track cannot be cut to automatically."
+          ? "No steady tempo found: this track cannot be cut to automatically."
           : sure
             ? `Steady tempo, read with confidence ${g.confidence.toFixed(2)}. Bars of ${g.beatsPerBar}.`
             : `Read with low confidence (${g.confidence.toFixed(2)}) — check the ticks line up with the spikes below before rendering.`
@@ -1363,7 +1362,7 @@ function paintSong(): void {
     </div>`;
   wrap.querySelector<HTMLButtonElement>("#brp-song-swap")!.onclick = () =>
     host!.querySelector<HTMLInputElement>("#brp-song-input")!.click();
-  note("brp-songnote", `Decoded on this device — ${fmt(song.duration)} long. Nothing was uploaded.`);
+  note("brp-songnote", `Decoded on this device, ${fmt(song.duration)} long. Nothing was uploaded.`);
 }
 
 function escapeHTML(value: string): string {
@@ -1394,7 +1393,7 @@ function paintWindow(): void {
   if (marked && plan) {
     note(
       "brp-wantnote",
-      `Anchored to the drop at ${fmt(dropAt!)} — the lead-in pulls the start back to ${fmt(
+      `Anchored to the drop at ${fmt(dropAt!)}: the lead-in pulls the start back to ${fmt(
         startShown,
       )}, the rest runs on from the drop. ${plan.duration.toFixed(2)}s in all.`,
     );
@@ -1408,7 +1407,7 @@ function paintWindow(): void {
     const hi = Math.max(...counts);
     note(
       "brp-wantnote",
-      `Filling ${plan.duration.toFixed(2)}s of song with ${reelCount()} clips — ${
+      `Filling ${plan.duration.toFixed(2)}s of song with ${reelCount()} clips, ${
         lo === hi ? `${lo} beats each` : `${lo}–${hi} beats each, the spares on the first and last`
       }. Starting at ${fmt(startShown)}.`,
     );
@@ -1425,7 +1424,7 @@ function paintWindow(): void {
     "brp-wave-hint",
     marked
       ? "The window is anchored to the drop. Click to listen anywhere; shift-click to move the drop; ◂ ▸ or the arrow keys step a frame, shift for a beat."
-      : "Click the waveform to set where the reel starts — while playing, playback jumps with it. Step onto the drop with ◂ ▸ or the arrow keys, then shift-click (or Mark) to pin it.",
+      : "Click the waveform to set where the reel starts, while playing, playback jumps with it. Step onto the drop with ◂ ▸ or the arrow keys, then shift-click (or Mark) to pin it.",
   );
 
   const before = host!.querySelector<HTMLInputElement>("#brp-before")!;
@@ -1635,7 +1634,7 @@ async function render(): Promise<void> {
       quality,
       outroBeats: outro ? grid()!.beatsPerBar : 0,
       onProgress: (f, label) => {
-        progress.textContent = `${label} — ${Math.round(f * 100)}%`;
+        progress.textContent = `${label}, ${Math.round(f * 100)}%`;
       },
     });
     const url = URL.createObjectURL(rendered.blob);
@@ -1647,7 +1646,7 @@ async function render(): Promise<void> {
     progress.textContent =
       rendered.container === "mp4"
         ? "Saved."
-        : "Saved as WebM — this browser cannot encode H.264. It plays everywhere but some uploaders prefer MP4.";
+        : "Saved as WebM: this browser cannot encode H.264. It plays everywhere but some uploaders prefer MP4.";
   } catch (err) {
     progress.textContent = err instanceof Error ? err.message : "The render failed.";
   } finally {

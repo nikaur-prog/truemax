@@ -147,15 +147,15 @@ function formulaCardsHTML(f: EarningsFormula): string {
   return `<div class="lg-tiers">
     <div class="lg-tier">
       <div class="lg-money">$${(f.rpmCents / 100).toFixed(2)}</div>
-      <div class="lg-tier-req">per 1,000 views — every view counts</div>
+      <div class="lg-tier-req">per 1,000 views: every view counts</div>
     </div>
     <div class="lg-tier">
       <div class="lg-money">×${f.eMax.toFixed(1)}</div>
-      <div class="lg-tier-req">engagement multiplier — real comments raise your rate</div>
+      <div class="lg-tier-req">engagement multiplier: real comments raise your rate</div>
     </div>
     <div class="lg-tier">
       <div class="lg-money">${fmtCount(f.thresholdViews)}</div>
-      <div class="lg-tier-req">views to unlock — then every view you already have pays</div>
+      <div class="lg-tier-req">views to unlock, then every view you already have pays</div>
     </div>
     <div class="lg-tier">
       <div class="lg-money">7 days</div>
@@ -181,18 +181,18 @@ function renderGate(): void {
     <h1>Make TrueMax videos.<br/>Get paid when they hit.</h1>
     <p class="lg-tagline">The face scan is the most filmable thing on this app. We hand you the
     tools that make the videos, you post in your own style, and every view you get is worth
-    money — a flat rate per thousand, raised by real engagement.</p>
+    money: a flat rate per thousand, raised by real engagement.</p>
     <div class="lg-montage">
       <!-- The montage master drops in as /league/montage.mp4 when rendered; the
            poster keeps the box honest until then. -->
       <video src="/league/montage.mp4" poster="/og.png" autoplay muted loop playsinline></video>
     </div>
     ${formulaCardsHTML(DEFAULT_FORMULA)}
-    <p class="lg-note">Views and comments combine across all your TrueMax videos — every post
+    <p class="lg-note">Views and comments combine across all your TrueMax videos. Every post
     counts. No cliffs: 237k views is worth exactly what 237k views is worth. Comments are the
-    bot filter — silent view farms earn half-rate.</p>
+    bot filter: silent view farms earn half-rate.</p>
     <ol class="lg-how">
-      <li><b>Apply.</b> Two minutes — handles, niche, why you.</li>
+      <li><b>Apply.</b> Two minutes: handles, niche, why you.</li>
       <li><b>Get approved.</b> Every application is reviewed by the founder. You get the tools
       that fit what you make.</li>
       <li><b>Post and track.</b> Submit each video's link; your dashboard shows views, earnings
@@ -200,7 +200,7 @@ function renderGate(): void {
     </ol>
     <p style="margin-top:26px"><button class="lg-btn pri lg-cta" id="lg-apply">Apply to join</button></p>
     <div class="lg-form" id="lg-authbox" hidden>
-      <h3 style="margin:0 0 2px">Sign in — or create your account</h3>
+      <h3 style="margin:0 0 2px">Sign in, or create your account</h3>
       <p class="lg-note" style="margin-top:4px">One account works for the app and the League.
       New here? The same button below creates your account.</p>
       <label for="lg-email">Email</label>
@@ -243,7 +243,7 @@ function renderGate(): void {
       return;
     }
     if (su.ok) return void boot();
-    err.textContent = su.message || si.message || "That didn't work — try again.";
+    err.textContent = su.message || si.message || "That didn't work. Try again.";
   };
 }
 
@@ -273,7 +273,7 @@ function renderApply(): void {
       <label for="ap-pitch">Why you (one or two sentences)</label>
       <textarea id="ap-pitch" rows="3" maxlength="500"></textarea>
       <p class="lg-note" style="margin-top:14px">The League leaderboard shows your name, handle
-      and earnings to other approved members — that's the game. Nothing else about your account
+      and earnings to other approved members: that's the game. Nothing else about your account
       is ever visible to anyone.</p>
       <p style="margin-top:16px"><button class="lg-btn pri" id="ap-send">Send application</button></p>
       <p class="lg-error" id="ap-err"></p>
@@ -316,10 +316,10 @@ function renderApply(): void {
 
 function renderStatus(row: CreatorRow): void {
   const copy = row.status === "rejected"
-    ? { chip: "NOT THIS TIME", chipClass: "warn", body: "This application wasn't approved. That's sometimes about fit and timing rather than your content — you're welcome to reach out on the account email." }
+    ? { chip: "NOT THIS TIME", chipClass: "warn", body: "This application wasn't approved. That's sometimes about fit and timing rather than your content: you're welcome to reach out on the account email." }
     : row.status === "paused"
       ? { chip: "PAUSED", chipClass: "warn", body: "Your membership is paused. Reach out on the account email if that's unexpected." }
-      : { chip: "IN REVIEW", chipClass: "ok", body: "Application received. Every one is read by the founder — you'll see the dashboard here the moment you're approved." };
+      : { chip: "IN REVIEW", chipClass: "ok", body: "Application received. Every one is read by the founder: you'll see the dashboard here the moment you're approved." };
   root.innerHTML = `${topBarHTML()}
   <div class="lg-gate">
     <span class="lg-chip ${copy.chipClass}">${copy.chip}</span>
@@ -464,7 +464,7 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
   if (!data) {
     el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
       <div><h3>TikTok</h3><p class="lg-sub" style="margin:4px 0 0">Link your own account and the
-      views and comments on your submitted videos count themselves — no screenshots, no waiting
+      views and comments on your submitted videos count themselves: no screenshots, no waiting
       on review day.</p></div>
       <button class="lg-btn pri" id="lg-tt-go">Connect</button></div>
       <p class="lg-error" id="lg-tt-err"></p>`;
@@ -529,7 +529,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     if (!sprints.length) {
       mount.innerHTML = `<h1 class="lg-h">Overview</h1>
         <div class="lg-card"><h3>No live sprint right now</h3>
-        <p class="lg-sub">The next pool opens soon — anything you post in the meantime can be
+        <p class="lg-sub">The next pool opens soon. Anything you post in the meantime can be
         submitted once it does.</p></div>
         <div class="lg-card" id="lg-tt"><p class="lg-sub">Loading…</p></div>`;
       void renderTikTokCard(mount.querySelector<HTMLElement>("#lg-tt")!, me);
@@ -552,7 +552,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <div class="lg-row"><span>Earnings</span><span class="lg-chip">LOCKED</span></div>
             <div class="lg-bar"><i style="width:${Math.round(p * 100)}%"></i></div>
             <div class="lg-bar-note">Pay unlocks at ${fmtCount(f.thresholdViews)} views and
-            ${f.thresholdComments} comments, combined — then it counts every view you already have.</div>
+            ${f.thresholdComments} comments, combined, then it counts every view you already have.</div>
           </div>`;
         }
         const accrued = creatorAccruedCents(f, videos);
@@ -563,7 +563,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         return `<div class="lg-card">${head}
           <div class="lg-row"><span>Accrued this sprint</span><span class="lg-money">${fmtMoney(accrued)}</span></div>
           <div class="lg-bar-note">$${(f.rpmCents / 100).toFixed(2)} per 1,000 views; each video earned at
-          its own ${factorText} engagement factor — locks at sprint close, paid within 7 days.</div>
+          its own ${factorText} engagement factor. Locks at sprint close, paid within 7 days.</div>
         </div>`;
       }
       const earned = earnedCents(s.tiers, totals);
@@ -586,7 +586,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     const sprints = (await loadSprints()).filter((s) => sprintIsLive(s));
     mount.innerHTML = `<h1 class="lg-h">Submit a video</h1>
       <p class="lg-sub">Paste the link the moment it's live. Only submitted, approved links count
-      toward your totals — if we can't see it, we can't pay on it.</p>
+      toward your totals, if we can't see it, we can't pay on it.</p>
       <div class="lg-card lg-form" style="max-width:520px;margin-left:0">
         <label for="sb-sprint">Sprint</label>
         <select id="sb-sprint">${sprints.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
@@ -620,7 +620,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       });
       if (error) {
         err.textContent = /duplicate/i.test(error.message)
-          ? "That video is already submitted — every video counts once."
+          ? "That video is already submitted. Every video counts once."
           : error.message;
         return;
       }
@@ -657,7 +657,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     }
     const rows = (data ?? []) as Array<{ display_name: string; handle: string; earned_cents: number }>;
     mount.innerHTML = `<h1 class="lg-h">Ranks</h1>
-      <p class="lg-sub">Paid-out totals, all time. Real money that actually moved — nothing on
+      <p class="lg-sub">Paid-out totals, all time. Real money that actually moved: nothing on
       this table is projected.</p>
       <div class="lg-card">${rows.length ? rows.map((r, i) => `
         <div class="lg-row">
@@ -691,7 +691,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           <div class="lg-row"><span>Earnings</span><span class="lg-chip">LOCKED</span></div>
           <div class="lg-bar"><i style="width:${Math.round(p * 100)}%"></i></div>
           <div class="lg-bar-note">${fmtCount(totals.views)} / ${fmtCount(f.thresholdViews)} views ·
-          ${totals.comments} / ${f.thresholdComments} comments — cross both and every view you
+          ${totals.comments} / ${f.thresholdComments} comments, cross both and every view you
           already have starts counting.</div></div>`;
       }
       const accrued = creatorAccruedCents(f, videos);
@@ -927,28 +927,28 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       },
       {
         id: "cta", n: "02", name: "Video Studio",
-        body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, voiced, ready to post.",
+        body: "Score videos, ratio videos, breakdowns and the outro, rendered in the house style, voiced, ready to post.",
         needs: "One photo · a face worth talking about", href: "/league/tools#cta",
       },
       {
         id: "polisher", n: "03", name: "The Polisher",
-        body: "Clean up a soft clip on this device: sharpen, colour — and a 4K upscale for the ones worth it.",
+        body: "Clean up a soft clip on this device: sharpen, colour: and a 4K upscale for the ones worth it.",
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
         id: "clips", n: "04", name: "Clips Library",
-        body: "Saved faces, celebrity references and demo exports to cut from — scored instantly, no rescan.",
+        body: "Saved faces, celebrity references and demo exports to cut from, scored instantly, no rescan.",
         needs: "Nothing · it's all in the library", href: "/league/tools#clips",
       },
     ];
     mount.innerHTML = `<h1 class="lg-h">Tools</h1>
       <p class="lg-sub">What you see here is what your membership includes. Renders are the
-      calls that cost us money (a voiceover, a 4K pass) — everything else is unmetered.</p>
+      calls that cost us money (a voiceover, a 4K pass), everything else is unmetered.</p>
       <div class="lg-card" id="lg-quota-card">
         <div class="lg-row" style="border:none;padding:0 0 8px"><h3>Renders this month</h3>
-        <b class="lg-num" id="lg-quota-num">— / ${me.monthly_render_quota}</b></div>
+        <b class="lg-num" id="lg-quota-num">, / ${me.monthly_render_quota}</b></div>
         <div class="lg-bar"><i id="lg-quota-fill" style="width:0%"></i></div>
-        <div class="lg-bar-note">Resets on the 1st. Need more? Ask — quotas are set per creator.</div>
+        <div class="lg-bar-note">Resets on the 1st. Need more? Ask, quotas are set per creator.</div>
       </div>
       <div class="lg-tools">
       ${tools.map((t) => `<div class="lg-card lg-tool ${granted(t.id) ? "" : "off"}">
@@ -964,7 +964,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         <div class="lg-tool-kicker">05</div>
         <div class="lg-row" style="border:none;padding:0">
           <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
-          the house palette — how every TrueMax video gets its look.</p>
+          the house palette, how every TrueMax video gets its look.</p>
           <p class="lg-note" style="margin:0">Owner-run · assets land in your pillars automatically</p></div>
           <span class="lg-chip">OWNER ONLY</span>
         </div></div>
@@ -1066,11 +1066,11 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>`).join("") || `<p class="lg-sub">No sprints yet — the league starts when the first one goes active.</p>`}
         <div class="lg-sprint-new">
           <h3 style="margin-top:18px">New sprint</h3>
-          <p class="lg-sub">Created as a DRAFT — creators see nothing until you activate it. The
+          <p class="lg-sub">Created as a DRAFT, creators see nothing until you activate it. The
           formula fields are the deal the gate advertises; change them here and this sprint pays
           differently, story included.</p>
           <div class="lg-sprint-grid">
-            <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1 — September" /></label>
+            <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1, September" /></label>
             <label>Pool ($) <input id="sp-pool" type="number" min="0" step="50" value="2000" /></label>
             <label>Starts <input id="sp-start" type="date" /></label>
             <label>Ends <input id="sp-end" type="date" /></label>
@@ -1105,7 +1105,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
 
       <div class="lg-card"><h3>Submissions to review · ${subs.length}</h3>
         <p class="lg-sub">ON LINKED ACCOUNT means the nightly tracker found this exact video on
-        the creator's own connected TikTok — ownership is proven. Approval is still your call:
+        the creator's own connected TikTok, ownership is proven. Approval is still your call:
         it says the video is actually TrueMax content, which no API can check.</p>
         ${subs.map((s) => `
         <div class="lg-row" style="flex-wrap:wrap">
@@ -1127,7 +1127,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
 
       <div class="lg-card"><h3>Outreach</h3>
         <p class="lg-sub">The daily engine: 100 DMs and 50 emails, sent by hand, tracked by hand.
-        The scripts are the proven structure — "Paid promo?" gets answered where a pitch gets
+        The scripts are the proven structure, "Paid promo?" gets answered where a pitch gets
         scrolled past. Never lead with the deal; it's message two.</p>
         <div class="lg-scripts">
           ${[
@@ -1137,19 +1137,19 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             },
             {
               t: "DM · message 2 (they replied)",
-              s: "We run TrueMax — you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views — then every view you already have counts. Want the link to apply?",
+              s: "We run TrueMax: you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views, then every view you already have counts. Want the link to apply?",
             },
             {
               t: "DM · follow-up (48h silence)",
-              s: "Still open if you want it — creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
+              s: "Still open if you want it, creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
             },
             {
               t: "Email (from their bio / Linktree / YouTube About)",
-              s: "Subject: Paid promo — your {niche} content\n\nHey {name},\n\nSaw {video} — that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league — two minutes. Happy to answer anything on here first.\n",
+              s: "Subject: Paid promo: your {niche} content\n\nHey {name},\n\nSaw {video}: that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league, two minutes. Happy to answer anything on here first.\n",
             },
             {
               t: "Referral bounty (to anyone signed)",
-              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough — we'll do the rest.",
+              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough, we'll do the rest.",
             },
           ].map((x, i) => `<div class="lg-row" style="align-items:flex-start">
             <div style="flex:1;min-width:0"><b style="font-size:13.5px">${x.t}</b>
@@ -1159,14 +1159,14 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>
         <p class="lg-note" style="margin-top:12px">Where the addresses come from: TikTok/IG bios
         and Linktrees first, YouTube About tabs second (most mirror to Shorts). Clippers live in
-        Whop clipping communities, clipping Discords, and under #clips #edits in the niche — the
+        Whop clipping communities, clipping Discords, and under #clips #edits in the niche: the
         /league link is the whole pitch. Fill {name}, {video}, {niche} before sending; a script
         sent unfilled reads as spam because it is.</p>
       </div>
 
       <div class="lg-card"><h3>Settlement</h3>
         <p class="lg-sub">Every approved creator's accrual under the sprint's formula, from the
-        latest snapshots — with the pro-rata factor if the pool is oversubscribed. The suggested
+        latest snapshots, with the pro-rata factor if the pool is oversubscribed. The suggested
         numbers ARE the payouts; recording them is still a decision you make per row.</p>
         <div id="lg-settle-sprints"></div>
         <div id="lg-settle-out"></div>
@@ -1205,7 +1205,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           out.innerHTML = `
             <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
-            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00 — pool covers everyone" : scale.toFixed(3)}</b></div>
+            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00, pool covers everyone" : scale.toFixed(3)}</b></div>
             ${earning.map((r, i) => `<div class="lg-row">
               <span>${esc(r.c.display_name)} <span class="lg-note">${esc(r.c.handle)} ·
               ${fmtCount(r.totals.views)} views</span></span>
@@ -1230,7 +1230,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
                 p_amount_cents: Math.round(r.accrued * scale),
                 p_note: sprint.name,
               });
-              btn.textContent = error ? "Failed — retry" : recorded === false ? "Already recorded" : "Recorded";
+              btn.textContent = error ? "Failed, retry" : recorded === false ? "Already recorded" : "Recorded";
               if (error) btn.disabled = false;
             };
           });

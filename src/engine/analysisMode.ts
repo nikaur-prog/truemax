@@ -263,7 +263,7 @@ const LADDER: Array<{
     polite: { male: ["Needs work"], female: ["Needs work"] },
     descriptor: { male: "a male with a lot to work on", female: "a female with a lot to work on" },
     tone: "low",
-    line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting — none of it bone.",
+    line: "Bottom of the reference set. Almost all of what is dragging it is grooming, body fat and lighting: none of it bone.",
   },
   {
     min: 12,
@@ -317,7 +317,7 @@ const LADDER: Array<{
     polite: { male: ["Okay"], female: ["Okay"] },
     descriptor: { male: "a male right on the middle", female: "a female right on the middle" },
     tone: "mid",
-    line: "Dead centre of the reference set. Which is where most faces are — that is what a middle means.",
+    line: "Dead centre of the reference set. Which is where most faces are: that is what a middle means.",
   },
   {
     min: 52,
@@ -398,7 +398,7 @@ const LADDER: Array<{
     polite: { male: ["Top of the scale"], female: ["Top of the scale"] },
     descriptor: { male: "a male at the top of the scale", female: "a female at the top of the scale" },
     tone: "peak",
-    line: "Top one per cent. There is nothing above this — the scale ends here.",
+    line: "Top one per cent. There is nothing above this: the scale ends here.",
   },
 ];
 

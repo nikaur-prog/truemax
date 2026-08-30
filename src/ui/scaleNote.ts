@@ -64,7 +64,7 @@ export function openScaleNote(sex: Sex): void {
       <h2 id="scalenote-title">This is a curve, not a school grade</h2>
 
       <p>The scale is a position in a population, not a mark out of ten.
-        <b>${SPREAD.median.toFixed(1)} is the exact middle</b> — not a pass mark, the median
+        <b>${SPREAD.median.toFixed(1)} is the exact middle</b>: not a pass mark, the median
         face. ${spreadLine(sex)}</p>
 
       <p>So it is tight, and that is what catches people out. Most of the range
@@ -85,7 +85,7 @@ export function openScaleNote(sex: Sex): void {
         known problem for where its middle sits: they are mostly middle-aged,
         and these measurements read youthful structure as better. Scored against
         their own distribution the reference faces come out at a median of 3.8,
-        not 5.0. The scale already corrects for that gap — 5.0 is set where
+        not 5.0. The scale already corrects for that gap: 5.0 is set where
         blinded human raters put an average face, which is 0.87 sigma above the
         reference median, not at the reference median itself. It is a real
         correction fitted on a thin sample of nineteen rated faces, so treat a
@@ -172,7 +172,7 @@ export function showScalePrimer(sex: Sex): Promise<void> {
         <h2 id="primer-title">Read this scale like a curve</h2>
 
         <p>Your score is a <b>position among people</b>, not a mark out of ten.
-          ${SPREAD.median.toFixed(1)} is not a pass — it is the exact middle face.
+          ${SPREAD.median.toFixed(1)} is not a pass: it is the exact middle face.
           ${spreadLine(sex)}</p>
 
         <div class="scale-ladder">${ladderHTML()}</div>
@@ -180,14 +180,14 @@ export function showScalePrimer(sex: Sex): Promise<void> {
         <p>That column is the part worth thirty seconds. A ${rung(7).score} here
           is not a school seven: it is about one person in ${rung(7).oneIn}. An
           ${rung(8).score} is around one in ${rung(8).oneIn}, and past that our
-          reference set stops being able to tell one rung from the next — so
+          reference set stops being able to tell one rung from the next: so
           ${rung(8).score} is where we stop counting, not where the faces stop.
           Scan anyone you consider good-looking and they will land lower than you
           expect.</p>
 
         <p class="scalenote-foot">${varianceLine()}</p>
 
-        <button type="button" class="btn primer-go">Got it — show my scan</button>
+        <button type="button" class="btn primer-go">Got it, show my scan</button>
       </div>`;
     document.body.appendChild(host);
 

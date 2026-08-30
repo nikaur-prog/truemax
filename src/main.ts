@@ -1951,7 +1951,7 @@ async function submitConsentedSideFeedback(generation = scanGeneration): Promise
     // the cap, with no way to tell that the earlier ones had landed.
     feedbackDeliveryNote = {
       ok: true,
-      message: "Enough side-landmark feedback shared today — this one was not needed",
+      message: "Enough side-landmark feedback shared today: this one was not needed",
     };
   } else {
     feedbackDeliveryNote = {
@@ -2465,7 +2465,7 @@ async function gateAnalysis(
     <section class="analysis-gate${preview ? " over-preview" : ""}">
     <span class="klabel">RESULTS ARE READY</span>
     <h2>Create an account to see your analysis</h2>
-    <p>Your result is computed and sitting behind this blur — it never left this device. Sign up or log in to open it. ${lastSide?.feedback
+    <p>Your result is computed and sitting behind this blur: it never left this device. Sign up or log in to open it. ${lastSide?.feedback
       ? "The side feedback you approved is sent privately after sign-in."
       : ""}</p>
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}

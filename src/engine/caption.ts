@@ -82,7 +82,7 @@ export function buildCaption(input: CaptionInput): CaptionResult {
   // Only claim a percentile when it reads as standing, and round it so the
   // caption does not pretend to a precision the instrument does not have.
   const topShare = Math.round(100 - input.percentile);
-  const standing = input.percentile >= 55 ? ` — top ${Math.max(1, topShare)}%` : "";
+  const standing = input.percentile >= 55 ? `, top ${Math.max(1, topShare)}%` : "";
 
   const subject = firstPerson ? "I" : name;
 

@@ -29,6 +29,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Sex } from "./types.js";
+import { ageOnDate } from "./age.js";
 
 /** The lowest age this is offered at, checked against date of birth. */
 export const MIN_AGE = 18;
@@ -178,10 +179,19 @@ export function katchMcArdle(weightKg: number, bodyFat: number): number {
  * date is a no: the honest failure of an age gate is to close.
  */
 export function oldEnoughForMacros(dateOfBirth: string | null | undefined, today: Date): boolean {
-  if (!dateOfBirth) return false;
-  const dob = new Date(dateOfBirth);
-  if (Number.isNaN(dob.getTime())) return false;
-  return ageOn(dob, today) >= MIN_AGE;
+  // ageOnDate rather than new Date(), and the difference is a real one. The
+  // Date constructor rolls an impossible calendar date forward instead of
+  // refusing it: "2008-02-30" silently becomes 2 March 2008 and "2010-04-31"
+  // becomes 1 May. Those are days out, which is nothing until the day it
+  // matters, and the day it matters is somebody's eighteenth birthday. Only
+  // "2000-13-45" was ever rejected, because that is out of range rather than
+  // merely impossible.
+  //
+  // age.ts already parsed dates correctly, with a round-trip check against
+  // exactly this. Two modules doing the same job and one of them doing it
+  // properly is how the wrong one survives; there is one now.
+  const age = ageOnDate(dateOfBirth ?? "", today);
+  return age !== null && age >= MIN_AGE;
 }
 
 /** Whole years elapsed, birthday-aware. */

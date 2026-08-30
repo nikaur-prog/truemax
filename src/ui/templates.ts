@@ -113,7 +113,7 @@ export function scoreHigherText(percentile: number): string {
 // photograph and five on the next with no explanation; inventing a value would
 // put a fabricated measurement in a product sold on not fabricating them.
 export function fmt(m: ScoredMetric): string {
-  if (!Number.isFinite(m.value)) return "—";
+  if (!Number.isFinite(m.value)) return "–";
   return `${m.value.toFixed(m.def.decimals)}${m.def.unit}`;
 }
 

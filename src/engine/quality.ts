@@ -113,7 +113,7 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
   const offAxis = Math.max(Math.abs(yawDeg), Math.abs(pitchDeg));
   if (frontal && offAxis > JAW_POSE_WARN_DEG)
     issues.push(
-      `Head is ${offAxis.toFixed(0)}° off level. Jaw and chin read low from this angle — straighten up for those to count`,
+      `Head is ${offAxis.toFixed(0)}° off level. Jaw and chin read low from this angle. Straighten up for those to count`,
     );
   if (!largeEnough) issues.push("Face is small in frame. Move closer or crop tighter");
   if (!neutralExpression) issues.push("Smiling detected. Expression shifts mouth and jaw measurements");

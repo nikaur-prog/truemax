@@ -63,7 +63,7 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
   return `<svg viewBox="0 0 150 158" class="mx-svg mx-mood-${mood}" aria-hidden="true">
     <defs>
       <!-- Fixed ids are safe because every instance defines identical
-           gradients — whichever copy the browser resolves, he looks the same. -->
+           gradients, whichever copy the browser resolves, he looks the same. -->
       <linearGradient id="mxg-body" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${BODY_TOP}"/>
         <stop offset="55%" stop-color="${BODY_MID}"/>
@@ -155,12 +155,12 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
         <path d="M85 49 q6 1.6 13 5" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
       <!-- Sad: the concerned brows, further. Inner ends high, outer ends
-           drooping — grief geometry, not anger. -->
+           drooping, grief geometry, not anger. -->
       <g class="mx-alt mx-brows-sad">
         <path d="M52 57 q6 -7 13 -10" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
         <path d="M85 47 q7 3 13 10" fill="none" stroke="${LIGHT}" stroke-opacity=".75" stroke-width="2.4" stroke-linecap="round"/>
       </g>
-      <!-- Mad: the one face concerned was explicitly built NOT to be — inner
+      <!-- Mad: the one face concerned was explicitly built NOT to be, inner
            ends down. It exists for slapstick and for being knocked about,
            and is never pointed at a person's own numbers. -->
       <g class="mx-alt mx-brows-mad">
@@ -197,7 +197,7 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
         <path d="M38 118 C28 116 24 108 28 101 C31 96 38 95 43 98 L52 103 C56 106 56 112 52 115 Z" fill="url(#mxg-limb)"/>
         <ellipse cx="54" cy="99" rx="9.5" ry="8" fill="url(#mxg-limb)"/>
       </g>
-      <!-- Waving arm. Drawn HANGING DOWN — the raise lives entirely in the
+      <!-- Waving arm. Drawn HANGING DOWN: the raise lives entirely in the
            animation, so every path back to rest is an arm coming down, never
            an arm left in the air. -->
       <g class="mx-arm${options.waving ? " waving" : ""}">
@@ -205,7 +205,7 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       </g>
       <!-- Crossed forearms for the fight-club block (wireMaxFight): two limb
            slabs crossing in an X over the lower body, each ending in a fist.
-           The front arm wears a deep-body stroke so the two read as two —
+           The front arm wears a deep-body stroke so the two read as two,
            without it the pair merges into one hatch-like bar. Hidden until
            the block; while it shows, the hanging arms are hidden so he does
            not grow extras. -->
@@ -276,7 +276,7 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       </g>
       <!-- Thought bubble for the thinking act. Distinct from .mx-thought,
            which is the messenger-dots bubble the chat uses while a real reply
-           is in flight — this one is a daydream, not a status. -->
+           is in flight: this one is a daydream, not a status. -->
       <g class="mx-prop mx-prop-idea">
         <circle cx="112" cy="44" r="11" fill="#ffffff" opacity=".92"/>
         <circle cx="124" cy="56" r="4.2" fill="#ffffff" opacity=".92"/>

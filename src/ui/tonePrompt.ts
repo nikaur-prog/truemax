@@ -48,7 +48,7 @@ export function askVerdictTone(force = false): Promise<VerdictTone> {
       <div class="toneask-card" role="dialog" aria-modal="true" aria-labelledby="toneask-title">
         <span class="klabel">ONE-WORD RESULTS</span>
         <h2 id="toneask-title">How do you want it put?</h2>
-        <p>The measurement is identical either way — the same score, the same
+        <p>The measurement is identical either way: the same score, the same
           percentile, the same numbers underneath. This is only the wording on
           top of it.</p>
         <div class="toneask-opts">

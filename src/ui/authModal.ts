@@ -422,7 +422,7 @@ function renderSignedIn(
   del.addEventListener("click", async () => {
     if (!armed) {
       armed = true;
-      del.textContent = "Tap again to confirm — this is permanent";
+      del.textContent = "Tap again to confirm: this is permanent";
       return;
     }
     del.disabled = true;

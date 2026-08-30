@@ -122,7 +122,7 @@ export function followUp(history: ScanPoint[], goalLabel?: string): FollowUp {
     return {
       kind: "working",
       headline: `Up ${change.toFixed(1)} in ${weeks} weeks. That is a real move.`,
-      body: `That is past the ${NOISE.toFixed(1)} points two photos of the same unchanged face differ by, so it is not the camera — something you are doing${goal} is showing up in the measurements. Keep the routine as it is; this is the part where people change things and lose the thread.`,
+      body: `That is past the ${NOISE.toFixed(1)} points two photos of the same unchanged face differ by, so it is not the camera, something you are doing${goal} is showing up in the measurements. Keep the routine as it is; this is the part where people change things and lose the thread.`,
       suggestChange: false,
     };
   }
@@ -142,7 +142,7 @@ export function followUp(history: ScanPoint[], goalLabel?: string): FollowUp {
     return {
       kind: "stalled",
       headline: `${weeks} weeks, and the number has not moved.`,
-      body: `Flat past two months is long enough to call. Nothing here is a failure${goal ? ` of yours${goal}` : ""} — it means this particular approach is not the lever for your face, and continuing it out of loyalty costs you the time a different one would have used. Worth rebuilding the plan around a different one.`,
+      body: `Flat past two months is long enough to call. Nothing here is a failure${goal ? ` of yours${goal}` : ""}: it means this particular approach is not the lever for your face, and continuing it out of loyalty costs you the time a different one would have used. Worth rebuilding the plan around a different one.`,
       suggestChange: true,
     };
   }
@@ -246,7 +246,7 @@ export function concernCleared(label: string, weeks: number): FollowUp {
   return {
     kind: "maintaining",
     headline: `Your ${label.toLowerCase()} has cleared.`,
-    body: `${weeks} weeks ago you told us this was the thing you wanted to work on, and the measurements no longer show it. Worth knowing what worked, because that is information about your face specifically rather than about faces in general. If you are using anything for it, a pharmacist is the right person to ask about what happens now — we measure, we do not prescribe.`,
+    body: `${weeks} weeks ago you told us this was the thing you wanted to work on, and the measurements no longer show it. Worth knowing what worked, because that is information about your face specifically rather than about faces in general. If you are using anything for it, a pharmacist is the right person to ask about what happens now, we measure, we do not prescribe.`,
     suggestChange: false,
   };
 }

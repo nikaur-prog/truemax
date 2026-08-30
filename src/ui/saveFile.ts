@@ -225,7 +225,7 @@ export function outcomeMessage(outcome: SaveOutcome): string {
     case "filed":
       return "Saved to your chosen folder";
     case "opened":
-      return "Opened — save it from there";
+      return "Opened, save it from there";
     case "cancelled":
       return "Not saved";
     default:

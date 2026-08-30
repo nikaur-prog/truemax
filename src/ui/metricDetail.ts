@@ -176,7 +176,7 @@ function step(delta: number): void {
 // our two landmarks do. Saying so is cheaper than being asked.
 const CONSTRUCTION_CAVEAT: Record<string, string> = {
   browTilt:
-    "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail — so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
+    "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail: so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
   jawFrontalAngle:
     "Constructed differently from the same-named angle in other tools, which read about 26° apart on the same face. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
 };
@@ -205,7 +205,7 @@ function normLine(m: ScoredMetric, sex: Sex): string {
 function positionLine(m: ScoredMetric, sex: Sex): string {
   const group = sex === "male" ? "men" : "women";
   if (m.conformance >= 0.999) {
-    return `Inside the ideal band — this feature is not holding the face back at all.`;
+    return `Inside the ideal band: this feature is not holding the face back at all.`;
   }
   // statedPct, like the chip beside it. Math.round put the same number on the
   // screen twice at two precisions — "Bottom 45%" over "closer to the ideal
@@ -395,7 +395,7 @@ function showAt(next: number): void {
   void info.offsetWidth;
   info.classList.add("enter");
   info.querySelector(".mdx-value")!.textContent = fmt(m);
-  info.querySelector(".mdx-score")!.textContent = m.implausible ? "—" : m.score.toFixed(1);
+  info.querySelector(".mdx-score")!.textContent = m.implausible ? "–" : m.score.toFixed(1);
   info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : rankShort(m.percentile);
   // No population bar for an impossible reading — its marker sits at phi(z) of
   // a value that is not a face, pinned to one end and presented as a position.

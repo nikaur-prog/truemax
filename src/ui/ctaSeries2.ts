@@ -330,7 +330,7 @@ function drawPlan(ctx: CanvasRenderingContext2D, w: number, h: number, local: nu
   ctx.font = `300 ${Math.round(44 * u)}px ${SERIF}`;
   ctx.fillText("Your 8-week plan", px + 32 * u, py + 70 * u);
   // The rows the chat just promised, now scheduled.
-  const ROWS = ["Adapalene 0.1% — nightly", "SPF 30 — every morning", "Sodium down, sleep earlier", "Rescan every week"];
+  const ROWS = ["Adapalene 0.1%, nightly", "SPF 30, every morning", "Sodium down, sleep earlier", "Rescan every week"];
   for (let i = 0; i < ROWS.length; i++) {
     const rp = seg(local, 0.5 + i * 0.2, 0.9 + i * 0.2);
     if (rp <= 0) continue;

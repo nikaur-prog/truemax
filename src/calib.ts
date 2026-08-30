@@ -162,7 +162,7 @@ function paint(): void {
 
   el.summary.innerHTML = scores.length
     ? `<div class="stat"><b>${mean(scores).toFixed(2)}</b><span>MEAN OF ${scores.length}</span></div>
-       <div class="stat"><b>${scores.length > 1 ? sd(scores).toFixed(2) : "—"}</b><span>SD ACROSS PHOTOS</span></div>
+       <div class="stat"><b>${scores.length > 1 ? sd(scores).toFixed(2) : ", "}</b><span>SD ACROSS PHOTOS</span></div>
        <div class="stat"><b>${Math.min(...scores).toFixed(1)}–${Math.max(...scores).toFixed(1)}</b><span>RANGE</span></div>
        <div class="stat"><b>${ok.filter((r) => r.clean).length}/${ok.length}</b><span>PASS CAPTURE GATE</span></div>`
     : `<p class="status">No face measured yet.</p>`;
@@ -173,7 +173,7 @@ function paint(): void {
       .map(
         (r) => `<tr class="${r.ok ? (r.clean ? "clean" : "") : "bad"}">
         <td class="fn">${escapeHtml(r.name)}</td>
-        <td class="num">${r.overall == null ? "—" : r.overall.toFixed(1)}</td>
+        <td class="num">${r.overall == null ? ", " : r.overall.toFixed(1)}</td>
         <td class="num">${r.ok ? r.yaw.toFixed(0) + "°" : ""}</td>
         <td class="num">${r.ok ? r.pitch.toFixed(0) + "°" : ""}</td>
         <td class="num">${r.ok ? r.smile.toFixed(2) : ""}</td>

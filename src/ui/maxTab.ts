@@ -53,7 +53,7 @@ const PREVIEW = [
   { who: "you", text: "How long until it shows?" },
   {
     who: "max",
-    text: "Weeks, not days — and I will tell you straight whether it moved, because I re-read the same numbers every scan.",
+    text: "Weeks, not days: and I will tell you straight whether it moved, because I re-read the same numbers every scan.",
   },
 ];
 
@@ -76,7 +76,7 @@ export function maxTabMarkup(paid: boolean): string {
       <div class="maxtab-stage">
         <span class="maxtab-face">${maxCharacterMarkup({ mood: "happy", waving: true })}</span>
         <h2>Ask Coach Max anything</h2>
-        <p>He has read every measurement in your scans. Plans, priorities, what moved and what did not — that is what he is for.</p>
+        <p>He has read every measurement in your scans. Plans, priorities, what moved and what did not: that is what he is for.</p>
       </div>
       ${composer}
     </div>`;
@@ -111,7 +111,7 @@ export function maxTabMarkup(paid: boolean): string {
 // measurement context is built on the results screen, so from here Max offers
 // the conversation rather than pretending to have the table open.
 const TAB_GREETING =
-  "Hey, I'm Max. Ask me anything — and open a scan if you want me talking through your exact numbers.";
+  "Hey, I'm Max. Ask me anything: and open a scan if you want me talking through your exact numbers.";
 
 export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
   const root = panel.querySelector<HTMLElement>(".maxtab");
@@ -157,8 +157,7 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
       // Stripe prorates the switch and shows the exact amount on the screen
       // the button opens, so the honest thing to state here is the plan's
       // price and the fact that the existing plan is credited against it.
-      price.innerHTML = `<b>$${MAX_MONTHLY.toFixed(2)}<small> USD / month</small></b>
-        — and what you already pay for Starter comes off it. Not a second membership:
+      price.innerHTML = `<b>$${MAX_MONTHLY.toFixed(2)}<small> USD / month</small></b>: and what you already pay for Starter comes off it. Not a second membership:
         your plan switches over and billing adjusts automatically, so you only pay the
         difference. Stripe shows you the exact amount before you confirm.`;
       cta.textContent = "Add Max to my plan";

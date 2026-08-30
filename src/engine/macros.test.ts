@@ -267,3 +267,14 @@ test("with no body fat reading there is nothing to adjust and scale weight stand
   assert.equal(proteinReferenceKg(80, undefined), 80);
   assert.equal(macroPlan({ ...HEAVY, weightKg: 80 }).protein, 128);
 });
+
+test("an impossible calendar date is not silently rolled forward into an age", () => {
+  // new Date("2008-02-30") is 2 March 2008 and new Date("2010-04-31") is
+  // 1 May 2010. Days out is nothing until the day it matters, and the day it
+  // matters is somebody's eighteenth birthday.
+  const dayBefore = new Date("2026-03-01T00:00:00Z");
+  assert.equal(oldEnoughForMacros("2008-02-30", dayBefore), false);
+  assert.equal(oldEnoughForMacros("2010-04-31", new Date("2028-05-01T00:00:00Z")), false);
+  // The real date either side of it still answers normally.
+  assert.equal(oldEnoughForMacros("2008-02-28", dayBefore), true);
+});

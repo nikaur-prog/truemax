@@ -522,7 +522,7 @@ export async function openTrialFunnel(
       ask: "My skin is the main thing. Is that even in here?",
       lead: "It is, and it's the part that moves fastest.",
       body:
-        "Skin is the one area where weeks of consistent work show up as a visibly different photograph. I read what your scan found, build the routine around it, and keep the plan boring on purpose — the products that work are cheap and the results come from not skipping.",
+        "Skin is the one area where weeks of consistent work show up as a visibly different photograph. I read what your scan found, build the routine around it, and keep the plan boring on purpose: the products that work are cheap and the results come from not skipping.",
     },
     {
       ask: "What if I do everything and the number doesn't move?",
@@ -534,13 +534,13 @@ export async function openTrialFunnel(
       ask: "Is this just going to tell me what I want to hear?",
       lead: "No, and you can check that.",
       body:
-        "Every number on your report shows its working — the measurement, the average it's compared against, and whether it's reliable enough to be scored at all. The ones that aren't get marked and given no weight. A tool that flattered you would hide that column, not print it.",
+        "Every number on your report shows its working: the measurement, the average it's compared against, and whether it's reliable enough to be scored at all. The ones that aren't get marked and given no weight. A tool that flattered you would hide that column, not print it.",
     },
     {
       ask: "How is a photo supposed to know anything about my face?",
       lead: "It measures, it doesn't guess.",
       body:
-        "The mesh puts a few hundred points on your face and I read proportions off them — spacing, angles, ratios. That's geometry, and it's repeatable. What it can't see is the things a photograph doesn't contain, which is why the report tells you when a number is indicative rather than scored.",
+        "The mesh puts a few hundred points on your face and I read proportions off them, spacing, angles, ratios. That's geometry, and it's repeatable. What it can't see is the things a photograph doesn't contain, which is why the report tells you when a number is indicative rather than scored.",
     },
     {
       ask: "How long before I actually see something?",
@@ -743,8 +743,8 @@ export async function openTrialFunnel(
           </button>
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
           <!-- Max lives at the foot of his own plan, not at the top of the
-               screen. He starts fully hidden behind the card's bottom edge —
-               the card's overflow does the hiding — and pops up waist-deep
+               screen. He starts fully hidden behind the card's bottom edge:
+               the card's overflow does the hiding: and pops up waist-deep
                once the offer settles, waves, and says his piece from a white
                bubble that types itself out. -->
           ${adult
@@ -763,7 +763,7 @@ export async function openTrialFunnel(
       </div>
       <p class="trial-status" role="status"></p>
       <button class="trial-decline" type="button">Not now</button>
-      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
+      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead: the option is on your results screen.</p>
     </div>`;
 
     // The canvases only exist once the offer is in the document. Painted from
@@ -1019,7 +1019,7 @@ export async function openTrialFunnel(
         ${textArea("trial-expectations", "What would you expect from TrueMax?", profile.expectations, "e.g. Honest measurements, clear next steps and no pressure")}`;
     } else if (step === 4) {
       content = `${textArea("trial-strengths", "What do you already feel confident about?", profile.strengths, "Anything you already like or want to preserve", true)}
-        ${textArea("trial-support", "Where would support be most useful?", profile.supportAreas, "Use your own words — or leave this blank", true)}`;
+        ${textArea("trial-support", "Where would support be most useful?", profile.supportAreas, "Use your own words, or leave this blank", true)}`;
     } else {
       content = `<div class="trial-choices compact">${QUIET_TOPICS.map((topic) => chip(topic.region, topic.label, profile.quietTopics.includes(topic.region))).join("")}</div>
         <div class="privacy-note"><b>Your face analysis stays on this device by default.</b><span>These answers save to your account so your pathway can follow you. Photo-feedback sharing remains a separate, optional Yes/No choice.</span></div>`;
