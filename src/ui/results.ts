@@ -19,7 +19,7 @@ import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
-import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
+import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
 import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { mountProtocolCard } from "./protocolCard.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
@@ -831,8 +831,91 @@ function wirePillarCards(report: Report): void {
       if (!ctx) return;
       const pillar = card.dataset.pillar as PillarId | undefined;
       if (!pillar) return;
-      const deck = pillarDeck(report, pillar);
-      if (!deck.length) return;
+      openPillarSheet(report, pillar);
+    };
+  }
+}
+
+let pillarSheet: HTMLElement | null = null;
+
+function closePillarSheet(): void {
+  pillarSheet?.remove();
+  pillarSheet = null;
+  document.removeEventListener("keydown", onPillarKey);
+}
+
+function onPillarKey(ev: KeyboardEvent): void {
+  // Scoped to the sheet: the detail card opens ON TOP of it and owns Escape
+  // while it is up, so closing the card must not also close the list behind it.
+  if (ev.key === "Escape" && !isMetricDetailOpen()) {
+    ev.stopPropagation();
+    closePillarSheet();
+  }
+}
+
+/**
+ * The pillar, opened as a list of the measurements that feed it.
+ *
+ * A list rather than a straight jump into the detail card, because the question
+ * the four numbers raise is "what is this made of" and a list answers it in one
+ * look. Each row still opens the detail card, at its own place in the deck, so
+ * the walk through the measurements is the same walk the region rows give.
+ */
+function openPillarSheet(report: Report, pillar: PillarId): void {
+  const deck = pillarDeck(report, pillar);
+  if (!deck.length || !ctx) return;
+  closePillarSheet();
+
+  const sex = report.sex;
+  const wrap = document.createElement("div");
+  pillarSheet = wrap;
+  wrap.className = "psx-overlay";
+  wrap.innerHTML = `<div class="psx-card" role="dialog" aria-modal="true" aria-label="${pillar} measurements">
+    <header class="psx-head">
+      <div>
+        <span class="psx-eyebrow">PILLAR</span>
+        <h3 class="psx-title">${pillar}</h3>
+      </div>
+      <span class="psx-count">${deck.length} measured</span>
+      <button class="psx-close" type="button" aria-label="Close">✕</button>
+    </header>
+    <div class="psx-body">
+      <p class="psx-note">${PILLAR_BLURB[pillar]}</p>
+      ${deck
+        .map(
+          (m, i) => `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}${
+            m.implausible ? " implausible" : ""
+          }" data-pillar-row="${i}" style="animation-delay:${60 + i * 55}ms">
+        <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${
+          m.implausible ? "—" : m.score.toFixed(1)
+        }</span></span></div>
+        <div class="psx-where">${REGION_NAMES[m.def.region] ?? m.def.region}</div>
+        ${
+          // An impossible reading has no position to place, exactly as on the
+          // side rows and in the detail card. The row still appears, because
+          // dropping it would change how many measurements a pillar has from
+          // one scan to the next with no account of why.
+          m.implausible ? "" : `<div class="rangebar">${idealWindow(m, sex)}<i data-l="${m.markerPct}"></i></div>`
+        }
+      </div>`,
+        )
+        .join("")}
+      <p class="psx-foot">Regions are the way through the report. This is the same set of measurements gathered a second way, by what they contribute to rather than where they sit.</p>
+    </div>
+  </div>`;
+
+  let downOnBackdrop = false;
+  wrap.addEventListener("pointerdown", (e) => {
+    downOnBackdrop = e.target === wrap;
+  });
+  wrap.addEventListener("click", (e) => {
+    if (e.target === wrap && downOnBackdrop) closePillarSheet();
+  });
+  wrap.querySelector(".psx-close")!.addEventListener("click", closePillarSheet);
+
+  for (const row of wrap.querySelectorAll<HTMLElement>("[data-pillar-row]")) {
+    row.addEventListener("click", () => {
+      if (!ctx) return;
       openMetricDetail({
         // The deck spans regions by definition, so the card takes each
         // measurement's own region from it. This is only the fallback.
@@ -840,15 +923,26 @@ function wirePillarCards(report: Report): void {
         deckLabel: pillar,
         deckNote: PILLAR_BLURB[pillar],
         metrics: deck,
-        index: 0,
-        sex: report.sex,
+        index: Number(row.dataset.pillarRow),
+        sex,
         landmarks: ctx.landmarks,
         frontPhoto: frontPhoto,
         sidePhoto: ctx.sidePhoto ?? null,
         sidePoints: ctx.sidePoints ?? null,
       });
-    };
+    });
   }
+
+  document.body.appendChild(wrap);
+  document.addEventListener("keydown", onPillarKey);
+  wrap.querySelector<HTMLElement>(".psx-close")?.focus();
+  // Same deferred paint the region list uses: the bars animate from zero to
+  // their marker rather than appearing already placed.
+  setTimeout(() => {
+    for (const i of wrap.querySelectorAll<HTMLElement>(".rangebar i")) {
+      i.style.left = `${i.dataset.l}%`;
+    }
+  }, 30);
 }
 
 let sideFade: OverlayFade | null = null;
@@ -2368,7 +2462,12 @@ export function clearResultsIdentityState(): void {
   // report. Everything else with that property — the gate, the dashboard, the
   // history panel, Max's chat — is already torn down on this path; this was
   // the one new surface that was not.
+  //
+  // The pillar list is torn down for the weaker version of the same reason: it
+  // holds no photograph, but it does hold one report's measurements, and it is
+  // the thing the detail card was opened FROM.
   closeMetricDetail();
+  closePillarSheet();
   ctx = null;
   maxAccess = false;
   adultUser = false;

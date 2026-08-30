@@ -6276,6 +6276,60 @@ body.is-member .journey { display: none; }
    construction drawn on, the number against its norm, and the comparisons.
    Phone-first: a sheet that owns the screen; on a desktop, a centred card
    with the stage beside the reading. */
+/* The pillar list.
+   Sits one below the measurement card's z-index, because the card opens from a
+   row of this list and has to paint over it. Everything else is the same sheet
+   language: bottom sheet on a phone, centred dialog on a desktop. */
+.psx-overlay {
+  position: fixed; inset: 0; z-index: 94;
+  display: grid; place-items: end center;
+  background: rgba(12, 14, 13, 0.55); backdrop-filter: blur(5px);
+  animation: mdx-dim .28s ease;
+}
+.psx-card {
+  width: 100%; max-width: 560px; max-height: 88dvh; overflow-y: auto;
+  background: var(--bg); border-radius: 22px 22px 0 0;
+  box-shadow: 0 -18px 60px rgba(10, 12, 11, 0.35);
+  animation: mdx-rise .38s cubic-bezier(0.26, 0.9, 0.32, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .psx-overlay, .psx-card { animation: none; }
+  .psx-card .metric { animation: none; opacity: 1; transform: none; }
+}
+@media (min-width: 900px) {
+  .psx-overlay { place-items: center; padding: 28px; }
+  .psx-card { border-radius: 22px; }
+}
+.psx-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 20px 12px;
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.psx-head > div { flex: 1; min-width: 0; }
+.psx-eyebrow { font: 600 9.5px var(--mono); letter-spacing: .16em; color: var(--mut); display: block; }
+.psx-title { font: 600 19px/1.25 var(--sans); letter-spacing: -0.01em; margin-top: 2px; }
+.psx-count { font: 500 11px var(--mono); letter-spacing: .1em; color: var(--mut); flex: none; }
+.psx-close {
+  flex: none; width: 34px; height: 34px; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%; background: none;
+  color: var(--mut); font-size: 13px; cursor: pointer;
+}
+.psx-close:hover { color: var(--ink); border-color: var(--acc); }
+.psx-body { padding: 16px 20px 22px; }
+.psx-note { font-size: 13.5px; line-height: 1.6; color: var(--mut); margin: 0 0 18px; }
+/* Which part of the face this measurement is taken on. The list crosses
+   regions, so without it a row names a measurement and not a place. */
+.psx-where {
+  font: 500 9.5px var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--mut); opacity: .8; margin: 1px 0 5px;
+}
+.psx-foot {
+  font-size: 12px; line-height: 1.55; color: var(--mut);
+  margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line);
+}
+
 .mdx-overlay {
   /* Above Max's pet (80) and his chat (90). The pet mounts LATER when a slow
      entitlement read resolves, which made it a later sibling at the same
