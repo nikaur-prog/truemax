@@ -35,13 +35,18 @@ test("the rarity phrase and the top-X% chip describe the same band", () => {
   }
 });
 
-test("the fraction form is only used where it lands exactly", () => {
-  // The reason rarityPhrase has two shapes at all. If a change ever lets a
-  // rounded fraction back in, this fails before it reaches a screen.
-  assert.equal(rarityText(90), "1 in 10");
-  assert.equal(rarityText(75), "1 in 4");
-  assert.equal(rarityText(55), "45% of"); // "1 in 2" would claim 50%
-  assert.equal(rarityText(85), "15% of"); // "1 in 7" would claim 14.3%
+test("no rarity stated about a person is ever a fraction", () => {
+  // The rule in CLAUDE.md: a rarity is never stated about a PERSON. This feeds
+  // a person's own report, so the "1 in 10" shape is barred here even though
+  // the scale note's ladder keeps it. The ladder describes the curve before
+  // anybody has seen their number; this sentence sits under their score.
+  assert.equal(rarityText(90), "10% of");
+  assert.equal(rarityText(75), "25% of");
+  assert.equal(rarityText(55), "45% of");
+  assert.equal(rarityText(85), "15% of");
+  for (let pct = 0; pct <= 100; pct += 0.5) {
+    assert.doesNotMatch(rarityText(pct), /\b1 in \d/, `rarityText(${pct})`);
+  }
 });
 
 test("both stop claiming resolution at the same place", () => {

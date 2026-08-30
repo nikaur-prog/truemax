@@ -149,4 +149,17 @@ test("a topical whose legal status varies says where it does not sit on a shelf"
   assert.ok(guide, "adapalene still carries a buying guide");
   assert.match(guide!.where, /prescription/i, guide!.where);
   assert.match(guide!.where, /UK|United Kingdom/, guide!.where);
+  // And it must not overstate the restriction either. A first attempt at this
+  // called adapalene prescription-only in Australia and New Zealand, which is
+  // wrong in both: Australia's Poisons Standard puts topical adapalene at or
+  // below 0.1% in Schedule 3, pharmacist-only, and New Zealand allows
+  // pharmacist supply up to 1 mg/g in packs of 30 g or less. Telling somebody
+  // they need a doctor when a pharmacist can hand it over is its own kind of
+  // wrong answer: it costs them an appointment they did not need.
+  assert.match(guide!.where, /Australia and New Zealand a pharmacist/, guide!.where);
+  assert.doesNotMatch(
+    guide!.where,
+    /Prescription-only in the UK, Australia and New Zealand/,
+    guide!.where,
+  );
 });

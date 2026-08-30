@@ -394,7 +394,11 @@ const LADDER: Array<{
     // the rung under it worth less. Roughly an 8.0+ headline score.
     min: 99,
     words: { male: ["True Adam"], female: ["True Eve"] },
-    kind: { male: ["One in a hundred"], female: ["One in a hundred"] },
+    // Not a count. Every other rung of this ladder names a quality; this one
+    // named a rarity, and a verdict word handed to a person is exactly where
+    // CLAUDE.md says a rarity may not go. "Genuinely rare" already sits on the
+    // rung below, so this reaches for the ceiling instead of the frequency.
+    kind: { male: ["As high as the scale goes"], female: ["As high as the scale goes"] },
     polite: { male: ["Top of the scale"], female: ["Top of the scale"] },
     descriptor: { male: "a male at the top of the scale", female: "a female at the top of the scale" },
     tone: "peak",

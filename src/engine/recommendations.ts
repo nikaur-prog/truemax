@@ -201,7 +201,7 @@ export const RECS: Rec[] = [
       strength: "0.1%, the only over-the-counter strength",
       example:
         "Sold as Differin in most places, and as pharmacy own-brand adapalene where it is stocked. A 45g tube lasts months.",
-      where: "Pharmacy, and how you get it depends on where you are. On the shelf in the US and over the counter in much of the EU. Prescription-only in the UK, Australia and New Zealand, so a GP or a prescribing pharmacist there, not a shelf.",
+      where: "A pharmacy, and how you get it differs by country. Off the shelf in the US and much of the EU. In Australia and New Zealand a pharmacist hands it over rather than a shelf, with no prescription needed. In the UK it is prescription-only. Ask at the counter rather than assuming.",
     },
   },
   {
