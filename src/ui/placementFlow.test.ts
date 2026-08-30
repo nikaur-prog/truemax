@@ -159,3 +159,40 @@ test("total failure still returns something to look at", () => {
   assert.match(body, /return finished\[0\];\s*$/);
   assert.doesNotMatch(body, /return null/);
 });
+
+// The Studio door. The AI room was staff-only in two places, so Adrian could
+// not use it without being made an admin of the whole product.
+const quickSrc = readFileSync(new URL("../quick.ts", import.meta.url), "utf8");
+const gateSrc = readFileSync(new URL("./quickGate.ts", import.meta.url), "utf8");
+
+test("the AI room is a grant, not a staff key", () => {
+  assert.match(quickSrc, /ai: "studio"/);
+  assert.doesNotMatch(quickSrc, /STAFF_ONLY_MODES = \["ai"/);
+  // Locked rather than removed, matching every other granted pillar: somebody
+  // who can see what exists knows what to ask the owner for.
+  assert.match(quickSrc, /const STAFF_ONLY_MODES = \["calibrate"\]/);
+  // Staff hold every key, including the new one.
+  assert.match(gateSrc, /grants: \{ cta: true, clips: true, polisher: true, studio: true \}/);
+});
+
+test("the League card's link opens the room rather than the menu", () => {
+  // There was no `ai` hash, so the Tools card would have landed on the pillar
+  // grid, which reads as a broken link.
+  assert.match(quickSrc, /ai: "ai",/);
+  assert.match(quickSrc, /if \(hash === "ai" \|\| hash === "studio"\)/);
+  const league = readFileSync(new URL("../league/main.ts", import.meta.url), "utf8");
+  assert.match(league, /id: "studio", n: "04", name: "Studio"/);
+  assert.match(league, /href: "\/league\/tools#ai"/);
+});
+
+test("the chips come from the catalogue, not from the markup", () => {
+  // One entry in one file adds a chip, its before wording, its after wording
+  // and its test coverage. A hand-written list in HTML would drift from the
+  // prompts within a cycle.
+  assert.match(quickSrc, /FACE_FLAWS\.map\(/);
+  assert.match(quickSrc, /flaws: selectedFlawIds\(\)/);
+  const html = readFileSync(new URL("../../quick.html", import.meta.url), "utf8");
+  assert.match(html, /id="q-ai-flaws"/);
+  // And the free box that invited "softer jawline" is no longer the main road.
+  assert.doesNotMatch(html, /placeholder="Acne along the jaw, patchy stubble, tired eyes, softer jawline"/);
+});

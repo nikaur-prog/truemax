@@ -169,7 +169,17 @@ export async function recordLeagueRender(userId: string, kind: string): Promise<
   if (error) throw new Error(error.message);
 }
 
-export type TtsMeter = "league" | "voice";
+/**
+ * Which ledger a reserved render is spent from.
+ *
+ * "studio" is an AI image pair. It shares the League monthly quota with
+ * "league" narration and differs only in the pillar grant that opens it and
+ * the `kind` its finalize writes. See the 20260830120000 migration for why an
+ * image pair goes through the same reserve/finalize/refund path rather than a
+ * simpler count-then-log: the OpenAI calls sit between the check and the spend,
+ * so a check-then-spend lets two concurrent pairs take the last slot.
+ */
+export type TtsMeter = "league" | "voice" | "studio";
 
 export async function claimTtsRender(userId: string, meter: TtsMeter): Promise<string | null> {
   const { data, error } = await getSupabaseAdmin().rpc("claim_tts_render", {

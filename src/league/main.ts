@@ -936,7 +936,12 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
-        id: "clips", n: "04", name: "Clips Library",
+        id: "studio", n: "04", name: "Studio",
+        body: "Describe a character, generate the before and after of the same face, then film them. The bone structure is identical in both shots because that is what a real glow-up does.",
+        needs: "No photos, a description, and one render slot a pair", href: "/league/tools#ai",
+      },
+      {
+        id: "clips", n: "05", name: "Clips Library",
         body: "Saved faces, celebrity references and demo exports to cut from, scored instantly, no rescan.",
         needs: "Nothing · it's all in the library", href: "/league/tools#clips",
       },
@@ -961,7 +966,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             : `<span class="lg-chip">NOT IN YOUR PLAN</span>`}
         </div></div>`).join("")}
       <div class="lg-card lg-tool off">
-        <div class="lg-tool-kicker">05</div>
+        <div class="lg-tool-kicker">06</div>
         <div class="lg-row" style="border:none;padding:0">
           <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
           the house palette, how every TrueMax video gets its look.</p>
