@@ -688,7 +688,15 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // and mirroring somebody's photo on a wrong guess is worse than leaving a
   // left-facing photo alone — the analysis handles either direction; this
   // flip exists for consistency, not correctness.
-  let seed = await seedSidePointsSmart(e.canvas);
+  // Measured, not just scored. The seeder has three independent ways to place
+  // these points and used to hand over whichever put most of them on the head;
+  // this lets it discard a tidy-looking placement whose measurements are not a
+  // shape a face comes in, and try the next one. Somebody is only told the
+  // placement failed once every method has failed.
+  let seed = await seedSidePointsSmart(
+    e.canvas,
+    (points, faceDir) => seedReadings(points, faceDir, ctx.sex).length === 0,
+  );
   if (seed.faceDir === -1 && (seed.method === "mesh" || seed.confidence >= 0.5)) {
     const w2 = e.canvas.width;
     const flipped = document.createElement("canvas");

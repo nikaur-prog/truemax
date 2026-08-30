@@ -998,7 +998,40 @@ function onMaskFraction(points: SidePoints, g: SideMaskGeometry, canvasW: number
  * The sync seedSidePoints below survives as the no-segmentation fallback and
  * for callers that cannot await.
  */
-export async function seedSidePointsSmart(canvas: HTMLCanvasElement): Promise<SideSeed> {
+/**
+ * Does this placement produce measurements a face can actually have?
+ *
+ * Supplied by the caller rather than imported, because answering it needs the
+ * scoring engine and the reference norms, and a seeder that reached for those
+ * would tie landmark estimation to the thing being estimated.
+ */
+export type SeedValidator = (points: SidePoints, faceDir: number) => boolean;
+
+/**
+ * The best seed that is also POSSIBLE, not merely the best-scoring one.
+ *
+ * There are three independent ways to place these thirteen points: the visible
+ * mesh, the segmentation silhouette, and the plain template fallback. This used
+ * to score two of them geometrically — what fraction of the points landed on
+ * the head — take the winner, and hand it over unmeasured. Geometry is a decent
+ * proxy and it is not the question. A placement can put every point tidily on
+ * the head and still produce a nasolabial angle of 167 degrees, which is not a
+ * shape a face comes in, and that is what somebody was then asked to accept.
+ *
+ * So each candidate is measured, and the first one that survives is used. Only
+ * when all of them fail does anybody get told the placement could not be made,
+ * which is the difference between a product that has one go and gives up and a
+ * product that tries everything it has.
+ *
+ * Ordered by geometric score, so a candidate that is both plausible and
+ * well-placed still wins; validation is a filter over that order rather than a
+ * replacement for it. With no validator supplied the behaviour is exactly what
+ * it was, which is what the calibration harnesses rely on.
+ */
+export async function seedSidePointsSmart(
+  canvas: HTMLCanvasElement,
+  validate?: SeedValidator,
+): Promise<SideSeed> {
   let g: SideMaskGeometry | null = null;
   try {
     g = await sideMaskGeometry(canvas);
@@ -1018,16 +1051,39 @@ export async function seedSidePointsSmart(canvas: HTMLCanvasElement): Promise<Si
     : -1;
   if (!mesh && !maskSeed) return seedSidePoints(canvas);
 
-  const useMesh = mesh !== null && meshScore >= maskScore;
-  const seed = useMesh ? mesh! : maskSeed!;
-  const cleaned = sanitizeSeed(seed, canvas.width, canvas.height);
-  applyOwnPrior(cleaned.points);
-  return {
-    points: keepSeedReachable(cleaned.points, canvas.width, canvas.height),
-    faceDir: cleaned.faceDir,
-    method: useMesh ? "mesh" : "segmentation",
-    confidence: Math.max(0, useMesh ? meshScore : maskScore),
+  const candidates: { seed: NonNullable<typeof mesh>; score: number; method: SideSeedMethod }[] = [];
+  if (mesh) candidates.push({ seed: mesh, score: meshScore, method: "mesh" });
+  if (maskSeed) candidates.push({ seed: maskSeed, score: maskScore, method: "segmentation" });
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Finished exactly as before: sanitised, given the owner's own prior for the
+  // four points behind the face, and pulled back inside the frame.
+  const finish = (c: (typeof candidates)[number]): SideSeed => {
+    const cleaned = sanitizeSeed(c.seed, canvas.width, canvas.height);
+    applyOwnPrior(cleaned.points);
+    return {
+      points: keepSeedReachable(cleaned.points, canvas.width, canvas.height),
+      faceDir: cleaned.faceDir,
+      method: c.method,
+      confidence: Math.max(0, c.score),
+    };
   };
+
+  const finished = candidates.map(finish);
+  if (!validate) return finished[0];
+
+  for (const seed of finished) {
+    if (validate(seed.points, seed.faceDir)) return seed;
+  }
+  // The template fallback is a third opinion and a genuinely different
+  // construction, so it is worth measuring rather than assumed to be worse.
+  const plain = seedSidePoints(canvas);
+  if (validate(plain.points, plain.faceDir)) return plain;
+
+  // Nothing measured cleanly. The best-scoring one still goes back, because the
+  // caller decides what to do about it and needs something to show while
+  // deciding — see askPlacementMode, which offers no accept button in this case.
+  return finished[0];
 }
 
 // The returning person's own ears, instead of the population's.
