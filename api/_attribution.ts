@@ -138,11 +138,10 @@ export async function reportPurchase(opts: {
 
   // ONE RETRY, AND IT IS FREE TO TAKE.
   //
-  // Stripe has already been answered 200 by the time anybody looks at the
-  // result of this, so a failure here is not retried by anything: a three
-  // second timeout or a momentary 500 loses that sale from the report for
-  // good. A single immediate retry recovers the common case, which is a blip
-  // rather than an outage.
+  // settle() waits for this result before answering Stripe, but returns 200
+  // even when reporting fails. A three second timeout or a momentary 500
+  // therefore loses that sale from the report for good. A single immediate
+  // retry recovers the common case, which is a blip rather than an outage.
   //
   // Safe to repeat because the payload carries the Stripe event id as
   // `event_id`, which is what TikTok deduplicates on: if the first attempt

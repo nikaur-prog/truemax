@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasMaxAccess, hasPaidAccess } from "./entitlement.js";
+import { hasMaxAccess, hasPaidAccess, resolveBillingIdentity } from "./entitlement.js";
 import type { Entitlement } from "./entitlement.js";
 
 // The gate between "measured your face for free" and "paid for the method".
@@ -51,4 +51,46 @@ test("cancel-at-period-end keeps access until the period actually ends", () => {
   // Someone who cancels has paid through the end of the period. Cutting them
   // off at the moment they click cancel is taking money for nothing.
   assert.equal(hasMaxAccess(ent({ cancelAtPeriodEnd: true })), true);
+});
+
+test("billing binds the access token to the same account seen on both sides", async () => {
+  const expectedIds: Array<string | undefined> = [];
+  const users = [{ id: "alice" }, { id: "alice" }];
+  const result = await resolveBillingIdentity(
+    async () => users.shift() ?? null,
+    async (expectedUserId) => {
+      expectedIds.push(expectedUserId);
+      return "alice-token";
+    },
+  );
+
+  assert.deepEqual(expectedIds, ["alice"]);
+  assert.deepEqual(result, { ok: true, accessToken: "alice-token", payerId: "alice" });
+});
+
+test("billing stops when the account changes while identity is being resolved", async () => {
+  const users = [{ id: "alice" }, { id: "bob" }];
+  const result = await resolveBillingIdentity(
+    async () => users.shift() ?? null,
+    async () => "alice-token",
+  );
+
+  assert.deepEqual(result, { ok: false, reason: "identity_changed" });
+});
+
+test("billing stops when the token does not belong to the first account", async () => {
+  let userReads = 0;
+  const result = await resolveBillingIdentity(
+    async () => {
+      userReads += 1;
+      return { id: "alice" };
+    },
+    async (expectedUserId) => {
+      assert.equal(expectedUserId, "alice");
+      return null;
+    },
+  );
+
+  assert.equal(userReads, 1, "do not continue to checkout after the session changes");
+  assert.deepEqual(result, { ok: false, reason: "identity_changed" });
 });

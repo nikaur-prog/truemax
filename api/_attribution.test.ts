@@ -234,10 +234,10 @@ test("only code 0 with nothing failed is a sale", async () => {
 });
 
 test("a transient failure is retried once, and the retry cannot double-count", async () => {
-  // Stripe has already been answered 200 by the time anybody reads this
-  // result, so nothing else retries a failure: one blip loses the sale from
-  // the report for good. Safe to repeat because the payload carries the Stripe
-  // event id, which is what TikTok deduplicates on.
+  // settle() still answers Stripe 200 when reporting fails, so nothing else
+  // retries a failure: one blip loses the sale from the report for good. Safe
+  // to repeat because the payload carries the Stripe event id, which is what
+  // TikTok deduplicates on.
   process.env.TIKTOK_PIXEL_ID = "test-pixel";
   process.env.TIKTOK_EVENTS_TOKEN = "test-token";
   const realFetch = globalThis.fetch;
