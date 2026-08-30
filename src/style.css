@@ -1975,11 +1975,40 @@ body.cam-takeover .cam-actions .btn { flex: 0 1 auto; min-width: 0; white-space:
    `min-width: 0` it was the item that paid for every other button's demands. */
 body.cam-takeover .cam-actions .btn.pri { flex: 1 0 auto; }
 @media (max-width: 760px) {
-  /* Upload keeps its icon and drops its words. Three labelled buttons do not
-     fit across a phone, and the arrow-into-cloud is the one of the three that
-     survives losing its text — a shutter and a Cancel do not. */
-  body.cam-takeover .cam-actions .btn.gho > span { display: none; }
-  body.cam-takeover .cam-actions .btn.gho { flex: 0 0 auto; padding-inline: 18px; }
+  /* TWO ROWS on a phone, and this is the fix that ends the argument.
+     Three controls have now been made to share one 390px line three times, by
+     tuning flex-grow, flex-shrink and min-width, and each tuning traded one
+     failure for another: the shutter was crushed to 99px against its own
+     122px label, then it was made unshrinkable and the row overflowed
+     instead, spilling "Capture anyway" off the left edge of the screen with
+     the upload glyph sitting on top of it. Reported from a phone, twice.
+     The arithmetic is simply too tight. "Capture anyway" is the longest and
+     least droppable label in the app, and at 14.5px with an icon and a pill
+     around it the three intrinsic widths land within a few pixels of the
+     viewport, so any device whose font metrics run a hair wide overflows.
+     A row that cannot fit should not be a row. The shutter takes the top line
+     to itself, which is also the honest hierarchy: it is the action, and the
+     other two are the ways out. Nothing can overflow, at any width, whatever
+     the label says.
+     Grid rather than flex, so `flex-direction: row` above stops applying and
+     the widths come from the tracks rather than from a negotiation. */
+  body.cam-takeover .cam-actions,
+  body.cam-takeover #side-actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  /* The shutter spans both tracks. It is first in the DOM on both screens
+     (index.html for the front, sideFlow.ts for the side), so it lands on the
+     top row and the other two fall in beneath it. */
+  body.cam-takeover .cam-actions .btn.pri,
+  body.cam-takeover #side-actions .btn.pri { grid-column: 1 / -1; }
+  /* A grid item is already track-width, so every flex-basis and width from
+     the rules above has to be handed back or it fights the track. */
+  body.cam-takeover .cam-actions .btn,
+  body.cam-takeover #side-actions .btn { width: auto; min-width: 0; margin: 0; }
+  /* And the upload gets its words back. They were dropped because three
+     labelled buttons did not fit across a phone; two do, and an icon with no
+     label is the button nobody presses. */
+  body.cam-takeover .cam-actions .btn.gho > span { display: inline; }
 }
 body.cam-takeover .cam-actions .btn.gho,
 body.cam-takeover .cam-actions .btn.cancel {
