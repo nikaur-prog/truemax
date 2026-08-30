@@ -109,6 +109,21 @@ The strongest version of it is the one where the number is not a 9. A tool that
 returns a high score for every attractive face is a mirror; a tool that returns
 a 7.4 with a named reason is a measurement.
 
+## Two things the competitor's own users asked them for
+
+From PSL's public launch thread, recorded in full in COMPETITOR_INTEL.md. Both
+are things TrueMax already does, which makes them positioning rather than
+roadmap:
+
+- *"stop being a psl rater and become a glow up progress coach"* — the parts
+  that actually change are skin, body fat and grooming, and that audience is
+  much larger than the looksmaxxing crowd. Women want it too.
+- *"A random score is entertaining for 30 seconds. Seeing specific areas
+  improve over time is what would keep me coming back."*
+
+So the content should lead with the second scan more than the first. A rating
+video is the hook; a rating video is also every competitor's entire library.
+
 ## What TrueMax has that none of them do
 
 The scan history. Every competitor above sells a rating; a rating is a single
