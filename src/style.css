@@ -1826,6 +1826,34 @@ body.cam-takeover .cam-hud {
 body.cam-takeover .cam-info,
 body.cam-takeover .cam-swap { top: calc(12px + env(safe-area-inset-top, 0px)); }
 
+/* ---------- the ground under a measurement ----------
+   The line was white over a full-brightness photograph, competing with
+   highlights, teeth and eye whites — the three things in a face that are also
+   nearly white. No amount of care in the renderer wins that fight, because it
+   is not a drawing problem: it is a contrast-budget problem, and the budget is
+   spent by the photo.
+
+   So the photo steps back while a measurement is on it. Only the PHOTO
+   canvas — the overlay canvas is a sibling and keeps its full brightness, so
+   the line gains everything the face gives up. Saturation comes down with
+   brightness because a dimmed-but-still-ruddy face keeps competing with the
+   warm end of the score bands.
+
+   Applied while the scan is running and while a single construction is
+   featured, never on the calm state: somebody looking at their own photograph
+   between measurements should see their photograph. */
+#frame.scanning #photo-canvas,
+#frame.measuring #photo-canvas {
+  filter: brightness(0.42) saturate(0.55);
+  transition: filter 0.32s ease;
+}
+#photo-canvas { transition: filter 0.32s ease; }
+@media (prefers-reduced-motion: reduce) {
+  #frame.scanning #photo-canvas,
+  #frame.measuring #photo-canvas,
+  #photo-canvas { transition: none; }
+}
+
 /* ---------- the measurement pass runs full-bleed ----------
    #v-main is a 38% / 1fr grid, so while the pass was running the photograph
    sat in a ~450px column of a 1240px page whose other column was still empty.

@@ -11,12 +11,48 @@ import type { ScoredMetric } from "../engine/types.js";
 // where the engine measured.
 // ---------------------------------------------------------------------------
 
-// The measurement overlay is monochrome white. The teal-and-orange it replaced
-// read as two systems fighting; a single white line over the photograph, with
-// the reference line the same white at half strength, reads as one instrument
-// and looks more premium. The label chips stay dark so the white text on them
-// keeps its contrast.
+// The line is coloured by what it MEASURED, not by house style.
+//
+// It was monochrome white, and the comment defending that said the
+// teal-and-orange it replaced "read as two systems fighting". That was right
+// about two colours fighting each other and it is not an argument for white:
+// one saturated hue on a darkened ground is still one instrument, and it beats
+// white because skin is already white-ish. A white line competes with
+// highlights, teeth and eye whites; a green one does not compete with anything
+// in a face.
+//
+// Three bands, wide enough that nobody reads a hue as a decimal. The exact
+// cut points do not matter much — what matters is that the same reading always
+// gets the same colour, so the hue is information rather than decoration.
+const BAND_LOW = "#F2604A";
+const BAND_MID = "#F0B24A";
+const BAND_HIGH = "#2BE08C";
+// The fallback, for the surfaces that draw a construction with no score behind
+// it: the landmark reference, the side seeder, the tutorial. Those are not
+// readings and must not wear a verdict's colour.
 const ACCENT = "#FFFFFF";
+
+/**
+ * The band a score sits in.
+ *
+ * Deliberately coarse. Reliability is not consulted here because the report
+ * already refuses to draw an unreliable metric at all (see RELIABLE_MIN in
+ * measurePass) — a line that reaches this function has already earned the
+ * right to be on screen, and dimming it again would be saying the same caveat
+ * twice in two languages.
+ */
+export function bandColour(score: number): string {
+  if (!Number.isFinite(score)) return ACCENT;
+  if (score < 4.5) return BAND_LOW;
+  if (score < 6.5) return BAND_MID;
+  return BAND_HIGH;
+}
+
+// The reference line inside a construction: the same hue at half strength, so
+// the pair still reads as one instrument taking one reading.
+function referenceOf(colour: string): string {
+  return colour === ACCENT ? "rgba(255,255,255,0.5)" : `${colour}80`;
+}
 const WARM = "rgba(255,255,255,0.5)";
 
 type Seg =
@@ -400,12 +436,19 @@ export function drawMeasurement(
   const ease = (t: number) => 1 - Math.pow(1 - t, 3);
   const lerp = (a: Pt2, b: Pt2, t: number): Pt2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
+  // One colour for the whole construction, taken from the reading it is a
+  // picture of. The recipes still name WARM for their reference lines, which is
+  // resolved here to the same hue at half strength rather than to a fixed
+  // white — so a construction is one instrument in one colour, never a
+  // coloured line with a white one beside it.
+  const band = bandColour(metric.score);
   for (const [segIndex, seg] of segs.entries()) {
     const u = ease(at(segIndex));
     if (u <= 0) continue;
     // Annotations wait until their own line has fully arrived.
     const done = u >= 0.999;
-    const color = ("color" in seg && seg.color) || ACCENT;
+    const named = ("color" in seg && seg.color) || null;
+    const color = named === WARM ? referenceOf(band) : named || band;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = lw;
@@ -415,10 +458,15 @@ export function drawMeasurement(
       const bFull = P(seg.b);
       const b = lerp(a, bFull, u);
       line(ctx, a, b);
-      // The tip carries a node as it travels; the start is marked from the
-      // first frame. A span is a reading between two points of light.
-      node(ctx, a, lw);
-      node(ctx, b, lw);
+      // No terminal nodes. A span used to end on a dot at each end, and the
+      // dots are what made it read as a measurement with handles rather than
+      // as one stroke: the line's own end IS the terminus, and marking it
+      // again says the same thing twice while adding the two brightest points
+      // in the construction.
+      //
+      // The dots stay where they are the thing being manipulated — the
+      // landmark review and the front edit, which draw their own and are not
+      // this renderer.
       if (seg.label && done && opts.labels !== false) {
         // Sit the label just past the line's end so the face stays visible
         const dx = bFull.x - a.x, dy = bFull.y - a.y;
@@ -477,14 +525,23 @@ function strokePremium(ctx: CanvasRenderingContext2D, trace: () => void): void {
   const w0 = ctx.lineWidth;
   const a0 = ctx.globalAlpha;
   ctx.save();
+  // The halo. Wider and brighter than it was (3x at 0.16 -> 4.5x at 0.26),
+  // which is only affordable now that the ground beneath it is darkened: over
+  // a full-brightness photograph the same values washed the face out, which is
+  // why they were set so low in the first place.
   ctx.shadowColor = "transparent";
-  ctx.globalAlpha = a0 * 0.16;
-  ctx.lineWidth = w0 * 3;
+  ctx.globalAlpha = a0 * 0.26;
+  ctx.lineWidth = w0 * 4.5;
   ctx.beginPath();
   trace();
   ctx.stroke();
-  ctx.globalAlpha = a0 * 0.92;
-  ctx.lineWidth = Math.max(0.9, w0 * 0.8);
+  // The core, genuinely hairline now. The old floor of 0.9 was what stopped it
+  // getting thin on a large canvas, and thin is where the sharpness comes
+  // from: a line reads as an instrument when it is fine and bright, and as a
+  // marker pen when it is thick and bright. 0.6 is still above the half-pixel
+  // at which a stroke starts to alias into grey on a 1x display.
+  ctx.globalAlpha = a0;
+  ctx.lineWidth = Math.max(0.6, w0 * 0.55);
   ctx.shadowColor = "rgba(0,0,0,0.4)";
   ctx.shadowBlur = 2.5;
   ctx.beginPath();
@@ -510,24 +567,6 @@ function auxLine(ctx: CanvasRenderingContext2D, a: Pt2, b: Pt2): void {
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
-  ctx.restore();
-}
-
-// Glowing instrument nodes where the whisker end-caps used to be. The span
-// still reads as a measurement — its ends are marked — but as a reading
-// taken between two points of light rather than a ruler laid on a face.
-function node(ctx: CanvasRenderingContext2D, p: Pt2, lw: number): void {
-  const a0 = ctx.globalAlpha;
-  ctx.save();
-  ctx.shadowColor = "transparent";
-  ctx.globalAlpha = a0 * 0.22;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, lw * 3.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = a0;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, lw * 1.3, 0, Math.PI * 2);
-  ctx.fill();
   ctx.restore();
 }
 
@@ -787,10 +826,11 @@ function drawRegionFallback(
   cy /= ids.length;
 
   const r = Math.max(3, width / 150);
+  const band = bandColour(metric.score);
   ctx.save();
-  ctx.shadowColor = ACCENT;
+  ctx.shadowColor = band;
   ctx.shadowBlur = width / 90;
-  ctx.fillStyle = ACCENT;
+  ctx.fillStyle = band;
   for (const i of ids) {
     ctx.beginPath();
     ctx.arc(landmarks[i].x * width, landmarks[i].y * height, r, 0, Math.PI * 2);
