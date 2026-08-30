@@ -1573,7 +1573,7 @@ function resetToUpload(): void {
   // abandon path inside the scan clears this class; the reset that ends the
   // run from the outside did not, so a scan reset mid-analysis left the upload
   // screen wearing it and the next capture inherited it.
-  el.frame.classList.remove("scanning", "prescan");
+  el.frame.classList.remove("scanning");
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
   // The next capture gets its own film. Keyed by scan ID, so this is belt and
@@ -1707,23 +1707,7 @@ async function handleCanvas(
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
-  // WHY THE PHOTO IS NOT DIMMED YET.
-  //
-  // `scanning` takes the screen and dims the photograph to 42% brightness, so
-  // that the measurement lines drawn on top of it read as light on dark. That
-  // is the right trade the moment there IS a line. It is a straight loss here:
-  // everything between this line and the mesh landing is face detection,
-  // quality assessment, occlusion and head-covering — four model calls with no
-  // overlay behind them at all — so what somebody watches is their own
-  // photograph going dark under the word SCANNING with nothing on it. On a
-  // phone that is over a second of a screen that looks like it has failed, and
-  // it is the first thing a real run of this flow was asked about.
-  //
-  // `prescan` says "the stage is up but nothing is drawn on it yet" and turns
-  // the dim off for exactly that window. It only means anything alongside
-  // `scanning`, so a stale one is inert; playMeasurePass drops it as it starts
-  // the reveal, which is the frame the dim starts earning its keep.
-  el.frame.classList.add("scanning", "prescan");
+  el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
   el.qualityChips.innerHTML = "";
@@ -2051,11 +2035,7 @@ async function playMeasurePass(
   const { landmarks, width, height, photo: frontShot } = pending;
   el.main.classList.remove("hidden");
   paintFrontPane(frontShot);
-  // The dim comes on here and not before: the reveal below is the first thing
-  // that puts anything on the overlay for it to make room for. See `prescan`
-  // in the front capture.
   el.frame.classList.add("scanning");
-  el.frame.classList.remove("prescan");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
   await nextFrame();
@@ -2631,10 +2611,13 @@ async function gateAnalysis(
   // "Analysis complete" only where an analysis actually ran. A capture whose
   // measurement threw skips the film above, and this line must not tell
   // somebody they watched something they did not.
-  const ran = front ? "<b>Analysis complete.</b>" : "<b>Both views captured.</b>";
-  el.status.innerHTML = saved
-    ? `${ran} Sign up or log in to open it.`
-    : `${ran} Sign in with an existing account to open it.`;
+  // The card directly below already says "Results are ready", asks for the
+  // account and names both doors. Repeating the ask up here was the same
+  // sentence twice, eighty pixels apart, and it was the half that collided
+  // with the card. The line keeps the completion beat and gives up the ask.
+  el.status.innerHTML = front
+    ? "<b>Analysis complete.</b>"
+    : "<b>Both views captured.</b>";
   el.barFill.style.width = "100%";
   // Last, and after the pane above has been filled. Leaving `scanning` is what
   // drops the photograph out of the full-screen scan stage and back into the

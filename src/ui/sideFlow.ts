@@ -1438,7 +1438,15 @@ function askPlacementMode(
       <span class="klabel">${low ? "LOW CONFIDENCE" : "AUTOMATIC PLACEMENT"}</span>
       <h2 id="side-mode-title">${low ? "Here is our best guess" : "We placed the points for you"}</h2>
       <figure class="side-mode-shot">
-        <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+        <button type="button" class="side-mode-zoom" data-zoom aria-expanded="false"
+          aria-label="Enlarge the photo to see the points">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path class="zoom-out" d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>
+            <path class="zoom-in" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/>
+          </svg>
+        </button>
+        <canvas data-zoom aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
       <p class="side-mode-copy">${low
         ? "This photo was a hard one to read, so treat these as starting positions rather than an answer."
@@ -1450,18 +1458,47 @@ function askPlacementMode(
       <p class="side-mode-fine">Placing them yourself gives a more accurate score. Taking these still lets you drag any point.</p>
     </section>`;
     document.body.appendChild(backdrop);
-    paintPlacementPreview(backdrop.querySelector("canvas")!, photo, points);
+    const shot = backdrop.querySelector("canvas")!;
+    const zoom = backdrop.querySelector<HTMLButtonElement>(".side-mode-zoom")!;
+    // Small by default and big on demand.
+    //
+    // Thirteen rings on a 168px picture land within a few pixels of each other
+    // around the nose and mouth, which reads as one teal smudge: enough to
+    // answer "did those go on my face", not enough to answer "is that one on
+    // my lip". Both questions get asked here, so both get a size. The card
+    // grows with the picture rather than the picture escaping the card.
+    let expanded = false;
+    const draw = () => {
+      paintPlacementPreview(shot, photo, points, expanded);
+      zoom.setAttribute("aria-expanded", String(expanded));
+      zoom.setAttribute("aria-label", expanded ? "Shrink the photo" : "Enlarge the photo to see the points");
+      backdrop.classList.toggle("expanded", expanded);
+    };
+    draw();
+    // Re-measured rather than re-scaled: the expanded size is bounded by the
+    // viewport, and a phone that rotates mid-decision would otherwise keep a
+    // picture sized for the other orientation.
+    const onResize = () => { if (expanded) draw(); };
+    window.addEventListener("resize", onResize);
     backdrop.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
     const settle = (mode: "auto" | "manual" | null) => {
       if (done) return;
       done = true;
       untrack();
+      window.removeEventListener("resize", onResize);
       backdrop.remove();
       resolve(mode);
     };
     const untrack = trackDialog(() => settle(null));
     backdrop.onclick = (ev) => {
-      const mode = (ev.target as HTMLElement).dataset.mode;
+      const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-zoom],[data-mode]");
+      if (!el) return;
+      if (el.hasAttribute("data-zoom")) {
+        expanded = !expanded;
+        draw();
+        return;
+      }
+      const mode = el.dataset.mode;
       if (mode !== "auto" && mode !== "manual") return;
       settle(mode);
     };
@@ -1501,6 +1538,28 @@ export function placementPreviewBox(
 }
 
 /**
+ * The enlarged size, bounded by the screen it is being read on.
+ *
+ * Not a fixed number. The whole dialog has to stay on the display with its
+ * heading and both buttons still reachable, so the picture gets what is left
+ * after that furniture rather than a size chosen on a desktop and discovered
+ * on a phone. The reserve is deliberately generous: a card whose buttons are
+ * below the fold is a dialog somebody cannot answer.
+ */
+const EXPANDED_RESERVE_H = 320;
+const EXPANDED_MARGIN_W = 76;
+
+export function expandedPreviewLimits(
+  viewportW: number,
+  viewportH: number,
+): { maxW: number; maxH: number } {
+  return {
+    maxW: Math.max(PLACEMENT_PREVIEW_W, Math.min(560, viewportW - EXPANDED_MARGIN_W)),
+    maxH: Math.max(PLACEMENT_PREVIEW_H, Math.min(640, viewportH - EXPANDED_RESERVE_H)),
+  };
+}
+
+/**
  * The photograph and its thirteen rings, small.
  *
  * Drawn rather than cloned. The live frame carries the rings as positioned DOM
@@ -1518,9 +1577,17 @@ function paintPlacementPreview(
   target: HTMLCanvasElement,
   photo: HTMLCanvasElement,
   points: SidePoints,
+  expanded = false,
 ): void {
-  const { w, h, scale } = placementPreviewBox(photo.width, photo.height);
+  const limits = expanded
+    ? expandedPreviewLimits(window.innerWidth, window.innerHeight)
+    : { maxW: PLACEMENT_PREVIEW_W, maxH: PLACEMENT_PREVIEW_H };
+  const { w, h, scale } = placementPreviewBox(photo.width, photo.height, limits.maxW, limits.maxH);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // The backing store is resized to the TARGET before the CSS box finishes
+  // travelling, so the picture is already sharp at the size it is arriving at
+  // and the browser only scales it during the transition itself. Repainting
+  // after the animation instead would land a soft picture and then snap it.
   target.style.width = `${w}px`;
   target.style.height = `${h}px`;
   target.width = Math.round(w * dpr);
@@ -1530,6 +1597,10 @@ function paintPlacementPreview(
   g.scale(dpr, dpr);
   g.drawImage(photo, 0, 0, w, h);
   const at = (id: keyof SidePoints) => ({ x: points[id].x * scale, y: points[id].y * scale });
+  // Ring and line weight are in DISPLAY units, not image units, so they stay
+  // the same apparent thickness at both sizes. Scaling them with the picture
+  // would make the enlarged view thirteen fat discs and defeat the enlarging.
+  const ring = expanded ? 5.4 : 3.1;
   g.strokeStyle = "rgba(143, 243, 224, 0.42)";
   g.lineWidth = 1;
   const pairs: [keyof SidePoints, keyof SidePoints][] = [
@@ -1548,11 +1619,11 @@ function paintPlacementPreview(
     g.stroke();
   }
   g.strokeStyle = "#8ff3e0";
-  g.lineWidth = 1.4;
+  g.lineWidth = expanded ? 1.8 : 1.4;
   for (const def of SIDE_POINTS) {
     const p = at(def.id);
     g.beginPath();
-    g.arc(p.x, p.y, 3.1, 0, Math.PI * 2);
+    g.arc(p.x, p.y, ring, 0, Math.PI * 2);
     g.stroke();
   }
 }

@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { placementPreviewBox, PLACEMENT_PREVIEW_W, PLACEMENT_PREVIEW_H } from "./sideFlow.js";
+import {
+  placementPreviewBox,
+  expandedPreviewLimits,
+  PLACEMENT_PREVIEW_W,
+  PLACEMENT_PREVIEW_H,
+} from "./sideFlow.js";
 
 // "Take these points, or place them yourself" moved out of a sheet pinned to
 // the bottom of the photo frame and into a centred dialog over a blurred page,
@@ -71,4 +76,49 @@ test("the class that hides the review row is both added and removed", () => {
 test("the stylesheet actually hides it", () => {
   const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
   assert.match(css, /#side-actions\.mode-pending\s*\{\s*visibility:\s*hidden/);
+});
+
+// The account wall used to be centred on the blurred preview it floats over,
+// which put half its overhang on the progress bar and the narration line above.
+test("the account wall hangs from the top of the blur, not its middle", () => {
+  const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
+  const rule = css.slice(css.indexOf(".analysis-gate.over-preview"));
+  const body = rule.slice(0, rule.indexOf("}"));
+  assert.match(body, /top:\s*0/);
+  assert.doesNotMatch(body, /top:\s*50%/);
+  assert.doesNotMatch(body, /translate\(-50%,\s*-50%\)/);
+});
+
+// The preview enlarges on demand. At 168px the thirteen rings land within a
+// few pixels of each other around the nose and mouth and read as one smudge,
+// which answers "did those go on my face" and not "is that one on my lip".
+test("the enlarged size is bounded by the screen it is read on", () => {
+  const phone = expandedPreviewLimits(390, 844);
+  // A phone gets most of its width and leaves room for the heading and both
+  // buttons: a dialog whose answers are below the fold cannot be answered.
+  assert.equal(phone.maxW, 390 - 76);
+  assert.equal(phone.maxH, 844 - 320);
+
+  const desktop = expandedPreviewLimits(1920, 1080);
+  // And a large display does not get a 1.8-metre face: the caps hold.
+  assert.equal(desktop.maxW, 560);
+  assert.equal(desktop.maxH, 640);
+});
+
+test("a very short window still gets a preview, never a zero-height one", () => {
+  // A phone in landscape, or a desktop window dragged short. Clamping to the
+  // collapsed size is the floor; going negative would paint nothing and the
+  // button would look broken rather than constrained.
+  const squat = expandedPreviewLimits(700, 300);
+  assert.equal(squat.maxH, PLACEMENT_PREVIEW_H);
+  assert.ok(squat.maxW > 0);
+  const box = placementPreviewBox(1200, 1600, squat.maxW, squat.maxH);
+  assert.ok(box.w > 0 && box.h > 0);
+});
+
+test("enlarging actually enlarges, on any ordinary screen", () => {
+  const small = placementPreviewBox(1200, 1600);
+  const lim = expandedPreviewLimits(390, 844);
+  const big = placementPreviewBox(1200, 1600, lim.maxW, lim.maxH);
+  assert.ok(big.h > small.h * 2, `expected a real jump, got ${small.h} to ${big.h}`);
 });

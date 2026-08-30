@@ -54,25 +54,31 @@ test("the wall reads one score, computed the same way the report will be", () =>
   assert.ok(frames > 0, "the gate path should use the multi-frame median");
 });
 
-// The dim exists so measurement lines read as light on dark. It was also being
-// applied to the front capture during detection, when there is no overlay at
-// all — a photograph going dark under the word SCANNING with nothing on it.
-test("every screen that raises the scan stage decides about the dim", () => {
-  const adds = [...src.matchAll(/el\.frame\.classList\.add\("scanning"[^)]*\)/g)].map((m) => m[0]);
-  // Two, and only two: the front capture and the measurement pass. A third
-  // would raise the stage without saying whether it has anything to show.
-  assert.equal(adds.length, 2, `expected 2 scanning-stage entries, found ${adds.length}`);
-  assert.ok(
-    adds.some((a) => a.includes('"prescan"')),
-    "the front capture raises the stage before there is an overlay, so it must set prescan",
-  );
-  assert.match(src, /el\.frame\.classList\.remove\("prescan"\)/);
+// The photograph is no longer dimmed while the pass runs, at the owner's call
+// after watching it. The lines carry their own dark halo and the scan stage is
+// already a dark room, so turning the face down was solving at the scale of the
+// photograph a contrast problem already solved at the scale of the stroke. It
+// also read as a fault: the face went dark mid-sequence for no visible cause.
+test("the scan stage never turns the photograph down", () => {
+  const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
+  // Any brightness filter on the photo pane, under any state class, is the
+  // thing that was removed. The comment naming the old value is allowed; a
+  // live declaration is not.
+  const declarations = css
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("*") && !l.trimStart().startsWith("/*"))
+    .join("\n");
+  assert.doesNotMatch(declarations, /#photo-canvas\s*\{[^}]*filter:\s*brightness/);
+  assert.doesNotMatch(declarations, /#frame\.(scanning|measuring)[^{]*\{[^}]*brightness/);
 });
 
-test("prescan is inert on its own", () => {
-  // It is written so a stale one cannot silently leave a measurement pass
-  // undimmed: the rule only fires alongside `scanning`.
-  const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
-  assert.match(css, /#frame\.scanning\.prescan #photo-canvas \{ filter: none; \}/);
-  assert.doesNotMatch(css, /^#frame\.prescan/m);
+test("the stage is raised in exactly two places", () => {
+  const adds = [...src.matchAll(/el\.frame\.classList\.add\("scanning"[^)]*\)/g)].map((m) => m[0]);
+  // The front capture and the measurement pass. A third would be a screen
+  // taking over the display without anyone deciding what it shows.
+  assert.equal(adds.length, 2, `expected 2 scanning-stage entries, found ${adds.length}`);
+  // And the un-dimming machinery that existed only to work around the dim is
+  // gone with it, rather than left behind as a class nothing reads.
+  assert.doesNotMatch(src, /prescan/);
+  assert.doesNotMatch(readFileSync(new URL("../style.css", import.meta.url), "utf8"), /\.prescan/);
 });

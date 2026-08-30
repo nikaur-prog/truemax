@@ -1578,12 +1578,18 @@ button.pillar:active { transform: translateY(0); }
   animation: side-mode-in 0.2s ease-out;
 }
 @keyframes side-mode-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .side-mode-backdrop { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .side-mode-backdrop { animation: none; }
+  .side-mode-card,
+  .side-mode-shot canvas,
+  .side-mode-zoom { transition: none; }
+}
 /* Centred, because there is one thing on it and no reason to read it as a
    form. Narrow, because a wide card at this word count is mostly whitespace
    with two buttons floating in it. */
 .side-mode-card {
   width: min(400px, 100%); margin: auto; flex: 0 0 auto;
+  transition: width .3s cubic-bezier(.22,.61,.36,1);
   background: var(--card); color: var(--ink);
   border: 1px solid var(--line); border-radius: 24px; padding: 26px 26px 22px;
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.28); text-align: center;
@@ -1595,11 +1601,32 @@ button.pillar:active { transform: translateY(0); }
 /* The photograph, at a size that answers "did that land on my face" and does
    not pretend to answer "is that landmark two pixels out". The full frame
    behind is for the second question. */
-.side-mode-shot { margin: 0 0 16px; display: flex; justify-content: center; }
+.side-mode-shot { margin: 0 0 16px; display: flex; justify-content: center; position: relative; }
 .side-mode-shot canvas {
   display: block; border-radius: 12px; border: 1px solid var(--line);
-  background: #0d0f11; max-width: 100%;
+  background: #0d0f11; max-width: 100%; cursor: zoom-in;
+  /* The box travels; the bitmap inside it is already painted at the size it is
+     arriving at, so this reads as the picture growing rather than as a swap. */
+  transition: width .3s cubic-bezier(.22,.61,.36,1), height .3s cubic-bezier(.22,.61,.36,1);
 }
+.side-mode-backdrop.expanded .side-mode-shot canvas { cursor: zoom-out; }
+/* Top right of the picture, which is the corner the profile never occupies:
+   the head faces one way or the other and the space above the shoulder is
+   empty in both. */
+.side-mode-zoom {
+  position: absolute; top: 7px; right: 7px; z-index: 1;
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 7px; cursor: pointer;
+  border: 1px solid rgba(143, 243, 224, 0.34);
+  background: rgba(12, 20, 18, 0.72); color: #8ff3e0;
+  transition: border-color .2s ease, transform .2s ease;
+}
+.side-mode-zoom:hover { border-color: #8ff3e0; transform: scale(1.06); }
+.side-mode-zoom .zoom-in { display: none; }
+.side-mode-backdrop.expanded .side-mode-zoom .zoom-in { display: inline; }
+.side-mode-backdrop.expanded .side-mode-zoom .zoom-out { display: none; }
+/* The card follows the picture rather than the picture escaping the card. */
+.side-mode-backdrop.expanded .side-mode-card { width: min(640px, 100%); }
 .side-mode-copy { color: var(--mut); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px; }
 /* Side by side, equal widths, because neither of these is the wrong answer. */
 .side-mode-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -2072,50 +2099,34 @@ body.cam-takeover .cam-hud {
 body.cam-takeover .cam-info,
 body.cam-takeover .cam-swap { top: calc(12px + env(safe-area-inset-top, 0px)); }
 
-/* ---------- the ground under a measurement ----------
-   The line was white over a full-brightness photograph, competing with
-   highlights, teeth and eye whites — the three things in a face that are also
-   nearly white. No amount of care in the renderer wins that fight, because it
-   is not a drawing problem: it is a contrast-budget problem, and the budget is
-   spent by the photo.
+/* THE PHOTOGRAPH IS NOT DIMMED.
 
-   So the photo steps back while a measurement is on it. Only the PHOTO
-   canvas — the overlay canvas is a sibling and keeps its full brightness, so
-   the line gains everything the face gives up. Saturation comes down with
-   brightness because a dimmed-but-still-ruddy face keeps competing with the
-   warm end of the score bands.
+   It used to be. `#frame.scanning` and `#frame.measuring` dropped
+   `#photo-canvas` to `brightness(0.42) saturate(0.55)` so the measurement
+   lines drawn over it would read as light on dark, and the overlay canvas,
+   being a sibling, kept its full brightness and gained everything the face
+   gave up.
 
-   Applied while the scan is running and while a single construction is
-   featured, never on the calm state: somebody looking at their own photograph
-   between measurements should see their photograph. */
-#frame.scanning #photo-canvas,
-#frame.measuring #photo-canvas {
-  filter: brightness(0.42) saturate(0.55);
-  transition: filter 0.32s ease;
-}
-/* ...and not before there is a line to make room for.
+   Reverted at the owner's call after watching it run, and the reasoning is
+   better than the reasoning it replaces:
 
-   The front capture puts the scan stage up the instant the shutter fires, on
-   purpose: it has to be painted before the camera is torn down, or a slow
-   MediaPipe mode switch leaves the pre-photo screen on the display. But
-   everything between that moment and the mesh landing is detection, quality,
-   occlusion and head-covering — four model calls with nothing on the overlay —
-   so the dim was being applied to a bare photograph for the length of all four.
-   The overlay gains nothing because there is no overlay, and the person sees
-   their own face go dark under the word SCANNING with no visible reason.
+     1. The lines do not need it. Every measurement stroke in measureOverlay
+        already carries its own dark halo — `shadowColor rgba(0,0,0,0.4)` at
+        2.5 blur behind a hairline bright core — which is what actually
+        separates a line from whatever is under it. That halo works on a light
+        cheek and a dark background equally, because it is local to the line.
+        Dimming the whole face was solving a contrast problem at the scale of
+        the photograph that had already been solved at the scale of the stroke.
+     2. The scan stage is already a dark room. `body:has(#frame.scanning)`
+        paints `rgba(12,13,15,0.94)` behind the frame, so a full-brightness
+        photograph sits on a dark ground with no help needed.
+     3. It read as a fault. The dim came in over 0.32s in the middle of a
+        sequence, so a photo that had been bright a moment ago went dark for no
+        cause the person could see. That was reported as a bug twice before it
+        was recognised as a feature, which is the usual sign.
 
-   `prescan` is set alongside `scanning` for exactly that window and dropped as
-   the reveal starts. It is written to be inert on its own, so a stale one
-   cannot leave a measurement pass undimmed. */
-#frame.scanning.prescan #photo-canvas { filter: none; }
-#photo-canvas { transition: filter 0.32s ease; }
-@media (prefers-reduced-motion: reduce) {
-  #frame.scanning #photo-canvas,
-  #frame.scanning.prescan #photo-canvas,
-  #frame.measuring #photo-canvas,
-  #photo-canvas { transition: none; }
-}
-
+   A local scrim behind a line is the move if a specific construction ever
+   washes out on a bright photograph. Turning the face down is not. */
 /* ---------- the measurement pass runs full-bleed ----------
    #v-main is a 38% / 1fr grid, so while the pass was running the photograph
    sat in a ~450px column of a 1240px page whose other column was still empty.
@@ -3737,10 +3748,28 @@ body.auth-modal-open { overflow: hidden; }
   border: 1px solid var(--line); border-radius: 13px; background: var(--card); font-size: 13px;
 }
 .gate-prev-cell b { font-family: var(--serif); font-weight: 400; }
+/* Anchored to the TOP of the blurred preview, not centred on it.
+
+   Centring assumes the card is shorter than what it floats over. This one is
+   not: it carries a heading, a paragraph, a button and a running Coach Max
+   demo, and the blurred preview under it is capped at 520px. So half the
+   difference hung off the top edge and landed on the progress bar and the
+   narration line above, which is exactly where it was reported: a white card
+   cutting through the green rule with the status text half behind it.
+
+   Top-anchored, the card's height stops mattering. It starts inside the
+   preview, grows downward into it, and cannot reach anything above. */
 .analysis-gate.over-preview {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+  margin-top: 22px;
   width: min(460px, calc(100% - 20px)); z-index: 1;
   box-shadow: 0 24px 70px rgba(20, 21, 24, .16);
+}
+/* Room under it, so the blur it floats on runs past the card rather than
+   ending halfway down it. Same device as .lockcard-ceiling above. */
+.lockwrap:has(.analysis-gate.over-preview) { margin-top: 18px; min-height: 640px; }
+@supports not selector(:has(*)) {
+  .lockwrap { margin-top: 18px; }
 }
 
 /* The landmark reference ----------------------------------------------------
