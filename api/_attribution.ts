@@ -87,6 +87,15 @@ export function clickIdFrom(metadata: Record<string, string> | null | undefined)
 const ENDPOINT = "https://business-api.tiktok.com/open_api/v1.3/event/track/";
 
 /**
+ * How long the conversion report may hold the webhook open.
+ *
+ * Generous for a single small POST and far short of the platform's own
+ * function ceiling, so a slow ad network costs one conversion rather than a
+ * failed webhook that Stripe then retries.
+ */
+const TIMEOUT_MS = 3000;
+
+/**
  * Tell TikTok a purchase happened, server side.
  *
  * From the WEBHOOK, not the browser, and that is the whole reason this exists
@@ -116,9 +125,19 @@ export async function reportPurchase(opts: {
   // the call would cost a round trip to report an unattributable sale.
   if (!opts.ttclid && !opts.ttp) return "skipped";
 
+  // BOUNDED, because an unbounded call to somebody else's server inside a
+  // payment webhook is a way to strand a paying customer. fetch has no default
+  // timeout: a host that accepts the connection and never answers holds this
+  // open until the platform kills the whole function. Reporting runs after
+  // fulfilment now, so a timeout costs one unreported conversion and nothing
+  // else, which is the correct thing for it to cost.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+
   try {
     const response = await fetch(ENDPOINT, {
       method: "POST",
+      signal: abort.signal,
       headers: { "Content-Type": "application/json", "Access-Token": token },
       body: JSON.stringify({
         event_source: "web",
@@ -149,9 +168,38 @@ export async function reportPurchase(opts: {
       console.error("tiktok-events", `HTTP ${response.status}`);
       return "failed";
     }
+
+    // HTTP 200 IS NOT SUCCESS HERE.
+    //
+    // The Events API answers 200 and puts the outcome in the body: a non-zero
+    // `code` is a rejected request, and `partial_failure` with a populated
+    // `failed_events` means some of the batch was dropped while the envelope
+    // succeeded. Checking only the status code recorded every one of those as
+    // "sent", which is worse than not reporting at all — a silent zero looks
+    // like an ad that is not converting, and the response said so plainly the
+    // whole time.
+    const payload = (await response.json().catch(() => null)) as {
+      code?: number;
+      message?: string;
+      data?: { partial_failure?: unknown; failed_events?: unknown[] } | null;
+    } | null;
+    if (!payload || (typeof payload.code === "number" && payload.code !== 0)) {
+      // The message describes OUR request, not the customer, so it is worth
+      // logging: "invalid pixel code" and "event_time too old" are the two
+      // failures somebody would otherwise spend a week not seeing.
+      console.error("tiktok-events", `code ${payload?.code ?? "none"}`, payload?.message ?? "");
+      return "failed";
+    }
+    const failed = payload.data?.failed_events;
+    if (payload.data?.partial_failure || (Array.isArray(failed) && failed.length > 0)) {
+      console.error("tiktok-events", "partial failure", Array.isArray(failed) ? failed.length : "?");
+      return "failed";
+    }
     return "sent";
   } catch (error) {
     console.error("tiktok-events", safeMessage(error));
     return "failed";
+  } finally {
+    clearTimeout(timer);
   }
 }

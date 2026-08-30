@@ -136,6 +136,30 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Invalid webhook signature." }, 400);
   }
 
+  // REPORTED LAST, AFTER EVERY PIECE OF FULFILMENT HAS LANDED.
+  //
+  // This used to be awaited in the middle of the handler, before the
+  // subscription entitlement was applied. Both halves of that were wrong.
+  //
+  // A hanging third party could strand a paying customer: the fetch had no
+  // timeout, so a TikTok endpoint that accepts the connection and never
+  // answers holds the function open until Vercel kills it, and the kill lands
+  // BEFORE apply_stripe_entitlement. The customer has paid, Stripe has a 500,
+  // and access does not arrive until a later retry happens to get through.
+  // Nothing owed to a person may ever queue behind a call to an ad network.
+  //
+  // So the conversion is noted where the money is seen and sent from here,
+  // once, at the end of whichever path succeeded. Still awaited — an
+  // un-awaited fetch in a serverless function is usually a fetch that never
+  // happens — and still unable to throw. It is now also bounded by a timeout
+  // in reportPurchase, which is what makes "last" safe rather than merely
+  // late.
+  let conversion: Parameters<typeof reportPurchase>[0] | null = null;
+  const settle = async (payload: Record<string, unknown>): Promise<Response> => {
+    if (conversion) await reportPurchase(conversion);
+    return json(payload);
+  };
+
   try {
     if (
       event.type === "checkout.session.completed"
@@ -199,28 +223,59 @@ export async function POST(request: Request): Promise<Response> {
         }
       }
 
-      // The conversion, reported to whoever sold the click.
-      //
-      // AFTER fulfilment and deliberately outside its error path. Everything
-      // above either grants what somebody paid for or throws so Stripe retries;
-      // this is a reporting call to a third party, and a third party having a
-      // bad afternoon must not be able to make a paid scan fail to arrive. It
-      // returns a word instead of throwing, and the word is ignored.
-      //
-      // Awaited rather than fired and forgotten, because this runs in a
-      // serverless function that stops executing the moment the response is
-      // returned: an un-awaited fetch here is a fetch that usually never
-      // happens, which is the kind of bug that looks like poor ad performance
-      // for a month.
+      // The conversion is NOTED here and reported at the very end. See settle().
       if (session.payment_status === "paid" && session.amount_total) {
-        await reportPurchase({
+        conversion = {
           eventId: event.id,
           ...clickIdFrom(session.metadata),
           valueMinor: session.amount_total,
           currency: session.currency ?? "usd",
           occurredAt: event.created * 1000,
-        });
+        };
       }
+    }
+
+    // SUBSCRIPTION REVENUE, which a Checkout Session cannot carry.
+    //
+    // The subscription products open with a seven-day trial, so the Session
+    // that starts one completes with amount_total 0: there is nothing to
+    // report and nothing was paid. The first real charge arrives seven days
+    // later as invoice.paid, and so does every renewal after it. Reporting
+    // only on Checkout therefore credited the ads with the trials and none of
+    // the revenue, which for a subscription product is most of it.
+    //
+    // The metadata is read from the SUBSCRIPTION rather than the invoice,
+    // which is why create-checkout-session copies attribution onto
+    // subscription_data.metadata: an invoice carries no memory of the click
+    // that started the subscription unless the subscription itself does.
+    //
+    // Two shapes because Stripe moved this field. Newer API versions nest it
+    // under invoice.parent.subscription_details; older ones put it directly on
+    // invoice.subscription_details. No apiVersion is pinned on the client, so
+    // reading both is what makes this survive an SDK bump.
+    if (event.type === "invoice.paid") {
+      const invoice = event.data.object as unknown as {
+        amount_paid?: number;
+        currency?: string;
+        parent?: { subscription_details?: { metadata?: Record<string, string> | null } | null } | null;
+        subscription_details?: { metadata?: Record<string, string> | null } | null;
+      };
+      const metadata =
+        invoice.parent?.subscription_details?.metadata
+        ?? invoice.subscription_details?.metadata
+        ?? null;
+      // A zero invoice is the trial opening, not a sale. Reporting it would
+      // tell the optimiser a conversion happened for no money.
+      if (invoice.amount_paid && invoice.amount_paid > 0) {
+        conversion = {
+          eventId: event.id,
+          ...clickIdFrom(metadata),
+          valueMinor: invoice.amount_paid,
+          currency: invoice.currency ?? "usd",
+          occurredAt: event.created * 1000,
+        };
+      }
+      return settle({ received: true });
     }
 
     if (
@@ -248,7 +303,7 @@ export async function POST(request: Request): Promise<Response> {
         });
         if (error) throw new Error(`Closed downsell release failed: ${error.message}`);
       }
-      return json({ received: true });
+      return settle({ received: true });
     }
 
     let update: EntitlementUpdate | null = null;
@@ -267,13 +322,13 @@ export async function POST(request: Request): Promise<Response> {
       const current = await getStripe().subscriptions.retrieve(event.data.object.id);
       update = entitlementFromSubscription(current);
     } else {
-      return json({ received: true, ignored: true });
+      return settle({ received: true, ignored: true });
     }
 
     // A Stripe account can contain unrelated products. Only sessions created
     // by TrueMax carry this user metadata, so unrelated events are acknowledged
     // without touching Supabase.
-    if (!update) return json({ received: true, ignored: true });
+    if (!update) return settle({ received: true, ignored: true });
 
     const { error } = await getSupabaseAdmin().rpc("apply_stripe_entitlement", {
       p_event_id: event.id,
@@ -290,7 +345,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     if (error) throw new Error(`Entitlement update failed: ${error.message}`);
 
-    return json({ received: true });
+    return settle({ received: true });
   } catch (error) {
     console.error("stripe-webhook", safeMessage(error));
     // A server failure must stay non-2xx so Stripe retries the delivery. Bad

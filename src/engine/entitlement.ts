@@ -1,4 +1,4 @@
-import { currentAccessToken, getSupabaseClient } from "./auth.js";
+import { currentAccessToken, currentUser, getSupabaseClient } from "./auth.js";
 import { attributionForCheckout } from "./attribution.js";
 
 export type EntitlementTier = "free" | "starter" | "max";
@@ -66,7 +66,11 @@ async function billingRedirect(path: string, payload?: unknown): Promise<Billing
   // choke point every checkout passes through and a fifth product added later
   // gets attribution without anybody remembering to wire it. The server does
   // not trust any of it — see api/_attribution.ts.
-  const attribution = payload ? attributionForCheckout() : null;
+  // Passing the payer explicitly, so a stored touch stamped for a DIFFERENT
+  // account never rides on this card even if the sign-in that should have
+  // cleared it was missed. One browser, two people; see claimAttribution.
+  const payer = await currentUser().catch(() => null);
+  const attribution = payload ? attributionForCheckout(Date.now(), payer?.id ?? null) : null;
   const sent = attribution ? { ...(payload as object), attribution } : payload;
 
   try {
