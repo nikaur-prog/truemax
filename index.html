@@ -278,7 +278,7 @@
             <canvas id="photo-canvas"></canvas>
             <canvas id="overlay-canvas"></canvas>
           </div>
-          <div class="sweep"></div>
+          <div class="frame-focus" aria-hidden="true"></div>
         </div>
         <div class="photo-caption">
           <span>FRONT</span><b id="capRight">SCANNING</b>
@@ -327,6 +327,10 @@
             </div>
             <svg id="side-lines" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
             <div id="side-verify"></div>
+            <!-- The reading treatment, the same one the front frame wears, so
+                 the profile is visibly being worked on while its thirteen
+                 points are being placed rather than sitting there inert. -->
+            <div class="frame-focus" aria-hidden="true"></div>
             <!-- Live profile capture, layered over the same frame so the
                  preview and the captured still occupy identical geometry. -->
             <div class="side-live hidden" id="side-live">

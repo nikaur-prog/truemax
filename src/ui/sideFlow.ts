@@ -19,6 +19,7 @@ import { mountVerifier, seedSidePointsSmart } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
+import { landPhoto } from "./photoLanding.js";
 import { mountRetakeGlyph } from "./retakeGlyph.js";
 import type { RetakeHandle } from "./retakeGlyph.js";
 import type { VerifyHandle } from "./sideVerify.js";
@@ -207,6 +208,11 @@ function markSideOpen(open: boolean): void {
  * no photograph to point at: opening the capture, retaking, and closing.
  */
 function clearWalkthrough(frame: HTMLElement): void {
+  // The reading treatment and the landing come off with everything else. Both
+  // are put on around an await, so a flow abandoned mid-read would otherwise
+  // hand the next screen an animation belonging to a photograph that is no
+  // longer there — the same defect the front scan had with its old sweep.
+  frame.classList.remove("scanning", "settling");
   frame.querySelector(".side-pointpill")?.remove();
   frame.querySelector(".side-refcrop")?.remove();
   // The popped-out reference lives on <body>, so it survives the frame being
@@ -638,6 +644,17 @@ export function close(): void {
   el().section.classList.add("hidden");
 }
 
+/**
+ * The floor on how long the profile is visibly read for.
+ *
+ * Long enough that the state reads as a step rather than a flicker, short
+ * enough that it is never the reason somebody is waiting: the seeding usually
+ * outruns it, in which case this costs nothing at all.
+ */
+const READ_BEAT_MS = 1150;
+
+const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
 async function load(file: File, ctx: SideCtx): Promise<void> {
   const img = await loadImage(file);
   const c = document.createElement("canvas");
@@ -673,7 +690,21 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // too, but there is async work between here and there, and one frame of an
   // exemplar sitting over somebody's own face is one frame too many.
   e.frame.classList.remove("awaiting");
-  e.cap.textContent = "VERIFY LANDMARKS";
+  // THE PROFILE LANDS, AND THEN IT IS VISIBLY READ.
+  //
+  // Everything between here and mountVerify is real work — a segmentation
+  // pass, a mesh pass, a template, and now a measurement of each of them until
+  // one comes out as a shape a face can be — and until this it was all done
+  // behind a still picture with the caption already reading VERIFY LANDMARKS.
+  // So the screen claimed the points were placed while they were being placed,
+  // and on a slow phone the dialog then appeared out of nothing.
+  //
+  // The caption says what is actually happening, the frame wears the same
+  // reading treatment the front does, and the thinking tone runs underneath.
+  landPhoto(e.frame);
+  e.frame.classList.add("scanning");
+  e.cap.textContent = "READING PROFILE";
+  startThinking();
 
   // Canonicalise the facing. A profile photograph mirrored horizontally has
   // identical geometry — faces are measured bilaterally — so instead of
@@ -693,10 +724,23 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // this lets it discard a tidy-looking placement whose measurements are not a
   // shape a face comes in, and try the next one. Somebody is only told the
   // placement failed once every method has failed.
-  let seed = await seedSidePointsSmart(
-    e.canvas,
-    (points, faceDir) => seedReadings(points, faceDir, ctx.sex).length === 0,
-  );
+  //
+  // Held for a beat whatever the hardware does. The seeding is anywhere from
+  // 200ms to a couple of seconds depending on the phone and on how many
+  // methods have to be measured before one passes, and a state that sometimes
+  // flashes past in three frames and sometimes sits for two seconds is worse
+  // than either: the fast case reads as a flicker. A floor makes it one beat.
+  const [seedResult] = await Promise.all([
+    seedSidePointsSmart(
+      e.canvas,
+      (points, faceDir) => seedReadings(points, faceDir, ctx.sex).length === 0,
+    ),
+    wait(READ_BEAT_MS),
+  ]);
+  let seed = seedResult;
+  stopThinking();
+  e.frame.classList.remove("scanning");
+  e.cap.textContent = "VERIFY LANDMARKS";
   if (seed.faceDir === -1 && (seed.method === "mesh" || seed.confidence >= 0.5)) {
     const w2 = e.canvas.width;
     const flipped = document.createElement("canvas");

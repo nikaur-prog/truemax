@@ -28,6 +28,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
+import { landPhoto } from "./ui/photoLanding.js";
 import { clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
@@ -1775,6 +1776,10 @@ async function handleCanvas(
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  // The photograph settles into the frame before the reading treatment starts
+  // over it. Both together would be two things happening to one picture in the
+  // same 600ms, and the landing is the one that has to be read.
+  landPhoto(el.frame);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
