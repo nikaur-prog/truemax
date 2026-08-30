@@ -1,3 +1,4 @@
+import { attributionMetadata } from "./_attribution.js";
 import { isAdult } from "../src/engine/age.js";
 import type Stripe from "stripe";
 import {
@@ -106,7 +107,15 @@ export async function POST(request: Request): Promise<Response> {
     userId = user.id;
 
     const body = await request.json().catch(() => null) as
-      { tier?: unknown; purchase?: unknown; billing?: unknown } | null;
+      { tier?: unknown; purchase?: unknown; billing?: unknown; attribution?: unknown } | null;
+
+    // Where this purchase came from, allowlisted and capped before it goes
+    // anywhere near Stripe. Spread into every Session's metadata below so the
+    // record of the sale and the record of its source are the same object: a
+    // separate attribution table would need its own join, its own retention
+    // answer and its own way of going stale, and Stripe already holds the one
+    // row that is definitely true about a payment.
+    const attribution = attributionMetadata(body?.attribution);
 
     // One-time scan credit — a payment, not a subscription, so none of the
     // trial machinery below applies to it. Members pay the member price; the
@@ -145,7 +154,7 @@ export async function POST(request: Request): Promise<Response> {
           cancel_url: `${origin}/?purchase=scan-cancelled`,
           client_reference_id: user.id,
           ...(customerId ? { customer: customerId } : { customer_email: user.email }),
-          metadata: { supabase_user_id: user.id, purpose: "scan_credit" },
+          metadata: { supabase_user_id: user.id, purpose: "scan_credit", ...attribution },
           custom_text: {
             submit: { message: "One in-depth scan, added to your account the moment payment completes. No subscription." },
           },
@@ -236,6 +245,7 @@ export async function POST(request: Request): Promise<Response> {
             purpose: "scan_credit",
             offer: "decline_downsell",
             downsell_claim_id: downsellClaimId,
+            ...attribution,
           },
           custom_text: {
             submit: { message: "Your full analysis, unlocked the moment payment completes. One payment, no subscription." },
@@ -284,7 +294,7 @@ export async function POST(request: Request): Promise<Response> {
           cancel_url: `${origin}/?purchase=voice-cancelled`,
           client_reference_id: user.id,
           ...(customerId ? { customer: customerId } : { customer_email: user.email }),
-          metadata: { supabase_user_id: user.id, purpose: "voice_credit" },
+          metadata: { supabase_user_id: user.id, purpose: "voice_credit", ...attribution },
           custom_text: {
             submit: { message: "One voiced analysis video, unlocked the moment payment completes. No subscription." },
           },
@@ -410,14 +420,23 @@ export async function POST(request: Request): Promise<Response> {
           tier,
           billing,
           trial_reservation_id: reservationId,
+          ...attribution,
         },
         subscription_data: {
           trial_period_days: 7,
+          // On the SUBSCRIPTION too, not only the Session. A Session is a
+          // moment; a subscription is the thing that renews, and every renewal
+          // invoice after the first carries no Session at all. Without this
+          // copy, the ad that brought somebody in could be credited with their
+          // first payment and nothing they ever paid afterwards, which is the
+          // difference between a channel looking unprofitable and looking like
+          // the best one you have.
           metadata: {
             supabase_user_id: user.id,
             tier,
             billing,
             trial_reservation_id: reservationId,
+            ...attribution,
           },
         },
         custom_text: {

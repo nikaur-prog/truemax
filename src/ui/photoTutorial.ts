@@ -153,6 +153,22 @@ const STEPS: Record<TutorialView, Step[]> = {
       title: "Ear covered",
       caption: "The ear notch anchors the jaw measurements. Push hair back so the whole ear shows.",
     },
+    // THE TARGET AND THE MOTION ARE TWO STEPS, NOT ONE CARD.
+    //
+    // These were a single step: the still as the video's poster, with the clip
+    // fading in over it. That is the right construction when the clip IS the
+    // still in motion, and it was the wrong one here — the clip is five seconds
+    // of someone turning and raising a phone, so it covered the one frame the
+    // step exists to teach. Somebody reached the end of the side tutorial
+    // having never seen the photograph they were being asked to match.
+    //
+    // The frame first, held, with nothing moving over it. Then how to get
+    // there.
+    {
+      src: "/tutorial/side-do.jpg", kind: "do",
+      title: "This is the one",
+      caption: "A true profile: one ear to the camera, the whole ear visible, chin level, and the far eye out of sight. This is the frame to match.",
+    },
     {
       src: "/tutorial/side-do.jpg", kind: "do",
       video: "/tutorial/side-turn.mp4",
@@ -165,8 +181,8 @@ const STEPS: Record<TutorialView, Step[]> = {
       // it rises until 4.2s, then holds at exactly this point to the end. The
       // flash fires mid-hold. Re-run the tracker if the clip is ever recut.
       flash: { at: 4.45, x: 0.435, y: 0.557 },
-      title: "This is the one",
-      caption: "Turn your head a full ninety degrees \u2014 one ear to the camera, chin level \u2014 and hold still. The phone stays where it is; only your head moves.",
+      title: "How to get there",
+      caption: "Turn your head a full ninety degrees and hold still. The phone stays where it is; only your head moves. You will not be able to see the screen, so listen for the two beeps and the shutter.",
     },
   ],
 };

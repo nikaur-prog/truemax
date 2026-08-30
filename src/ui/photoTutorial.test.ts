@@ -12,11 +12,16 @@ test("every view shows the mistakes first and the right way last", () => {
   for (const view of VIEWS) {
     const steps = tutorialSteps(view);
     assert.ok(steps.length >= 3, `${view} needs enough mistakes to be worth watching`);
-    const dos = steps.filter((s) => s.kind === "do");
-    assert.equal(dos.length, 1, `${view} must land on exactly one correct frame`);
+    // Every mistake before every correct frame, and the last word is a correct
+    // one. The side tutorial ends on TWO: the frame to match, held still, and
+    // then the turn that gets you there. That is one lesson in two cards, not
+    // an interleaving — the rule that matters is that no "dont" ever follows a
+    // "do", because a mistake shown after the answer is the last thing seen.
+    const firstDo = steps.findIndex((s) => s.kind === "do");
+    assert.ok(firstDo > 0, `${view} must show at least one mistake first`);
     assert.equal(steps[steps.length - 1].kind, "do", `${view} must END on the correct frame`);
-    for (const step of steps.slice(0, -1)) {
-      assert.equal(step.kind, "dont", `${view} must not interleave a correct frame`);
+    for (const step of steps.slice(firstDo)) {
+      assert.equal(step.kind, "do", `${view} must not return to a mistake after the answer`);
     }
   }
 });
@@ -26,8 +31,14 @@ test("every step names its own asset and carries its own words", () => {
   for (const view of VIEWS) {
     for (const step of tutorialSteps(view)) {
       assert.match(step.src, /^\/tutorial\/[a-z-]+\.jpg$/, `${step.src} is not a tutorial asset`);
-      assert.ok(!seen.has(step.src), `${step.src} is used twice`);
-      seen.add(step.src);
+      // No step may be a duplicate of another, but a still MAY appear twice
+      // when one of the two carries motion: the side tutorial shows the target
+      // frame held, then the same frame as the clip's poster while the turn
+      // plays over it. Keying on the pair is what distinguishes "the same
+      // lesson taught twice" from "a still and its own motion".
+      const key = `${step.src}|${step.video ?? ""}`;
+      assert.ok(!seen.has(key), `${key} is used twice`);
+      seen.add(key);
       assert.ok(step.title.length > 0 && step.title.length < 40, `bad title: ${step.title}`);
       // The caption has to survive the picture being missing, so it must say
       // what to do rather than just point at the image.
@@ -83,4 +94,31 @@ test("the clip lands on the step that teaches the turn", () => {
   assert.equal(withVideo[0].kind, "do", "the clip shows the correct capture, not a mistake");
   const side = tutorialSteps("side");
   assert.equal(side[side.length - 1].video, withVideo[0].video, "and it is the side tutorial's last step");
+});
+
+test("the side tutorial shows the target frame before it shows the motion", () => {
+  // These were one card: the still as the clip's poster, with five seconds of
+  // someone turning and raising a phone fading in over it. That construction is
+  // right when the clip IS the still in motion, and wrong here, because the
+  // motion covered the one frame the step exists to teach. Somebody could reach
+  // the end of the side tutorial having never seen the photograph to match.
+  const side = tutorialSteps("side");
+  const stills = side.filter((s) => s.kind === "do" && !s.video);
+  const motion = side.filter((s) => s.kind === "do" && s.video);
+  assert.equal(stills.length, 1, "the frame to match gets a card of its own");
+  assert.equal(motion.length, 1, "so does the turn that gets you there");
+  assert.ok(
+    side.indexOf(stills[0]) < side.indexOf(motion[0]),
+    "the target is shown, held and uncovered, BEFORE anything moves over it",
+  );
+});
+
+test("no tutorial step is hidden behind its own video", () => {
+  // The general form of the bug above: any step whose still carries a lesson
+  // the clip then obscures. A step may have motion, but every view must reach
+  // at least one correct frame that nothing plays over.
+  for (const view of VIEWS) {
+    const uncovered = tutorialSteps(view).filter((s) => s.kind === "do" && !s.video);
+    assert.ok(uncovered.length >= 1, `${view} must show its answer as a still, not only as a clip`);
+  }
 });

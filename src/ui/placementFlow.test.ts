@@ -111,3 +111,51 @@ test("a side the person called wrong says so on the report", () => {
   assert.match(results, /\$\{unverifiedBanner\(\)\}/);
   assert.match(results, /on\("unver-redo", \(\) => ctx\?\.onRedoSide\?\.\(\)\)/);
 });
+
+// Double-tap on a control zoomed the page, which is what an impatient thumb
+// does when a button seems not to have responded. It is the browser's legacy
+// double-tap-to-zoom, and it is ours to switch off.
+test("double-tap does not zoom, and pinch still does", () => {
+  const live = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(live, /body \{ touch-action: manipulation; \}/);
+  // `manipulation`, never `none` on the body: none would take pinch zoom away
+  // from anybody who needs to enlarge text. The landmark editors set none on
+  // their own layers, where a drag must not scroll the page.
+  assert.doesNotMatch(live, /^body \{[^}]*touch-action: none/m);
+});
+
+// The seeder has three independent ways to place these thirteen points, and it
+// used to hand over whichever put most of them on the head — a geometric proxy
+// that is decent and is not the question. A placement can sit every point
+// tidily on the head and still measure a nasolabial angle of 167 degrees.
+const verify = readFileSync(new URL("./sideVerify.ts", import.meta.url), "utf8");
+
+test("every seeding method is measured before anybody is told it failed", () => {
+  // The validator is threaded from the flow, where the scoring engine lives, so
+  // the seeder never has to import the thing it is estimating for.
+  assert.match(src, /seedSidePointsSmart\(\s*e\.canvas,\s*\(points, faceDir\) =>\s*seedReadings\(points, faceDir, ctx\.sex\)\.length === 0,/);
+  // Candidates are ranked geometrically and then filtered, so a seed that is
+  // both plausible AND well placed still wins.
+  assert.match(verify, /candidates\.sort\(\(a, b\) => b\.score - a\.score\)/);
+  assert.match(verify, /for \(const seed of finished\) \{\s*if \(validate\(seed\.points, seed\.faceDir\)\) return seed;/);
+  // The plain template is a genuinely different construction, so it gets
+  // measured too rather than assumed worse than the two that already failed.
+  assert.match(verify, /const plain = seedSidePoints\(canvas\);\s*if \(validate\(plain\.points, plain\.faceDir\)\) return plain;/);
+});
+
+test("a seeder with no validator behaves exactly as it did", () => {
+  // The calibration harnesses call it bare and must keep getting the
+  // best-scoring seed, not a different one.
+  assert.match(verify, /if \(!validate\) return finished\[0\];/);
+});
+
+test("total failure still returns something to look at", () => {
+  // The dialog needs a picture to show while it explains that the placement
+  // could not be made; returning null would leave it describing nothing.
+  const fn = verify.slice(verify.indexOf("export async function seedSidePointsSmart"));
+  const body = fn.slice(0, fn.indexOf("\n}\n"));
+  // The LAST statement, not merely a statement: whatever it tries in between,
+  // the thing it hands back when everything failed is the best seed it had.
+  assert.match(body, /return finished\[0\];\s*$/);
+  assert.doesNotMatch(body, /return null/);
+});

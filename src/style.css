@@ -58,6 +58,26 @@
 html { scroll-behavior: smooth; overflow-x: clip; }
 body { overflow-x: clip; max-width: 100%; }
 
+/* DOUBLE-TAP DOES NOT ZOOM.
+
+   Reported from a phone: tapping a control twice in quick succession — which is
+   what an impatient thumb does when a button seems not to have responded —
+   zooms the page instead. That is the browser's legacy double-tap-to-zoom, a
+   behaviour from the era of desktop sites on small screens, and it is ours to
+   turn off rather than something we are stuck with.
+
+   `manipulation` is the narrow instruction: it keeps panning and PINCH zoom,
+   and drops only the double-tap gesture and the 300ms click delay that comes
+   with waiting to see whether a second tap arrives. The alternative in the
+   viewport tag, `user-scalable=no`, is the wrong tool twice over: it takes
+   pinch away from anyone who needs to enlarge text, and iOS Safari has ignored
+   it since iOS 10 anyway.
+
+   On `body` rather than on each control, so a button added later inherits it,
+   and the two places that genuinely need `touch-action: none` — the landmark
+   editors, where a drag must not scroll the page — still override it below. */
+body { touch-action: manipulation; }
+
 /* Every horizontal scroller in the product keeps its swipe to itself. Listed
    together so a new one added later has an obvious place to be added. */
 .q-lib-strip, .rtabs, .deck, .prod-slots, .q-cut-slots, .q-disc-clips {
@@ -440,9 +460,79 @@ body {
 @media (prefers-reduced-motion: reduce) { .zoomable { transition: none; } }
 .zoomable canvas { width: 100%; height: auto; display: block; }
 #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.sweep { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, #79e8d2, transparent); box-shadow: 0 0 16px #79e8d2; display: none; }
-.face-frame.scanning .sweep { display: block; animation: sweep 1.5s ease-in-out infinite; }
-@keyframes sweep { 0% { top: 5%; } 50% { top: 93%; } 100% { top: 5%; } }
+
+/* ---------------------------------------------------------------------------
+   THE PHOTOGRAPH LANDS.
+
+   The shutter used to be a cut: one frame the viewfinder, the next frame the
+   scan stage with the picture already sitting in it, and a hard two-pixel line
+   starting to travel. Nothing carried the eye across the join, so the moment
+   the whole product is built around — your photograph, taken — read as the
+   screen glitching.
+
+   So the picture arrives slightly too big and settles back into the frame,
+   with one short bloom of light over it. It is the move a camera makes: the
+   image is caught, then it comes to rest. `transform` and `opacity` only, so
+   it composites on the GPU and reflows nothing.
+   --------------------------------------------------------------------------- */
+.face-frame.settling { animation: capture-settle 640ms cubic-bezier(.16, .84, .36, 1) both; }
+@keyframes capture-settle {
+  from { transform: scale(1.045); }
+  to { transform: none; }
+}
+.face-frame.settling::before {
+  content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: #fff; animation: capture-bloom 640ms cubic-bezier(.16, .84, .36, 1) both;
+}
+@keyframes capture-bloom { from { opacity: .38; } 45%, to { opacity: 0; } }
+
+/* ---------------------------------------------------------------------------
+   THE READING TREATMENT, while the photograph is being worked on.
+
+   What this replaces was a hard 2px line with a 16px glow that ran to the
+   bottom of the frame and then RAN BACK UP, forever, at 1.5s a lap. Reported
+   from a real run as looking buggy, and it is: nothing that reads a face reads
+   it upward, so the return leg has no meaning, and a hairline that reverses
+   direction twice a second is read as an element that has come loose rather
+   than as work being done.
+
+   Three changes and they are all the same change. The band is WIDE (42% of the
+   frame) and soft at both edges, so there is no line to see come loose. It
+   travels DOWNWARD ONLY and fades out before it re-enters at the top, so it
+   never reverses. And it sits under a held glow on the frame itself that
+   breathes on the same clock, which is what carries the beat when the pass
+   runs longer than one lap.
+   --------------------------------------------------------------------------- */
+.frame-focus { position: absolute; inset: 0; z-index: 2; pointer-events: none; display: none; }
+.face-frame.scanning .frame-focus { display: block; }
+.face-frame.scanning .frame-focus::before {
+  content: ""; position: absolute; left: 0; right: 0; height: 42%;
+  background: linear-gradient(180deg,
+    rgba(121, 232, 210, 0) 0%,
+    rgba(121, 232, 210, 0.09) 46%,
+    rgba(121, 232, 210, 0.17) 64%,
+    rgba(121, 232, 210, 0.05) 82%,
+    rgba(121, 232, 210, 0) 100%);
+  animation: frame-read 2.9s linear infinite;
+}
+@keyframes frame-read {
+  0% { top: -44%; opacity: 0; }
+  12% { opacity: 1; }
+  84% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+.face-frame.scanning .frame-focus::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(121, 232, 210, 0.20), inset 0 0 42px rgba(121, 232, 210, 0.09);
+  animation: frame-breathe 2.9s ease-in-out infinite;
+}
+@keyframes frame-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .face-frame.settling,
+  .face-frame.settling::before { animation: none; }
+  .face-frame.scanning .frame-focus::before { display: none; }
+  .face-frame.scanning .frame-focus::after { animation: none; opacity: .8; }
+}
 
 /* `gap` and `flex-wrap` because the two halves are a fixed word and a status
    that changes length ("VERIFY LANDMARKS" -> "CHECK LANDMARKS"). With neither,
@@ -482,10 +572,11 @@ body {
    frame holds a faint inner light. Cheap: one box-shadow, no filter, no
    compositing layer per beat. */
 .face-frame.measuring { box-shadow: 0 18px 60px rgba(20, 21, 24, 0.18), inset 0 0 0 1px rgba(121, 232, 210, 0.18); }
-/* The roving sweep line belongs to the opening beat, when nothing specific is
+/* The travelling band belongs to the opening beat, when nothing specific is
    being looked at yet. Once the camera is pushed in on one construction, a
-   second line travelling across it is just another thing moving. */
-.face-frame.measuring .sweep { display: none; }
+   second thing crossing it is just another thing moving. The held glow stays:
+   it is the frame saying it is still working, and it does not travel. */
+.face-frame.measuring .frame-focus::before { display: none; }
 @media (prefers-reduced-motion: reduce) { .face-frame.measuring { box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); } }
 
 /* Crossing between the front and side photographs mid-scan. The canvas is
@@ -1575,11 +1666,17 @@ button.pillar:active { transform: translateY(0); }
   display: flex; align-items: center; justify-content: center; overflow-y: auto;
   padding: 20px; background: rgba(12, 13, 15, 0.66); backdrop-filter: blur(9px);
   -webkit-backdrop-filter: blur(9px);
-  animation: side-mode-in 0.2s ease-out;
+  /* Paced with the card that rises out of it, not ahead of it. */
+  animation: side-mode-in 0.3s ease-out;
 }
 @keyframes side-mode-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes side-mode-card-in {
+  from { opacity: 0; transform: translateY(22px) scale(.9); filter: blur(7px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .side-mode-backdrop { animation: none; }
+  .side-mode-backdrop,
+  .side-mode-card { animation: none; }
   .side-mode-card,
   .side-mode-shot canvas,
   .side-mode-zoom { transition: none; }
@@ -1589,6 +1686,14 @@ button.pillar:active { transform: translateY(0); }
    with two buttons floating in it. */
 .side-mode-card {
   width: min(400px, 100%); margin: auto; flex: 0 0 auto;
+  /* IT COMES FROM BEHIND THE SCREEN, it does not appear.
+     The backdrop used to fade in with the card already at rest inside it, so
+     after a beat of the profile being read the question arrived as a cut. It
+     now rises out of the blur: undersized, soft and low, resolving as it comes
+     forward. `backwards` rather than `both` on purpose — the fill must not
+     leave a blur filter on the card afterwards, because a filter is a
+     containing block and the zoom control inside this card is positioned. */
+  animation: side-mode-card-in .44s cubic-bezier(.2, .8, .28, 1) backwards;
   transition: width .3s cubic-bezier(.22,.61,.36,1);
   background: var(--card); color: var(--ink);
   border: 1px solid var(--line); border-radius: 24px; padding: 26px 26px 22px;
