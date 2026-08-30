@@ -1579,7 +1579,7 @@ function resetToUpload(): void {
   // The next capture gets its own film. Keyed by scan ID, so this is belt and
   // braces rather than the mechanism — but a reset is exactly the moment a
   // stale "already measured" would be worth nothing and cost everything.
-  measuredOnScreenFor = null;
+  clearMeasuredOnScreen();
   el.photoCanvas.width = 1;
   el.photoCanvas.height = 1;
   el.photoCanvas.getContext("2d")?.clearRect(0, 0, 1, 1);
@@ -2001,16 +2001,69 @@ function paintFrontPane(frontShot: HTMLCanvasElement): void {
 /**
  * Which scan has already had its measurement film played on screen.
  *
- * A signed-out capture now watches the whole pass BEFORE the account wall goes
- * up, so the wall interrupts a finished measurement instead of an empty
- * screen. Signing in then re-enters runFullAnalysis for the same scan, and
- * without this it would play the identical ninety-second film a second time.
+ * A signed-out capture watches the whole pass BEFORE the account wall goes up,
+ * so the wall interrupts a finished measurement instead of an empty screen.
+ * Signing in then re-enters runFullAnalysis for the same scan, and without
+ * this it would play the identical film a second time.
  *
- * Keyed by scan ID rather than a boolean, so a second capture in the same page
- * view gets its own pass — and cleared by resetToUpload, which is what "start
- * again" means.
+ * IT HAS TO OUTLIVE THE PAGE, and the first version did not.
+ *
+ * Module memory alone covers the password sign-in, which never leaves the
+ * document. It does not cover the two paths most people take: Google, and the
+ * emailed link. Both navigate away and come back to a fresh document, so the
+ * variable is null again and resumePendingAfterAuth replays the whole pass on
+ * somebody who watched it ninety seconds earlier and has since typed a
+ * password into Google. That is the single worst moment in the flow to spend a
+ * minute of somebody's attention on a repeat.
+ *
+ * So the fact is mirrored into localStorage against the scan ID. Not scoped to
+ * an identity: it is written while signed OUT and read after signing IN, and an
+ * identity-scoped key would be looked for under a scope that did not exist when
+ * it was written. The value is a scan UUID and nothing else, one at a time.
+ *
+ * Cleared when a new scan STARTS rather than when one finishes, which is the
+ * difference that matters on the resume path: a finished scan's flag has to
+ * survive the redirect that finishes it, so clearing it at the end of
+ * runFullAnalysis would delete the thing on the way past the moment it exists
+ * for. resetToUpload is the honest boundary, and it is the only one that ever
+ * needs to be.
+ *
+ * A storage failure resolves to "not measured", which replays the film. That
+ * is the harmless direction: this flag gates an animation, not an entitlement,
+ * so a false negative costs a repeat and a false positive would cost somebody
+ * the only demonstration the product gives them.
  */
+const MEASURED_KEY = "truemax.measured-scan";
 let measuredOnScreenFor: string | null = null;
+
+function markMeasuredOnScreen(scanId: string): void {
+  measuredOnScreenFor = scanId;
+  try {
+    localStorage.setItem(MEASURED_KEY, scanId);
+  } catch {
+    // Private mode, or storage full. The module copy still covers every
+    // same-document path, which is all this could do before.
+  }
+}
+
+function measuredOnScreen(scanId: string): boolean {
+  if (measuredOnScreenFor === scanId) return true;
+  try {
+    return localStorage.getItem(MEASURED_KEY) === scanId;
+  } catch {
+    return false;
+  }
+}
+
+function clearMeasuredOnScreen(): void {
+  measuredOnScreenFor = null;
+  try {
+    localStorage.removeItem(MEASURED_KEY);
+  } catch {
+    // Nothing to do: the module copy is cleared either way, and a stale entry
+    // names a scan ID that can never be current again.
+  }
+}
 
 /**
  * The measurement film: the mesh landing, then every construction drawn on the
@@ -2074,7 +2127,7 @@ async function playMeasurePass(
     pass.cancel();
     return false;
   }
-  measuredOnScreenFor = token.scanId;
+  markMeasuredOnScreen(token.scanId);
   // Back to rest, and with no camera transition attached: the results screen
   // owns this element's zoom from here and must not inherit a half-finished
   // push-in on somebody's chin.
@@ -2113,7 +2166,7 @@ async function runFullAnalysis(
   // behind it — see playMeasurePass. Playing it twice for one capture is the
   // one thing this must not do, so a scan that has already been measured on
   // screen goes straight to its result.
-  if (measuredOnScreenFor === token.scanId) {
+  if (measuredOnScreen(token.scanId)) {
     paintFrontPane(frontShot);
     // The wall was standing in this pane. It is answered, so it goes before
     // renderResults gets here rather than being overwritten by it a few

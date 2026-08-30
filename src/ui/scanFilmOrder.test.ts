@@ -24,17 +24,8 @@ test("the film plays before the wall goes up", () => {
 test("one capture is never measured on screen twice", () => {
   // Signing in at the wall re-enters runFullAnalysis for the same scan. Without
   // the guard it would replay the whole film a second time.
-  assert.match(src, /measuredOnScreenFor = token\.scanId/);
-  assert.match(src, /if \(measuredOnScreenFor === token\.scanId\)/);
-});
-
-test("a reset clears it, so the next capture gets its own film", () => {
-  const reset = src.indexOf("function resetToUpload()");
-  const cleared = src.indexOf("measuredOnScreenFor = null;", reset);
-  assert.ok(reset > 0 && cleared > reset, "resetToUpload should clear measuredOnScreenFor");
-  // Inside resetToUpload, not somewhere after it.
-  const nextFn = src.indexOf("\nfunction ", reset + 10);
-  assert.ok(cleared < nextFn, "the clear belongs inside resetToUpload");
+  assert.match(src, /markMeasuredOnScreen\(token\.scanId\)/);
+  assert.match(src, /if \(measuredOnScreen\(token\.scanId\)\)/);
 });
 
 test("the wall's thumbnails come from the capture, not from the pane", () => {
@@ -81,4 +72,48 @@ test("the stage is raised in exactly two places", () => {
   // gone with it, rather than left behind as a class nothing reads.
   assert.doesNotMatch(src, /prescan/);
   assert.doesNotMatch(readFileSync(new URL("../style.css", import.meta.url), "utf8"), /\.prescan/);
+});
+
+// The film is keyed by scan ID, and that key has to outlive the document.
+//
+// Module memory alone covers the password sign-in, which never leaves the page.
+// It does not cover Google or the emailed link: both navigate away and come
+// back to a fresh document, where resumePendingAfterAuth re-enters the analysis
+// with the variable back at null and replays the whole pass on somebody who
+// watched it a minute ago. Found by review, and the review was right.
+test("the already-measured mark survives a redirect", () => {
+  // A mirror in storage, not a bare module variable.
+  assert.match(src, /localStorage\.setItem\(MEASURED_KEY/);
+  assert.match(src, /localStorage\.getItem\(MEASURED_KEY\) === scanId/);
+  // Read through the helper, never off the variable directly, or the OAuth
+  // path silently goes back to reading module memory.
+  assert.match(src, /if \(measuredOnScreen\(token\.scanId\)\)/);
+  assert.doesNotMatch(src, /measuredOnScreenFor === token\.scanId/);
+});
+
+test("the mark is NOT identity-scoped", () => {
+  // It is written signed out and read signed in. scopedStorageKey would look
+  // for it under a scope that did not exist when it was written, so the flag
+  // would never be found on the exact path it exists for.
+  const block = src.slice(src.indexOf("const MEASURED_KEY"), src.indexOf("function measuredOnScreen"));
+  assert.doesNotMatch(block, /scopedStorageKey/);
+});
+
+test("a storage failure replays rather than skips", () => {
+  // This flag gates an animation, not an entitlement. A false negative costs a
+  // repeat; a false positive would cost somebody the only demonstration the
+  // product gives them, so the catch resolves to false.
+  const read = src.slice(src.indexOf("function measuredOnScreen"));
+  const body = read.slice(0, read.indexOf("\n}"));
+  assert.match(body, /catch \{\s*return false;\s*\}/);
+});
+
+test("a new scan clears it; a finished one does not", () => {
+  // The finished scan's flag has to survive the redirect that finishes it, so
+  // clearing at the end of runFullAnalysis would delete it on the way past the
+  // moment it exists for.
+  const reset = src.indexOf("function resetToUpload()");
+  const cleared = src.indexOf("clearMeasuredOnScreen();", reset);
+  const nextFn = src.indexOf("\nfunction ", reset + 10);
+  assert.ok(cleared > reset && cleared < nextFn, "resetToUpload should clear the mark");
 });
