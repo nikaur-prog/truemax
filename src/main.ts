@@ -36,6 +36,7 @@ import {
   consumePendingScanCredit,
   discardPendingScanCredit,
   ensureScanAllowed,
+  guestScansLeft,
   recordScanRun,
 } from "./ui/scanGate.js";
 import { setMemberPricing } from "./engine/scanPricing.js";
@@ -70,6 +71,7 @@ import {
   loadScanCredits,
 } from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
+import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
@@ -161,6 +163,15 @@ async function refreshPathwayState(): Promise<void> {
   }
 }
 
+// The tier the last entitlement read resolved to.
+//
+// The subject chooser needs it to know how many other people this account may
+// still scan, and it runs on a path with no network read of its own — the
+// `is-member` body class it already consults says member or not, which cannot
+// tell Starter's three a week from Max's fifty. Defaults to "free", so a read
+// that has not landed yet offers no guest scans rather than fifty.
+let lastKnownTier: EntitlementTier = "free";
+
 async function refreshMaxAccess(): Promise<void> {
   const owner = activeScanOwner();
   const generation = scanGeneration;
@@ -193,7 +204,8 @@ async function refreshMaxAccess(): Promise<void> {
     setMaxAccess(hasMaxAccess(entitlement) || admin);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
-    setMemberPricing(tierOf(entitlement) !== "free");
+    lastKnownTier = tierOf(entitlement);
+    setMemberPricing(lastKnownTier !== "free");
     setDepth(
       depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
       freeScansLeft({ entitlement, scanCount }),
@@ -208,6 +220,9 @@ async function refreshMaxAccess(): Promise<void> {
     // somebody we could not confirm is a member sets up a charge that does not
     // match what they were shown.
     setMemberPricing(false);
+    // Same direction as everything else in this catch: an unread entitlement
+    // must not hand out an allowance nobody confirmed was paid for.
+    lastKnownTier = "free";
     setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
@@ -703,7 +718,7 @@ function ensureSex(then: () => void): void {
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  });
+  }, undefined, guestScansLeft(lastKnownTier));
 }
 
 // The late form of the same question, for a scan captured with nobody signed

@@ -63,6 +63,11 @@ export function closeSubjectChooser(): void {
 export function openSubjectChooser(
   onPick: (answer: SubjectAnswer) => void,
   onCancel?: () => void,
+  // How many other people this account may still scan this week. Undefined
+  // means "not known here", which reads as no cap — the gate that does know is
+  // the one that must refuse, and a chooser guessing would be worse than a
+  // chooser staying quiet.
+  guestsLeft?: number,
 ): void {
   closeSubjectChooser();
   const el = document.createElement("div");
@@ -78,8 +83,10 @@ export function openSubjectChooser(
           <button class="subjpick-opt" data-who="me" type="button">
             <b>It's me</b><span>Counts toward your progress</span>
           </button>
-          <button class="subjpick-opt" data-who="other" type="button">
-            <b>Someone else</b><span>Saved separately, kept off your chart</span>
+          <button class="subjpick-opt" data-who="other" type="button"${guestsLeft === 0 ? " disabled" : ""}>
+            <b>Someone else</b><span>${guestsLeft === 0
+              ? "You have used this week's scans of other people"
+              : "Saved separately, kept off your chart"}</span>
           </button>
         </div>
       </div>

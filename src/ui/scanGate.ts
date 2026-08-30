@@ -8,7 +8,8 @@ import {
   startScanCreditCheckout,
 } from "../engine/entitlement.js";
 import { TRIAL_SCANS, tierOf } from "../engine/depth.js";
-import { mergeScanTimes, nextScanSlotAt, weeklyAllowance } from "../engine/scanAllowance.js";
+import { guestAllowance, mergeScanTimes, nextScanSlotAt, scansInWindow, weeklyAllowance } from "../engine/scanAllowance.js";
+import type { EntitlementTier } from "../engine/entitlement.js";
 import { SCAN_PRICE_MEMBER, isMemberPricing, scanPrice, setMemberPricing } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
 import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
@@ -56,7 +57,45 @@ function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
 // carry ISO dates too, and the newer of the two wins, so the gate still works
 // for scans that predate this stamp existing.
 const STAMP_KEY = "truemax.lastScanAt";
+// Guest scans keep their OWN list of completion times, deliberately separate
+// from the owner's single stamp above.
+//
+// A guest scan does not spend the owner's week — that is settled and stays
+// true — but "does not spend the week" turned into "is free and unlimited",
+// and unlimited is not a tier: it handed a Starter subscriber and a Max
+// subscriber the identical product on the one axis Max is actually sold on.
+// So there are two budgets rather than one, and they cannot borrow from each
+// other in either direction.
+//
+// A list rather than a stamp, because the cap is a count inside the window
+// (three a week, fifty on Max) rather than a single slot.
+const GUEST_KEY = "truemax.guestScanTimes";
 let pendingWeeklyCreditOwner: string | null = null;
+
+function readGuestTimes(): number[] {
+  try {
+    const key = scopedStorageKey(GUEST_KEY);
+    if (!key) return [];
+    const raw = JSON.parse(localStorage.getItem(key) || "[]") as unknown;
+    // Anything that is not a finite number is dropped rather than trusted: one
+    // NaN from a corrupted write would otherwise poison every comparison after
+    // it, exactly as scansInWindow guards against for the owner's own times.
+    return Array.isArray(raw) ? raw.filter((t): t is number => Number.isFinite(t)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * How many more people this account may scan inside the trailing week.
+ *
+ * Pruned to the window on read, so the stored list cannot grow without bound
+ * on an account that scans a lot of faces.
+ */
+export function guestScansLeft(tier: EntitlementTier): number {
+  const used = scansInWindow(readGuestTimes(), Date.now()).length;
+  return Math.max(0, guestAllowance(tier) - used);
+}
 
 /** Clear an unspent weekly-skip intent when its capture is abandoned. */
 export function discardPendingScanCredit(): void {
@@ -84,7 +123,20 @@ export function recordScanRun(guest = false): void {
   // Not an abuse hole. The subject chooser is member-gated, so the only people
   // who can declare a guest are the ones already paying, and what they get out
   // of it is a result they cannot chart.
-  if (guest) return;
+  if (guest) {
+    // Recorded against the guest budget instead of the owner's week. The early
+    // return this replaced is why guest scans were unlimited.
+    try {
+      const key = scopedStorageKey(GUEST_KEY);
+      if (!key) return;
+      const kept = scansInWindow(readGuestTimes(), Date.now());
+      localStorage.setItem(key, JSON.stringify([...kept, Date.now()]));
+    } catch {
+      /* Storage disabled: the cap cannot hold this browser, and a cap that
+         fails open is the survivable direction for a free product. */
+    }
+    return;
+  }
   try {
     const key = scopedStorageKey(STAMP_KEY);
     if (!key) return;

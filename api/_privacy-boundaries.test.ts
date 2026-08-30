@@ -107,6 +107,14 @@ test("guest scans do not spend the owner's depth allowance or enter Max context"
   assert.match(main, /ownScans\(historyBefore\)\.length - \(existingScan && !scanSubject \? 1 : 0\)/);
   assert.match(gate, /ownScans\(readAllHistory\(\)\)\.length >= TRIAL_SCANS/);
   assert.match(results, /scans: ownScans\(readAllHistory\(\)\)\.length/);
+  // Guest scans now have a budget of their own, which makes the SEPARATION
+  // load-bearing rather than incidental: a guest writes to GUEST_KEY and never
+  // to the owner's weekly stamp, and the owner's slot arithmetic still reads
+  // own scans only. Merging the two stores in either direction would let a
+  // friend's face spend the owner's week, which is the thing this test is for.
+  assert.match(gate, /const GUEST_KEY = "truemax\.guestScanTimes"/);
+  assert.match(gate, /if \(guest\) \{[\s\S]{0,400}?scopedStorageKey\(GUEST_KEY\)[\s\S]{0,400}?return;\s*\}/);
+  assert.match(gate, /const history = ownScans\(readAllHistory\(\)\)/);
 });
 
 test("late camera and rundown work cannot resurrect replaced user media", () => {
