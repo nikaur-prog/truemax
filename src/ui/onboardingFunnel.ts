@@ -14,6 +14,7 @@ import type { OnboardingProfile } from "../engine/onboarding.js";
 import { hasPaidAccess, loadEntitlement, openBillingPortal, startTrialCheckout } from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
+import { recordTrialDecline } from "../engine/trialDecline.js";
 import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
@@ -226,6 +227,12 @@ function askBeforeDeclining(host: HTMLElement): void {
     }
     if (target.dataset.decline === "go") {
       track("offer-declined-confirmed");
+      // Recorded, not awaited. The sheet said what declining costs and the
+      // person has confirmed it; making them watch a spinner to leave a screen
+      // they are leaving would be the last thing this flow does to them. The
+      // write is idempotent server-side, so a failure here means the next
+      // decline records it instead of a duplicate.
+      void recordTrialDecline().catch(() => undefined);
       sheet.remove();
       close();
     }

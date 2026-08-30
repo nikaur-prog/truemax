@@ -68,6 +68,10 @@ export function openSubjectChooser(
   // the one that must refuse, and a chooser guessing would be worse than a
   // chooser staying quiet.
   guestsLeft?: number,
+  // True once this account has declined the trial. It keeps its scans and can
+  // still scan other people; what it gave up is scanning ITSELF, which is the
+  // consequence the decline sheet named.
+  selfLocked?: boolean,
 ): void {
   closeSubjectChooser();
   const el = document.createElement("div");
@@ -80,8 +84,10 @@ export function openSubjectChooser(
         <h2 id="subj-h">Who's getting scanned?</h2>
         <p>Only your own scans count toward your progress — so a friend's face never moves your trend.</p>
         <div class="subjpick-opts">
-          <button class="subjpick-opt" data-who="me" type="button">
-            <b>It's me</b><span>Counts toward your progress</span>
+          <button class="subjpick-opt" data-who="me" type="button"${selfLocked ? " disabled" : ""}>
+            <b>It's me</b><span>${selfLocked
+              ? "You turned down the trial, so your own scans are closed"
+              : "Counts toward your progress"}</span>
           </button>
           <button class="subjpick-opt" data-who="other" type="button"${guestsLeft === 0 ? " disabled" : ""}>
             <b>Someone else</b><span>${guestsLeft === 0

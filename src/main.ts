@@ -75,6 +75,7 @@ import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
+import { loadTrialDeclined } from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
@@ -172,6 +173,16 @@ async function refreshPathwayState(): Promise<void> {
 // that has not landed yet offers no guest scans rather than fifty.
 let lastKnownTier: EntitlementTier = "free";
 
+// Whether this account turned the trial down.
+//
+// Defaults to FALSE, which is the opposite direction from lastKnownTier above,
+// and deliberately so: the two guard different things. An unread tier must not
+// hand out an allowance nobody paid for, so it fails closed. An unread decline
+// must not refuse somebody their own scan on a network hiccup, so it fails
+// open — the cost of getting it wrong is a scan that should not have happened,
+// against telling a paying-attention user they may not scan their own face.
+let lastKnownDeclined = false;
+
 async function refreshMaxAccess(): Promise<void> {
   const owner = activeScanOwner();
   const generation = scanGeneration;
@@ -184,10 +195,15 @@ async function refreshMaxAccess(): Promise<void> {
     // Credits and the staff flag each fall back to "no" on their own failure,
     // so one unreachable table cannot take the whole entitlement read down with
     // it — and both fail in the locked direction.
-    const [entitlement, credits, admin] = await Promise.all([
+    const [entitlement, credits, admin, declined] = await Promise.all([
       loadEntitlement(),
       loadScanCredits().catch(() => 0),
       loadIsAdmin().catch(() => false),
+      // Its own catch, like credits and the staff flag: one unreachable column
+      // must not take the whole entitlement read down with it.
+      currentUser()
+        .then((user) => (user ? loadTrialDeclined(user) : null))
+        .catch(() => null),
     ]);
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     let currentPaidScan = false;
@@ -205,6 +221,10 @@ async function refreshMaxAccess(): Promise<void> {
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     lastKnownTier = tierOf(entitlement);
+    // A live subscription overrides an old decline outright. Somebody who
+    // declined and later subscribed has un-declined by paying, and leaving the
+    // stamp in force would lock a paying customer out of their own face.
+    lastKnownDeclined = lastKnownTier === "free" && Boolean(declined);
     setMemberPricing(lastKnownTier !== "free");
     setDepth(
       depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
@@ -223,6 +243,8 @@ async function refreshMaxAccess(): Promise<void> {
     // Same direction as everything else in this catch: an unread entitlement
     // must not hand out an allowance nobody confirmed was paid for.
     lastKnownTier = "free";
+    // Not reset here: a failed read is not evidence that somebody un-declined,
+    // and the last known answer is better than a guess in either direction.
     setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
@@ -673,6 +695,19 @@ function ensureSex(then: () => void): void {
   const profile = loadProfile();
   const member = document.body.classList.contains("is-member");
   if (!member) {
+    // KNOWN GAP, and the one that matters: a declined account is almost always
+    // a free one, and a free account never reaches the chooser — so the
+    // `selfLocked` flag passed below never fires for the population the
+    // decline sheet is talking to.
+    //
+    // Closing it is not a flag, it is a model change. "Counts toward my week"
+    // and "counts toward my chart" are one boolean today (recordScanRun's
+    // `guest`), and a declined account needs them apart: their weekly scan
+    // still spends the week, and still must not attach to their profile or
+    // move their trend. Doing that properly means splitting the two axes
+    // through recordScanRun, the history writer and the avatar adoption
+    // path, which is a change with privacy edges and is not being made in
+    // passing at the bottom of another one.
     askPopulation(storedSex() ?? undefined, null);
     return;
   }
@@ -718,7 +753,7 @@ function ensureSex(then: () => void): void {
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  }, undefined, guestScansLeft(lastKnownTier));
+  }, undefined, guestScansLeft(lastKnownTier), lastKnownDeclined);
 }
 
 // The late form of the same question, for a scan captured with nobody signed
