@@ -63,6 +63,25 @@ export interface Rec {
   // Required for anything applied to the body. Prescription items are absent
   // from this file entirely; this asserts the remainder really is over-counter.
   otc?: boolean;
+  /**
+   * A medicine, rather than a cosmetic or a habit.
+   *
+   * Over the counter is not the same as suitable for a child, and this file
+   * had no idea a person could be one. A sixteen-year-old was being handed
+   * minoxidil with a shelf, a strength and a button that says "I'm going with
+   * this", which is the app telling a minor to start a drug.
+   *
+   * What this flag does NOT do is hide the card. Somebody with acne is going
+   * to search benzoyl peroxide whether or not we mention it, and the card is
+   * the one place they will read the actual cautions. It withholds the
+   * INSTRUCTION: no shelf, no strength to go and buy, no commitment clock.
+   * The card explains the thing and says who has to be in the room first.
+   *
+   * Set on pharmacological actives and nothing else. Sunscreen, moisturiser,
+   * food, sleep and technique are not on this list and must not be: a teenager
+   * being told to wear sunscreen is the single best line in the product.
+   */
+  guardian?: true;
   caution?: string;
   // Dietary flags a profile can exclude on
   contains?: Array<"meat" | "fish" | "shellfish" | "dairy">;
@@ -163,6 +182,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "adapalene",
+    guardian: true,
     concerns: ["acne"],
     group: "topical",
     goals: ["skin"],
@@ -186,6 +206,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "azelaic",
+    guardian: true,
     concerns: ["redness", "marks", "acne", "pigmentation"],
     group: "topical",
     goals: ["skin"],
@@ -208,6 +229,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "salicylic",
+    guardian: true,
     concerns: ["acne", "pores"],
     group: "topical",
     goals: ["skin"],
@@ -228,6 +250,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "benzoyl-peroxide",
+    guardian: true,
     concerns: ["acne"],
     group: "topical",
     goals: ["skin"],
@@ -505,6 +528,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "whitening",
+    guardian: true,
     group: "topical",
     goals: ["teeth"],
     channel: "grooming",
@@ -572,6 +596,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "brow-oils",
+    guardian: true,
     group: "topical",
     goals: ["grooming", "eyes"],
     channel: "grooming",
@@ -701,6 +726,7 @@ export const RECS: Rec[] = [
   // ---- hair ---------------------------------------------------------------
   {
     id: "minoxidil",
+    guardian: true,
     group: "topical",
     goals: ["hair"],
     channel: "grooming",
@@ -723,6 +749,7 @@ export const RECS: Rec[] = [
   },
   {
     id: "keto-shampoo",
+    guardian: true,
     group: "topical",
     goals: ["hair"],
     channel: "grooming",

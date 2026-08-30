@@ -2347,6 +2347,20 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
    search box returns chemistry and forty bottles at four strengths. Set apart
    from the reasoning above it, because this is the part you read standing in
    the shop. */
+/* What replaces the shelf and the strength for somebody under eighteen. Warm
+   rather than red: it is not a refusal, it is naming who else has to be in the
+   room before a medicine starts. */
+.rec-guardian {
+  margin: 12px 0 0; padding: 12px 14px; border-radius: 12px;
+  background: var(--warm-soft, rgba(240, 178, 74, 0.12));
+  border: 1px solid var(--line);
+}
+.rec-guardian-h {
+  display: block; font: 500 8.5px var(--mono); letter-spacing: .13em;
+  color: var(--mut); margin-bottom: 6px;
+}
+.rec-guardian p { margin: 0; font-size: 12.5px; line-height: 1.55; }
+
 .rec-buy {
   margin-top: 12px;
   padding: 12px 14px 13px;

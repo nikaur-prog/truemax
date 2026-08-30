@@ -2836,7 +2836,31 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
 // The search link stays underneath, and it stays a search rather than a
 // merchant: the example is an example, not the answer, and there is no
 // affiliate anywhere in this.
+/**
+ * The line that replaces a shelf and a strength for somebody under eighteen.
+ *
+ * Named rather than silent. A blank space where the buying guide was reads as
+ * a bug, and a minor who has just been told a medicine exists and then given
+ * no route is going to find a worse route on their own. This says what the
+ * thing is for and who has to be involved before it starts.
+ */
+function guardianBlock(r: Rec): string {
+  if (!r.guardian || adultUser) return "";
+  return `<div class="rec-guardian">
+    <span class="rec-guardian-h">BEFORE THIS ONE</span>
+    <p>This is a medicine rather than a cosmetic, and the label on it was
+      written for adults. Show this card to a parent or guardian, and ask a
+      pharmacist whether it suits you and at what strength. That is not a
+      formality: the right answer for a fifteen-year-old and a thirty-year-old
+      genuinely differ, and a pharmacist will tell you for free.</p>
+  </div>`;
+}
+
 function buyBlock(r: Rec): string {
+  // No shelf and no strength for a minor. Over the counter is not the same as
+  // suitable for a child, and a buying guide is an instruction to go and get
+  // it. guardianBlock takes this slot instead.
+  if (r.guardian && !adultUser) return "";
   const guide = buyGuideFor(r);
   if (!guide) return "";
   const url = productSearchUrl(r);
@@ -2867,6 +2891,7 @@ function buyBlock(r: Rec): string {
         <span class="rec-what">${r.what}</span>
         <p>${r.detail}</p>
         ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
+        ${guardianBlock(r)}
         ${buyBlock(r)}
         ${recTrackHTML(r)}
       </div>`,
@@ -2885,7 +2910,11 @@ function buyBlock(r: Rec): string {
 // It also states the timeline up front. Somebody who knows going in that a
 // retinoid needs twelve weeks is somebody who does not quit at week three, and
 // it is the honest thing to put next to a purchase.
-function recTrackHTML(r: { id: string; weeksToJudge?: number }): string {
+function recTrackHTML(r: { id: string; weeksToJudge?: number; guardian?: true }): string {
+  // No commitment clock on a medicine for a minor. "I'm going with this"
+  // starts a protocol Max then follows up on, which turns a card somebody was
+  // reading into a course they have started.
+  if (r.guardian && !adultUser) return "";
   const already = protocolFor(r.id);
   const weeks = Math.max(4, r.weeksToJudge ?? 4);
   if (already && already.status !== "offered") {
