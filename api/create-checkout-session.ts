@@ -150,7 +150,20 @@ export async function POST(request: Request): Promise<Response> {
           .maybeSingle<{ trial_declined_at: string | null; downsell_redeemed_at: string | null }>(),
       ]);
       if (entitlementError) throw new Error(`Downsell pricing lookup failed: ${entitlementError.message}`);
-      if (profileError) throw new Error(`Downsell eligibility lookup failed: ${profileError.message}`);
+      // A failed eligibility read REFUSES the offer rather than throwing.
+      //
+      // The direction is the point: this endpoint hands out a discount, so an
+      // unreadable eligibility fact must mean "no offer", never a 500 and
+      // never the offer anyway. It also removes a deploy-order hazard that
+      // would otherwise be real. This branch reads downsell_redeemed_at, which
+      // arrives in its own migration; between a merge and that migration being
+      // applied the select would error, and every declining account would meet
+      // a server error instead of a closed offer. Closed is the honest answer
+      // in that window, and it is the same answer the person gets once the
+      // offer has genuinely been used.
+      if (profileError) {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
       const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
       // Three conditions, and the third is the one that makes this an offer
       // rather than a tier. "Declined and not a member" both stay true
