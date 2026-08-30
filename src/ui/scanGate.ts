@@ -342,7 +342,7 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
     ? "You've used both of this week's scans"
     : "You've used your free scan this week";
   const sub = allowance > 1
-    ? "One scan of your own face a week, on every plan. Your face doesn't change in a day, so a second scan mostly measures your lighting, leave it and the number can actually move. Max scans of other people are separate and do not spend this."
+    ? "One scan of your own face a week, on every plan. Your face doesn't change in a day, so a second scan mostly measures your lighting. Leave it and the number can actually move. Max scans of other people are separate and do not spend this."
     : "You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.";
   // One upsell line each: non-members hear about the member price, Starter
   // members hear that Max carries a second weekly scan. Max members, who have

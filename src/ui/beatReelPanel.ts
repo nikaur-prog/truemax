@@ -609,7 +609,7 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
       </section>
 
       <section class="brp-sec" id="brp-preview-sec" hidden>
-        <div class="brp-head"><span>▶ THE PREVIEW</span><small id="brp-prevnote">Loops until you stop it, what it shows is what renders.</small></div>
+        <div class="brp-head"><span>▶ THE PREVIEW</span><small id="brp-prevnote">Loops until you stop it. What it shows is what renders.</small></div>
         <div class="brp-prevwrap" id="brp-prevwrap" hidden>
           <canvas id="brp-prev" width="270" height="480"></canvas>
         </div>

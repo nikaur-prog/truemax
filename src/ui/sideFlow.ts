@@ -197,6 +197,19 @@ function clearWalkthrough(frame: HTMLElement): void {
 }
 
 export function openSideCapture(ctx: SideCtx): void {
+  // Any dialog belonging to the placement that is being retaken goes with it.
+  //
+  // The placement sheet stops pointer events reaching the photograph beneath
+  // it, and layering keeps a mouse away from the retake control, but neither
+  // makes that control unreachable: Shift-Tab from the sheet's own button
+  // lands on it and Enter fires it. The verifier was then destroyed while the
+  // sheet stayed on screen, and answering it ran the previous placement's
+  // callback against a capture that no longer existed.
+  //
+  // Cancelled here rather than defended against at the retake button, because
+  // this is the one function every retake goes through whatever reached it:
+  // keyboard, pointer or assistive technology.
+  cancelDialogs();
   const e = el();
   verifier?.destroy();
   verifier = null;
@@ -1454,7 +1467,7 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       <span class="klabel">OPTIONAL · YOUR CHOICE</span>
       <h2 id="side-feedback-title">${afterEdit ? "We noticed you adjusted the points" : "Help improve TrueMax?"}</h2>
       <p id="side-feedback-copy">${afterEdit
-        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them, corrections like yours are exactly what teaches the placement to land right next time."
+        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them. Corrections like yours are exactly what teaches the placement to land right next time."
         : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
       <div class="side-feedback-actions">
@@ -1473,8 +1486,17 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       if (finished) {
         // Already on the thank-you card with its timer running. The dialog is
         // going away now, so the timer must not fire into a torn-down flow.
+        //
+        // The promise is still settled, with TRUE, and both halves of that
+        // matter. Returning without resolving left the awaiting closure and
+        // its scan pending for the life of the page, which is the leak this
+        // whole cancel mechanism exists to prevent. And true is the answer
+        // they actually gave: the thank-you card is only ever reached by
+        // pressing yes, so resolving false here would record a consent they
+        // did give as one they refused.
         window.clearTimeout(thanksTimer);
         backdrop.remove();
+        resolve(true);
         return;
       }
       finished = true;

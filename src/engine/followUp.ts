@@ -122,7 +122,7 @@ export function followUp(history: ScanPoint[], goalLabel?: string): FollowUp {
     return {
       kind: "working",
       headline: `Up ${change.toFixed(1)} in ${weeks} weeks. That is a real move.`,
-      body: `That is past the ${NOISE.toFixed(1)} points two photos of the same unchanged face differ by, so it is not the camera, something you are doing${goal} is showing up in the measurements. Keep the routine as it is; this is the part where people change things and lose the thread.`,
+      body: `That is past the ${NOISE.toFixed(1)} points two photos of the same unchanged face differ by, so it is not the camera. Something you are doing${goal} is showing up in the measurements. Keep the routine as it is; this is the part where people change things and lose the thread.`,
       suggestChange: false,
     };
   }

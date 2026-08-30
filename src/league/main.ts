@@ -932,7 +932,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       },
       {
         id: "polisher", n: "03", name: "The Polisher",
-        body: "Clean up a soft clip on this device: sharpen, colour: and a 4K upscale for the ones worth it.",
+        body: "Clean up a soft clip on this device: sharpen, colour, and a 4K upscale for the ones worth it.",
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
@@ -1141,7 +1141,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             },
             {
               t: "DM · follow-up (48h silence)",
-              s: "Still open if you want it, creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
+              s: "Still open if you want it. Creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
             },
             {
               t: "Email (from their bio / Linktree / YouTube About)",

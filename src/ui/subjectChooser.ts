@@ -112,7 +112,7 @@ export function openSubjectChooser(
       <button class="subjpick-cancel" type="button" aria-label="Cancel">✕</button>
       <div class="subjpick-step" data-step="who">
         <h2 id="subj-h">Who's getting scanned?</h2>
-        <p>Only your own scans count toward your progress: so a friend's face never moves your trend.</p>
+        <p>Only your own scans count toward your progress, so a friend's face never moves your trend.</p>
         <div class="subjpick-opts">
           <button class="subjpick-opt" data-who="me" type="button"${selfLock ? " disabled" : ""}>
             <b>It's me</b><span>${selfLock === "declined"

@@ -1494,7 +1494,7 @@ function renderCalibrationSet(): void {
       el.calBody.appendChild(area);
       area.focus();
       area.select();
-      msg.textContent = "Clipboard refused, select and copy from the box.";
+      msg.textContent = "Clipboard refused. Select and copy from the box.";
     }
   };
   document.getElementById("q-cal-clear")!.onclick = () => {

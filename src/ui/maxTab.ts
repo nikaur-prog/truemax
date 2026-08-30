@@ -53,7 +53,7 @@ const PREVIEW = [
   { who: "you", text: "How long until it shows?" },
   {
     who: "max",
-    text: "Weeks, not days: and I will tell you straight whether it moved, because I re-read the same numbers every scan.",
+    text: "Weeks, not days. And I will tell you straight whether it moved, because I re-read the same numbers every scan.",
   },
 ];
 
