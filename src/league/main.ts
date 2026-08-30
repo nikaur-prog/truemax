@@ -1,6 +1,8 @@
 import { getSupabaseClient, currentAccessToken, currentUser, signIn, signUp } from "../engine/auth.js";
 import type { Tier } from "./tiers.js";
 import { earnedCents, nextTier, fmtMoney, fmtCount } from "./tiers.js";
+import type { AudienceStats, AudienceTier } from "./audience.js";
+import { TIER_1, TIER_RULES, ruleFor, shortfall, statsArePossible, tierFor } from "./audience.js";
 import type { EarningsFormula, VideoTotals } from "./earnings.js";
 import {
   DEFAULT_FORMULA,
@@ -76,6 +78,21 @@ interface SubmissionRow {
   /** Set by the nightly tracker when the URL matched a video on the
    *  creator's own linked TikTok — ownership proven, counts automatic. */
   tiktok_video_id: string | null;
+}
+
+/** One creator's submitted audience breakdown, awaiting or carrying a review. */
+interface AudienceProofRow {
+  id: string;
+  user_id: string;
+  platform: string;
+  proof_url: string;
+  tier1_share: number;
+  usa_share: number;
+  views_28d: number;
+  videos_28d: number;
+  status: string;
+  note: string | null;
+  submitted_at: string;
 }
 
 const root = document.getElementById("league")!;
@@ -313,7 +330,7 @@ function renderStatus(row: CreatorRow): void {
 
 // --- the dashboard -----------------------------------------------------------
 
-type Page = "overview" | "submit" | "mine" | "ranks" | "money" | "tools" | "admin";
+type Page = "overview" | "submit" | "mine" | "ranks" | "money" | "offers" | "tools" | "admin";
 
 async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
   const pages: Array<[Page, string]> = [
@@ -322,6 +339,7 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
     ["mine", "Submissions"],
     ["ranks", "Ranks"],
     ["money", "Money"],
+    ["offers", "Offers"],
     ["tools", "Tools"],
   ];
   if (staff) pages.push(["admin", "Admin"]);
@@ -682,6 +700,182 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>`).join("")}</div>` : `<p class="lg-sub">Payouts land here once a sprint settles.</p>`}`;
   },
 
+  /**
+   * Offers: which tier this account is in, and what it would take to move up.
+   *
+   * The pay formula answers "how many people watched" and says nothing about
+   * who. This is the other half, and it is deliberately the most transparent
+   * page in the League: every floor is printed, the creator's own numbers are
+   * printed next to them, and a shortfall names the exact gap. A creator
+   * programme that rejects without a reason does not get posted in.
+   */
+  async offers(mount, me) {
+    const client = await getSupabaseClient();
+    const [tierRow, proofRow] = await Promise.all([
+      client
+        .from("league_audience_tiers")
+        .select("tier, note, decided_at")
+        .eq("user_id", me.user_id)
+        .maybeSingle<{ tier: AudienceTier; note: string | null; decided_at: string }>(),
+      client
+        .from("league_audience_proofs")
+        .select("status, note, submitted_at, tier1_share, usa_share, views_28d, videos_28d")
+        .eq("user_id", me.user_id)
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{
+          status: string;
+          note: string | null;
+          submitted_at: string;
+          tier1_share: number;
+          usa_share: number;
+          views_28d: number;
+          videos_28d: number;
+        }>(),
+    ]);
+
+    const mine: AudienceTier = tierRow.data?.tier ?? "unrated";
+    const latest = proofRow.data ?? null;
+    const claimed: AudienceStats | null = latest
+      ? {
+          tier1Share: Number(latest.tier1_share),
+          usaShare: Number(latest.usa_share),
+          views28d: Number(latest.views_28d),
+          videos28d: Number(latest.videos_28d),
+        }
+      : null;
+
+    const cards = TIER_RULES.filter((r) => r.id !== "unrated")
+      .map((rule) => {
+        const gap = claimed ? shortfall(rule, claimed) : [];
+        const held = mine === rule.id;
+        return `<div class="lg-card lg-offer${held ? " held" : ""}">
+        <div class="lg-offer-h"><b>${rule.label.toUpperCase()}</b>${held ? `<span class="lg-chip ok">YOUR TIER</span>` : ""}</div>
+        <p class="lg-sub">${esc(rule.blurb)}</p>
+        <ul class="lg-offer-reqs">
+          ${rule.minTier1Share ? `<li>${Math.round(rule.minTier1Share * 100)}% of views from Tier 1 countries</li>` : ""}
+          ${rule.minUsaShare ? `<li>${Math.round(rule.minUsaShare * 100)}% of views from the United States</li>` : ""}
+          <li>${fmtCount(rule.minViews28d)} views in the last 28 days</li>
+          ${rule.minVideos28d > 1 ? `<li>across at least ${rule.minVideos28d} videos</li>` : ""}
+        </ul>
+        ${
+          claimed && !held
+            ? gap.length
+              ? `<div class="lg-offer-gap"><b>What is missing</b><ul>${gap
+                  .map((g) => `<li>${esc(g)}</li>`)
+                  .join("")}</ul></div>`
+              : `<div class="lg-offer-gap ok">Your submitted numbers clear every floor here. Waiting on review.</div>`
+            : ""
+        }
+      </div>`;
+      })
+      .join("");
+
+    const status = !latest
+      ? `<p class="lg-sub">Nothing submitted yet. Send your audience breakdown below and an admin will place your account.</p>`
+      : latest.status === "pending"
+        ? `<p class="lg-sub">Submitted ${new Date(latest.submitted_at).toLocaleDateString()}, waiting on review.</p>`
+        : `<p class="lg-sub">Last review: <b>${esc(latest.status)}</b>${latest.note ? ` — ${esc(latest.note)}` : ""}</p>`;
+
+    mount.innerHTML = `<h1 class="lg-h">Offers</h1>
+      <p class="lg-sub">Accounts are placed into a tier from where their viewers are, not just how many
+      there are. A view from a country TrueMax cannot sell in still counts toward your totals; the tier
+      is what decides the rate those totals are paid at.</p>
+      <div class="lg-card">
+        <div class="lg-row"><span>Your tier</span><span class="lg-money">${esc(ruleFor(mine).label)}</span></div>
+        ${status}
+        ${
+          // What the submitted numbers would reach, said out loud while the
+          // review is pending. It is what the claim reaches, not a decision:
+          // a person still watches the recording against it.
+          claimed && latest?.status === "pending" && tierFor(claimed) !== mine
+            ? `<p class="lg-sub">On the numbers you sent, this account reaches
+               <b>${esc(ruleFor(tierFor(claimed)).label)}</b>. The review decides.</p>`
+            : ""
+        }
+        ${tierRow.data?.note ? `<p class="lg-sub">${esc(tierRow.data.note)}</p>` : ""}
+      </div>
+      <div class="lg-offers">${cards}</div>
+      <h2 class="lg-h2">Send your audience breakdown</h2>
+      <p class="lg-sub">Screen-record the audience page of your own platform analytics and link it, then
+      type the same numbers in. A person watches the recording against what you typed.</p>
+      <div class="lg-card lg-form" style="max-width:520px;margin-left:0">
+        <label for="au-platform">Account</label>
+        <select id="au-platform">
+          <option value="tiktok">TikTok</option>
+          <option value="instagram">Instagram</option>
+        </select>
+        <label for="au-url">Link to your screen recording</label>
+        <input id="au-url" type="url" placeholder="https://…" />
+        <label for="au-t1">% of views from Tier 1 countries</label>
+        <input id="au-t1" type="number" min="0" max="100" step="0.1" />
+        <label for="au-us">% of views from the United States</label>
+        <input id="au-us" type="number" min="0" max="100" step="0.1" />
+        <label for="au-views">Views in the last 28 days</label>
+        <input id="au-views" type="number" min="0" step="1" />
+        <label for="au-videos">Videos those views are spread across</label>
+        <input id="au-videos" type="number" min="0" step="1" />
+        <p class="lg-note" style="margin-top:14px">Tier 1 today: ${TIER_1.join(", ")}. The United States is
+        inside Tier 1, so its share can never be the larger of the two.</p>
+        <p style="margin-top:16px"><button class="lg-btn pri" id="au-go">Send for review</button></p>
+        <p class="lg-error" id="au-err"></p>
+      </div>`;
+
+    document.getElementById("au-go")!.onclick = async () => {
+      const err = document.getElementById("au-err")!;
+      err.textContent = "";
+      const num = (id: string) => Number((document.getElementById(id) as HTMLInputElement).value);
+      const url = (document.getElementById("au-url") as HTMLInputElement).value.trim();
+      let link: URL;
+      try {
+        link = new URL(url);
+      } catch {
+        err.textContent = "That needs to be a full https:// link to your recording.";
+        return;
+      }
+      if (link.protocol !== "https:") {
+        err.textContent = "That needs to be a full https:// link to your recording.";
+        return;
+      }
+      const stats = {
+        tier1Share: num("au-t1") / 100,
+        usaShare: num("au-us") / 100,
+        views28d: num("au-views"),
+        videos28d: num("au-videos"),
+      };
+      // The message is chosen BEFORE the guard, because the guard is a type
+      // predicate: inside its false branch the value has been narrowed away
+      // and there is nothing left to read the mistake off.
+      const wrongRow = stats.usaShare > stats.tier1Share;
+      // The same check the database runs, so the message names the problem
+      // rather than surfacing a constraint violation. The US share exceeding
+      // the Tier 1 share is the commonest one: it means the wrong row was read.
+      if (!statsArePossible(stats)) {
+        err.textContent = wrongRow
+          ? "The US is inside Tier 1, so its share cannot be larger. Check which row you read."
+          : "Those numbers do not add up. Percentages are 0 to 100, and views need videos behind them.";
+        return;
+      }
+      const { error } = await client.from("league_audience_proofs").insert({
+        user_id: me.user_id,
+        platform: (document.getElementById("au-platform") as HTMLSelectElement).value,
+        proof_url: link.href,
+        tier1_share: stats.tier1Share,
+        usa_share: stats.usaShare,
+        views_28d: stats.views28d,
+        videos_28d: stats.videos28d,
+      });
+      if (error) {
+        err.textContent = error.message;
+        return;
+      }
+      // Shown back immediately, including which tier these numbers would reach,
+      // so the creator knows what they have asked for rather than waiting to
+      // find out. It is what the numbers CLAIM; the review decides.
+      void PAGES.offers(mount, me);
+    };
+  },
+
   async tools(mount, me) {
     const granted = (id: string) => me.pillar_grants?.[id] === true;
     // The pillars, in the order a member meets them. Each granted card is a
@@ -765,12 +959,17 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async admin(mount) {
     mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const [{ data: apps }, { data: pending }, { data: allSprints }] = await Promise.all([
+    const [{ data: apps }, { data: pending }, { data: allSprints }, { data: proofs }] = await Promise.all([
       client.from("league_creators").select("*").eq("status", "applied").order("created_at"),
       client.from("league_submissions").select("*").eq("status", "pending").order("created_at"),
       // Every status, drafts included — loadSprints deliberately hides drafts
       // from creators, and the admin is exactly who drafts exist for.
       client.from("league_sprints").select("*").order("starts_at", { ascending: false }),
+      client
+        .from("league_audience_proofs")
+        .select("*")
+        .eq("status", "pending")
+        .order("submitted_at"),
     ]);
     const applications = (apps ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
     const subs = (pending ?? []) as SubmissionRow[];
@@ -783,7 +982,44 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       : `<span class="lg-chip warn">DRAFT</span>`;
     const day = (iso: string) => new Date(iso).toLocaleDateString();
 
+    const audience = (proofs ?? []) as AudienceProofRow[];
+
+    // What the numbers the creator typed would reach, computed here rather
+    // than trusted from anywhere, so the reviewer is comparing the recording
+    // against a tier this code derived from the same rules the offer page
+    // printed. The decision is still theirs: accept places the tier, reject
+    // does not.
+    const audienceCard = `<div class="lg-card"><h3>Audience reviews · ${audience.length}</h3>
+      ${audience.length ? "" : `<p class="lg-sub">Nothing waiting. Creators send their breakdown from the Offers page.</p>`}
+      ${audience
+        .map((p) => {
+          const claim: AudienceStats = {
+            tier1Share: Number(p.tier1_share),
+            usaShare: Number(p.usa_share),
+            views28d: Number(p.views_28d),
+            videos28d: Number(p.videos_28d),
+          };
+          const reaches = tierFor(claim);
+          return `<div class="lg-row" style="flex-wrap:wrap;gap:8px">
+            <span style="flex:1;min-width:240px">
+              <b>${esc(p.platform)}</b>
+              <span class="lg-note">Tier 1 ${Math.round(claim.tier1Share * 100)}% ·
+              US ${Math.round(claim.usaShare * 100)}% ·
+              ${fmtCount(claim.views28d)} views · ${claim.videos28d} videos</span><br>
+              <a href="${esc(p.proof_url)}" target="_blank" rel="noopener noreferrer">Watch the recording ↗</a>
+            </span>
+            <span style="display:flex;gap:8px;align-items:center">
+              <span class="lg-chip${reaches === "unrated" ? " warn" : " ok"}">CLAIMS ${ruleFor(reaches).label.toUpperCase()}</span>
+              <button class="lg-btn pri" data-aud-ok="${p.id}" data-aud-user="${p.user_id}" data-aud-tier="${reaches}">Place as ${ruleFor(reaches).label}</button>
+              <button class="lg-btn danger" data-aud-no="${p.id}">Reject</button>
+            </span>
+          </div>`;
+        })
+        .join("")}
+    </div>`;
+
     mount.innerHTML = `<h1 class="lg-h">Admin</h1>
+      ${audienceCard}
       <div class="lg-card"><h3>Sprints · ${sprints.length}</h3>
         ${sprints.map((s) => `<div class="lg-row" style="flex-wrap:wrap">
           <span><b>${esc(s.name)}</b> <span class="lg-note">${day(s.starts_at)} → ${day(s.ends_at)} ·
@@ -1038,6 +1274,59 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     });
 
     const refresh = () => void PAGES.admin(mount, undefined as never);
+    // Placing a tier is two writes and they have to both land: the proof is
+    // marked accepted, and the tier row is upserted. Upsert rather than insert,
+    // because a creator re-submitting after growing their account is the normal
+    // case and their tier moves rather than duplicating.
+    mount.querySelectorAll<HTMLButtonElement>("[data-aud-ok]").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        const reviewer = await currentUser();
+        const { error } = await client.from("league_audience_tiers").upsert(
+          {
+            user_id: b.dataset.audUser!,
+            tier: b.dataset.audTier!,
+            proof_id: b.dataset.audOk!,
+            decided_by: reviewer?.id ?? null,
+            decided_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" },
+        );
+        if (error) {
+          b.disabled = false;
+          window.alert(`Tier not placed: ${error.message}`);
+          return;
+        }
+        await client
+          .from("league_audience_proofs")
+          .update({
+            status: "accepted",
+            reviewed_by: reviewer?.id ?? null,
+            reviewed_at: new Date().toISOString(),
+          })
+          .eq("id", b.dataset.audOk!);
+        refresh();
+      };
+    });
+    mount.querySelectorAll<HTMLButtonElement>("[data-aud-no]").forEach((b) => {
+      b.onclick = async () => {
+        // A reason, always. A rejection with no note is what makes a creator
+        // programme feel arbitrary, and the creator can read this back.
+        const note = window.prompt("Why is this being rejected? The creator sees this.");
+        if (note === null) return;
+        const reviewer = await currentUser();
+        await client
+          .from("league_audience_proofs")
+          .update({
+            status: "rejected",
+            note: note.trim() || "The recording did not match the numbers submitted.",
+            reviewed_by: reviewer?.id ?? null,
+            reviewed_at: new Date().toISOString(),
+          })
+          .eq("id", b.dataset.audNo!);
+        refresh();
+      };
+    });
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {
       b.onclick = async () => {
         const row = b.closest(".lg-row")!;
