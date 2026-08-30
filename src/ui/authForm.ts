@@ -59,6 +59,19 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     </div>
     <div class="acct-divider"><span>or</span></div>
     <form class="acct-form" novalidate>
+      ${
+        // Signup only. Asked here rather than left to the quiz so the app can
+        // greet somebody by name the moment they are through the wall, and so
+        // the quiz opens with a field already filled instead of a blank one.
+        // Not required: an account is worth more than a name, and this is the
+        // screen standing between a finished scan and the person who took it.
+        isSignup && !isLink
+          ? `<label class="acct-field">
+              <span>First name <em>optional</em></span>
+              <input type="text" name="name" autocomplete="given-name" placeholder="What should we call you?" maxlength="60" />
+            </label>`
+          : ""
+      }
       <label class="acct-field">
         <span>Email</span>
         <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
@@ -119,7 +132,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     const result = isLink
       ? await signInWithLink(email)
       : isSignup
-        ? await signUp(email, password)
+        ? await signUp(email, password, String(data.get("name") || ""))
         : await signIn(email, password);
     setWorking(submit, false, isLink ? "Email me a sign-in link" : isSignup ? "Create free account" : "Sign in");
 
