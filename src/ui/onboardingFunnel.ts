@@ -178,6 +178,60 @@ function readInputs(profile: OnboardingProfile, root = host): void {
 // always dismissible: the questions are required, the subscription never is.
 let locked = false;
 
+/**
+ * The one thing between "Not now" and losing the plan.
+ *
+ * Every line of this names something that is true today, and there is nothing
+ * else in it. In particular there is no statistic: the obvious one to reach for
+ * is a share of people who hit their goals in eight weeks, and nobody has been
+ * here eight weeks, there is no cohort, and goal completion is not measured
+ * yet. Inventing a number about results is the one thing a product that sells
+ * itself on measurement cannot do. It is a strong line and it goes in the
+ * moment it is real.
+ *
+ * The last sentence is the one that stops this being a threat. Somebody
+ * declining is weighing "what do I lose", and the fear that answers loudest is
+ * that their scan disappears. It does not, ever, and saying so is what lets
+ * them decide rather than bounce.
+ */
+function askBeforeDeclining(host: HTMLElement): void {
+  track("offer-declined-asked");
+  const sheet = document.createElement("div");
+  sheet.className = "decline-sheet";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-labelledby", "decline-title");
+  sheet.innerHTML = `<div class="decline-card">
+    <h3 id="decline-title">Are you sure?</h3>
+    <p>This was your one personal scan. Without a plan you will not get the routine,
+      the products, or your weekly progress, and you will not be able to scan
+      yourself again. Your results stay saved either way.</p>
+    <div class="decline-actions">
+      <button type="button" class="btn pri" data-decline="keep">Keep my free trial</button>
+      <button type="button" class="btn gho" data-decline="go">No thanks</button>
+    </div>
+  </div>`;
+  host.appendChild(sheet);
+  // Focus lands on Keep, not on No thanks. The destructive choice should never
+  // be the one a stray Enter takes.
+  sheet.querySelector<HTMLButtonElement>('[data-decline="keep"]')?.focus();
+  sheet.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    // The backdrop is a way back to the offer, never a way past it: dismissing
+    // a confirmation by tapping beside it must not count as confirming.
+    if (target === sheet || target.dataset.decline === "keep") {
+      track("offer-declined-kept");
+      sheet.remove();
+      return;
+    }
+    if (target.dataset.decline === "go") {
+      track("offer-declined-confirmed");
+      sheet.remove();
+      close();
+    }
+  });
+}
+
 function close(): void {
   if (locked) return;
   host?.remove();
@@ -195,7 +249,19 @@ export function closeTrialFunnel(): void {
 }
 
 function onKey(event: KeyboardEvent): void {
-  if (event.key === "Escape") close();
+  if (event.key !== "Escape") return;
+  // Escape belongs to the innermost thing on screen. With the are-you-sure
+  // sheet up it dismisses the sheet and leaves the offer standing; letting it
+  // fall through to close() would have made Escape a silent decline that skips
+  // the confirmation entirely — the one route past the sheet that never has to
+  // read it.
+  const sheet = host?.querySelector<HTMLElement>(".decline-sheet");
+  if (sheet) {
+    track("offer-declined-kept");
+    sheet.remove();
+    return;
+  }
+  close();
 }
 
 interface FunnelPreview {
@@ -490,12 +556,12 @@ export async function openTrialFunnel(
         </article>
       </div>
       <p class="trial-status" role="status"></p>
-      <button class="trial-decline" type="button">No thank you — show me my analysis</button>
+      <button class="trial-decline" type="button">Not now</button>
       <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout.</p>
     </div>`;
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
-    activeHost.querySelector(".trial-decline")?.addEventListener("click", close);
+    activeHost.querySelector(".trial-decline")?.addEventListener("click", () => askBeforeDeclining(activeHost));
 
     // The sequence: the offer settles, Max pops up from behind the card's
     // bottom edge, waves (and puts his arm down), and only THEN does the
