@@ -1689,6 +1689,20 @@ function wireMaxAsk(): void {
   document.addEventListener("click", (event) => {
     const hit = (event.target as HTMLElement | null)?.closest?.("[data-max-ask]");
     if (!hit) return;
+    // The tier check belongs here as well as on the markup.
+    //
+    // Today the only `data-max-ask` element is rendered inside maxAnalysisHTML,
+    // which is already behind `maxAccess && adultUser`, so this cannot fire for
+    // anyone who should not reach it. But this is a DELEGATED listener bound
+    // once to the document and never rebound, so it outlives every re-render
+    // and would silently pick up any future element that reuses the attribute
+    // from ungated markup. Every other Max surface in this file states the
+    // condition where it acts; this one inherited it from its caller.
+    //
+    // The real boundary is the server, which answers 402 unless the tier is
+    // max (api/max-chat.ts). This keeps the client from opening a panel that
+    // is only going to be refused.
+    if (!maxAccess || !adultUser || observationsOnly()) return;
     const cc = chatContext();
     if (cc) openMaxChat(cc);
   });
