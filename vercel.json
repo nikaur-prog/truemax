@@ -1,4 +1,7 @@
 {
+  "redirects": [
+    { "source": "/index.html", "destination": "/", "permanent": true }
+  ],
   "rewrites": [
     { "source": "/auth", "destination": "/auth.html" },
     { "source": "/quick", "destination": "/quick.html" },
@@ -8,7 +11,13 @@
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/brand", "destination": "/brand.html" },
     { "source": "/league", "destination": "/league.html" },
-    { "source": "/league/tools", "destination": "/quick.html" }
+    { "source": "/league/tools", "destination": "/quick.html" },
+    { "source": "/guides", "destination": "/guides.html" },
+    { "source": "/face-score", "destination": "/face-score.html" },
+    { "source": "/improve-your-looks", "destination": "/improve-your-looks.html" },
+    { "source": "/looksmaxxing-guide", "destination": "/looksmaxxing-guide.html" },
+    { "source": "/glow-up-guide", "destination": "/glow-up-guide.html" },
+    { "source": "/methodology", "destination": "/methodology.html" }
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" },

@@ -1,8 +1,16 @@
 # TrueMax SEO plan
 
-Status: Ready for implementation
+Status: Technical foundation implemented; production rollout and search-console setup pending
 
 Prepared: 12 August 2026
+
+Foundation updated: 31 August 2026
+
+The first implementation now includes canonical metadata, `robots.txt`, a
+sitemap, homepage entity and application schema, a crawlable guide hub, four
+intent-led guides, a public methodology page, clean URL rewrites, the duplicate
+`/index.html` redirect and automated SEO surface tests. The separate rollout
+steps are tracked in `docs/SEO_ROLLOUT_CHECKLIST.md`.
 
 Primary domain: `https://www.truemax.app/`
 

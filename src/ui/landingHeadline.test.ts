@@ -72,10 +72,10 @@ test("the rotation comes back round rather than running out", () => {
   assert.equal(seen.size, 3, "the signed-out set should cycle through exactly its three lines");
 });
 
-test("visit 0 opens on the strongest claim", () => {
-  // A stranger's first sight of the page gets the sentence the whole product
-  // argues for, not whichever line the cycle happened to land on.
-  assert.equal(text(pickHeadline(ctx())), "Looks are no longer subjective.");
+test("visit 0 opens on the clearest product description", () => {
+  // A stranger's first sight of the page says what the product does, not a
+  // universal claim about attractiveness.
+  assert.equal(text(pickHeadline(ctx())), "Your face score, measurement by measurement.");
 });
 
 test("a signed-in name appears in the headline", () => {
@@ -107,7 +107,13 @@ test("a rescan is only suggested once it could resolve a real move", () => {
 
 test("a name with surrounding whitespace is treated as a name, an empty one is not", () => {
   assert.match(text(pickHeadline(ctx({ name: "  Sam  " }))), /Sam/);
-  assert.equal(text(pickHeadline(ctx({ name: "   " }))), "Looks are no longer subjective.");
+  assert.equal(text(pickHeadline(ctx({ name: "   " }))), "Your face score, measurement by measurement.");
+});
+
+test("no landing headline makes attractiveness objective or universally measurable", () => {
+  for (const c of everyContext()) {
+    assert.doesNotMatch(text(pickHeadline(c)), /no longer subjective|attractiveness.*measur|objective/i);
+  }
 });
 
 test("a corrupted visit counter still picks a headline", () => {
