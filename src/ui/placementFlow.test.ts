@@ -111,3 +111,15 @@ test("a side the person called wrong says so on the report", () => {
   assert.match(results, /\$\{unverifiedBanner\(\)\}/);
   assert.match(results, /on\("unver-redo", \(\) => ctx\?\.onRedoSide\?\.\(\)\)/);
 });
+
+// Double-tap on a control zoomed the page, which is what an impatient thumb
+// does when a button seems not to have responded. It is the browser's legacy
+// double-tap-to-zoom, and it is ours to switch off.
+test("double-tap does not zoom, and pinch still does", () => {
+  const live = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(live, /body \{ touch-action: manipulation; \}/);
+  // `manipulation`, never `none` on the body: none would take pinch zoom away
+  // from anybody who needs to enlarge text. The landmark editors set none on
+  // their own layers, where a drag must not scroll the page.
+  assert.doesNotMatch(live, /^body \{[^}]*touch-action: none/m);
+});

@@ -58,6 +58,26 @@
 html { scroll-behavior: smooth; overflow-x: clip; }
 body { overflow-x: clip; max-width: 100%; }
 
+/* DOUBLE-TAP DOES NOT ZOOM.
+
+   Reported from a phone: tapping a control twice in quick succession — which is
+   what an impatient thumb does when a button seems not to have responded —
+   zooms the page instead. That is the browser's legacy double-tap-to-zoom, a
+   behaviour from the era of desktop sites on small screens, and it is ours to
+   turn off rather than something we are stuck with.
+
+   `manipulation` is the narrow instruction: it keeps panning and PINCH zoom,
+   and drops only the double-tap gesture and the 300ms click delay that comes
+   with waiting to see whether a second tap arrives. The alternative in the
+   viewport tag, `user-scalable=no`, is the wrong tool twice over: it takes
+   pinch away from anyone who needs to enlarge text, and iOS Safari has ignored
+   it since iOS 10 anyway.
+
+   On `body` rather than on each control, so a button added later inherits it,
+   and the two places that genuinely need `touch-action: none` — the landmark
+   editors, where a drag must not scroll the page — still override it below. */
+body { touch-action: manipulation; }
+
 /* Every horizontal scroller in the product keeps its swipe to itself. Listed
    together so a new one added later has an obvious place to be added. */
 .q-lib-strip, .rtabs, .deck, .prod-slots, .q-cut-slots, .q-disc-clips {
