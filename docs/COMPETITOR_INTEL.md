@@ -187,21 +187,173 @@ on-device inference.
 
 ---
 
+## PSL's second launch post, and the actual growth mechanic
+
+Same founder, r/GenAiApps, same day-ish. **215 comments against the first
+post's 43.** The difference is the mechanic, and it is worth studying closely.
+
+Title: *"[iOS] [Limited Time FREE] The PSL app that shows you the actual data
+behind your score, not just a random number | **LooksMax AI / Umax
+Alternative**"*. Flair: Giveaway.
+
+Four things are doing work in that title alone: the bracket tags the sub
+expects, FREE as the hook, the wedge stated plainly, and **two competitor names
+appended for search**. People search "Umax alternative"; that post is what they
+find.
+
+The body is a direct attack on the incumbents:
+
+> "They give you a score out of 100 with nothing behind it. No measurements. No
+> explanation of how they got there. And then 'tips' so generic they apply to
+> literally everyone like 'improve your skin', 'get more sleep', 'stay
+> hydrated.' Cool. That's not analysis, that's a fortune cookie. **Worse, the
+> score changes every time you rescan the same photo, which tells you it's
+> basically random.**"
+
+And the offer:
+
+> "Consider this limited free access to something other apps in this space
+> charge $3.99–4.99/week for :)"
+>
+> "**For free access, comment 'PSL' and I'll share the next steps.**"
+>
+> "PS: Would really appreciate an App Store review if you like it (Download
+> from the App Store under your own Apple ID first, or the review option won't
+> unlock.)"
+
+That is the whole engine in three lines. Free codes are traded for **comments**,
+which is the ranking signal Reddit rewards, and each commenter gets a DM and an
+**App Store review** ask. The founder replied "DM'ed you!" over and over. 215
+comments is a front-page post in that subreddit and it cost him promo codes.
+
+**Note what they claim and cannot prove:** "Calibrated and consistent scoring,
+rescan and you get the same read, because it's measuring, not rolling dice."
+TrueMax has actually measured its own repeatability and can put a number on it.
+They assert it as a slogan.
+
+---
+
 ## FaceIQ Labs
 
-Held open. What is known so far:
+### What their own users say
 
-- Named directly in TikTok captions that are pulling seven-figure view counts
-  (@saulmogman, 1.3M views on "Analysis at FaceIQ Labs")
-- Roughly 1.1M monthly visits by the owner's own earlier reading
-- Positioned toward an audience considering surgery, which is a narrower TAM
-  than TrueMax's
-- Their line craft and loading screen are the visual benchmark that step 16 of
-  the seventeen was measured against
+r/truerateddiscussions, *"Is FaceIQ rating accurate?"*, 16 upvotes, 30
+comments. The OP posts his own FaceIQ result: **OVERALL 5.41 (Top 46%), FRONT
+6.33 (Top 69%), SIDE 3.94 (Bottom 21%)** over a harmony-score density curve.
 
-**Still to gather:** pricing and paywall order, whether they have a creator
-programme, their privacy posture, their App Store listing and age rating, and
-whether their scoring surfaces reliability at all.
+Treat a rating subreddit with the scepticism it deserves. But the same
+complaints recur from different people, and several are structural rather than
+matters of taste:
+
+**1. It only measures harmony.** The top comment: *"This tool only rates
+harmony. It doesn't take other important factors into account such as features,
+dimorphism and angularity."* Another: *"Just measures harmony bro, I get like
+6.1/10 harmony but my other categories are what bring my score down to like a
+4.75."* Users disagree about whether dimorphism was added later.
+
+**2. It does not reproduce, and users noticed.** The OP, unprompted: *"I tried
+it 3 times and I got 4.8, 5-something and 6.3, which is a huge difference
+according to the percentiles."* A 1.5-point swing on one face. This is the same
+failure PSL's marketing copy attacks them for, and it is the single most
+attackable thing about the category.
+
+**3. Nobody can see how a measurement becomes a score.** The most careful
+commenter: *"It's great at figuring out deviations from ideal, but how do we
+know that having an fWHR of 1.7 as a male means being a 5/10 for that particular
+aspect?"* Same person tested plain AI-generated faces and got 5 to 7, and tested
+people rated 8ish elsewhere and got 6 to 7: the scale is compressed and
+unanchored.
+
+**4. Weighting is opaque and probably flat.** *"Are some features weighted
+higher than others or are they just averaged out normally?"* The OP: *"I think
+they are all considered equal (not sure tho) but they definitely shouldn't be."*
+
+**5. The side profile reads as absurd.** *"you don't have a bottom 27% side
+profile. That's absurd."* Multiple people report a very low side and a strong
+front on the same face.
+
+**6. The paywall is read as manipulative.** *"I figured it was giving me way too
+good of a score at first and then it practically taunted me with bad scores that
+were locked behind the paywall as a way to reel me in into buying it."*
+
+**7. Price resistance is loud.** *"Did you pay 50 dollars for that analysis?"*
+and *"I'm gonna build a face scan app because this ones mad expensive."*
+
+**8. Celebrity results discredit it.** *"Just look at how they rate models and
+celebrities. It's ridiculous. There are leading actors that are rated lower than
+mark zuckerberg lol."*
+
+### Their creator programme runs on Clipify
+
+FaceIQ does not run their own portal. They rent one: **clipify.app**, a
+third-party clipping platform, plus a Discord ("Clipify", 1.22K creators) with
+channels for tutorial, announcements, updates, sprints, competitions, support,
+clips, chat, payouts, questions, suggestions, bug-report and giveaways.
+
+Their Clipify nav is Overview · Sprints · Submit · Submissions · Ranks · Money ·
+Tools · Support · Profile. **That is TrueMax's league nav almost verbatim.** We
+built the same thing independently; theirs is rented, ours is owned.
+
+Live sprints observed:
+
+| Sprint | Budget used | Submissions |
+| --- | --- | --- |
+| FaceIQ Labs Face Analysis | $315 / $4,000 (8%) | 13 earning · 2 pending · 11 approved · **16 rejected** |
+| FaceIQ Clips | $20 / $2,000 (1%) | 22 earning · 1 pending · 10 approved · 4 rejected |
+
+Note the rejection rate on the first: 16 rejected against 11 approved. Their
+sprints run on the Clipify pattern of a fixed budget that "ends when the budget
+runs out", with stacking milestones (an observed example: $30 at 20k, $75 at
+150k, $150 at 500k, $250 at 1M against a $3,000 budget). They have run $10,000
+and $5,000 sprints and a $2,000 song competition.
+
+### What their announcements reveal
+
+- **July 12: they were being cheated.** *"there has been a surge in viewbotters
+  and people trying to cheat our system... Regions have been moved from your
+  account to every single video. Now you have to declare, per video, which
+  region it is in."* They rejected every pending payout and made everyone
+  re-verify.
+- **July 8:** a second app, **AuraPal** ("helps you rate and improve your
+  pictures"), with its own $5,000 sprint. They are running a portfolio.
+- **July 5:** a "CTA Polisher" tool, because creator CTAs were *"too ai sloppy"*.
+- **May 7:** *"It looks like TikTok is banning videos, accounts within the
+  space."* A platform risk that applies to us identically.
+
+**The design lesson, and it is a live one for our own league:** FaceIQ verified
+audience geography at the ACCOUNT level and got viewbotted, so they moved to
+PER-VIDEO verification. TrueMax's new audience tiers are account-level. That is
+the right place to start and the wrong place to finish, and #148 records it.
+
+### Meanwhile, PSL publishes a guide to faking it
+
+PSL's Discord carries a section titled **"HOW TO GET US VIEWERS ⚠️ USE AT YOUR
+OWN RISK, COULD LEAD TO BANNING/SHADOWBANNING OF ACCOUNT"** with two methods,
+the second requiring a phone you can factory-reset and **a US residential proxy
+at $4/month**.
+
+They gate payouts on a 20% Tier-1 audience and then tell creators how to
+manufacture one. We are not doing that, and it is worth being explicit about
+why: it is platform fraud, it poisons the tier signal the payout depends on,
+and it is the exact behaviour that forced FaceIQ into per-video verification.
+
+### The rest of PSL's creator rules, worth copying
+
+Their programme is tighter than ours and most of it is free to adopt:
+
+- Post the **same video to both TikTok and Instagram** — counted separately, so
+  the same work earns twice.
+- **Minimum one video a day.** Their stated top earners post 6 to 12 a day
+  across multiple accounts for $5k–$10k a month.
+- A required **bio line and link**.
+- A required **branded overlay**, shown full-screen, alone, for at least 1.5
+  seconds, within the first 15 seconds.
+- The **tag must be in the first line of the description** so it is visible
+  without pressing "more".
+- English only. Named banned niches (anime, cartoons, sports, animals).
+- Tier-1 share must be **maintained** after acceptance, checked monthly.
+- **30 days to submit; views lock at submission.** Submit when you are happy.
+- Payouts monthly, timed to when Apple pays them.
 
 ---
 
