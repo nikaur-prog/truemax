@@ -127,16 +127,20 @@ test("the payload carries a click id and money, and no person", async () => {
   let sent: Record<string, unknown> | null = null;
   globalThis.fetch = ((_url: string, init: RequestInit) => {
     sent = JSON.parse(String(init.body)) as Record<string, unknown>;
-    return Promise.resolve(new Response("{}", { status: 200 }));
+    return Promise.resolve(new Response(JSON.stringify({ code: 0, message: "OK" }), { status: 200 }));
   }) as typeof fetch;
   try {
-    await reportPurchase({
+    const outcome = await reportPurchase({
       eventId: "evt_4",
       ttclid: "ABC",
       valueMinor: 1199,
       currency: "usd",
       occurredAt: 1_700_000_000_000,
     });
+    // ASSERTED, not merely awaited. This test mocked a bare `{}` and never
+    // looked at what came back, so it passed while the function reported that
+    // exact response as a success.
+    assert.equal(outcome, "sent");
     const body = sent as unknown as { data: [{ properties: { value: number; currency: string }; event_time: number; event_id: string; user: Record<string, unknown> }] };
     // Stripe counts minor units; TikTok wants the major one.
     assert.equal(body.data[0].properties.value, 11.99);
@@ -174,4 +178,94 @@ test("neither attribution test file contains a raw control character", async () 
     const raw = [...bytes].filter((b) => b < 9 || (b > 13 && b < 32) || b === 127);
     assert.deepEqual(raw, [], `${url.pathname} must escape control characters, not embed them`);
   }
+});
+
+// SUCCESS IS STATED, NOT INFERRED.
+//
+// The Events API answers HTTP 200 and puts the outcome in the body. The first
+// version rejected only a numeric non-zero `code`, so the one shape most likely
+// to arrive from a proxy, a gateway error page or a moved field — a bare 200
+// with no code — was reported as a sale. Downstream that is indistinguishable
+// from an ad that converts and never gets paid for.
+const okBody = (body: unknown) =>
+  (() => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))) as unknown as typeof fetch;
+
+async function outcomeFor(body: unknown): Promise<string> {
+  process.env.TIKTOK_PIXEL_ID = "test-pixel";
+  process.env.TIKTOK_EVENTS_TOKEN = "test-token";
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  globalThis.fetch = okBody(body);
+  console.error = () => {};
+  try {
+    return await reportPurchase({ eventId: "e", ttclid: "ABC", valueMinor: 299, currency: "usd" });
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realError;
+    delete process.env.TIKTOK_PIXEL_ID;
+    delete process.env.TIKTOK_EVENTS_TOKEN;
+  }
+}
+
+test("a 200 carrying nothing is a failure, not a sale", async () => {
+  assert.equal(await outcomeFor({}), "failed");
+  assert.equal(await outcomeFor(null), "failed");
+  assert.equal(await outcomeFor({ message: "ok" }), "failed", "a message is not a code");
+});
+
+test("a 200 stating an error code is a failure", async () => {
+  assert.equal(await outcomeFor({ code: 40002, message: "invalid pixel code" }), "failed");
+  assert.equal(await outcomeFor({ code: "0" }), "failed", "the string zero is not the number zero");
+});
+
+test("a partial failure inside a successful envelope is a failure", async () => {
+  assert.equal(await outcomeFor({ code: 0, data: { partial_failure: true } }), "failed");
+  assert.equal(await outcomeFor({ code: 0, data: { failed_events: [{ index: 0 }] } }), "failed");
+});
+
+test("only code 0 with nothing failed is a sale", async () => {
+  assert.equal(await outcomeFor({ code: 0, message: "OK" }), "sent");
+  assert.equal(await outcomeFor({ code: 0, data: { failed_events: [] } }), "sent");
+});
+
+test("a transient failure is retried once, and the retry cannot double-count", async () => {
+  // Stripe has already been answered 200 by the time anybody reads this
+  // result, so nothing else retries a failure: one blip loses the sale from
+  // the report for good. Safe to repeat because the payload carries the Stripe
+  // event id, which is what TikTok deduplicates on.
+  process.env.TIKTOK_PIXEL_ID = "test-pixel";
+  process.env.TIKTOK_EVENTS_TOKEN = "test-token";
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  console.error = () => {};
+  const sentIds: string[] = [];
+  let call = 0;
+  globalThis.fetch = ((_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { data: [{ event_id: string }] };
+    sentIds.push(body.data[0].event_id);
+    call++;
+    return Promise.resolve(
+      new Response(JSON.stringify(call === 1 ? { code: 40100 } : { code: 0 }), { status: 200 }),
+    );
+  }) as typeof fetch;
+  try {
+    const result = await reportPurchase({
+      eventId: "evt_retry",
+      ttclid: "ABC",
+      valueMinor: 299,
+      currency: "usd",
+    });
+    assert.equal(result, "sent", "the second attempt recovers the sale");
+    assert.equal(call, 2, "exactly one retry, never a loop");
+    assert.deepEqual(sentIds, ["evt_retry", "evt_retry"], "the same event id, so TikTok drops the duplicate");
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realError;
+    delete process.env.TIKTOK_PIXEL_ID;
+    delete process.env.TIKTOK_EVENTS_TOKEN;
+  }
+});
+
+test("a sustained failure stops after the retry rather than looping", async () => {
+  assert.equal(await outcomeFor({ code: 40100 }), "failed");
 });

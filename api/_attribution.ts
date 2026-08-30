@@ -125,6 +125,41 @@ export async function reportPurchase(opts: {
   // the call would cost a round trip to report an unattributable sale.
   if (!opts.ttclid && !opts.ttp) return "skipped";
 
+  // ONE RETRY, AND IT IS FREE TO TAKE.
+  //
+  // Stripe has already been answered 200 by the time anybody looks at the
+  // result of this, so a failure here is not retried by anything: a three
+  // second timeout or a momentary 500 loses that sale from the report for
+  // good. A single immediate retry recovers the common case, which is a blip
+  // rather than an outage.
+  //
+  // Safe to repeat because the payload carries the Stripe event id as
+  // `event_id`, which is what TikTok deduplicates on: if the first attempt
+  // actually landed and only the response was lost, the second is discarded at
+  // their end rather than double-counting the sale.
+  //
+  // This is NOT a durable outbox and does not pretend to be. A real outage
+  // still loses the conversion, and closing that properly needs a table, a
+  // retry worker and a migration. Left as a decision rather than built
+  // silently.
+  const first = await attemptReport(pixel, token, opts);
+  if (first !== "failed") return first;
+  return attemptReport(pixel, token, opts);
+}
+
+async function attemptReport(
+  pixel: string,
+  token: string,
+  opts: {
+    eventId: string;
+    ttclid?: string;
+    ttp?: string;
+    valueMinor: number;
+    currency: string;
+    occurredAt?: number;
+  },
+): Promise<"sent" | "skipped" | "failed"> {
+
   // BOUNDED, because an unbounded call to somebody else's server inside a
   // payment webhook is a way to strand a paying customer. fetch has no default
   // timeout: a host that accepts the connection and never answers holds this
@@ -183,7 +218,13 @@ export async function reportPurchase(opts: {
       message?: string;
       data?: { partial_failure?: unknown; failed_events?: unknown[] } | null;
     } | null;
-    if (!payload || (typeof payload.code === "number" && payload.code !== 0)) {
+    // `=== 0`, never "not a non-zero number". A 200 carrying `{}` has no code
+    // at all, and the earlier check let it through as a success: the one shape
+    // most likely to arrive from a proxy, a gateway error page, or an API
+    // version that moved the field was the one shape reported as sent. Success
+    // has to be stated by the response, not inferred from the absence of a
+    // failure.
+    if (!payload || payload.code !== 0) {
       // The message describes OUR request, not the customer, so it is worth
       // logging: "invalid pixel code" and "event_time too old" are the two
       // failures somebody would otherwise spend a week not seeing.

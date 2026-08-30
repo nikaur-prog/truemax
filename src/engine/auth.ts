@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { AuthChangeEvent, Session, SupabaseClient, User } from "@supabase/supabase-js";
 import { track } from "./track.js";
 import { activateScanOwner } from "./scanScope.js";
-import { claimAttribution } from "./attribution.js";
+import { settleAttributionForAuth } from "./attribution.js";
 import { pendingAnalysisRedirect } from "./pendingAnalysis.js";
 
 // ---------------------------------------------------------------------------
@@ -387,7 +387,15 @@ export function onAuthChange(
       // click too: it binds to the first person who signs in and is dropped
       // the moment a different one does, so one browser shared by two people
       // cannot put one person's click on the other's card.
-      claimAttribution(user?.id ?? null);
+      //
+      // The EVENT is passed, not just the user, and that distinction is the
+      // whole thing. This first shipped as claimAttribution(user?.id ?? null),
+      // which read every null session as a sign-out — including the
+      // INITIAL_SESSION that Supabase emits on every page load for a visitor
+      // who is not signed in. That is the ordinary state of somebody arriving
+      // from an advert, so their click was erased on the first event of the
+      // first page view.
+      settleAttributionForAuth(event, user?.id ?? null);
       cb(user, event);
     });
     unsub = () => data.subscription.unsubscribe();

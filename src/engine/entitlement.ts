@@ -57,8 +57,19 @@ export function hasPaidAccess(entitlement: Entitlement): boolean {
 }
 
 async function billingRedirect(path: string, payload?: unknown): Promise<BillingResult> {
+  // THE PAYER IS READ FIRST, AND READ AGAIN AFTERWARDS.
+  //
+  // These used to be two independent reads in the other order: the token, then
+  // separately whoever happened to be signed in. A tab that switches account
+  // between the two lands a request authenticated as one person carrying the
+  // other's stored click. Reading the payer around the token and requiring the
+  // two to agree closes the window; a null from either simply means no
+  // attribution is attached, which costs a reporting row and nothing else.
+  const payerBefore = await currentUser().catch(() => null);
   const accessToken = await currentAccessToken();
   if (!accessToken) return { ok: false, message: "Sign in before opening billing." };
+  const payerAfter = await currentUser().catch(() => null);
+  const payer = payerBefore && payerAfter && payerBefore.id === payerAfter.id ? payerBefore : null;
 
   // Where this person came from, attached at the last possible moment.
   //
@@ -69,8 +80,11 @@ async function billingRedirect(path: string, payload?: unknown): Promise<Billing
   // Passing the payer explicitly, so a stored touch stamped for a DIFFERENT
   // account never rides on this card even if the sign-in that should have
   // cleared it was missed. One browser, two people; see claimAttribution.
-  const payer = await currentUser().catch(() => null);
-  const attribution = payload ? attributionForCheckout(Date.now(), payer?.id ?? null) : null;
+  //
+  // No settled payer means no attribution at all, rather than falling back to
+  // an unchecked read: an identity that moved mid-request is exactly when the
+  // owner check matters most, so it fails closed.
+  const attribution = payload && payer ? attributionForCheckout(Date.now(), payer.id) : null;
   const sent = attribution ? { ...(payload as object), attribution } : payload;
 
   try {

@@ -213,3 +213,37 @@ export function claimAttribution(userId: string | null): void {
     /* storage disabled: there is nothing stored to bind */
   }
 }
+
+/**
+ * What an auth event should do to the stored touch.
+ *
+ * SIGNED OUT IS NOT THE SAME AS NOT SIGNED IN, and conflating them broke the
+ * entire feature. Supabase emits INITIAL_SESSION on every page load with a
+ * null session when nobody is signed in, which is the ordinary state of a
+ * visitor arriving from an advert. Treating that null the same as a sign-out
+ * cleared the click that had been captured moments earlier, on the very first
+ * event of the very first page view: every ad visitor lost their attribution
+ * before they had scrolled, and the purchase that followed carried none.
+ *
+ * So only a real SIGNED_OUT forgets. An event with no user and no sign-out is
+ * simply somebody who has not signed in, and their touch waits for them.
+ *
+ * Split out as a pure function on purpose. The bug above lived in a callback
+ * wired to a Supabase subscription, which is exactly the shape a source-level
+ * assertion cannot check and a behavioural test can: this takes an event name
+ * and a user id and returns a decision, so the lifecycle can be exercised
+ * directly.
+ */
+export type AttributionAction = "bind" | "forget" | "leave";
+
+export function attributionActionFor(event: string, userId: string | null): AttributionAction {
+  if (userId) return "bind";
+  return event === "SIGNED_OUT" ? "forget" : "leave";
+}
+
+/** Apply that decision. The one place an auth event touches attribution. */
+export function settleAttributionForAuth(event: string, userId: string | null): void {
+  const action = attributionActionFor(event, userId);
+  if (action === "bind") claimAttribution(userId);
+  else if (action === "forget") claimAttribution(null);
+}

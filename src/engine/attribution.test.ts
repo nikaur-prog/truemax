@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   captureAttribution,
   attributionForCheckout,
+  attributionActionFor,
   claimAttribution,
   clearAttribution,
   expired,
+  settleAttributionForAuth,
 } from "./attribution.js";
 
 // localStorage does not exist in node. A Map behind the three methods used is
@@ -145,4 +147,75 @@ test("claiming when nothing is stored does nothing at all", () => {
   claimAttribution(null);
   assert.equal(attributionForCheckout(), null);
   assert.equal(store.size, 0, "an ordinary signed-in visit still writes nothing");
+});
+
+// ---------------------------------------------------------------------------
+// THE AUTH LIFECYCLE, EXERCISED RATHER THAN ASSERTED ABOUT.
+//
+// The first version of the identity binding called claimAttribution(null) for
+// every event carrying no session. Supabase emits INITIAL_SESSION on every page
+// load, with a null session when nobody is signed in, which is the ordinary
+// state of a visitor arriving from an advert. So the click captured moments
+// earlier was erased on the first event of the first page view, and the whole
+// feature was dead for exactly the journey it was built for.
+//
+// It survived a review, a full test run and a green build because everything
+// guarding it was a source-level assertion about the code's SHAPE. Nothing ran
+// the sequence. These do.
+// ---------------------------------------------------------------------------
+
+/** The real sequence a visitor from an advert produces, in order. */
+function visitorFromAnAd(): void {
+  reset();
+  captureAttribution("?utm_source=tiktok&utm_content=hook-3&ttclid=CLICK");
+  settleAttributionForAuth("INITIAL_SESSION", null);
+}
+
+test("a signed-out page load does NOT erase a fresh click", () => {
+  visitorFromAnAd();
+  assert.equal(attributionForCheckout()?.ttclid, "CLICK", "INITIAL_SESSION with no user is not a sign-out");
+});
+
+test("the click survives every event a signed-out visitor generates", () => {
+  visitorFromAnAd();
+  for (const event of ["INITIAL_SESSION", "TOKEN_REFRESHED", "USER_UPDATED", "PASSWORD_RECOVERY"]) {
+    settleAttributionForAuth(event, null);
+  }
+  assert.equal(attributionForCheckout()?.ttclid, "CLICK", "only a real sign-out forgets");
+});
+
+test("...and is still there when they sign up and pay", () => {
+  visitorFromAnAd();
+  settleAttributionForAuth("SIGNED_IN", "new-user");
+  const a = attributionForCheckout(Date.now(), "new-user");
+  assert.equal(a?.ttclid, "CLICK");
+  assert.equal(a?.content, "hook-3", "the creative that earned the sale is what reaches Stripe");
+});
+
+test("INITIAL_SESSION WITH a user binds rather than leaving it loose", () => {
+  // A returning visitor who is already signed in gets INITIAL_SESSION with a
+  // session, and that is a real identity: it must bind, or the touch stays
+  // unowned and the next person to sign in inherits it.
+  reset();
+  captureAttribution("?utm_source=tiktok&ttclid=CLICK");
+  settleAttributionForAuth("INITIAL_SESSION", "alice-id");
+  assert.equal(attributionForCheckout(Date.now(), "bob-id"), null, "bound to Alice, refused for Bob");
+  assert.equal(attributionForCheckout(Date.now(), "alice-id")?.ttclid, "CLICK");
+});
+
+test("SIGNED_OUT, and only SIGNED_OUT, forgets", () => {
+  visitorFromAnAd();
+  settleAttributionForAuth("SIGNED_OUT", null);
+  assert.equal(attributionForCheckout(), null);
+});
+
+test("the decision itself is exhaustive over the three cases", () => {
+  assert.equal(attributionActionFor("SIGNED_IN", "u"), "bind");
+  assert.equal(attributionActionFor("INITIAL_SESSION", "u"), "bind");
+  // A user id present always wins, even on a sign-out event: there is an
+  // identity in hand, and binding to it is never worse than forgetting.
+  assert.equal(attributionActionFor("SIGNED_OUT", "u"), "bind");
+  assert.equal(attributionActionFor("SIGNED_OUT", null), "forget");
+  assert.equal(attributionActionFor("INITIAL_SESSION", null), "leave");
+  assert.equal(attributionActionFor("TOKEN_REFRESHED", null), "leave");
 });

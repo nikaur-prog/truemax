@@ -910,7 +910,7 @@ function mountVerify(
             <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
             <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
           </div>
-          <p class="refcrop-hint"><b>${label}</b>${hint ? ` — ${hint}` : ""}</p>
+          <p class="refcrop-hint"><b>${label}</b>${hint ? `. ${hint}` : ""}</p>
         </div>`;
         document.body.appendChild(overlay);
         const bigCanvas = overlay.querySelector("canvas")!;

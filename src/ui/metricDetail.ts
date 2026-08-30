@@ -233,7 +233,7 @@ function overviewHTML(m: ScoredMetric, sex: Sex): string {
     ${read ? `<p class="mdx-read"><b>On your face:</b> ${read}.</p>` : ""}
     ${m.implausible ? "" : `<p class="mdx-pos">${positionLine(m, sex)}</p>`}
     ${m.implausible
-      ? `<p class="mdx-flag">This reading fell outside the range a face occupies, so it is treated as a misplaced point rather than a measurement. It has no population position and it moves nothing — the landmarks behind it need re-checking.</p>`
+      ? `<p class="mdx-flag">This reading fell outside the range a face occupies, so it is treated as a misplaced point rather than a measurement. It has no population position and it moves nothing. The landmarks behind it need re-checking.</p>`
       : ""}
     ${indicative && !m.implausible
       ? `<p class="mdx-flag soft">Shown, not scored: across many photos of the same people this one moves as much between two photos of one face as between two different faces, so it carries no weight.</p>`

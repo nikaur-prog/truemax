@@ -109,7 +109,7 @@
             <td>Your browser only. They are not synchronized to your account</td>
           </tr>
           <tr>
-            <td>Your onboarding profile — name, optional mobile number, date of
+            <td>Your onboarding profile: name, optional mobile number, date of
               birth, discovery source, goals, expectations and boundaries</td>
             <td>To establish age-appropriate access and personalise your pathway</td>
             <td>Supabase, readable only by your account and the service</td>
@@ -130,7 +130,7 @@
             <td>Your browser, and Supabase when supplied through onboarding</td>
           </tr>
           <tr>
-            <td>Optional self-score feedback — your measured score, the score
+            <td>Optional self-score feedback: your measured score, the score
               you chose, sex reference, scan ID and account ID</td>
             <td>To review calibration. It never changes your score</td>
             <td>Supabase, service-only; no photograph or free text is included</td>
@@ -173,13 +173,13 @@
         We use a small number of processors to run the service:
       </p>
       <ul>
-        <li><b>Supabase</b> — accounts, database and storage.</li>
-        <li><b>Vercel</b> — hosting and delivery of the website.</li>
-        <li><b>Stripe</b> — payments and subscription management.</li>
-        <li><b>Anthropic</b> — Coach Max replies, only when you use Max.</li>
-        <li><b>ElevenLabs and OpenAI</b> — generated narration, with OpenAI used
+        <li><b>Supabase</b>: accounts, database and storage.</li>
+        <li><b>Vercel</b>: hosting and delivery of the website.</li>
+        <li><b>Stripe</b>: payments and subscription management.</li>
+        <li><b>Anthropic</b>: Coach Max replies, only when you use Max.</li>
+        <li><b>ElevenLabs and OpenAI</b>: generated narration, with OpenAI used
           as a fallback. OpenAI also generates staff-only fictional model images.</li>
-        <li><b>TikTok</b> &mdash; two separate things. Account linking and post
+        <li><b>TikTok</b>: two separate things. Account linking and post
           statistics, only for Creator League participants who connect TikTok.
           And, if you reached us by clicking a TikTok advert, a record that a
           purchase happened. See below.</li>
@@ -203,11 +203,25 @@
         here rather than folded into the list above.
       </p>
       <p>
-        The identifier is kept in your browser for at most 30 days and is
+        In your browser the identifier is kept for at most 30 days and is
         discarded after that whether or not you buy anything. It is dropped
         when you sign out. If you arrived without clicking an advert, nothing
         is stored and nothing is ever sent. Clearing this site&rsquo;s data in
-        your browser removes it immediately.
+        your browser removes the copy held there immediately.
+      </p>
+      <p>
+        <b>If you do buy, a copy is kept by Stripe.</b> The identifier is
+        written onto the payment record, and onto the subscription if you start
+        one, so that it stays attached to the purchase for as long as Stripe
+        keeps that record. Clearing your browser does not remove that copy.
+        While a subscription is active we report each renewal payment to the
+        advertising platform in the same way as the first, with the same
+        contents: the identifier, the amount and the currency, and nothing that
+        describes you. That reporting stops when the subscription does. Deleting
+        your account removes the TrueMax side of it; to have the Stripe copy
+        erased as well, email
+        <a href="mailto:privacy@truemax.app">privacy@truemax.app</a> and we will
+        make the request on your behalf.
       </p>
       <p>
         We may also disclose information where the law requires it.
@@ -224,7 +238,7 @@
         from the device by server-side account deletion. Use the in-app history
         controls or clear this site's browser data to remove them.
         If you have uninstalled the app or cannot sign in, there is a route that
-        does not need either — see <a href="/delete-account">deleting your
+        does not need either. See <a href="/delete-account">deleting your
         account</a>.
       </p>
       <p>
