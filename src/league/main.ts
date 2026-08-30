@@ -771,6 +771,11 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       })
       .join("");
 
+    // One breakdown at a time. A second pending row is not a thing the queue
+    // should hold: the honest pattern is file, wait, hear why, file again, and
+    // a unique index over the pending rows says so at the database as well.
+    const pending = latest?.status === "pending";
+
     const status = !latest
       ? `<p class="lg-sub">Nothing submitted yet. Send your audience breakdown below and an admin will place your account.</p>`
       : latest.status === "pending"
@@ -799,7 +804,12 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       <h2 class="lg-h2">Send your audience breakdown</h2>
       <p class="lg-sub">Screen-record the audience page of your own platform analytics and link it, then
       type the same numbers in. A person watches the recording against what you typed.</p>
-      <div class="lg-card lg-form" style="max-width:520px;margin-left:0">
+      ${pending
+        ? `<div class="lg-card" style="max-width:520px;margin-left:0"><p class="lg-sub">One breakdown is
+           already with the reviewer, so the form is closed until it comes back. If the numbers you sent
+           were wrong, say so on the account email and it will be sent back rather than stacked up
+           behind a second one.</p></div>`
+        : `<div class="lg-card lg-form" style="max-width:520px;margin-left:0">
         <label for="au-platform">Account</label>
         <select id="au-platform">
           <option value="tiktok">TikTok</option>
@@ -819,7 +829,11 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         inside Tier 1, so its share can never be the larger of the two.</p>
         <p style="margin-top:16px"><button class="lg-btn pri" id="au-go">Send for review</button></p>
         <p class="lg-error" id="au-err"></p>
-      </div>`;
+      </div>`}`;
+
+    // No form on screen, so nothing to wire. The pending state is the one the
+    // database enforces too: one pending proof per account per platform.
+    if (pending) return;
 
     document.getElementById("au-go")!.onclick = async () => {
       const err = document.getElementById("au-err")!;
@@ -866,7 +880,14 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         videos_28d: stats.videos28d,
       });
       if (error) {
-        err.textContent = error.message;
+        // The two failures a creator can actually cause get their own words.
+        // A raw Postgres message is not something to put in front of somebody:
+        // it names a constraint, and they need to know what to do next.
+        err.textContent = error.code === "23505"
+          ? "There is already a breakdown for that account waiting on review."
+          : error.code === "42501"
+            ? "Only approved League members can send a breakdown."
+            : "That did not send. Check your connection and try again.";
         return;
       }
       // Shown back immediately, including which tier these numbers would reach,
