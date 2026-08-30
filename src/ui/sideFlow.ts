@@ -736,6 +736,10 @@ function mountVerify(
   // complaint — not re-asked at confirm.
   let flaggedWrong = false;
   let consentAnswer: boolean | null = null;
+  // Set when the automatic placement was TAKEN rather than walked through, so
+  // the review panel knows to ask whether it was right. Cleared once answered:
+  // the question is asked once, not every time the panel repaints.
+  let askedAccuracy = false;
   // Set once the "nothing was moved" prompt has been shown, so the second press
   // goes through. Scoped per mounted photo, so the next face asks again.
   let untouchedAcknowledged = false;
@@ -1098,15 +1102,46 @@ function mountVerify(
         </svg>
       </button>
       <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>
+      ${askedAccuracy ? "" : `<button class="btn gho" id="side-wrong">Points are wrong</button>`}
       <button class="btn pri" id="side-go">Confirm</button>`;
+    if (askedAccuracy) {
+      // Asked as a question with two answers rather than left as a button
+      // somebody has to think to press. "Points are wrong" is a complaint, and
+      // people do not complain, they shrug and carry on: the yes half of this
+      // is what makes answering it feel like part of the flow. Only the no
+      // half goes anywhere, which is the same consent ask the button had.
+      const ask = document.createElement("div");
+      ask.className = "side-accuracy";
+      ask.innerHTML = `<p>Do you think the points landed in the right places?</p>
+        <span class="side-accuracy-btns">
+          <button type="button" class="btn gho" data-acc="no">No</button>
+          <button type="button" class="btn gho" data-acc="yes">Yes</button>
+        </span>`;
+      e.panelCopy.appendChild(ask);
+      ask.onclick = async (ev) => {
+        const answer = (ev.target as HTMLElement).dataset.acc;
+        if (!answer) return;
+        askedAccuracy = false;
+        if (answer === "yes") {
+          ask.innerHTML = `<p>Noted. Drag any ring that still looks off, then confirm.</p>`;
+          return;
+        }
+        ask.innerHTML = `<p>Thanks. Drag each wrong ring onto the feature it names, then confirm.</p>`;
+        flaggedWrong = true;
+        consentAnswer = await askSideFeedbackConsent();
+        ask.innerHTML = `<p>${consentAnswer
+          ? "That photo and your corrections will be shared privately after you confirm, and they directly teach the automatic placement to land closer."
+          : "Nothing will be shared. Drag each wrong ring onto the feature it names, then confirm."}</p>`;
+      };
+    }
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
       drawGuides(e.lines, automaticPoints, w, h);
     };
     document.getElementById("side-guided")!.onclick = () => showGuidedActions();
     document.getElementById("side-go")!.onclick = () => void confirmPlacement();
-    document.getElementById("side-wrong")!.onclick = async () => {
+    const wrong = document.getElementById("side-wrong");
+    if (wrong) wrong.onclick = async () => {
       // The complaint is the moment to ask, because the complaint is the
       // evidence. What is deliberately NOT here is any mention of an account:
       // being asked to sign up before you have even confirmed your points is
@@ -1273,8 +1308,88 @@ function mountVerify(
     }
   };
 
-  if (startInGuidedMode) showGuidedActions();
-  else showReviewActions();
+  if (startInGuidedMode) {
+    // The choice, before the walkthrough rather than instead of it.
+    //
+    // A fresh seed used to drop straight into thirteen guided taps whether the
+    // automatic placement was good or not, so somebody whose points had landed
+    // perfectly still had to confirm every one of them, and somebody whose had
+    // not could not tell until they were four points in. The seed is already
+    // computed by the time this runs, so there is nothing to save by hiding
+    // it: showing the rings and asking is strictly more information for the
+    // person and one fewer decision made on their behalf.
+    //
+    // The review state is put up first, so the question is asked over the
+    // thirteen rings it is about rather than over an empty frame.
+    showReviewActions();
+    void askPlacementMode(e.frame, seed.confidence ?? 1).then((mode) => {
+      if (mode === "manual") {
+        showGuidedActions();
+        return;
+      }
+      // Taking the automatic placement is the branch that owes an answer back:
+      // the person has just accepted a guess, and whether the guess was right
+      // is the single most useful thing they can tell us. Asked in the review
+      // panel rather than in another sheet, because a second modal in a row
+      // reads as an interrogation.
+      askedAccuracy = true;
+      showReviewActions();
+    });
+  } else showReviewActions();
+}
+
+/**
+ * Take these points, or place them yourself.
+ *
+ * A bottom sheet inside the photo frame rather than a modal over the middle of
+ * it, and that is the whole design. The question is about the thirteen rings
+ * on the picture, so the picture has to stay visible while it is asked: a
+ * centred dialog would cover the only evidence the person has to answer with,
+ * and a dialog containing its own copy of the photograph is a second, smaller
+ * picture of the thing already on screen.
+ *
+ * The fine print is not boilerplate and does not always say the same thing.
+ * The seeder already reports its own confidence, and the walkthrough copy
+ * downstream branches on it, so this does too: an unsure placement says so
+ * plainly instead of leaving somebody to discover it four rings in.
+ *
+ * There is no way past this without answering, and deliberately so. Both
+ * answers are complete and neither is destructive: taking the points still
+ * lands on a screen where every one of them can be dragged.
+ */
+function askPlacementMode(frame: HTMLElement, confidence: number): Promise<"auto" | "manual"> {
+  const low = confidence < 0.7;
+  return new Promise((resolve) => {
+    const sheet = document.createElement("div");
+    sheet.className = "side-mode-sheet";
+    sheet.dataset.verifyChrome = "1";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    sheet.setAttribute("aria-labelledby", "side-mode-title");
+    sheet.innerHTML = `<div class="side-mode-card">
+      <h3 id="side-mode-title">${low ? "Here is our best guess" : "We placed the points for you"}</h3>
+      <p>${low
+        ? "The photo was a hard one to read, so treat these as starting positions. You can take them and drag the ones that look off, or place all thirteen yourself."
+        : "This is where our system put them. Take these and check them over, or place all thirteen yourself, one at a time."}</p>
+      <div class="side-mode-actions">
+        <button type="button" class="btn gho" data-mode="manual">Place them myself</button>
+        <button type="button" class="btn pri" data-mode="auto">Use these points</button>
+      </div>
+      <p class="side-mode-fine">Our detection is still improving. If the points look off, placing them yourself gives a more accurate score.</p>
+    </div>`;
+    // Chrome, not photograph: the verifier treats a pointerdown on the frame
+    // as a drag on the nearest ring, and a tap on this sheet must not move a
+    // point that is sitting underneath it.
+    sheet.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    frame.appendChild(sheet);
+    sheet.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
+    sheet.onclick = (ev) => {
+      const mode = (ev.target as HTMLElement).dataset.mode;
+      if (mode !== "auto" && mode !== "manual") return;
+      sheet.remove();
+      resolve(mode);
+    };
+  });
 }
 
 function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {

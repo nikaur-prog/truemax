@@ -1555,6 +1555,64 @@ button.pillar:active { transform: translateY(0); }
   color: var(--acc); background: var(--acc-soft); border-radius: 12px;
   padding: 12px 14px; font-size: 12.5px; line-height: 1.55;
 }
+
+/* Take these points, or place them yourself.
+   A sheet along the BOTTOM of the frame rather than a box in the middle of it,
+   because the question is about the thirteen rings on the photograph and
+   covering them to ask it would leave nothing to answer with. The frame is
+   position: relative (.face-frame), so inset works off the photo rather than
+   off the page. */
+.side-mode-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 14;
+  padding: 12px 14px 13px; line-height: normal;
+  background: linear-gradient(to top, rgba(10, 11, 13, 0.95) 68%, rgba(10, 11, 13, 0));
+  animation: side-mode-in 0.22s ease-out;
+}
+@keyframes side-mode-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .side-mode-sheet { animation: none; } }
+/* Kept deliberately short. Every row this sheet adds is a row of the
+   photograph it covers, and on a side profile the bottom of the frame is the
+   jaw and the chin: the points somebody most needs to see to answer. */
+.side-mode-card { max-width: 420px; margin: 0 auto; color: #f4f4f5; text-align: left; }
+.side-mode-card h3 {
+  font-family: var(--serif); font-weight: 400; font-size: 17px;
+  margin: 0 0 4px; line-height: 1.2; color: #fff;
+}
+.side-mode-card p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.45; color: rgba(244, 244, 245, 0.86); }
+/* Side by side rather than stacked, for the same reason: one row instead of
+   two. Equal widths, because neither of these is the wrong answer. */
+.side-mode-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.side-mode-actions .btn { width: 100%; padding: 10px 8px; font-size: 13px; min-width: 0; }
+/* Both buttons sit on a dark ground here, so neither can borrow the light
+   theme's ink: the primary inverts and the ghost takes a light border. */
+.side-mode-actions .btn.pri {
+  background: #f4f4f5; color: #101113; border-color: #f4f4f5;
+}
+.side-mode-actions .btn.pri:hover { background: #fff; border-color: #fff; }
+.side-mode-actions .btn.gho {
+  background: transparent; color: #f4f4f5; border-color: rgba(244, 244, 245, 0.34);
+}
+.side-mode-actions .btn.gho:hover { border-color: rgba(244, 244, 245, 0.6); }
+/* Bottom right, quieter than everything above it, and it never claims the
+   automatic placement is fine. */
+.side-mode-fine {
+  margin: 8px 0 0; text-align: right;
+  font-size: 10.5px; line-height: 1.4; color: rgba(244, 244, 245, 0.62);
+}
+@media (max-width: 360px) {
+  .side-mode-actions { grid-template-columns: 1fr; }
+}
+
+/* Did the points land right? Asked in the panel under the frame, once, only
+   after somebody took the automatic placement. */
+.side-accuracy {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 12px;
+}
+.side-accuracy p { margin: 0; font-size: 12.5px; line-height: 1.5; }
+.side-accuracy-btns { display: flex; gap: 8px; }
+.side-accuracy-btns .btn { min-width: 64px; padding: 7px 14px; font-size: 12.5px; }
 #side-actions { flex-wrap: wrap; }
 #side-actions .btn { min-width: 130px; }
 .drop-side { width: 100%; padding: 28px 22px; text-align: center; }
