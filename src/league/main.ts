@@ -350,12 +350,25 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
     <main class="lg-main" id="lg-page"></main>
   </div>`;
 
-  const mount = document.getElementById("lg-page")!;
+  const host = document.getElementById("lg-page")!;
   const nav = [...root.querySelectorAll<HTMLButtonElement>(".lg-nav button")];
   const go = (page: Page) => {
     for (const b of nav) b.classList.toggle("on", b.dataset.page === page);
     location.hash = page;
-    void PAGES[page](mount, me);
+    // A FRESH pane per navigation, and the reason is a race rather than
+    // tidiness. Every page here loads before it writes, and they take
+    // different amounts of time, so two taps in a row could land in the wrong
+    // order: the slower page's innerHTML arrived last and left its content
+    // under the other tab's highlight. A page that has been navigated away
+    // from now finishes its load and writes into a pane that is no longer in
+    // the document, which is exactly what it should do.
+    //
+    // It also means the eight page functions need to know nothing about this.
+    // A sequence number would have to be checked inside every one of them,
+    // and the first one written without the check would bring the bug back.
+    const pane = document.createElement("div");
+    host.replaceChildren(pane);
+    void PAGES[page](pane, me);
   };
   for (const b of nav) b.onclick = () => go(b.dataset.page as Page);
   const initial = (location.hash.slice(1) || "overview") as Page;
@@ -1295,57 +1308,49 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     });
 
     const refresh = () => void PAGES.admin(mount, undefined as never);
-    // Placing a tier is two writes and they have to both land: the proof is
-    // marked accepted, and the tier row is upserted. Upsert rather than insert,
-    // because a creator re-submitting after growing their account is the normal
-    // case and their tier moves rather than duplicating.
+
+    // Both halves of a decision in one call.
+    //
+    // Placing a tier is two writes and they have to both land: the tier row is
+    // upserted and the proof is marked accepted. As two requests from here
+    // they could not, and only the first was even checked - a dropped second
+    // request left a creator rated with their proof still pending, which the
+    // one-pending-proof index then makes a state they cannot submit their way
+    // out of. The RPC does both inside one transaction and takes the
+    // reviewer's identity from the session rather than from this page.
+    const review = async (
+      b: HTMLButtonElement,
+      proofId: string,
+      accept: boolean,
+      tier?: string,
+      note?: string,
+    ): Promise<void> => {
+      b.disabled = true;
+      const { error } = await client.rpc("league_review_audience_proof", {
+        p_proof_id: proofId,
+        p_accept: accept,
+        p_tier: tier ?? null,
+        p_note: note ?? null,
+      });
+      if (error) {
+        b.disabled = false;
+        window.alert(`Not saved: ${error.message}`);
+        return;
+      }
+      refresh();
+    };
+
     mount.querySelectorAll<HTMLButtonElement>("[data-aud-ok]").forEach((b) => {
-      b.onclick = async () => {
-        b.disabled = true;
-        const reviewer = await currentUser();
-        const { error } = await client.from("league_audience_tiers").upsert(
-          {
-            user_id: b.dataset.audUser!,
-            tier: b.dataset.audTier!,
-            proof_id: b.dataset.audOk!,
-            decided_by: reviewer?.id ?? null,
-            decided_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" },
-        );
-        if (error) {
-          b.disabled = false;
-          window.alert(`Tier not placed: ${error.message}`);
-          return;
-        }
-        await client
-          .from("league_audience_proofs")
-          .update({
-            status: "accepted",
-            reviewed_by: reviewer?.id ?? null,
-            reviewed_at: new Date().toISOString(),
-          })
-          .eq("id", b.dataset.audOk!);
-        refresh();
-      };
+      b.onclick = () => void review(b, b.dataset.audOk!, true, b.dataset.audTier!);
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-aud-no]").forEach((b) => {
-      b.onclick = async () => {
+      b.onclick = () => {
         // A reason, always. A rejection with no note is what makes a creator
-        // programme feel arbitrary, and the creator can read this back.
+        // programme feel arbitrary, and the creator can read this back. An
+        // empty box still gets a sentence, supplied by the function.
         const note = window.prompt("Why is this being rejected? The creator sees this.");
         if (note === null) return;
-        const reviewer = await currentUser();
-        await client
-          .from("league_audience_proofs")
-          .update({
-            status: "rejected",
-            note: note.trim() || "The recording did not match the numbers submitted.",
-            reviewed_by: reviewer?.id ?? null,
-            reviewed_at: new Date().toISOString(),
-          })
-          .eq("id", b.dataset.audNo!);
-        refresh();
+        void review(b, b.dataset.audNo!, false, undefined, note);
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {

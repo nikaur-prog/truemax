@@ -1199,6 +1199,17 @@ button.pillar:active { transform: translateY(0); }
   border: 1px solid var(--line);
   font-size: 12.5px; line-height: 1.55;
 }
+/* A weight nobody has confirmed in three months. Same warm treatment as the
+   floor note and for the same reason: it is not an error, it is the panel
+   saying what its own arithmetic rests on. The .mac-stale class on the shell
+   is the hook for anything that wants to find this state; the sentence is
+   what the person actually needs. */
+.mac-stale-note {
+  margin: 12px 0 0; padding: 11px 12px; border-radius: 10px;
+  background: var(--warm-soft, rgba(240, 178, 74, 0.12));
+  border: 1px solid var(--line);
+  font-size: 12.5px; line-height: 1.55;
+}
 .mac-adjust { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .mac-sel span { font: 500 8.5px var(--mono); letter-spacing: .13em; color: var(--mut); display: block; margin-bottom: 5px; }
 .mac-sel select {

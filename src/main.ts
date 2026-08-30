@@ -1759,7 +1759,15 @@ async function handleCanvas(
     coveringRejection = rejection !== null;
   }
   skipCoveringCheck = false;
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) {
+    // The same tidy-up every other abandon path above does, and the one that
+    // was missing. detectHeadCovering is the longest await on this screen, so
+    // it is the likeliest place to be abandoned in, and a bare return left the
+    // scanning class on the frame: the next screen inherited a sweeping
+    // animation belonging to a scan that had already been thrown away.
+    el.frame.classList.remove("scanning");
+    return;
+  }
   if (rejection) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "PHOTO NOT VALID";

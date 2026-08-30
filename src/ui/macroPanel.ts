@@ -97,6 +97,13 @@ function planHTML(plan: MacroPlan, body: StoredBody): string {
   // because MacroPlan's shape is what enforces that there is nowhere to put a
   // goal weight, and that guard is worth more than the convenience.
   const referenceKg = proteinReferenceKg(body.weightKg, body.bodyFat);
+  const stale = isStale(body);
+  // Months rather than a date, because "over three months ago" is the fact
+  // that matters and a precise date invites arguing with it.
+  const months = Math.floor((Date.now() - body.savedAt) / (30 * 24 * 60 * 60 * 1000));
+  const staleAge = months >= 12
+    ? "over a year ago"
+    : months >= 2 ? `over ${months} months ago` : "over three months ago";
   return `<div class="mac-head">
     <b class="mac-kcal">${plan.calories.toLocaleString()}</b><span class="mac-kcal-u">kcal a day</span>
   </div>
@@ -128,6 +135,16 @@ function planHTML(plan: MacroPlan, body: StoredBody): string {
         .join("")}</select></label>
   </div>
   <p class="mac-activity-def">${ACTIVITY[body.activity].label} means ${lowerFirst(ACTIVITY[body.activity].detail)}. A session counts as exercise at 15 to 30 minutes of raised heart rate, and as intense at 45 to 120. Almost everybody picks one level too high.</p>
+  ${
+    // A weight from three months ago is a guess about somebody's past, and the
+    // whole calculation rests on it. The staleness was already computed and
+    // then spent on a class name with no stylesheet behind it, so nothing on
+    // screen said anything: the panel quietly kept doing arithmetic on a
+    // number nobody had confirmed since. It is a sentence, not a style.
+    stale
+      ? `<p class="mac-stale-note">These numbers come from a weight you last confirmed ${staleAge}. Everything above is arithmetic on that figure, so if it has moved, so has the whole day.</p>`
+      : ""
+  }
   <p class="mac-basis">${body.heightCm}cm, ${body.weightKg}kg. Resting energy by ${basis}, then your activity factor.${
     // Said out loud whenever the two numbers differ, because otherwise the
     // protein figure does not divide by the weight printed beside it and the
