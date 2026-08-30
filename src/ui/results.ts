@@ -100,6 +100,15 @@ interface Ctx {
   // photo — a dense cloud in the wrong place that read exactly like "my points
   // jumped somewhere else after I confirmed them".
   sidePoints?: SidePoints;
+  /**
+   * Whether a human stood behind those thirteen points.
+   *
+   * Only ever explicitly false: somebody took the automatic placement, was
+   * asked whether it looked right, said no, was offered the walkthrough and
+   * declined. Undefined on a restored scan that predates the question, which
+   * is why every test on this is `=== false` rather than a truthiness check.
+   */
+  sideVerified?: boolean;
   onRedoSide?: () => void;
   // The front half's equivalent: open the landmark editor over the front
   // photograph. Absent when there is nothing to edit against — a restored
@@ -1429,6 +1438,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
         <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile, SIDE_TAIL_LIMIT_PCT)}</span></div>
       </div>
       ${provenance(measured)}
+      ${unverifiedBanner()}
       ${implausibleBanner(report)}
       ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile, SIDE_TAIL_LIMIT_PCT) })}
@@ -1500,6 +1510,7 @@ function wireSideNav(): void {
   };
   on("sn-redo", () => ctx?.onRedoSide?.());
   on("imp-redo", () => ctx?.onRedoSide?.());
+  on("unver-redo", () => ctx?.onRedoSide?.());
   on("sn-retake", () => ctx?.onSideProfile?.());
   on("sn-continue", () => goPathway());
   on("sn-plan", () => select("improve"));
@@ -1646,6 +1657,39 @@ function regionPositionPanel(r: RegionScore, id: RegionId, sex: Sex): string {
 // Told at the top of the profile, not left to be discovered halfway down a
 // measurement list. An excluded measurement is the one case where the fix is
 // free and takes ten seconds, so the offer to re-verify goes with it.
+/**
+ * The side profile was scored on points their own subject said were wrong.
+ *
+ * Reachable by exactly one route: take the automatic placement, answer "no"
+ * when asked whether it looks right, then decline the walkthrough. It is scored
+ * rather than refused, because somebody who will not spend thirty seconds on
+ * thirteen rings will not spend them on a retake either and would simply leave
+ * with nothing.
+ *
+ * But it cannot be printed as though it were the same object as a confirmed
+ * placement. The five points behind the face are estimated from an average
+ * head rather than found in the photo; a person who says they look wrong is
+ * very likely right, and the number underneath is then measuring the estimate.
+ * So the report says so, and offers the thirty seconds again.
+ *
+ * `=== false` on purpose. A scan restored from history predates this question
+ * and carries undefined, which must read as "never asked" and not as "said no".
+ */
+function unverifiedBanner(): string {
+  if (ctx?.sideVerified !== false) return "";
+  const redo = ctx?.onRedoSide
+    ? ` <button class="linkish" id="unver-redo">Place the points now</button>`
+    : "";
+  return `<div class="impbanner">
+    <b>You told us these points were wrong</b>
+    <p>This side score is measured from the automatic placement you said looked off, because
+    you chose not to correct it. The five points behind the face, the jaw corner, the ear, the
+    hinge and the neck point, are estimated from an average head rather than found in your
+    photo, so a placement that looks wrong usually is. Treat this profile score as indicative
+    until the points are placed.${redo}</p>
+  </div>`;
+}
+
 function implausibleBanner(report: Report): string {
   const bad = report.regions.flatMap((r) => r.metrics).filter((m) => m.implausible);
   if (!bad.length) return "";

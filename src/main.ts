@@ -1909,6 +1909,16 @@ interface LastSide {
   seedMethod?: SideSeedMethod;
   feedback?: SideFeedbackIntent;
   feedbackSubmitted?: boolean;
+  /**
+   * Whether a human stood behind the thirteen side points.
+   *
+   * False only when somebody took the automatic placement, was asked whether
+   * it looked right, said no, was offered the walkthrough and declined it. The
+   * scan is still run: refusing it loses the scan and teaches us nothing, and
+   * somebody who will not spend thirty seconds on the rings will not spend
+   * them on a retake either. But the report says what it is built on.
+   */
+  verified?: boolean;
 }
 let lastSide: LastSide | null = null;
 let feedbackDeliveryNote: { ok: boolean; message: string } | null = null;
@@ -2400,6 +2410,10 @@ async function runFullAnalysis(
     sideReport: sideReport ?? undefined,
     sidePhoto: lastSide?.photo,
     sidePoints: lastSide?.points,
+    // Undefined for a scan restored from history, which predates the flag and
+    // cannot be re-litigated. `=== false` is the test downstream, so an absent
+    // answer reads as "not told otherwise" rather than as an accusation.
+    sideVerified: lastSide?.verified,
     // Correct the points on the profile already taken, rather than shooting it
     // again. The photograph is usually fine; it is the seed that missed.
     onRedoSide: () => {
@@ -2437,6 +2451,7 @@ async function runFullAnalysis(
             automaticPoints: review.automaticPoints,
             seedMethod: review.seedMethod,
             feedback: review.feedback ?? undefined,
+            verified: review.verified,
           };
           startConsentedSideFeedback();
           await runFullAnalysis(sideReport, token);
@@ -2948,6 +2963,7 @@ function startSide(): void {
         automaticPoints: review.automaticPoints,
         seedMethod: review.seedMethod,
         feedback: review.feedback ?? undefined,
+        verified: review.verified,
       };
       (window as unknown as Record<string, unknown>).__truemaxSide = sideReport;
       // The verified points, for the calibration harnesses — re-scoring the
