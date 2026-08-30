@@ -239,6 +239,97 @@ competitions · submissions · payouts · questions · suggestions · bug-report
 
 ---
 
+---
+
+## Part 5 — The economics, and what we do not know
+
+### What they probably make
+
+Fermi estimates from public traffic. Not financials, and the error bars are
+large enough that the band matters more than the midpoint.
+
+**PSL.** 148.9K web visits in July, but they are App Store only, so the website
+is a funnel rather than the product. Web to install maybe 15 to 35%; install to
+paying maybe 2 to 6% for a hard-paywalled utility. That implies roughly 1,500
+payers a month from web alone at a blended ~$8, so about **$12K gross**. TikTok
+almost certainly drives more installs than the website does, which could put the
+real figure several times higher.
+
+Band: **$10K to $50K a month gross**, most likely the lower half.
+
+The counter-signal that argues for the low end: their App Store page reads *"This
+app hasn't received enough ratings or reviews to display an overview."* Thousands
+of paying customers over three months would have produced ratings. Caveat on the
+caveat: that screenshot was taken from a New Zealand storefront and they are
+US-focused, so it may be a regional artefact rather than a global one.
+
+**FaceIQ.** Roughly 1.1M monthly visits, about 7x PSL, running for longer, and
+now operating two apps (FaceIQ plus AuraPal). Naive scaling gives $70K to $350K.
+
+But their live Clipify sprints show **$315 of a $4,000 budget used (8%) and $20
+of $2,000 (1%)**. For a programme that has been running sprints since May, that
+is a slow burn, and it argues against the top of the range. $315 across 11
+approved videos is about $29 a video.
+
+Band: **$50K to $200K a month gross.**
+
+### The number that actually matters
+
+Theirs is a curiosity. Ours is the plan. At $7.99 and $11.99, **1,000 paying
+subscribers is roughly $10K MRR**, and that is the figure to reason about. It is
+also, at a 2 to 4% conversion, about 25,000 to 50,000 people who complete a
+scan, which at the observed content rates is a few dozen videos that land rather
+than a few thousand.
+
+### What we do not know, and how to find out
+
+Ranked by how much the answer would change the plan.
+
+1. **Their actual revenue.** App Store rank history and review velocity, or an
+   Appfigures/Sensor Tower estimate. Cheap, and it converts a wide band into a
+   narrow one.
+2. **Whether the one-off report really outsells subscriptions for us too.** They
+   told us it does for them. We can test it in a week by reordering our own
+   paywall, and we should, because it is a pricing change rather than a build.
+3. **FaceIQ's pricing and paywall order.** Not yet gathered. A user in their own
+   thread mentions "$50 for that analysis", which if accurate is a very
+   different model from PSL's $6.99.
+4. **Where the creators actually are.** Clipify's Discord is one confirmed pool
+   of 1.22K. Are there others, and what do they get paid elsewhere?
+5. **Our own conversion.** Currently unknown because there is no traffic. Every
+   estimate above is a competitor's number standing in for ours, and the first
+   real week of Phase 1 replaces all of it.
+
+### The integrity line, decided in advance
+
+Most of what these companies do is not cheating. Paying creators per view,
+posting six to twelve times a day, cross-posting to both platforms, putting a
+competitor's name in a Reddit title, giving away free access: that is all just
+doing the work, harder than most people are willing to.
+
+Three things are over the line, and they are worth naming so the decision is
+already made when the temptation arrives:
+
+- **Teaching audience fraud.** PSL's Discord carries a guide to manufacturing a
+  Tier-1 audience with a residential proxy and a factory-resettable phone. It
+  defrauds the platforms and it defrauds their own payout criteria.
+- **Claims the data cannot carry.** "50% see results in week 1" describes a
+  cohort. "80% of women match with only the top 20% of men" is a contested
+  reading of one dataset stated as fact.
+- **Incentivised App Store reviews.** Asking for a review in the same breath as
+  handing over a free code is against Apple's guidelines.
+
+The useful observation: **none of that is what is growing them.** The proxy
+guide is about creators extracting more from PSL, not about PSL acquiring users.
+The claims are decoration on a funnel that works because of volume. What is
+growing them is posting a great deal and paying other people to post as well,
+and both of those are available to anyone willing to do them.
+
+The one place honesty genuinely costs us is ad copy: they can write "50% see
+results in week 1" and we cannot. That is a real disadvantage, accepted
+deliberately, and the compensation is that everything we do say survives
+scrutiny from a journalist, an App Store reviewer, or a user who rescans.
+
 ## The one-line version
 
 They sell a verdict on your skull and cannot reproduce it. We sell a
