@@ -113,3 +113,64 @@ test("duplicate webhook secrets are only attempted once", () => {
   });
   assert.deepEqual(secrets, ["whsec_same"]);
 });
+
+// ---------------------------------------------------------------------------
+// Where the conversion is reported from, and when.
+//
+// The handler drives Stripe and Supabase and cannot be imported here, so these
+// are source assertions on the ORDER of the handler. Order is exactly what
+// would rot, and it is what was wrong: reporting sat in the middle of the
+// function, before the subscription entitlement was applied, awaiting a fetch
+// with no timeout. A hanging ad network could therefore strand a paying
+// customer without access, which is the most expensive possible failure of a
+// reporting call.
+const { readFileSync } = await import("node:fs");
+const webhookSource = readFileSync(new URL("./stripe-webhook.ts", import.meta.url), "utf8");
+const attributionSource = readFileSync(new URL("./_attribution.ts", import.meta.url), "utf8");
+
+test("nothing owed to a person ever queues behind the ad network", () => {
+  const entitlement = webhookSource.indexOf('rpc("apply_stripe_entitlement"');
+  const report = webhookSource.indexOf("if (conversion) await reportPurchase(conversion)");
+  assert.ok(entitlement > -1 && report > -1, "both the fulfilment and the report must exist");
+  // The only reportPurchase call is inside settle(), and every success path
+  // returns through settle. A second call site anywhere else would be a path
+  // that reports before fulfilment again.
+  const calls = webhookSource.match(/await reportPurchase\(/g) ?? [];
+  assert.equal(calls.length, 1, "exactly one reporting call, and it lives in settle()");
+  // No success return may bypass it.
+  const body = webhookSource.slice(webhookSource.indexOf("let conversion"));
+  assert.doesNotMatch(body, /return json\(\{ received: true/, "success returns go through settle()");
+});
+
+test("subscription revenue is reported, not just the trial that opened it", () => {
+  // The subscription products open on a seven-day trial, so the Checkout
+  // Session completes at amount_total 0. The first real charge and every
+  // renewal arrive as invoice.paid, which the handler used to ignore entirely
+  // — so the ads were credited with the trials and none of the money.
+  assert.match(webhookSource, /event\.type === "invoice\.paid"/);
+  assert.match(webhookSource, /invoice\.amount_paid/);
+  // Read from the SUBSCRIPTION's metadata: an invoice has no memory of the
+  // click that started the subscription unless the subscription carries it.
+  assert.match(webhookSource, /parent\?\.subscription_details\?\.metadata/);
+  // Both shapes, because Stripe moved the field and no apiVersion is pinned.
+  assert.match(webhookSource, /invoice\.subscription_details\?\.metadata/);
+  // A zero invoice is the trial opening, not a sale.
+  assert.match(webhookSource, /invoice\.amount_paid > 0/);
+});
+
+test("the reporting call is bounded", () => {
+  // fetch has no default timeout, so an unbounded call to somebody else's
+  // server inside a payment webhook is a way to strand a paying customer.
+  assert.match(attributionSource, /new AbortController\(\)/);
+  assert.match(attributionSource, /signal: abort\.signal/);
+  assert.match(attributionSource, /clearTimeout\(timer\)/);
+});
+
+test("HTTP 200 from TikTok is not taken as success", () => {
+  // The Events API answers 200 and puts the outcome in the body. Checking only
+  // the status recorded rejected requests and partial failures as "sent",
+  // which reads downstream as an ad that is not converting.
+  assert.match(attributionSource, /payload\.code !== 0/);
+  assert.match(attributionSource, /partial_failure/);
+  assert.match(attributionSource, /failed_events/);
+});

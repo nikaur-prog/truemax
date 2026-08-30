@@ -109,7 +109,7 @@
             <td>Your browser only. They are not synchronized to your account</td>
           </tr>
           <tr>
-            <td>Your onboarding profile — name, optional mobile number, date of
+            <td>Your onboarding profile: name, optional mobile number, date of
               birth, discovery source, goals, expectations and boundaries</td>
             <td>To establish age-appropriate access and personalise your pathway</td>
             <td>Supabase, readable only by your account and the service</td>
@@ -130,7 +130,7 @@
             <td>Your browser, and Supabase when supplied through onboarding</td>
           </tr>
           <tr>
-            <td>Optional self-score feedback — your measured score, the score
+            <td>Optional self-score feedback: your measured score, the score
               you chose, sex reference, scan ID and account ID</td>
             <td>To review calibration. It never changes your score</td>
             <td>Supabase, service-only; no photograph or free text is included</td>
@@ -167,19 +167,83 @@
 
       <h2>Who we share it with</h2>
       <p>
-        We do not sell your personal information, and we do not share it for
-        advertising. We use a small number of processors to run the service:
+        We do not sell your personal information. We do not share your
+        photographs, scans, scores or conversations with anyone for
+        advertising, and no advertising script runs on any page of this site.
+        We use a small number of processors to run the service:
       </p>
       <ul>
-        <li><b>Supabase</b> — accounts, database and storage.</li>
-        <li><b>Vercel</b> — hosting and delivery of the website.</li>
-        <li><b>Stripe</b> — payments and subscription management.</li>
-        <li><b>Anthropic</b> — Coach Max replies, only when you use Max.</li>
-        <li><b>ElevenLabs and OpenAI</b> — generated narration, with OpenAI used
+        <li><b>Supabase</b>: accounts, database and storage.</li>
+        <li><b>Vercel</b>: hosting and delivery of the website.</li>
+        <li><b>Stripe</b>: payments and subscription management.</li>
+        <li><b>Anthropic</b>: Coach Max replies, only when you use Max.</li>
+        <li><b>ElevenLabs and OpenAI</b>: generated narration, with OpenAI used
           as a fallback. OpenAI also generates staff-only fictional model images.</li>
-        <li><b>TikTok</b> — account linking and post statistics, only for Creator
-          League participants who connect TikTok.</li>
+        <li><b>TikTok</b>: two separate things. Account linking and post
+          statistics, only for Creator League participants who connect TikTok.
+          And, if you reached us by clicking a TikTok advert, a record that a
+          purchase happened. See below.</li>
       </ul>
+
+      <h3>If you arrived from a campaign link</h3>
+      <p>
+        Links we put in adverts, newsletters, video descriptions and profile
+        bios carry campaign parameters that say where the link was placed. They
+        are the standard <code>utm_source</code>, <code>utm_medium</code>,
+        <code>utm_campaign</code>, <code>utm_content</code> and
+        <code>utm_term</code>, and they describe the placement, not you. An
+        advert additionally carries a click identifier that the advertising
+        platform put there.
+      </p>
+      <p>
+        Three different things happen to them, and they are worth separating.
+      </p>
+      <ul>
+        <li><b>Stored in your browser.</b> Whichever of those parameters your
+          link carried, ad or not, is written to this site&rsquo;s local
+          storage on arrival. A link with none of them writes nothing at all,
+          which is most visits.</li>
+        <li><b>Copied to Stripe if you buy.</b> Those same parameters are
+          attached to the payment record, and to the subscription if you start
+          one, so we can see which placement a sale came from.</li>
+        <li><b>Sent to TikTok only for an advert.</b> The report described
+          below happens only when the click identifier is present, which means
+          only when you came from a TikTok advert. A newsletter or bio link has
+          no click identifier and nothing is ever reported for it.</li>
+      </ul>
+      <p>
+        <b>The report to TikTok contains no description of you.</b> The click
+        identifier, the amount and the currency. Not your email address, hashed
+        or otherwise, and not your phone number, your name, your IP address or
+        your device. Never a photograph, a scan, a score, or anything Coach Max
+        said to you. The click identifier is a tracking identifier, and an
+        advertising platform can use it to attribute the sale, build audiences
+        and target adverts, which is why it is described here rather than
+        folded into the list above.
+      </p>
+      <p>
+        In your browser all of it is kept for at most 30 days and discarded
+        after that whether or not you buy anything, and it is dropped when you
+        sign out. Clearing this site&rsquo;s data in your browser removes the
+        copy held there immediately.
+      </p>
+      <p>
+        <b>If you do buy, a copy is kept by Stripe.</b> The campaign parameters
+        and, where there is one, the click identifier are written onto the
+        payment record, and onto the subscription if you start one, so that
+        they stay attached to the purchase for as long as Stripe keeps that
+        record. Clearing your browser does not remove that copy.
+        Where a subscription began with a TikTok advert, each renewal payment
+        is reported in the same way as the first, with the same contents: the
+        click identifier, the amount and the currency, and nothing that
+        describes you. That reporting stops when the subscription does, and it
+        never happens at all for a subscription that did not begin with an
+        advert. Deleting
+        your account removes the TrueMax side of it; to have the Stripe copy
+        erased as well, email
+        <a href="mailto:privacy@truemax.app">privacy@truemax.app</a> and we will
+        make the request on your behalf.
+      </p>
       <p>
         We may also disclose information where the law requires it.
       </p>
@@ -195,7 +259,7 @@
         from the device by server-side account deletion. Use the in-app history
         controls or clear this site's browser data to remove them.
         If you have uninstalled the app or cannot sign in, there is a route that
-        does not need either — see <a href="/delete-account">deleting your
+        does not need either. See <a href="/delete-account">deleting your
         account</a>.
       </p>
       <p>

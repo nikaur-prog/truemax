@@ -126,7 +126,7 @@ export async function POST(request: Request): Promise<Response> {
       }
       if (budget && budget.used >= budget.quota) {
         return json(
-          { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st — or ask for a raise.` },
+          { error: `Monthly render quota reached (${budget.quota}). It resets on the 1st, or ask for a raise.` },
           429,
         );
       }

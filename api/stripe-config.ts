@@ -146,7 +146,7 @@ export async function GET(request: Request): Promise<Response> {
       keyMode,
       summary:
         broken.length || mismatched.length
-          ? `${broken.length} unusable, ${mismatched.length} in the wrong mode — checkout will fail for these`
+          ? `${broken.length} unusable, ${mismatched.length} in the wrong mode. Checkout will fail for these`
           : "every required price resolves with the expected amount, currency, cadence and mode",
       prices,
     },

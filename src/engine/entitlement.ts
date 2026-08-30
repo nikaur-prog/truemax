@@ -1,4 +1,4 @@
-import { currentAccessToken, getSupabaseClient } from "./auth.js";
+import { currentAccessToken, currentUser, getSupabaseClient } from "./auth.js";
 import { attributionForCheckout } from "./attribution.js";
 
 export type EntitlementTier = "free" | "starter" | "max";
@@ -56,9 +56,47 @@ export function hasPaidAccess(entitlement: Entitlement): boolean {
     (entitlement.status === "active" || entitlement.status === "trialing");
 }
 
+interface BillingUser {
+  id: string;
+}
+
+export type BillingIdentityResult =
+  | { ok: true; accessToken: string; payerId: string }
+  | { ok: false; reason: "signed_out" | "identity_changed" };
+
+export async function resolveBillingIdentity(
+  readUser: () => Promise<BillingUser | null> = currentUser,
+  readAccessToken: (expectedUserId?: string) => Promise<string | null> = currentAccessToken,
+): Promise<BillingIdentityResult> {
+  const payerBefore = await readUser().catch(() => null);
+  if (!payerBefore) return { ok: false, reason: "signed_out" };
+
+  const accessToken = await readAccessToken(payerBefore.id).catch(() => null);
+  if (!accessToken) return { ok: false, reason: "identity_changed" };
+
+  const payerAfter = await readUser().catch(() => null);
+  if (!payerAfter || payerAfter.id !== payerBefore.id) {
+    return { ok: false, reason: "identity_changed" };
+  }
+
+  return { ok: true, accessToken, payerId: payerBefore.id };
+}
+
 async function billingRedirect(path: string, payload?: unknown): Promise<BillingResult> {
-  const accessToken = await currentAccessToken();
-  if (!accessToken) return { ok: false, message: "Sign in before opening billing." };
+  // THE PAYER IS READ FIRST, AND READ AGAIN AFTERWARDS.
+  //
+  // These used to be two independent reads in the other order: the token, then
+  // separately whoever happened to be signed in. A tab that switches account
+  // between the two lands a request authenticated as one person carrying the
+  // other's stored click. Reading the payer around the token and requiring the
+  // two to agree closes the window. A changed identity aborts billing rather
+  // than opening a Checkout Session authenticated as the previous account.
+  const identity = await resolveBillingIdentity();
+  if (!identity.ok) {
+    return identity.reason === "signed_out"
+      ? { ok: false, message: "Sign in before opening billing." }
+      : { ok: false, message: "Your signed-in account changed. Try billing again." };
+  }
 
   // Where this person came from, attached at the last possible moment.
   //
@@ -66,14 +104,18 @@ async function billingRedirect(path: string, payload?: unknown): Promise<Billing
   // choke point every checkout passes through and a fifth product added later
   // gets attribution without anybody remembering to wire it. The server does
   // not trust any of it — see api/_attribution.ts.
-  const attribution = payload ? attributionForCheckout() : null;
+  // Passing the payer explicitly, so a stored touch stamped for a DIFFERENT
+  // account never rides on this card even if the sign-in that should have
+  // cleared it was missed. One browser, two people; see claimAttribution.
+  //
+  const attribution = payload ? attributionForCheckout(Date.now(), identity.payerId) : null;
   const sent = attribution ? { ...(payload as object), attribution } : payload;
 
   try {
     const response = await fetch(path, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${identity.accessToken}`,
         "X-Idempotency-Key": crypto.randomUUID(),
         ...(sent ? { "Content-Type": "application/json" } : {}),
       },

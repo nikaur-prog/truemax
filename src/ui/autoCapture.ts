@@ -51,6 +51,10 @@ export function createAutoCapture(opts: Opts): AutoCapture {
   let raf = 0;
   let lastBeep = -1;
   let fired = false;
+  // Declared up here rather than beside the pause logic below, because frame()
+  // has to be able to refuse to run while paused. See the guard in frame().
+  let pausedAt = 0;
+  let badSince = 0;
 
   const stop = () => {
     if (raf) cancelAnimationFrame(raf);
@@ -60,6 +64,16 @@ export function createAutoCapture(opts: Opts): AutoCapture {
   };
 
   const frame = (now: number) => {
+    // PAUSED MEANS PAUSED, even for a callback already in flight.
+    //
+    // cancelAnimationFrame is asked for below, and belt-and-braces is right
+    // here: a callback the browser has already dispatched cannot be recalled,
+    // and startedAt deliberately survives a pause because it is holding the
+    // progress. Without this line that surviving value is all a stale callback
+    // needs to complete the count and fire the shutter on a frame the gates
+    // rejected — the same outcome the grace period used to produce, arriving
+    // by a different route.
+    if (pausedAt) return;
     if (!startedAt || fired) return;
     const elapsed = now - startedAt;
     const remaining = Math.max(0, total - elapsed);
@@ -109,16 +123,32 @@ export function createAutoCapture(opts: Opts): AutoCapture {
   // A LONG absence still cancels outright, because at that point the person has
   // put the phone down or walked out of frame, and a countdown that resumes
   // from 0.2 seconds when they come back would fire before they were ready.
-  const GRACE_FRAMES = 4;
+  //
+  // THE FIRST BAD FRAME STOPS THE CLOCK. There is no grace period on the timer
+  // and there must never be one.
+  //
+  // This shipped with a four-frame grace before pausing, on the reasoning that
+  // a single dropped frame should not stall a count about to complete. That
+  // reasoning is right about the HINT TEXT and wrong about the timer, and the
+  // difference is a race that fires the shutter on a bad frame: the count sits
+  // at 1.45 of 1.5 seconds, one update(false) arrives and only increments a
+  // counter, the animation frame is still scheduled, and 100ms later the
+  // shutter fires on framing the gates had already rejected. Readiness updates
+  // arrive per analysed camera frame while the countdown runs on
+  // requestAnimationFrame, so the grace window is easily long enough to
+  // complete a count inside.
+  //
+  // The whole safety argument for pausing rather than resetting is "the
+  // shutter cannot fire on a bad frame, because the timer is not running while
+  // the frame is bad". A grace period on the pause is precisely the hole in
+  // that sentence. Hysteresis belongs to what is DISPLAYED — see captureSettle,
+  // which holds the hint text so it does not flicker — never to whether the
+  // clock is running.
   const ABANDON_MS = 4000;
-  let misses = 0;
-  let pausedAt = 0;
-  let badSince = 0;
 
   return {
     update(ready: boolean) {
       if (ready) {
-        misses = 0;
         badSince = 0;
         if (pausedAt) {
           // Resume where it stopped: push the start forward by exactly the
@@ -145,9 +175,8 @@ export function createAutoCapture(opts: Opts): AutoCapture {
         opts.onTick(null);
         return;
       }
-      // A brief dip is held, exactly as the hint text is (captureSettle), so a
-      // single bad frame cannot stall a count that is about to complete.
-      if (!pausedAt && ++misses >= GRACE_FRAMES) {
+      // Immediately, on this frame, before anything else can be scheduled.
+      if (!pausedAt) {
         pausedAt = now;
         if (raf) cancelAnimationFrame(raf);
         raf = 0;
@@ -157,7 +186,6 @@ export function createAutoCapture(opts: Opts): AutoCapture {
       stop();
       pausedAt = 0;
       badSince = 0;
-      misses = 0;
       opts.onTick(null);
     },
     // Paused still counts as armed: the count is held, not discarded, and a

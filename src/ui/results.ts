@@ -432,7 +432,7 @@ function viewCards(r: Report): string {
     .join("")}</div>${
     // When they genuinely coincide, say so. Silence there reads as a bug.
     same
-      ? `<p class="viewnote same">Both views landed on the same number this time — the front and the profile agree.</p>`
+      ? `<p class="viewnote same">Both views landed on the same number this time. The front and the profile agree.</p>`
       : ""
   }`;
 }

@@ -52,10 +52,31 @@ export interface Attribution {
   term?: string;
   /** TikTok's click identifier, appended to the destination URL by the ad. */
   ttclid?: string;
-  /** TikTok's browser cookie parameter, for matching without a click id. */
+  /**
+   * TikTok's `_ttp` value, if an ad ever appends one to the destination URL.
+   *
+   * NOT A FALLBACK, whatever it looks like. `_ttp` is normally a first-party
+   * cookie written by TikTok's browser Pixel, and this product deliberately
+   * runs no Pixel — the conversion goes back server-side from the Stripe
+   * webhook precisely so no ad-network script touches a page where somebody's
+   * face is on screen. With no Pixel there is usually no `_ttp` to read, so
+   * `ttclid` is what actually carries attribution here.
+   *
+   * Kept because it costs one URL parameter and is occasionally present, and
+   * documented as marginal so nobody plans a match-rate around it.
+   */
   ttp?: string;
   /** When this first touch happened, ISO. Used only to expire it. */
   at: string;
+  /**
+   * The account this touch has been claimed by, once one has signed in.
+   *
+   * Absent while nobody has signed in, which is the normal state for a first
+   * touch: the click lands on a signed-out landing page. It is stamped the
+   * first time an identity appears and is what makes the record refuse to
+   * follow a second person. See claimAttribution.
+   */
+  owner?: string;
 }
 
 function clean(value: string | null): string | undefined {
@@ -132,9 +153,12 @@ function readStored(): Attribution | null {
  * Returns null rather than an empty object when there is nothing to say, so
  * the caller sends no attribution field at all rather than an empty one.
  */
-export function attributionForCheckout(now = Date.now()): Attribution | null {
+export function attributionForCheckout(now = Date.now(), owner?: string | null): Attribution | null {
   const stored = readStored();
   if (!stored || expired(stored, now)) return null;
+  // Belt and braces against a missed claim: the checkout knows who is paying,
+  // and a record stamped for somebody else never rides on their card.
+  if (owner && stored.owner && stored.owner !== owner) return null;
   return stored;
 }
 
@@ -145,4 +169,81 @@ export function clearAttribution(): void {
   } catch {
     /* nothing to clear */
   }
+}
+
+/**
+ * Bind the stored touch to whoever is signed in, or forget it.
+ *
+ * ONE BROWSER, TWO PEOPLE. Alice arrives through an ad, browses signed out so
+ * the click is stored, and signs out or simply hands the phone over. Bob signs
+ * in and buys. Without this, Bob's payment and his subscription carry Alice's
+ * ttclid, the campaign is credited with a sale it did not make, and Bob's own
+ * click is discarded on arrival because first-touch sees a live record and
+ * declines to overwrite it. Shared phones are not an edge case in this
+ * product's audience.
+ *
+ * Three cases, and only the first keeps anything:
+ *
+ *   unclaimed   nobody had signed in when the click landed, which is the
+ *               ordinary path. It is stamped with this owner and kept: this
+ *               IS the person the ad brought.
+ *   same owner  nothing to do.
+ *   different   forgotten outright, so the next campaign click for this person
+ *               is a first touch rather than something queued behind a stale
+ *               one.
+ *
+ * Signing OUT forgets it too, by passing null. There is no way to know whether
+ * the next person at this browser is the same one, and crediting a stranger's
+ * purchase to somebody else's click is the failure worth avoiding.
+ */
+export function claimAttribution(userId: string | null): void {
+  try {
+    const stored = readStored();
+    if (!stored) return;
+    if (!userId) {
+      clearAttribution();
+      return;
+    }
+    if (!stored.owner) {
+      localStorage.setItem(KEY, JSON.stringify({ ...stored, owner: userId }));
+      return;
+    }
+    if (stored.owner !== userId) clearAttribution();
+  } catch {
+    /* storage disabled: there is nothing stored to bind */
+  }
+}
+
+/**
+ * What an auth event should do to the stored touch.
+ *
+ * SIGNED OUT IS NOT THE SAME AS NOT SIGNED IN, and conflating them broke the
+ * entire feature. Supabase emits INITIAL_SESSION on every page load with a
+ * null session when nobody is signed in, which is the ordinary state of a
+ * visitor arriving from an advert. Treating that null the same as a sign-out
+ * cleared the click that had been captured moments earlier, on the very first
+ * event of the very first page view: every ad visitor lost their attribution
+ * before they had scrolled, and the purchase that followed carried none.
+ *
+ * So only a real SIGNED_OUT forgets. An event with no user and no sign-out is
+ * simply somebody who has not signed in, and their touch waits for them.
+ *
+ * Split out as a pure function on purpose. The bug above lived in a callback
+ * wired to a Supabase subscription, which is exactly the shape a source-level
+ * assertion cannot check and a behavioural test can: this takes an event name
+ * and a user id and returns a decision, so the lifecycle can be exercised
+ * directly.
+ */
+export type AttributionAction = "bind" | "forget" | "leave";
+
+export function attributionActionFor(event: string, userId: string | null): AttributionAction {
+  if (userId) return "bind";
+  return event === "SIGNED_OUT" ? "forget" : "leave";
+}
+
+/** Apply that decision. The one place an auth event touches attribution. */
+export function settleAttributionForAuth(event: string, userId: string | null): void {
+  const action = attributionActionFor(event, userId);
+  if (action === "bind") claimAttribution(userId);
+  else if (action === "forget") claimAttribution(null);
 }

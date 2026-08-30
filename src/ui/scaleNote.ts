@@ -48,7 +48,7 @@ function ladderHTML(): string {
   return LADDER.map(
     (r) => `<div class="scale-rung">
       <b>${r.score.toFixed(1)}</b>
-      <span>${r.capped ? `about 1 in ${r.oneIn} — as far as we can count` : `about 1 in ${r.oneIn}`}</span>
+      <span>${r.capped ? `about 1 in ${r.oneIn}, as far as we can count` : `about 1 in ${r.oneIn}`}</span>
     </div>`,
   ).join("");
 }

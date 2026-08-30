@@ -120,7 +120,7 @@ export async function POST(request: Request): Promise<Response> {
       // Refresh-and-persist lives in _tiktok.ts, shared with the nightly
       // tracker — two copies of refresh logic is how one stops refreshing.
       const access = await freshTikTokAccess(user.id, row);
-      if (!access) return json({ error: "The TikTok link has expired — connect it again." }, 401);
+      if (!access) return json({ error: "The TikTok link has expired. Connect it again." }, 401);
 
       const videos = await listOwnTikTokVideos(access, 10);
       if (!videos) {

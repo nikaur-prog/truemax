@@ -87,6 +87,26 @@ export function clickIdFrom(metadata: Record<string, string> | null | undefined)
 const ENDPOINT = "https://business-api.tiktok.com/open_api/v1.3/event/track/";
 
 /**
+ * How long the conversion report may hold the webhook open. IN TOTAL.
+ *
+ * A budget shared across both attempts rather than a timeout applied to each,
+ * and the difference is not pedantry: settle() awaits this before the response
+ * is constructed, so Stripe has NOT been answered while it runs. Three seconds
+ * per attempt with one retry is a six second bound on a webhook, described in
+ * the code as three.
+ *
+ * Sharing the deadline keeps the retry worth having, because the failure it
+ * exists for is a fast one: a 500 or a rejected code comes back in
+ * milliseconds and leaves nearly the whole budget for a second try. Only a
+ * timeout consumes the budget, and a timeout is the case where retrying
+ * immediately was least likely to help anyway.
+ */
+const TOTAL_BUDGET_MS = 3000;
+
+/** Below this there is not enough left for a second attempt to be worth making. */
+const MIN_RETRY_MS = 300;
+
+/**
  * Tell TikTok a purchase happened, server side.
  *
  * From the WEBHOOK, not the browser, and that is the whole reason this exists
@@ -116,16 +136,69 @@ export async function reportPurchase(opts: {
   // the call would cost a round trip to report an unattributable sale.
   if (!opts.ttclid && !opts.ttp) return "skipped";
 
+  // ONE RETRY, AND IT IS FREE TO TAKE.
+  //
+  // settle() waits for this result before answering Stripe, but returns 200
+  // even when reporting fails. A three second timeout or a momentary 500
+  // therefore loses that sale from the report for good. A single immediate
+  // retry recovers the common case, which is a blip rather than an outage.
+  //
+  // Safe to repeat because the payload carries the Stripe event id as
+  // `event_id`, which is what TikTok deduplicates on: if the first attempt
+  // actually landed and only the response was lost, the second is discarded at
+  // their end rather than double-counting the sale.
+  //
+  // This is NOT a durable outbox and does not pretend to be. A real outage
+  // still loses the conversion, and closing that properly needs a table, a
+  // retry worker and a migration. Left as a decision rather than built
+  // silently.
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const first = await attemptReport(pixel, token, opts, deadline);
+  if (first !== "failed") return first;
+  if (deadline - Date.now() < MIN_RETRY_MS) return "failed";
+  return attemptReport(pixel, token, opts, deadline);
+}
+
+async function attemptReport(
+  pixel: string,
+  token: string,
+  opts: {
+    eventId: string;
+    ttclid?: string;
+    ttp?: string;
+    valueMinor: number;
+    currency: string;
+    occurredAt?: number;
+  },
+  deadline: number,
+): Promise<"sent" | "skipped" | "failed"> {
+
+  // BOUNDED, because an unbounded call to somebody else's server inside a
+  // payment webhook is a way to strand a paying customer. fetch has no default
+  // timeout: a host that accepts the connection and never answers holds this
+  // open until the platform kills the whole function. Reporting runs after
+  // fulfilment now, so a timeout costs one unreported conversion and nothing
+  // else, which is the correct thing for it to cost.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), Math.max(0, deadline - Date.now()));
+
   try {
     const response = await fetch(ENDPOINT, {
       method: "POST",
+      signal: abort.signal,
       headers: { "Content-Type": "application/json", "Access-Token": token },
       body: JSON.stringify({
         event_source: "web",
         event_source_id: pixel,
         data: [
           {
-            event: "CompletePayment",
+            // TikTok's CURRENT standard event name. It was CompletePayment,
+            // and the old name is still accepted and mapped on their side, so
+            // this is not a conversion-loss fix. It is that a configuration
+            // being set up now should be set up against the standard as it
+            // stands, or the next person reading either end has to know the
+            // history to see that the two agree.
+            event: "Purchase",
             // Seconds, and the payment's own time rather than now: a webhook
             // retried an hour later must not report an hour-late conversion.
             event_time: Math.floor((opts.occurredAt ?? Date.now()) / 1000),
@@ -149,9 +222,44 @@ export async function reportPurchase(opts: {
       console.error("tiktok-events", `HTTP ${response.status}`);
       return "failed";
     }
+
+    // HTTP 200 IS NOT SUCCESS HERE.
+    //
+    // The Events API answers 200 and puts the outcome in the body: a non-zero
+    // `code` is a rejected request, and `partial_failure` with a populated
+    // `failed_events` means some of the batch was dropped while the envelope
+    // succeeded. Checking only the status code recorded every one of those as
+    // "sent", which is worse than not reporting at all — a silent zero looks
+    // like an ad that is not converting, and the response said so plainly the
+    // whole time.
+    const payload = (await response.json().catch(() => null)) as {
+      code?: number;
+      message?: string;
+      data?: { partial_failure?: unknown; failed_events?: unknown[] } | null;
+    } | null;
+    // `=== 0`, never "not a non-zero number". A 200 carrying `{}` has no code
+    // at all, and the earlier check let it through as a success: the one shape
+    // most likely to arrive from a proxy, a gateway error page, or an API
+    // version that moved the field was the one shape reported as sent. Success
+    // has to be stated by the response, not inferred from the absence of a
+    // failure.
+    if (!payload || payload.code !== 0) {
+      // The message describes OUR request, not the customer, so it is worth
+      // logging: "invalid pixel code" and "event_time too old" are the two
+      // failures somebody would otherwise spend a week not seeing.
+      console.error("tiktok-events", `code ${payload?.code ?? "none"}`, payload?.message ?? "");
+      return "failed";
+    }
+    const failed = payload.data?.failed_events;
+    if (payload.data?.partial_failure || (Array.isArray(failed) && failed.length > 0)) {
+      console.error("tiktok-events", "partial failure", Array.isArray(failed) ? failed.length : "?");
+      return "failed";
+    }
     return "sent";
   } catch (error) {
     console.error("tiktok-events", safeMessage(error));
     return "failed";
+  } finally {
+    clearTimeout(timer);
   }
 }

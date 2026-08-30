@@ -793,7 +793,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       ? `<p class="lg-sub">Nothing submitted yet. Send your audience breakdown below and an admin will place your account.</p>`
       : latest.status === "pending"
         ? `<p class="lg-sub">Submitted ${new Date(latest.submitted_at).toLocaleDateString()}, waiting on review.</p>`
-        : `<p class="lg-sub">Last review: <b>${esc(latest.status)}</b>${latest.note ? ` — ${esc(latest.note)}` : ""}</p>`;
+        : `<p class="lg-sub">Last review: <b>${esc(latest.status)}</b>${latest.note ? `. ${esc(latest.note)}` : ""}</p>`;
 
     mount.innerHTML = `<h1 class="lg-h">Offers</h1>
       <p class="lg-sub">Accounts are placed into a tier from where their viewers are, not just how many
@@ -1063,7 +1063,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             ${s.status === "draft" ? `<button class="lg-btn pri" data-sprint-activate="${s.id}">Activate</button>` : ""}
             ${s.status === "active" ? `<button class="lg-btn danger" data-sprint-close="${s.id}">Close</button>` : ""}
           </span>
-        </div>`).join("") || `<p class="lg-sub">No sprints yet — the league starts when the first one goes active.</p>`}
+        </div>`).join("") || `<p class="lg-sub">No sprints yet. The league starts when the first one goes active.</p>`}
         <div class="lg-sprint-new">
           <h3 style="margin-top:18px">New sprint</h3>
           <p class="lg-sub">Created as a DRAFT, creators see nothing until you activate it. The

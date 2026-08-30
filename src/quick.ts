@@ -1376,8 +1376,8 @@ function renderCalibrationSet(): void {
       </div>
       ${
         missing.length
-          ? `<p class="q-cal-missing">No face in this set carries ${missing.join(", ")} yet —
-             those stay on a prior until one does.</p>`
+          ? `<p class="q-cal-missing">No face in this set carries ${missing.join(", ")} yet,
+             so those stay on a prior until one does.</p>`
           : ""
       }
       <p class="q-cal-missing">${
@@ -1395,7 +1395,7 @@ function renderCalibrationSet(): void {
       ${
         withheld.length
           ? `<p class="q-cal-missing">${withheld.length} row${withheld.length === 1 ? "" : "s"}
-             held out of the export — the rating is not marked as your own. A row marked
+             held out of the export, because the rating is not marked as your own. A row marked
              <b>borrowed</b> stays out for good; a row marked <b>unknown</b> predates the
              provenance field and one tap on "mine" clears it, but only do that for a number
              you remember writing yourself.</p>`

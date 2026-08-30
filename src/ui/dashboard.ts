@@ -460,7 +460,7 @@ function scanSection(scans: StoredScan[], legacyCount = 0, guestCount = 0, listC
       <div class="dash-empty">
         <b>No scans yet.</b>
         <span>${guestCount
-          ? `${guestCount} scan${guestCount === 1 ? "" : "s"} of someone else ${guestCount === 1 ? "is" : "are"} kept in the Scans tab — a friend's face is a record here, never your progress. Scan yourself to start your own trend.`
+          ? `${guestCount} scan${guestCount === 1 ? "" : "s"} of someone else ${guestCount === 1 ? "is" : "are"} kept in the Scans tab. A friend's face is a record here, never your progress. Scan yourself to start your own trend.`
           : legacyCount
             ? `${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used the previous scoring calibration. Take a new scan to start a clean, comparable trend.`
             : "Scan your face to see your first measurement: and every one after it lines up here so you can watch it move."}</span>
