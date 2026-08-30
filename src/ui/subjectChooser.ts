@@ -60,6 +60,28 @@ export function closeSubjectChooser(): void {
  * signed-out visitor has no "you" for the question to mean anything against,
  * and asking would be one more screen between them and their first result.
  */
+export type SelfLock = "declined" | "weekly" | null;
+
+/**
+ * Why "It's me" is closed, or null when it is open.
+ *
+ * The decline outranks the weekly limit when both apply, because it is the
+ * larger fact and the more permanent one: telling somebody their week is up
+ * when their own scans are closed indefinitely answers a smaller question
+ * than the one they have.
+ *
+ * A pure function rather than a pair of reads at the call site, because the
+ * precedence is the part worth pinning: the two callers must not disagree
+ * about which sentence a person sees, and the weekly lock was added to close
+ * a route around the gate rather than to change what a declined account is
+ * told.
+ */
+export function selfLockFor(declined: boolean, guestOnly: boolean): SelfLock {
+  if (declined) return "declined";
+  if (guestOnly) return "weekly";
+  return null;
+}
+
 export function openSubjectChooser(
   onPick: (answer: SubjectAnswer) => void,
   onCancel?: () => void,
@@ -68,10 +90,18 @@ export function openSubjectChooser(
   // the one that must refuse, and a chooser guessing would be worse than a
   // chooser staying quiet.
   guestsLeft?: number,
-  // True once this account has declined the trial. It keeps its scans and can
-  // still scan other people; what it gave up is scanning ITSELF, which is the
-  // consequence the decline sheet named.
-  selfLocked?: boolean,
+  // Why "It's me" is closed, or null when it is open. Two different facts
+  // reach this chooser and they need two different sentences, so it carries a
+  // reason rather than a boolean:
+  //
+  //   "declined"  this account turned down the trial. It keeps its scans and
+  //               can still scan other people; what it gave up is scanning
+  //               ITSELF, which is the consequence the decline sheet named.
+  //   "weekly"    the personal scan for this week is already spent, and they
+  //               arrived here from the gate's "scan someone else instead".
+  //               The gate closed on the self scan; the chooser must not
+  //               reopen it.
+  selfLock?: SelfLock,
 ): void {
   closeSubjectChooser();
   const el = document.createElement("div");
@@ -84,10 +114,12 @@ export function openSubjectChooser(
         <h2 id="subj-h">Who's getting scanned?</h2>
         <p>Only your own scans count toward your progress: so a friend's face never moves your trend.</p>
         <div class="subjpick-opts">
-          <button class="subjpick-opt" data-who="me" type="button"${selfLocked ? " disabled" : ""}>
-            <b>It's me</b><span>${selfLocked
+          <button class="subjpick-opt" data-who="me" type="button"${selfLock ? " disabled" : ""}>
+            <b>It's me</b><span>${selfLock === "declined"
               ? "You turned down the trial, so your own scans are closed"
-              : "Counts toward your progress"}</span>
+              : selfLock === "weekly"
+                ? "This week's scan of your own face is already used"
+                : "Counts toward your progress"}</span>
           </button>
           <button class="subjpick-opt" data-who="other" type="button"${guestsLeft === 0 ? " disabled" : ""}>
             <b>Someone else</b><span>${guestsLeft === 0

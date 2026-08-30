@@ -467,7 +467,7 @@ function scanSection(scans: StoredScan[], legacyCount = 0, guestCount = 0, listC
         <!-- A ghost of what fills in: three rows shaped like the real scan
              rows. With no scans a desktop dashboard was two-thirds empty
              cream, which reads as a broken page rather than a young one. The
-             ghost carries no numbers — inventing a score to decorate an empty
+             ghost carries no numbers: inventing a score to decorate an empty
              state is exactly what this product must never do. -->
         <div class="dash-ghost" aria-hidden="true">
           <div class="dash-ghost-row"><i></i><b></b><s></s></div>
@@ -565,7 +565,7 @@ function profilePanel(scans: StoredScan[], avg: number): string {
         : ""
     }
     <p class="dash-prof-note">Scored against ${sex === "male" ? "men" : "women"}, and averaged across every
-      comparable scan on this device — one photograph carries about ${DISPLAY_NOISE.toFixed(1)} points of noise on its own.${
+      comparable scan on this device: one photograph carries about ${DISPLAY_NOISE.toFixed(1)} points of noise on its own.${
         spread != null
           ? ` Yours vary by ${spread.toFixed(1)} points either side of the average, and anything inside that band is the camera.`
           : ""

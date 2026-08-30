@@ -219,7 +219,7 @@ export function openScanRecall(scan: StoredScan, previous?: StoredScan): RecallH
   void loadPhotos(scanStorageKey(scan)).then((p) => {
     if (!shots || !shots.isConnected) return;
     if (!p || (!p.front && !p.side)) {
-      shots.innerHTML = `<p class="recall-note">No photograph kept for this scan — it was taken before thumbnails were stored, or on another device.</p>`;
+      shots.innerHTML = `<p class="recall-note">No photograph kept for this scan. It was taken before thumbnails were stored, or on another device.</p>`;
       return;
     }
     shots.innerHTML =

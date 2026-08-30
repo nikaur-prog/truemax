@@ -145,17 +145,24 @@ export async function POST(request: Request): Promise<Response> {
           .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>(),
         admin
           .from("profiles")
-          .select("trial_declined_at")
+          .select("trial_declined_at,downsell_redeemed_at")
           .eq("user_id", user.id)
-          .maybeSingle<{ trial_declined_at: string | null }>(),
+          .maybeSingle<{ trial_declined_at: string | null; downsell_redeemed_at: string | null }>(),
       ]);
       if (entitlementError) throw new Error(`Downsell pricing lookup failed: ${entitlementError.message}`);
       if (profileError) throw new Error(`Downsell eligibility lookup failed: ${profileError.message}`);
       const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
+      // Three conditions, and the third is the one that makes this an offer
+      // rather than a tier. "Declined and not a member" both stay true
+      // forever, so without a redemption stamp a declined account could come
+      // back to this endpoint for every future scan and never pay the standard
+      // price again. The client sends a fresh idempotency key each time, so
+      // nothing deduplicated it either.
+      //
       // A member is refused rather than quietly redirected to the standard
       // price: they already have the thing this sells, and charging them for
       // it because a stale tab offered it would be the worse outcome.
-      if (member || !prof?.trial_declined_at) {
+      if (member || !prof?.trial_declined_at || prof.downsell_redeemed_at) {
         return json({ error: "That offer is not available on this account." }, 403);
       }
       const downsellPrice =

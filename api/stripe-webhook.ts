@@ -129,6 +129,33 @@ export async function POST(request: Request): Promise<Response> {
             p_credits: 1,
           });
           if (error) throw new Error(`Scan credit grant failed: ${error.message}`);
+
+          // The downsell burns here, at fulfilment, and only here.
+          //
+          // Stamping it when the Checkout Session was created would take the
+          // offer away from somebody who opened it and closed it, and opening
+          // a checkout is not a purchase. Stamping it on a payment that
+          // completed is what makes it a one-time exit offer instead of a
+          // standing half-price tier for anybody who declined once.
+          //
+          // Ordered after the credit so a failure here cannot cost somebody
+          // the scan they paid for. The credit grant is idempotent on the
+          // event id; this write is idempotent by being a single timestamp.
+          //
+          // Somebody who subscribed between opening this checkout and paying
+          // it still gets the credit rather than a refusal. They paid, and a
+          // scan credit is worth something to a member too: it skips the
+          // weekly wait. Refusing to deliver a thing somebody has already been
+          // charged for is the worse of the two outcomes, and the session's
+          // own 31-minute expiry is what bounds how stale that can get.
+          if (session.metadata.offer === "decline_downsell") {
+            const stamped = await getSupabaseAdmin()
+              .from("profiles")
+              .update({ downsell_redeemed_at: new Date().toISOString() })
+              .eq("user_id", userId)
+              .is("downsell_redeemed_at", null);
+            if (stamped.error) throw new Error(`Downsell stamp failed: ${stamped.error.message}`);
+          }
         }
       }
 

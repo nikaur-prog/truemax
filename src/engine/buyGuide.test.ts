@@ -132,3 +132,21 @@ test("the search link is built from the category, not the advice headline", () =
     `search link "${url}" does not carry the named category`,
   );
 });
+
+test("a topical whose legal status varies says where it does not sit on a shelf", () => {
+  // Adapalene is genuinely over the counter in the US and much of the EU, so
+  // a blanket ban on naming it would be wrong: it is the one retinoid a
+  // person can usually just buy. What is wrong is implying that is true
+  // everywhere. "At the counter in most other places" read as an assurance,
+  // and in the UK, Australia and New Zealand it is prescription-only.
+  //
+  // The rule this pins is narrow and checkable: if the guide sends somebody
+  // to a pharmacy for something whose status differs by country, the `where`
+  // line has to name the places it is not simply on sale.
+  const adapalene = topicals.find((r) => r.id === "adapalene");
+  assert.ok(adapalene, "the adapalene recommendation is still in the engine");
+  const guide = buyGuideFor(adapalene!);
+  assert.ok(guide, "adapalene still carries a buying guide");
+  assert.match(guide!.where, /prescription/i, guide!.where);
+  assert.match(guide!.where, /UK|United Kingdom/, guide!.where);
+});

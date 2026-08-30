@@ -246,7 +246,7 @@ export function concernCleared(label: string, weeks: number): FollowUp {
   return {
     kind: "maintaining",
     headline: `Your ${label.toLowerCase()} has cleared.`,
-    body: `${weeks} weeks ago you told us this was the thing you wanted to work on, and the measurements no longer show it. Worth knowing what worked, because that is information about your face specifically rather than about faces in general. If you are using anything for it, a pharmacist is the right person to ask about what happens now, we measure, we do not prescribe.`,
+    body: `${weeks} weeks ago you told us this was the thing you wanted to work on, and the measurements no longer show it. Worth knowing what worked, because that is information about your face specifically rather than about faces in general. If you are using anything for it, a pharmacist is the right person to ask about what happens now. We measure, we do not prescribe.`,
     suggestChange: false,
   };
 }

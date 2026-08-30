@@ -178,6 +178,10 @@ export function nextFreeScanAt(allowance = 1): number | null {
 // proceeds and is spent, everyone else sees the countdown.
 export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
   const owner = activeScanOwner();
+  // A fresh run owes nothing to the last one. Cleared here rather than when
+  // the chooser closes, because this is the one function every capture path
+  // goes through, and the gate's guest button fires from inside it.
+  guestOnlyRun = false;
   // The base allowance first, with no network: a browser with an open slot at
   // allowance one has an open slot at every tier, so the common case stays a
   // pure localStorage check. Only a held slot goes on to ask who this is —
@@ -262,6 +266,29 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
 
 let host: HTMLElement | null = null;
 let timer: number | null = null;
+
+// ---------------------------------------------------------------------------
+// Set by the gate's "Scan someone else instead", cleared at the start of every
+// allowance check.
+//
+// That button used to hand back `proceed` itself, which is the callback that
+// runs the WHOLE normal flow. The comment beside it argued that the subject
+// chooser is the next screen, so "someone else" should be a choice made there
+// rather than a mode imposed behind their back. The intent was right and the
+// wiring was a hole: the chooser's "It's me" was still enabled, so a member
+// whose week was spent could press the gate's way out and then pick their own
+// face. Two taps around the weekly limit.
+//
+// The chooser still opens and they can still back out. What changes is that
+// the self option is closed, which is not a mode imposed on them, it is the
+// fact that sent them to the gate in the first place.
+// ---------------------------------------------------------------------------
+let guestOnlyRun = false;
+
+/** True when this run reached the flow through the gate's guest offer. */
+export function guestOnlyNow(): boolean {
+  return guestOnlyRun;
+}
 
 export function closeScanGate(): void {
   if (timer !== null) clearInterval(timer);
@@ -371,6 +398,9 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
   host.querySelector<HTMLButtonElement>("#sg-wait")!.onclick = closeScanGate;
   host.querySelector<HTMLButtonElement>("#sg-guest")?.addEventListener("click", () => {
     track("scan-gate-guest");
+    // Set BEFORE proceed runs, because proceed opens the chooser synchronously
+    // enough that a later assignment would miss it.
+    guestOnlyRun = true;
     closeScanGate();
     // Straight into the normal flow. The subject chooser is the next thing it
     // shows, so "someone else" is a choice they make there rather than a mode

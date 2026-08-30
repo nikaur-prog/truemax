@@ -1,6 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "./auth.js";
 import type { EntitlementTier } from "./entitlement.js";
+import { scopedStorageKey } from "./scanScope.js";
 
 // ---------------------------------------------------------------------------
 // Whether this account turned the trial down, and when.
@@ -57,21 +58,84 @@ export async function recordTrialDecline(): Promise<string | null> {
 // The subject chooser runs on a path with no network read of its own, so it
 // cannot await the profile. This holds the last known answer instead.
 //
-// Defaults to FALSE and is reset on every identity change, which is the
-// opposite direction from the tier cache beside it and deliberately so: an
-// unread tier must not hand out an allowance nobody paid for, while an unread
-// decline must not refuse somebody their own face on a network hiccup.
+// It is BACKED BY THE DEVICE, and that mirror is the whole point of this
+// block. In memory alone the cache defaults to false and is reset to false on
+// every identity change, so a declined account only had to reload the page and
+// fail one profile read to come back un-declined. Flight mode and a refresh.
+// The in-memory reasoning ("an unread decline must not refuse somebody their
+// own face on a hiccup") was sound for a hiccup and wrong for a reload,
+// because a reload turns the unknown state into something anybody can reach on
+// purpose, twice a minute.
+//
+// The mirror is written where the decline is CONFIRMED, so every real declined
+// account has one: the decline is made through this app, on this device. It is
+// scoped per account like every other device-local record here, so one
+// person's stamp cannot answer for another's.
+//
+// What is left open is a declined account meeting a failing read on a device
+// it has never successfully loaded on. That is a genuine unknown rather than a
+// repeatable trick, and it stays lenient, because refusing somebody their own
+// face on a fact never once read is still the worse of the two mistakes.
+// Clearing the mirror needs devtools, which is the same bar as every other
+// client-side check in the app.
 // ---------------------------------------------------------------------------
 
-let cached = false;
+const DECLINE_KEY = "truemax.declined";
+
+function readMirror(): boolean {
+  try {
+    const key = scopedStorageKey(DECLINE_KEY);
+    if (!key) return false;
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeMirror(value: boolean): void {
+  try {
+    const key = scopedStorageKey(DECLINE_KEY);
+    if (!key) return;
+    if (value) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
+  } catch {
+    // A browser refusing storage is not a reason to fail the scan. The
+    // in-memory cache still holds for this page view.
+  }
+}
+
+let cached: boolean | null = null;
 
 export function declinedNow(): boolean {
+  // Null means nothing has been set this page view, which is exactly the
+  // cold-start case the mirror exists for.
+  if (cached === null) cached = readMirror();
   return cached;
 }
 
-/** Set from the entitlement read, from a confirmed decline, and on sign-out. */
+/**
+ * Set from the entitlement read, from a confirmed decline, and on sign-out.
+ *
+ * Writes through to the device so the answer survives a reload. A confirmed
+ * decline persists; a confirmed NON-decline clears the stamp, which is what
+ * keeps a decline reversed in the database from being re-imposed by a stale
+ * device record.
+ */
 export function setDeclinedCache(value: boolean): void {
   cached = value;
+  writeMirror(value);
+}
+
+/**
+ * Forget the cached answer without asserting a new one.
+ *
+ * For an identity change, where the previous account's answer must not carry
+ * over and the next account's has not been read yet. Distinct from
+ * setDeclinedCache(false), which is a claim that somebody has NOT declined and
+ * would erase the incoming account's stamp before it was ever consulted.
+ */
+export function clearDeclinedCache(): void {
+  cached = null;
 }
 
 /**
@@ -96,10 +160,13 @@ export function setDeclinedCache(value: boolean): void {
  * On a free account with a failed read the PREVIOUS answer stands. A failure
  * is not evidence that anybody un-declined, and it is not evidence that they
  * did either, so the last thing actually known is better than a guess in
- * either direction. That leaves the cold-start case still open in the lenient
- * direction — first load, failed read, nothing known — which is deliberate:
- * refusing somebody their own face on the strength of a fact never once read
- * is the worse of the two mistakes.
+ * either direction.
+ *
+ * "Previous" reaches further than this page view: declinedNow falls back to a
+ * per-account device stamp written when the decline was confirmed. That is
+ * what closes the reload. Without it, an in-memory cache resetting to false
+ * meant a declined account could refresh with the network blocked and come
+ * back un-declined, which is a trick rather than an edge case.
  */
 export function nextDeclinedCache(
   tier: EntitlementTier,

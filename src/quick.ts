@@ -1435,10 +1435,10 @@ function renderCalibrationSet(): void {
                     <span>${
                       f.thumb ? `<img class="q-cal-thumb" src="${f.thumb}" alt="" />` : `<i class="q-cal-thumb none"></i>`
                     }${f.label ? escapeHtml(f.label) : f.id}${flag}${suspectFlag}</span>
-                    <span>${f.rating === null ? ", " : f.rating.toFixed(1)}</span>
+                    <span>${f.rating === null ? "–" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
                     <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
-                      gap === null ? ", " : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
+                      gap === null ? "–" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
                     }</span>
                     <span class="q-cal-acts">${
                       f.ratedBy === undefined && f.rating !== null
@@ -3249,7 +3249,7 @@ function comparisonHTML(before: Report, after: Report): string {
       (m) => `
         <tr data-dir="${m.direction}">
           <th scope="row">${m.label}</th>
-          <td>${m.before === null ? ", " : m.before.toFixed(1)}</td>
+          <td>${m.before === null ? "–" : m.before.toFixed(1)}</td>
           <td>${m.after.toFixed(1)}</td>
           <td class="q-cmp-delta">${moveLabel(m)}</td>
         </tr>`,

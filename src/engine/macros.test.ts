@@ -13,7 +13,7 @@ import {
   mifflinStJeor,
   oldEnoughForMacros,
 } from "./macros.js";
-import type { BodyInput } from "./macros.js";
+import type { Activity, BodyInput } from "./macros.js";
 
 const BASE: BodyInput = {
   age: 28,
@@ -241,15 +241,25 @@ test("the macros never total more energy than the day they are printed under", (
   for (let weightKg = 35; weightKg <= 300; weightKg += 5) {
     for (const bodyFat of [undefined, 0.03, 0.15, 0.3, 0.45, 0.6]) {
       for (const goal of ["lean", "hold", "build"] as const) {
-        const plan = macroPlan({ ...HEAVY, goal, weightKg, ...(bodyFat === undefined ? {} : { bodyFat }) });
+        // Activity and sex are in the sweep because the reported overflow was
+        // at a high activity factor, and the first version of this test held
+        // both fixed at sedentary and male. A sweep that does not move every
+        // input is a sweep that finds only the corner you already knew about.
+        for (const activity of Object.keys(ACTIVITY) as Activity[]) {
+        for (const sex of ["male", "female"] as const) {
+        const plan = macroPlan({ ...HEAVY, sex, activity, goal, weightKg, ...(bodyFat === undefined ? {} : { bodyFat }) });
         const sum = plan.protein * 4 + plan.carbs * 4 + plan.fat * 9;
-        // Three gram figures rounded to whole grams cannot land exactly on a
-        // rounded kcal figure, so the tolerance is the rounding and nothing
-        // more: 9 kcal is one gram of fat.
+        // ZERO tolerance. The old nine-kcal allowance was written to excuse
+        // independent rounding, and it hid a real overflow: 4,382 kcal of
+        // macros under a 4,374 kcal day. The grams are rounded before the day
+        // is read off them now, so the printed figures agree exactly, and a
+        // test that accepts a gap is a test that would let the gap back in.
         assert.ok(
-          sum - plan.calories <= 9,
-          `${weightKg}kg at ${bodyFat}: ${Math.round(sum)} kcal of macros under a ${plan.calories} kcal day`,
+          sum <= plan.calories,
+          `${weightKg}kg at ${bodyFat}, ${sex}/${activity}/${goal}: ${sum} kcal of macros under a ${plan.calories} kcal day`,
         );
+        }
+        }
       }
     }
   }

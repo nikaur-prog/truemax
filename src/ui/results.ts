@@ -786,7 +786,7 @@ function showSideRegion(id: RegionId): void {
     <div class="reveal">
       ${sideRegionDeck(r, report)}
       <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>
-        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against: the score above is real, the curve would be invented.</p></div>
+        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against. The score above is real; the curve would be invented.</p></div>
     </div>`;
 
   revealBars();
@@ -2817,7 +2817,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
   // the best-evidenced thing comes first, so the cheapest and most certain
   // options are what someone reads before anything they could spend money on.
   const GROUPS: Array<[string, string, string]> = [
-    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country, and a pharmacist will know what's on the shelf where you are."],
+    ["topical", "APPLY", "Nothing here is a prescription from us. Availability and permitted strengths differ by country: what is on a shelf in one place is behind the counter or prescription-only in another, and the pharmacist where you are is the one who knows which. Each entry says what we know."],
     ["food", "EAT", "Facts about food, not a diet. No targets, no counting, nothing to buy."],
     ["habit", "DO", "Free, and mostly the things that compound."],
     ["professional", "ASK SOMEONE", "The things worth paying a person for rather than guessing at."],

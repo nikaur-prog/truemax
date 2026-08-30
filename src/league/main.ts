@@ -586,7 +586,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     const sprints = (await loadSprints()).filter((s) => sprintIsLive(s));
     mount.innerHTML = `<h1 class="lg-h">Submit a video</h1>
       <p class="lg-sub">Paste the link the moment it's live. Only submitted, approved links count
-      toward your totals, if we can't see it, we can't pay on it.</p>
+      toward your totals. If we can't see it, we can't pay on it.</p>
       <div class="lg-card lg-form" style="max-width:520px;margin-left:0">
         <label for="sb-sprint">Sprint</label>
         <select id="sb-sprint">${sprints.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
@@ -946,7 +946,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       calls that cost us money (a voiceover, a 4K pass), everything else is unmetered.</p>
       <div class="lg-card" id="lg-quota-card">
         <div class="lg-row" style="border:none;padding:0 0 8px"><h3>Renders this month</h3>
-        <b class="lg-num" id="lg-quota-num">, / ${me.monthly_render_quota}</b></div>
+        <b class="lg-num" id="lg-quota-num">– / ${me.monthly_render_quota}</b></div>
         <div class="lg-bar"><i id="lg-quota-fill" style="width:0%"></i></div>
         <div class="lg-bar-note">Resets on the 1st. Need more? Ask, quotas are set per creator.</div>
       </div>

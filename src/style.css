@@ -2020,15 +2020,30 @@ body.cam-takeover .cam-actions .btn.gho:hover,
 body.cam-takeover .cam-actions .btn.cancel:hover {
   background: rgba(16, 17, 19, 0.72); border-color: rgba(255, 255, 255, 0.45);
 }
+/* How tall the floating action row actually is, so the two things that must
+   sit above it stop guessing. Both carried their own copy of the one-row
+   height (84 and 88), and when the row became two rows on a phone the glasses
+   link landed inside it. One value, declared where the row is described, and
+   the phone override lives beside the grid that causes it. */
+body.cam-takeover { --cam-actions-h: 84px; }
+/* Two rows of buttons on a phone, a 10px gap and 16px of padding top and
+   bottom, which measures 144px in Chromium at 390 and 430. Declared AFTER the
+   one-row value rather than beside the grid that produces it: both selectors
+   are body.cam-takeover, so they carry identical specificity and source order
+   is the only thing that separates them. Put earlier, the phone value simply
+   lost. */
+@media (max-width: 760px) {
+  body.cam-takeover { --cam-actions-h: 144px; }
+}
 body.cam-takeover #btn-noglasses {
   position: fixed; left: 50%; transform: translateX(-50%); z-index: 322;
-  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--cam-actions-h) + 12px + env(safe-area-inset-bottom, 0px));
   color: #fff; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
 }
 /* Clear the notch, and lift the lamp bar off the floating action row. */
 body.cam-takeover .cam-hud {
   padding: calc(16px + env(safe-area-inset-top, 0px)) 16px
-    calc(88px + env(safe-area-inset-bottom, 0px));
+    calc(var(--cam-actions-h) + 16px + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 761px) {
   /* Full-bleed made the frame the width of the monitor, and the HUD furniture

@@ -261,24 +261,38 @@ export function macroPlan(input: BodyInput): MacroPlan {
   const remainder = calories - protein * KCAL_PER_G.protein - fat * KCAL_PER_G.fat;
   const carbs = Math.max(0, remainder / KCAL_PER_G.carbs);
 
-  // The two floors are floors, so the day cannot be smaller than they are.
+  // Round the grams FIRST, then read the day off them.
   //
+  // The check that the macros cannot outrun the day used to be made on the
+  // unrounded figures and then every number was rounded independently, so the
+  // guarantee applied to arithmetic nobody sees. Three grams each rounding up
+  // against a calorie figure rounding down is up to about nine kcal of
+  // disagreement, and it was reachable: 4,382 kcal of macros printed under a
+  // 4,374 kcal day. Small, and exactly the kind of thing that makes somebody
+  // stop trusting a calculator, because they can add three numbers.
+  //
+  // These four are what the card prints, so these four are what the invariant
+  // is about. The day is the larger of the target and the food, both as
+  // whole numbers, and the sum can now never exceed it by even one kcal.
+  const proteinG = Math.round(protein);
+  const fatG = Math.round(fat);
+  const carbsG = Math.round(carbs);
+  const macroKcal =
+    proteinG * KCAL_PER_G.protein + fatG * KCAL_PER_G.fat + carbsG * KCAL_PER_G.carbs;
+  // The floors are floors, so the day cannot be smaller than they are.
   // Clamping carbohydrate at zero and printing the original target anyway is
-  // how the numbers came to disagree: the remainder went negative, the clamp
-  // hid it, and the plan listed more food than the calorie line above it. The
-  // reference mass makes that unreachable on any accepted input, and this
-  // still stands behind it, because a calculator whose own figures contradict
-  // each other is worse than one that says a slightly larger number.
-  const floorKcal = protein * KCAL_PER_G.protein + fat * KCAL_PER_G.fat + carbs * KCAL_PER_G.carbs;
-  const day = Math.max(calories, floorKcal);
+  // how the numbers first came to disagree: the remainder went negative and
+  // the clamp hid it. The reference mass makes that unreachable on any
+  // accepted input, and this still stands behind it.
+  const day = Math.max(Math.round(calories), macroKcal);
 
   return {
     bmr: Math.round(bmr),
     maintenance: Math.round(maintenance),
-    calories: Math.round(day),
-    protein: Math.round(protein),
-    carbs: Math.round(carbs),
-    fat: Math.round(fat),
+    calories: day,
+    protein: proteinG,
+    carbs: carbsG,
+    fat: fatG,
     basis: useKatch ? "katch" : "mifflin",
     floored,
   };

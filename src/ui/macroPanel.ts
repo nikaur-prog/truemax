@@ -54,11 +54,21 @@ export function macroPanelHTML(ctx: MacroPanelCtx, now = new Date()): string {
     );
   }
   if (!oldEnoughForMacros(ctx.dateOfBirth, now)) {
-    // Deliberately does not say "you are too young", because on a missing date
-    // of birth that would be a claim we cannot make. It says what is true: the
-    // calculator is for adults and we do not have a date on file.
+    // Two different facts reach this branch and they were sharing one
+    // sentence. "Add a date of birth in your account settings" is the right
+    // thing to say to somebody who has not given one; said to a sixteen-year-
+    // old who has, it is an instruction they cannot follow, pointing at a
+    // field that is already filled in.
+    //
+    // Neither version says "you are too young". On a missing date that would
+    // be a claim we cannot make, and on a real one it is not the useful half:
+    // what they need to know is that the calculator opens at eighteen and
+    // nothing else on their plan is affected.
+    const known = Boolean(ctx.dateOfBirth);
     return shell(
-      `<p class="mac-note">The calculator is for adults only, and it works from your date of birth rather than a tick box. Add one in your account settings and it will appear here.</p>`,
+      `<p class="mac-note">${known
+        ? "The calculator is the one part of the plan that opens at 18, and your date of birth says not yet. Everything else here is unchanged, and this appears on its own when the date passes."
+        : "The calculator is for adults only, and it works from your date of birth rather than a tick box. Add one in your account settings and it will appear here."}</p>`,
     );
   }
 

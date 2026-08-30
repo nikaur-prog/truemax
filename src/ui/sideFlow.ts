@@ -559,7 +559,35 @@ export function openSideAdjust(
   mountVerify(photo, { ...seed, method: seed.method ?? "existing" }, ctx, "REVIEW LANDMARKS");
 }
 
+// ---------------------------------------------------------------------------
+// Dialogs that outlive the function call that opened them.
+//
+// Both the placement sheet and the consent dialog hand a promise back to a
+// caller holding closures over the CURRENT scan: which photograph, which
+// points, which feedback record. Neither was torn down by close(), so an
+// identity change or a retake left the sheet on screen with its handlers
+// live, and the next tap ran the previous scan's code against the new one.
+// The promise never settled either, so the awaiting closure was held forever.
+//
+// Registering the cancel here is what lets close() be the single place that
+// knows how to take the side flow down. Cancelling settles the promise in the
+// direction that does nothing: no mode chosen, no consent given.
+// ---------------------------------------------------------------------------
+const openDialogs = new Set<() => void>();
+
+function trackDialog(cancel: () => void): () => void {
+  openDialogs.add(cancel);
+  return () => openDialogs.delete(cancel);
+}
+
+function cancelDialogs(): void {
+  // Copied before iterating: each cancel removes itself from the set.
+  for (const cancel of [...openDialogs]) cancel();
+  openDialogs.clear();
+}
+
 export function close(): void {
+  cancelDialogs();
   stopSideCamera();
   verifier?.destroy();
   verifier = null;
@@ -1142,6 +1170,13 @@ function mountVerify(
     document.getElementById("side-go")!.onclick = () => void confirmPlacement();
     const wrong = document.getElementById("side-wrong");
     if (wrong) wrong.onclick = async () => {
+      // Disabled BEFORE the await, not after it. The dialog takes a frame to
+      // appear and the button stayed live across it, so a double tap opened
+      // two consent backdrops stacked on each other: answering the top one
+      // left the second still standing over the photograph, and the second
+      // answer overwrote the first.
+      if (wrong.hasAttribute("disabled")) return;
+      wrong.setAttribute("disabled", "true");
       // The complaint is the moment to ask, because the complaint is the
       // evidence. What is deliberately NOT here is any mention of an account:
       // being asked to sign up before you have even confirmed your points is
@@ -1150,7 +1185,6 @@ function mountVerify(
       flaggedWrong = true;
       consentAnswer = await askSideFeedbackConsent();
       const wrongButton = document.getElementById("side-wrong");
-      wrongButton?.setAttribute("disabled", "true");
       if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
       e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
         <p class="side-sub">${consentAnswer
@@ -1323,6 +1357,9 @@ function mountVerify(
     // thirteen rings it is about rather than over an empty frame.
     showReviewActions();
     void askPlacementMode(e.frame, seed.confidence ?? 1).then((mode) => {
+      // Null is a cancelled sheet: the flow was closed or the identity changed
+      // underneath it, and there is nothing left for either branch to act on.
+      if (mode === null) return;
       if (mode === "manual") {
         showGuidedActions();
         return;
@@ -1357,9 +1394,10 @@ function mountVerify(
  * answers are complete and neither is destructive: taking the points still
  * lands on a screen where every one of them can be dragged.
  */
-function askPlacementMode(frame: HTMLElement, confidence: number): Promise<"auto" | "manual"> {
+function askPlacementMode(frame: HTMLElement, confidence: number): Promise<"auto" | "manual" | null> {
   const low = confidence < 0.7;
   return new Promise((resolve) => {
+    let done = false;
     const sheet = document.createElement("div");
     sheet.className = "side-mode-sheet";
     sheet.dataset.verifyChrome = "1";
@@ -1383,11 +1421,18 @@ function askPlacementMode(frame: HTMLElement, confidence: number): Promise<"auto
     sheet.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     frame.appendChild(sheet);
     sheet.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
+    const settle = (mode: "auto" | "manual" | null) => {
+      if (done) return;
+      done = true;
+      untrack();
+      sheet.remove();
+      resolve(mode);
+    };
+    const untrack = trackDialog(() => settle(null));
     sheet.onclick = (ev) => {
       const mode = (ev.target as HTMLElement).dataset.mode;
       if (mode !== "auto" && mode !== "manual") return;
-      sheet.remove();
-      resolve(mode);
+      settle(mode);
     };
   });
 }
@@ -1421,10 +1466,26 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
     const no = backdrop.querySelector<HTMLButtonElement>('[data-choice="no"]')!;
     const yes = backdrop.querySelector<HTMLButtonElement>('[data-choice="yes"]')!;
     let finished = false;
+    let thanksTimer = 0;
+    // Cancelled by close(), which is also the identity-change path. No consent
+    // is the safe direction and the honest one: nobody answered.
+    const untrack = trackDialog(() => {
+      if (finished) {
+        // Already on the thank-you card with its timer running. The dialog is
+        // going away now, so the timer must not fire into a torn-down flow.
+        window.clearTimeout(thanksTimer);
+        backdrop.remove();
+        return;
+      }
+      finished = true;
+      backdrop.remove();
+      resolve(false);
+    });
     const finish = (choice: boolean) => {
       if (finished) return;
       finished = true;
       if (!choice) {
+        untrack();
         backdrop.remove();
         resolve(false);
         return;
@@ -1442,7 +1503,8 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       const waiting = signedIn ? "when you confirm" : "once you are signed in";
       dialog.innerHTML = `<span class="side-feedback-thanks" aria-live="polite">Thank you.</span>
         <p>We’ll share it privately ${waiting}.</p>`;
-      window.setTimeout(() => {
+      thanksTimer = window.setTimeout(() => {
+        untrack();
         backdrop.remove();
         resolve(true);
       }, 850);

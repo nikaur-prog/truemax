@@ -36,6 +36,7 @@ import {
   consumePendingScanCredit,
   discardPendingScanCredit,
   ensureScanAllowed,
+  guestOnlyNow,
   guestScansLeft,
   recordScanRun,
 } from "./ui/scanGate.js";
@@ -74,8 +75,10 @@ import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js"
 import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
-import { openSubjectChooser } from "./ui/subjectChooser.js";
+import { openSubjectChooser, selfLockFor } from "./ui/subjectChooser.js";
+import type { SelfLock } from "./ui/subjectChooser.js";
 import {
+  clearDeclinedCache,
   declinedNow,
   loadTrialDeclined,
   nextDeclinedCache,
@@ -746,7 +749,12 @@ function ensureSex(then: () => void): void {
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  }, undefined, guestScansLeft(lastKnownTier, declinedNow()), declinedNow());
+  }, undefined, guestScansLeft(lastKnownTier, declinedNow()), selfLockNow());
+}
+
+/** The two facts the chooser needs, read at the moment it opens. */
+function selfLockNow(): SelfLock {
+  return selfLockFor(declinedNow(), guestOnlyNow());
 }
 
 // The late form of the same question, for a scan captured with nobody signed
@@ -779,7 +787,7 @@ function askLateSubject(): Promise<boolean> {
       // in at the gate, and answer a chooser that had never heard of the
       // guest budget or the decline.
       guestScansLeft(lastKnownTier, declinedNow()),
-      declinedNow(),
+      selfLockNow(),
     );
   });
 }
@@ -1561,6 +1569,11 @@ function resetToUpload(): void {
   subjectAsked = false;
   skipCoveringCheck = false;
   feedbackInFlight = null;
+  // The sweeping scan animation belongs to a run that no longer exists. Every
+  // abandon path inside the scan clears this class; the reset that ends the
+  // run from the outside did not, so a scan reset mid-analysis left the upload
+  // screen wearing it and the next capture inherited it.
+  el.frame.classList.remove("scanning");
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
   el.photoCanvas.width = 1;
@@ -2840,7 +2853,12 @@ if (isAuthAvailable()) {
       // other's self-scan. They go back to the closed defaults and are
       // repopulated by the next entitlement read.
       lastKnownTier = "free";
-      setDeclinedCache(false);
+      // CLEAR rather than set-false. setDeclinedCache(false) is a claim that
+      // this account has not declined, and it writes that claim through to the
+      // device: on an identity change it would erase the incoming account's
+      // stamp before that account's entitlement had ever been read. Forgetting
+      // is the honest operation here; the next read supplies the answer.
+      clearDeclinedCache();
       clearResultsIdentityState();
       closeScanGate();
       closeDashboard();
