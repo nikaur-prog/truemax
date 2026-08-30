@@ -11,10 +11,17 @@ import {
   validateOnboardingStep,
 } from "../engine/onboarding.js";
 import type { OnboardingProfile } from "../engine/onboarding.js";
-import { hasPaidAccess, loadEntitlement, openBillingPortal, startTrialCheckout } from "../engine/entitlement.js";
+import {
+  hasPaidAccess,
+  loadEntitlement,
+  openBillingPortal,
+  startDownsellCheckout,
+  startTrialCheckout,
+} from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
 import { recordTrialDecline, setDeclinedCache } from "../engine/trialDecline.js";
+import { SCAN_PRICE_MEMBER } from "../engine/scanPricing.js";
 import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import type { CeilingInput } from "./ceilingCta.js";
@@ -274,8 +281,85 @@ async function confirmDecline(sheet: HTMLElement): Promise<void> {
   // reads this cache on the very next scan, with no round trip of its own.
   track("offer-declined-confirmed");
   setDeclinedCache(true);
-  sheet.remove();
-  close();
+  // The decline is RECORDED BEFORE the downsell is offered, and the order is
+  // the point. Holding the stamp back until after one more offer would make
+  // the confirmation a lie: they pressed the button that says "no thanks" and
+  // nothing happened. It also makes the offer verifiable, because the server
+  // will only quote the downsell price to an account it can see has declined.
+  showDownsell(sheet);
+}
+
+/**
+ * One offer after the no, and then it is over.
+ *
+ * The subscription was declined and that is done. What is left is the analysis
+ * of the scan they have already given us, which is a different thing to sell:
+ * one payment, no plan, no renewal, and it opens the report that is already
+ * sitting behind the wall. The member price rather than the standard single
+ * scan price, because the alternative on the table here is not a subscription,
+ * it is nothing.
+ *
+ * Two sheets is the limit. There is no third screen, "No thanks" closes the
+ * whole funnel, and Escape does the same: a decline that takes three refusals
+ * to land is not a funnel, it is a trap, and it is the exact thing that gets a
+ * product in this category written about.
+ */
+function showDownsell(previous: HTMLElement): void {
+  track("downsell-shown");
+  // A NEW element rather than new innerHTML in the old one. The confirmation
+  // sheet's click listener is still bound to that node, and it answers a
+  // backdrop tap by tracking "offer-declined-kept" — an event that would now
+  // be false, since the decline is already stamped. Swapping the node retires
+  // the listener with it.
+  const host = previous.parentElement;
+  const sheet = document.createElement("div");
+  sheet.className = "decline-sheet downsell";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-labelledby", "decline-title");
+  previous.remove();
+  host?.appendChild(sheet);
+  sheet.innerHTML = `<div class="decline-card">
+    <h3 id="decline-title">Your analysis is still there</h3>
+    <p>No plan, then. The full breakdown of the scan you already did is a
+      separate thing: every measurement, your region scores and where each one
+      sits against the reference, unlocked on this account for
+      ${SCAN_PRICE_MEMBER}. One payment, nothing renews.</p>
+    <p class="decline-err" role="status" aria-live="polite"></p>
+    <div class="decline-actions">
+      <button type="button" class="btn pri" data-down="buy">Unlock it for ${SCAN_PRICE_MEMBER}</button>
+      <button type="button" class="btn gho" data-down="no">No thanks</button>
+    </div>
+  </div>`;
+  // Focus lands on the way out, not on the payment. The person has already
+  // said no once; the button under their thumb should not be the one that
+  // charges them.
+  sheet.querySelector<HTMLButtonElement>('[data-down="no"]')?.focus();
+  sheet.onclick = async (event) => {
+    const target = event.target as HTMLElement;
+    // The backdrop closes it, unlike the confirmation sheet above. There the
+    // backdrop was a way back to the offer; here there is nothing behind it
+    // to go back to, and dismissing an offer is a complete answer to it.
+    if (target === sheet || target.dataset.down === "no") {
+      track("downsell-declined");
+      sheet.remove();
+      close();
+      return;
+    }
+    if (target.dataset.down !== "buy") return;
+    const buy = sheet.querySelector<HTMLButtonElement>('[data-down="buy"]')!;
+    const no = sheet.querySelector<HTMLButtonElement>('[data-down="no"]');
+    buy.disabled = true;
+    buy.textContent = "Opening checkout…";
+    track("downsell-checkout");
+    const result = await startDownsellCheckout();
+    // A redirect never returns, so reaching this line at all is the failure.
+    buy.disabled = false;
+    buy.textContent = `Unlock it for ${SCAN_PRICE_MEMBER}`;
+    if (no) no.disabled = false;
+    const note = sheet.querySelector<HTMLElement>(".decline-err");
+    if (note) note.textContent = result.message ?? "That did not open. Check your connection and try again.";
+  };
 }
 
 function close(): void {
@@ -303,6 +387,16 @@ function onKey(event: KeyboardEvent): void {
   // read it.
   const sheet = host?.querySelector<HTMLElement>(".decline-sheet");
   if (sheet) {
+    // The downsell is the same node type in the same slot but a different
+    // moment: the decline has already landed, so Escape here is not backing
+    // out of anything, it is declining the offer and leaving. Reporting it as
+    // "kept" would say somebody stayed on the plan they had just cancelled.
+    if (sheet.classList.contains("downsell")) {
+      track("downsell-declined");
+      sheet.remove();
+      close();
+      return;
+    }
     track("offer-declined-kept");
     sheet.remove();
     return;

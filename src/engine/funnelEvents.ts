@@ -39,6 +39,14 @@ export const FUNNEL_EVENTS = [
   "offer-declined-confirmed",
   // Backed out of the sheet and stayed in the offer.
   "offer-declined-kept",
+  // The one offer after the no: the analysis they already have, unlocked once
+  // at the member price. Counted as three separate events because the useful
+  // question is which of the two steps loses people. A high shown-to-declined
+  // ratio says the offer is wrong; a high checkout-to-nothing gap says the
+  // checkout is.
+  "downsell-shown",
+  "downsell-checkout",
+  "downsell-declined",
 ] as const;
 
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];

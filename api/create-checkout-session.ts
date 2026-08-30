@@ -116,6 +116,81 @@ export async function POST(request: Request): Promise<Response> {
       return json({ url: session.url });
     }
 
+    // The decline downsell.
+    //
+    // Somebody who has just turned the trial down is not a member and is not
+    // going to become one today, and the standard $5.99 single scan is the
+    // wrong number to put in front of them: the alternative on the table is
+    // nothing at all, not a subscription. So they are offered the same scan
+    // credit at the member price, once.
+    //
+    // THE ELIGIBILITY IS CHECKED HERE, not carried up from the client, and
+    // that is the whole reason this is a separate branch rather than a flag on
+    // the scan branch. A "give me the cheap price" field in a request body is
+    // a cheap price for everybody who opens the console, and the standard
+    // price then means nothing. The two conditions the server can actually
+    // verify are that the account declined and that it is not already a
+    // member, and those are exactly the two that make the offer honest.
+    //
+    // The purpose marker is the ordinary scan_credit one: this is the same
+    // product, bought at a different moment, so the webhook needs to know
+    // nothing about the downsell existing.
+    if (body?.purchase === "downsell") {
+      const admin = getSupabaseAdmin();
+      const [{ data: ent, error: entitlementError }, { data: prof, error: profileError }] = await Promise.all([
+        admin
+          .from("entitlements")
+          .select("stripe_customer_id,status,tier")
+          .eq("user_id", user.id)
+          .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>(),
+        admin
+          .from("profiles")
+          .select("trial_declined_at")
+          .eq("user_id", user.id)
+          .maybeSingle<{ trial_declined_at: string | null }>(),
+      ]);
+      if (entitlementError) throw new Error(`Downsell pricing lookup failed: ${entitlementError.message}`);
+      if (profileError) throw new Error(`Downsell eligibility lookup failed: ${profileError.message}`);
+      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
+      // A member is refused rather than quietly redirected to the standard
+      // price: they already have the thing this sells, and charging them for
+      // it because a stale tab offered it would be the worse outcome.
+      if (member || !prof?.trial_declined_at) {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+      const downsellPrice =
+        process.env.STRIPE_DOWNSELL_PRICE_ID
+        || process.env.STRIPE_PRICE_SCAN_DOWNSELL
+        // Falls back to the member scan price, which is the same amount for
+        // the same product. A dedicated price is worth configuring so the
+        // downsell can be read separately in Stripe, but the offer working is
+        // worth more than the reporting.
+        || process.env.STRIPE_MEMBER_SCAN_PRICE_ID
+        || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER
+        || null;
+      if (!downsellPrice) return json({ error: "Single scans are still being connected." }, 503);
+      const session = await getStripe().checkout.sessions.create(
+        {
+          mode: "payment",
+          expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+          line_items: [{ price: downsellPrice, quantity: 1 }],
+          success_url: `${origin}/?purchase=scan-success`,
+          cancel_url: `${origin}/?purchase=scan-cancelled`,
+          client_reference_id: user.id,
+          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
+          metadata: { supabase_user_id: user.id, purpose: "scan_credit", offer: "decline_downsell" },
+          custom_text: {
+            submit: { message: "Your full analysis, unlocked the moment payment completes. One payment, no subscription." },
+          },
+        },
+        request.headers.get("x-idempotency-key")
+          ? { idempotencyKey: request.headers.get("x-idempotency-key") as string }
+          : undefined,
+      );
+      if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+      return json({ url: session.url });
+    }
+
     // One voiced analysis export — a payment like the scan credit, one flat
     // price for everyone. There is no member price on purpose: the cost being
     // covered is the synthesis call, and that costs the same whoever asks.
