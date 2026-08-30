@@ -1557,51 +1557,66 @@ button.pillar:active { transform: translateY(0); }
 }
 
 /* Take these points, or place them yourself.
-   A sheet along the BOTTOM of the frame rather than a box in the middle of it,
-   because the question is about the thirteen rings on the photograph and
-   covering them to ask it would leave nothing to answer with. The frame is
-   position: relative (.face-frame), so inset works off the photo rather than
-   off the page. */
-.side-mode-sheet {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 14;
-  padding: 12px 14px 13px; line-height: normal;
-  background: linear-gradient(to top, rgba(10, 11, 13, 0.95) 68%, rgba(10, 11, 13, 0));
-  animation: side-mode-in 0.22s ease-out;
+
+   A centred dialog over a blurred page, not a sheet along the bottom of the
+   photo frame. The sheet was pinned there so the thirteen rings stayed visible
+   while the question about them was asked, which sounded right and read as
+   clutter: it landed directly over the review row, so the same two choices
+   were on screen twice, four inches apart, in two different visual languages.
+   The evidence moves inside the dialog instead, small, and the row behind is
+   hidden while this is up. */
+.side-mode-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  /* Flex with an auto margin rather than `place-items: center`, and scrollable.
+     A grid-centred child taller than its container is clipped at the TOP in
+     every engine, which on a short phone in landscape would hide the heading
+     and leave two unexplained buttons. This centres while it fits and scrolls
+     when it does not. */
+  display: flex; align-items: center; justify-content: center; overflow-y: auto;
+  padding: 20px; background: rgba(12, 13, 15, 0.66); backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  animation: side-mode-in 0.2s ease-out;
 }
-@keyframes side-mode-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .side-mode-sheet { animation: none; } }
-/* Kept deliberately short. Every row this sheet adds is a row of the
-   photograph it covers, and on a side profile the bottom of the frame is the
-   jaw and the chin: the points somebody most needs to see to answer. */
-.side-mode-card { max-width: 420px; margin: 0 auto; color: #f4f4f5; text-align: left; }
-.side-mode-card h3 {
-  font-family: var(--serif); font-weight: 400; font-size: 17px;
-  margin: 0 0 4px; line-height: 1.2; color: #fff;
+@keyframes side-mode-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .side-mode-backdrop { animation: none; } }
+/* Centred, because there is one thing on it and no reason to read it as a
+   form. Narrow, because a wide card at this word count is mostly whitespace
+   with two buttons floating in it. */
+.side-mode-card {
+  width: min(400px, 100%); margin: auto; flex: 0 0 auto;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 24px; padding: 26px 26px 22px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.28); text-align: center;
 }
-.side-mode-card p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.45; color: rgba(244, 244, 245, 0.86); }
-/* Side by side rather than stacked, for the same reason: one row instead of
-   two. Equal widths, because neither of these is the wrong answer. */
-.side-mode-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.side-mode-actions .btn { width: 100%; padding: 10px 8px; font-size: 13px; min-width: 0; }
-/* Both buttons sit on a dark ground here, so neither can borrow the light
-   theme's ink: the primary inverts and the ghost takes a light border. */
-.side-mode-actions .btn.pri {
-  background: #f4f4f5; color: #101113; border-color: #f4f4f5;
+.side-mode-card h2 {
+  font-family: var(--serif); font-weight: 300; font-size: 26px;
+  letter-spacing: -0.02em; margin: 9px 0 16px; line-height: 1.15;
 }
-.side-mode-actions .btn.pri:hover { background: #fff; border-color: #fff; }
-.side-mode-actions .btn.gho {
-  background: transparent; color: #f4f4f5; border-color: rgba(244, 244, 245, 0.34);
+/* The photograph, at a size that answers "did that land on my face" and does
+   not pretend to answer "is that landmark two pixels out". The full frame
+   behind is for the second question. */
+.side-mode-shot { margin: 0 0 16px; display: flex; justify-content: center; }
+.side-mode-shot canvas {
+  display: block; border-radius: 12px; border: 1px solid var(--line);
+  background: #0d0f11; max-width: 100%;
 }
-.side-mode-actions .btn.gho:hover { border-color: rgba(244, 244, 245, 0.6); }
-/* Bottom right, quieter than everything above it, and it never claims the
+.side-mode-copy { color: var(--mut); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px; }
+/* Side by side, equal widths, because neither of these is the wrong answer. */
+.side-mode-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.side-mode-actions .btn { width: 100%; padding: 11px 8px; font-size: 13.5px; min-width: 0; }
+/* Under the buttons, quieter than everything above it, and it never claims the
    automatic placement is fine. */
 .side-mode-fine {
-  margin: 8px 0 0; text-align: right;
-  font-size: 10.5px; line-height: 1.4; color: rgba(244, 244, 245, 0.62);
+  margin: 14px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--mut); opacity: 0.78;
 }
 @media (max-width: 360px) {
+  .side-mode-card { padding: 22px 20px 20px; }
   .side-mode-actions { grid-template-columns: 1fr; }
 }
+/* The review row, while the dialog above is asking the same question. Hidden
+   rather than removed: it keeps its height, so answering does not drop the
+   whole page up by one button row. */
+#side-actions.mode-pending { visibility: hidden; }
 
 /* Did the points land right? Asked in the panel under the frame, once, only
    after somebody took the automatic placement. */
@@ -2078,9 +2093,25 @@ body.cam-takeover .cam-swap { top: calc(12px + env(safe-area-inset-top, 0px)); }
   filter: brightness(0.42) saturate(0.55);
   transition: filter 0.32s ease;
 }
+/* ...and not before there is a line to make room for.
+
+   The front capture puts the scan stage up the instant the shutter fires, on
+   purpose: it has to be painted before the camera is torn down, or a slow
+   MediaPipe mode switch leaves the pre-photo screen on the display. But
+   everything between that moment and the mesh landing is detection, quality,
+   occlusion and head-covering — four model calls with nothing on the overlay —
+   so the dim was being applied to a bare photograph for the length of all four.
+   The overlay gains nothing because there is no overlay, and the person sees
+   their own face go dark under the word SCANNING with no visible reason.
+
+   `prescan` is set alongside `scanning` for exactly that window and dropped as
+   the reveal starts. It is written to be inert on its own, so a stale one
+   cannot leave a measurement pass undimmed. */
+#frame.scanning.prescan #photo-canvas { filter: none; }
 #photo-canvas { transition: filter 0.32s ease; }
 @media (prefers-reduced-motion: reduce) {
   #frame.scanning #photo-canvas,
+  #frame.scanning.prescan #photo-canvas,
   #frame.measuring #photo-canvas,
   #photo-canvas { transition: none; }
 }
@@ -7108,6 +7139,13 @@ select.q-input { appearance: auto; }
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
+  /* .side-mode-backdrop is deliberately not on that list. Everywhere else the
+     blur is decoration and a translucent scrim reads the same; there it is the
+     thing that was asked for, and what it is separating the dialog from is the
+     same photograph the dialog is showing a copy of. A flat scrim over that
+     leaves two pictures of one face competing at different sizes. It is also
+     the cheapest of these to blur: nothing behind it moves and nothing on it
+     animates, so the compositor blurs a still frame once. */
 }
 
 /* ---------------------------------------------------------------------------

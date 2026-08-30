@@ -1366,11 +1366,17 @@ function mountVerify(
     // it: showing the rings and asking is strictly more information for the
     // person and one fewer decision made on their behalf.
     //
-    // The review state is put up first, so the question is asked over the
-    // thirteen rings it is about rather than over an empty frame.
+    // The review state is put up first, so whichever answer comes back lands
+    // on a finished screen rather than building one underneath the person.
     showReviewActions();
-    void askPlacementMode(e.frame, seed.confidence ?? 1).then((mode) => {
-      // Null is a cancelled sheet: the flow was closed or the identity changed
+    // ...and then hidden again while the question is up. It is the same two
+    // choices the dialog is offering, in the same order, four inches lower:
+    // leaving it live means a person can answer twice, and the two answers do
+    // not have to agree.
+    e.actions.classList.add("mode-pending");
+    void askPlacementMode(e.canvas, seed.points, seed.confidence ?? 1).then((mode) => {
+      e.actions.classList.remove("mode-pending");
+      // Null is a cancelled dialog: the flow was closed or the identity changed
       // underneath it, and there is nothing left for either branch to act on.
       if (mode === null) return;
       if (mode === "manual") {
@@ -1391,12 +1397,23 @@ function mountVerify(
 /**
  * Take these points, or place them yourself.
  *
- * A bottom sheet inside the photo frame rather than a modal over the middle of
- * it, and that is the whole design. The question is about the thirteen rings
- * on the picture, so the picture has to stay visible while it is asked: a
- * centred dialog would cover the only evidence the person has to answer with,
- * and a dialog containing its own copy of the photograph is a second, smaller
- * picture of the thing already on screen.
+ * A centred dialog over a blurred screen, with its own small copy of the
+ * photograph and the thirteen rings drawn on it. The earlier version was a
+ * sheet pinned to the bottom of the photo frame, on the reasoning that the
+ * question is about the rings so the rings had to stay visible. That was true
+ * and still cost more than it bought: the sheet sat directly on top of the
+ * review row it was asking about, so "Confirm" and "One by one" were legible
+ * and pressable underneath a dialog offering the same two choices in different
+ * words. Two live readings of the same screen both called it cluttered, and
+ * both were reading four buttons where there are two decisions.
+ *
+ * So the evidence moves INTO the dialog instead of being framed around it. The
+ * preview is small on purpose: at this size nobody is auditing a landmark, they
+ * are answering "did that land roughly on my face" — which is the whole
+ * question, and the one the full-size frame behind is there to answer properly
+ * once an answer is given. The row below is hidden while this is up, because a
+ * control offering a choice that is currently being asked in a modal is not a
+ * shortcut, it is a second answer to the same question.
  *
  * The fine print is not boilerplate and does not always say the same thing.
  * The seeder already reports its own confidence, and the walkthrough copy
@@ -1407,47 +1424,137 @@ function mountVerify(
  * answers are complete and neither is destructive: taking the points still
  * lands on a screen where every one of them can be dragged.
  */
-function askPlacementMode(frame: HTMLElement, confidence: number): Promise<"auto" | "manual" | null> {
+function askPlacementMode(
+  photo: HTMLCanvasElement,
+  points: SidePoints,
+  confidence: number,
+): Promise<"auto" | "manual" | null> {
   const low = confidence < 0.7;
   return new Promise((resolve) => {
     let done = false;
-    const sheet = document.createElement("div");
-    sheet.className = "side-mode-sheet";
-    sheet.dataset.verifyChrome = "1";
-    sheet.setAttribute("role", "dialog");
-    sheet.setAttribute("aria-modal", "true");
-    sheet.setAttribute("aria-labelledby", "side-mode-title");
-    sheet.innerHTML = `<div class="side-mode-card">
-      <h3 id="side-mode-title">${low ? "Here is our best guess" : "We placed the points for you"}</h3>
-      <p>${low
-        ? "The photo was a hard one to read, so treat these as starting positions. You can take them and drag the ones that look off, or place all thirteen yourself."
-        : "This is where our system put them. Take these and check them over, or place all thirteen yourself, one at a time."}</p>
+    const backdrop = document.createElement("div");
+    backdrop.className = "side-mode-backdrop";
+    backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-mode-title">
+      <span class="klabel">${low ? "LOW CONFIDENCE" : "AUTOMATIC PLACEMENT"}</span>
+      <h2 id="side-mode-title">${low ? "Here is our best guess" : "We placed the points for you"}</h2>
+      <figure class="side-mode-shot">
+        <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+      </figure>
+      <p class="side-mode-copy">${low
+        ? "This photo was a hard one to read, so treat these as starting positions rather than an answer."
+        : "This is where our system put them, on your photo."}</p>
       <div class="side-mode-actions">
         <button type="button" class="btn gho" data-mode="manual">Place them myself</button>
         <button type="button" class="btn pri" data-mode="auto">Use these points</button>
       </div>
-      <p class="side-mode-fine">Our detection is still improving. If the points look off, placing them yourself gives a more accurate score.</p>
-    </div>`;
-    // Chrome, not photograph: the verifier treats a pointerdown on the frame
-    // as a drag on the nearest ring, and a tap on this sheet must not move a
-    // point that is sitting underneath it.
-    sheet.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-    frame.appendChild(sheet);
-    sheet.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
+      <p class="side-mode-fine">Placing them yourself gives a more accurate score. Taking these still lets you drag any point.</p>
+    </section>`;
+    document.body.appendChild(backdrop);
+    paintPlacementPreview(backdrop.querySelector("canvas")!, photo, points);
+    backdrop.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
     const settle = (mode: "auto" | "manual" | null) => {
       if (done) return;
       done = true;
       untrack();
-      sheet.remove();
+      backdrop.remove();
       resolve(mode);
     };
     const untrack = trackDialog(() => settle(null));
-    sheet.onclick = (ev) => {
+    backdrop.onclick = (ev) => {
       const mode = (ev.target as HTMLElement).dataset.mode;
       if (mode !== "auto" && mode !== "manual") return;
       settle(mode);
     };
   });
+}
+
+/**
+ * How big the dialog's copy of the photograph is.
+ *
+ * Separated from the painting so the two rules that matter can be checked
+ * without a canvas.
+ *
+ * It never upscales. A capture narrower than the box would otherwise be blown
+ * up to fill it, and a soft, enlarged thumbnail of a photo that was already too
+ * small is the worst possible evidence to hand somebody who is being asked
+ * whether the points landed right.
+ *
+ * And it is bounded on BOTH axes, which a picture in a dialog has to be. A
+ * width cap alone is fine for the 3:4 the camera produces and useless for the
+ * 9:16 a phone gallery hands back: 168 wide is then 299 tall, and the card
+ * around it stops fitting on the screen it is being read on. Capping the height
+ * costs a narrower picture on a tall capture and keeps the card on screen,
+ * which is the trade worth making every time.
+ */
+export const PLACEMENT_PREVIEW_W = 168;
+export const PLACEMENT_PREVIEW_H = 200;
+
+export function placementPreviewBox(
+  photoW: number,
+  photoH: number,
+  maxW = PLACEMENT_PREVIEW_W,
+  maxH = PLACEMENT_PREVIEW_H,
+): { w: number; h: number; scale: number } {
+  if (!(photoW > 0) || !(photoH > 0)) return { w: 0, h: 0, scale: 1 };
+  const scale = Math.min(1, maxW / photoW, maxH / photoH);
+  return { w: Math.round(photoW * scale), h: Math.round(photoH * scale), scale };
+}
+
+/**
+ * The photograph and its thirteen rings, small.
+ *
+ * Drawn rather than cloned. The live frame carries the rings as positioned DOM
+ * elements sized for a finger, and shrinking that whole apparatus to thumbnail
+ * width would give thirteen 44px hit targets on a 150px picture, which is a
+ * solid block of teal rather than a placement. Painted at this size they read
+ * as marks on a face, which is the only thing being asked about here.
+ *
+ * The connector lines come too, at half strength: three of the five estimated
+ * points sit off the silhouette, and without the lines back to the face they
+ * look like stray dots in the room rather than the jaw and neck geometry they
+ * are.
+ */
+function paintPlacementPreview(
+  target: HTMLCanvasElement,
+  photo: HTMLCanvasElement,
+  points: SidePoints,
+): void {
+  const { w, h, scale } = placementPreviewBox(photo.width, photo.height);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  target.style.width = `${w}px`;
+  target.style.height = `${h}px`;
+  target.width = Math.round(w * dpr);
+  target.height = Math.round(h * dpr);
+  const g = target.getContext("2d");
+  if (!g) return;
+  g.scale(dpr, dpr);
+  g.drawImage(photo, 0, 0, w, h);
+  const at = (id: keyof SidePoints) => ({ x: points[id].x * scale, y: points[id].y * scale });
+  g.strokeStyle = "rgba(143, 243, 224, 0.42)";
+  g.lineWidth = 1;
+  const pairs: [keyof SidePoints, keyof SidePoints][] = [
+    ["pronasale", "pogonion"],
+    ["glabella", "subnasale"],
+    ["subnasale", "pogonion"],
+    ["condylion", "gonion"],
+    ["gonion", "menton"],
+  ];
+  for (const [a, b] of pairs) {
+    const p1 = at(a);
+    const p2 = at(b);
+    g.beginPath();
+    g.moveTo(p1.x, p1.y);
+    g.lineTo(p2.x, p2.y);
+    g.stroke();
+  }
+  g.strokeStyle = "#8ff3e0";
+  g.lineWidth = 1.4;
+  for (const def of SIDE_POINTS) {
+    const p = at(def.id);
+    g.beginPath();
+    g.arc(p.x, p.y, 3.1, 0, Math.PI * 2);
+    g.stroke();
+  }
 }
 
 function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
