@@ -117,3 +117,27 @@ test("clearing forgets without erasing the device stamp", () => {
   clearDeclinedCache();
   assert.equal(declinedNow(), true);
 });
+
+test("a signed-out visitor has not declined, and the owner's stamp survives it", () => {
+  // Signing out moves to an anonymous scope, which has a key of its own and
+  // legitimately holds no stamp. What must not happen is that answer becoming
+  // the account's answer when they sign back in.
+  //
+  // The genuinely unreadable case, where the identity has not resolved at all
+  // and scopedStorageKey returns null, exists only before the first
+  // activateScanOwner call at page load and cannot be re-entered through the
+  // public API. declinedNow answers false there without memoising it, so the
+  // next call once the identity lands reads the real stamp; that branch is
+  // covered by inspection rather than by this test.
+  local.clear();
+  activateScanOwner(ALICE);
+  setDeclinedCache(true);
+
+  clearDeclinedCache();
+  activateScanOwner(null);
+  assert.equal(declinedNow(), false, "an anonymous scope carries no decline");
+
+  clearDeclinedCache();
+  activateScanOwner(ALICE);
+  assert.equal(declinedNow(), true, "and the account's own stamp is still there");
+});

@@ -82,13 +82,22 @@ export async function recordTrialDecline(): Promise<string | null> {
 
 const DECLINE_KEY = "truemax.declined";
 
-function readMirror(): boolean {
+/**
+ * The device's answer, or null when there is no answer to be had.
+ *
+ * Null is not "has not declined". scopedStorageKey returns null while the
+ * identity is still resolving (see scanScope: null deliberately means "not
+ * known yet", never "anonymous"), and localStorage itself can throw in a
+ * private window. Collapsing either of those into false is what the caller
+ * must not do, because the caller MEMOISES.
+ */
+function readMirror(): boolean | null {
   try {
     const key = scopedStorageKey(DECLINE_KEY);
-    if (!key) return false;
+    if (!key) return null;
     return localStorage.getItem(key) === "1";
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -107,9 +116,18 @@ function writeMirror(value: boolean): void {
 let cached: boolean | null = null;
 
 export function declinedNow(): boolean {
-  // Null means nothing has been set this page view, which is exactly the
-  // cold-start case the mirror exists for.
-  if (cached === null) cached = readMirror();
+  // A null cache means nothing has been set this page view, which is exactly
+  // the cold-start case the mirror exists for.
+  if (cached === null) {
+    const mirrored = readMirror();
+    // An unreadable mirror is answered but NOT remembered. Memoising it was a
+    // hole: this can be called while the identity is still resolving, the
+    // mirror has no key to read yet, and caching that "no" would answer for
+    // the rest of the page view without ever looking again. The next call,
+    // after the identity lands, reads the real stamp.
+    if (mirrored === null) return false;
+    cached = mirrored;
+  }
   return cached;
 }
 
