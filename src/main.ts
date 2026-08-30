@@ -1576,6 +1576,10 @@ function resetToUpload(): void {
   el.frame.classList.remove("scanning");
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
+  // The next capture gets its own film. Keyed by scan ID, so this is belt and
+  // braces rather than the mechanism — but a reset is exactly the moment a
+  // stale "already measured" would be worth nothing and cost everything.
+  clearMeasuredOnScreen();
   el.photoCanvas.width = 1;
   el.photoCanvas.height = 1;
   el.photoCanvas.getContext("2d")?.clearRect(0, 0, 1, 1);
@@ -1976,47 +1980,118 @@ async function submitConsentedSideFeedback(generation = scanGeneration): Promise
 }
 
 // Both photographs are in. One analysis, one reveal, one score.
-async function runFullAnalysis(
-  sideReport: Report | null,
-  token = scanSession.currentToken(),
-): Promise<void> {
-  if (!pending || !token || !scanSession.isCurrent(token)) return;
-  if (!scanSession.transition(token, "analyzing")) return;
-  const generation = scanGeneration;
-  const { landmarks, width, height, quality, autoNote, photo: frontShot } = pending;
-  el.main.classList.remove("hidden");
-  // The front capture comes from `pending`, which has owned its own copy since
-  // the moment it was accepted. It used to be cloned off el.photoCanvas right
-  // here — and this function can run a second time (sign-in mid-scan resumes
-  // it), by which point the pane may be showing the profile. See PendingFront.
-  //
-  // Paint it too, so the pane always agrees with the FRONT caption underneath
-  // regardless of what the previous run, or the side flow, left behind.
+/**
+ * Paint the FRONT capture into the photo pane.
+ *
+ * The front capture comes from `pending`, which has owned its own copy since
+ * the moment it was accepted. It used to be cloned off el.photoCanvas at the
+ * top of the analysis — and that runs a second time when a sign-in mid-scan
+ * resumes it, by which point the pane may be showing the profile. See
+ * PendingFront.
+ *
+ * Called wherever the pane must agree with the FRONT caption underneath it,
+ * regardless of what the measurement pass, or the side flow, left behind.
+ */
+function paintFrontPane(frontShot: HTMLCanvasElement): void {
   el.photoCanvas.width = frontShot.width;
   el.photoCanvas.height = frontShot.height;
   el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
+}
+
+/**
+ * Which scan has already had its measurement film played on screen.
+ *
+ * A signed-out capture watches the whole pass BEFORE the account wall goes up,
+ * so the wall interrupts a finished measurement instead of an empty screen.
+ * Signing in then re-enters runFullAnalysis for the same scan, and without
+ * this it would play the identical film a second time.
+ *
+ * IT HAS TO OUTLIVE THE PAGE, and the first version did not.
+ *
+ * Module memory alone covers the password sign-in, which never leaves the
+ * document. It does not cover the two paths most people take: Google, and the
+ * emailed link. Both navigate away and come back to a fresh document, so the
+ * variable is null again and resumePendingAfterAuth replays the whole pass on
+ * somebody who watched it ninety seconds earlier and has since typed a
+ * password into Google. That is the single worst moment in the flow to spend a
+ * minute of somebody's attention on a repeat.
+ *
+ * So the fact is mirrored into localStorage against the scan ID. Not scoped to
+ * an identity: it is written while signed OUT and read after signing IN, and an
+ * identity-scoped key would be looked for under a scope that did not exist when
+ * it was written. The value is a scan UUID and nothing else, one at a time.
+ *
+ * Cleared when a new scan STARTS rather than when one finishes, which is the
+ * difference that matters on the resume path: a finished scan's flag has to
+ * survive the redirect that finishes it, so clearing it at the end of
+ * runFullAnalysis would delete the thing on the way past the moment it exists
+ * for. resetToUpload is the honest boundary, and it is the only one that ever
+ * needs to be.
+ *
+ * A storage failure resolves to "not measured", which replays the film. That
+ * is the harmless direction: this flag gates an animation, not an entitlement,
+ * so a false negative costs a repeat and a false positive would cost somebody
+ * the only demonstration the product gives them.
+ */
+const MEASURED_KEY = "truemax.measured-scan";
+let measuredOnScreenFor: string | null = null;
+
+function markMeasuredOnScreen(scanId: string): void {
+  measuredOnScreenFor = scanId;
+  try {
+    localStorage.setItem(MEASURED_KEY, scanId);
+  } catch {
+    // Private mode, or storage full. The module copy still covers every
+    // same-document path, which is all this could do before.
+  }
+}
+
+function measuredOnScreen(scanId: string): boolean {
+  if (measuredOnScreenFor === scanId) return true;
+  try {
+    return localStorage.getItem(MEASURED_KEY) === scanId;
+  } catch {
+    return false;
+  }
+}
+
+function clearMeasuredOnScreen(): void {
+  measuredOnScreenFor = null;
+  try {
+    localStorage.removeItem(MEASURED_KEY);
+  } catch {
+    // Nothing to do: the module copy is cleared either way, and a stale entry
+    // names a scan ID that can never be current again.
+  }
+}
+
+/**
+ * The measurement film: the mesh landing, then every construction drawn on the
+ * face that produced it, on the real photographs and the real numbers.
+ *
+ * Split out of runFullAnalysis because it is now played from two places. It
+ * paints, animates and waits, and it persists nothing: everything it needs is
+ * the front report, the optional side report and the two captures. That is
+ * what makes it safe to run before there is an account to attribute anything
+ * to.
+ *
+ * Returns false when the scan was superseded while it ran, in which case the
+ * caller must stop rather than paint over whatever replaced it.
+ */
+async function playMeasurePass(
+  front: Report,
+  sideReport: Report | null,
+  token: ScanToken,
+  generation: number,
+): Promise<boolean> {
+  if (!pending) return false;
+  const { landmarks, width, height, photo: frontShot } = pending;
+  el.main.classList.remove("hidden");
+  paintFrontPane(frontShot);
   el.frame.classList.add("scanning");
   el.capRight.textContent = "SCANNING";
   el.analysis.innerHTML = "";
   await nextFrame();
-  // MEASURE FIRST, THEN SHOW THE MEASURING.
-  //
-  // This used to run the other way round: eight sentences on a timer, then the
-  // analysis. The animation therefore could not show a single real number, and
-  // the score arrived with no visible parentage — the exact opposite of what a
-  // measurement product should look like while it works. The engine is
-  // synchronous and takes milliseconds, so there was never a reason for the
-  // wait to come first except that it had always been written that way.
-  const front = analyzeFrames(
-    [{ landmarks, width, height, source: frontShot }, ...pending.extraFrames],
-    selectedSex,
-  );
-  // Front-only is a real result: mergeReports already returns the front report
-  // untouched when the side is absent, so the same call covers both and the
-  // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
-  // "Add side profile" nudge) does the rest.
-  const report = sideReport ? mergeReports(front, sideReport) : front;
-
   // The mesh landing is the opening beat, handed to the pass so it waits for
   // the reveal to finish rather than clearing it off the canvas underneath.
   const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
@@ -2050,12 +2125,59 @@ async function runFullAnalysis(
   reveal.cancel();
   if (!scanIsCurrent(token, generation) || !pending) {
     pass.cancel();
-    return;
+    return false;
   }
+  markMeasuredOnScreen(token.scanId);
   // Back to rest, and with no camera transition attached: the results screen
   // owns this element's zoom from here and must not inherit a half-finished
   // push-in on somebody's chin.
   applyZoom(el.zoomable, IDENTITY_ZOOM);
+  return true;
+}
+
+async function runFullAnalysis(
+  sideReport: Report | null,
+  token = scanSession.currentToken(),
+): Promise<void> {
+  if (!pending || !token || !scanSession.isCurrent(token)) return;
+  if (!scanSession.transition(token, "analyzing")) return;
+  const generation = scanGeneration;
+  const { landmarks, width, height, quality, autoNote, photo: frontShot } = pending;
+  el.main.classList.remove("hidden");
+  // MEASURE FIRST, THEN SHOW THE MEASURING.
+  //
+  // This used to run the other way round: eight sentences on a timer, then the
+  // analysis. The animation therefore could not show a single real number, and
+  // the score arrived with no visible parentage — the exact opposite of what a
+  // measurement product should look like while it works. The engine is
+  // synchronous and takes milliseconds, so there was never a reason for the
+  // wait to come first except that it had always been written that way.
+  const front = analyzeFrames(
+    [{ landmarks, width, height, source: frontShot }, ...pending.extraFrames],
+    selectedSex,
+  );
+  // Front-only is a real result: mergeReports already returns the front report
+  // untouched when the side is absent, so the same call covers both and the
+  // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
+  // "Add side profile" nudge) does the rest.
+  const report = sideReport ? mergeReports(front, sideReport) : front;
+
+  // The film may already have played, in front of the account wall rather than
+  // behind it — see playMeasurePass. Playing it twice for one capture is the
+  // one thing this must not do, so a scan that has already been measured on
+  // screen goes straight to its result.
+  if (measuredOnScreen(token.scanId)) {
+    paintFrontPane(frontShot);
+    // The wall was standing in this pane. It is answered, so it goes before
+    // renderResults gets here rather than being overwritten by it a few
+    // hundred milliseconds later with a Coach Max demo still animating inside.
+    gateDemo?.stop();
+    gateDemo = null;
+    el.analysis.innerHTML = "";
+  } else if (!(await playMeasurePass(front, sideReport, token, generation))) {
+    return;
+  }
+  if (!scanIsCurrent(token, generation) || !pending) return;
   const historyBefore = readAllHistory();
   const existingScan = historyBefore.some((scan) => scanStorageKey(scan) === token.scanId);
   const priorScanCount = Math.max(
@@ -2431,12 +2553,56 @@ async function gateAnalysis(
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
-  el.frame.classList.remove("scanning");
-  el.capRight.textContent = "SCAN READY";
-  el.status.innerHTML = saved
-    ? "<b>Both views captured.</b> Sign up or log in to run the analysis."
-    : "<b>Both views captured.</b> Sign in with an existing account to continue.";
-  el.barFill.style.width = "100%";
+
+  // THE FILM RUNS BEFORE THE WALL.
+  //
+  // It used to run after it: two captures, then a sign-up screen, then — once
+  // there was an account — the measurement pass. Which meant the one thing on
+  // this whole flow that demonstrates the product was on the far side of the
+  // only screen asking somebody to commit to it. They were being asked to buy
+  // the measuring on the strength of having taken two photographs.
+  //
+  // So the pass plays here, on their own face, showing every construction and
+  // every real number, and the wall goes up at the end of it — at the exact
+  // moment the result would otherwise appear. Nothing about what is being
+  // withheld changes: the scan is still not stored, attributed or counted
+  // until there is an account. What changes is that by the time the question
+  // is asked, they have watched the answer being computed.
+  //
+  // Nothing here persists anything. See playMeasurePass.
+  let front: Report | null = null;
+  try {
+    if (pending) {
+      // analyzeFrames, not analyze: the same multi-frame median the finished
+      // analysis will use. A single-frame reading here would show one score
+      // during the pass, blur a second one behind the wall, and print a third
+      // after sign-in, all for one face.
+      front = analyzeFrames(
+        [
+          {
+            landmarks: pending.landmarks,
+            width: pending.width,
+            height: pending.height,
+            source: pending.photo,
+          },
+          ...pending.extraFrames,
+        ],
+        selectedSex,
+      );
+    }
+  } catch {
+    // An analysis that cannot be computed skips the film and falls through to
+    // the wall, which is exactly what this screen did before the film existed.
+    front = null;
+  }
+  if (front && !(await playMeasurePass(front, sideReport, token, generation))) return;
+  if (!scanIsCurrent(token, generation) || !pending) return;
+  if (front) {
+    // The pass leaves the profile on the pane and a construction on the
+    // overlay. The wall is a front-facing screen with a FRONT caption on it.
+    paintFrontPane(pending.photo);
+    drawCalm(el.overlayCanvas, pending.landmarks, pending.width, pending.height);
+  }
   // The result exists before the account does. The analysis is pure, on-device
   // arithmetic, so it is computed here and shown BLURRED behind the gate: the
   // person sees the shape of their own finished result — the big number, their
@@ -2447,17 +2613,20 @@ async function gateAnalysis(
   let preview = "";
   let teaser: OpenAccountOptions["teaser"];
   try {
-    if (pending) {
-      const front = analyze(pending.landmarks, pending.width, pending.height, selectedSex);
+    if (pending && front) {
       const merged = sideReport ? mergeReports(front, sideReport) : front;
       // The photographs travel with the numbers. A blurred score on its own
       // was a grey smudge nobody could read as their own result; their own two
       // faces beside it are unmistakable, and they are thumbnails of pictures
       // that never leave this device either way.
+      //
+      // From `pending`, not from the pane. The pane is whatever the pass last
+      // painted, which for a two-view scan is the PROFILE — thumbnailing it
+      // would have put the side capture in the front slot of the teaser.
       teaser = {
         overall: merged.overall,
         regionCount: merged.regions.length,
-        front: toThumb(el.photoCanvas),
+        front: toThumb(pending.photo),
         side: lastSide?.photo ? toThumb(lastSide.photo) : null,
         regions: merged.regions.map((g) => ({ label: REGION_NAMES[g.region], score: g.score })),
       };
@@ -2478,12 +2647,39 @@ async function gateAnalysis(
     <section class="analysis-gate${preview ? " over-preview" : ""}">
     <span class="klabel">RESULTS ARE READY</span>
     <h2>Create an account to see your analysis</h2>
-    <p>Your result is computed and sitting behind this blur: it never left this device. Sign up or log in to open it. ${lastSide?.feedback
+    <p>${front
+      ? "That was your own face being measured, on this device. The result is behind the blur and it never left."
+      : "Your result is computed and sitting behind this blur: it never left this device."} Sign up or log in to open it. ${lastSide?.feedback
       ? "The side feedback you approved is sent privately after sign-in."
       : ""}</p>
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
     <button type="button" class="btn pri analysis-gate-open">Create account and see my results</button>
   </section></div>`;
+
+  el.capRight.textContent = "SCAN READY";
+  // The pass fades the status line out and back in between sentences, so a run
+  // that ended mid-swap can leave `swapping` (opacity: 0) behind. Without this
+  // the wall's own line would be set and then not shown.
+  el.status.classList.remove("swapping");
+  // "Analysis complete" only where an analysis actually ran. A capture whose
+  // measurement threw skips the film above, and this line must not tell
+  // somebody they watched something they did not.
+  // The card directly below already says "Results are ready", asks for the
+  // account and names both doors. Repeating the ask up here was the same
+  // sentence twice, eighty pixels apart, and it was the half that collided
+  // with the card. The line keeps the completion beat and gives up the ask.
+  el.status.innerHTML = front
+    ? "<b>Analysis complete.</b>"
+    : "<b>Both views captured.</b>";
+  el.barFill.style.width = "100%";
+  // Last, and after the pane above has been filled. Leaving `scanning` is what
+  // drops the photograph out of the full-screen scan stage and back into the
+  // report column beside the analysis, so the wall and the blurred result
+  // arrive in the same movement rather than the frame shrinking onto an empty
+  // column that fills in a frame later. Same FLIP the finished analysis uses,
+  // for the same reason: this is a geometry change the size of the camera
+  // takeover, and it must not be a cut.
+  flipThrough(el.frame, () => el.frame.classList.remove("scanning"));
 
   // Under the button, never above it. The demo is there to make the wait worth
   // it, not to compete with the thing being asked for.
