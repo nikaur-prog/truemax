@@ -15,7 +15,7 @@
 // have to be reading the same day.
 // ---------------------------------------------------------------------------
 
-import { ACTIVITY, GOAL_LABEL, macroPlan, oldEnoughForMacros } from "../engine/macros.js";
+import { ACTIVITY, GOAL_LABEL, macroPlan, oldEnoughForMacros, proteinReferenceKg } from "../engine/macros.js";
 import type { Activity, EnergyGoal, MacroPlan } from "../engine/macros.js";
 import { isStale, readBody, writeBody } from "../engine/bodyProfile.js";
 import type { StoredBody } from "../engine/bodyProfile.js";
@@ -93,6 +93,10 @@ function askHTML(): string {
 
 function planHTML(plan: MacroPlan, body: StoredBody): string {
   const basis = plan.basis === "katch" ? "Katch-McArdle, from your lean mass" : "Mifflin-St Jeor";
+  // The same call macroPlan makes. Read rather than returned on the plan
+  // because MacroPlan's shape is what enforces that there is nowhere to put a
+  // goal weight, and that guard is worth more than the convenience.
+  const referenceKg = proteinReferenceKg(body.weightKg, body.bodyFat);
   return `<div class="mac-head">
     <b class="mac-kcal">${plan.calories.toLocaleString()}</b><span class="mac-kcal-u">kcal a day</span>
   </div>
@@ -124,7 +128,14 @@ function planHTML(plan: MacroPlan, body: StoredBody): string {
         .join("")}</select></label>
   </div>
   <p class="mac-activity-def">${ACTIVITY[body.activity].label} means ${lowerFirst(ACTIVITY[body.activity].detail)}. A session counts as exercise at 15 to 30 minutes of raised heart rate, and as intense at 45 to 120. Almost everybody picks one level too high.</p>
-  <p class="mac-basis">${body.heightCm}cm, ${body.weightKg}kg. Resting energy by ${basis}, then your activity factor. <button type="button" class="linkish" id="mac-edit">Change height or weight</button></p>
+  <p class="mac-basis">${body.heightCm}cm, ${body.weightKg}kg. Resting energy by ${basis}, then your activity factor.${
+    // Said out loud whenever the two numbers differ, because otherwise the
+    // protein figure does not divide by the weight printed beside it and the
+    // panel looks like it has made an arithmetic mistake.
+    referenceKg !== body.weightKg
+      ? ` Protein and fat are set against ${referenceKg}kg rather than your scale weight: the requirement follows lean tissue, not stored fat.`
+      : ""
+  } <button type="button" class="linkish" id="mac-edit">Change height or weight</button></p>
   <p class="mac-note mac-disclaimer">A population formula, not a measurement of you: it is a starting point to adjust from over a few weeks, not a rule. It does not know your health history, and a physician or registered dietitian outranks this panel. No goal weight is set here and none should be.</p>`;
 }
 

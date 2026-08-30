@@ -49,13 +49,48 @@ export const MAX_SURPLUS = 0.12;
  * 1.6 g/kg is where the meta-analytic evidence puts the point of diminishing
  * returns for resistance-trained adults. Higher figures circulate; they are not
  * better supported, and this is a number we have to be able to defend.
+ *
+ * WHICH body mass is the other half of that defence, and it is not always the
+ * number on the scale. See proteinReferenceKg.
  */
 export const PROTEIN_G_PER_KG = 1.6;
+
+/**
+ * The mass the per-kilogram targets are actually taken against.
+ *
+ * 1.6 g/kg is a recommendation made about people near a normal body
+ * composition, where total mass and metabolically active mass are close
+ * enough that the distinction does not matter. Applied to total mass at the
+ * top of the accepted input range it stops describing anything: 250 kg at 60%
+ * body fat came out as 400 g of protein and a 150 g fat floor, together more
+ * energy than the day the same function had just calculated. The plan told
+ * somebody to eat 2530 kcal and then listed 2950 kcal of food.
+ *
+ * Adipose tissue is not what the requirement scales with, so when body fat is
+ * known this uses the standard adjusted body weight, lean mass plus a quarter
+ * of the fat mass. That is a long-standing clinical convention rather than
+ * anything invented here, and it lands the same 250 kg case on 220 g, which
+ * is a number a dietitian would recognise.
+ *
+ * With body fat unknown there is nothing to adjust against and total mass
+ * stands, which is what 1.6 g/kg means in the literature anyway.
+ */
+export function proteinReferenceKg(weightKg: number, bodyFat?: number): number {
+  if (bodyFat === undefined) return weightKg;
+  const lean = weightKg * (1 - bodyFat);
+  // Rounded here rather than where it is printed, so the panel's explanation
+  // and the panel's protein figure are the same arithmetic. A displayed 138kg
+  // beside a target computed from 137.5kg is a figure that does not divide.
+  return Math.round(lean + 0.25 * (weightKg - lean));
+}
 
 /**
  * Fat's floor, in grams per kilogram. Below roughly this, fat-soluble vitamin
  * absorption and endocrine function start to be affected, so it is a floor
  * rather than a preference and the carbohydrate figure yields to it.
+ *
+ * Taken against the same reference mass as protein, and for the same reason:
+ * vitamin absorption and endocrine function do not scale with stored fat.
  */
 export const FAT_FLOOR_G_PER_KG = 0.6;
 
@@ -205,16 +240,32 @@ export function macroPlan(input: BodyInput): MacroPlan {
   const calories = Math.max(adjusted, bmr);
   const floored = calories > adjusted + 0.5;
 
-  const protein = input.weightKg * PROTEIN_G_PER_KG;
-  const fatFloor = input.weightKg * FAT_FLOOR_G_PER_KG;
+  // Not returned on the plan, and that is deliberate: MacroPlan's shape is
+  // what enforces "there is nowhere to put a goal weight", and a weight-shaped
+  // field on it weakens a guard that exists for a good reason. The panel calls
+  // proteinReferenceKg itself when it needs to explain the figure.
+  const referenceKg = proteinReferenceKg(input.weightKg, input.bodyFat);
+  const protein = referenceKg * PROTEIN_G_PER_KG;
+  const fatFloor = referenceKg * FAT_FLOOR_G_PER_KG;
   const fat = Math.max(fatFloor, (calories * FAT_SHARE) / KCAL_PER_G.fat);
   const remainder = calories - protein * KCAL_PER_G.protein - fat * KCAL_PER_G.fat;
   const carbs = Math.max(0, remainder / KCAL_PER_G.carbs);
 
+  // The two floors are floors, so the day cannot be smaller than they are.
+  //
+  // Clamping carbohydrate at zero and printing the original target anyway is
+  // how the numbers came to disagree: the remainder went negative, the clamp
+  // hid it, and the plan listed more food than the calorie line above it. The
+  // reference mass makes that unreachable on any accepted input, and this
+  // still stands behind it, because a calculator whose own figures contradict
+  // each other is worse than one that says a slightly larger number.
+  const floorKcal = protein * KCAL_PER_G.protein + fat * KCAL_PER_G.fat + carbs * KCAL_PER_G.carbs;
+  const day = Math.max(calories, floorKcal);
+
   return {
     bmr: Math.round(bmr),
     maintenance: Math.round(maintenance),
-    calories: Math.round(calories),
+    calories: Math.round(day),
     protein: Math.round(protein),
     carbs: Math.round(carbs),
     fat: Math.round(fat),

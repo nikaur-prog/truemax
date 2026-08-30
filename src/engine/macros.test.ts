@@ -9,6 +9,7 @@ import {
   bodyInputIsUsable,
   katchMcArdle,
   macroPlan,
+  proteinReferenceKg,
   mifflinStJeor,
   oldEnoughForMacros,
 } from "./macros.js";
@@ -218,4 +219,51 @@ test("every figure returned is a whole number", () => {
     if (typeof v !== "number") continue;
     assert.equal(v, Math.round(v), `${k} = ${v}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// The numbers on the card have to add up to the number above them.
+// ---------------------------------------------------------------------------
+
+const HEAVY = {
+  age: 30,
+  sex: "male",
+  heightCm: 180,
+  activity: "sedentary",
+  goal: "lean",
+} as const;
+
+test("the macros never total more energy than the day they are printed under", () => {
+  // Swept across the whole accepted input range rather than spot-checked. The
+  // failure was at one corner of it - 250kg at 60% body fat printed 2530 kcal
+  // and then listed 2950 kcal of food - and a corner is exactly what a couple
+  // of hand-picked cases miss.
+  for (let weightKg = 35; weightKg <= 300; weightKg += 5) {
+    for (const bodyFat of [undefined, 0.03, 0.15, 0.3, 0.45, 0.6]) {
+      for (const goal of ["lean", "hold", "build"] as const) {
+        const plan = macroPlan({ ...HEAVY, goal, weightKg, ...(bodyFat === undefined ? {} : { bodyFat }) });
+        const sum = plan.protein * 4 + plan.carbs * 4 + plan.fat * 9;
+        // Three gram figures rounded to whole grams cannot land exactly on a
+        // rounded kcal figure, so the tolerance is the rounding and nothing
+        // more: 9 kcal is one gram of fat.
+        assert.ok(
+          sum - plan.calories <= 9,
+          `${weightKg}kg at ${bodyFat}: ${Math.round(sum)} kcal of macros under a ${plan.calories} kcal day`,
+        );
+      }
+    }
+  }
+});
+
+test("protein is taken against lean tissue rather than scale weight", () => {
+  // 400 g of protein is not a recommendation anybody makes. The adjustment is
+  // what stops the per-kilogram rule being applied where it stops meaning
+  // anything.
+  assert.equal(proteinReferenceKg(250, 0.6), 138);
+  assert.equal(macroPlan({ ...HEAVY, weightKg: 250, bodyFat: 0.6 }).protein, 221);
+});
+
+test("with no body fat reading there is nothing to adjust and scale weight stands", () => {
+  assert.equal(proteinReferenceKg(80, undefined), 80);
+  assert.equal(macroPlan({ ...HEAVY, weightKg: 80 }).protein, 128);
 });
