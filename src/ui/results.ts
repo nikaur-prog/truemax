@@ -1964,7 +1964,7 @@ function showRegion(id: RegionId): void {
         <div class="dcard">
           <h3>Notable comparisons<em>REFERENCE</em></h3>
           ${matchCard}
-          <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
+          <p class="footnote">Reference set grows with every analysed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
       </div>
       ${regionPositionPanel(r, id, ctx!.report.sex)}

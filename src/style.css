@@ -91,6 +91,23 @@ body {
 .reel-caption b { font-variation-settings: "opsz" 120, "wght" 300; }
 .side-title, .q-body h2 { font-variation-settings: "opsz" 96, "wght" 300; }
 .goal-head .endgoal { font-variation-settings: "opsz" 72, "wght" 300; }
+/* Every serif HEADING is display type and belongs at the display end of the
+   axis too. Left on auto they were rendering at their own font size, which for
+   a 31px heading is opsz 31: the text-sized letterforms, at display size. The
+   `f` is where it shows worst, because Fraunces only grows its long swash
+   terminal high up the axis, and at auto it comes out stubby with a heavy ball
+   on the end. Reported as "that little f looks weird"; it was every serif
+   heading in the app, on the same cause as the numerals above. */
+.auth-card h2,
+.side-feedback-dialog h2,
+.sexpick-head h2,
+.trial-body h2,
+.trial-offer h2,
+.trial-loading h2 { font-variation-settings: "opsz" 96, "wght" 300; }
+/* The smaller dashboard headings sit lower on the axis, because at 22px the
+   very fine display strokes start to disappear rather than read as fine. */
+.dash-profile h2,
+.dash-scans h2 { font-variation-settings: "opsz" 60, "wght" 300; }
 .pillar b { font-variation-settings: "opsz" 36, "wght" 400; }
 .celeb .ava { font-variation-settings: "opsz" 20, "wght" 400; }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
@@ -6700,7 +6717,140 @@ select.q-input { appearance: auto; }
   border: 1px solid var(--line); border-radius: 16px; background: var(--card);
   user-select: none; -webkit-user-select: none; pointer-events: none;
 }
-.acct-teaser-k { font: 600 9px var(--mono); letter-spacing: .16em; color: var(--mut); }
+.acct-teaser-k {
+  font: 600 9px var(--mono); letter-spacing: .16em; color: var(--mut);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+/* The live dot, while it is measuring. Green and pulsing, then it goes out. */
+.acct-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--acc);
+  flex: none; opacity: 0; transition: opacity .3s ease;
+}
+.measuring .acct-dot { opacity: 1; animation: acct-pulse 1s ease-in-out infinite; }
+@keyframes acct-pulse { 50% { opacity: .25; transform: scale(.7); } }
+/* Two labels in one slot, so the swap does not move anything under it. */
+.acct-k-run, .acct-k-done { transition: opacity .3s ease; }
+.acct-k-run { display: none; }
+.acct-k-done { display: none; }
+.measuring .acct-k-run { display: inline; }
+.revealed .acct-k-done { display: inline; }
+
+/* The sweep: a band of light crossing both photographs while the measurement
+   runs. It is theatre and it is short, because the work genuinely finished on
+   this device before the dialog opened. What it buys is that the person
+   watches their own scan land instead of finding a finished panel. */
+.acct-faces { position: relative; overflow: hidden; border-radius: 11px; }
+.acct-sweep {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    rgba(75, 245, 197, .05) 46%,
+    rgba(75, 245, 197, .3) 50%,
+    rgba(75, 245, 197, .05) 54%,
+    transparent 62%
+  );
+  background-size: 260% 100%;
+}
+.measuring .acct-sweep { opacity: 1; animation: acct-sweep 750ms cubic-bezier(.4, 0, .6, 1) infinite; }
+@keyframes acct-sweep {
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+
+/* The score, popping.
+   While the sweep runs the slot holds a skeleton rather than a void: the first
+   pass left the score and the region grid at opacity 0, which reserved their
+   height correctly and left a large blank hole in the middle of the card. A
+   shimmering placeholder says "a number is coming here", which an empty gap
+   does not. Then a spring, and the overshoot is what makes it read as a result
+   arriving rather than a panel fading up. */
+.acct-teaser.measuring .acct-teaser-score {
+  filter: none; background: var(--soft); border-radius: 99px;
+  min-width: 116px; min-height: 50px;
+  animation: acct-shim 1.2s ease-in-out infinite;
+}
+.acct-teaser.measuring .acct-teaser-score b,
+.acct-teaser.measuring .acct-teaser-score small { visibility: hidden; }
+.revealed .acct-teaser-score { animation: acct-pop .62s cubic-bezier(.22, 1.4, .36, 1) backwards; }
+@keyframes acct-shim { 50% { opacity: .45; } }
+@keyframes acct-pop {
+  from { opacity: 0; transform: scale(.62); }
+  55% { transform: scale(1.06); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* The ladder. Nine rungs, and a marker that travels the strip and settles.
+   Under the same blur as everything else, and wide enough to sit across more
+   than one rung, so it says "somewhere here" rather than naming a tier. */
+.acct-ladder {
+  position: relative; display: grid; grid-template-columns: repeat(9, 1fr);
+  gap: 3px; width: 100%; height: 5px; margin: 1px 0 3px;
+}
+.acct-ladder i { display: block; border-radius: 99px; background: var(--soft); }
+.acct-mark {
+  position: absolute; top: -3px; height: 11px; width: 22%;
+  border-radius: 99px; background: var(--acc); opacity: .55;
+  filter: blur(4px);
+  left: calc(var(--at) * (100% / 9));
+}
+.measuring .acct-mark { animation: acct-hunt 1.1s cubic-bezier(.5, 0, .5, 1) infinite alternate; }
+@keyframes acct-hunt {
+  from { left: 0%; }
+  to { left: 78%; }
+}
+.revealed .acct-mark { transition: left .7s cubic-bezier(.22, 1.1, .36, 1); }
+.measuring .acct-ladder i { opacity: .5; }
+
+/* The regions, cascading. Each cell has its own index so they arrive one after
+   another rather than as a block: eight things landing in sequence reads as
+   eight measurements, which is what the line underneath then claims.
+   The cells hold the same skeleton treatment while the sweep runs. Three
+   classes deep, so this beats the .acct-cell.tone-* backgrounds without
+   reaching for !important. */
+.acct-teaser.measuring .acct-cell {
+  background: var(--soft); filter: none;
+  animation: acct-shim 1.2s ease-in-out infinite;
+}
+.acct-teaser.measuring .acct-cell span,
+.acct-teaser.measuring .acct-cell b { visibility: hidden; }
+/* And the line goes: "8 regions measured" is past tense, and it was sitting
+   under a label that still said MEASURING.
+   Written as .acct-teaser.measuring rather than .measuring .acct-teaser, which
+   was the first attempt and matched nothing at all: the measuring class is ON
+   the teaser, not on an ancestor of it. */
+.acct-teaser.measuring em { opacity: 0; }
+.revealed .acct-cell { animation: acct-drop .42s cubic-bezier(.2, .9, .3, 1) backwards; }
+.revealed .acct-cell:nth-child(1) { animation-delay: .10s; }
+.revealed .acct-cell:nth-child(2) { animation-delay: .16s; }
+.revealed .acct-cell:nth-child(3) { animation-delay: .22s; }
+.revealed .acct-cell:nth-child(4) { animation-delay: .28s; }
+.revealed .acct-cell:nth-child(5) { animation-delay: .34s; }
+.revealed .acct-cell:nth-child(6) { animation-delay: .40s; }
+.revealed .acct-cell:nth-child(7) { animation-delay: .46s; }
+.revealed .acct-cell:nth-child(8) { animation-delay: .52s; }
+@keyframes acct-drop {
+  from { opacity: 0; transform: translateY(7px) scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+.acct-teaser.revealed em { animation: acct-fade .5s ease .62s backwards; }
+@keyframes acct-fade { from { opacity: 0; transform: translateY(4px); } }
+
+/* Everything settles instantly for somebody who asked for less motion. The JS
+   also skips straight to the revealed state, so this is the belt to that
+   braces: no sweep, no hunt, no cascade, and nothing left at opacity 0. */
+@media (prefers-reduced-motion: reduce) {
+  .acct-sweep { display: none; }
+  .acct-teaser .acct-teaser-score,
+  .acct-teaser .acct-cells,
+  .acct-teaser .acct-cell,
+  .acct-teaser em { animation: none; opacity: 1; transform: none; }
+  .acct-teaser .acct-teaser-score b,
+  .acct-teaser .acct-teaser-score small,
+  .acct-teaser .acct-cell span,
+  .acct-teaser .acct-cell b { visibility: visible; }
+  .acct-mark { animation: none; transition: none; }
+}
 
 /* The two captures, side by side and the same size, so the pair reads as one
    scan rather than as two pictures. */

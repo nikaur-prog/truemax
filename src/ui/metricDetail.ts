@@ -268,7 +268,7 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   // has no proximity cap.
   return m.percentile < CELEB_MATCH_MIN_PCT
     ? `<p class="mdx-none">Comparisons are only offered where you place in the top ${100 - CELEB_MATCH_MIN_PCT}% on the measurement, and this one sits below that. A flattering comparison you did not earn would make every other number here worth less.</p>`
-    : `<p class="mdx-none">No reference face in the set carries this measurement yet, so there is nothing to compare against. The set grows with every analyzed face.</p>`;
+    : `<p class="mdx-none">No reference face in the set carries this measurement yet, so there is nothing to compare against. The set grows with every analysed face.</p>`;
 }
 
 function barHTML(m: ScoredMetric, sex: Sex): string {

@@ -43,7 +43,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       ? "Create your account"
       : "Welcome back";
   const lede = analysis
-    ? "In order to be able to analyze your face, you must create an account. Sign up or log in to continue."
+    ? "In order to be able to analyse your face, you must create an account. Sign up or log in to continue."
     : "Photos stay on this device by default. Your account keeps your membership attached to you across browsers.";
 
   root.innerHTML = `
