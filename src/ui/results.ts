@@ -26,6 +26,7 @@ import { commitProtocol, offerProtocol, protocolFor, readProtocols, writeProtoco
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
+import type { CeilingInput } from "./ceilingCta.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { nutritionPlanHTML } from "./nutritionPlan.js";
 import { macroPanelHTML, wireMacroPanel } from "./macroPanel.js";
@@ -2466,6 +2467,21 @@ export function setAdult(value: boolean): void {
 // gate reads a DATE rather than a boolean. Null until a profile loads, and null
 // closes the gate: same direction as adultUser, for the same reason.
 let birthDate: string | null = null;
+
+/**
+ * This scan's ceiling, for a surface outside the report that has earned the
+ * right to show it.
+ *
+ * Exists so the offer screen can carry the before and after strip without
+ * being handed the whole report, and so it CANNOT invent one: null until a
+ * scan is in hand, and the photograph is the person's own capture.
+ */
+export function currentCeiling(): CeilingInput | null {
+  if (!ctx || ctx.archived) return null;
+  const r = ctx.report;
+  if (!Number.isFinite(r.overall) || !Number.isFinite(r.potential)) return null;
+  return { overall: r.overall, potential: r.potential, photo: frontPhoto };
+}
 
 export function setBirthDate(value: string | null): void {
   birthDate = value && value.trim() ? value.trim() : null;

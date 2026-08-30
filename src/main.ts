@@ -27,7 +27,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
-import { clearResultsIdentityState, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
+import { clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
@@ -2167,10 +2167,16 @@ async function runFullAnalysis(
     // Same destination as "continue" — the plan chooser, which already handles
     // signed-out users and the under-18 rule. The upgrade button is not a
     // second, parallel billing path.
+    // Both plan doors carry this scan's ceiling onto the offer screen, so the
+    // before-and-after strip beside the plan cards is the person's own
+    // photograph and their own two numbers. currentCeiling() returns null
+    // until a scan is in hand, and the funnel draws nothing rather than
+    // reaching for a stand-in face.
     onUpgrade: async () => {
+      const ceiling = currentCeiling();
       const user = await currentUser();
       if (user) {
-        await openTrialFunnel(user);
+        await openTrialFunnel(user, undefined, { ceiling });
         await refreshMaxAccess();
         return;
       }
@@ -2178,21 +2184,22 @@ async function runFullAnalysis(
         reason: "analysis",
         notice: "Create your account to choose a plan.",
         onAuthenticated: async (signedInUser) => {
-          await openTrialFunnel(signedInUser);
+          await openTrialFunnel(signedInUser, undefined, { ceiling });
           await refreshMaxAccess();
         },
       });
     },
     onContinue: async () => {
+      const ceiling = currentCeiling();
       const user = await currentUser();
       if (user) {
-        await openTrialFunnel(user);
+        await openTrialFunnel(user, undefined, { ceiling });
         return;
       }
       await openAccount({
         reason: "analysis",
         notice: "Create your account to save your pathway and choose a trial.",
-        onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser),
+        onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser, undefined, { ceiling }),
       });
     },
     // Correct the front points, then score the corrected face.

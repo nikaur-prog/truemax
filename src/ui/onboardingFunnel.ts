@@ -16,6 +16,8 @@ import type { Entitlement } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
 import { recordTrialDecline, setDeclinedCache } from "../engine/trialDecline.js";
 import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
+import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
+import type { CeilingInput } from "./ceilingCta.js";
 import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
 import { METRICS } from "../engine/metrics.js";
@@ -317,6 +319,17 @@ export interface FunnelOptions {
   // No ✕, no Escape, no "Not now" — the quiz has to be finished before the
   // rest of the app means anything. Only ever true on a first run.
   required?: boolean;
+  /**
+   * This person's own before-and-after, when they have just scanned.
+   *
+   * Absent on the first-run path, and absent is the correct state there: with
+   * no scan there is no ceiling, and the alternative would be showing the
+   * synthetic demo cast in a before-and-after, which is the fabricated
+   * after-photo that ceilingCta.ts exists to refuse. Every other app in the
+   * category will happily render the face you could have. We show the person
+   * their own photograph, out of focus, or we show nothing.
+   */
+  ceiling?: CeilingInput | null;
 }
 
 
@@ -327,6 +340,7 @@ export async function openTrialFunnel(
 ): Promise<void> {
   locked = false;
   const required = Boolean(options.required);
+  const ceiling = options.ceiling ?? null;
   close();
   const activeHost = document.createElement("div");
   host = activeHost;
@@ -451,42 +465,88 @@ export async function openTrialFunnel(
     const svg = activeHost.querySelector<SVGSVGElement>(".max-stage .mx-svg");
     if (!feed || !say || !svg) return;
 
-    // Drawn per open rather than rotated in order, because the order would be
-    // per page load and everybody would see the same first one anyway.
-    const exchange = DEMO_EXCHANGES[Math.floor(Math.random() * DEMO_EXCHANGES.length)]!;
+    // A QUEUE, not a single exchange.
+    //
+    // One question and one answer is a quotation. Two, with the second arriving
+    // while the first is still on the screen, is a conversation, and the thing
+    // being sold here is a coach you can keep talking to. So a short shuffled
+    // run plays: a second question comes back from the person's side once the
+    // first answer has landed and been read.
+    //
+    // Two, and it stops. The warning above about screensavers is the reason:
+    // this sits on a payment screen, and an assistant that keeps talking at
+    // somebody trying to read prices is working against the card it lives on.
+    // Shuffled rather than ordered, so a person who reaches this screen more
+    // than once (close it, scan again, come back) is not watching a repeat.
+    const queue = shuffled(DEMO_EXCHANGES).slice(0, 2);
 
-    const ask = document.createElement("div");
-    ask.className = "max-ask";
-    ask.textContent = exchange.ask;
-    feed.insertBefore(ask, say);
-    ask.classList.add("show");
-
-    window.setTimeout(() => {
+    const runOne = (exchange: (typeof DEMO_EXCHANGES)[number], then: () => void) => {
       if (!alive()) return;
-      // Thinking: dots in the bubble, thinking face on him. The pause is the
-      // point — an instant answer reads as a recording, a visible think reads
-      // as somebody working on YOUR question.
-      say.classList.add("pondering");
-      say.innerHTML = "<p><i></i><i></i><i></i></p>";
-      svg.classList.remove("mx-mood-happy");
-      svg.classList.add("mx-mood-thinking");
+      // One exchange on screen at a time. The previous question leaves as the
+      // next arrives, so the feed reads as a conversation moving forward
+      // without the card growing under it: this sits directly above a price
+      // and a button, and a panel that gets taller every few seconds pushes
+      // the thing being sold off a phone screen.
+      for (const old of feed.querySelectorAll<HTMLElement>(".max-ask")) {
+        old.classList.add("gone");
+        window.setTimeout(() => old.remove(), 320);
+      }
+      const ask = document.createElement("div");
+      ask.className = "max-ask";
+      ask.textContent = exchange.ask;
+      feed.insertBefore(ask, say);
+      // Next frame, so the transition has a state to move FROM. Added in the
+      // same tick as the insert, the class is part of the initial style and
+      // the message appears rather than arriving.
+      requestAnimationFrame(() => ask.classList.add("show"));
 
       window.setTimeout(() => {
         if (!alive()) return;
-        say.classList.remove("pondering");
-        svg.classList.remove("mx-mood-thinking");
-        svg.classList.add("mx-mood-happy");
-        say.innerHTML = `<p><b>${exchange.lead}</b> ${exchange.body}</p>`;
-        typewriteBlock(say);
-        svg.classList.add("speaking");
+        // Thinking: dots in the bubble, thinking face on him. The pause is the
+        // point — an instant answer reads as a recording, a visible think reads
+        // as somebody working on YOUR question.
+        say.classList.add("pondering");
+        say.innerHTML = "<p><i></i><i></i><i></i></p>";
+        svg.classList.remove("mx-mood-happy");
+        svg.classList.add("mx-mood-thinking");
+
         window.setTimeout(() => {
-          svg.classList.remove("speaking");
-          // Said his piece: the same follow-through nod the real chat gives.
-          if (alive()) reactMax(activeHost.querySelector<HTMLElement>(".max-stage"), "nod");
-        }, 5600);
-      }, 2100);
-    }, 700);
+          if (!alive()) return;
+          say.classList.remove("pondering");
+          svg.classList.remove("mx-mood-thinking");
+          svg.classList.add("mx-mood-happy");
+          say.innerHTML = `<p><b>${exchange.lead}</b> ${exchange.body}</p>`;
+          typewriteBlock(say);
+          svg.classList.add("speaking");
+          window.setTimeout(() => {
+            svg.classList.remove("speaking");
+            if (!alive()) return;
+            // Said his piece: the same follow-through nod the real chat gives.
+            reactMax(activeHost.querySelector<HTMLElement>(".max-stage"), "nod");
+            then();
+          }, 5600);
+        }, 2100);
+      }, 700);
+    };
+
+    // The gap between answers is long on purpose. It is roughly how long the
+    // answer takes to read, and a follow-up that lands before the last one has
+    // been read is two voices talking over each other.
+    runOne(queue[0]!, () => {
+      if (!queue[1]) return;
+      window.setTimeout(() => runOne(queue[1]!, () => {}), 2600);
+    });
   };
+
+  /** A copy, shuffled. The source list is readonly and stays that way. */
+  function shuffled<T>(items: ReadonlyArray<T>): T[] {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j]!, out[i]!];
+    }
+    return out;
+  }
 
   // What an existing subscriber sees instead of the plan cards.
   //
@@ -559,6 +619,14 @@ export async function openTrialFunnel(
         <span>re-taken the same way every scan. One scan is a score; a run of them
           is the only thing that can tell you a change was real and not the camera.</span>
       </div>
+      ${
+        ceiling
+          ? `<div class="offer-ceiling">
+              <span class="offer-ceiling-h">WHERE YOUR SCAN SAYS YOU CAN GET TO</span>
+              ${ceilingCtaMarkup(ceiling)}
+            </div>`
+          : ""
+      }
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
           <div class="plan-top"><span>STARTER</span><b>${priceInner(STARTER_MONTHLY, "month")}</b></div>
@@ -603,6 +671,11 @@ export async function openTrialFunnel(
       <button class="trial-decline" type="button">Not now</button>
       <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
     </div>`;
+
+    // The canvases only exist once the offer is in the document. Painted from
+    // the capture the report was built on, never re-read from the live canvas,
+    // which by now may be showing a profile or nothing at all.
+    if (ceiling) paintCeilingCta(activeHost, ceiling.photo);
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
     activeHost.querySelector(".trial-decline")?.addEventListener("click", () => askBeforeDeclining(activeHost));
@@ -941,5 +1014,8 @@ export function openTrialFunnelPreview(adult: boolean, offer: boolean): Promise<
     expectations: "Honest measurements and clear next steps.",
     completedAt: null,
   };
-  return openTrialFunnel(user, { profile, offer });
+  // A stand-in ceiling so the offer screen's before-and-after strip can be
+  // looked at in development. No photograph, which is a real production state
+  // too (a report reopened from history), and the one the strip has to survive.
+  return openTrialFunnel(user, { profile, offer }, { ceiling: { overall: 5.6, potential: 7.1, photo: null } });
 }
