@@ -66,6 +66,30 @@ export const MAX_ANNUAL = 89.99;
 // plan card here and the upsell there can never disagree about the price.
 export const STARTER_MONTHLY = 7.99;
 
+/**
+ * The price, anchored against $0.
+ *
+ * A card that opens with "$7.99 USD / month" asks the reader to weigh a
+ * monthly commitment before it has told them the first week costs nothing, so
+ * the number they judge the offer on is the wrong one. Struck through, with $0
+ * in the position their eye was already going to, the first thing read is what
+ * they will actually be charged today. The real rate is not hidden: it is on
+ * the card twice over, struck through here and stated plainly in the renewal
+ * line under the button.
+ *
+ * Returns the INNER html of `.plan-top b`, because the billing toggle rewrites
+ * that node wholesale and the two used to hold separate copies of the same
+ * markup. A card reading one period under a toggle set to the other is the
+ * kind of mismatch somebody notices only after being charged, and one function
+ * is the only way they cannot drift.
+ */
+function priceInner(amount: number, period: "month" | "year"): string {
+  return `<s class="plan-was">$${amount.toFixed(2)} USD / ${period}</s>`
+    + `<span class="plan-now">$0</span>`
+    + `<small> for your first 7 days</small>`;
+}
+
+
 /** $X.XX/week for a year priced at yearTotal. */
 const weeklyOf = (yearTotal: number) => (yearTotal / 52).toFixed(2);
 
@@ -427,9 +451,9 @@ export async function openTrialFunnel(
       </div>
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
-          <div class="plan-top"><span>STARTER</span><b>$${STARTER_MONTHLY.toFixed(2)}<small> USD / month</small></b></div>
+          <div class="plan-top"><span>STARTER</span><b>${priceInner(STARTER_MONTHLY, "month")}</b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
-          <div class="plan-feat"><ul><li>One scan a week</li><li>In-depth analysis of every measurement</li><li>Progress tracking scan to scan</li><li>Personalised recommendations</li></ul></div>
+          <div class="plan-feat"><ul><li>Your weekly pathway, ordered by what moves</li><li>Daily accountability tracker</li><li>Progress tracking scan to scan</li><li>Scan other people too</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="starter">Start 7-day free trial</button>
           <small>Then $${STARTER_MONTHLY.toFixed(2)}/month. Cancel anytime.</small>
@@ -437,7 +461,7 @@ export async function openTrialFunnel(
         <article class="plan-card max${adult ? " featured" : " locked"}" data-plan="max">
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}
           ${adult ? billingToggle() : ""}
-          <div class="plan-top"><span>TRUE<span>MAX</span></span><b>$11.99<small> USD / month</small></b></div>
+          <div class="plan-top"><span>TRUE<span>MAX</span></span><b>${priceInner(MAX_MONTHLY, "month")}</b></div>
           ${adult ? `<span class="plan-week">$${weeklyOf(MAX_MONTHLY * 12)}/week. The leading weekly-priced app: $3.99/week.</span>` : ""}
           <p>Your highest-touch experience with Max alongside you.</p>
           <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
@@ -467,7 +491,7 @@ export async function openTrialFunnel(
       </div>
       <p class="trial-status" role="status"></p>
       <button class="trial-decline" type="button">No thank you — show me my analysis</button>
-      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
+      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout.</p>
     </div>`;
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
@@ -570,8 +594,8 @@ export async function openTrialFunnel(
           const note = card.querySelector<HTMLElement>(":scope > small");
           if (price) {
             price.innerHTML = mode === "annual"
-              ? `$${MAX_ANNUAL.toFixed(2)}<small> USD / year</small>`
-              : `$${MAX_MONTHLY.toFixed(2)}<small> USD / month</small>`;
+              ? priceInner(MAX_ANNUAL, "year")
+              : priceInner(MAX_MONTHLY, "month");
           }
           if (note && adult) {
             note.textContent = mode === "annual"

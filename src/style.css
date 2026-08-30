@@ -863,7 +863,17 @@ body.funnel-open { overflow: hidden; }
 .plan-top { display: grid; gap: 14px; }
 .plan-top > span { font: 10px var(--mono); letter-spacing: .18em; }
 .plan-top > span span { color: #ffd54a; text-shadow: 0 0 12px rgba(255,213,74,.55); }
-.plan-top b { font: 300 clamp(34px, 4.5vw, 48px)/1 var(--serif); }
+.plan-top b { font: 300 clamp(34px, 4.5vw, 48px)/1 var(--serif); display: grid; gap: 5px; justify-items: start; }
+/* The anchor. Struck through, at label size, ABOVE the number that is actually
+   charged today — the reader's eye lands on $0 and then finds out what it is
+   $0 instead of. Reversing the order makes the same two facts read as a price
+   with an apology under it. */
+.plan-was {
+  font: 11.5px/1 var(--mono); letter-spacing: .04em; color: var(--mut);
+  text-decoration-thickness: 1px; text-underline-offset: 0;
+}
+.featured .plan-was { color: rgba(255, 255, 255, .5); }
+.plan-now { font: inherit; }
 .plan-top small { font: 9px var(--mono); letter-spacing: .07em; color: var(--mut); }
 .featured .plan-top small { color: rgba(255,255,255,.58); }
 .plan-card > p { margin: 11px 0 10px; color: var(--mut); font-size: 13px; line-height: 1.5; }
