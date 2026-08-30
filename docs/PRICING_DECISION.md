@@ -90,7 +90,7 @@ use the same seven-day term when Apple and Google billing are implemented.
 
 The gate holds a ROLLING seven-day window per account: free and Starter may
 hold one completed scan inside the trailing week, Max two — which is what the
-Max plan card has sold since it existed ("Two scans a week"); the gate simply
+Max plan card sold until 30 August 2026 ("Two scans a week"); the gate simply
 never honoured it until now. A slot frees exactly a week after the scan
 holding it, so there is no fixed weekday and no replenish moment. Rollover
 ceases to be a question: an unused slot is a window with room in it — nothing
@@ -103,3 +103,20 @@ and is test-pinned to the plan-card wording.
 - What exactly is included in Starter versus Max, beyond Max AI?
 
 These affect entitlements and must not be inferred from display copy.
+
+
+## Update, 30 August 2026: one personal scan on every tier
+
+Max no longer gets two personal scans a week. The reason is the weekly
+ceremony rather than cost: a second personal scan inside the same window sits
+inside the noise the first one already carries, so it cannot show progress,
+only weather.
+
+The tiers differ on OTHER people's faces instead, which is the axis Max is
+actually sold on and the one where "unlimited" was quietly giving Starter and
+Max the same product. Starter gets three guest scans a week, Max fifty, free
+none — except a free account that declined the trial, which keeps one, because
+its own weekly scan is now a guest scan.
+
+No grandfather clause, because no subscription was ever sold at the two-scan
+promise.

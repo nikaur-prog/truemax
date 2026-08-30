@@ -177,8 +177,18 @@ export function buildPassPlan(
   // of the overall score. It gets roughly two thirds of the pass, and the side
   // keeps a third, which is the same proportion the scoring uses.
   const sideSteps = out.slice(frontCount);
-  const sideKeep = Math.min(sideSteps.length, Math.max(1, Math.round(max / 3)));
-  const frontKeep = Math.max(1, max - sideKeep);
+  // A third to the side, but never at the cost of the front's last beat, and
+  // never any at a cap of one — a single-beat pass belongs to the front, which
+  // carries 75% of the score.
+  //
+  // Both halves used to carry a Math.max(1, ...) floor, which meant the cap was
+  // not a cap: `{ maxSteps: 1 }` against one front and one side measurement
+  // returned two beats. Production passes nine so it never showed, but an
+  // exported option that quietly returns more than it was asked for is a
+  // contract the video harnesses rely on.
+  const sideWanted = Math.min(sideSteps.length, Math.max(1, Math.round(max / 3)));
+  const sideKeep = Math.min(sideWanted, Math.max(0, max - 1));
+  const frontKeep = max - sideKeep;
   return [
     ...breadthFirst(out.slice(0, frontCount), frontKeep),
     ...breadthFirst(sideSteps, sideKeep),

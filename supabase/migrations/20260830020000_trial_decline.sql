@@ -61,3 +61,40 @@ $$;
 
 revoke all on function public.record_trial_decline() from public;
 grant execute on function public.record_trial_decline() to authenticated;
+
+-- CORRECTIVE, and the reason the revoke above is not enough on its own.
+--
+-- 20260812040016 ends with `grant select, insert, update on public.profiles to
+-- authenticated`, a TABLE-level grant. PostgreSQL does not let a column-level
+-- REVOKE subtract from one: a grantee's privilege on a column is the union of
+-- the column-level and table-level grants, so revoking the column while the
+-- table grant stands changes nothing. The stamp was writable — and therefore
+-- CLEARABLE — from the browser, which makes the decline a suggestion.
+--
+-- So the table-level UPDATE goes, and comes back as a column list. The list is
+-- every column the onboarding upsert names, and nothing else. user_id is on it
+-- deliberately: supabase-js builds its ON CONFLICT SET from every key it was
+-- given, so leaving it out would break profile saves, and granting it is safe
+-- because the row policy's WITH CHECK still requires auth.uid() = user_id —
+-- a row cannot be reassigned to somebody else.
+--
+-- created_at is NOT on the list. Nothing writes it and it is not the client's
+-- to move.
+revoke update on public.profiles from authenticated;
+grant update (
+  user_id,
+  first_name,
+  last_name,
+  mobile,
+  date_of_birth,
+  discovery_source,
+  primary_objectives,
+  success_outcome,
+  expectations,
+  strengths,
+  support_areas,
+  quiet_topics,
+  consent_version,
+  completed_at,
+  updated_at
+) on public.profiles to authenticated;

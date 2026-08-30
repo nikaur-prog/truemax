@@ -1293,7 +1293,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile, SIDE_TAIL_LIMIT_PCT) })}
         ${curveLegend()}
-        <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
+        <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles", SIDE_TAIL_LIMIT_PCT)}</p></div>
       ${regions.map((r) => sideRegionDeck(r, report)).join("")}
       ${modeSwitcher("full")}
       ${sideNav()}

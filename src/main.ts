@@ -75,7 +75,7 @@ import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
-import { loadTrialDeclined } from "./engine/trialDecline.js";
+import { declinedNow, loadTrialDeclined, setDeclinedCache } from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
@@ -173,15 +173,6 @@ async function refreshPathwayState(): Promise<void> {
 // that has not landed yet offers no guest scans rather than fifty.
 let lastKnownTier: EntitlementTier = "free";
 
-// Whether this account turned the trial down.
-//
-// Defaults to FALSE, which is the opposite direction from lastKnownTier above,
-// and deliberately so: the two guard different things. An unread tier must not
-// hand out an allowance nobody paid for, so it fails closed. An unread decline
-// must not refuse somebody their own scan on a network hiccup, so it fails
-// open — the cost of getting it wrong is a scan that should not have happened,
-// against telling a paying-attention user they may not scan their own face.
-let lastKnownDeclined = false;
 
 async function refreshMaxAccess(): Promise<void> {
   const owner = activeScanOwner();
@@ -224,7 +215,7 @@ async function refreshMaxAccess(): Promise<void> {
     // A live subscription overrides an old decline outright. Somebody who
     // declined and later subscribed has un-declined by paying, and leaving the
     // stamp in force would lock a paying customer out of their own face.
-    lastKnownDeclined = lastKnownTier === "free" && Boolean(declined);
+    setDeclinedCache(lastKnownTier === "free" && Boolean(declined));
     setMemberPricing(lastKnownTier !== "free");
     setDepth(
       depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
@@ -695,19 +686,9 @@ function ensureSex(then: () => void): void {
   const profile = loadProfile();
   const member = document.body.classList.contains("is-member");
   if (!member) {
-    // KNOWN GAP, and the one that matters: a declined account is almost always
-    // a free one, and a free account never reaches the chooser — so the
-    // `selfLocked` flag passed below never fires for the population the
-    // decline sheet is talking to.
-    //
-    // Closing it is not a flag, it is a model change. "Counts toward my week"
-    // and "counts toward my chart" are one boolean today (recordScanRun's
-    // `guest`), and a declined account needs them apart: their weekly scan
-    // still spends the week, and still must not attach to their profile or
-    // move their trend. Doing that properly means splitting the two axes
-    // through recordScanRun, the history writer and the avatar adoption
-    // path, which is a change with privacy edges and is not being made in
-    // passing at the bottom of another one.
+    // Signed OUT only. `is-member` is Boolean(user), so every signed-in
+    // account reaches the chooser below, free ones included — an earlier
+    // comment here claimed the opposite and was wrong.
     askPopulation(storedSex() ?? undefined, null);
     return;
   }
@@ -753,7 +734,7 @@ function ensureSex(then: () => void): void {
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  }, undefined, guestScansLeft(lastKnownTier), lastKnownDeclined);
+  }, undefined, guestScansLeft(lastKnownTier, declinedNow()), declinedNow());
 }
 
 // The late form of the same question, for a scan captured with nobody signed
@@ -781,6 +762,12 @@ function askLateSubject(): Promise<boolean> {
         resetToUpload();
         resolve(false);
       },
+      // The same two limits the early chooser gets. This one was passing
+      // neither, which made it the way around both: capture signed out, sign
+      // in at the gate, and answer a chooser that had never heard of the
+      // guest budget or the decline.
+      guestScansLeft(lastKnownTier, declinedNow()),
+      declinedNow(),
     );
   });
 }
@@ -1365,9 +1352,15 @@ el.btnCamera.addEventListener("click", async () => {
   // No fold-back: the scan stage takes the screen over from the viewfinder,
   // so animating the viewfinder back down into the landing card would be
   // showing the person a screen they are not going to.
-  await closeCamera({ instant: true });
-  if (shot) await handleCanvas(shot, 1, generation, token, burst.slice(1));
-  else scanSession.reset();
+  if (shot) {
+    // handleCanvas closes the camera itself, after it has put the scan on the
+    // screen. Closing it here as well would reopen the gap this ordering
+    // exists to shut.
+    await handleCanvas(shot, 1, generation, token, burst.slice(1));
+  } else {
+    await closeCamera({ instant: true });
+    scanSession.reset();
+  }
 });
 
 el.btnCancel.addEventListener("click", async () => {
@@ -1667,14 +1660,13 @@ async function handleCanvas(
 ): Promise<void> {
   if (!token || !scanIsCurrent(token, generation)) return;
   void exifOrientation;
-  // Uploading while the live preview is running left the landmarker in VIDEO
-  // mode, and the still-image detector then threw "Landmarker is in VIDEO
-  // mode". Capturing had always torn the camera down first; choosing a file
-  // never did.
-  // Same reasoning as the capture path: whichever way the photo arrived, the
-  // next thing on screen is the scan, not the landing card.
-  if (cam) await closeCamera({ instant: true });
-  if (!scanIsCurrent(token, generation)) return;
+  // The photo goes up, and the scan stage takes the screen, BEFORE the camera
+  // is torn down. The order matters and it is not cosmetic: closeCamera awaits
+  // the landmarker's mode switch, and MediaPipe's setOptions is asynchronous
+  // and occasionally slow. Tearing the takeover down first meant the landing
+  // layout was what sat under the awaited call, so a slow switch put the
+  // pre-photo screen back on the display for as long as it took. Painting
+  // first means whatever the await costs is spent behind the scan.
   const width = src.width;
   const height = src.height;
   el.photoCanvas.width = width;
@@ -1683,18 +1675,34 @@ async function handleCanvas(
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  el.frame.classList.add("scanning");
+  el.capRight.textContent = "SCANNING";
+  el.analysis.innerHTML = "";
+  el.qualityChips.innerHTML = "";
+
+  // Uploading while the live preview is running left the landmarker in VIDEO
+  // mode, and the still-image detector then threw "Landmarker is in VIDEO
+  // mode". Capturing had always torn the camera down first; choosing a file
+  // never did. Both go through here now, so both are safe.
+  if (cam) await closeCamera({ instant: true });
+  if (!scanIsCurrent(token, generation)) {
+    // Abandoned mid-handoff. The stage was put up above, so it has to come
+    // back down here rather than being left on screen for the next thing.
+    el.frame.classList.remove("scanning");
+    return;
+  }
+
   // The front photo, kept so the scan can switch back to it after showing the
   // profile being measured.
   const frontShot = document.createElement("canvas");
   frontShot.width = el.photoCanvas.width;
   frontShot.height = el.photoCanvas.height;
   frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
-  el.frame.classList.add("scanning");
-  el.capRight.textContent = "SCANNING";
-  el.analysis.innerHTML = "";
-  el.qualityChips.innerHTML = "";
   await nextFrame();
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) {
+    el.frame.classList.remove("scanning");
+    return;
+  }
 
   // Real math (milliseconds) happens inside the theatre beat (~2.2s)
   const result = detectStable(el.photoCanvas);
@@ -2795,6 +2803,14 @@ if (isAuthAvailable()) {
     const nextUserId = user?.id ?? null;
     const identityChanged = previousUserId !== undefined && previousUserId !== nextUserId;
     if (identityChanged) {
+      // Both of these are module state describing the PREVIOUS account, and
+      // neither was reset here. A Max holder finishing a scan and a free user
+      // signing in on the same tab left the second one holding the first one's
+      // guest allowance; a decline belonging to one account disabled the
+      // other's self-scan. They go back to the closed defaults and are
+      // repopulated by the next entitlement read.
+      lastKnownTier = "free";
+      setDeclinedCache(false);
       clearResultsIdentityState();
       closeScanGate();
       closeDashboard();

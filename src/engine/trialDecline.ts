@@ -49,3 +49,26 @@ export async function recordTrialDecline(): Promise<string | null> {
   if (error) throw new Error(error.message);
   return (data as string | null) ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// The cached answer, for the surfaces that need it without a round trip.
+//
+// The subject chooser runs on a path with no network read of its own, so it
+// cannot await the profile. This holds the last known answer instead.
+//
+// Defaults to FALSE and is reset on every identity change, which is the
+// opposite direction from the tier cache beside it and deliberately so: an
+// unread tier must not hand out an allowance nobody paid for, while an unread
+// decline must not refuse somebody their own face on a network hiccup.
+// ---------------------------------------------------------------------------
+
+let cached = false;
+
+export function declinedNow(): boolean {
+  return cached;
+}
+
+/** Set from the entitlement read, from a confirmed decline, and on sign-out. */
+export function setDeclinedCache(value: boolean): void {
+  cached = value;
+}

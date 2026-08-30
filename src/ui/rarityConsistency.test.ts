@@ -155,6 +155,21 @@ test("the side profile may not name a band narrower than the outer decile", () =
   assert.equal(rankShort(0.4), "Bottom 1%");
 });
 
+test("the side chip and the sentence under it name the same band", () => {
+  // Found in review: the chip took the tail limit and populationLine did not,
+  // so a profile in the tail printed "Top 10%" over "the top 1%" — the same
+  // face, two bands, and the narrower one a claim the side sample cannot
+  // support. Both readings now clamp before the phrase is built.
+  for (const pct of [0, 1, 4, 96, 99, 100]) {
+    const chip = rankShort(pct, SIDE_TAIL_LIMIT_PCT);
+    const line = populationLine(pct, "male", "profiles", SIDE_TAIL_LIMIT_PCT);
+    assert.doesNotMatch(line, /top 1%/, `${pct}: "${line}" under chip "${chip}"`);
+    assert.doesNotMatch(line, /\b1 in 100\b/, `${pct}: "${line}" under chip "${chip}"`);
+  }
+  // And the front, which passes no limit, is unchanged.
+  assert.match(populationLine(99.6, "male", "faces"), /top 1%/);
+});
+
 test("the three standing phrasings cannot drift apart", () => {
   // They were three functions saying the same thing three ways, and two of them
   // were fixed on separate occasions while the third kept the old wording. They

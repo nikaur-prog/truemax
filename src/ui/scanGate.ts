@@ -25,10 +25,10 @@ import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
 // someone who wants to scan again TODAY is buying a re-measurement, not a
 // measurement, and that is what the one-time scan credit already prices.
 //
-// Max gets two, because that is what its plan card has always said. The gate
-// held everybody to one, which made "Two scans a week" a printed promise the
-// product did not keep — the kind of bug no subscriber reports, they just
-// learn the cards are decoration. The arithmetic (rolling window, which scan
+// ONE personal scan on every tier, including Max. Max used to get two and its
+// card sold it; the card sells guest scans now instead, because a second
+// personal scan inside the same week is inside the noise the first one already
+// carries and cannot show progress. The arithmetic (rolling window, which scan
 // holds the slot) lives in engine/scanAllowance.ts where it can be tested.
 //
 // The gate sits at the moment of intent (the upload button, the camera button,
@@ -92,9 +92,9 @@ function readGuestTimes(): number[] {
  * Pruned to the window on read, so the stored list cannot grow without bound
  * on an account that scans a lot of faces.
  */
-export function guestScansLeft(tier: EntitlementTier): number {
+export function guestScansLeft(tier: EntitlementTier, declined = false): number {
   const used = scansInWindow(readGuestTimes(), Date.now()).length;
-  return Math.max(0, guestAllowance(tier) - used);
+  return Math.max(0, guestAllowance(tier, declined) - used);
 }
 
 /** Clear an unspent weekly-skip intent when its capture is abandoned. */
@@ -315,7 +315,7 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
     ? "You've used both of this week's scans"
     : "You've used your free scan this week";
   const sub = allowance > 1
-    ? "Max includes two scans a week. Your face doesn't change in a day, so a third scan mostly measures your lighting — leave it and the number can actually move."
+    ? "One scan of your own face a week, on every plan. Your face doesn't change in a day, so a second scan mostly measures your lighting — leave it and the number can actually move. Max scans of other people are separate and do not spend this."
     : "You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.";
   // One upsell line each: non-members hear about the member price, Starter
   // members hear that Max carries a second weekly scan. Max members, who have
@@ -333,7 +333,7 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
   const note = !member
     ? `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`
     : allowance === 1
-      ? `<p class="sg-note">Max includes two scans a week.</p>`
+      ? `<p class="sg-note">Scans of other people are separate and do not spend this week.</p>`
       : "";
 
   host = document.createElement("div");

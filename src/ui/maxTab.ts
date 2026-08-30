@@ -61,7 +61,7 @@ const BENEFITS = [
   "Unlimited chats with Coach Max about your numbers",
   "Coach Max's written analysis on every scan",
   "Step-by-step plans, catered to you",
-  "Two scans a week",
+  "Scan up to 50 other people a week",
 ];
 
 export function maxTabMarkup(paid: boolean): string {

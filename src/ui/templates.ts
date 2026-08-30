@@ -312,12 +312,27 @@ export const rarityText = rarityPhrase;
 // Below it, the honest statement is the plain directional one: most people
 // score higher, and here is roughly how many. Same number, no spin in either
 // direction.
-export function populationLine(pct: number, sex: Sex, subject: string): string {
+export function populationLine(pct: number, sex: Sex, subject: string, tailLimit?: number): string {
   const group = sexNoun(sex);
   if (pct >= 50) {
-    return `Roughly ${rarityText(pct)} ${group} ${subject} measure this way.`;
+    // `tailLimit` matters here and was missed when it was added to the chip.
+    // rarityText says "the top 1%" past the resolution cap, so a side profile
+    // printed "Top 10%" in the chip and "the top 1%" in the sentence directly
+    // underneath it — the same face, two bands, one of them a claim the side
+    // sample cannot support. Clamping the percentile before it reaches the
+    // phrase keeps both readings on the same number.
+    return `Roughly ${rarityText(clampToTail(pct, tailLimit))} ${group} ${subject} measure this way.`;
   }
-  return `About ${scoreHigherText(pct)} of ${group} ${subject} score higher.`;
+  return `About ${scoreHigherText(clampToTail(pct, tailLimit))} of ${group} ${subject} score higher.`;
+}
+
+/**
+ * Pull a percentile inside the band its sample can express, before any phrase
+ * is built from it. Undefined limit leaves it exactly as it was.
+ */
+function clampToTail(pct: number, tailLimit?: number): number {
+  if (!tailLimit || !Number.isFinite(pct)) return pct;
+  return Math.max(tailLimit, Math.min(100 - tailLimit, pct));
 }
 
 // The headline chip.

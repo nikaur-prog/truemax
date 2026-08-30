@@ -1949,6 +1949,10 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
   margin: 0 0 12px; line-height: 1.15;
 }
 .decline-card p { margin: 0 0 20px; font-size: 14.5px; line-height: 1.6; color: var(--ink); }
+/* Empty until a save actually fails, so the sheet does not open carrying a
+   warning about something that has not gone wrong. */
+.decline-card .decline-err:empty { display: none; }
+.decline-card .decline-err { color: #a3352a; font-size: 13.5px; margin: -8px 0 16px; }
 /* Keep first and full width, No thanks quieter underneath. The destructive
    choice is reachable, never prominent. */
 .decline-actions { display: grid; gap: 10px; }

@@ -14,7 +14,7 @@ import type { OnboardingProfile } from "../engine/onboarding.js";
 import { hasPaidAccess, loadEntitlement, openBillingPortal, startTrialCheckout } from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
-import { recordTrialDecline } from "../engine/trialDecline.js";
+import { recordTrialDecline, setDeclinedCache } from "../engine/trialDecline.js";
 import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
@@ -207,6 +207,7 @@ function askBeforeDeclining(host: HTMLElement): void {
     <p>This was your one personal scan. Without a plan you will not get the routine,
       the products, or your weekly progress, and you will not be able to scan
       yourself again. Your results stay saved either way.</p>
+    <p class="decline-err" role="status" aria-live="polite"></p>
     <div class="decline-actions">
       <button type="button" class="btn pri" data-decline="keep">Keep my free trial</button>
       <button type="button" class="btn gho" data-decline="go">No thanks</button>
@@ -226,17 +227,53 @@ function askBeforeDeclining(host: HTMLElement): void {
       return;
     }
     if (target.dataset.decline === "go") {
-      track("offer-declined-confirmed");
-      // Recorded, not awaited. The sheet said what declining costs and the
-      // person has confirmed it; making them watch a spinner to leave a screen
-      // they are leaving would be the last thing this flow does to them. The
-      // write is idempotent server-side, so a failure here means the next
-      // decline records it instead of a duplicate.
-      void recordTrialDecline().catch(() => undefined);
-      sheet.remove();
-      close();
+      void confirmDecline(sheet);
     }
   });
+}
+
+/**
+ * Take the decline, and only close once it is actually recorded.
+ *
+ * This used to fire the RPC without awaiting it and swallow every failure, so
+ * a network drop looked exactly like success: the offer closed, the person
+ * believed they had declined, and nothing on the server had changed. The one
+ * thing this flow must not do is claim a consequence it did not apply.
+ *
+ * A null return is a failure too, not a success with no data —
+ * record_trial_decline reads the stamp back after writing it, so null means
+ * there was no profile row to stamp.
+ */
+async function confirmDecline(sheet: HTMLElement): Promise<void> {
+  const go = sheet.querySelector<HTMLButtonElement>('[data-decline="go"]');
+  const keep = sheet.querySelector<HTMLButtonElement>('[data-decline="keep"]');
+  if (go) {
+    go.disabled = true;
+    go.textContent = "Saving…";
+  }
+  if (keep) keep.disabled = true;
+  let stamped: string | null = null;
+  try {
+    stamped = await recordTrialDecline();
+  } catch {
+    stamped = null;
+  }
+  if (!stamped) {
+    if (go) {
+      go.disabled = false;
+      go.textContent = "No thanks";
+    }
+    if (keep) keep.disabled = false;
+    const note = sheet.querySelector<HTMLElement>(".decline-err");
+    if (note) note.textContent = "That did not save. Check your connection and try again.";
+    return;
+  }
+  // Only now is it true, so only now is it counted and cached. The chooser
+  // reads this cache on the very next scan, with no round trip of its own.
+  track("offer-declined-confirmed");
+  setDeclinedCache(true);
+  sheet.remove();
+  close();
 }
 
 function close(): void {

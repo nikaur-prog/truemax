@@ -56,9 +56,15 @@ export function weeklyAllowance(_tier: EntitlementTier): number {
 //
 // Fifty is a cap rather than a target. It exists so "unlimited" is not printed
 // on a card next to a number nobody has measured the cost of.
-export function guestAllowance(tier: EntitlementTier): number {
+export function guestAllowance(tier: EntitlementTier, declined = false): number {
   if (tier === "max") return 50;
   if (tier === "starter") return 3;
+  // A DECLINED free account keeps its weekly scan, and that scan is a guest
+  // scan: stored, but with no profile attached and off the chart. Returning
+  // zero here locked them out of scanning entirely, because the decline also
+  // disables "It's me" — which is not the consequence the sheet named. The
+  // sheet says they cannot scan THEMSELVES; it does not say they cannot scan.
+  if (declined) return 1;
   return 0;
 }
 

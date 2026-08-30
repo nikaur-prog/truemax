@@ -143,6 +143,25 @@ test("the cap spreads across regions instead of exhausting the first one", () =>
   assert.deepEqual(regions, ["eyes", "jaw", "chin"]);
 });
 
+test("the cap is a hard cap, not a target", () => {
+  // Found in review: both halves of the allocation carried a floor of one, so
+  // a cap of one against one front and one side measurement returned two
+  // beats. Production passes nine and never saw it; the video harnesses pass
+  // three, six and eight and rely on getting what they asked for.
+  const front = report([region("eyes", ["browTilt"])]);
+  const side = report([region("jaw", ["gonialAngle"])]);
+  for (const maxSteps of [1, 2, 3]) {
+    assert.ok(
+      buildPassPlan(front, side, { maxSteps }).length <= maxSteps,
+      `maxSteps ${maxSteps} returned ${buildPassPlan(front, side, { maxSteps }).length}`,
+    );
+  }
+  // At one, the single beat is the front's.
+  const one = buildPassPlan(front, side, { maxSteps: 1 });
+  assert.equal(one.length, 1);
+  assert.equal(one[0].view, "front");
+});
+
 test("an uncapped-looking call is still capped, because the pass has a default", () => {
   // The pass used to walk every honest measurement, which ran to about
   // eighteen seconds of loading screen. Callers that pass no options get the
