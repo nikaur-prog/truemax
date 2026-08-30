@@ -12,10 +12,12 @@
 // is the only channel that still works when the subject is not looking at the
 // display. Anything the countdown says visually is a bonus for the front.
 //
-// The count resets the instant the frame stops being good, which is what makes
-// it safe: it cannot fire on a frame that has drifted, and someone who needs
-// longer simply gets a longer countdown rather than a failed photo. The manual
-// button keeps working throughout for anyone who would rather take it himself.
+// The count PAUSES while the frame is not good, which is what makes it safe:
+// the timer is not running, so the shutter cannot fire on a frame that has
+// drifted. It resumes where it stopped rather than starting again, so somebody
+// who wobbles gets a slightly longer countdown instead of an endless one. The
+// manual button keeps working throughout for anyone who would rather take it
+// himself.
 // ---------------------------------------------------------------------------
 
 export interface AutoCapture {
@@ -87,33 +89,79 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     raf = requestAnimationFrame(frame);
   };
 
-  // How many consecutive not-ready frames it takes to abandon a running
-  // count. The hint text already has this hysteresis (captureSettle) and the
-  // countdown did not, so a face sitting on the boundary of one check reset
-  // the timer thirty times a second — the screen said "Hold still · 2"
-  // indefinitely while the count silently restarted underneath it, and the
-  // shutter never fired. Four frames is ~130ms: a real drift still cancels
-  // almost immediately, a flicker no longer can.
+  // IT PAUSES. IT DOES NOT START AGAIN.
+  //
+  // This used to throw away the whole count on a sustained bad frame, and the
+  // symptom was reported from a real run: the countdown restarting three, four,
+  // five times before a photo finally landed, with nothing on screen explaining
+  // why. Every blocking gate is a live measurement of a moving person — face
+  // width, centring, pitch, yaw, roll, motion blur, expression — so on a phone
+  // held at arm's length, something dips below its threshold every second or
+  // so. Under a reset rule, a 1.5-second countdown needs 1.5 uninterrupted
+  // seconds, and a person who twitches every second never gets one.
+  //
+  // Pausing costs the interruption and nothing more. Two half-second wobbles
+  // add half a second to the wait instead of restarting the wait twice. It is
+  // also strictly safer than the old rule in the way that matters: the shutter
+  // still cannot fire on a bad frame, because the timer is not running while
+  // the frame is bad.
+  //
+  // A LONG absence still cancels outright, because at that point the person has
+  // put the phone down or walked out of frame, and a countdown that resumes
+  // from 0.2 seconds when they come back would fire before they were ready.
   const GRACE_FRAMES = 4;
+  const ABANDON_MS = 4000;
   let misses = 0;
+  let pausedAt = 0;
+  let badSince = 0;
 
   return {
     update(ready: boolean) {
       if (ready) {
         misses = 0;
+        badSince = 0;
+        if (pausedAt) {
+          // Resume where it stopped: push the start forward by exactly the
+          // time spent paused, so the remaining count is unchanged.
+          startedAt += performance.now() - pausedAt;
+          pausedAt = 0;
+          raf = requestAnimationFrame(frame);
+          return;
+        }
         if (!startedAt) {
           startedAt = performance.now();
           raf = requestAnimationFrame(frame);
         }
-      } else if (startedAt && ++misses >= GRACE_FRAMES) {
+        return;
+      }
+
+      if (!startedAt) return;
+      const now = performance.now();
+      if (!badSince) badSince = now;
+      // Gone long enough that this is no longer a wobble. Forget the progress.
+      if (now - badSince >= ABANDON_MS) {
         stop();
+        pausedAt = 0;
         opts.onTick(null);
+        return;
+      }
+      // A brief dip is held, exactly as the hint text is (captureSettle), so a
+      // single bad frame cannot stall a count that is about to complete.
+      if (!pausedAt && ++misses >= GRACE_FRAMES) {
+        pausedAt = now;
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
       }
     },
     cancel() {
       stop();
+      pausedAt = 0;
+      badSince = 0;
+      misses = 0;
       opts.onTick(null);
     },
+    // Paused still counts as armed: the count is held, not discarded, and a
+    // caller asking "is a capture under way" should hear yes.
     armed: () => startedAt !== 0,
   };
 }
