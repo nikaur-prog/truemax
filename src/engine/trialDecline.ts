@@ -1,5 +1,6 @@
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "./auth.js";
+import type { EntitlementTier } from "./entitlement.js";
 
 // ---------------------------------------------------------------------------
 // Whether this account turned the trial down, and when.
@@ -71,4 +72,41 @@ export function declinedNow(): boolean {
 /** Set from the entitlement read, from a confirmed decline, and on sign-out. */
 export function setDeclinedCache(value: boolean): void {
   cached = value;
+}
+
+/**
+ * What the cache should hold after an entitlement read.
+ *
+ * `declined` carries three states and they are three different facts:
+ *
+ *   - a stamp:    this account declined, on that date;
+ *   - null:       the read succeeded and there is no stamp;
+ *   - undefined:  the read FAILED and nothing is known.
+ *
+ * The third is why loadTrialDeclined throws instead of returning null. Folding
+ * a failure into "no stamp" made an unreachable column indistinguishable from
+ * a clean account, so a declined account could take that one read offline and
+ * come back un-declined — the consequence the sheet named, undone by turning
+ * off the wifi.
+ *
+ * A live subscription clears the stamp without consulting it at all: somebody
+ * who declined and later subscribed has un-declined by paying, and that is
+ * true whether or not the column could be read.
+ *
+ * On a free account with a failed read the PREVIOUS answer stands. A failure
+ * is not evidence that anybody un-declined, and it is not evidence that they
+ * did either, so the last thing actually known is better than a guess in
+ * either direction. That leaves the cold-start case still open in the lenient
+ * direction — first load, failed read, nothing known — which is deliberate:
+ * refusing somebody their own face on the strength of a fact never once read
+ * is the worse of the two mistakes.
+ */
+export function nextDeclinedCache(
+  tier: EntitlementTier,
+  declined: string | null | undefined,
+  previous: boolean,
+): boolean {
+  if (tier !== "free") return false;
+  if (declined === undefined) return previous;
+  return Boolean(declined);
 }

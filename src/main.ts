@@ -75,7 +75,12 @@ import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
-import { declinedNow, loadTrialDeclined, setDeclinedCache } from "./engine/trialDecline.js";
+import {
+  declinedNow,
+  loadTrialDeclined,
+  nextDeclinedCache,
+  setDeclinedCache,
+} from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
@@ -191,10 +196,15 @@ async function refreshMaxAccess(): Promise<void> {
       loadScanCredits().catch(() => 0),
       loadIsAdmin().catch(() => false),
       // Its own catch, like credits and the staff flag: one unreachable column
-      // must not take the whole entitlement read down with it.
+      // must not take the whole entitlement read down with it. UNDEFINED is
+      // the failure, though, and null is a successful read that found no
+      // stamp. loadTrialDeclined throws rather than returning null precisely
+      // so the caller can tell those apart, and catching to null threw that
+      // away: a declined account that took this one read offline came back as
+      // "never declined" and had its own face handed back to it.
       currentUser()
         .then((user) => (user ? loadTrialDeclined(user) : null))
-        .catch(() => null),
+        .catch(() => undefined),
     ]);
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     let currentPaidScan = false;
@@ -214,8 +224,10 @@ async function refreshMaxAccess(): Promise<void> {
     lastKnownTier = tierOf(entitlement);
     // A live subscription overrides an old decline outright. Somebody who
     // declined and later subscribed has un-declined by paying, and leaving the
-    // stamp in force would lock a paying customer out of their own face.
-    setDeclinedCache(lastKnownTier === "free" && Boolean(declined));
+    // stamp in force would lock a paying customer out of their own face. That
+    // holds even when the stamp itself could not be read, which is why the
+    // paid branch does not consult `declined` at all.
+    setDeclinedCache(nextDeclinedCache(lastKnownTier, declined, declinedNow()));
     setMemberPricing(lastKnownTier !== "free");
     setDepth(
       depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
