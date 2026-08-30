@@ -8,7 +8,8 @@ import {
   startScanCreditCheckout,
 } from "../engine/entitlement.js";
 import { TRIAL_SCANS, tierOf } from "../engine/depth.js";
-import { mergeScanTimes, nextScanSlotAt, weeklyAllowance } from "../engine/scanAllowance.js";
+import { guestAllowance, mergeScanTimes, nextScanSlotAt, scansInWindow, weeklyAllowance } from "../engine/scanAllowance.js";
+import type { EntitlementTier } from "../engine/entitlement.js";
 import { SCAN_PRICE_MEMBER, isMemberPricing, scanPrice, setMemberPricing } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
 import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
@@ -24,10 +25,10 @@ import { activeScanOwner, scopedStorageKey } from "../engine/scanScope.js";
 // someone who wants to scan again TODAY is buying a re-measurement, not a
 // measurement, and that is what the one-time scan credit already prices.
 //
-// Max gets two, because that is what its plan card has always said. The gate
-// held everybody to one, which made "Two scans a week" a printed promise the
-// product did not keep — the kind of bug no subscriber reports, they just
-// learn the cards are decoration. The arithmetic (rolling window, which scan
+// ONE personal scan on every tier, including Max. Max used to get two and its
+// card sold it; the card sells guest scans now instead, because a second
+// personal scan inside the same week is inside the noise the first one already
+// carries and cannot show progress. The arithmetic (rolling window, which scan
 // holds the slot) lives in engine/scanAllowance.ts where it can be tested.
 //
 // The gate sits at the moment of intent (the upload button, the camera button,
@@ -56,7 +57,45 @@ function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
 // carry ISO dates too, and the newer of the two wins, so the gate still works
 // for scans that predate this stamp existing.
 const STAMP_KEY = "truemax.lastScanAt";
+// Guest scans keep their OWN list of completion times, deliberately separate
+// from the owner's single stamp above.
+//
+// A guest scan does not spend the owner's week — that is settled and stays
+// true — but "does not spend the week" turned into "is free and unlimited",
+// and unlimited is not a tier: it handed a Starter subscriber and a Max
+// subscriber the identical product on the one axis Max is actually sold on.
+// So there are two budgets rather than one, and they cannot borrow from each
+// other in either direction.
+//
+// A list rather than a stamp, because the cap is a count inside the window
+// (three a week, fifty on Max) rather than a single slot.
+const GUEST_KEY = "truemax.guestScanTimes";
 let pendingWeeklyCreditOwner: string | null = null;
+
+function readGuestTimes(): number[] {
+  try {
+    const key = scopedStorageKey(GUEST_KEY);
+    if (!key) return [];
+    const raw = JSON.parse(localStorage.getItem(key) || "[]") as unknown;
+    // Anything that is not a finite number is dropped rather than trusted: one
+    // NaN from a corrupted write would otherwise poison every comparison after
+    // it, exactly as scansInWindow guards against for the owner's own times.
+    return Array.isArray(raw) ? raw.filter((t): t is number => Number.isFinite(t)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * How many more people this account may scan inside the trailing week.
+ *
+ * Pruned to the window on read, so the stored list cannot grow without bound
+ * on an account that scans a lot of faces.
+ */
+export function guestScansLeft(tier: EntitlementTier, declined = false): number {
+  const used = scansInWindow(readGuestTimes(), Date.now()).length;
+  return Math.max(0, guestAllowance(tier, declined) - used);
+}
 
 /** Clear an unspent weekly-skip intent when its capture is abandoned. */
 export function discardPendingScanCredit(): void {
@@ -84,7 +123,20 @@ export function recordScanRun(guest = false): void {
   // Not an abuse hole. The subject chooser is member-gated, so the only people
   // who can declare a guest are the ones already paying, and what they get out
   // of it is a result they cannot chart.
-  if (guest) return;
+  if (guest) {
+    // Recorded against the guest budget instead of the owner's week. The early
+    // return this replaced is why guest scans were unlimited.
+    try {
+      const key = scopedStorageKey(GUEST_KEY);
+      if (!key) return;
+      const kept = scansInWindow(readGuestTimes(), Date.now());
+      localStorage.setItem(key, JSON.stringify([...kept, Date.now()]));
+    } catch {
+      /* Storage disabled: the cap cannot hold this browser, and a cap that
+         fails open is the survivable direction for a free product. */
+    }
+    return;
+  }
   try {
     const key = scopedStorageKey(STAMP_KEY);
     if (!key) return;
@@ -126,6 +178,10 @@ export function nextFreeScanAt(allowance = 1): number | null {
 // proceeds and is spent, everyone else sees the countdown.
 export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
   const owner = activeScanOwner();
+  // A fresh run owes nothing to the last one. Cleared here rather than when
+  // the chooser closes, because this is the one function every capture path
+  // goes through, and the gate's guest button fires from inside it.
+  guestOnlyRun = false;
   // The base allowance first, with no network: a browser with an open slot at
   // allowance one has an open slot at every tier, so the common case stays a
   // pure localStorage check. Only a held slot goes on to ask who this is —
@@ -211,6 +267,29 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
 let host: HTMLElement | null = null;
 let timer: number | null = null;
 
+// ---------------------------------------------------------------------------
+// Set by the gate's "Scan someone else instead", cleared at the start of every
+// allowance check.
+//
+// That button used to hand back `proceed` itself, which is the callback that
+// runs the WHOLE normal flow. The comment beside it argued that the subject
+// chooser is the next screen, so "someone else" should be a choice made there
+// rather than a mode imposed behind their back. The intent was right and the
+// wiring was a hole: the chooser's "It's me" was still enabled, so a member
+// whose week was spent could press the gate's way out and then pick their own
+// face. Two taps around the weekly limit.
+//
+// The chooser still opens and they can still back out. What changes is that
+// the self option is closed, which is not a mode imposed on them, it is the
+// fact that sent them to the gate in the first place.
+// ---------------------------------------------------------------------------
+let guestOnlyRun = false;
+
+/** True when this run reached the flow through the gate's guest offer. */
+export function guestOnlyNow(): boolean {
+  return guestOnlyRun;
+}
+
 export function closeScanGate(): void {
   if (timer !== null) clearInterval(timer);
   timer = null;
@@ -263,7 +342,7 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
     ? "You've used both of this week's scans"
     : "You've used your free scan this week";
   const sub = allowance > 1
-    ? "Max includes two scans a week. Your face doesn't change in a day, so a third scan mostly measures your lighting — leave it and the number can actually move."
+    ? "One scan of your own face a week, on every plan. Your face doesn't change in a day, so a second scan mostly measures your lighting. Leave it and the number can actually move. Max scans of other people are separate and do not spend this."
     : "You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.";
   // One upsell line each: non-members hear about the member price, Starter
   // members hear that Max carries a second weekly scan. Max members, who have
@@ -276,12 +355,12 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
   // guessing. Members only, because the subject chooser is members only.
   const guestOffer = scanGuest
     ? `<button class="btn gho" id="sg-guest">Scan someone else instead</button>
-       <p class="sg-note">Scanning a friend is always free and never spends your week — their result just doesn't go on your chart.</p>`
+       <p class="sg-note">Scanning a friend is always free and never spends your week: their result just doesn't go on your chart.</p>`
     : "";
   const note = !member
     ? `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`
     : allowance === 1
-      ? `<p class="sg-note">Max includes two scans a week.</p>`
+      ? `<p class="sg-note">Scans of other people are separate and do not spend this week.</p>`
       : "";
 
   host = document.createElement("div");
@@ -319,6 +398,9 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
   host.querySelector<HTMLButtonElement>("#sg-wait")!.onclick = closeScanGate;
   host.querySelector<HTMLButtonElement>("#sg-guest")?.addEventListener("click", () => {
     track("scan-gate-guest");
+    // Set BEFORE proceed runs, because proceed opens the chooser synchronously
+    // enough that a later assignment would miss it.
+    guestOnlyRun = true;
     closeScanGate();
     // Straight into the normal flow. The subject chooser is the next thing it
     // shows, so "someone else" is a choice they make there rather than a mode

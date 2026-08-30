@@ -109,16 +109,62 @@ function teaserMarkup(t: NonNullable<OpenAccountOptions["teaser"]>): string {
     )
     .join("");
 
-  return `<aside class="acct-teaser" aria-hidden="true" inert>
-    <span class="acct-teaser-k">YOUR SCAN · MEASURED ON THIS DEVICE</span>
-    ${faces ? `<div class="acct-faces">${faces}</div>` : ""}
+  // The nine rungs of the plain ladder, as a shape rather than as words.
+  //
+  // "The tiers behind the score" without handing any of them over: the strip
+  // says there IS a scale and that this scan landed somewhere on it, and the
+  // marker sits under the same blur as everything else, soft enough to span
+  // more than one rung. Same contract as the score itself, which leaks its
+  // colour and keeps its digits.
+  const rungs = Array.from({ length: 9 }, (_, i) => `<i style="--i:${i}"></i>`).join("");
+  const at = Math.max(0, Math.min(8, Math.round((t.overall / 10) * 8)));
+
+  return `<aside class="acct-teaser measuring" aria-hidden="true" inert>
+    <span class="acct-teaser-k"><i class="acct-dot"></i><span class="acct-k-run">MEASURING ON THIS DEVICE</span><span class="acct-k-done">YOUR SCAN · MEASURED ON THIS DEVICE</span></span>
+    ${faces ? `<div class="acct-faces">${faces}<span class="acct-sweep"></span></div>` : ""}
     <div class="acct-teaser-score tone-${scoreTone(t.overall)}">
       <b>${t.overall.toFixed(1)}</b><small>/10</small>
     </div>
+    <div class="acct-ladder" style="--at:${at}">${rungs}<span class="acct-mark"></span></div>
     ${grid ? `<div class="acct-cells">${grid}</div>` : ""}
     <em>${t.regionCount} regions measured. It unlocks the moment you are in.</em>
   </aside>`;
 }
+
+/**
+ * Run the reveal once the teaser is in the document.
+ *
+ * The card used to arrive finished: every blurred element on screen at once,
+ * which reads as a decorative panel on a paywall rather than as a thing that
+ * just happened to your face. Nothing about the data changes here. What
+ * changes is that the person watches it land: a sweep across their own two
+ * photographs while the measurement runs, then the score pops, then the
+ * regions cascade in, then the line underneath.
+ *
+ * The work is genuinely already done, on their device, before this dialog
+ * opened, so the pause is theatre and is kept short. It is honest theatre in
+ * the sense that every number it settles on is the real one; it is not a fake
+ * progress bar waiting on a server.
+ */
+export function playTeaserReveal(root: ParentNode): void {
+  const teaser = root.querySelector<HTMLElement>(".acct-teaser");
+  if (!teaser) return;
+  // Somebody who has asked for less motion gets the finished card immediately,
+  // rather than a shorter version of the same animation.
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    teaser.classList.remove("measuring");
+    teaser.classList.add("revealed");
+    return;
+  }
+  window.setTimeout(() => {
+    if (!teaser.isConnected) return;
+    teaser.classList.remove("measuring");
+    teaser.classList.add("revealed");
+  }, MEASURE_MS);
+}
+
+/** How long the sweep runs before the score pops. Two passes of the faces. */
+const MEASURE_MS = 1500;
 
 function initials(email: string): string {
   return email.trim().slice(0, 1).toUpperCase() || "•";
@@ -241,7 +287,12 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     // scatter.
     body.innerHTML = "";
     body.classList.toggle("acct-two", Boolean(options.teaser));
-    if (options.teaser) body.insertAdjacentHTML("beforeend", teaserMarkup(options.teaser));
+    if (options.teaser) {
+      body.insertAdjacentHTML("beforeend", teaserMarkup(options.teaser));
+      // After the markup is in the document, so the measuring state has a
+      // painted frame to start from rather than being the initial style.
+      playTeaserReveal(body);
+    }
     const formCol = document.createElement("div");
     formCol.className = "acct-form-col";
     body.appendChild(formCol);
@@ -371,7 +422,7 @@ function renderSignedIn(
   del.addEventListener("click", async () => {
     if (!armed) {
       armed = true;
-      del.textContent = "Tap again to confirm — this is permanent";
+      del.textContent = "Tap again to confirm: this is permanent";
       return;
     }
     del.disabled = true;

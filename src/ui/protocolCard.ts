@@ -165,7 +165,7 @@ export function mountProtocolCard(
       const v = judge(updated, at, scanMoved || said);
       const disagree = said !== scanMoved
         ? said
-          ? ` The scan hasn't caught up with you yet, and that's normal — you see your own face every day and it only needs to shift a little for you to clock it. ${DISPLAY_NOISE.toFixed(1)} points is the smallest thing I can call.`
+          ? ` The scan hasn't caught up with you yet, and that's normal: you see your own face every day and it only needs to shift a little for you to clock it. ${DISPLAY_NOISE.toFixed(1)} points is the smallest thing I can call.`
           : ` For what it's worth, the scan does think something moved. Worth another few weeks before you write it off.`
         : "";
       settle(el, verdictCopy(v) + disagree);

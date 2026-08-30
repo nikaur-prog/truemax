@@ -3,7 +3,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { copyDiagnostics } from "./diagnostics.js";
 import type { DiagnosticsCapture } from "./diagnostics.js";
 import { aggregateScoreToPercentile, phi, REGION_NAMES, regionIsScored } from "../engine/scoring.js";
-import type { RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
+import type { PillarId, RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
 import type { ScanDelta } from "../engine/history.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { SIDE_POINTS } from "../engine/sideMetrics.js";
@@ -19,18 +19,22 @@ import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
-import { closeMetricDetail, openMetricDetail } from "./metricDetail.js";
+import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
+import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { mountProtocolCard } from "./protocolCard.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
+import type { CeilingInput } from "./ceilingCta.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { nutritionPlanHTML } from "./nutritionPlan.js";
+import { macroPanelHTML, wireMacroPanel } from "./macroPanel.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
-import { EVIDENCE_LABEL, RECS, recsFor, productSearchUrl } from "../engine/recommendations.js";
+import { EVIDENCE_LABEL, RECS, buyGuideFor, recsFor, productSearchUrl } from "../engine/recommendations.js";
+import type { Rec } from "../engine/recommendations.js";
 import { loadVoiceCredits, startScanCreditCheckout, startVoiceCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
@@ -50,6 +54,7 @@ import { armMaxPetReveal, mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
+import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
 
 interface Ctx {
   report: Report;
@@ -248,7 +253,9 @@ export function renderResults(c: Ctx): void {
   placeQualityChips();
   tabView = "front";
   buildTabs("front");
-  select("overall");
+  // The initial mount does not scroll: main.ts owns where the page sits when
+  // the results arrive, and a second scroll from here would fight it.
+  select("overall", undefined, { silent: true });
 }
 
 // Which half of the scan the tab row is currently describing.
@@ -388,10 +395,15 @@ function buildTabs(view: "front" | "side"): void {
 // is three boxes to say what one already said.
 function viewCards(r: Report): string {
   if (!r.views) return "";
-  const cards: Array<[string, number, number]> = [
-    ["OVERALL", r.overall, r.overallPercentile],
-    ["FRONT", r.views.front.score, r.views.front.percentile],
-    ["SIDE", r.views.side.score, r.views.side.percentile],
+  // The fourth column is how far into a tail that card may name a band. The
+  // profile gets a wider floor than the other two: thirteen points placed by
+  // hand, on a metric set whose repeatability is still open, printed "Bottom
+  // 1%" beside a 3.5 — the most precise-sounding claim in the product sitting
+  // on its least established measurement. See SIDE_TAIL_LIMIT_PCT.
+  const cards: Array<[string, number, number, number | undefined]> = [
+    ["OVERALL", r.overall, r.overallPercentile, undefined],
+    ["FRONT", r.views.front.score, r.views.front.percentile, undefined],
+    ["SIDE", r.views.side.score, r.views.side.percentile, SIDE_TAIL_LIMIT_PCT],
   ];
   // One decimal, matching the headline and the pillars. Two decimals were an
   // attempt at precision the measurement cannot support — a single scan moves
@@ -400,11 +412,11 @@ function viewCards(r: Report): string {
   // 4.2, 4.2 reads as three numbers that happen to agree.
   const same = new Set(cards.map(([, score]) => score.toFixed(1))).size === 1;
   return `<div class="viewcards">${cards
-    .map(([label, score, pct]) => {
+    .map(([label, score, pct, tailLimit]) => {
       const tone = scoreTone(score);
       return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
         <span class="vc-label">${label}</span>
-        <span class="vc-rank">${rankShort(pct)}</span>
+        <span class="vc-rank">${rankShort(pct, tailLimit)}</span>
         <b class="vc-score ${tone}"><span data-count="${score}" data-decimals="1">0.0</span><small>/10</small></b>
       </div>`;
     })
@@ -522,8 +534,54 @@ function resultActions(merged: boolean, ctx: Ctx): string {
   </div>`;
 }
 
-function select(id: string, forceView?: "front" | "side"): void {
+/**
+ * Put the reader back at the top of the report.
+ *
+ * Switching to Side, or to a region tab, replaces the whole right-hand column
+ * under a scroll position that was correct for the column that just left. So
+ * pressing Side from halfway down the front's measurement list dropped the
+ * person into the middle of the side's list, past the heading, past the score,
+ * past Coach Max's read — reported as "it auto-scrolls me down to the
+ * ratings". Nothing was scrolling. Nothing was un-scrolling either, which is
+ * the actual bug: this is the only place in the report that ever moves the
+ * page, and until now it did not exist.
+ *
+ * The rail is the target rather than the photograph. It carries its own
+ * scroll-margin under the sticky header, it is the top of the thing that
+ * changed, and on a phone the photo column sits above it and stays reachable
+ * with one flick up.
+ */
+function scrollReportToTop(): void {
+  const rail = ctx?.analysis.querySelector<HTMLElement>(".rtabs-rail");
+  if (!rail) return;
+  // Already at or above the top of the report: a scroll here would drag
+  // somebody who is reading the photograph downward, which is the opposite of
+  // the complaint.
+  if (rail.getBoundingClientRect().top >= 0) return;
+  rail.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/**
+ * `silent` marks a select that no person asked for: the initial mount, and the
+ * repaint when a late entitlement read lands. Two behaviours hang off it, and
+ * both would be wrong on a programmatic call.
+ *
+ * It must not SCROLL, because the page position belongs to whoever set it.
+ * And it must not open the OFFER: the plan tab is walled, so a person pressing
+ * it is asking to see the offer, while an entitlement read resolving under an
+ * already-open plan tab is not — that one would fire a paywall at somebody who
+ * pressed nothing.
+ */
+function select(id: string, forceView?: "front" | "side", opts: { silent?: boolean } = {}): void {
   if (!ctx) return;
+  // The wall. Measurement is free and coaching is paid, so this is the single
+  // door the plan is behind — the tab, the lead button, the support row and
+  // "See my current plan" all arrive here, and gating the door rather than the
+  // four handles is why there is nothing to keep in step.
+  if (id === "improve" && depth !== "plan" && !opts.silent) {
+    ctx.onUpgrade?.();
+    return;
+  }
   stopTypewriter();
   // Leaving Coach Max's read is the signal that the first read is over —
   // which is what arms the pet's entrance (ten seconds later, from the edge).
@@ -561,6 +619,9 @@ function select(id: string, forceView?: "front" | "side"): void {
   else if (id === "side") showSide();
   else if (onSide) showSideRegion(id.slice(5) as RegionId);
   else showRegion(id as RegionId);
+  // After the new panel exists, not before: scrolling to a rail that is about
+  // to be re-measured under fresh content lands in the wrong place.
+  if (!opts.silent) scrollReportToTop();
 }
 
 // Which region the overlay is currently lit for, so a transition knows what it
@@ -725,7 +786,7 @@ function showSideRegion(id: RegionId): void {
     <div class="reveal">
       ${sideRegionDeck(r, report)}
       <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>
-        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against — the score above is real, the curve would be invented.</p></div>
+        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against. The score above is real; the curve would be invented.</p></div>
     </div>`;
 
   revealBars();
@@ -760,6 +821,133 @@ function revealBars(): void {
 // the profile photo, the same credibility gesture the front regions have. The
 // calm state is the thirteen verified points; leaving a row returns to them.
 let sideActive: string | null = null;
+// Tapping a pillar opens the measurements behind it.
+//
+// The regions still lead — they are the tabs, they carry the photograph, they
+// are what the scan walked. This is the answer to "what IS Angularity", asked
+// in the one place the word appears, and it is answered with the same card and
+// the same measurements the region rows open rather than with a second screen
+// of its own.
+function wirePillarCards(report: Report): void {
+  for (const card of document.querySelectorAll<HTMLElement>(".pillar.can-open")) {
+    card.onclick = () => {
+      if (!ctx) return;
+      const pillar = card.dataset.pillar as PillarId | undefined;
+      if (!pillar) return;
+      openPillarSheet(report, pillar);
+    };
+  }
+}
+
+let pillarSheet: HTMLElement | null = null;
+
+function closePillarSheet(): void {
+  pillarSheet?.remove();
+  pillarSheet = null;
+  document.removeEventListener("keydown", onPillarKey);
+}
+
+function onPillarKey(ev: KeyboardEvent): void {
+  // Scoped to the sheet: the detail card opens ON TOP of it and owns Escape
+  // while it is up, so closing the card must not also close the list behind it.
+  if (ev.key === "Escape" && !isMetricDetailOpen()) {
+    ev.stopPropagation();
+    closePillarSheet();
+  }
+}
+
+/**
+ * The pillar, opened as a list of the measurements that feed it.
+ *
+ * A list rather than a straight jump into the detail card, because the question
+ * the four numbers raise is "what is this made of" and a list answers it in one
+ * look. Each row still opens the detail card, at its own place in the deck, so
+ * the walk through the measurements is the same walk the region rows give.
+ */
+function openPillarSheet(report: Report, pillar: PillarId): void {
+  const deck = pillarDeck(report, pillar);
+  if (!deck.length || !ctx) return;
+  closePillarSheet();
+
+  const sex = report.sex;
+  const wrap = document.createElement("div");
+  pillarSheet = wrap;
+  wrap.className = "psx-overlay";
+  wrap.innerHTML = `<div class="psx-card" role="dialog" aria-modal="true" aria-label="${pillar} measurements">
+    <header class="psx-head">
+      <div>
+        <span class="psx-eyebrow">PILLAR</span>
+        <h3 class="psx-title">${pillar}</h3>
+      </div>
+      <span class="psx-count">${deck.length} measured</span>
+      <button class="psx-close" type="button" aria-label="Close">✕</button>
+    </header>
+    <div class="psx-body">
+      <p class="psx-note">${PILLAR_BLURB[pillar]}</p>
+      ${deck
+        .map(
+          (m, i) => `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}${
+            m.implausible ? " implausible" : ""
+          }" data-pillar-row="${i}" style="animation-delay:${60 + i * 55}ms">
+        <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${
+          m.implausible ? "–" : m.score.toFixed(1)
+        }</span></span></div>
+        <div class="psx-where">${REGION_NAMES[m.def.region] ?? m.def.region}</div>
+        ${
+          // An impossible reading has no position to place, exactly as on the
+          // side rows and in the detail card. The row still appears, because
+          // dropping it would change how many measurements a pillar has from
+          // one scan to the next with no account of why.
+          m.implausible ? "" : `<div class="rangebar">${idealWindow(m, sex)}<i data-l="${m.markerPct}"></i></div>`
+        }
+      </div>`,
+        )
+        .join("")}
+      <p class="psx-foot">Regions are the way through the report. This is the same set of measurements gathered a second way, by what they contribute to rather than where they sit.</p>
+    </div>
+  </div>`;
+
+  let downOnBackdrop = false;
+  wrap.addEventListener("pointerdown", (e) => {
+    downOnBackdrop = e.target === wrap;
+  });
+  wrap.addEventListener("click", (e) => {
+    if (e.target === wrap && downOnBackdrop) closePillarSheet();
+  });
+  wrap.querySelector(".psx-close")!.addEventListener("click", closePillarSheet);
+
+  for (const row of wrap.querySelectorAll<HTMLElement>("[data-pillar-row]")) {
+    row.addEventListener("click", () => {
+      if (!ctx) return;
+      openMetricDetail({
+        // The deck spans regions by definition, so the card takes each
+        // measurement's own region from it. This is only the fallback.
+        region: deck[0].def.region,
+        deckLabel: pillar,
+        deckNote: PILLAR_BLURB[pillar],
+        metrics: deck,
+        index: Number(row.dataset.pillarRow),
+        sex,
+        landmarks: ctx.landmarks,
+        frontPhoto: frontPhoto,
+        sidePhoto: ctx.sidePhoto ?? null,
+        sidePoints: ctx.sidePoints ?? null,
+      });
+    });
+  }
+
+  document.body.appendChild(wrap);
+  document.addEventListener("keydown", onPillarKey);
+  wrap.querySelector<HTMLElement>(".psx-close")?.focus();
+  // Same deferred paint the region list uses: the bars animate from zero to
+  // their marker rather than appearing already placed.
+  setTimeout(() => {
+    for (const i of wrap.querySelectorAll<HTMLElement>(".rangebar i")) {
+      i.style.left = `${i.dataset.l}%`;
+    }
+  }, 30);
+}
+
 let sideFade: OverlayFade | null = null;
 function wireSideMeasurementTaps(report: Report): void {
   if (!ctx?.sidePoints || !ctx.sidePhoto) return;
@@ -778,7 +966,7 @@ function wireSideMeasurementTaps(report: Report): void {
     for (const hint of hints) {
       hint.classList.toggle("on", !!name);
       hint.innerHTML = name
-        ? `<i>◱</i>Drawing <b>${name}</b> — tap to open`
+        ? `<i>◱</i>Drawing <b>${name}</b>, tap to open`
         : `<i>◱</i>Hover to draw it on your profile · tap to open`;
     }
   };
@@ -957,12 +1145,20 @@ function showOverall(): void {
             : ""
       }
       </div>
-      <div class="pillars">${(Object.entries(r.pillars) as [string, number][])
-        .map(
-          ([p, s]) => `
-        <div class="pillar"><b data-count="${s}" data-decimals="1">0.0</b><span>${p.toUpperCase()}</span>
-        <div class="pbar"><i data-w="${s * 10}"></i></div></div>`,
-        )
+      <div class="pillars">${(Object.entries(r.pillars) as [PillarId, number][])
+        .map(([p, s]) => {
+          // A pillar with nothing measured behind it is not a button. It can
+          // happen: a front-only scan whose regions mostly failed the
+          // reliability bar leaves a pillar with an aggregate and an empty
+          // deck, and a card that opens onto nothing is worse than a card that
+          // does not offer.
+          const open = pillarDeck(r, p).length > 0;
+          const tag = open ? "button" : "div";
+          const attrs = open ? ` type="button" class="pillar can-open" data-pillar="${p}"` : ` class="pillar"`;
+          return `
+        <${tag}${attrs}><b data-count="${s}" data-decimals="1">0.0</b><span>${p.toUpperCase()}</span>
+        <div class="pbar"><i data-w="${s * 10}"></i></div></${tag}>`;
+        })
         .join("")}
       </div>
       ${populationBlock(r)}
@@ -974,6 +1170,7 @@ function showOverall(): void {
   wireModeSwitcher();
   const overview = body().querySelector<HTMLElement>(".overview-reveal");
   if (overview) animateOverview(overview);
+  wirePillarCards(r);
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
   // Correcting the reference population where its effect is visible. Every
   // percentile on this screen comes from it, and it moves the overall score by
@@ -1199,7 +1396,7 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
       // The one silent-failure worth naming: the render still shipped, but
       // without the voice — a credit hiccup or a network blip. The credit is
       // only spent when audio comes back, so nothing was paid for nothing.
-      done("Saved — no voice (credit not used)");
+      done("Saved: no voice (credit not used)");
     } else {
       done(outcomeMessage(result.outcome));
     }
@@ -1207,7 +1404,7 @@ async function downloadVoicedAnalysis(btn: HTMLButtonElement): Promise<void> {
     // A capture the app itself would warn about must not be published with a
     // number on it — the same rule the creator tools enforce.
     const blocked = error instanceof Error && error.name === "RundownBlocked";
-    done(blocked ? "Retake first — quality too low" : "Export failed");
+    done(blocked ? "Retake first, quality too low" : "Export failed");
     if (!blocked) console.error(error);
   }
 }
@@ -1229,14 +1426,14 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       <div class="score-head">
         <div><div class="klabel">SIDE PROFILE · 25% OF THE TOTAL</div>
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
-        <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
+        <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile, SIDE_TAIL_LIMIT_PCT)}</span></div>
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
       ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile, SIDE_TAIL_LIMIT_PCT) })}
         ${curveLegend()}
-        <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
+        <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles", SIDE_TAIL_LIMIT_PCT)}</p></div>
       ${regions.map((r) => sideRegionDeck(r, report)).join("")}
       ${modeSwitcher("full")}
       ${sideNav()}
@@ -1403,7 +1600,7 @@ function indicativeNote(metrics: ScoredMetric[]): string {
 
 function indicativeTag(m: ScoredMetric): string {
   if (!isIndicative(m)) return "";
-  return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people — so it is shown and not scored.">not scored</span>`;
+  return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people: so it is shown and not scored.">not scored</span>`;
 }
 
 // The same rule as isIndicative, one level up.
@@ -1632,6 +1829,20 @@ function wireMaxAsk(): void {
   document.addEventListener("click", (event) => {
     const hit = (event.target as HTMLElement | null)?.closest?.("[data-max-ask]");
     if (!hit) return;
+    // The tier check belongs here as well as on the markup.
+    //
+    // Today the only `data-max-ask` element is rendered inside maxAnalysisHTML,
+    // which is already behind `maxAccess && adultUser`, so this cannot fire for
+    // anyone who should not reach it. But this is a DELEGATED listener bound
+    // once to the document and never rebound, so it outlives every re-render
+    // and would silently pick up any future element that reuses the attribute
+    // from ungated markup. Every other Max surface in this file states the
+    // condition where it acts; this one inherited it from its caller.
+    //
+    // The real boundary is the server, which answers 402 unless the tier is
+    // max (api/max-chat.ts). This keeps the client from opening a panel that
+    // is only going to be refused.
+    if (!maxAccess || !adultUser || observationsOnly()) return;
     const cc = chatContext();
     if (cc) openMaxChat(cc);
   });
@@ -1731,7 +1942,7 @@ function showRegion(id: RegionId): void {
             <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
             <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`
                 // Not measured on this photograph. It keeps its row and says so,
-                // rather than vanishing — the same region would otherwise show a
+                // rather than vanishing: the same region would otherwise show a
                 // different number of measurements from one scan to the next with
                 // no account of why. Not tappable and no range bar, because there
                 // is no reading to draw or to place.
@@ -1753,7 +1964,7 @@ function showRegion(id: RegionId): void {
         <div class="dcard">
           <h3>Notable comparisons<em>REFERENCE</em></h3>
           ${matchCard}
-          <p class="footnote">Reference set grows with every analyzed face. Matches are on specific metrics where you genuinely align.</p>
+          <p class="footnote">Reference set grows with every analysed face. Matches are on specific metrics where you genuinely align.</p>
         </div>
       </div>
       ${regionPositionPanel(r, id, ctx!.report.sex)}
@@ -1874,7 +2085,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     if (!hint) return;
     hint.classList.toggle("on", !!metric);
     hint.innerHTML = metric
-      ? `<i>◱</i>Drawing <b>${metric.def.name}</b> — tap to open`
+      ? `<i>◱</i>Drawing <b>${metric.def.name}</b>, tap to open`
       : HINT_IDLE;
   };
 
@@ -2048,9 +2259,14 @@ function showImprove(): void {
       </div>`
     : "";
 
-  // Whether this account is past its free allowance — decided up front because
-  // it changes what goes INTO the plan body, not just what covers it.
-  const gated = depth === "rating";
+  // Whether the plan is walled for this account — decided up front because it
+  // changes what goes INTO the plan body, not just what covers it.
+  //
+  // The wall is at "plan" now rather than at "rating". Reaching this function
+  // walled should be rare, since select() sends a person pressing Plan to the
+  // offer instead; this covers the paths that arrive without a press, such as
+  // an entitlement lapsing while the tab is already open.
+  const gated = depth !== "plan";
 
   // The percentile translation sits beside the ceiling everywhere the ceiling
   // appears. On a PSL-shaped scale a 7 reads as "a bit above average" to
@@ -2078,8 +2294,8 @@ function showImprove(): void {
               ? lever.body(m, r.sex)
               : lockedCopy(m, r.sex);
           const locked = !muted && !maxAccess;
-          // The list was already ranked — sorted by how far the metric sits
-          // below its reference, weighted by the goals this person chose — but
+          // The list was already ranked, sorted by how far the metric sits
+          // below its reference, weighted by the goals this person chose, but
           // nothing on screen said so, so four cards read as four equal
           // suggestions and the order looked arbitrary. Naming the rank turns
           // a list into a programme: it tells somebody what to do FIRST, which
@@ -2098,7 +2314,8 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
-      ${nutritionPlanHTML(r, { dietAdvice: profile.advice.diet, maxAccess })}
+      ${nutritionPlanHTML(r, { dietAdvice: profile.advice.diet, maxAccess, adult: adultUser })}
+      ${macroPanelHTML({ sex: r.sex, dateOfBirth: birthDate, maxAccess, dietAdvice: profile.advice.diet })}
       ${recsHTML(profile)}
       ${maxAccess || gated ? "" : upsell()}`;
 
@@ -2122,7 +2339,6 @@ function showImprove(): void {
               ${ceilingCtaMarkup({ overall: r.overall, potential: r.potential, photo: frontPhoto })}
               <p>The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
-              <button class="linkish lock-single" id="btn-single-scan">Or buy just this one scan for ${scanPrice()}</button>
             </div>
           </div>`
         : planBody}
@@ -2135,6 +2351,21 @@ function showImprove(): void {
   // painted from the cached front capture rather than re-read from the live
   // canvas, which by now may be showing the side profile.
   paintCeilingCta(body(), frontPhoto);
+
+  // Only the live copy. A gated plan renders the same markup twice, once behind
+  // the blur, and wiring the blurred one would put a working form inside a lock
+  // and a second element sharing every id with the real one.
+  const macros = gated
+    ? null
+    : body().querySelector<HTMLElement>(".panel.mac");
+  if (macros) {
+    wireMacroPanel(macros, {
+      sex: r.sex,
+      dateOfBirth: birthDate,
+      maxAccess,
+      dietAdvice: profile.advice.diet,
+    });
+  }
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => {
@@ -2232,6 +2463,30 @@ export function setAdult(value: boolean): void {
   syncMaxSurfaces();
 }
 
+// The date of birth behind that flag, kept because the macro calculator's age
+// gate reads a DATE rather than a boolean. Null until a profile loads, and null
+// closes the gate: same direction as adultUser, for the same reason.
+let birthDate: string | null = null;
+
+/**
+ * This scan's ceiling, for a surface outside the report that has earned the
+ * right to show it.
+ *
+ * Exists so the offer screen can carry the before and after strip without
+ * being handed the whole report, and so it CANNOT invent one: null until a
+ * scan is in hand, and the photograph is the person's own capture.
+ */
+export function currentCeiling(): CeilingInput | null {
+  if (!ctx || ctx.archived) return null;
+  const r = ctx.report;
+  if (!Number.isFinite(r.overall) || !Number.isFinite(r.potential)) return null;
+  return { overall: r.overall, potential: r.potential, photo: frontPhoto };
+}
+
+export function setBirthDate(value: string | null): void {
+  birthDate = value && value.trim() ? value.trim() : null;
+}
+
 // What this account can currently see. Defaults to "rating" — the safe
 // direction, same reasoning as maxAccess: a failed entitlement read shows a
 // wall to a paying customer, who can retry, rather than handing the paid
@@ -2250,7 +2505,17 @@ export function clearResultsIdentityState(): void {
   // report. Everything else with that property — the gate, the dashboard, the
   // history panel, Max's chat — is already torn down on this path; this was
   // the one new surface that was not.
+  //
+  // The pillar list is torn down for the weaker version of the same reason: it
+  // holds no photograph, but it does hold one report's measurements, and it is
+  // the thing the detail card was opened FROM.
   closeMetricDetail();
+  closePillarSheet();
+  // The macro panel's age gate keys off this, and a stale date across an
+  // account change is exactly the kind of thing that opens an 18+ surface to
+  // the wrong person. The body itself is stored under the account's own key,
+  // so it does not need clearing; the date does.
+  birthDate = null;
   ctx = null;
   maxAccess = false;
   adultUser = false;
@@ -2274,10 +2539,7 @@ export function setMaxAccess(value: boolean): void {
 export function setPathwayState(next: PathwayState): void {
   if (next === pathway) return;
   pathway = next;
-  for (const id of ["btn-continue", "sn-continue"]) {
-    const span = document.getElementById(id)?.querySelector("span");
-    if (span) span.textContent = pathwayLabel();
-  }
+  paintPathwayLabels();
   // "See your plan" in the support row goes to the same tab as the lead
   // button now does, and two buttons for one destination is how the row got
   // confusing in the first place. Drop the duplicate rather than render it.
@@ -2288,7 +2550,22 @@ export function setPathwayState(next: PathwayState): void {
 }
 
 function pathwayLabel(): string {
-  return pathway === "plan" ? "See my current plan" : "Build my pathway";
+  // Being signed in is not the same as having a plan. `pathway` only knows
+  // whether there is an account, so on its own it put "See my current plan" in
+  // front of free accounts that have never had one — a label that promises
+  // something the press cannot deliver, which is exactly the kind of small lie
+  // that makes the offer behind it feel like a trick rather than an offer.
+  // "Build my pathway" is true for them, and the offer is what building it
+  // costs.
+  return pathway === "plan" && depth === "plan" ? "See my current plan" : "Build my pathway";
+}
+
+/** The one writer for the lead button's words, shared by both late reads. */
+function paintPathwayLabels(): void {
+  for (const id of ["btn-continue", "sn-continue"]) {
+    const span = document.getElementById(id)?.querySelector("span");
+    if (span) span.textContent = pathwayLabel();
+  }
 }
 
 // Read at click time, never captured at render time. The label is painted
@@ -2335,8 +2612,16 @@ export function setDepth(next: Depth, remainingFreeScans = 0): void {
   scansLeft = remainingFreeScans;
   if (next === depth) return;
   depth = next;
+  // The label reads both `pathway` and `depth`, so whichever of the two late
+  // reads lands second has to repaint it. This one used not to, which left a
+  // Max account whose entitlement resolved after its session still being
+  // offered "Build my pathway" for a plan it had already paid for.
+  paintPathwayLabels();
   const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
-  if (open) select(open.dataset.id || "overall");
+  // Re-selects the tab already open, to repaint it now that the entitlement
+  // is known. Nobody pressed anything, so nothing may move: a late network
+  // read is not allowed to yank the page out from under someone mid-sentence.
+  if (open) select(open.dataset.id || "overall", undefined, { silent: true });
 }
 
 // Wraps in-depth content in a blur with an unlock card over it.
@@ -2352,6 +2637,12 @@ export function setDepth(next: Depth, remainingFreeScans = 0): void {
 // focusable, so nothing behind the wall is reachable by keyboard or a screen
 // reader. A paywall you can tab through is not a paywall.
 function locked(content: string): string {
+  // The DEPTH wall, over the region tabs. Distinct from the plan wall in
+  // showImprove, and the difference is the one-off scan credit: a credit buys
+  // exactly one full-depth scan, so it opens this door and it has never opened
+  // that one. Offering it under the plan card would take money without moving
+  // the thing in front of the reader, which is why the two cards say different
+  // things rather than sharing a template.
   const left = scansLeft > 0
     ? `<p class="lockcard-note">${scansLeft} free in-depth ${scansLeft === 1 ? "scan" : "scans"} left on this account.</p>`
     : "";
@@ -2370,9 +2661,12 @@ function locked(content: string): string {
 
 function wireUnlock(): void {
   document.getElementById("btn-unlock")?.addEventListener("click", () => ctx?.onUpgrade?.());
-  // The non-subscription road through the same gate. One price per person, two
-  // prices on the label, and the server decides which applies — the client
-  // never picks its own price.
+  // The non-subscription road through the DEPTH gate. Rendered by the depth
+  // lock card only — the plan card does not offer it, because a credit cannot
+  // reach the plan tier. The query is null-safe, so wiring it unconditionally
+  // is correct for both.
+  // One price per person, two prices on the label, and the server decides
+  // which applies — the client never picks its own price.
   const single = document.getElementById("btn-single-scan") as HTMLButtonElement | null;
   single?.addEventListener("click", async () => {
     track("single-scan-started");
@@ -2495,7 +2789,7 @@ function upsell(): string {
     <h4>WHAT MAX ADDS</h4>
     <p class="recs-note">Your measurements, your scores, your ranking and your progress over time are yours on every plan, and always will be. What Coach Max adds is the part that takes work to get right: the specific routine for your face, not a generic list.</p>
     <ul class="upsell-list">
-      <li><b>The method, not just the target.</b> The overview above says what to improve. Max writes how — for your face, in order, shaped by what you said you want.</li>
+      <li><b>The method, not just the target.</b> The overview above says what to improve. Max writes how, for your face, in order, shaped by what you said you want.</li>
       <li><b>Follow-up that reads your numbers.</b> Max checks whether what you are doing actually moved a measurement, says so either way, and rebuilds the plan when eight weeks of a routine has moved nothing.</li>
       <li><b>Your wishlist, kept honest.</b> Max keeps the list of what you are using, edits it with you, and is allowed to tell you something on it is not earning its place.</li>
     </ul>
@@ -2523,11 +2817,66 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
   // the best-evidenced thing comes first, so the cheapest and most certain
   // options are what someone reads before anything they could spend money on.
   const GROUPS: Array<[string, string, string]> = [
-    ["topical", "APPLY", "Over-the-counter only. Availability and permitted strengths differ by country, and a pharmacist will know what's on the shelf where you are."],
+    ["topical", "APPLY", "Nothing here is a prescription from us. Availability and permitted strengths differ by country: what is on a shelf in one place is behind the counter or prescription-only in another, and the pharmacist where you are is the one who knows which. Each entry says what we know."],
     ["food", "EAT", "Facts about food, not a diet. No targets, no counting, nothing to buy."],
     ["habit", "DO", "Free, and mostly the things that compound."],
     ["professional", "ASK SOMEONE", "The things worth paying a person for rather than guessing at."],
   ];
+
+
+// What to buy, named.
+//
+// This replaced a bare "Find it on Google" link, which was the point at which
+// the plan stopped being a plan. Searching "salicylic acid 2%" returns
+// chemistry, opinion pieces and forty bottles at four strengths, and the
+// person who most needed the recommendation is the one least able to pick from
+// that. Category first, then the number that has to be on the label, then
+// something that exists on a shelf, then which shelf.
+//
+// The search link stays underneath, and it stays a search rather than a
+// merchant: the example is an example, not the answer, and there is no
+// affiliate anywhere in this.
+/**
+ * The line that replaces a shelf and a strength for somebody under eighteen.
+ *
+ * Named rather than silent. A blank space where the buying guide was reads as
+ * a bug, and a minor who has just been told a medicine exists and then given
+ * no route is going to find a worse route on their own. This says what the
+ * thing is for and who has to be involved before it starts.
+ */
+function guardianBlock(r: Rec): string {
+  if (!r.guardian || adultUser) return "";
+  return `<div class="rec-guardian">
+    <span class="rec-guardian-h">BEFORE THIS ONE</span>
+    <p>This is a medicine rather than a cosmetic, and the label on it was
+      written for adults. Show this card to a parent or guardian, and ask a
+      pharmacist whether it suits you and at what strength. That is not a
+      formality: the right answer for a fifteen-year-old and a thirty-year-old
+      genuinely differ, and a pharmacist will tell you for free.</p>
+  </div>`;
+}
+
+function buyBlock(r: Rec): string {
+  // No shelf and no strength for a minor. Over the counter is not the same as
+  // suitable for a child, and a buying guide is an instruction to go and get
+  // it. guardianBlock takes this slot instead.
+  if (r.guardian && !adultUser) return "";
+  const guide = buyGuideFor(r);
+  if (!guide) return "";
+  const url = productSearchUrl(r);
+  return `<div class="rec-buy">
+    <span class="rec-buy-h">WHAT TO BUY</span>
+    <b class="rec-buy-cat">${guide.category}</b>
+    <span class="rec-buy-strength">${guide.strength}</span>
+    <p class="rec-buy-eg">${guide.example}</p>
+    <p class="rec-buy-where"><i aria-hidden="true">◎</i>${guide.where}</p>
+    ${
+      url
+        ? `<a class="rec-find" href="${url}" target="_blank" rel="noopener noreferrer">Compare what is sold near you <span aria-hidden="true">↗</span></a>`
+        : ""
+    }
+  </div>`;
+}
 
   const sections = GROUPS.map(([g, label, blurb]) => {
     const items = recs.filter((r) => r.group === g);
@@ -2542,7 +2891,8 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
         <span class="rec-what">${r.what}</span>
         <p>${r.detail}</p>
         ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
-        ${productSearchUrl(r) ? `<a class="rec-find" href="${productSearchUrl(r)}" target="_blank" rel="noopener noreferrer">Find it on Google <span aria-hidden="true">↗</span></a>` : ""}
+        ${guardianBlock(r)}
+        ${buyBlock(r)}
         ${recTrackHTML(r)}
       </div>`,
         )
@@ -2560,7 +2910,11 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
 // It also states the timeline up front. Somebody who knows going in that a
 // retinoid needs twelve weeks is somebody who does not quit at week three, and
 // it is the honest thing to put next to a purchase.
-function recTrackHTML(r: { id: string; weeksToJudge?: number }): string {
+function recTrackHTML(r: { id: string; weeksToJudge?: number; guardian?: true }): string {
+  // No commitment clock on a medicine for a minor. "I'm going with this"
+  // starts a protocol Max then follows up on, which turns a card somebody was
+  // reading into a course they have started.
+  if (r.guardian && !adultUser) return "";
   const already = protocolFor(r.id);
   const weeks = Math.max(4, r.weeksToJudge ?? 4);
   if (already && already.status !== "offered") {
@@ -2569,7 +2923,7 @@ function recTrackHTML(r: { id: string; weeksToJudge?: number }): string {
       : already.status === "judged"
         ? "Done and dusted"
         : already.startedAt
-          ? "Running — Max is tracking it"
+          ? "Running, Max is tracking it"
           : "On your list";
     return `<span class="rec-track rec-track-on">${label}</span>`;
   }

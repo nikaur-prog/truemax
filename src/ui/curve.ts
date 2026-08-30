@@ -166,7 +166,7 @@ export function curveSVG(
 
 // The "you are here" flag on the marker.
 //
-// Sits above the dot, and flips to whichever side has room — anchored blindly
+// Sits above the dot, and flips to whichever side has room, anchored blindly
 // to the right it runs off the edge for anyone in the top quarter, which is
 // exactly the person most likely to be looking closely at it.
 function callout(px: number, py: number, mark: { score: number; rank: string }): string {
@@ -191,7 +191,7 @@ function callout(px: number, py: number, mark: { score: number; rank: string }):
 }
 
 // Height of the drawn curve at a given x, by walking the same point list the
-// path was built from — so the dot always sits ON the line, never near it.
+// path was built from: so the dot always sits ON the line, never near it.
 function yAt(pts: Array<[number, number]>, x: number): number {
   for (let i = 1; i < pts.length; i++) {
     if (x <= pts[i][0]) {

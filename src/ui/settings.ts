@@ -185,7 +185,7 @@ export async function openSettings(user: User): Promise<void> {
           <div class="set-locked">
             <span>Date of birth</span>
             <b>${esc(readableDate(profile.dateOfBirth))}</b>
-            <small>Locked. Your age decides which plans can be offered to you, so changing it here isn't something we let a form do — email support@truemax.app if it's wrong.</small>
+            <small>Locked. Your age decides which plans can be offered to you, so changing it here isn't something we let a form do, email support@truemax.app if it's wrong.</small>
           </div>
         </section>
 
@@ -203,7 +203,7 @@ export async function openSettings(user: User): Promise<void> {
 
         <section class="set-group">
           <h3>What to leave alone</h3>
-          <p class="set-hint">Measurements for these regions still appear in full. What stops is the coaching — nothing written, and Coach Max won't raise them.</p>
+          <p class="set-hint">Measurements for these regions still appear in full. What stops is the coaching: nothing written, and Coach Max won't raise them.</p>
           <div class="trial-choices compact" data-field="quiet">
             ${QUIET_TOPICS.map((t) => chip(t.region, t.label, profile.quietTopics.includes(t.region))).join("")}
           </div>
@@ -348,7 +348,7 @@ export async function openSettings(user: User): Promise<void> {
     const status = activeHost.querySelector<HTMLElement>(".trial-status");
     const button = activeHost.querySelector<HTMLButtonElement>("#set-save");
     if (!profile.firstName) {
-      if (status) status.textContent = "Your first name is how the app greets you — it can't be blank.";
+      if (status) status.textContent = "Your first name is how the app greets you: it can't be blank.";
       return;
     }
     busy = true;

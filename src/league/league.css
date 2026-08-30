@@ -261,3 +261,31 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
   .lg-btn { transition: none; }
   .lg-btn.lg-cta { animation: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Offers: the audience tiers.
+
+   The most transparent page in the League on purpose. Every floor is printed,
+   the creator's own numbers sit next to them, and a shortfall names the exact
+   gap. A programme that rejects without a reason does not get posted in.
+--------------------------------------------------------------------------- */
+.lg-offers { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.lg-offer.held { border-color: rgba(75, 245, 197, .5); }
+.lg-offer-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.lg-offer-h b { font-size: 15px; letter-spacing: .06em; }
+.lg-offer-reqs { margin: 10px 0 0; padding-left: 18px; }
+.lg-offer-reqs li { font-size: 13px; line-height: 1.6; }
+/* What is missing, when the creator's own numbers fall short. Warm rather than
+   red: it is a distance to cover, not an error they made. */
+.lg-offer-gap {
+  margin-top: 12px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(240, 178, 74, .1); border: 1px solid rgba(240, 178, 74, .3);
+  font-size: 12.5px; line-height: 1.55;
+}
+.lg-offer-gap.ok { background: rgba(75, 245, 197, .09); border-color: rgba(75, 245, 197, .3); }
+.lg-offer-gap b { display: block; margin-bottom: 4px; }
+.lg-offer-gap ul { margin: 0; padding-left: 18px; }
+.lg-h2 { font-size: 19px; margin: 26px 0 6px; }
+@media (max-width: 640px) {
+  .lg-offers { grid-template-columns: 1fr; }
+}

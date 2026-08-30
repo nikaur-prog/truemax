@@ -236,7 +236,7 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
     </figure>
     <figure class="tut-eg bad">
       <img src="/tutorial/side-partial.jpg" alt="A poorly taken side profile: only half turned, so both eyes are still visible" loading="lazy" />
-      <figcaption><span class="tut-eg-mark">✕</span>Half turned — both eyes showing</figcaption>
+      <figcaption><span class="tut-eg-mark">✕</span>Half turned, both eyes showing</figcaption>
     </figure>`;
 
   const heading = view === "front"
@@ -248,7 +248,7 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
     ? "Twenty seconds on what ruins a front photo, and what a good one looks like."
     : view === "side"
       ? "The profile is the shot people get wrong most. Twenty seconds on why."
-      : "A scan is two photographs — square to the lens, then a full quarter turn. Forty seconds on both, now, while you are still looking at the screen.";
+      : "A scan is two photographs, square to the lens, then a full quarter turn. Forty seconds on both, now, while you are still looking at the screen.";
 
   const wrap = document.createElement("div");
   wrap.className = "tut-ask";
@@ -263,7 +263,7 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
       <!-- Two examples, never four. The combined ask covers both photographs,
            and showing both pairs here put four figures and four captions in a
            panel that on a phone is already carrying a three-line heading, a
-           paragraph, two buttons and a checkbox — so the bottom of it fell off
+           paragraph, two buttons and a checkbox: so the bottom of it fell off
            the screen. The teaser is answering one question, "is this worth
            forty seconds?", and the front pair answers it as well as four do.
            The profile examples are still in the tutorial itself, which is
@@ -338,7 +338,7 @@ export function playTutorial(
   wrap.innerHTML = `
     <div class="tut-bars">${steps.map((_, i) => `<i data-bar="${i}"><b></b></i>`).join("")}</div>
     <!-- A gray ✕, outside the photograph. It used to say "Skip", and the
-         verdict mark on the photo used to be a lone red ✕ in a circle — so the
+         verdict mark on the photo used to be a lone red ✕ in a circle: so the
          close control and the "this is wrong" mark were the same glyph, and
          people read the verdict as an exit button. One gray ✕ off the picture
          closes; the verdict on the picture now carries its word. -->

@@ -44,7 +44,7 @@ export function diagnosticsText(
   capture?: DiagnosticsCapture,
 ): string {
   const lines: string[] = [];
-  const n = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
+  const n = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "–");
 
   lines.push(`TRUEMAX SCAN DIAGNOSTICS`);
   lines.push(`face: ${label || "(unnamed)"}`);
@@ -87,7 +87,7 @@ export function diagnosticsText(
         `  ·  side: ${n(report.views.side.score, 1)} (pct ${n(report.views.side.percentile, 1)})`,
     );
   } else {
-    lines.push(`views: front only — no side profile in this scan`);
+    lines.push(`views: front only: no side profile in this scan`);
   }
   lines.push("");
 
@@ -126,7 +126,7 @@ export function diagnosticsText(
   const dropped = report.metrics.filter((m) => m.implausible);
   if (dropped.length) {
     lines.push("");
-    lines.push(`EXCLUDED (anatomically implausible — placement error, not a face)`);
+    lines.push(`EXCLUDED (anatomically implausible, placement error, not a face)`);
     for (const m of dropped) lines.push(`  ${m.def.name}: ${n(m.value, m.def.decimals)}`);
   }
 

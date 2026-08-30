@@ -72,7 +72,7 @@ export function regionMoves(before: Report, after: Report): RegionMove[] {
 
 /** "+1.2", "−0.4", "0.0", or "—" when there is nothing to compare against. */
 export function moveLabel(move: RegionMove): string {
-  if (move.delta === null) return "—";
+  if (move.delta === null) return "–";
   // A real minus sign, not a hyphen, to match the headline strip. And the sign
   // is derived from the delta rather than from the direction, so a movement too
   // small to colour still reads as the direction it went.

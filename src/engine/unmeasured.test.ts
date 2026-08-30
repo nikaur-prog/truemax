@@ -62,7 +62,7 @@ test("the unmeasured metric is reported as absent, never as a number", () => {
   assert.ok(fr, "the metric should still be in the report, flagged");
   assert.equal(fr.implausible, true, "an unmeasurable metric must be excluded from aggregates");
   assert.equal(wasMeasured(fr), false);
-  assert.equal(fmt(fr), "—");
+  assert.equal(fmt(fr), "–");
   // And it must not have poisoned anything around it.
   const midface = report.regions.find((r) => r.region === "midface")!;
   assert.ok(Number.isFinite(midface.score), "midface score went non-finite");

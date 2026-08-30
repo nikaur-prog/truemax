@@ -57,7 +57,7 @@ export function showCaptionStep(host: HTMLElement, options: CaptionStepOptions):
     </div>
     <input class="prod-input${preset ? "" : " hidden"}" id="prod-who-name"
       placeholder="Their first name" maxlength="40" value="${escapeAttr(preset)}">
-    <input class="prod-input" id="prod-desc" placeholder="One line about it (optional) — e.g. 8 weeks of training" maxlength="140">
+    <input class="prod-input" id="prod-desc" placeholder="One line about it (optional), e.g. 8 weeks of training" maxlength="140">
     <div class="prod-cap-out">
       <pre id="prod-cap-text"></pre>
       <button type="button" class="btn pri" id="prod-copy">Copy caption + hashtags</button>

@@ -116,6 +116,107 @@ export async function POST(request: Request): Promise<Response> {
       return json({ url: session.url });
     }
 
+    // The decline downsell.
+    //
+    // Somebody who has just turned the trial down is not a member and is not
+    // going to become one today, and the standard $5.99 single scan is the
+    // wrong number to put in front of them: the alternative on the table is
+    // nothing at all, not a subscription. So they are offered the same scan
+    // credit at the member price, once.
+    //
+    // THE ELIGIBILITY IS CHECKED HERE, not carried up from the client, and
+    // that is the whole reason this is a separate branch rather than a flag on
+    // the scan branch. A "give me the cheap price" field in a request body is
+    // a cheap price for everybody who opens the console, and the standard
+    // price then means nothing. The two conditions the server can actually
+    // verify are that the account declined and that it is not already a
+    // member, and those are exactly the two that make the offer honest.
+    //
+    // The purpose marker is the ordinary scan_credit one: this is the same
+    // product, bought at a different moment, so the webhook needs to know
+    // nothing about the downsell existing.
+    if (body?.purchase === "downsell") {
+      const admin = getSupabaseAdmin();
+      const { data: ent, error: entitlementError } = await admin
+        .from("entitlements")
+        .select("stripe_customer_id,status,tier")
+        .eq("user_id", user.id)
+        .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
+      if (entitlementError) throw new Error(`Downsell pricing lookup failed: ${entitlementError.message}`);
+      // A failed eligibility read REFUSES the offer rather than throwing.
+      //
+      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
+      // A member is refused before anything is claimed: they already have the
+      // thing this sells, and charging them for it because a stale tab offered
+      // it would be the worse outcome.
+      if (member) {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+
+      // CLAIMED, not checked.
+      //
+      // The first version read a redemption timestamp here and decided from
+      // it, which is read-then-act with a network round trip and a human
+      // paying in between. Two concurrent requests both read null, both got a
+      // discounted session, both were paid, and the second webhook stamp
+      // updated no row and reported success: two discounted purchases against
+      // a promise of one.
+      //
+      // claim_downsell does the whole test in a single UPDATE ... WHERE, so
+      // Postgres serialises the two callers on the row and exactly one of them
+      // gets true back. It also carries the "has declined" test, which is why
+      // the profile is not read separately any more: one statement decides,
+      // and there is no window between deciding and acting.
+      //
+      // A claim expires after 35 minutes, slightly outlasting the 31-minute
+      // Checkout Session below it, so abandoning a checkout gives the offer
+      // back but never while a payable session for it is still alive.
+      const { data: claimed, error: claimError } = await admin.rpc("claim_downsell", {
+        p_user_id: user.id,
+      });
+      // A failed claim REFUSES rather than throwing, in the direction every
+      // other check on this endpoint fails: this hands out a discount, so an
+      // unreadable eligibility fact must mean "no offer", never a 500 and
+      // never the offer anyway. It also removes a deploy-order hazard: between
+      // a merge and this migration being applied the RPC does not exist, and
+      // every declining account would otherwise meet a server error instead of
+      // a closed offer.
+      if (claimError || claimed !== true) {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+      const downsellPrice =
+        process.env.STRIPE_DOWNSELL_PRICE_ID
+        || process.env.STRIPE_PRICE_SCAN_DOWNSELL
+        // Falls back to the member scan price, which is the same amount for
+        // the same product. A dedicated price is worth configuring so the
+        // downsell can be read separately in Stripe, but the offer working is
+        // worth more than the reporting.
+        || process.env.STRIPE_MEMBER_SCAN_PRICE_ID
+        || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER
+        || null;
+      if (!downsellPrice) return json({ error: "Single scans are still being connected." }, 503);
+      const session = await getStripe().checkout.sessions.create(
+        {
+          mode: "payment",
+          expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+          line_items: [{ price: downsellPrice, quantity: 1 }],
+          success_url: `${origin}/?purchase=scan-success`,
+          cancel_url: `${origin}/?purchase=scan-cancelled`,
+          client_reference_id: user.id,
+          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
+          metadata: { supabase_user_id: user.id, purpose: "scan_credit", offer: "decline_downsell" },
+          custom_text: {
+            submit: { message: "Your full analysis, unlocked the moment payment completes. One payment, no subscription." },
+          },
+        },
+        request.headers.get("x-idempotency-key")
+          ? { idempotencyKey: request.headers.get("x-idempotency-key") as string }
+          : undefined,
+      );
+      if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+      return json({ url: session.url });
+    }
+
     // One voiced analysis export — a payment like the scan credit, one flat
     // price for everyone. There is no member price on purpose: the cost being
     // covered is the synthesis call, and that costs the same whoever asks.

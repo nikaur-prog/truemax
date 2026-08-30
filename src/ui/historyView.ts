@@ -194,12 +194,12 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
     <h2>Your scans</h2>
     <div class="hist-stats">
       <div><b>${mine.length}</b><span>YOUR SCANS</span></div>
-      <div><b>${mine.length ? avg.toFixed(1) : "—"}</b><span>YOUR AVERAGE</span></div>
-      <div><b>${mine.length ? best.toFixed(1) : "—"}</b><span>BEST</span></div>
+      <div><b>${mine.length ? avg.toFixed(1) : "–"}</b><span>YOUR AVERAGE</span></div>
+      <div><b>${mine.length ? best.toFixed(1) : "–"}</b><span>BEST</span></div>
     </div>
     ${mine.length >= 2 ? trendSVG(mine) : ""}
     <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.
-      A dot inside it has not really moved — same face, different photo. Only dots clear of the
+      A dot inside it has not really moved, same face, different photo. Only dots clear of the
       band are a change worth reading.</p>
     ${legacyCount ? `<p class="hist-note">${legacyCount} earlier scan${legacyCount === 1 ? "" : "s"} used a previous calibration and is excluded from this chart.</p>` : ""}
     ${guests ? `<p class="hist-note">${guests} scan${guests === 1 ? " was" : "s were"} taken of someone else on this device. ${guests === 1 ? "It is" : "They are"} listed below but left out of your chart, your average and your streak.</p>` : ""}

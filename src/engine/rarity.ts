@@ -93,8 +93,20 @@ export function rarityPhrase(pct: number): string {
   const shown = statedPct(pct);
   if (shown >= 99) return "the top 1%";
   const rest = shown >= 50 ? 100 - shown : shown;
-  const n = oneInN(pct);
-  return Math.abs(100 / n - rest) < 0.01 ? `1 in ${n}` : `${rest}% of`;
+  // ALWAYS the percentage, never the fraction.
+  //
+  // This used to return "1 in 10" wherever the percentage divided exactly,
+  // and this function feeds a person's own report: "Roughly 1 in 10 male
+  // faces measure this way", printed under their score. That is the sentence
+  // CLAUDE.md bars, which says a rarity is never stated about a PERSON. The
+  // fraction is what makes it about them; the percentage is the same fact in
+  // the language the rest of the product already uses, next to "Top 10%" and
+  // "30% of faces come in above you".
+  //
+  // The scale note's ladder is unaffected and stays: it reads oneInN directly
+  // through LADDER, and it describes the rungs of the curve before anybody has
+  // seen their own number, which is the exception the rule names.
+  return `${rest}% of`;
 }
 
 // The compact form, for a grid cell rather than a sentence.
@@ -117,9 +129,12 @@ export function rarityShort(pct: number): string {
   const shown = statedPct(pct);
   if (shown >= 99) return "Top 1%";
   if (shown < 50) return `Ahead of ${shown}%`;
-  const rest = 100 - shown;
-  const n = oneInN(pct);
-  return Math.abs(100 / n - rest) < 0.01 ? `1 in ${n}` : `Top ${rest}%`;
+  // "Top N%", never "1 in N", for the reason given on rarityPhrase above: this
+  // labels a person's own cell. The comment block below explains why the
+  // fraction was chosen originally and it is a good argument about legibility,
+  // which is why it is kept rather than deleted; it is simply outranked by the
+  // rule about what may be said to somebody about their own face.
+  return `Top ${100 - shown}%`;
 }
 
 // The one line that does the most work in the product.
@@ -132,9 +147,10 @@ export function rarityLine(pct: number): string {
   const q = rarityPhrase(pct);
   if (q === "the top 1%") return "This is the top 1% of the reference set.";
   const dir = statedPct(pct) >= 50 ? "high" : "low";
-  return q.endsWith("of")
-    ? `About ${q} people measure this ${dir}.`
-    : `About ${q} measure this ${dir}.`;
+  // rarityPhrase now always returns the "N% of" shape, so the bare-fraction
+  // branch this used to carry ("About 1 in 8 measure this high") is gone with
+  // it rather than left behind as an unreachable alternative.
+  return `About ${q} people measure this ${dir}.`;
 }
 
 // "Two thirds of men measure between 4.1 and 6.3."

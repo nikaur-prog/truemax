@@ -194,7 +194,7 @@ export function openScanRecall(scan: StoredScan, previous?: StoredScan): RecallH
   document.body.appendChild(wrap);
 
   // The full interactive analysis, for scans whose archive was kept. The
-  // sheet above stays exactly as it is — this is the way THROUGH it for
+  // sheet above stays exactly as it is: this is the way THROUGH it for
   // anybody who wants to walk the measurements again rather than read the
   // summary. Scans from before archives shipped never grow the button, in
   // keeping with the footnote right above it.
@@ -219,7 +219,7 @@ export function openScanRecall(scan: StoredScan, previous?: StoredScan): RecallH
   void loadPhotos(scanStorageKey(scan)).then((p) => {
     if (!shots || !shots.isConnected) return;
     if (!p || (!p.front && !p.side)) {
-      shots.innerHTML = `<p class="recall-note">No photograph kept for this scan — it was taken before thumbnails were stored, or on another device.</p>`;
+      shots.innerHTML = `<p class="recall-note">No photograph kept for this scan. It was taken before thumbnails were stored, or on another device.</p>`;
       return;
     }
     shots.innerHTML =

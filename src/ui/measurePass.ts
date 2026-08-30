@@ -87,11 +87,11 @@ const LABELS: Record<RegionId, string> = {
  * number, so the first measurement shown IS the one doing the most work behind
  * the score, and everything after it is shown in the order it matters.
  *
- * ALL of them, not a single speaker. The pass used to feature one measurement
- * per region and be done in eight beats, which read as three lines of front
- * analysis and a jump to the profile — the scan visibly doing less work than
- * the report it produces. The screen exists to show the work, so it shows the
- * work. The honesty rules are unchanged: implausible readings, undrawable
+ * Every honest measurement a region has, not a single speaker. Which of them
+ * actually reach the screen is the cap's business, below; this function's job
+ * is to say what the region COULD show and in what order of importance.
+ *
+ * The honesty rules are unchanged: implausible readings, undrawable
  * constructions and anything under RELIABLE_MIN never appear at any length.
  */
 function speakersFor(
@@ -103,12 +103,30 @@ function speakersFor(
     .sort((a, b) => b.def.weight * reliabilityOf(b.def.id) - a.def.weight * reliabilityOf(a.def.id));
 }
 
+/**
+ * How many measurements the pass features, by default.
+ *
+ * This was uncapped, on the reasoning that the screen exists to show the work
+ * so it should show all of it. Watched end to end that is around thirty beats
+ * at 520ms each, plus the open and the close: roughly eighteen seconds of
+ * loading screen. Long enough that the person stops reading the lines and
+ * starts waiting for them to stop, which is the opposite of the intended
+ * effect — and a competitor doing the same job in five seconds does not read
+ * as having measured less, it reads as being quicker at it.
+ *
+ * Nine, and the honest way to shorten a pass is to cut the number of beats
+ * rather than the length of each one. Halving ARRIVE and HOLD would make every
+ * line feel skipped; showing fewer lines at the same dwell reads as decisive.
+ * The measurements that do not get a beat are not hidden — every one of them
+ * is in the report a moment later, drawable on tap.
+ */
+const DEFAULT_MAX_STEPS = 9;
+
 export interface PlanOptions {
   /**
-   * Hard cap on beats. Default is uncapped: the pass walks every measurement
-   * the report can honestly show, front then side, because the whole point of
-   * the screen is the scan showing its work — and the render behind it gets
-   * that much more time to finish. The per-beat pacing is tightened to match.
+   * Hard cap on beats. Defaults to DEFAULT_MAX_STEPS. The video harnesses set
+   * their own, because a thirty-second film has a different budget from a
+   * loading screen.
    */
   maxSteps?: number;
 }
@@ -125,7 +143,7 @@ export function buildPassPlan(
   side: Report | null,
   opts: PlanOptions = {},
 ): PassStep[] {
-  const max = opts.maxSteps ?? Infinity;
+  const max = opts.maxSteps ?? DEFAULT_MAX_STEPS;
   const out: PassStep[] = [];
 
   const collect = (
@@ -148,15 +166,71 @@ export function buildPassPlan(
   if (side) collect(side, SIDE_ORDER, "side", hasSideOverlay);
 
   if (out.length <= max) return out;
-  // Over the cap. Trim from the FRONT tail rather than the front of the list or
-  // the side: the last front beats are the whole-face readings, which are the
-  // ones a viewer can most afford to lose, and dropping side beats instead
-  // would leave the profile they just spent a minute verifying unrepresented —
-  // exactly the complaint that put the side into this animation in the first
-  // place.
+
+  // Over the cap, and how it is trimmed decides what the scan LOOKS like it
+  // measured.
+  //
+  // The old rule gave the side everything it asked for and handed the front
+  // the remainder, which was harmless while the pass was uncapped and is not
+  // now: a real profile offers five to eight drawable measurements, so at a
+  // cap of nine the front would be left with one beat. The front carries 75%
+  // of the overall score. It gets roughly two thirds of the pass, and the side
+  // keeps a third, which is the same proportion the scoring uses.
   const sideSteps = out.slice(frontCount);
-  const keepFront = Math.max(1, max - sideSteps.length);
-  return [...out.slice(0, keepFront), ...sideSteps.slice(0, max - keepFront)];
+  // A third to the side, but never at the cost of the front's last beat, and
+  // never any at a cap of one — a single-beat pass belongs to the front, which
+  // carries 75% of the score.
+  //
+  // Both halves used to carry a Math.max(1, ...) floor, which meant the cap was
+  // not a cap: `{ maxSteps: 1 }` against one front and one side measurement
+  // returned two beats. Production passes nine so it never showed, but an
+  // exported option that quietly returns more than it was asked for is a
+  // contract the video harnesses rely on.
+  const sideWanted = Math.min(sideSteps.length, Math.max(1, Math.round(max / 3)));
+  const sideKeep = Math.min(sideWanted, Math.max(0, max - 1));
+  const frontKeep = max - sideKeep;
+  return [
+    ...breadthFirst(out.slice(0, frontCount), frontKeep),
+    ...breadthFirst(sideSteps, sideKeep),
+  ];
+}
+
+/**
+ * Take `cap` steps by walking the regions in rounds: every region's best
+ * measurement first, then every region's second, and so on.
+ *
+ * Slicing the head off the list instead would have spent a nine-beat pass on
+ * four eye measurements and two cheekbone ones, and never reached the jaw or
+ * the chin — the two regions people actually arrive asking about. Rounds keep
+ * the pass travelling over the whole face, which is what makes it read as an
+ * examination rather than as a close inspection of one feature.
+ *
+ * The result is returned in the ORIGINAL order, so the camera still descends
+ * the face top to bottom. Only the membership is chosen here, never the
+ * running order.
+ */
+function breadthFirst(steps: PassStep[], cap: number): PassStep[] {
+  if (steps.length <= cap) return steps;
+  const byRegion = new Map<string, PassStep[]>();
+  for (const step of steps) {
+    // Keyed by view as well as region: the front jaw and the side jaw are two
+    // different sets of measurements on two different photographs.
+    const key = `${step.view}:${step.region}`;
+    const list = byRegion.get(key);
+    if (list) list.push(step);
+    else byRegion.set(key, [step]);
+  }
+  const lists = [...byRegion.values()];
+  const deepest = Math.max(...lists.map((l) => l.length));
+  const keep = new Set<PassStep>();
+  for (let round = 0; round < deepest && keep.size < cap; round++) {
+    for (const list of lists) {
+      if (round >= list.length) continue;
+      keep.add(list[round]);
+      if (keep.size >= cap) break;
+    }
+  }
+  return steps.filter((step) => keep.has(step));
 }
 
 // ---------------------------------------------------------------------------

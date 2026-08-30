@@ -183,7 +183,7 @@ const ABOUT_STEP: Step = {
         .map((o) => `<option value="${o}"${p.ethnicity === o ? " selected" : ""}>${o}</option>`)
         .join("")}
     </select>
-    <p class="q-foot">The background question changes no measurement and selects no different standard — there is one scale, the same for everybody. It is recorded only so we can say honestly who our reference set actually covers.</p>`,
+    <p class="q-foot">The background question changes no measurement and selects no different standard. There is one scale, the same for everybody. It is recorded only so we can say honestly who our reference set actually covers.</p>`,
   pick: (key, p) => {
     if (key === "male" || key === "female") p.sex = key;
   },

@@ -37,8 +37,8 @@ test("rarity is computed off the stated percentile, not the raw one", () => {
 test("rarity is symmetric about the median", () => {
   // Same construction both sides: no congratulating the top half and no
   // commiserating with the bottom half.
-  assert.match(rarityLine(90), /1 in 10 measure this high/);
-  assert.match(rarityLine(10), /1 in 10 measure this low/);
+  assert.match(rarityLine(90), /10% of people measure this high/);
+  assert.match(rarityLine(10), /10% of people measure this low/);
 });
 
 test("rarity never claims a certainty of one", () => {
@@ -102,13 +102,13 @@ test("ladder rungs stay within the rounding the rest of the product uses", () =>
   }
 });
 
-test("the compact form uses a fraction only where it lands exactly", () => {
-  // The punchy form on the values worth being punchy about...
-  assert.equal(rarityShort(78), "1 in 5"); // top 20%
-  assert.equal(rarityShort(90), "1 in 10");
-  assert.equal(rarityShort(76), "1 in 4"); // top 25%
-  // ...and the percentage where a fraction would misstate it. "1 in 7" claims
-  // 14.3% while the number printed beside it says 15%.
+test("the compact form never uses a fraction", () => {
+  // It used to print "1 in 5" wherever the percentage divided exactly, and
+  // this labels a person's own cell. CLAUDE.md bars a rarity stated about a
+  // person, and the fraction is the form that makes it about them.
+  assert.equal(rarityShort(78), "Top 20%");
+  assert.equal(rarityShort(90), "Top 10%");
+  assert.equal(rarityShort(76), "Top 25%");
   assert.equal(rarityShort(85), "Top 15%");
   assert.equal(rarityShort(62), "Top 40%");
 });
@@ -123,10 +123,10 @@ test("the compact form never dresses a below-median score as an achievement", ()
 });
 
 test("the median edge is decided by the stated percentile, not the raw one", () => {
-  // 49 rounds to a stated 50, so it IS the median on screen and "1 in 2" is the
-  // honest reading of it. Splitting on the raw value instead would print
-  // "Ahead of 50%" beside a number the same screen just rounded to 50.
-  assert.equal(rarityShort(49), "1 in 2");
+  // 49 rounds to a stated 50, so it IS the median on screen and belongs on the
+  // upper branch. Splitting on the raw value instead would print "Ahead of
+  // 50%" beside a number the same screen just rounded to 50.
+  assert.equal(rarityShort(49), "Top 50%");
   assert.equal(rarityShort(47), "Ahead of 45%");
 });
 

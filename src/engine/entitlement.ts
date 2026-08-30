@@ -173,6 +173,18 @@ export function startScanCreditCheckout(): Promise<BillingResult> {
   return billingRedirect("/api/create-checkout-session", { purchase: "scan" });
 }
 
+/**
+ * The same scan credit at the member price, offered once to somebody who has
+ * just declined the trial.
+ *
+ * Nothing about the eligibility travels in this request. The server reads the
+ * decline stamp and the entitlement itself and answers 403 if either says no,
+ * because a discount a client can ask for is a discount everybody gets.
+ */
+export function startDownsellCheckout(): Promise<BillingResult> {
+  return billingRedirect("/api/create-checkout-session", { purchase: "downsell" });
+}
+
 // ---------------------------------------------------------------------------
 // Voiced-analysis credits: $2.99 buys one narrated export. Same shape as the
 // scan credit, except the SPEND is server-side in /api/tts (where the

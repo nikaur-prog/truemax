@@ -197,6 +197,19 @@ function clearWalkthrough(frame: HTMLElement): void {
 }
 
 export function openSideCapture(ctx: SideCtx): void {
+  // Any dialog belonging to the placement that is being retaken goes with it.
+  //
+  // The placement sheet stops pointer events reaching the photograph beneath
+  // it, and layering keeps a mouse away from the retake control, but neither
+  // makes that control unreachable: Shift-Tab from the sheet's own button
+  // lands on it and Enter fires it. The verifier was then destroyed while the
+  // sheet stayed on screen, and answering it ran the previous placement's
+  // callback against a capture that no longer existed.
+  //
+  // Cancelled here rather than defended against at the retake button, because
+  // this is the one function every retake goes through whatever reached it:
+  // keyboard, pointer or assistive technology.
+  cancelDialogs();
   const e = el();
   verifier?.destroy();
   verifier = null;
@@ -559,7 +572,35 @@ export function openSideAdjust(
   mountVerify(photo, { ...seed, method: seed.method ?? "existing" }, ctx, "REVIEW LANDMARKS");
 }
 
+// ---------------------------------------------------------------------------
+// Dialogs that outlive the function call that opened them.
+//
+// Both the placement sheet and the consent dialog hand a promise back to a
+// caller holding closures over the CURRENT scan: which photograph, which
+// points, which feedback record. Neither was torn down by close(), so an
+// identity change or a retake left the sheet on screen with its handlers
+// live, and the next tap ran the previous scan's code against the new one.
+// The promise never settled either, so the awaiting closure was held forever.
+//
+// Registering the cancel here is what lets close() be the single place that
+// knows how to take the side flow down. Cancelling settles the promise in the
+// direction that does nothing: no mode chosen, no consent given.
+// ---------------------------------------------------------------------------
+const openDialogs = new Set<() => void>();
+
+function trackDialog(cancel: () => void): () => void {
+  openDialogs.add(cancel);
+  return () => openDialogs.delete(cancel);
+}
+
+function cancelDialogs(): void {
+  // Copied before iterating: each cancel removes itself from the set.
+  for (const cancel of [...openDialogs]) cancel();
+  openDialogs.clear();
+}
+
 export function close(): void {
+  cancelDialogs();
   stopSideCamera();
   verifier?.destroy();
   verifier = null;
@@ -736,6 +777,10 @@ function mountVerify(
   // complaint — not re-asked at confirm.
   let flaggedWrong = false;
   let consentAnswer: boolean | null = null;
+  // Set when the automatic placement was TAKEN rather than walked through, so
+  // the review panel knows to ask whether it was right. Cleared once answered:
+  // the question is asked once, not every time the panel repaints.
+  let askedAccuracy = false;
   // Set once the "nothing was moved" prompt has been shown, so the second press
   // goes through. Scoped per mounted photo, so the next face asks again.
   let untouchedAcknowledged = false;
@@ -1088,8 +1133,8 @@ function mountVerify(
     const low = (seed.confidence ?? 1) < 0.7;
     e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
       <p class="side-sub">${low
-        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names — the hollow centre shows the pixel underneath."
-        : "The front of the face is measured; the five behind it — jaw corner, ear, and the neck point — are estimated from an average head, so they are the ones worth checking. Drag any ring straight onto the feature it names."}</p>
+        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names: the hollow centre shows the pixel underneath."
+        : "The front of the face is measured; the five behind it, jaw corner, ear, and the neck point, are estimated from an average head, so they are the ones worth checking. Drag any ring straight onto the feature it names."}</p>
       <p class="side-review-note">Nothing leaves this device unless you separately choose to share it.</p>`;
     e.actions.innerHTML = `
       <button class="side-reset-glyph" id="side-reset" type="button" aria-label="Reset points to the automatic placement" title="Reset to automatic placement">
@@ -1098,15 +1143,53 @@ function mountVerify(
         </svg>
       </button>
       <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>
+      ${askedAccuracy ? "" : `<button class="btn gho" id="side-wrong">Points are wrong</button>`}
       <button class="btn pri" id="side-go">Confirm</button>`;
+    if (askedAccuracy) {
+      // Asked as a question with two answers rather than left as a button
+      // somebody has to think to press. "Points are wrong" is a complaint, and
+      // people do not complain, they shrug and carry on: the yes half of this
+      // is what makes answering it feel like part of the flow. Only the no
+      // half goes anywhere, which is the same consent ask the button had.
+      const ask = document.createElement("div");
+      ask.className = "side-accuracy";
+      ask.innerHTML = `<p>Do you think the points landed in the right places?</p>
+        <span class="side-accuracy-btns">
+          <button type="button" class="btn gho" data-acc="no">No</button>
+          <button type="button" class="btn gho" data-acc="yes">Yes</button>
+        </span>`;
+      e.panelCopy.appendChild(ask);
+      ask.onclick = async (ev) => {
+        const answer = (ev.target as HTMLElement).dataset.acc;
+        if (!answer) return;
+        askedAccuracy = false;
+        if (answer === "yes") {
+          ask.innerHTML = `<p>Noted. Drag any ring that still looks off, then confirm.</p>`;
+          return;
+        }
+        ask.innerHTML = `<p>Thanks. Drag each wrong ring onto the feature it names, then confirm.</p>`;
+        flaggedWrong = true;
+        consentAnswer = await askSideFeedbackConsent();
+        ask.innerHTML = `<p>${consentAnswer
+          ? "That photo and your corrections will be shared privately after you confirm, and they directly teach the automatic placement to land closer."
+          : "Nothing will be shared. Drag each wrong ring onto the feature it names, then confirm."}</p>`;
+      };
+    }
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
       drawGuides(e.lines, automaticPoints, w, h);
     };
     document.getElementById("side-guided")!.onclick = () => showGuidedActions();
     document.getElementById("side-go")!.onclick = () => void confirmPlacement();
-    document.getElementById("side-wrong")!.onclick = async () => {
+    const wrong = document.getElementById("side-wrong");
+    if (wrong) wrong.onclick = async () => {
+      // Disabled BEFORE the await, not after it. The dialog takes a frame to
+      // appear and the button stayed live across it, so a double tap opened
+      // two consent backdrops stacked on each other: answering the top one
+      // left the second still standing over the photograph, and the second
+      // answer overwrote the first.
+      if (wrong.hasAttribute("disabled")) return;
+      wrong.setAttribute("disabled", "true");
       // The complaint is the moment to ask, because the complaint is the
       // evidence. What is deliberately NOT here is any mention of an account:
       // being asked to sign up before you have even confirmed your points is
@@ -1115,12 +1198,11 @@ function mountVerify(
       flaggedWrong = true;
       consentAnswer = await askSideFeedbackConsent();
       const wrongButton = document.getElementById("side-wrong");
-      wrongButton?.setAttribute("disabled", "true");
-      if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks — noted" : "Noted";
+      if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
       e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
         <p class="side-sub">${consentAnswer
-          ? "Thank you — that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
-          : "No problem — nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
+          ? "Thank you: that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
+          : "No problem: nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
         <p class="side-review-note">The circular arrow under the photo resets every point to the automatic placement.</p>`;
     };
   };
@@ -1191,7 +1273,7 @@ function mountVerify(
         });
         const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
         if (hint) {
-          hint.textContent = `${readings.join("; ")} — check ${
+          hint.textContent = `${readings.join("; ")}, check ${
             points.length ? points.join(", ") : "the points behind it"
           }`;
           hint.classList.add("show");
@@ -1223,10 +1305,10 @@ function mountVerify(
         }
         e.panelCopy.innerHTML = `<h2 class="side-title">Nothing was moved</h2>
           <p class="side-sub">These are the automatic positions exactly as they were estimated.
-          The five behind the face — jaw corner, ear and the neck point — are inferred from an
+          The five behind the face, jaw corner, ear and the neck point, are inferred from an
           average head rather than found in the photo, so they are the ones that drift.</p>
           <p class="side-review-note">If they are genuinely right, press Confirm as-is. If you
-          have not looked yet, this is the moment — a side score built on a guessed jaw corner
+          have not looked yet, this is the moment: a side score built on a guessed jaw corner
           measures the guess.</p>`;
         return;
       }
@@ -1273,8 +1355,99 @@ function mountVerify(
     }
   };
 
-  if (startInGuidedMode) showGuidedActions();
-  else showReviewActions();
+  if (startInGuidedMode) {
+    // The choice, before the walkthrough rather than instead of it.
+    //
+    // A fresh seed used to drop straight into thirteen guided taps whether the
+    // automatic placement was good or not, so somebody whose points had landed
+    // perfectly still had to confirm every one of them, and somebody whose had
+    // not could not tell until they were four points in. The seed is already
+    // computed by the time this runs, so there is nothing to save by hiding
+    // it: showing the rings and asking is strictly more information for the
+    // person and one fewer decision made on their behalf.
+    //
+    // The review state is put up first, so the question is asked over the
+    // thirteen rings it is about rather than over an empty frame.
+    showReviewActions();
+    void askPlacementMode(e.frame, seed.confidence ?? 1).then((mode) => {
+      // Null is a cancelled sheet: the flow was closed or the identity changed
+      // underneath it, and there is nothing left for either branch to act on.
+      if (mode === null) return;
+      if (mode === "manual") {
+        showGuidedActions();
+        return;
+      }
+      // Taking the automatic placement is the branch that owes an answer back:
+      // the person has just accepted a guess, and whether the guess was right
+      // is the single most useful thing they can tell us. Asked in the review
+      // panel rather than in another sheet, because a second modal in a row
+      // reads as an interrogation.
+      askedAccuracy = true;
+      showReviewActions();
+    });
+  } else showReviewActions();
+}
+
+/**
+ * Take these points, or place them yourself.
+ *
+ * A bottom sheet inside the photo frame rather than a modal over the middle of
+ * it, and that is the whole design. The question is about the thirteen rings
+ * on the picture, so the picture has to stay visible while it is asked: a
+ * centred dialog would cover the only evidence the person has to answer with,
+ * and a dialog containing its own copy of the photograph is a second, smaller
+ * picture of the thing already on screen.
+ *
+ * The fine print is not boilerplate and does not always say the same thing.
+ * The seeder already reports its own confidence, and the walkthrough copy
+ * downstream branches on it, so this does too: an unsure placement says so
+ * plainly instead of leaving somebody to discover it four rings in.
+ *
+ * There is no way past this without answering, and deliberately so. Both
+ * answers are complete and neither is destructive: taking the points still
+ * lands on a screen where every one of them can be dragged.
+ */
+function askPlacementMode(frame: HTMLElement, confidence: number): Promise<"auto" | "manual" | null> {
+  const low = confidence < 0.7;
+  return new Promise((resolve) => {
+    let done = false;
+    const sheet = document.createElement("div");
+    sheet.className = "side-mode-sheet";
+    sheet.dataset.verifyChrome = "1";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    sheet.setAttribute("aria-labelledby", "side-mode-title");
+    sheet.innerHTML = `<div class="side-mode-card">
+      <h3 id="side-mode-title">${low ? "Here is our best guess" : "We placed the points for you"}</h3>
+      <p>${low
+        ? "The photo was a hard one to read, so treat these as starting positions. You can take them and drag the ones that look off, or place all thirteen yourself."
+        : "This is where our system put them. Take these and check them over, or place all thirteen yourself, one at a time."}</p>
+      <div class="side-mode-actions">
+        <button type="button" class="btn gho" data-mode="manual">Place them myself</button>
+        <button type="button" class="btn pri" data-mode="auto">Use these points</button>
+      </div>
+      <p class="side-mode-fine">Our detection is still improving. If the points look off, placing them yourself gives a more accurate score.</p>
+    </div>`;
+    // Chrome, not photograph: the verifier treats a pointerdown on the frame
+    // as a drag on the nearest ring, and a tap on this sheet must not move a
+    // point that is sitting underneath it.
+    sheet.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    frame.appendChild(sheet);
+    sheet.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
+    const settle = (mode: "auto" | "manual" | null) => {
+      if (done) return;
+      done = true;
+      untrack();
+      sheet.remove();
+      resolve(mode);
+    };
+    const untrack = trackDialog(() => settle(null));
+    sheet.onclick = (ev) => {
+      const mode = (ev.target as HTMLElement).dataset.mode;
+      if (mode !== "auto" && mode !== "manual") return;
+      settle(mode);
+    };
+  });
 }
 
 function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
@@ -1294,7 +1467,7 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       <span class="klabel">OPTIONAL · YOUR CHOICE</span>
       <h2 id="side-feedback-title">${afterEdit ? "We noticed you adjusted the points" : "Help improve TrueMax?"}</h2>
       <p id="side-feedback-copy">${afterEdit
-        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them — corrections like yours are exactly what teaches the placement to land right next time."
+        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them. Corrections like yours are exactly what teaches the placement to land right next time."
         : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
       <div class="side-feedback-actions">
@@ -1306,10 +1479,35 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
     const no = backdrop.querySelector<HTMLButtonElement>('[data-choice="no"]')!;
     const yes = backdrop.querySelector<HTMLButtonElement>('[data-choice="yes"]')!;
     let finished = false;
+    let thanksTimer = 0;
+    // Cancelled by close(), which is also the identity-change path. No consent
+    // is the safe direction and the honest one: nobody answered.
+    const untrack = trackDialog(() => {
+      if (finished) {
+        // Already on the thank-you card with its timer running. The dialog is
+        // going away now, so the timer must not fire into a torn-down flow.
+        //
+        // The promise is still settled, with TRUE, and both halves of that
+        // matter. Returning without resolving left the awaiting closure and
+        // its scan pending for the life of the page, which is the leak this
+        // whole cancel mechanism exists to prevent. And true is the answer
+        // they actually gave: the thank-you card is only ever reached by
+        // pressing yes, so resolving false here would record a consent they
+        // did give as one they refused.
+        window.clearTimeout(thanksTimer);
+        backdrop.remove();
+        resolve(true);
+        return;
+      }
+      finished = true;
+      backdrop.remove();
+      resolve(false);
+    });
     const finish = (choice: boolean) => {
       if (finished) return;
       finished = true;
       if (!choice) {
+        untrack();
         backdrop.remove();
         resolve(false);
         return;
@@ -1327,7 +1525,8 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       const waiting = signedIn ? "when you confirm" : "once you are signed in";
       dialog.innerHTML = `<span class="side-feedback-thanks" aria-live="polite">Thank you.</span>
         <p>We’ll share it privately ${waiting}.</p>`;
-      window.setTimeout(() => {
+      thanksTimer = window.setTimeout(() => {
+        untrack();
         backdrop.remove();
         resolve(true);
       }, 850);

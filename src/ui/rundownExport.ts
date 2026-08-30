@@ -302,7 +302,7 @@ export async function downloadRundownVideo(
   const frameCount = Math.round(FPS * audio.duration);
   output.addVideoTrack(videoSource, { frameRate: FPS, maximumPacketCount: frameCount + 4 });
   output.addAudioTrack(audioSource);
-  output.setMetadataTags({ title: `TrueMax rundown — ${options.name}`, artist: "TrueMax" });
+  output.setMetadataTags({ title: `TrueMax rundown, ${options.name}`, artist: "TrueMax" });
   await output.start();
 
   // Audio first and in one call: the whole track is a single buffer, so there is

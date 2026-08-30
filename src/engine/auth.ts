@@ -177,13 +177,39 @@ export async function socialAvailability(): Promise<SocialAvailability | null> {
 
 // A password sign-up. Supabase can be set to require email confirmation; the
 // result says so rather than pretending the user is signed in.
-export async function signUp(email: string, password: string): Promise<AuthResult> {
+/**
+ * `name` is written into auth metadata rather than into `profiles`.
+ *
+ * The profiles row is `first_name not null` and is written by a single upsert
+ * that also stamps `completed_at`, so there is no way to put a name there
+ * before the quiz without either faking a completed profile or inventing a
+ * second partial-write path. Metadata has neither problem, and it is already
+ * the place the app looks first: `namesFromUser` in onboarding.ts reads
+ * `first_name` / `last_name` off the user before falling back to `full_name`,
+ * which is how Google and Apple sign-ins already arrive with a name.
+ *
+ * So one field at signup makes the greeting work immediately, prefills the
+ * quiz, and touches no schema.
+ */
+export async function signUp(email: string, password: string, name = ""): Promise<AuthResult> {
   try {
     const c = await getSupabaseClient();
+    // Split on the first space only: "Mary Anne Smith" is a first name of
+    // "Mary" and a last of "Anne Smith", which is wrong far less often than
+    // the alternative and is editable in the quiz either way.
+    const trimmed = name.trim().replace(/\s+/g, " ");
+    const cut = trimmed.indexOf(" ");
+    const first = cut === -1 ? trimmed : trimmed.slice(0, cut);
+    const last = cut === -1 ? "" : trimmed.slice(cut + 1);
     const { data, error } = await c.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: authRedirects().scan },
+      options: {
+        emailRedirectTo: authRedirects().scan,
+        // Omitted entirely when blank, so an empty field cannot overwrite a
+        // name an OAuth provider already supplied on a later link.
+        ...(first ? { data: { first_name: first, last_name: last } } : {}),
+      },
     });
     if (error) return { ok: false, message: friendly(error.message) };
     // Counted at sign-up success, confirmed or not — the account exists either

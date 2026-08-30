@@ -71,7 +71,7 @@ const TARGETS: Target[] = [
 
 export function nutritionPlanHTML(
   r: Report,
-  opts: { dietAdvice: boolean; maxAccess: boolean },
+  opts: { dietAdvice: boolean; maxAccess: boolean; adult: boolean },
 ): string {
   if (!opts.dietAdvice) {
     return `<div class="panel nutri"><h4>NUTRITION</h4>
@@ -85,14 +85,32 @@ export function nutritionPlanHTML(
 
   const gonial = byId(r, "gonialProxy");
   const cheek = byId(r, "cheekboneHeight");
+  // The composition card is the only place on this panel that states an energy
+  // figure, and an energy figure is 18+ everywhere else in the product. Found
+  // in review: the macro calculator directly BELOW this panel runs a four-gate
+  // check with the age read from a date of birth, and this panel sat above it
+  // printing "a moderate deficit of 300 to 500 kcal per day" to anybody with
+  // the Max tier, minors and unloaded profiles included. Building a careful
+  // gate next to an ungated surface saying the same thing is worse than having
+  // built neither, because the gate implies the surface is covered.
+  //
+  // Default false, same direction as adultUser and every other 18+ surface: an
+  // age we could not read behaves like an age that is too young.
+  const energyOk = opts.adult;
   const ratio = byId(r, "jawCheekRatio");
   const eye = byId(r, "eyeAspectRatio");
 
   const cards: string[] = [];
   if (fired(gonial) || fired(cheek)) {
     const m = fired(gonial) ? gonial : (cheek as ScoredMetric);
+    // The measurement and the mechanism are stated either way. Only the number
+    // is withheld, which is the same line the rest of the product draws: what
+    // is measured is yours, what is prescribed has a gate.
+    const how = energyOk
+      ? `A moderate deficit of 300 to 500 kcal per day, with the protein target held, moves this number without costing lean mass.`
+      : `Energy targets are part of the 18+ side of the plan, so this card stops at the measurement. The mechanism is the same either way: this number follows total body fat rather than anything done to the face directly.`;
     cards.push(`<div class="nutri-card"><b>BODY COMPOSITION</b>
-      <p>${m.def.name} measures ${fmt(m)} against the ${r.sex} average of ${mean(m, r.sex)}. Submental and cheek fat sit on that path. Facial fat cannot be targeted directly; it falls with total body fat. A moderate deficit of 300 to 500 kcal per day, with the protein target held, moves this number without costing lean mass.</p></div>`);
+      <p>${m.def.name} measures ${fmt(m)} against the ${r.sex} average of ${mean(m, r.sex)}. Submental and cheek fat sit on that path. Facial fat cannot be targeted directly; it falls with total body fat. ${how}</p></div>`);
   }
   if (fired(ratio)) {
     cards.push(`<div class="nutri-card"><b>WATER RETENTION</b>

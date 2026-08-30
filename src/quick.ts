@@ -608,7 +608,7 @@ function openReelKindChoice(): void {
       <b>What are we making?</b>
       <button type="button" class="q-kind" data-kind="pair">
         <span>Before &amp; after</span>
-        <em>Two photos, scanned separately. The video is the glow-up — the after score climbs out of the before.</em>
+        <em>Two photos, scanned separately. The video is the glow-up: the after score climbs out of the before.</em>
       </button>
       <button type="button" class="q-kind" data-kind="single">
         <span>One photo</span>
@@ -687,7 +687,7 @@ function updateModeStep(): void {
     return;
   }
   el.modeStep.textContent =
-    reelStage === "before" ? "Step 1 of 2 — the before photo" : "Step 2 of 2 — the after photo";
+    reelStage === "before" ? "Step 1 of 2: the before photo" : "Step 2 of 2: the after photo";
 }
 
 function leaveMode(): void {
@@ -892,14 +892,14 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
   void submitSideCorrectionFeedback(upload.photo, upload.points, upload.faceDir, upload.feedback)
     .then((result) => {
       if (result.ok) {
-        setShareStatus("Side correction shared — it will teach the automatic placement.");
+        setShareStatus("Side correction shared: it will teach the automatic placement.");
       } else if (result.rateLimited) {
         // Retrying a limit would return the same answer all day, so nothing is
         // kept: the correction is declined, not lost in transit.
-        setShareStatus("Daily sharing limit reached — this correction stayed on this device.");
+        setShareStatus("Daily sharing limit reached: this correction stayed on this device.");
       } else {
         failedUpload = upload;
-        setShareStatus(`Correction NOT shared — ${result.message ?? "the upload failed"}. The face itself is saved.`);
+        setShareStatus(`Correction NOT shared, ${result.message ?? "the upload failed"}. The face itself is saved.`);
       }
     });
 }
@@ -942,7 +942,7 @@ function renderFaceSlots(): void {
     </div>
     <button type="button" class="btn pri q-slot-go" id="q-slot-go"
       ${pendingFront || pendingSide ? "" : "disabled"}>Analyse</button>
-    <p class="q-cal-hint">Either view on its own is worth having — a front-only
+    <p class="q-cal-hint">Either view on its own is worth having: a front-only
     face still carries every front metric. Both together is what lets a side
     measurement ever be checked against a human rating.</p>
     <p class="q-cal-hint" id="q-slot-share" role="status">${shareStatus}</p>
@@ -1040,7 +1040,7 @@ function renderRatingEdit(id: string): void {
   el.calStep.textContent = "Change a rating";
   el.calBody.innerHTML = `
     <div class="q-cal-rate">
-      <p class="q-cal-ask">${face.label ? escapeHtml(face.label) : face.id} —
+      <p class="q-cal-ask">${face.label ? escapeHtml(face.label) : face.id}:
       you said ${face.rating === null ? "nothing" : face.rating.toFixed(1)},
       the engine said ${face.scored.toFixed(1)}.</p>
       <div class="q-cal-input">
@@ -1054,7 +1054,7 @@ function renderRatingEdit(id: string): void {
         <button type="button" class="btn pri" id="q-edit-typo">I mistyped it</button>
         <button type="button" class="btn gho" id="q-edit-mind">I changed my mind</button>
       </div>
-      <p class="q-cal-hint"><b>Mistyped</b> means the number you meant was always this one —
+      <p class="q-cal-hint"><b>Mistyped</b> means the number you meant was always this one:
       nothing was learned from the engine, so the row stays in the fit.
       <b>Changed my mind</b> means the engine's number moved yours. That is worth keeping as a
       record and worth nothing as a target: a corpus fitted to numbers the engine suggested
@@ -1132,7 +1132,7 @@ function renderRatingStep(r: Report): void {
   el.calStep.textContent = "Your rating";
   el.calBody.innerHTML = `
     <div class="q-cal-rate">
-      <p class="q-cal-ask">Before you see what it said — what is this face, out of ten?
+      <p class="q-cal-ask">Before you see what it said, what is this face, out of ten?
       Leave it empty if you are not sure; the face saves either way.</p>
       <div class="q-cal-input">
         <input type="number" id="q-cal-num" min="1" max="10" step="0.1" inputmode="decimal"
@@ -1141,7 +1141,7 @@ function renderRatingStep(r: Report): void {
                maxlength="40" autocomplete="off" />
         <button type="button" class="btn pri" id="q-cal-save">Save face</button>
       </div>
-      <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale —
+      <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale:
       a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
       how the men in the current corpus ended up useless.</p>
       <label class="q-cal-prov">
@@ -1153,7 +1153,7 @@ function renderRatingStep(r: Report): void {
       another product's scores is reverse-engineering its formula with arithmetic, so a
       borrowed number is kept with the face and left out of the corpus export.</p>
       <p class="q-cal-hint">Skipping is a real answer, not a failure. A face saved
-      without a rating still carries its measurements and its side corrections — it
+      without a rating still carries its measurements and its side corrections: it
       just sits out of the agreement fit. A corpus full of hesitant 5s settles nothing;
       the nine men already in it span 4.5 to 6.1 and are useless for that exact reason.
       Rate the ones you are sure about.</p>
@@ -1202,7 +1202,7 @@ function renderRatingStep(r: Report): void {
     }
     const rating = Number(num.value);
     if (!(rating >= 1 && rating <= 10)) {
-      msg.textContent = "A number between 1 and 10 — or leave it empty to save without one.";
+      msg.textContent = "A number between 1 and 10, or leave it empty to save without one.";
       num.focus();
       return;
     }
@@ -1385,7 +1385,7 @@ function renderCalibrationSet(): void {
                 ? `, ${missingSide.length} side measurement${
                     missingSide.length === 1 ? "" : "s"
                   } still uncovered`
-                : " — every side measurement is covered"
+                : ", and every side measurement is covered"
             }.`
       }</p>
       ${
@@ -1435,10 +1435,10 @@ function renderCalibrationSet(): void {
                     <span>${
                       f.thumb ? `<img class="q-cal-thumb" src="${f.thumb}" alt="" />` : `<i class="q-cal-thumb none"></i>`
                     }${f.label ? escapeHtml(f.label) : f.id}${flag}${suspectFlag}</span>
-                    <span>${f.rating === null ? "—" : f.rating.toFixed(1)}</span>
+                    <span>${f.rating === null ? "–" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
                     <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
-                      gap === null ? "—" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
+                      gap === null ? "–" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
                     }</span>
                     <span class="q-cal-acts">${
                       f.ratedBy === undefined && f.rating !== null
@@ -1494,7 +1494,7 @@ function renderCalibrationSet(): void {
       el.calBody.appendChild(area);
       area.focus();
       area.select();
-      msg.textContent = "Clipboard refused — select and copy from the box.";
+      msg.textContent = "Clipboard refused. Select and copy from the box.";
     }
   };
   document.getElementById("q-cal-clear")!.onclick = () => {
@@ -1652,7 +1652,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
 
          Both of these carried their entire meaning in a placeholder longer than
          the box that held it, so they read as "Name for the rundow" and
-         "Earlier score for a t" — and a placeholder is the wrong place for the
+         "Earlier score for a t": and a placeholder is the wrong place for the
          only explanation anyway, because it vanishes the moment somebody types
          into the field it was explaining. -->
     <div class="q-namerow">
@@ -1684,8 +1684,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <label class="q-namefield">
         <span>Cut</span>
         <select id="q-rundown-cut" class="q-input">
-          <option value="short" selected>Short — fast, trait-led (~50s)</option>
-          <option value="full">Full read — every figure spoken (~90s)</option>
+          <option value="short" selected>Short, fast, trait-led (~50s)</option>
+          <option value="full">Full read, every figure spoken (~90s)</option>
         </select>
         <small>Short says the verdict and shows the number. Full says both.</small>
       </label>
@@ -1706,7 +1706,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     <div class="q-cut">
       <div class="q-cut-head">
         <span>Cutaway photos <i>(optional)</i></span>
-        <small>More shots of the same person. Cut to between measurements — the numbers
+        <small>More shots of the same person. Cut to between measurements: the numbers
         always come from the photo above.</small>
       </div>
       <div class="q-cut-slots" id="q-cut-slots"></div>
@@ -1767,8 +1767,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <button class="btn gho" id="q-again">New photo</button>
     </div>
     <!-- Where the files go.
-         The share sheet is the right answer on a phone — "Save Video" writes to
-         the camera roll and the TikTok app is one tap away — and the wrong one
+         The share sheet is the right answer on a phone, "Save Video" writes to
+         the camera roll and the TikTok app is one tap away: and the wrong one
          on a laptop, where it is an AirDrop menu in front of a folder. The
          platform is detected, and this is here because the detection is a
          heuristic about hardware and the person pressing the button knows
@@ -1863,9 +1863,9 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       if (!res.ok) throw new Error(String(res.status));
       const blob = await res.blob();
       const outcome = await saveFile(blob, exportName("reel", "mp4", "cta-film"), "reel");
-      btn.textContent = outcome === "cancelled" ? "Not saved — tap to retry" : outcomeMessage(outcome);
+      btn.textContent = outcome === "cancelled" ? "Not saved, tap to retry" : outcomeMessage(outcome);
     } catch {
-      btn.textContent = "Could not fetch — tap to retry";
+      btn.textContent = "Could not fetch, tap to retry";
     } finally {
       btn.disabled = false;
       // Back to what it says on the tin once the outcome has been read.
@@ -1879,9 +1879,9 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     btn.disabled = true;
     try {
       const outcome = await downloadCtaOutro((p) => (btn.textContent = `Rendering · ${Math.round(p * 100)}%`));
-      btn.textContent = outcome === "cancelled" ? "Not saved — tap to retry" : outcomeMessage(outcome);
+      btn.textContent = outcome === "cancelled" ? "Not saved, tap to retry" : outcomeMessage(outcome);
     } catch {
-      btn.textContent = "Export failed — tap to retry";
+      btn.textContent = "Export failed, tap to retry";
     }
     btn.disabled = false;
     window.setTimeout(() => (btn.textContent = "CTA outro MP4"), 2600);
@@ -1936,7 +1936,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     const update = () => {
       const seconds = spokenSeconds(noteField.value);
       noteLen.textContent = seconds
-        ? `Adds about ${seconds.toFixed(1)}s of voiceover — find roughly that much extra footage.`
+        ? `Adds about ${seconds.toFixed(1)}s of voiceover, find roughly that much extra footage.`
         : "Read out verbatim just before the call to action.";
     };
     noteField.addEventListener("input", update);
@@ -1953,7 +1953,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     const copied = await copyDiagnostics(r, label);
     // Says which of the two things happened. "Copied" over a clipboard write
     // that silently failed is the one outcome that wastes somebody's scan.
-    button.textContent = copied ? "Copied — paste it back" : "Copy from the box";
+    button.textContent = copied ? "Copied, paste it back" : "Copy from the box";
     window.setTimeout(() => (button.textContent = "Copy diagnostics"), 2600);
   };
   document.getElementById("q-card-download")!.onclick = () => void downloadScoreCard(editedReport(r));
@@ -2524,7 +2524,7 @@ function drawDiscClips(): void {
     used === 0
       ? `The line runs about ${budget.toFixed(1)}s. Add up to ${DISC_SLOTS} clips to cover it.`
       : left > 0.05
-        ? `${used.toFixed(1)}s of ${budget.toFixed(1)}s covered — ${left.toFixed(1)}s still on the last frame.`
+        ? `${used.toFixed(1)}s of ${budget.toFixed(1)}s covered, ${left.toFixed(1)}s still on the last frame.`
         : `${budget.toFixed(1)}s covered. Every second of the line has picture.`;
 
   host.innerHTML = "";
@@ -2740,7 +2740,7 @@ async function downloadVideo(
     // would send somebody looking through their camera roll for a file that is
     // not there.
     if (outcome === "cancelled") {
-      if (btn) btn.textContent = "Not saved — tap to retry";
+      if (btn) btn.textContent = "Not saved, tap to retry";
     } else {
       if (btn) btn.textContent = outcomeMessage(outcome);
       track("quick-video-downloaded");
@@ -2822,7 +2822,7 @@ async function downloadScoreCard(
     if (!blob) throw new Error("The card would not encode.");
     const outcome = await saveFile(blob, exportName("card", "png", from ? "before" : "after"), "card");
     if (btn) {
-      btn.textContent = outcome === "cancelled" ? "Not saved — tap to retry" : outcomeMessage(outcome);
+      btn.textContent = outcome === "cancelled" ? "Not saved, tap to retry" : outcomeMessage(outcome);
     }
     if (outcome !== "cancelled") track("quick-card-downloaded");
   } catch (error) {
@@ -2906,7 +2906,7 @@ async function downloadRundown(r: Report): Promise<void> {
       shouldCancel: () => mediaEpoch !== rundownMediaEpoch || source !== last,
     });
     if (result.outcome === "cancelled") {
-      if (btn) btn.textContent = "Not saved — tap to retry";
+      if (btn) btn.textContent = "Not saved, tap to retry";
     } else {
       // Say when it came out silent. An operator who does not notice until the
       // edit has wasted the whole render, and the fix is usually just signing
@@ -2914,12 +2914,12 @@ async function downloadRundown(r: Report): Promise<void> {
       if (btn) {
         btn.textContent = result.narrated
           ? outcomeMessage(result.outcome)
-          : `${outcomeMessage(result.outcome)} — no voiceover`;
+          : `${outcomeMessage(result.outcome)}: no voiceover`;
         // Which service actually spoke. The fallback voice is a different
         // narrator; an operator who hears it should learn that here rather
         // than assume the default changed.
         if (result.narrated && result.voiceProvider === "openai") {
-          btn.textContent = `${outcomeMessage(result.outcome)} — fallback voice`;
+          btn.textContent = `${outcomeMessage(result.outcome)}, fallback voice`;
         }
       }
       track("quick-rundown-downloaded");
@@ -3065,7 +3065,7 @@ function renderAiNote(): void {
     ? `<b>${before.toFixed(1)} → ${after.toFixed(1)} is a wide jump.</b> Past about three points the
        generator tends to hand back a different face rather than the same one improved, and the
        comment section spots that instantly. These numbers steer the prompt; the scan decides.`
-    : `These numbers steer the prompt — the generator has never seen our percentile tables, so the
+    : `These numbers steer the prompt: the generator has never seen our percentile tables, so the
        scan may land a point either side. The pair is built to keep one face throughout.`;
 }
 
@@ -3249,7 +3249,7 @@ function comparisonHTML(before: Report, after: Report): string {
       (m) => `
         <tr data-dir="${m.direction}">
           <th scope="row">${m.label}</th>
-          <td>${m.before === null ? "—" : m.before.toFixed(1)}</td>
+          <td>${m.before === null ? "–" : m.before.toFixed(1)}</td>
           <td>${m.after.toFixed(1)}</td>
           <td class="q-cmp-delta">${moveLabel(m)}</td>
         </tr>`,
@@ -3281,7 +3281,7 @@ function comparisonHTML(before: Report, after: Report): string {
       </table>
       <!-- The before, on its own.
            The buttons further down the page render the face on screen, which is
-           the after — so the before existed only inside the joined cut and
+           the after: so the before existed only inside the joined cut and
            could not be taken into an edit. These are the same two exports
            pointed at the other half, for somebody assembling the video
            themselves rather than using the producer. -->

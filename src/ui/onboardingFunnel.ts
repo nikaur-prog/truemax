@@ -11,10 +11,20 @@ import {
   validateOnboardingStep,
 } from "../engine/onboarding.js";
 import type { OnboardingProfile } from "../engine/onboarding.js";
-import { hasPaidAccess, loadEntitlement, openBillingPortal, startTrialCheckout } from "../engine/entitlement.js";
+import {
+  hasPaidAccess,
+  loadEntitlement,
+  openBillingPortal,
+  startDownsellCheckout,
+  startTrialCheckout,
+} from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { track } from "../engine/track.js";
+import { recordTrialDecline, setDeclinedCache } from "../engine/trialDecline.js";
+import { SCAN_PRICE_MEMBER } from "../engine/scanPricing.js";
 import { maxCharacterMarkup, maxLoaderMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
+import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
+import type { CeilingInput } from "./ceilingCta.js";
 import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
 import { METRICS } from "../engine/metrics.js";
@@ -65,6 +75,30 @@ export const MAX_ANNUAL = 89.99;
 // Starter member pays on top of what they already pay. One constant, so the
 // plan card here and the upsell there can never disagree about the price.
 export const STARTER_MONTHLY = 7.99;
+
+/**
+ * The price, anchored against $0.
+ *
+ * A card that opens with "$7.99 USD / month" asks the reader to weigh a
+ * monthly commitment before it has told them the first week costs nothing, so
+ * the number they judge the offer on is the wrong one. Struck through, with $0
+ * in the position their eye was already going to, the first thing read is what
+ * they will actually be charged today. The real rate is not hidden: it is on
+ * the card twice over, struck through here and stated plainly in the renewal
+ * line under the button.
+ *
+ * Returns the INNER html of `.plan-top b`, because the billing toggle rewrites
+ * that node wholesale and the two used to hold separate copies of the same
+ * markup. A card reading one period under a toggle set to the other is the
+ * kind of mismatch somebody notices only after being charged, and one function
+ * is the only way they cannot drift.
+ */
+function priceInner(amount: number, period: "month" | "year"): string {
+  return `<s class="plan-was">$${amount.toFixed(2)} USD / ${period}</s>`
+    + `<span class="plan-now">$0</span>`
+    + `<small> for your first 7 days</small>`;
+}
+
 
 /** $X.XX/week for a year priced at yearTotal. */
 const weeklyOf = (yearTotal: number) => (yearTotal / 52).toFixed(2);
@@ -154,6 +188,180 @@ function readInputs(profile: OnboardingProfile, root = host): void {
 // always dismissible: the questions are required, the subscription never is.
 let locked = false;
 
+/**
+ * The one thing between "Not now" and losing the plan.
+ *
+ * Every line of this names something that is true today, and there is nothing
+ * else in it. In particular there is no statistic: the obvious one to reach for
+ * is a share of people who hit their goals in eight weeks, and nobody has been
+ * here eight weeks, there is no cohort, and goal completion is not measured
+ * yet. Inventing a number about results is the one thing a product that sells
+ * itself on measurement cannot do. It is a strong line and it goes in the
+ * moment it is real.
+ *
+ * The last sentence is the one that stops this being a threat. Somebody
+ * declining is weighing "what do I lose", and the fear that answers loudest is
+ * that their scan disappears. It does not, ever, and saying so is what lets
+ * them decide rather than bounce.
+ */
+function askBeforeDeclining(host: HTMLElement): void {
+  track("offer-declined-asked");
+  const sheet = document.createElement("div");
+  sheet.className = "decline-sheet";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-labelledby", "decline-title");
+  sheet.innerHTML = `<div class="decline-card">
+    <h3 id="decline-title">Are you sure?</h3>
+    <p>This was your one personal scan. Without a plan you will not get the routine,
+      the products, or your weekly progress, and you will not be able to scan
+      yourself again. Your results stay saved either way.</p>
+    <p class="decline-err" role="status" aria-live="polite"></p>
+    <div class="decline-actions">
+      <button type="button" class="btn pri" data-decline="keep">Keep my free trial</button>
+      <button type="button" class="btn gho" data-decline="go">No thanks</button>
+    </div>
+  </div>`;
+  host.appendChild(sheet);
+  // Focus lands on Keep, not on No thanks. The destructive choice should never
+  // be the one a stray Enter takes.
+  sheet.querySelector<HTMLButtonElement>('[data-decline="keep"]')?.focus();
+  sheet.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    // The backdrop is a way back to the offer, never a way past it: dismissing
+    // a confirmation by tapping beside it must not count as confirming.
+    if (target === sheet || target.dataset.decline === "keep") {
+      track("offer-declined-kept");
+      sheet.remove();
+      return;
+    }
+    if (target.dataset.decline === "go") {
+      void confirmDecline(sheet);
+    }
+  });
+}
+
+/**
+ * Take the decline, and only close once it is actually recorded.
+ *
+ * This used to fire the RPC without awaiting it and swallow every failure, so
+ * a network drop looked exactly like success: the offer closed, the person
+ * believed they had declined, and nothing on the server had changed. The one
+ * thing this flow must not do is claim a consequence it did not apply.
+ *
+ * A null return is a failure too, not a success with no data —
+ * record_trial_decline reads the stamp back after writing it, so null means
+ * there was no profile row to stamp.
+ */
+async function confirmDecline(sheet: HTMLElement): Promise<void> {
+  const go = sheet.querySelector<HTMLButtonElement>('[data-decline="go"]');
+  const keep = sheet.querySelector<HTMLButtonElement>('[data-decline="keep"]');
+  if (go) {
+    go.disabled = true;
+    go.textContent = "Saving…";
+  }
+  if (keep) keep.disabled = true;
+  let stamped: string | null = null;
+  try {
+    stamped = await recordTrialDecline();
+  } catch {
+    stamped = null;
+  }
+  if (!stamped) {
+    if (go) {
+      go.disabled = false;
+      go.textContent = "No thanks";
+    }
+    if (keep) keep.disabled = false;
+    const note = sheet.querySelector<HTMLElement>(".decline-err");
+    if (note) note.textContent = "That did not save. Check your connection and try again.";
+    return;
+  }
+  // Only now is it true, so only now is it counted and cached. The chooser
+  // reads this cache on the very next scan, with no round trip of its own.
+  track("offer-declined-confirmed");
+  setDeclinedCache(true);
+  // The decline is RECORDED BEFORE the downsell is offered, and the order is
+  // the point. Holding the stamp back until after one more offer would make
+  // the confirmation a lie: they pressed the button that says "no thanks" and
+  // nothing happened. It also makes the offer verifiable, because the server
+  // will only quote the downsell price to an account it can see has declined.
+  showDownsell(sheet);
+}
+
+/**
+ * One offer after the no, and then it is over.
+ *
+ * The subscription was declined and that is done. What is left is the analysis
+ * of the scan they have already given us, which is a different thing to sell:
+ * one payment, no plan, no renewal, and it opens the report that is already
+ * sitting behind the wall. The member price rather than the standard single
+ * scan price, because the alternative on the table here is not a subscription,
+ * it is nothing.
+ *
+ * Two sheets is the limit. There is no third screen, "No thanks" closes the
+ * whole funnel, and Escape does the same: a decline that takes three refusals
+ * to land is not a funnel, it is a trap, and it is the exact thing that gets a
+ * product in this category written about.
+ */
+function showDownsell(previous: HTMLElement): void {
+  track("downsell-shown");
+  // A NEW element rather than new innerHTML in the old one. The confirmation
+  // sheet's click listener is still bound to that node, and it answers a
+  // backdrop tap by tracking "offer-declined-kept" — an event that would now
+  // be false, since the decline is already stamped. Swapping the node retires
+  // the listener with it.
+  const host = previous.parentElement;
+  const sheet = document.createElement("div");
+  sheet.className = "decline-sheet downsell";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-labelledby", "decline-title");
+  previous.remove();
+  host?.appendChild(sheet);
+  sheet.innerHTML = `<div class="decline-card">
+    <h3 id="decline-title">Your analysis is still there</h3>
+    <p>No plan, then. The full breakdown of the scan you already did is a
+      separate thing: every measurement, your region scores and where each one
+      sits against the reference, unlocked on this account for
+      ${SCAN_PRICE_MEMBER}. One payment, nothing renews.</p>
+    <p class="decline-err" role="status" aria-live="polite"></p>
+    <div class="decline-actions">
+      <button type="button" class="btn pri" data-down="buy">Unlock it for ${SCAN_PRICE_MEMBER}</button>
+      <button type="button" class="btn gho" data-down="no">No thanks</button>
+    </div>
+  </div>`;
+  // Focus lands on the way out, not on the payment. The person has already
+  // said no once; the button under their thumb should not be the one that
+  // charges them.
+  sheet.querySelector<HTMLButtonElement>('[data-down="no"]')?.focus();
+  sheet.onclick = async (event) => {
+    const target = event.target as HTMLElement;
+    // The backdrop closes it, unlike the confirmation sheet above. There the
+    // backdrop was a way back to the offer; here there is nothing behind it
+    // to go back to, and dismissing an offer is a complete answer to it.
+    if (target === sheet || target.dataset.down === "no") {
+      track("downsell-declined");
+      sheet.remove();
+      close();
+      return;
+    }
+    if (target.dataset.down !== "buy") return;
+    const buy = sheet.querySelector<HTMLButtonElement>('[data-down="buy"]')!;
+    const no = sheet.querySelector<HTMLButtonElement>('[data-down="no"]');
+    buy.disabled = true;
+    buy.textContent = "Opening checkout…";
+    track("downsell-checkout");
+    const result = await startDownsellCheckout();
+    // A redirect never returns, so reaching this line at all is the failure.
+    buy.disabled = false;
+    buy.textContent = `Unlock it for ${SCAN_PRICE_MEMBER}`;
+    if (no) no.disabled = false;
+    const note = sheet.querySelector<HTMLElement>(".decline-err");
+    if (note) note.textContent = result.message ?? "That did not open. Check your connection and try again.";
+  };
+}
+
 function close(): void {
   if (locked) return;
   host?.remove();
@@ -171,7 +379,29 @@ export function closeTrialFunnel(): void {
 }
 
 function onKey(event: KeyboardEvent): void {
-  if (event.key === "Escape") close();
+  if (event.key !== "Escape") return;
+  // Escape belongs to the innermost thing on screen. With the are-you-sure
+  // sheet up it dismisses the sheet and leaves the offer standing; letting it
+  // fall through to close() would have made Escape a silent decline that skips
+  // the confirmation entirely — the one route past the sheet that never has to
+  // read it.
+  const sheet = host?.querySelector<HTMLElement>(".decline-sheet");
+  if (sheet) {
+    // The downsell is the same node type in the same slot but a different
+    // moment: the decline has already landed, so Escape here is not backing
+    // out of anything, it is declining the offer and leaving. Reporting it as
+    // "kept" would say somebody stayed on the plan they had just cancelled.
+    if (sheet.classList.contains("downsell")) {
+      track("downsell-declined");
+      sheet.remove();
+      close();
+      return;
+    }
+    track("offer-declined-kept");
+    sheet.remove();
+    return;
+  }
+  close();
 }
 
 interface FunnelPreview {
@@ -183,6 +413,17 @@ export interface FunnelOptions {
   // No ✕, no Escape, no "Not now" — the quiz has to be finished before the
   // rest of the app means anything. Only ever true on a first run.
   required?: boolean;
+  /**
+   * This person's own before-and-after, when they have just scanned.
+   *
+   * Absent on the first-run path, and absent is the correct state there: with
+   * no scan there is no ceiling, and the alternative would be showing the
+   * synthetic demo cast in a before-and-after, which is the fabricated
+   * after-photo that ceilingCta.ts exists to refuse. Every other app in the
+   * category will happily render the face you could have. We show the person
+   * their own photograph, out of focus, or we show nothing.
+   */
+  ceiling?: CeilingInput | null;
 }
 
 
@@ -193,6 +434,7 @@ export async function openTrialFunnel(
 ): Promise<void> {
   locked = false;
   const required = Boolean(options.required);
+  const ceiling = options.ceiling ?? null;
   close();
   const activeHost = document.createElement("div");
   host = activeHost;
@@ -280,7 +522,7 @@ export async function openTrialFunnel(
       ask: "My skin is the main thing. Is that even in here?",
       lead: "It is, and it's the part that moves fastest.",
       body:
-        "Skin is the one area where weeks of consistent work show up as a visibly different photograph. I read what your scan found, build the routine around it, and keep the plan boring on purpose — the products that work are cheap and the results come from not skipping.",
+        "Skin is the one area where weeks of consistent work show up as a visibly different photograph. I read what your scan found, build the routine around it, and keep the plan boring on purpose: the products that work are cheap and the results come from not skipping.",
     },
     {
       ask: "What if I do everything and the number doesn't move?",
@@ -292,13 +534,13 @@ export async function openTrialFunnel(
       ask: "Is this just going to tell me what I want to hear?",
       lead: "No, and you can check that.",
       body:
-        "Every number on your report shows its working — the measurement, the average it's compared against, and whether it's reliable enough to be scored at all. The ones that aren't get marked and given no weight. A tool that flattered you would hide that column, not print it.",
+        "Every number on your report shows its working: the measurement, the average it's compared against, and whether it's reliable enough to be scored at all. The ones that aren't get marked and given no weight. A tool that flattered you would hide that column, not print it.",
     },
     {
       ask: "How is a photo supposed to know anything about my face?",
       lead: "It measures, it doesn't guess.",
       body:
-        "The mesh puts a few hundred points on your face and I read proportions off them — spacing, angles, ratios. That's geometry, and it's repeatable. What it can't see is the things a photograph doesn't contain, which is why the report tells you when a number is indicative rather than scored.",
+        "The mesh puts a few hundred points on your face and I read proportions off them, spacing, angles, ratios. That's geometry, and it's repeatable. What it can't see is the things a photograph doesn't contain, which is why the report tells you when a number is indicative rather than scored.",
     },
     {
       ask: "How long before I actually see something?",
@@ -317,42 +559,88 @@ export async function openTrialFunnel(
     const svg = activeHost.querySelector<SVGSVGElement>(".max-stage .mx-svg");
     if (!feed || !say || !svg) return;
 
-    // Drawn per open rather than rotated in order, because the order would be
-    // per page load and everybody would see the same first one anyway.
-    const exchange = DEMO_EXCHANGES[Math.floor(Math.random() * DEMO_EXCHANGES.length)]!;
+    // A QUEUE, not a single exchange.
+    //
+    // One question and one answer is a quotation. Two, with the second arriving
+    // while the first is still on the screen, is a conversation, and the thing
+    // being sold here is a coach you can keep talking to. So a short shuffled
+    // run plays: a second question comes back from the person's side once the
+    // first answer has landed and been read.
+    //
+    // Two, and it stops. The warning above about screensavers is the reason:
+    // this sits on a payment screen, and an assistant that keeps talking at
+    // somebody trying to read prices is working against the card it lives on.
+    // Shuffled rather than ordered, so a person who reaches this screen more
+    // than once (close it, scan again, come back) is not watching a repeat.
+    const queue = shuffled(DEMO_EXCHANGES).slice(0, 2);
 
-    const ask = document.createElement("div");
-    ask.className = "max-ask";
-    ask.textContent = exchange.ask;
-    feed.insertBefore(ask, say);
-    ask.classList.add("show");
-
-    window.setTimeout(() => {
+    const runOne = (exchange: (typeof DEMO_EXCHANGES)[number], then: () => void) => {
       if (!alive()) return;
-      // Thinking: dots in the bubble, thinking face on him. The pause is the
-      // point — an instant answer reads as a recording, a visible think reads
-      // as somebody working on YOUR question.
-      say.classList.add("pondering");
-      say.innerHTML = "<p><i></i><i></i><i></i></p>";
-      svg.classList.remove("mx-mood-happy");
-      svg.classList.add("mx-mood-thinking");
+      // One exchange on screen at a time. The previous question leaves as the
+      // next arrives, so the feed reads as a conversation moving forward
+      // without the card growing under it: this sits directly above a price
+      // and a button, and a panel that gets taller every few seconds pushes
+      // the thing being sold off a phone screen.
+      for (const old of feed.querySelectorAll<HTMLElement>(".max-ask")) {
+        old.classList.add("gone");
+        window.setTimeout(() => old.remove(), 320);
+      }
+      const ask = document.createElement("div");
+      ask.className = "max-ask";
+      ask.textContent = exchange.ask;
+      feed.insertBefore(ask, say);
+      // Next frame, so the transition has a state to move FROM. Added in the
+      // same tick as the insert, the class is part of the initial style and
+      // the message appears rather than arriving.
+      requestAnimationFrame(() => ask.classList.add("show"));
 
       window.setTimeout(() => {
         if (!alive()) return;
-        say.classList.remove("pondering");
-        svg.classList.remove("mx-mood-thinking");
-        svg.classList.add("mx-mood-happy");
-        say.innerHTML = `<p><b>${exchange.lead}</b> ${exchange.body}</p>`;
-        typewriteBlock(say);
-        svg.classList.add("speaking");
+        // Thinking: dots in the bubble, thinking face on him. The pause is the
+        // point — an instant answer reads as a recording, a visible think reads
+        // as somebody working on YOUR question.
+        say.classList.add("pondering");
+        say.innerHTML = "<p><i></i><i></i><i></i></p>";
+        svg.classList.remove("mx-mood-happy");
+        svg.classList.add("mx-mood-thinking");
+
         window.setTimeout(() => {
-          svg.classList.remove("speaking");
-          // Said his piece: the same follow-through nod the real chat gives.
-          if (alive()) reactMax(activeHost.querySelector<HTMLElement>(".max-stage"), "nod");
-        }, 5600);
-      }, 2100);
-    }, 700);
+          if (!alive()) return;
+          say.classList.remove("pondering");
+          svg.classList.remove("mx-mood-thinking");
+          svg.classList.add("mx-mood-happy");
+          say.innerHTML = `<p><b>${exchange.lead}</b> ${exchange.body}</p>`;
+          typewriteBlock(say);
+          svg.classList.add("speaking");
+          window.setTimeout(() => {
+            svg.classList.remove("speaking");
+            if (!alive()) return;
+            // Said his piece: the same follow-through nod the real chat gives.
+            reactMax(activeHost.querySelector<HTMLElement>(".max-stage"), "nod");
+            then();
+          }, 5600);
+        }, 2100);
+      }, 700);
+    };
+
+    // The gap between answers is long on purpose. It is roughly how long the
+    // answer takes to read, and a follow-up that lands before the last one has
+    // been read is two voices talking over each other.
+    runOne(queue[0]!, () => {
+      if (!queue[1]) return;
+      window.setTimeout(() => runOne(queue[1]!, () => {}), 2600);
+    });
   };
+
+  /** A copy, shuffled. The source list is readonly and stays that way. */
+  function shuffled<T>(items: ReadonlyArray<T>): T[] {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j]!, out[i]!];
+    }
+    return out;
+  }
 
   // What an existing subscriber sees instead of the plan cards.
   //
@@ -425,9 +713,17 @@ export async function openTrialFunnel(
         <span>re-taken the same way every scan. One scan is a score; a run of them
           is the only thing that can tell you a change was real and not the camera.</span>
       </div>
+      ${
+        ceiling
+          ? `<div class="offer-ceiling">
+              <span class="offer-ceiling-h">WHERE YOUR SCAN SAYS YOU CAN GET TO</span>
+              ${ceilingCtaMarkup(ceiling)}
+            </div>`
+          : ""
+      }
       <div class="plan-grid">
         <article class="plan-card starter" data-plan="starter">
-          <div class="plan-top"><span>STARTER</span><b>$${STARTER_MONTHLY.toFixed(2)}<small> USD / month</small></b></div>
+          <div class="plan-top"><span>STARTER</span><b>${priceInner(STARTER_MONTHLY, "month")}</b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
           <div class="plan-feat"><ul><li>One scan a week</li><li>In-depth analysis of every measurement</li><li>Progress tracking scan to scan</li><li>Personalised recommendations</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
@@ -437,18 +733,18 @@ export async function openTrialFunnel(
         <article class="plan-card max${adult ? " featured" : " locked"}" data-plan="max">
           ${adult ? `<span class="plan-ribbon">MOST IMMERSIVE</span>` : `<span class="plan-ribbon lock">18+ · LOCKED</span>`}
           ${adult ? billingToggle() : ""}
-          <div class="plan-top"><span>TRUE<span>MAX</span></span><b>$11.99<small> USD / month</small></b></div>
+          <div class="plan-top"><span>TRUE<span>MAX</span></span><b>${priceInner(MAX_MONTHLY, "month")}</b></div>
           ${adult ? `<span class="plan-week">$${weeklyOf(MAX_MONTHLY * 12)}/week. The leading weekly-priced app: $3.99/week.</span>` : ""}
           <p>Your highest-touch experience with Max alongside you.</p>
-          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
+          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Scan up to 50 other people a week</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="max" ${adult ? "" : "disabled"}>
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
           </button>
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
           <!-- Max lives at the foot of his own plan, not at the top of the
-               screen. He starts fully hidden behind the card's bottom edge —
-               the card's overflow does the hiding — and pops up waist-deep
+               screen. He starts fully hidden behind the card's bottom edge:
+               the card's overflow does the hiding: and pops up waist-deep
                once the offer settles, waves, and says his piece from a white
                bubble that types itself out. -->
           ${adult
@@ -466,12 +762,17 @@ export async function openTrialFunnel(
         </article>
       </div>
       <p class="trial-status" role="status"></p>
-      <button class="trial-decline" type="button">No thank you — show me my analysis</button>
-      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
+      <button class="trial-decline" type="button">Not now</button>
+      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead: the option is on your results screen.</p>
     </div>`;
 
+    // The canvases only exist once the offer is in the document. Painted from
+    // the capture the report was built on, never re-read from the live canvas,
+    // which by now may be showing a profile or nothing at all.
+    if (ceiling) paintCeilingCta(activeHost, ceiling.photo);
+
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
-    activeHost.querySelector(".trial-decline")?.addEventListener("click", close);
+    activeHost.querySelector(".trial-decline")?.addEventListener("click", () => askBeforeDeclining(activeHost));
 
     // The sequence: the offer settles, Max pops up from behind the card's
     // bottom edge, waves (and puts his arm down), and only THEN does the
@@ -570,8 +871,8 @@ export async function openTrialFunnel(
           const note = card.querySelector<HTMLElement>(":scope > small");
           if (price) {
             price.innerHTML = mode === "annual"
-              ? `$${MAX_ANNUAL.toFixed(2)}<small> USD / year</small>`
-              : `$${MAX_MONTHLY.toFixed(2)}<small> USD / month</small>`;
+              ? priceInner(MAX_ANNUAL, "year")
+              : priceInner(MAX_MONTHLY, "month");
           }
           if (note && adult) {
             note.textContent = mode === "annual"
@@ -718,7 +1019,7 @@ export async function openTrialFunnel(
         ${textArea("trial-expectations", "What would you expect from TrueMax?", profile.expectations, "e.g. Honest measurements, clear next steps and no pressure")}`;
     } else if (step === 4) {
       content = `${textArea("trial-strengths", "What do you already feel confident about?", profile.strengths, "Anything you already like or want to preserve", true)}
-        ${textArea("trial-support", "Where would support be most useful?", profile.supportAreas, "Use your own words — or leave this blank", true)}`;
+        ${textArea("trial-support", "Where would support be most useful?", profile.supportAreas, "Use your own words, or leave this blank", true)}`;
     } else {
       content = `<div class="trial-choices compact">${QUIET_TOPICS.map((topic) => chip(topic.region, topic.label, profile.quietTopics.includes(topic.region))).join("")}</div>
         <div class="privacy-note"><b>Your face analysis stays on this device by default.</b><span>These answers save to your account so your pathway can follow you. Photo-feedback sharing remains a separate, optional Yes/No choice.</span></div>`;
@@ -807,5 +1108,8 @@ export function openTrialFunnelPreview(adult: boolean, offer: boolean): Promise<
     expectations: "Honest measurements and clear next steps.",
     completedAt: null,
   };
-  return openTrialFunnel(user, { profile, offer });
+  // A stand-in ceiling so the offer screen's before-and-after strip can be
+  // looked at in development. No photograph, which is a real production state
+  // too (a report reopened from history), and the one the strip has to survive.
+  return openTrialFunnel(user, { profile, offer }, { ceiling: { overall: 5.6, potential: 7.1, photo: null } });
 }

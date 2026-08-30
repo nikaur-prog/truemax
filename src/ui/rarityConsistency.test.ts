@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { percentileLine, populationLine, rankShort, rarityText, scoreHigherText, topPctText } from "./templates.js";
 import { oneInN, rarityPhrase } from "../engine/rarity.js";
+import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
 
 // The two ways this app states the same fact must state the same fact.
 //
@@ -34,13 +35,18 @@ test("the rarity phrase and the top-X% chip describe the same band", () => {
   }
 });
 
-test("the fraction form is only used where it lands exactly", () => {
-  // The reason rarityPhrase has two shapes at all. If a change ever lets a
-  // rounded fraction back in, this fails before it reaches a screen.
-  assert.equal(rarityText(90), "1 in 10");
-  assert.equal(rarityText(75), "1 in 4");
-  assert.equal(rarityText(55), "45% of"); // "1 in 2" would claim 50%
-  assert.equal(rarityText(85), "15% of"); // "1 in 7" would claim 14.3%
+test("no rarity stated about a person is ever a fraction", () => {
+  // The rule in CLAUDE.md: a rarity is never stated about a PERSON. This feeds
+  // a person's own report, so the "1 in 10" shape is barred here even though
+  // the scale note's ladder keeps it. The ladder describes the curve before
+  // anybody has seen their number; this sentence sits under their score.
+  assert.equal(rarityText(90), "10% of");
+  assert.equal(rarityText(75), "25% of");
+  assert.equal(rarityText(55), "45% of");
+  assert.equal(rarityText(85), "15% of");
+  for (let pct = 0; pct <= 100; pct += 0.5) {
+    assert.doesNotMatch(rarityText(pct), /\b1 in \d/, `rarityText(${pct})`);
+  }
 });
 
 test("both stop claiming resolution at the same place", () => {
@@ -133,6 +139,40 @@ test("the bottom of the reference set is never 'Bottom 0%'", () => {
   for (const pct of [0, 0.001, 0.4]) {
     assert.equal(rankShort(pct), "Bottom 1%");
   }
+});
+
+test("the side profile may not name a band narrower than the outer decile", () => {
+  // A 3.5 profile printed "Bottom 1%": the most precise-sounding claim in the
+  // product, off thirteen points placed by hand, on a metric set whose
+  // repeatability is still open (#54). The floor is a policy tied to that open
+  // question, so it is pinned here — if #54 lands and someone narrows it, this
+  // test is the thing that makes them say so out loud.
+  for (const pct of [0, 0.4, 1, 4, 9]) {
+    assert.equal(rankShort(pct, SIDE_TAIL_LIMIT_PCT), "Bottom 10%");
+  }
+  for (const pct of [91, 96, 99, 100]) {
+    assert.equal(rankShort(pct, SIDE_TAIL_LIMIT_PCT), "Top 10%");
+  }
+  // Inside the floor the profile still reads exactly like everything else.
+  assert.equal(rankShort(37, SIDE_TAIL_LIMIT_PCT), rankShort(37));
+  assert.equal(rankShort(72, SIDE_TAIL_LIMIT_PCT), rankShort(72));
+  // And the front is untouched: this widened one reading, not the product.
+  assert.equal(rankShort(0.4), "Bottom 1%");
+});
+
+test("the side chip and the sentence under it name the same band", () => {
+  // Found in review: the chip took the tail limit and populationLine did not,
+  // so a profile in the tail printed "Top 10%" over "the top 1%" — the same
+  // face, two bands, and the narrower one a claim the side sample cannot
+  // support. Both readings now clamp before the phrase is built.
+  for (const pct of [0, 1, 4, 96, 99, 100]) {
+    const chip = rankShort(pct, SIDE_TAIL_LIMIT_PCT);
+    const line = populationLine(pct, "male", "profiles", SIDE_TAIL_LIMIT_PCT);
+    assert.doesNotMatch(line, /top 1%/, `${pct}: "${line}" under chip "${chip}"`);
+    assert.doesNotMatch(line, /\b1 in 100\b/, `${pct}: "${line}" under chip "${chip}"`);
+  }
+  // And the front, which passes no limit, is unchanged.
+  assert.match(populationLine(99.6, "male", "faces"), /top 1%/);
 });
 
 test("the three standing phrasings cannot drift apart", () => {

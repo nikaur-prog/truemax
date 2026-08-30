@@ -57,12 +57,12 @@ export const FRONT_GROUP_LABEL: Record<FrontGroup, string> = {
 
 export const FRONT_POINTS: readonly FrontPointSpec[] = [
   // --- eyes ---------------------------------------------------------------
-  { id: "eyeROuter", label: "Right eye, outer corner", hint: "The outer corner of the eye on YOUR right — image left.", group: "eyes", index: LM.EYE_R_OUTER },
+  { id: "eyeROuter", label: "Right eye, outer corner", hint: "The outer corner of the eye on YOUR right, image left.", group: "eyes", index: LM.EYE_R_OUTER },
   { id: "eyeRInner", label: "Right eye, inner corner", hint: "Where the eyelids meet nearest the nose.", group: "eyes", index: LM.EYE_R_INNER },
   { id: "eyeRTop", label: "Right eye, upper lid", hint: "The highest point of the open eyelid.", group: "eyes", index: LM.EYE_R_TOP },
   { id: "eyeRBottom", label: "Right eye, lower lid", hint: "The lowest point of the lower lid.", group: "eyes", index: LM.EYE_R_BOTTOM },
   { id: "eyeLInner", label: "Left eye, inner corner", hint: "Where the eyelids meet nearest the nose.", group: "eyes", index: LM.EYE_L_INNER },
-  { id: "eyeLOuter", label: "Left eye, outer corner", hint: "The outer corner of the eye on YOUR left — image right.", group: "eyes", index: LM.EYE_L_OUTER },
+  { id: "eyeLOuter", label: "Left eye, outer corner", hint: "The outer corner of the eye on YOUR left, image right.", group: "eyes", index: LM.EYE_L_OUTER },
   { id: "eyeLTop", label: "Left eye, upper lid", hint: "The highest point of the open eyelid.", group: "eyes", index: LM.EYE_L_TOP },
   { id: "eyeLBottom", label: "Left eye, lower lid", hint: "The lowest point of the lower lid.", group: "eyes", index: LM.EYE_L_BOTTOM },
 
@@ -98,7 +98,7 @@ export const FRONT_POINTS: readonly FrontPointSpec[] = [
   // --- mouth --------------------------------------------------------------
   { id: "mouthR", label: "Mouth, right corner", hint: "The corner of the mouth on your right.", group: "mouth", index: LM.MOUTH_R },
   { id: "mouthL", label: "Mouth, left corner", hint: "The corner of the mouth on your left.", group: "mouth", index: LM.MOUTH_L },
-  { id: "lipTop", label: "Top of the upper lip", hint: "The lip's outer edge on the midline — the cupid's bow dip.", group: "mouth", index: LM.LIP_TOP },
+  { id: "lipTop", label: "Top of the upper lip", hint: "The lip's outer edge on the midline: the cupid's bow dip.", group: "mouth", index: LM.LIP_TOP },
   { id: "lipUpperInner", label: "Upper lip, inner edge", hint: "Where the upper lip meets the mouth opening.", group: "mouth", index: LM.LIP_UPPER_INNER },
   { id: "lipLowerInner", label: "Lower lip, inner edge", hint: "Where the lower lip meets the mouth opening.", group: "mouth", index: LM.LIP_LOWER_INNER },
   { id: "lipBottom", label: "Bottom of the lower lip", hint: "The lip's outer edge on the midline, below the mouth.", group: "mouth", index: LM.LIP_BOTTOM },
@@ -113,8 +113,8 @@ export const FRONT_POINTS: readonly FrontPointSpec[] = [
   { id: "menton", label: "Bottom of the chin", hint: "The lowest point of the chin, on the midline.", group: "jaw", index: LM.MENTON },
 
   // --- face ---------------------------------------------------------------
-  { id: "zygionR", label: "Face edge, right", hint: "The widest point of the face on your right — the silhouette, not the cheekbone.", group: "face", index: LM.ZYGION_R },
-  { id: "zygionL", label: "Face edge, left", hint: "The widest point of the face on your left — the silhouette, not the cheekbone.", group: "face", index: LM.ZYGION_L },
+  { id: "zygionR", label: "Face edge, right", hint: "The widest point of the face on your right: the silhouette, not the cheekbone.", group: "face", index: LM.ZYGION_R },
+  { id: "zygionL", label: "Face edge, left", hint: "The widest point of the face on your left: the silhouette, not the cheekbone.", group: "face", index: LM.ZYGION_L },
   { id: "malarR", label: "Right cheekbone", hint: "The prominence of the cheekbone itself.", group: "face", index: LM.MALAR_R },
   { id: "malarL", label: "Left cheekbone", hint: "The prominence of the cheekbone itself.", group: "face", index: LM.MALAR_L },
   { id: "cheekMidR", label: "Right cheek, mid outline", hint: "The cheek's outline between the cheekbone and the jaw corner.", group: "face", index: LM.CHEEK_MID_R },

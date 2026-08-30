@@ -110,5 +110,5 @@ export function subline(ctx: GreetingCtx): string {
   ];
   if (visit % 2 === 0) return pick(own, 1);
   const q = pick(QUOTES, 3);
-  return `“${q.text}” — ${q.who}`;
+  return `“${q.text}”, ${q.who}`;
 }

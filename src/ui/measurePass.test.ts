@@ -103,7 +103,7 @@ test("an implausible reading is never featured", () => {
   assert.notEqual(plan[0].metric.def.id, "jawCheekRatio");
 });
 
-test("the cap trims front beats and keeps the profile represented", () => {
+test("the cap keeps the profile represented and still gives the front most of the pass", () => {
   const front = report([
     region("eyes", ["browTilt"]),
     region("midface", ["midfaceRatio"]),
@@ -116,9 +116,66 @@ test("the cap trims front beats and keeps the profile represented", () => {
   assert.equal(plan.length, 4);
   // Whatever else went, the side is still in the running order.
   assert.ok(plan.some((s) => s.view === "side"), "the profile must survive the cap");
-  // And the front beats kept are the EARLY ones, not an arbitrary subset.
+  // The front carries 75% of the overall score and gets about two thirds of
+  // the beats. The rule it replaced gave the side everything it asked for and
+  // handed the front the remainder, which at a realistic cap left the front
+  // with one beat out of nine.
   const frontRegions = plan.filter((s) => s.view === "front").map((s) => s.region);
-  assert.deepEqual(frontRegions, ["eyes", "midface"].slice(0, frontRegions.length));
+  assert.deepEqual(frontRegions, ["eyes", "midface", "lips"]);
+  // Order of travel is untouched by the trim: the pass still descends.
+  assert.deepEqual(
+    plan.map((s) => `${s.view}:${s.region}`),
+    ["front:eyes", "front:midface", "front:lips", "side:jaw"],
+  );
+});
+
+test("the cap spreads across regions instead of exhausting the first one", () => {
+  // Four eye measurements and one each elsewhere. Slicing the head off the
+  // list would spend the whole pass on eyes and never reach the jaw or the
+  // chin — the two regions people actually arrive asking about.
+  const front = report([
+    region("eyes", ["browTilt", "canthalTilt", "browPosition", "eyeAspectRatio"]),
+    region("jaw", ["jawCheekRatio"]),
+    region("chin", ["philtrumChinRatio"]),
+  ]);
+  const plan = buildPassPlan(front, null, { maxSteps: 3 });
+  const regions = plan.map((s) => s.region);
+  assert.deepEqual(regions, ["eyes", "jaw", "chin"]);
+});
+
+test("the cap is a hard cap, not a target", () => {
+  // Found in review: both halves of the allocation carried a floor of one, so
+  // a cap of one against one front and one side measurement returned two
+  // beats. Production passes nine and never saw it; the video harnesses pass
+  // three, six and eight and rely on getting what they asked for.
+  const front = report([region("eyes", ["browTilt"])]);
+  const side = report([region("jaw", ["gonialAngle"])]);
+  for (const maxSteps of [1, 2, 3]) {
+    assert.ok(
+      buildPassPlan(front, side, { maxSteps }).length <= maxSteps,
+      `maxSteps ${maxSteps} returned ${buildPassPlan(front, side, { maxSteps }).length}`,
+    );
+  }
+  // At one, the single beat is the front's.
+  const one = buildPassPlan(front, side, { maxSteps: 1 });
+  assert.equal(one.length, 1);
+  assert.equal(one[0].view, "front");
+});
+
+test("an uncapped-looking call is still capped, because the pass has a default", () => {
+  // The pass used to walk every honest measurement, which ran to about
+  // eighteen seconds of loading screen. Callers that pass no options get the
+  // default rather than all of it.
+  const front = report([
+    region("eyes", ["browTilt", "canthalTilt", "browPosition", "eyeAspectRatio"]),
+    region("midface", ["midfaceRatio"]),
+    region("lips", ["lipRatio"]),
+    region("jaw", ["jawCheekRatio"]),
+    region("chin", ["philtrumChinRatio"]),
+    region("proportions", ["facialIndex"]),
+  ]);
+  const side = report([region("jaw", ["gonialAngle"]), region("nose", ["nasolabialAngle"])]);
+  assert.ok(buildPassPlan(front, side).length <= 9);
 });
 
 test("a front-only scan plans a front-only pass", () => {

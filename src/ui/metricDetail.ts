@@ -38,7 +38,27 @@ import { metricRead } from "../engine/metricReads.js";
 // ---------------------------------------------------------------------------
 
 export interface MetricDetailOpts {
+  /**
+   * The region the deck was opened FROM, used only where a metric of its own
+   * cannot say. Every per-measurement label, zoom and comparison is taken from
+   * that measurement's own `def.region` instead, because a deck no longer has
+   * to come from one region: tapping a pillar opens the measurements that
+   * build it, and those are spread across the face by definition.
+   */
   region: RegionId;
+  /**
+   * Prefix for the eyebrow, naming what the deck IS when it is not a region.
+   * "HARMONY" over "MIDFACE · FRONT", so the card says which grouping you
+   * opened and which part of the face you are looking at.
+   */
+  deckLabel?: string;
+  /**
+   * One line about the DECK, held above the readout while you step through it.
+   * A pillar needs this and a region does not: "Jaw" is self-explanatory and
+   * "Dimorphism" is a word people will read as a compliment unless it is told
+   * plainly what it measures.
+   */
+  deckNote?: string;
   /** The measured metrics of the deck being browsed, in display order. */
   metrics: ScoredMetric[];
   index: number;
@@ -156,7 +176,7 @@ function step(delta: number): void {
 // our two landmarks do. Saying so is cheaper than being asked.
 const CONSTRUCTION_CAVEAT: Record<string, string> = {
   browTilt:
-    "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail — so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
+    "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail: so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
   jawFrontalAngle:
     "Constructed differently from the same-named angle in other tools, which read about 26° apart on the same face. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
 };
@@ -185,7 +205,7 @@ function normLine(m: ScoredMetric, sex: Sex): string {
 function positionLine(m: ScoredMetric, sex: Sex): string {
   const group = sex === "male" ? "men" : "women";
   if (m.conformance >= 0.999) {
-    return `Inside the ideal band — this feature is not holding the face back at all.`;
+    return `Inside the ideal band: this feature is not holding the face back at all.`;
   }
   // statedPct, like the chip beside it. Math.round put the same number on the
   // screen twice at two precisions — "Bottom 45%" over "closer to the ideal
@@ -248,7 +268,7 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   // has no proximity cap.
   return m.percentile < CELEB_MATCH_MIN_PCT
     ? `<p class="mdx-none">Comparisons are only offered where you place in the top ${100 - CELEB_MATCH_MIN_PCT}% on the measurement, and this one sits below that. A flattering comparison you did not earn would make every other number here worth less.</p>`
-    : `<p class="mdx-none">No reference face in the set carries this measurement yet, so there is nothing to compare against. The set grows with every analyzed face.</p>`;
+    : `<p class="mdx-none">No reference face in the set carries this measurement yet, so there is nothing to compare against. The set grows with every analysed face.</p>`;
 }
 
 function barHTML(m: ScoredMetric, sex: Sex): string {
@@ -273,7 +293,7 @@ function stageZoom(m: ScoredMetric, view: "side" | "front"): ZoomSpec {
   if (opts.landmarks) {
     const b = measurementBounds(m, opts.landmarks);
     if (b) return zoomToBounds(b, { fill: 0.6, min: 1.35, max: 2.8 });
-    const z = zoomFor(opts.region, opts.landmarks);
+    const z = zoomFor(m.def.region ?? opts.region, opts.landmarks);
     return { scale: z.scale, originX: z.originX, originY: z.originY };
   }
   return { scale: 1.15, originX: 50, originY: 50 };
@@ -331,8 +351,15 @@ function showAt(next: number): void {
   // Header
   active.querySelector(".mdx-count")!.textContent = `${index + 1} / ${opts.metrics.length}`;
   active.querySelector(".mdx-title")!.textContent = m.def.name;
+  const shownRegion = m.def.region ?? opts.region;
   active.querySelector(".mdx-eyebrow")!.textContent =
-    `${REGION_NAMES[opts.region].toUpperCase()} · ${view === "side" ? "PROFILE" : "FRONT"}`;
+    [
+      opts.deckLabel?.toUpperCase(),
+      REGION_NAMES[shownRegion]?.toUpperCase() ?? shownRegion.toUpperCase(),
+      view === "side" ? "PROFILE" : "FRONT",
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
   // Stage: pan the camera. Swapping photographs cannot pan, so that one case
   // dips through black instead — a cut, not a glitch.
@@ -368,7 +395,7 @@ function showAt(next: number): void {
   void info.offsetWidth;
   info.classList.add("enter");
   info.querySelector(".mdx-value")!.textContent = fmt(m);
-  info.querySelector(".mdx-score")!.textContent = m.implausible ? "—" : m.score.toFixed(1);
+  info.querySelector(".mdx-score")!.textContent = m.implausible ? "–" : m.score.toFixed(1);
   info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : rankShort(m.percentile);
   // No population bar for an impossible reading — its marker sits at phi(z) of
   // a value that is not a face, pinned to one end and presented as a position.
@@ -389,7 +416,8 @@ function renderTab(): void {
     b.classList.toggle("on", b.dataset.tab === tab);
   }
   const body = active.querySelector<HTMLElement>(".mdx-tabbody")!;
-  body.innerHTML = tab === "overview" ? overviewHTML(m, opts.sex) : celebsHTML(m, opts.region, opts.sex);
+  body.innerHTML =
+    tab === "overview" ? overviewHTML(m, opts.sex) : celebsHTML(m, m.def.region ?? opts.region, opts.sex);
 }
 
 export function openMetricDetail(o: MetricDetailOpts): void {
@@ -419,6 +447,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
         <button class="mdx-step mdx-next" aria-label="Next measurement">›</button>
       </div>
       <div class="mdx-info">
+        <p class="mdx-decknote"></p>
         <div class="mdx-readout">
           <b class="mdx-value"></b>
           <span class="mdx-chip mdx-score"></span>
@@ -466,6 +495,10 @@ export function openMetricDetail(o: MetricDetailOpts): void {
     downX = null;
     if (Math.abs(dx) > 44) step(dx < 0 ? 1 : -1);
   });
+
+  const note = wrap.querySelector<HTMLElement>(".mdx-decknote")!;
+  note.textContent = o.deckNote ?? "";
+  note.hidden = !o.deckNote;
 
   document.addEventListener("keydown", onKey);
   // The report behind a fixed dialog must not scroll under it.

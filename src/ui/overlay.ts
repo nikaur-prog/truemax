@@ -8,7 +8,6 @@ const DOT = "rgba(255, 255, 255, 0.92)";
 const DOT_IRIS = "rgba(143, 243, 224, 0.95)";
 const DOT_DIM = "rgba(255, 255, 255, 0.30)";
 const DOT_HI = "#8FF3E0";
-const MESH = "rgba(255, 255, 255, 0.16)";
 const MESH_DIM = "rgba(255, 255, 255, 0.07)";
 
 const REVEAL_MS = 1400;
@@ -42,11 +41,18 @@ export function drawLandmarksAnimated(
     const t = Math.min(1, (now - start) / REVEAL_MS);
     ctx.clearRect(0, 0, width, height);
 
-    ctx.strokeStyle = MESH;
-    ctx.globalAlpha = easeOut(t);
-    strokeMesh(ctx, landmarks, width, height);
-    ctx.globalAlpha = 1;
-
+    // NO MESH in the reveal.
+    //
+    // The 478-point tessellation was the noisiest thing on the screen and it
+    // carried the least meaning — nobody reads a triangle, and it spent
+    // exactly the contrast budget the measurement lines need a moment later.
+    // Landing dots alone reads as a machine finding points, which is what is
+    // actually happening; the mesh read as a filter.
+    //
+    // The calm state below still draws one, at MESH_DIM (0.07) rather than the
+    // 0.16 this used: less than half the weight, over a photograph nobody is
+    // measuring, with nothing competing for the eye. That one is a resting
+    // texture and it stays.
     const n = Math.floor(easeOut(t) * order.length);
     for (let i = 0; i < n; i++) {
       const idx = order[i];

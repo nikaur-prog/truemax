@@ -79,7 +79,9 @@ test("a region the before scan never had reads as unknown, not as zero", () => {
   assert.equal(jaw.before, null);
   assert.equal(jaw.delta, null);
   assert.equal(jaw.direction, "flat");
-  assert.equal(moveLabel(jaw), "—");
+  // An en dash, the null glyph for a numeric column. The em dash is barred
+  // from user-facing prose; this is not prose.
+  assert.equal(moveLabel(jaw), "–");
 });
 
 test("the rows come back in the after's ranking order", () => {

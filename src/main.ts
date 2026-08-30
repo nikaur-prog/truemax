@@ -27,7 +27,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
-import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
+import { clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
@@ -36,6 +36,8 @@ import {
   consumePendingScanCredit,
   discardPendingScanCredit,
   ensureScanAllowed,
+  guestOnlyNow,
+  guestScansLeft,
   recordScanRun,
 } from "./ui/scanGate.js";
 import { setMemberPricing } from "./engine/scanPricing.js";
@@ -49,7 +51,12 @@ import type { SidePoints } from "./engine/sideMetrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { cameraCount, isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
-import { enterCameraTakeover, exitCameraTakeover } from "./ui/camTakeover.js";
+import {
+  clearCameraTakeover,
+  enterCameraTakeover,
+  exitCameraTakeover,
+  flipThrough,
+} from "./ui/camTakeover.js";
 import { mountDemoReel } from "./ui/demoReel.js";
 import { closeHistory, openHistory } from "./ui/historyView.js";
 import { loadPhotos } from "./engine/photoStore.js";
@@ -58,16 +65,25 @@ import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import type { OpenAccountOptions } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
-  consumeScanCreditForScan,
   hasMaxAccess,
+  consumeScanCreditForScan,
   loadEntitlement,
   loadIsAdmin,
   loadScanCredits,
 } from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
+import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
-import { openSubjectChooser } from "./ui/subjectChooser.js";
+import { openSubjectChooser, selfLockFor } from "./ui/subjectChooser.js";
+import type { SelfLock } from "./ui/subjectChooser.js";
+import {
+  clearDeclinedCache,
+  declinedNow,
+  loadTrialDeclined,
+  nextDeclinedCache,
+  setDeclinedCache,
+} from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
@@ -156,6 +172,16 @@ async function refreshPathwayState(): Promise<void> {
   }
 }
 
+// The tier the last entitlement read resolved to.
+//
+// The subject chooser needs it to know how many other people this account may
+// still scan, and it runs on a path with no network read of its own — the
+// `is-member` body class it already consults says member or not, which cannot
+// tell Starter's three a week from Max's fifty. Defaults to "free", so a read
+// that has not landed yet offers no guest scans rather than fifty.
+let lastKnownTier: EntitlementTier = "free";
+
+
 async function refreshMaxAccess(): Promise<void> {
   const owner = activeScanOwner();
   const generation = scanGeneration;
@@ -168,10 +194,20 @@ async function refreshMaxAccess(): Promise<void> {
     // Credits and the staff flag each fall back to "no" on their own failure,
     // so one unreachable table cannot take the whole entitlement read down with
     // it — and both fail in the locked direction.
-    const [entitlement, credits, admin] = await Promise.all([
+    const [entitlement, credits, admin, declined] = await Promise.all([
       loadEntitlement(),
       loadScanCredits().catch(() => 0),
       loadIsAdmin().catch(() => false),
+      // Its own catch, like credits and the staff flag: one unreachable column
+      // must not take the whole entitlement read down with it. UNDEFINED is
+      // the failure, though, and null is a successful read that found no
+      // stamp. loadTrialDeclined throws rather than returning null precisely
+      // so the caller can tell those apart, and catching to null threw that
+      // away: a declined account that took this one read offline came back as
+      // "never declined" and had its own face handed back to it.
+      currentUser()
+        .then((user) => (user ? loadTrialDeclined(user) : null))
+        .catch(() => undefined),
     ]);
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     let currentPaidScan = false;
@@ -188,7 +224,14 @@ async function refreshMaxAccess(): Promise<void> {
     setMaxAccess(hasMaxAccess(entitlement) || admin);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
-    setMemberPricing(tierOf(entitlement) !== "free");
+    lastKnownTier = tierOf(entitlement);
+    // A live subscription overrides an old decline outright. Somebody who
+    // declined and later subscribed has un-declined by paying, and leaving the
+    // stamp in force would lock a paying customer out of their own face. That
+    // holds even when the stamp itself could not be read, which is why the
+    // paid branch does not consult `declined` at all.
+    setDeclinedCache(nextDeclinedCache(lastKnownTier, declined, declinedNow()));
+    setMemberPricing(lastKnownTier !== "free");
     setDepth(
       depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
       freeScansLeft({ entitlement, scanCount }),
@@ -203,6 +246,11 @@ async function refreshMaxAccess(): Promise<void> {
     // somebody we could not confirm is a member sets up a charge that does not
     // match what they were shown.
     setMemberPricing(false);
+    // Same direction as everything else in this catch: an unread entitlement
+    // must not hand out an allowance nobody confirmed was paid for.
+    lastKnownTier = "free";
+    // Not reset here: a failed read is not evidence that somebody un-declined,
+    // and the last known answer is better than a guess in either direction.
     setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
@@ -653,6 +701,9 @@ function ensureSex(then: () => void): void {
   const profile = loadProfile();
   const member = document.body.classList.contains("is-member");
   if (!member) {
+    // Signed OUT only. `is-member` is Boolean(user), so every signed-in
+    // account reaches the chooser below, free ones included — an earlier
+    // comment here claimed the opposite and was wrong.
     askPopulation(storedSex() ?? undefined, null);
     return;
   }
@@ -698,7 +749,12 @@ function ensureSex(then: () => void): void {
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  });
+  }, undefined, guestScansLeft(lastKnownTier, declinedNow()), selfLockNow());
+}
+
+/** The two facts the chooser needs, read at the moment it opens. */
+function selfLockNow(): SelfLock {
+  return selfLockFor(declinedNow(), guestOnlyNow());
 }
 
 // The late form of the same question, for a scan captured with nobody signed
@@ -726,6 +782,12 @@ function askLateSubject(): Promise<boolean> {
         resetToUpload();
         resolve(false);
       },
+      // The same two limits the early chooser gets. This one was passing
+      // neither, which made it the way around both: capture signed out, sign
+      // in at the gate, and answer a chooser that had never heard of the
+      // guest budget or the decline.
+      guestScansLeft(lastKnownTier, declinedNow()),
+      selfLockNow(),
     );
   });
 }
@@ -954,6 +1016,9 @@ async function ensureOnboarded(user: User): Promise<void> {
   knownAdult = profileIsAdult(profile);
   knownFirstName = profile.firstName?.trim() || null;
   setAdult(knownAdult);
+  // The macro calculator's gate reads the date rather than the flag, because an
+  // age it derives itself cannot be a tick box somebody set.
+  setBirthDate(profile.dateOfBirth ?? null);
   if (onboardingComplete(profile)) return;
   await openTrialFunnel(user, undefined, { required: true });
 }
@@ -1218,7 +1283,19 @@ async function openCamera(): Promise<void> {
 // Tear the live preview down and put the landing screen back exactly as it
 // was, celebrity reel and all. Shared by capture and cancel so the two can
 // never drift apart and leave the page half in camera mode.
-async function closeCamera(): Promise<void> {
+//
+// `instant` skips the fold-back animation only. Everything else — the stream,
+// the listeners, the HUD, the landmarker mode — is torn down identically, so
+// the two paths still cannot drift.
+//
+// Cancel folds back, because the person really is returning to the landing
+// screen and should watch themselves get there. Capture must NOT: the photo
+// is taken, the scan is about to run, and a 560ms fold-back of the viewfinder
+// into the small landing card put the pre-photo screen on the display for
+// half a second in between. Reported as "it takes you back to the pre-photo
+// screen, and then it will go through and scan the photo", and that is
+// exactly what it was doing.
+async function closeCamera(opts: { instant?: boolean } = {}): Promise<void> {
   autoFront?.cancel();
   autoFront = null;
   if (frontKeyHandler) {
@@ -1228,7 +1305,8 @@ async function closeCamera(): Promise<void> {
   cam?.stop();
   cam = null;
   lastCheck = null;
-  exitCameraTakeover(document.getElementById("capture-stage"));
+  if (opts.instant) clearCameraTakeover();
+  else exitCameraTakeover(document.getElementById("capture-stage"));
   el.camSwap.classList.add("hidden");
   el.ovalFrame.classList.remove("live", "ready", "tracking");
   el.stage.classList.remove("live-cam");
@@ -1294,9 +1372,18 @@ el.btnCamera.addEventListener("click", async () => {
   // Remember that the front came from the camera, so the side step defaults to
   // the camera too rather than making the user switch capture method mid-flow.
   captureMethod = "camera";
-  await closeCamera();
-  if (shot) await handleCanvas(shot, 1, generation, token, burst.slice(1));
-  else scanSession.reset();
+  // No fold-back: the scan stage takes the screen over from the viewfinder,
+  // so animating the viewfinder back down into the landing card would be
+  // showing the person a screen they are not going to.
+  if (shot) {
+    // handleCanvas closes the camera itself, after it has put the scan on the
+    // screen. Closing it here as well would reopen the gap this ordering
+    // exists to shut.
+    await handleCanvas(shot, 1, generation, token, burst.slice(1));
+  } else {
+    await closeCamera({ instant: true });
+    scanSession.reset();
+  }
 });
 
 el.btnCancel.addEventListener("click", async () => {
@@ -1482,6 +1569,11 @@ function resetToUpload(): void {
   subjectAsked = false;
   skipCoveringCheck = false;
   feedbackInFlight = null;
+  // The sweeping scan animation belongs to a run that no longer exists. Every
+  // abandon path inside the scan clears this class; the reset that ends the
+  // run from the outside did not, so a scan reset mid-analysis left the upload
+  // screen wearing it and the next capture inherited it.
+  el.frame.classList.remove("scanning");
   feedbackDeliveryNote = null;
   resumePendingStarted = false;
   el.photoCanvas.width = 1;
@@ -1596,12 +1688,13 @@ async function handleCanvas(
 ): Promise<void> {
   if (!token || !scanIsCurrent(token, generation)) return;
   void exifOrientation;
-  // Uploading while the live preview is running left the landmarker in VIDEO
-  // mode, and the still-image detector then threw "Landmarker is in VIDEO
-  // mode". Capturing had always torn the camera down first; choosing a file
-  // never did.
-  if (cam) await closeCamera();
-  if (!scanIsCurrent(token, generation)) return;
+  // The photo goes up, and the scan stage takes the screen, BEFORE the camera
+  // is torn down. The order matters and it is not cosmetic: closeCamera awaits
+  // the landmarker's mode switch, and MediaPipe's setOptions is asynchronous
+  // and occasionally slow. Tearing the takeover down first meant the landing
+  // layout was what sat under the awaited call, so a slow switch put the
+  // pre-photo screen back on the display for as long as it took. Painting
+  // first means whatever the await costs is spent behind the scan.
   const width = src.width;
   const height = src.height;
   el.photoCanvas.width = width;
@@ -1610,18 +1703,34 @@ async function handleCanvas(
 
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
+  el.frame.classList.add("scanning");
+  el.capRight.textContent = "SCANNING";
+  el.analysis.innerHTML = "";
+  el.qualityChips.innerHTML = "";
+
+  // Uploading while the live preview is running left the landmarker in VIDEO
+  // mode, and the still-image detector then threw "Landmarker is in VIDEO
+  // mode". Capturing had always torn the camera down first; choosing a file
+  // never did. Both go through here now, so both are safe.
+  if (cam) await closeCamera({ instant: true });
+  if (!scanIsCurrent(token, generation)) {
+    // Abandoned mid-handoff. The stage was put up above, so it has to come
+    // back down here rather than being left on screen for the next thing.
+    el.frame.classList.remove("scanning");
+    return;
+  }
+
   // The front photo, kept so the scan can switch back to it after showing the
   // profile being measured.
   const frontShot = document.createElement("canvas");
   frontShot.width = el.photoCanvas.width;
   frontShot.height = el.photoCanvas.height;
   frontShot.getContext("2d")!.drawImage(el.photoCanvas, 0, 0);
-  el.frame.classList.add("scanning");
-  el.capRight.textContent = "SCANNING";
-  el.analysis.innerHTML = "";
-  el.qualityChips.innerHTML = "";
   await nextFrame();
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) {
+    el.frame.classList.remove("scanning");
+    return;
+  }
 
   // Real math (milliseconds) happens inside the theatre beat (~2.2s)
   const result = detectStable(el.photoCanvas);
@@ -1663,7 +1772,15 @@ async function handleCanvas(
     coveringRejection = rejection !== null;
   }
   skipCoveringCheck = false;
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) {
+    // The same tidy-up every other abandon path above does, and the one that
+    // was missing. detectHeadCovering is the longest await on this screen, so
+    // it is the likeliest place to be abandoned in, and a bare return left the
+    // scanning class on the frame: the next screen inherited a sweeping
+    // animation belonging to a scan that had already been thrown away.
+    el.frame.classList.remove("scanning");
+    return;
+  }
   if (rejection) {
     el.frame.classList.remove("scanning");
     el.capRight.textContent = "PHOTO NOT VALID";
@@ -1847,7 +1964,7 @@ async function submitConsentedSideFeedback(generation = scanGeneration): Promise
     // the cap, with no way to tell that the earlier ones had landed.
     feedbackDeliveryNote = {
       ok: true,
-      message: "Enough side-landmark feedback shared today — this one was not needed",
+      message: "Enough side-landmark feedback shared today: this one was not needed",
     };
   } else {
     feedbackDeliveryNote = {
@@ -2008,7 +2125,11 @@ async function runFullAnalysis(
     await pruneArchivesTo(keep);
   })();
 
-  el.frame.classList.remove("scanning");
+  // Leaving `scanning` is what drops the photograph out of the full-screen
+  // scan stage and back into the report's 38% column, so it is a geometry
+  // change of the same size the camera takeover makes — and it gets the same
+  // FLIP rather than a cut.
+  flipThrough(el.frame, () => el.frame.classList.remove("scanning"));
   el.capRight.textContent = "ANALYZED";
   el.status.textContent = "";
   el.status.classList.remove("swapping");
@@ -2079,10 +2200,16 @@ async function runFullAnalysis(
     // Same destination as "continue" — the plan chooser, which already handles
     // signed-out users and the under-18 rule. The upgrade button is not a
     // second, parallel billing path.
+    // Both plan doors carry this scan's ceiling onto the offer screen, so the
+    // before-and-after strip beside the plan cards is the person's own
+    // photograph and their own two numbers. currentCeiling() returns null
+    // until a scan is in hand, and the funnel draws nothing rather than
+    // reaching for a stand-in face.
     onUpgrade: async () => {
+      const ceiling = currentCeiling();
       const user = await currentUser();
       if (user) {
-        await openTrialFunnel(user);
+        await openTrialFunnel(user, undefined, { ceiling });
         await refreshMaxAccess();
         return;
       }
@@ -2090,21 +2217,22 @@ async function runFullAnalysis(
         reason: "analysis",
         notice: "Create your account to choose a plan.",
         onAuthenticated: async (signedInUser) => {
-          await openTrialFunnel(signedInUser);
+          await openTrialFunnel(signedInUser, undefined, { ceiling });
           await refreshMaxAccess();
         },
       });
     },
     onContinue: async () => {
+      const ceiling = currentCeiling();
       const user = await currentUser();
       if (user) {
-        await openTrialFunnel(user);
+        await openTrialFunnel(user, undefined, { ceiling });
         return;
       }
       await openAccount({
         reason: "analysis",
         notice: "Create your account to save your pathway and choose a trial.",
-        onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser),
+        onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser, undefined, { ceiling }),
       });
     },
     // Correct the front points, then score the corrected face.
@@ -2350,7 +2478,7 @@ async function gateAnalysis(
     <section class="analysis-gate${preview ? " over-preview" : ""}">
     <span class="klabel">RESULTS ARE READY</span>
     <h2>Create an account to see your analysis</h2>
-    <p>Your result is computed and sitting behind this blur — it never left this device. Sign up or log in to open it. ${lastSide?.feedback
+    <p>Your result is computed and sitting behind this blur: it never left this device. Sign up or log in to open it. ${lastSide?.feedback
       ? "The side feedback you approved is sent privately after sign-in."
       : ""}</p>
     ${saved ? "" : `<p class="analysis-gate-warn">This browser could not preserve the scan through an email or social redirect. Use an existing password login to keep this result.</p>`}
@@ -2377,10 +2505,45 @@ async function gateAnalysis(
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
         scanSession.claim(token, `user:${signedInUser.id}`);
+
+        // THE ACCOUNT IS READ BEFORE ANYTHING IS DECIDED ABOUT IT.
+        //
+        // Claiming the continuation above is what stops a double analysis, and
+        // it also took this path out from under resumePendingAfterAuth, which
+        // is the only other place ensureScanAllowed runs after a sign-in. The
+        // result was a way around both the weekly limit and the decline:
+        // capture signed out, sign in with a password at the wall, and answer
+        // a chooser that had consulted nothing but this device. On a phone the
+        // account had never used, the decline mirror is empty and the server
+        // was never asked, so a declined account got "It's me" back.
+        //
+        // refreshMaxAccess is the read: it fetches the entitlement and the
+        // decline stamp and settles both caches. It is also the call that was
+        // missing from authenticated startup generally, which is why a member
+        // who subscribed and came back on a full reload kept a stale decline
+        // lock until some later screen happened to refresh it.
+        await refreshMaxAccess();
+        if (!scanSession.isCurrent(token)) return;
+
+        // And now the gate, with a real tier behind it. Signed-out capture is
+        // allowed to run to the end precisely so this question can be asked
+        // once there is an account to ask it about; skipping it here made that
+        // design into the hole it was written to avoid.
+        if (!(await ensureScanAllowed(() => undefined))) {
+          // Refused. The capture stays in storage and the wall stays up, so
+          // buying a credit or waiting out the week finishes this scan rather
+          // than starting a new one. resumePendingStarted goes back down so
+          // the deferred path can pick it up when they return.
+          resumePendingStarted = false;
+          return;
+        }
+        if (!scanSession.isCurrent(token)) return;
+
         // The capture ran signed out, so nobody was ever asked whose face
         // this is — and the person signing in at the gate is not necessarily
         // the person in the photographs (an owner's expired session, a
-        // friend's scan). Attribution happens only after the answer.
+        // friend's scan). Attribution happens only after the answer, and only
+        // after the two reads above, so the chooser knows what it is offering.
         if (!(await askLateSubject())) return;
         startConsentedSideFeedback();
         await runFullAnalysis(sideReport, token);
@@ -2718,6 +2881,19 @@ if (isAuthAvailable()) {
     const nextUserId = user?.id ?? null;
     const identityChanged = previousUserId !== undefined && previousUserId !== nextUserId;
     if (identityChanged) {
+      // Both of these are module state describing the PREVIOUS account, and
+      // neither was reset here. A Max holder finishing a scan and a free user
+      // signing in on the same tab left the second one holding the first one's
+      // guest allowance; a decline belonging to one account disabled the
+      // other's self-scan. They go back to the closed defaults and are
+      // repopulated by the next entitlement read.
+      lastKnownTier = "free";
+      // CLEAR rather than set-false. setDeclinedCache(false) is a claim that
+      // this account has not declined, and it writes that claim through to the
+      // device: on an identity change it would erase the incoming account's
+      // stamp before that account's entitlement had ever been read. Forgetting
+      // is the honest operation here; the next read supplies the answer.
+      clearDeclinedCache();
       clearResultsIdentityState();
       closeScanGate();
       closeDashboard();

@@ -29,11 +29,43 @@ export const SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 import type { EntitlementTier } from "./entitlement.js";
 
-// By LIVE tier (tierOf already folds subscription status in): the Starter
-// card sells "One scan a week", the Max card "Two scans a week", and free
-// matches Starter because the free scan is the funnel, not a plan.
-export function weeklyAllowance(tier: EntitlementTier): number {
-  return tier === "max" ? 2 : 1;
+// ONE personal scan a week, on every tier.
+//
+// Max used to get two, and the card sold it. It is one now, and the reason is
+// the weekly ceremony rather than cost: the whole product rests on there being
+// exactly one big analysis a week to look forward to, and a second personal
+// scan in the same window undercuts it — the second reading is inside the
+// noise the first one already carries, so it cannot show progress, only
+// weather. What Max buys instead is other people's faces, which is where the
+// tiers now differ (see guestAllowance).
+//
+// Taking back a stated benefit needs a grandfather clause as a rule. There is
+// none here because there is nobody to grandfather: no subscription has ever
+// been sold at the two-scan promise.
+export function weeklyAllowance(_tier: EntitlementTier): number {
+  return 1;
+}
+
+// How many OTHER people a tier may scan in the same trailing window.
+//
+// Guest scans were unlimited, and unlimited is not a tier: it gave a Starter
+// subscriber and a Max subscriber the identical product on the axis Max is
+// actually sold on. Free is zero because the subject chooser is member-gated,
+// so a free account has no way to declare a guest in the first place — the
+// number states that rather than leaving it implied by another module.
+//
+// Fifty is a cap rather than a target. It exists so "unlimited" is not printed
+// on a card next to a number nobody has measured the cost of.
+export function guestAllowance(tier: EntitlementTier, declined = false): number {
+  if (tier === "max") return 50;
+  if (tier === "starter") return 3;
+  // A DECLINED free account keeps its weekly scan, and that scan is a guest
+  // scan: stored, but with no profile attached and off the chart. Returning
+  // zero here locked them out of scanning entirely, because the decline also
+  // disables "It's me" — which is not the consequence the sheet named. The
+  // sheet says they cannot scan THEMSELVES; it does not say they cannot scan.
+  if (declined) return 1;
+  return 0;
 }
 
 /**

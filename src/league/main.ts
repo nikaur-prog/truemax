@@ -1,6 +1,8 @@
 import { getSupabaseClient, currentAccessToken, currentUser, signIn, signUp } from "../engine/auth.js";
 import type { Tier } from "./tiers.js";
 import { earnedCents, nextTier, fmtMoney, fmtCount } from "./tiers.js";
+import type { AudienceStats, AudienceTier } from "./audience.js";
+import { TIER_1, TIER_RULES, ruleFor, shortfall, statsArePossible, tierFor } from "./audience.js";
 import type { EarningsFormula, VideoTotals } from "./earnings.js";
 import {
   DEFAULT_FORMULA,
@@ -78,6 +80,21 @@ interface SubmissionRow {
   tiktok_video_id: string | null;
 }
 
+/** One creator's submitted audience breakdown, awaiting or carrying a review. */
+interface AudienceProofRow {
+  id: string;
+  user_id: string;
+  platform: string;
+  proof_url: string;
+  tier1_share: number;
+  usa_share: number;
+  views_28d: number;
+  videos_28d: number;
+  status: string;
+  note: string | null;
+  submitted_at: string;
+}
+
 const root = document.getElementById("league")!;
 
 const esc = (s: string) =>
@@ -130,15 +147,15 @@ function formulaCardsHTML(f: EarningsFormula): string {
   return `<div class="lg-tiers">
     <div class="lg-tier">
       <div class="lg-money">$${(f.rpmCents / 100).toFixed(2)}</div>
-      <div class="lg-tier-req">per 1,000 views — every view counts</div>
+      <div class="lg-tier-req">per 1,000 views: every view counts</div>
     </div>
     <div class="lg-tier">
       <div class="lg-money">×${f.eMax.toFixed(1)}</div>
-      <div class="lg-tier-req">engagement multiplier — real comments raise your rate</div>
+      <div class="lg-tier-req">engagement multiplier: real comments raise your rate</div>
     </div>
     <div class="lg-tier">
       <div class="lg-money">${fmtCount(f.thresholdViews)}</div>
-      <div class="lg-tier-req">views to unlock — then every view you already have pays</div>
+      <div class="lg-tier-req">views to unlock, then every view you already have pays</div>
     </div>
     <div class="lg-tier">
       <div class="lg-money">7 days</div>
@@ -164,18 +181,18 @@ function renderGate(): void {
     <h1>Make TrueMax videos.<br/>Get paid when they hit.</h1>
     <p class="lg-tagline">The face scan is the most filmable thing on this app. We hand you the
     tools that make the videos, you post in your own style, and every view you get is worth
-    money — a flat rate per thousand, raised by real engagement.</p>
+    money: a flat rate per thousand, raised by real engagement.</p>
     <div class="lg-montage">
       <!-- The montage master drops in as /league/montage.mp4 when rendered; the
            poster keeps the box honest until then. -->
       <video src="/league/montage.mp4" poster="/og.png" autoplay muted loop playsinline></video>
     </div>
     ${formulaCardsHTML(DEFAULT_FORMULA)}
-    <p class="lg-note">Views and comments combine across all your TrueMax videos — every post
+    <p class="lg-note">Views and comments combine across all your TrueMax videos. Every post
     counts. No cliffs: 237k views is worth exactly what 237k views is worth. Comments are the
-    bot filter — silent view farms earn half-rate.</p>
+    bot filter: silent view farms earn half-rate.</p>
     <ol class="lg-how">
-      <li><b>Apply.</b> Two minutes — handles, niche, why you.</li>
+      <li><b>Apply.</b> Two minutes: handles, niche, why you.</li>
       <li><b>Get approved.</b> Every application is reviewed by the founder. You get the tools
       that fit what you make.</li>
       <li><b>Post and track.</b> Submit each video's link; your dashboard shows views, earnings
@@ -183,7 +200,7 @@ function renderGate(): void {
     </ol>
     <p style="margin-top:26px"><button class="lg-btn pri lg-cta" id="lg-apply">Apply to join</button></p>
     <div class="lg-form" id="lg-authbox" hidden>
-      <h3 style="margin:0 0 2px">Sign in — or create your account</h3>
+      <h3 style="margin:0 0 2px">Sign in, or create your account</h3>
       <p class="lg-note" style="margin-top:4px">One account works for the app and the League.
       New here? The same button below creates your account.</p>
       <label for="lg-email">Email</label>
@@ -226,7 +243,7 @@ function renderGate(): void {
       return;
     }
     if (su.ok) return void boot();
-    err.textContent = su.message || si.message || "That didn't work — try again.";
+    err.textContent = su.message || si.message || "That didn't work. Try again.";
   };
 }
 
@@ -256,7 +273,7 @@ function renderApply(): void {
       <label for="ap-pitch">Why you (one or two sentences)</label>
       <textarea id="ap-pitch" rows="3" maxlength="500"></textarea>
       <p class="lg-note" style="margin-top:14px">The League leaderboard shows your name, handle
-      and earnings to other approved members — that's the game. Nothing else about your account
+      and earnings to other approved members: that's the game. Nothing else about your account
       is ever visible to anyone.</p>
       <p style="margin-top:16px"><button class="lg-btn pri" id="ap-send">Send application</button></p>
       <p class="lg-error" id="ap-err"></p>
@@ -299,10 +316,10 @@ function renderApply(): void {
 
 function renderStatus(row: CreatorRow): void {
   const copy = row.status === "rejected"
-    ? { chip: "NOT THIS TIME", chipClass: "warn", body: "This application wasn't approved. That's sometimes about fit and timing rather than your content — you're welcome to reach out on the account email." }
+    ? { chip: "NOT THIS TIME", chipClass: "warn", body: "This application wasn't approved. That's sometimes about fit and timing rather than your content: you're welcome to reach out on the account email." }
     : row.status === "paused"
       ? { chip: "PAUSED", chipClass: "warn", body: "Your membership is paused. Reach out on the account email if that's unexpected." }
-      : { chip: "IN REVIEW", chipClass: "ok", body: "Application received. Every one is read by the founder — you'll see the dashboard here the moment you're approved." };
+      : { chip: "IN REVIEW", chipClass: "ok", body: "Application received. Every one is read by the founder: you'll see the dashboard here the moment you're approved." };
   root.innerHTML = `${topBarHTML()}
   <div class="lg-gate">
     <span class="lg-chip ${copy.chipClass}">${copy.chip}</span>
@@ -313,7 +330,7 @@ function renderStatus(row: CreatorRow): void {
 
 // --- the dashboard -----------------------------------------------------------
 
-type Page = "overview" | "submit" | "mine" | "ranks" | "money" | "tools" | "admin";
+type Page = "overview" | "submit" | "mine" | "ranks" | "money" | "offers" | "tools" | "admin";
 
 async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
   const pages: Array<[Page, string]> = [
@@ -322,6 +339,7 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
     ["mine", "Submissions"],
     ["ranks", "Ranks"],
     ["money", "Money"],
+    ["offers", "Offers"],
     ["tools", "Tools"],
   ];
   if (staff) pages.push(["admin", "Admin"]);
@@ -332,12 +350,25 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
     <main class="lg-main" id="lg-page"></main>
   </div>`;
 
-  const mount = document.getElementById("lg-page")!;
+  const host = document.getElementById("lg-page")!;
   const nav = [...root.querySelectorAll<HTMLButtonElement>(".lg-nav button")];
   const go = (page: Page) => {
     for (const b of nav) b.classList.toggle("on", b.dataset.page === page);
     location.hash = page;
-    void PAGES[page](mount, me);
+    // A FRESH pane per navigation, and the reason is a race rather than
+    // tidiness. Every page here loads before it writes, and they take
+    // different amounts of time, so two taps in a row could land in the wrong
+    // order: the slower page's innerHTML arrived last and left its content
+    // under the other tab's highlight. A page that has been navigated away
+    // from now finishes its load and writes into a pane that is no longer in
+    // the document, which is exactly what it should do.
+    //
+    // It also means the eight page functions need to know nothing about this.
+    // A sequence number would have to be checked inside every one of them,
+    // and the first one written without the check would bring the bug back.
+    const pane = document.createElement("div");
+    host.replaceChildren(pane);
+    void PAGES[page](pane, me);
   };
   for (const b of nav) b.onclick = () => go(b.dataset.page as Page);
   const initial = (location.hash.slice(1) || "overview") as Page;
@@ -433,7 +464,7 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
   if (!data) {
     el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
       <div><h3>TikTok</h3><p class="lg-sub" style="margin:4px 0 0">Link your own account and the
-      views and comments on your submitted videos count themselves — no screenshots, no waiting
+      views and comments on your submitted videos count themselves: no screenshots, no waiting
       on review day.</p></div>
       <button class="lg-btn pri" id="lg-tt-go">Connect</button></div>
       <p class="lg-error" id="lg-tt-err"></p>`;
@@ -498,7 +529,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     if (!sprints.length) {
       mount.innerHTML = `<h1 class="lg-h">Overview</h1>
         <div class="lg-card"><h3>No live sprint right now</h3>
-        <p class="lg-sub">The next pool opens soon — anything you post in the meantime can be
+        <p class="lg-sub">The next pool opens soon. Anything you post in the meantime can be
         submitted once it does.</p></div>
         <div class="lg-card" id="lg-tt"><p class="lg-sub">Loading…</p></div>`;
       void renderTikTokCard(mount.querySelector<HTMLElement>("#lg-tt")!, me);
@@ -521,7 +552,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <div class="lg-row"><span>Earnings</span><span class="lg-chip">LOCKED</span></div>
             <div class="lg-bar"><i style="width:${Math.round(p * 100)}%"></i></div>
             <div class="lg-bar-note">Pay unlocks at ${fmtCount(f.thresholdViews)} views and
-            ${f.thresholdComments} comments, combined — then it counts every view you already have.</div>
+            ${f.thresholdComments} comments, combined, then it counts every view you already have.</div>
           </div>`;
         }
         const accrued = creatorAccruedCents(f, videos);
@@ -532,7 +563,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         return `<div class="lg-card">${head}
           <div class="lg-row"><span>Accrued this sprint</span><span class="lg-money">${fmtMoney(accrued)}</span></div>
           <div class="lg-bar-note">$${(f.rpmCents / 100).toFixed(2)} per 1,000 views; each video earned at
-          its own ${factorText} engagement factor — locks at sprint close, paid within 7 days.</div>
+          its own ${factorText} engagement factor. Locks at sprint close, paid within 7 days.</div>
         </div>`;
       }
       const earned = earnedCents(s.tiers, totals);
@@ -555,7 +586,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     const sprints = (await loadSprints()).filter((s) => sprintIsLive(s));
     mount.innerHTML = `<h1 class="lg-h">Submit a video</h1>
       <p class="lg-sub">Paste the link the moment it's live. Only submitted, approved links count
-      toward your totals — if we can't see it, we can't pay on it.</p>
+      toward your totals. If we can't see it, we can't pay on it.</p>
       <div class="lg-card lg-form" style="max-width:520px;margin-left:0">
         <label for="sb-sprint">Sprint</label>
         <select id="sb-sprint">${sprints.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
@@ -589,7 +620,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       });
       if (error) {
         err.textContent = /duplicate/i.test(error.message)
-          ? "That video is already submitted — every video counts once."
+          ? "That video is already submitted. Every video counts once."
           : error.message;
         return;
       }
@@ -626,7 +657,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     }
     const rows = (data ?? []) as Array<{ display_name: string; handle: string; earned_cents: number }>;
     mount.innerHTML = `<h1 class="lg-h">Ranks</h1>
-      <p class="lg-sub">Paid-out totals, all time. Real money that actually moved — nothing on
+      <p class="lg-sub">Paid-out totals, all time. Real money that actually moved: nothing on
       this table is projected.</p>
       <div class="lg-card">${rows.length ? rows.map((r, i) => `
         <div class="lg-row">
@@ -660,7 +691,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           <div class="lg-row"><span>Earnings</span><span class="lg-chip">LOCKED</span></div>
           <div class="lg-bar"><i style="width:${Math.round(p * 100)}%"></i></div>
           <div class="lg-bar-note">${fmtCount(totals.views)} / ${fmtCount(f.thresholdViews)} views ·
-          ${totals.comments} / ${f.thresholdComments} comments — cross both and every view you
+          ${totals.comments} / ${f.thresholdComments} comments, cross both and every view you
           already have starts counting.</div></div>`;
       }
       const accrued = creatorAccruedCents(f, videos);
@@ -682,6 +713,203 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>`).join("")}</div>` : `<p class="lg-sub">Payouts land here once a sprint settles.</p>`}`;
   },
 
+  /**
+   * Offers: which tier this account is in, and what it would take to move up.
+   *
+   * The pay formula answers "how many people watched" and says nothing about
+   * who. This is the other half, and it is deliberately the most transparent
+   * page in the League: every floor is printed, the creator's own numbers are
+   * printed next to them, and a shortfall names the exact gap. A creator
+   * programme that rejects without a reason does not get posted in.
+   */
+  async offers(mount, me) {
+    const client = await getSupabaseClient();
+    const [tierRow, proofRow] = await Promise.all([
+      client
+        .from("league_audience_tiers")
+        .select("tier, note, decided_at")
+        .eq("user_id", me.user_id)
+        .maybeSingle<{ tier: AudienceTier; note: string | null; decided_at: string }>(),
+      client
+        .from("league_audience_proofs")
+        .select("status, note, submitted_at, tier1_share, usa_share, views_28d, videos_28d")
+        .eq("user_id", me.user_id)
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{
+          status: string;
+          note: string | null;
+          submitted_at: string;
+          tier1_share: number;
+          usa_share: number;
+          views_28d: number;
+          videos_28d: number;
+        }>(),
+    ]);
+
+    const mine: AudienceTier = tierRow.data?.tier ?? "unrated";
+    const latest = proofRow.data ?? null;
+    const claimed: AudienceStats | null = latest
+      ? {
+          tier1Share: Number(latest.tier1_share),
+          usaShare: Number(latest.usa_share),
+          views28d: Number(latest.views_28d),
+          videos28d: Number(latest.videos_28d),
+        }
+      : null;
+
+    const cards = TIER_RULES.filter((r) => r.id !== "unrated")
+      .map((rule) => {
+        const gap = claimed ? shortfall(rule, claimed) : [];
+        const held = mine === rule.id;
+        return `<div class="lg-card lg-offer${held ? " held" : ""}">
+        <div class="lg-offer-h"><b>${rule.label.toUpperCase()}</b>${held ? `<span class="lg-chip ok">YOUR TIER</span>` : ""}</div>
+        <p class="lg-sub">${esc(rule.blurb)}</p>
+        <ul class="lg-offer-reqs">
+          ${rule.minTier1Share ? `<li>${Math.round(rule.minTier1Share * 100)}% of views from Tier 1 countries</li>` : ""}
+          ${rule.minUsaShare ? `<li>${Math.round(rule.minUsaShare * 100)}% of views from the United States</li>` : ""}
+          <li>${fmtCount(rule.minViews28d)} views in the last 28 days</li>
+          ${rule.minVideos28d > 1 ? `<li>across at least ${rule.minVideos28d} videos</li>` : ""}
+        </ul>
+        ${
+          claimed && !held
+            ? gap.length
+              ? `<div class="lg-offer-gap"><b>What is missing</b><ul>${gap
+                  .map((g) => `<li>${esc(g)}</li>`)
+                  .join("")}</ul></div>`
+              : `<div class="lg-offer-gap ok">Your submitted numbers clear every floor here. Waiting on review.</div>`
+            : ""
+        }
+      </div>`;
+      })
+      .join("");
+
+    // One breakdown at a time. A second pending row is not a thing the queue
+    // should hold: the honest pattern is file, wait, hear why, file again, and
+    // a unique index over the pending rows says so at the database as well.
+    const pending = latest?.status === "pending";
+
+    const status = !latest
+      ? `<p class="lg-sub">Nothing submitted yet. Send your audience breakdown below and an admin will place your account.</p>`
+      : latest.status === "pending"
+        ? `<p class="lg-sub">Submitted ${new Date(latest.submitted_at).toLocaleDateString()}, waiting on review.</p>`
+        : `<p class="lg-sub">Last review: <b>${esc(latest.status)}</b>${latest.note ? ` — ${esc(latest.note)}` : ""}</p>`;
+
+    mount.innerHTML = `<h1 class="lg-h">Offers</h1>
+      <p class="lg-sub">Accounts are placed into a tier from where their viewers are, not just how many
+      there are. A view from a country TrueMax cannot sell in still counts toward your totals; the tier
+      is what decides the rate those totals are paid at.</p>
+      <div class="lg-card">
+        <div class="lg-row"><span>Your tier</span><span class="lg-money">${esc(ruleFor(mine).label)}</span></div>
+        ${status}
+        ${
+          // What the submitted numbers would reach, said out loud while the
+          // review is pending. It is what the claim reaches, not a decision:
+          // a person still watches the recording against it.
+          claimed && latest?.status === "pending" && tierFor(claimed) !== mine
+            ? `<p class="lg-sub">On the numbers you sent, this account reaches
+               <b>${esc(ruleFor(tierFor(claimed)).label)}</b>. The review decides.</p>`
+            : ""
+        }
+        ${tierRow.data?.note ? `<p class="lg-sub">${esc(tierRow.data.note)}</p>` : ""}
+      </div>
+      <div class="lg-offers">${cards}</div>
+      <h2 class="lg-h2">Send your audience breakdown</h2>
+      <p class="lg-sub">Screen-record the audience page of your own platform analytics and link it, then
+      type the same numbers in. A person watches the recording against what you typed.</p>
+      ${pending
+        ? `<div class="lg-card" style="max-width:520px;margin-left:0"><p class="lg-sub">One breakdown is
+           already with the reviewer, so the form is closed until it comes back. If the numbers you sent
+           were wrong, say so on the account email and it will be sent back rather than stacked up
+           behind a second one.</p></div>`
+        : `<div class="lg-card lg-form" style="max-width:520px;margin-left:0">
+        <label for="au-platform">Account</label>
+        <select id="au-platform">
+          <option value="tiktok">TikTok</option>
+          <option value="instagram">Instagram</option>
+        </select>
+        <label for="au-url">Link to your screen recording</label>
+        <input id="au-url" type="url" placeholder="https://…" />
+        <label for="au-t1">% of views from Tier 1 countries</label>
+        <input id="au-t1" type="number" min="0" max="100" step="0.1" />
+        <label for="au-us">% of views from the United States</label>
+        <input id="au-us" type="number" min="0" max="100" step="0.1" />
+        <label for="au-views">Views in the last 28 days</label>
+        <input id="au-views" type="number" min="0" step="1" />
+        <label for="au-videos">Videos those views are spread across</label>
+        <input id="au-videos" type="number" min="0" step="1" />
+        <p class="lg-note" style="margin-top:14px">Tier 1 today: ${TIER_1.join(", ")}. The United States is
+        inside Tier 1, so its share can never be the larger of the two.</p>
+        <p style="margin-top:16px"><button class="lg-btn pri" id="au-go">Send for review</button></p>
+        <p class="lg-error" id="au-err"></p>
+      </div>`}`;
+
+    // No form on screen, so nothing to wire. The pending state is the one the
+    // database enforces too: one pending proof per account per platform.
+    if (pending) return;
+
+    document.getElementById("au-go")!.onclick = async () => {
+      const err = document.getElementById("au-err")!;
+      err.textContent = "";
+      const num = (id: string) => Number((document.getElementById(id) as HTMLInputElement).value);
+      const url = (document.getElementById("au-url") as HTMLInputElement).value.trim();
+      let link: URL;
+      try {
+        link = new URL(url);
+      } catch {
+        err.textContent = "That needs to be a full https:// link to your recording.";
+        return;
+      }
+      if (link.protocol !== "https:") {
+        err.textContent = "That needs to be a full https:// link to your recording.";
+        return;
+      }
+      const stats = {
+        tier1Share: num("au-t1") / 100,
+        usaShare: num("au-us") / 100,
+        views28d: num("au-views"),
+        videos28d: num("au-videos"),
+      };
+      // The message is chosen BEFORE the guard, because the guard is a type
+      // predicate: inside its false branch the value has been narrowed away
+      // and there is nothing left to read the mistake off.
+      const wrongRow = stats.usaShare > stats.tier1Share;
+      // The same check the database runs, so the message names the problem
+      // rather than surfacing a constraint violation. The US share exceeding
+      // the Tier 1 share is the commonest one: it means the wrong row was read.
+      if (!statsArePossible(stats)) {
+        err.textContent = wrongRow
+          ? "The US is inside Tier 1, so its share cannot be larger. Check which row you read."
+          : "Those numbers do not add up. Percentages are 0 to 100, and views need videos behind them.";
+        return;
+      }
+      const { error } = await client.from("league_audience_proofs").insert({
+        user_id: me.user_id,
+        platform: (document.getElementById("au-platform") as HTMLSelectElement).value,
+        proof_url: link.href,
+        tier1_share: stats.tier1Share,
+        usa_share: stats.usaShare,
+        views_28d: stats.views28d,
+        videos_28d: stats.videos28d,
+      });
+      if (error) {
+        // The two failures a creator can actually cause get their own words.
+        // A raw Postgres message is not something to put in front of somebody:
+        // it names a constraint, and they need to know what to do next.
+        err.textContent = error.code === "23505"
+          ? "There is already a breakdown for that account waiting on review."
+          : error.code === "42501"
+            ? "Only approved League members can send a breakdown."
+            : "That did not send. Check your connection and try again.";
+        return;
+      }
+      // Shown back immediately, including which tier these numbers would reach,
+      // so the creator knows what they have asked for rather than waiting to
+      // find out. It is what the numbers CLAIM; the review decides.
+      void PAGES.offers(mount, me);
+    };
+  },
+
   async tools(mount, me) {
     const granted = (id: string) => me.pillar_grants?.[id] === true;
     // The pillars, in the order a member meets them. Each granted card is a
@@ -699,28 +927,28 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       },
       {
         id: "cta", n: "02", name: "Video Studio",
-        body: "Score videos, ratio videos, breakdowns and the outro — rendered in the house style, voiced, ready to post.",
+        body: "Score videos, ratio videos, breakdowns and the outro, rendered in the house style, voiced, ready to post.",
         needs: "One photo · a face worth talking about", href: "/league/tools#cta",
       },
       {
         id: "polisher", n: "03", name: "The Polisher",
-        body: "Clean up a soft clip on this device: sharpen, colour — and a 4K upscale for the ones worth it.",
+        body: "Clean up a soft clip on this device: sharpen, colour, and a 4K upscale for the ones worth it.",
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
         id: "clips", n: "04", name: "Clips Library",
-        body: "Saved faces, celebrity references and demo exports to cut from — scored instantly, no rescan.",
+        body: "Saved faces, celebrity references and demo exports to cut from, scored instantly, no rescan.",
         needs: "Nothing · it's all in the library", href: "/league/tools#clips",
       },
     ];
     mount.innerHTML = `<h1 class="lg-h">Tools</h1>
       <p class="lg-sub">What you see here is what your membership includes. Renders are the
-      calls that cost us money (a voiceover, a 4K pass) — everything else is unmetered.</p>
+      calls that cost us money (a voiceover, a 4K pass), everything else is unmetered.</p>
       <div class="lg-card" id="lg-quota-card">
         <div class="lg-row" style="border:none;padding:0 0 8px"><h3>Renders this month</h3>
-        <b class="lg-num" id="lg-quota-num">— / ${me.monthly_render_quota}</b></div>
+        <b class="lg-num" id="lg-quota-num">– / ${me.monthly_render_quota}</b></div>
         <div class="lg-bar"><i id="lg-quota-fill" style="width:0%"></i></div>
-        <div class="lg-bar-note">Resets on the 1st. Need more? Ask — quotas are set per creator.</div>
+        <div class="lg-bar-note">Resets on the 1st. Need more? Ask, quotas are set per creator.</div>
       </div>
       <div class="lg-tools">
       ${tools.map((t) => `<div class="lg-card lg-tool ${granted(t.id) ? "" : "off"}">
@@ -736,7 +964,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         <div class="lg-tool-kicker">05</div>
         <div class="lg-row" style="border:none;padding:0">
           <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
-          the house palette — how every TrueMax video gets its look.</p>
+          the house palette, how every TrueMax video gets its look.</p>
           <p class="lg-note" style="margin:0">Owner-run · assets land in your pillars automatically</p></div>
           <span class="lg-chip">OWNER ONLY</span>
         </div></div>
@@ -765,12 +993,17 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async admin(mount) {
     mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const [{ data: apps }, { data: pending }, { data: allSprints }] = await Promise.all([
+    const [{ data: apps }, { data: pending }, { data: allSprints }, { data: proofs }] = await Promise.all([
       client.from("league_creators").select("*").eq("status", "applied").order("created_at"),
       client.from("league_submissions").select("*").eq("status", "pending").order("created_at"),
       // Every status, drafts included — loadSprints deliberately hides drafts
       // from creators, and the admin is exactly who drafts exist for.
       client.from("league_sprints").select("*").order("starts_at", { ascending: false }),
+      client
+        .from("league_audience_proofs")
+        .select("*")
+        .eq("status", "pending")
+        .order("submitted_at"),
     ]);
     const applications = (apps ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
     const subs = (pending ?? []) as SubmissionRow[];
@@ -783,7 +1016,44 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       : `<span class="lg-chip warn">DRAFT</span>`;
     const day = (iso: string) => new Date(iso).toLocaleDateString();
 
+    const audience = (proofs ?? []) as AudienceProofRow[];
+
+    // What the numbers the creator typed would reach, computed here rather
+    // than trusted from anywhere, so the reviewer is comparing the recording
+    // against a tier this code derived from the same rules the offer page
+    // printed. The decision is still theirs: accept places the tier, reject
+    // does not.
+    const audienceCard = `<div class="lg-card"><h3>Audience reviews · ${audience.length}</h3>
+      ${audience.length ? "" : `<p class="lg-sub">Nothing waiting. Creators send their breakdown from the Offers page.</p>`}
+      ${audience
+        .map((p) => {
+          const claim: AudienceStats = {
+            tier1Share: Number(p.tier1_share),
+            usaShare: Number(p.usa_share),
+            views28d: Number(p.views_28d),
+            videos28d: Number(p.videos_28d),
+          };
+          const reaches = tierFor(claim);
+          return `<div class="lg-row" style="flex-wrap:wrap;gap:8px">
+            <span style="flex:1;min-width:240px">
+              <b>${esc(p.platform)}</b>
+              <span class="lg-note">Tier 1 ${Math.round(claim.tier1Share * 100)}% ·
+              US ${Math.round(claim.usaShare * 100)}% ·
+              ${fmtCount(claim.views28d)} views · ${claim.videos28d} videos</span><br>
+              <a href="${esc(p.proof_url)}" target="_blank" rel="noopener noreferrer">Watch the recording ↗</a>
+            </span>
+            <span style="display:flex;gap:8px;align-items:center">
+              <span class="lg-chip${reaches === "unrated" ? " warn" : " ok"}">CLAIMS ${ruleFor(reaches).label.toUpperCase()}</span>
+              <button class="lg-btn pri" data-aud-ok="${p.id}" data-aud-user="${p.user_id}" data-aud-tier="${reaches}">Place as ${ruleFor(reaches).label}</button>
+              <button class="lg-btn danger" data-aud-no="${p.id}">Reject</button>
+            </span>
+          </div>`;
+        })
+        .join("")}
+    </div>`;
+
     mount.innerHTML = `<h1 class="lg-h">Admin</h1>
+      ${audienceCard}
       <div class="lg-card"><h3>Sprints · ${sprints.length}</h3>
         ${sprints.map((s) => `<div class="lg-row" style="flex-wrap:wrap">
           <span><b>${esc(s.name)}</b> <span class="lg-note">${day(s.starts_at)} → ${day(s.ends_at)} ·
@@ -796,11 +1066,11 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>`).join("") || `<p class="lg-sub">No sprints yet — the league starts when the first one goes active.</p>`}
         <div class="lg-sprint-new">
           <h3 style="margin-top:18px">New sprint</h3>
-          <p class="lg-sub">Created as a DRAFT — creators see nothing until you activate it. The
+          <p class="lg-sub">Created as a DRAFT, creators see nothing until you activate it. The
           formula fields are the deal the gate advertises; change them here and this sprint pays
           differently, story included.</p>
           <div class="lg-sprint-grid">
-            <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1 — September" /></label>
+            <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1, September" /></label>
             <label>Pool ($) <input id="sp-pool" type="number" min="0" step="50" value="2000" /></label>
             <label>Starts <input id="sp-start" type="date" /></label>
             <label>Ends <input id="sp-end" type="date" /></label>
@@ -835,7 +1105,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
 
       <div class="lg-card"><h3>Submissions to review · ${subs.length}</h3>
         <p class="lg-sub">ON LINKED ACCOUNT means the nightly tracker found this exact video on
-        the creator's own connected TikTok — ownership is proven. Approval is still your call:
+        the creator's own connected TikTok, ownership is proven. Approval is still your call:
         it says the video is actually TrueMax content, which no API can check.</p>
         ${subs.map((s) => `
         <div class="lg-row" style="flex-wrap:wrap">
@@ -857,7 +1127,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
 
       <div class="lg-card"><h3>Outreach</h3>
         <p class="lg-sub">The daily engine: 100 DMs and 50 emails, sent by hand, tracked by hand.
-        The scripts are the proven structure — "Paid promo?" gets answered where a pitch gets
+        The scripts are the proven structure, "Paid promo?" gets answered where a pitch gets
         scrolled past. Never lead with the deal; it's message two.</p>
         <div class="lg-scripts">
           ${[
@@ -867,19 +1137,19 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             },
             {
               t: "DM · message 2 (they replied)",
-              s: "We run TrueMax — you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views — then every view you already have counts. Want the link to apply?",
+              s: "We run TrueMax: you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views, then every view you already have counts. Want the link to apply?",
             },
             {
               t: "DM · follow-up (48h silence)",
-              s: "Still open if you want it — creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
+              s: "Still open if you want it. Creators are getting paid per view this sprint, not per post. Two minutes to apply: truemax.app/league",
             },
             {
               t: "Email (from their bio / Linktree / YouTube About)",
-              s: "Subject: Paid promo — your {niche} content\n\nHey {name},\n\nSaw {video} — that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league — two minutes. Happy to answer anything on here first.\n",
+              s: "Subject: Paid promo: your {niche} content\n\nHey {name},\n\nSaw {video}: that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league, two minutes. Happy to answer anything on here first.\n",
             },
             {
               t: "Referral bounty (to anyone signed)",
-              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough — we'll do the rest.",
+              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough, we'll do the rest.",
             },
           ].map((x, i) => `<div class="lg-row" style="align-items:flex-start">
             <div style="flex:1;min-width:0"><b style="font-size:13.5px">${x.t}</b>
@@ -889,14 +1159,14 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         </div>
         <p class="lg-note" style="margin-top:12px">Where the addresses come from: TikTok/IG bios
         and Linktrees first, YouTube About tabs second (most mirror to Shorts). Clippers live in
-        Whop clipping communities, clipping Discords, and under #clips #edits in the niche — the
+        Whop clipping communities, clipping Discords, and under #clips #edits in the niche: the
         /league link is the whole pitch. Fill {name}, {video}, {niche} before sending; a script
         sent unfilled reads as spam because it is.</p>
       </div>
 
       <div class="lg-card"><h3>Settlement</h3>
         <p class="lg-sub">Every approved creator's accrual under the sprint's formula, from the
-        latest snapshots — with the pro-rata factor if the pool is oversubscribed. The suggested
+        latest snapshots, with the pro-rata factor if the pool is oversubscribed. The suggested
         numbers ARE the payouts; recording them is still a decision you make per row.</p>
         <div id="lg-settle-sprints"></div>
         <div id="lg-settle-out"></div>
@@ -935,7 +1205,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           out.innerHTML = `
             <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
-            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00 — pool covers everyone" : scale.toFixed(3)}</b></div>
+            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00, pool covers everyone" : scale.toFixed(3)}</b></div>
             ${earning.map((r, i) => `<div class="lg-row">
               <span>${esc(r.c.display_name)} <span class="lg-note">${esc(r.c.handle)} ·
               ${fmtCount(r.totals.views)} views</span></span>
@@ -960,7 +1230,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
                 p_amount_cents: Math.round(r.accrued * scale),
                 p_note: sprint.name,
               });
-              btn.textContent = error ? "Failed — retry" : recorded === false ? "Already recorded" : "Recorded";
+              btn.textContent = error ? "Failed, retry" : recorded === false ? "Already recorded" : "Recorded";
               if (error) btn.disabled = false;
             };
           });
@@ -1038,6 +1308,51 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     });
 
     const refresh = () => void PAGES.admin(mount, undefined as never);
+
+    // Both halves of a decision in one call.
+    //
+    // Placing a tier is two writes and they have to both land: the tier row is
+    // upserted and the proof is marked accepted. As two requests from here
+    // they could not, and only the first was even checked - a dropped second
+    // request left a creator rated with their proof still pending, which the
+    // one-pending-proof index then makes a state they cannot submit their way
+    // out of. The RPC does both inside one transaction and takes the
+    // reviewer's identity from the session rather than from this page.
+    const review = async (
+      b: HTMLButtonElement,
+      proofId: string,
+      accept: boolean,
+      tier?: string,
+      note?: string,
+    ): Promise<void> => {
+      b.disabled = true;
+      const { error } = await client.rpc("league_review_audience_proof", {
+        p_proof_id: proofId,
+        p_accept: accept,
+        p_tier: tier ?? null,
+        p_note: note ?? null,
+      });
+      if (error) {
+        b.disabled = false;
+        window.alert(`Not saved: ${error.message}`);
+        return;
+      }
+      refresh();
+    };
+
+    mount.querySelectorAll<HTMLButtonElement>("[data-aud-ok]").forEach((b) => {
+      b.onclick = () => void review(b, b.dataset.audOk!, true, b.dataset.audTier!);
+    });
+    mount.querySelectorAll<HTMLButtonElement>("[data-aud-no]").forEach((b) => {
+      b.onclick = () => {
+        // A reason, always. A rejection with no note is what makes a creator
+        // programme feel arbitrary, and the creator can read this back. An
+        // empty box still gets a sentence, supplied by the function.
+        const note = window.prompt("Why is this being rejected? The creator sees this.");
+        if (note === null) return;
+        void review(b, b.dataset.audNo!, false, undefined, note);
+      };
+    });
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {
       b.onclick = async () => {
         const row = b.closest(".lg-row")!;

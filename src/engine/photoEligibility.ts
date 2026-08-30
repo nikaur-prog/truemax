@@ -103,7 +103,7 @@ export function frontPhotoRejection(
   if (Math.abs(quality.pitchDeg) > UPLOAD_FRONT_PITCH_BLOCK) {
     return {
       title: "Sorry, the camera angle is too high or low.",
-      detail: "Keep the camera at eye level and your chin neutral—not tipped up or tucked down.",
+      detail: "Keep the camera at eye level and your chin neutral: not tipped up or tucked down.",
     };
   }
   if (Math.abs(quality.rollDeg) > UPLOAD_FRONT_ROLL_BLOCK) {

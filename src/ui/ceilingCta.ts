@@ -54,6 +54,13 @@ export function ceilingCtaMarkup({ overall, potential }: CeilingInput): string {
 export function paintCeilingCta(root: ParentNode, photo: HTMLCanvasElement | null): void {
   if (!photo) {
     root.querySelector(".ceil-faces")?.classList.add("nophoto");
+    // And the honesty line goes with them. It says "that second image is your
+    // own photo, out of focus", which is exactly the right sentence when there
+    // are two images and a claim about the second one, and a description of
+    // something that is not on the screen when there are none. Found when this
+    // block moved onto the offer screen, where a missing capture is ordinary
+    // rather than theoretical.
+    root.querySelector(".ceil-hon")?.remove();
     return;
   }
   for (const canvas of root.querySelectorAll<HTMLCanvasElement>(".ceil-face")) {

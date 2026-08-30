@@ -113,7 +113,7 @@ export function scoreHigherText(percentile: number): string {
 // photograph and five on the next with no explanation; inventing a value would
 // put a fabricated measurement in a product sold on not fabricating them.
 export function fmt(m: ScoredMetric): string {
-  if (!Number.isFinite(m.value)) return "—";
+  if (!Number.isFinite(m.value)) return "–";
   return `${m.value.toFixed(m.def.decimals)}${m.def.unit}`;
 }
 
@@ -312,12 +312,27 @@ export const rarityText = rarityPhrase;
 // Below it, the honest statement is the plain directional one: most people
 // score higher, and here is roughly how many. Same number, no spin in either
 // direction.
-export function populationLine(pct: number, sex: Sex, subject: string): string {
+export function populationLine(pct: number, sex: Sex, subject: string, tailLimit?: number): string {
   const group = sexNoun(sex);
   if (pct >= 50) {
-    return `Roughly ${rarityText(pct)} ${group} ${subject} measure this way.`;
+    // `tailLimit` matters here and was missed when it was added to the chip.
+    // rarityText says "the top 1%" past the resolution cap, so a side profile
+    // printed "Top 10%" in the chip and "the top 1%" in the sentence directly
+    // underneath it — the same face, two bands, one of them a claim the side
+    // sample cannot support. Clamping the percentile before it reaches the
+    // phrase keeps both readings on the same number.
+    return `Roughly ${rarityText(clampToTail(pct, tailLimit))} ${group} ${subject} measure this way.`;
   }
-  return `About ${scoreHigherText(pct)} of ${group} ${subject} score higher.`;
+  return `About ${scoreHigherText(clampToTail(pct, tailLimit))} of ${group} ${subject} score higher.`;
+}
+
+/**
+ * Pull a percentile inside the band its sample can express, before any phrase
+ * is built from it. Undefined limit leaves it exactly as it was.
+ */
+function clampToTail(pct: number, tailLimit?: number): number {
+  if (!tailLimit || !Number.isFinite(pct)) return pct;
+  return Math.max(tailLimit, Math.min(100 - tailLimit, pct));
 }
 
 // The headline chip.
@@ -701,8 +716,13 @@ export function leverFor(m: ScoredMetric): Lever {
 // `statedPct` clamps to [1, 99], so "Bottom 0%" — the nonsense an earlier
 // separately-computed version printed for a face at the very bottom of the
 // reference set — is unreachable here by construction.
-function standing(pct: number): { top: boolean; pct: number } {
-  const shown = statedPct(pct);
+//
+// `tailLimit` is how far into a tail this particular reading is allowed to
+// name a band. It defaults to the front's settled behaviour and is widened
+// only for the side profile, whose repeatability is still open — see
+// SIDE_TAIL_LIMIT_PCT in engine/precision.ts for why.
+function standing(pct: number, tailLimit?: number): { top: boolean; pct: number } {
+  const shown = statedPct(pct, tailLimit);
   return shown < 50 ? { top: false, pct: shown } : { top: true, pct: 100 - shown };
 }
 
@@ -713,13 +733,13 @@ function standing(pct: number): { top: boolean; pct: number } {
 // version of the cards computed it separately and got a "Bottom 47%" sitting
 // directly beneath a "Top 53.4%" on the chart. Both were describing the same
 // face and one of them was arithmetically wrong.
-export function rankShort(pct: number): string {
-  const s = standing(pct);
+export function rankShort(pct: number, tailLimit?: number): string {
+  const s = standing(pct, tailLimit);
   return s.top ? `Top ${s.pct}%` : `Bottom ${s.pct}%`;
 }
 
-export function percentileLine(pct: number, sex: Sex): string {
-  const s = standing(pct);
+export function percentileLine(pct: number, sex: Sex, tailLimit?: number): string {
+  const s = standing(pct, tailLimit);
   const group = sex === "male" ? "men" : "women";
   return s.top ? `Top ${s.pct}% of ${group}` : `Bottom ${s.pct}% of ${group}`;
 }
