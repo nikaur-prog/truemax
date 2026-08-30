@@ -31,7 +31,8 @@ import { nutritionPlanHTML } from "./nutritionPlan.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
-import { EVIDENCE_LABEL, RECS, recsFor, productSearchUrl } from "../engine/recommendations.js";
+import { EVIDENCE_LABEL, RECS, buyGuideFor, recsFor, productSearchUrl } from "../engine/recommendations.js";
+import type { Rec } from "../engine/recommendations.js";
 import { loadVoiceCredits, startScanCreditCheckout, startVoiceCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
@@ -2775,6 +2776,37 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
     ["professional", "ASK SOMEONE", "The things worth paying a person for rather than guessing at."],
   ];
 
+
+// What to buy, named.
+//
+// This replaced a bare "Find it on Google" link, which was the point at which
+// the plan stopped being a plan. Searching "salicylic acid 2%" returns
+// chemistry, opinion pieces and forty bottles at four strengths, and the
+// person who most needed the recommendation is the one least able to pick from
+// that. Category first, then the number that has to be on the label, then
+// something that exists on a shelf, then which shelf.
+//
+// The search link stays underneath, and it stays a search rather than a
+// merchant: the example is an example, not the answer, and there is no
+// affiliate anywhere in this.
+function buyBlock(r: Rec): string {
+  const guide = buyGuideFor(r);
+  if (!guide) return "";
+  const url = productSearchUrl(r);
+  return `<div class="rec-buy">
+    <span class="rec-buy-h">WHAT TO BUY</span>
+    <b class="rec-buy-cat">${guide.category}</b>
+    <span class="rec-buy-strength">${guide.strength}</span>
+    <p class="rec-buy-eg">${guide.example}</p>
+    <p class="rec-buy-where"><i aria-hidden="true">◎</i>${guide.where}</p>
+    ${
+      url
+        ? `<a class="rec-find" href="${url}" target="_blank" rel="noopener noreferrer">Compare what is sold near you <span aria-hidden="true">↗</span></a>`
+        : ""
+    }
+  </div>`;
+}
+
   const sections = GROUPS.map(([g, label, blurb]) => {
     const items = recs.filter((r) => r.group === g);
     if (!items.length) return "";
@@ -2788,7 +2820,7 @@ function recsHTML(p: ReturnType<typeof loadProfile>): string {
         <span class="rec-what">${r.what}</span>
         <p>${r.detail}</p>
         ${r.caution ? `<span class="rec-caution">${r.caution}</span>` : ""}
-        ${productSearchUrl(r) ? `<a class="rec-find" href="${productSearchUrl(r)}" target="_blank" rel="noopener noreferrer">Find it on Google <span aria-hidden="true">↗</span></a>` : ""}
+        ${buyBlock(r)}
         ${recTrackHTML(r)}
       </div>`,
         )

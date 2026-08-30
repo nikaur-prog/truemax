@@ -75,18 +75,61 @@ export interface Rec {
   // "broad-spectrum SPF 30 sunscreen" finds bottles). Absent means the title
   // already is the product.
   search?: string;
+  // What to buy, named. Required on every topical that we say works; see
+  // BuyGuide above for why an example brand appears at all.
+  buy?: BuyGuide;
+}
+
+/**
+ * How to actually buy the thing.
+ *
+ * The recommendation used to end at a search box, which is the point at which
+ * a person is on their own: "Salicylic acid 2%" typed into Google returns
+ * chemistry, opinion pieces and forty products at forty strengths. Naming the
+ * category, the strength on the label, an example that exists on a shelf and
+ * which shelf it is on is the difference between advice and a plan.
+ *
+ * The brand in `example` is an EXAMPLE and the copy has to read as one. We are
+ * not paid by anyone, there is no affiliate link anywhere in this file, and
+ * `where` names a kind of shop rather than a merchant. The reason a name
+ * appears at all is that "an adapalene gel" is not findable by somebody who
+ * has never bought one, and sending them to a search box and calling that
+ * neutrality was helping nobody.
+ */
+export interface BuyGuide {
+  /** The generic thing, named first: "An adapalene gel". */
+  category: string;
+  /** What has to be on the label. The active and its strength, or the spec. */
+  strength: string;
+  /** Concrete and shelf-findable, always phrased as one option among several. */
+  example: string;
+  /** Which kind of shop, and anything about availability worth knowing first. */
+  where: string;
+}
+
+/**
+ * The buying guide for a recommendation, or null where there is nothing to buy.
+ *
+ * Null covers three cases and they are all deliberate: food, habits and
+ * professionals have no product; and a topical whose evidence is "none" has no
+ * buying guide either, because telling somebody a thing does not work and then
+ * showing them where to get it is the worst of both.
+ */
+export function buyGuideFor(rec: Rec): BuyGuide | null {
+  if (rec.group !== "topical" || rec.evidence === "none") return null;
+  return rec.buy ?? null;
 }
 
 /**
  * A Google search link for buying the thing — products only, and always a
- * search, never a merchant. We name generic actives, not brands, so the
- * honest link is "here is where to compare what's available where you live"
- * rather than an affiliate pointing at one shop. Non-product groups (food,
- * habits, professionals) return null: there is nothing to buy.
+ * search, never a merchant. We name generic actives, and an example only as an
+ * example, so the honest link is "here is where to compare what's available
+ * where you live" rather than an affiliate pointing at one shop. Non-product
+ * groups (food, habits, professionals) return null: there is nothing to buy.
  */
 export function productSearchUrl(rec: Rec): string | null {
   if (rec.group !== "topical") return null;
-  return `https://www.google.com/search?q=${encodeURIComponent(rec.search ?? rec.title)}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(rec.buy?.category ?? rec.search ?? rec.title)}`;
 }
 
 export const EVIDENCE_LABEL: Record<Evidence, string> = {
@@ -110,6 +153,13 @@ export const RECS: Rec[] = [
     detail:
       "The best-evidenced thing on this entire page, and the cheapest. Randomised trials show daily sunscreen measurably slows photoageing: the texture and pigment changes people later try to reverse.",
     otc: true,
+    buy: {
+      category: "A broad-spectrum face sunscreen",
+      strength: "SPF 30 or higher, with UVA protection stated on the label",
+      example:
+        "Supermarket and pharmacy own-brands pass the same tests as the expensive ones. Buy the texture you will actually wear every day, because the one you skip protects nothing.",
+      where: "Supermarket or pharmacy. The cheapest thing on this list.",
+    },
   },
   {
     id: "adapalene",
@@ -126,6 +176,13 @@ export const RECS: Rec[] = [
     otc: true,
     caution:
       "Over the counter in the US; pharmacist-only or prescription in the UK, EU, Australia and New Zealand, so ask a pharmacist what's available where you are. Retinoids are not for use in pregnancy.",
+    buy: {
+      category: "An adapalene gel",
+      strength: "0.1%, the only over-the-counter strength",
+      example:
+        "Sold as Differin in most places, and as pharmacy own-brand adapalene where it is stocked. A 45g tube lasts months.",
+      where: "Pharmacy. On the shelf in the US, at the counter in most other places.",
+    },
   },
   {
     id: "azelaic",
@@ -141,6 +198,13 @@ export const RECS: Rec[] = [
       "Gentler than a retinoid and works on both redness and the brown marks left behind after a breakout. Often the better first step if your skin reacts badly to things.",
     otc: true,
     caution: "Higher strengths (15–20%) are prescription in most countries.",
+    buy: {
+      category: "An azelaic acid cream, gel or suspension",
+      strength: "10%, which is the over-the-counter ceiling in most countries",
+      example:
+        "Several cosmetic ranges sell a 10% version, including The Ordinary and Paula's Choice. At this strength they are much the same thing.",
+      where: "Pharmacy or the skincare aisle. No prescription at 10%.",
+    },
   },
   {
     id: "salicylic",
@@ -154,6 +218,13 @@ export const RECS: Rec[] = [
     weeksToJudge: 8,
     detail: "Oil-soluble, so it reaches into blocked pores rather than just the surface. Best for congestion and blackheads.",
     otc: true,
+    buy: {
+      category: "A leave-on salicylic acid liquid, gel or toner",
+      strength: "2%, and leave-on rather than a face wash",
+      example:
+        "Sold as a BHA liquid or a blemish exfoliant. Paula's Choice 2% BHA is the long-standing one; CeraVe and The Ordinary sell cheaper 2% versions.",
+      where: "Pharmacy or the skincare aisle. A wash rinses off before it works, so check it says leave-on.",
+    },
   },
   {
     id: "benzoyl-peroxide",
@@ -169,6 +240,13 @@ export const RECS: Rec[] = [
       "Lower strengths can work with less irritation. Start slowly, follow the product label and give a mild breakout routine six to eight weeks before judging it.",
     otc: true,
     caution: "It can irritate skin and bleach towels, bedding and clothing. Stop and seek help for swelling or blistering.",
+    buy: {
+      category: "A benzoyl peroxide gel or wash",
+      strength: "2.5%, not the 5% or 10% next to it on the shelf",
+      example:
+        "Sold as PanOxyl 2.5% wash, and as pharmacy own-brand acne gel. The higher strengths beside it irritate more without working better.",
+      where: "Pharmacy or supermarket. Over the counter everywhere.",
+    },
   },
   {
     id: "niacinamide",
@@ -183,6 +261,13 @@ export const RECS: Rec[] = [
     detail:
       "Modest but real effects on redness and barrier function. Not a headline act, but it pairs well with the actives above rather than replacing them.",
     otc: true,
+    buy: {
+      category: "A niacinamide serum",
+      strength: "4 to 5%. Higher is not better and stings more",
+      example:
+        "Most ranges sell one. The Ordinary's is 10%, which is above where the evidence sits, so it is worth reading the percentage rather than the front of the bottle.",
+      where: "Pharmacy or the skincare aisle.",
+    },
   },
   {
     id: "derm",
@@ -211,6 +296,13 @@ export const RECS: Rec[] = [
     otc: true,
     caution:
       "If skin is cracked, weeping or painful, that is past what a moisturiser fixes, so see a pharmacist or doctor.",
+    buy: {
+      category: "A plain fragrance-free moisturising cream",
+      strength: "Fragrance-free, and a tub or pump rather than a lotion if the skin is dry",
+      example:
+        "Sold as CeraVe Moisturising Cream, Cetaphil, or a pharmacy own-brand emollient. The cheap tub often outperforms the expensive jar.",
+      where: "Pharmacy or supermarket. The word to look for is fragrance-free, not unscented.",
+    },
   },
   {
     id: "gentle-cleanse",
@@ -258,12 +350,19 @@ export const RECS: Rec[] = [
     goals: ["skin"],
     channel: "grooming",
     title: "Silicone for a raised healing scar",
-    what: "Silicone gel or sheets—not for indented acne scars",
+    what: "Silicone gel or sheets, not for indented acne scars",
     evidence: "moderate",
     weeksToJudge: 12,
     detail:
       "Silicone may help a raised healing scar. Indented, tethered or keloid-like scars need classification first because the useful procedures are different.",
     otc: true,
+    buy: {
+      category: "Medical silicone gel or silicone sheets",
+      strength: "100% silicone. Sheets for a flat area, gel where a sheet will not stay on",
+      example:
+        "Sold as Kelo-cote or Dermatix gel, and Mepiform or Cica-Care sheets.",
+      where: "Pharmacy. Ask at the counter, because it is often kept behind it rather than on a shelf.",
+    },
   },
   {
     id: "redness-triggers",
@@ -383,6 +482,13 @@ export const RECS: Rec[] = [
     weeksToJudge: 8,
     detail: "Spit, don't rinse. Rinsing washes away the fluoride you just applied. Costs nothing and outperforms everything else here.",
     otc: true,
+    buy: {
+      category: "Any fluoride toothpaste",
+      strength: "1350 to 1500 ppm fluoride, printed in small type on the back of the box",
+      example:
+        "Every mainstream brand qualifies, and so does supermarket own-brand. Children's toothpaste and some natural ranges are below this, which is the only thing worth checking.",
+      where: "Supermarket. Costs a couple of pounds or dollars.",
+    },
   },
   {
     id: "cheese",
@@ -410,6 +516,13 @@ export const RECS: Rec[] = [
     otc: true,
     caution:
       "Permitted peroxide concentration differs by country: the EU caps over-the-counter strength well below the US. Sensitivity is common and reverses when you stop.",
+    buy: {
+      category: "Peroxide whitening strips",
+      strength: "Hydrogen or carbamide peroxide, at whatever your country permits over the counter",
+      example:
+        "Sold as Crest 3D Whitestrips in the US, and by several other ranges at the same strength. The version on a UK or EU shelf is far weaker, because the permitted concentration there is a fraction of the US one.",
+      where: "Pharmacy or supermarket in the US. A dentist, in the countries where the over-the-counter strength is capped.",
+    },
   },
   {
     id: "dentist",
@@ -449,6 +562,13 @@ export const RECS: Rec[] = [
     start: "instant",
     detail: "Cosmetic and immediate. Salon or at-home kits both work; patch test first, because dye reactions are the common problem.",
     otc: true,
+    buy: {
+      category: "A brow tint kit, or a salon appointment",
+      strength: "A shade at or one step below your hair colour. Darker reads as drawn on",
+      example:
+        "Sold as RefectoCil or Godefroy kits for home use. A salon tint costs more and lasts about the same.",
+      where: "Pharmacy, beauty counter or salon. Patch test 48 hours ahead either way.",
+    },
   },
   {
     id: "brow-oils",
@@ -593,6 +713,13 @@ export const RECS: Rec[] = [
     otc: true,
     caution:
       "Gains reverse if you stop, so it is an ongoing commitment rather than a course. Formulations and recommended strength differ for women. Not for use in pregnancy. Ask a pharmacist.",
+    buy: {
+      category: "A topical minoxidil solution or foam",
+      strength: "5%. Foam if the solution's propylene glycol irritates your scalp",
+      example:
+        "Sold as Regaine or Rogaine, and as pharmacy own-brand minoxidil at a fraction of the price for the same active.",
+      where: "Pharmacy, over the counter in most countries. Ask at the counter rather than guessing the strength.",
+    },
   },
   {
     id: "keto-shampoo",
@@ -606,6 +733,13 @@ export const RECS: Rec[] = [
     detail:
       "Some evidence as an adjunct for scalp health and shedding. Cheap and low-risk, but a supporting act rather than a treatment.",
     otc: true,
+    buy: {
+      category: "A ketoconazole shampoo",
+      strength: "1%, which is the over-the-counter strength",
+      example:
+        "Sold as Nizoral, and as pharmacy own-brand anti-dandruff ketoconazole. Two or three washes a week is the usual pattern.",
+      where: "Pharmacy or supermarket.",
+    },
   },
   {
     id: "hair-damage",
@@ -633,6 +767,13 @@ export const RECS: Rec[] = [
       "Darker colour reads as more density at the same hair count, the same way brow tinting does. Bleaching does the reverse and damages the shaft.",
     otc: true,
     caution: "Patch test 48 hours ahead. Dye reactions are the common problem, and they can be severe.",
+    buy: {
+      category: "Box dye, or a salon appointment",
+      strength: "At or near your natural shade going darker. Bleach damages the shaft and thins what it lightens",
+      example:
+        "Any mainstream permanent or demi-permanent box dye. A salon costs more and is worth it if you are going more than a shade or two.",
+      where: "Supermarket or pharmacy for box dye. Patch test 48 hours ahead.",
+    },
   },
   {
     id: "hair-doctor",
@@ -661,6 +802,13 @@ export const RECS: Rec[] = [
     detail:
       "The best-evidenced over-the-counter option for raised scarring, and the one dermatologists reach for first. It needs months of daily use, and it does nothing for indented scars.",
     otc: true,
+    buy: {
+      category: "Medical silicone gel or silicone sheets",
+      strength: "100% silicone, used daily for months rather than weeks",
+      example:
+        "Sold as Kelo-cote or Dermatix gel, and Mepiform or Cica-Care sheets.",
+      where: "Pharmacy. Often behind the counter rather than on a shelf.",
+    },
   },
   {
     id: "scar-sun",

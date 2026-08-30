@@ -2146,6 +2146,36 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 /* Products only: a Google search for the generic active, never a merchant or a
    brand. Styled as a quiet utility link, not a buy button — the evidence label
    above it is the sell, this is just the door. */
+/* What to buy, named. The recommendation ended at a search link before this,
+   which is where a plan stopped being a plan: "salicylic acid 2%" typed into a
+   search box returns chemistry and forty bottles at four strengths. Set apart
+   from the reasoning above it, because this is the part you read standing in
+   the shop. */
+.rec-buy {
+  margin-top: 12px;
+  padding: 12px 14px 13px;
+  border-radius: 12px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+}
+.rec-buy-h {
+  display: block;
+  font: 600 9px var(--mono); letter-spacing: .17em;
+  color: var(--mut); margin-bottom: 6px;
+}
+.rec-buy-cat { display: block; font: 600 14.5px var(--sans); letter-spacing: -0.005em; }
+.rec-buy-strength {
+  display: block; font: 500 12px var(--mono);
+  color: var(--acc); margin-top: 3px;
+}
+.rec-buy-eg { font-size: 13px; line-height: 1.55; color: var(--ink); margin: 9px 0 0; }
+.rec-buy-where {
+  display: flex; gap: 7px; align-items: baseline;
+  font-size: 12.5px; line-height: 1.5; color: var(--mut); margin: 8px 0 0;
+}
+.rec-buy-where i { font-style: normal; color: var(--acc); flex: none; font-size: 10px; }
+.rec-buy .rec-find { margin-top: 11px; background: var(--card); }
+
 .rec-find {
   display: inline-flex; align-items: center; gap: 5px;
   margin-top: 9px; font-size: 12px; font-weight: 600;
