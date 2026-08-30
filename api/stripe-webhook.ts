@@ -1,3 +1,4 @@
+import { clickIdFrom, reportPurchase } from "./_attribution.js";
 import { getStripe, getSupabaseAdmin, json, safeMessage } from "./_shared.js";
 
 type StripeClient = ReturnType<typeof getStripe>;
@@ -196,6 +197,29 @@ export async function POST(request: Request): Promise<Response> {
           });
           if (error) throw new Error(`Voice credit grant failed: ${error.message}`);
         }
+      }
+
+      // The conversion, reported to whoever sold the click.
+      //
+      // AFTER fulfilment and deliberately outside its error path. Everything
+      // above either grants what somebody paid for or throws so Stripe retries;
+      // this is a reporting call to a third party, and a third party having a
+      // bad afternoon must not be able to make a paid scan fail to arrive. It
+      // returns a word instead of throwing, and the word is ignored.
+      //
+      // Awaited rather than fired and forgotten, because this runs in a
+      // serverless function that stops executing the moment the response is
+      // returned: an un-awaited fetch here is a fetch that usually never
+      // happens, which is the kind of bug that looks like poor ad performance
+      // for a month.
+      if (session.payment_status === "paid" && session.amount_total) {
+        await reportPurchase({
+          eventId: event.id,
+          ...clickIdFrom(session.metadata),
+          valueMinor: session.amount_total,
+          currency: session.currency ?? "usd",
+          occurredAt: event.created * 1000,
+        });
       }
     }
 

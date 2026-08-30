@@ -1,5 +1,6 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { SidePoints } from "./engine/sideMetrics.js";
+import { captureAttribution } from "./engine/attribution.js";
 import { detect, initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
@@ -401,6 +402,9 @@ function withSex(next: () => void): void {
 function paintSilhouette(): void {
   drawQuickSilhouette(el.silhouette, storedSex() ?? "male");
 }
+// Where this visit came from, read off the URL before anything else runs.
+// First touch wins and it expires; see engine/attribution.ts.
+captureAttribution();
 track("quick-visit");
 
 // Resolve the account before reading the persistent face library. IndexedDB is

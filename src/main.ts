@@ -1,4 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { captureAttribution } from "./engine/attribution.js";
 import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
@@ -264,6 +265,9 @@ markPlatform();
 // identical from a screenshot otherwise.
 const stamp = document.getElementById("build-stamp");
 if (stamp) stamp.textContent = __BUILD__;
+// Where this visit came from, read off the URL before anything else runs.
+// First touch wins and it expires; see engine/attribution.ts.
+captureAttribution();
 track("visit");
 
 if (import.meta.env.DEV) {

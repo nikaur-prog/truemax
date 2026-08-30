@@ -1,4 +1,5 @@
 import { currentAccessToken, getSupabaseClient } from "./auth.js";
+import { attributionForCheckout } from "./attribution.js";
 
 export type EntitlementTier = "free" | "starter" | "max";
 export type PaidTier = Exclude<EntitlementTier, "free">;
@@ -59,15 +60,24 @@ async function billingRedirect(path: string, payload?: unknown): Promise<Billing
   const accessToken = await currentAccessToken();
   if (!accessToken) return { ok: false, message: "Sign in before opening billing." };
 
+  // Where this person came from, attached at the last possible moment.
+  //
+  // Here rather than at any of the four call sites, because this is the single
+  // choke point every checkout passes through and a fifth product added later
+  // gets attribution without anybody remembering to wire it. The server does
+  // not trust any of it — see api/_attribution.ts.
+  const attribution = payload ? attributionForCheckout() : null;
+  const sent = attribution ? { ...(payload as object), attribution } : payload;
+
   try {
     const response = await fetch(path, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "X-Idempotency-Key": crypto.randomUUID(),
-        ...(payload ? { "Content-Type": "application/json" } : {}),
+        ...(sent ? { "Content-Type": "application/json" } : {}),
       },
-      ...(payload ? { body: JSON.stringify(payload) } : {}),
+      ...(sent ? { body: JSON.stringify(sent) } : {}),
     });
     const body = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
     if (!response.ok || !body?.url) {
