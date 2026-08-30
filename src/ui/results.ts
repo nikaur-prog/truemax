@@ -2314,7 +2314,7 @@ function showImprove(): void {
         <span class="because">Because you chose ${g.label.toLowerCase()}</span></div>`,
         )
         .join("")}
-      ${nutritionPlanHTML(r, { dietAdvice: profile.advice.diet, maxAccess })}
+      ${nutritionPlanHTML(r, { dietAdvice: profile.advice.diet, maxAccess, adult: adultUser })}
       ${macroPanelHTML({ sex: r.sex, dateOfBirth: birthDate, maxAccess, dietAdvice: profile.advice.diet })}
       ${recsHTML(profile)}
       ${maxAccess || gated ? "" : upsell()}`;
