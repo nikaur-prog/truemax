@@ -2505,10 +2505,45 @@ async function gateAnalysis(
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
         scanSession.claim(token, `user:${signedInUser.id}`);
+
+        // THE ACCOUNT IS READ BEFORE ANYTHING IS DECIDED ABOUT IT.
+        //
+        // Claiming the continuation above is what stops a double analysis, and
+        // it also took this path out from under resumePendingAfterAuth, which
+        // is the only other place ensureScanAllowed runs after a sign-in. The
+        // result was a way around both the weekly limit and the decline:
+        // capture signed out, sign in with a password at the wall, and answer
+        // a chooser that had consulted nothing but this device. On a phone the
+        // account had never used, the decline mirror is empty and the server
+        // was never asked, so a declined account got "It's me" back.
+        //
+        // refreshMaxAccess is the read: it fetches the entitlement and the
+        // decline stamp and settles both caches. It is also the call that was
+        // missing from authenticated startup generally, which is why a member
+        // who subscribed and came back on a full reload kept a stale decline
+        // lock until some later screen happened to refresh it.
+        await refreshMaxAccess();
+        if (!scanSession.isCurrent(token)) return;
+
+        // And now the gate, with a real tier behind it. Signed-out capture is
+        // allowed to run to the end precisely so this question can be asked
+        // once there is an account to ask it about; skipping it here made that
+        // design into the hole it was written to avoid.
+        if (!(await ensureScanAllowed(() => undefined))) {
+          // Refused. The capture stays in storage and the wall stays up, so
+          // buying a credit or waiting out the week finishes this scan rather
+          // than starting a new one. resumePendingStarted goes back down so
+          // the deferred path can pick it up when they return.
+          resumePendingStarted = false;
+          return;
+        }
+        if (!scanSession.isCurrent(token)) return;
+
         // The capture ran signed out, so nobody was ever asked whose face
         // this is — and the person signing in at the gate is not necessarily
         // the person in the photographs (an owner's expired session, a
-        // friend's scan). Attribution happens only after the answer.
+        // friend's scan). Attribution happens only after the answer, and only
+        // after the two reads above, so the chooser knows what it is offering.
         if (!(await askLateSubject())) return;
         startConsentedSideFeedback();
         await runFullAnalysis(sideReport, token);

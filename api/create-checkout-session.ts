@@ -137,45 +137,51 @@ export async function POST(request: Request): Promise<Response> {
     // nothing about the downsell existing.
     if (body?.purchase === "downsell") {
       const admin = getSupabaseAdmin();
-      const [{ data: ent, error: entitlementError }, { data: prof, error: profileError }] = await Promise.all([
-        admin
-          .from("entitlements")
-          .select("stripe_customer_id,status,tier")
-          .eq("user_id", user.id)
-          .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>(),
-        admin
-          .from("profiles")
-          .select("trial_declined_at,downsell_redeemed_at")
-          .eq("user_id", user.id)
-          .maybeSingle<{ trial_declined_at: string | null; downsell_redeemed_at: string | null }>(),
-      ]);
+      const { data: ent, error: entitlementError } = await admin
+        .from("entitlements")
+        .select("stripe_customer_id,status,tier")
+        .eq("user_id", user.id)
+        .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
       if (entitlementError) throw new Error(`Downsell pricing lookup failed: ${entitlementError.message}`);
       // A failed eligibility read REFUSES the offer rather than throwing.
       //
-      // The direction is the point: this endpoint hands out a discount, so an
-      // unreadable eligibility fact must mean "no offer", never a 500 and
-      // never the offer anyway. It also removes a deploy-order hazard that
-      // would otherwise be real. This branch reads downsell_redeemed_at, which
-      // arrives in its own migration; between a merge and that migration being
-      // applied the select would error, and every declining account would meet
-      // a server error instead of a closed offer. Closed is the honest answer
-      // in that window, and it is the same answer the person gets once the
-      // offer has genuinely been used.
-      if (profileError) {
+      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
+      // A member is refused before anything is claimed: they already have the
+      // thing this sells, and charging them for it because a stale tab offered
+      // it would be the worse outcome.
+      if (member) {
         return json({ error: "That offer is not available on this account." }, 403);
       }
-      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
-      // Three conditions, and the third is the one that makes this an offer
-      // rather than a tier. "Declined and not a member" both stay true
-      // forever, so without a redemption stamp a declined account could come
-      // back to this endpoint for every future scan and never pay the standard
-      // price again. The client sends a fresh idempotency key each time, so
-      // nothing deduplicated it either.
+
+      // CLAIMED, not checked.
       //
-      // A member is refused rather than quietly redirected to the standard
-      // price: they already have the thing this sells, and charging them for
-      // it because a stale tab offered it would be the worse outcome.
-      if (member || !prof?.trial_declined_at || prof.downsell_redeemed_at) {
+      // The first version read a redemption timestamp here and decided from
+      // it, which is read-then-act with a network round trip and a human
+      // paying in between. Two concurrent requests both read null, both got a
+      // discounted session, both were paid, and the second webhook stamp
+      // updated no row and reported success: two discounted purchases against
+      // a promise of one.
+      //
+      // claim_downsell does the whole test in a single UPDATE ... WHERE, so
+      // Postgres serialises the two callers on the row and exactly one of them
+      // gets true back. It also carries the "has declined" test, which is why
+      // the profile is not read separately any more: one statement decides,
+      // and there is no window between deciding and acting.
+      //
+      // A claim expires after 35 minutes, slightly outlasting the 31-minute
+      // Checkout Session below it, so abandoning a checkout gives the offer
+      // back but never while a payable session for it is still alive.
+      const { data: claimed, error: claimError } = await admin.rpc("claim_downsell", {
+        p_user_id: user.id,
+      });
+      // A failed claim REFUSES rather than throwing, in the direction every
+      // other check on this endpoint fails: this hands out a discount, so an
+      // unreadable eligibility fact must mean "no offer", never a 500 and
+      // never the offer anyway. It also removes a deploy-order hazard: between
+      // a merge and this migration being applied the RPC does not exist, and
+      // every declining account would otherwise meet a server error instead of
+      // a closed offer.
+      if (claimError || claimed !== true) {
         return json({ error: "That offer is not available on this account." }, 403);
       }
       const downsellPrice =
