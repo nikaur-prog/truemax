@@ -32,6 +32,9 @@ const CHECKED = [
   // back to a clear "not connected" message — so this reports false without
   // failing the check.
   "STRIPE_MAX_ANNUAL_PRICE_ID",
+  "STRIPE_SCAN_PRICE_ID",
+  "STRIPE_MEMBER_SCAN_PRICE_ID",
+  "STRIPE_VOICED_PRICE_ID",
   "TRUEMAX_APP_URL",
   "CRON_SECRET",
   "ANTHROPIC_API_KEY",
@@ -53,6 +56,9 @@ export function GET(request: Request): Response {
     STRIPE_STARTER_PRICE_ID: "STRIPE_PRICE_STARTER_MONTHLY",
     STRIPE_MAX_PRICE_ID: "STRIPE_PRICE_MAX_MONTHLY",
     STRIPE_MAX_ANNUAL_PRICE_ID: "STRIPE_PRICE_MAX_ANNUAL",
+    STRIPE_SCAN_PRICE_ID: "STRIPE_PRICE_EXTRA_SCAN_STANDARD",
+    STRIPE_MEMBER_SCAN_PRICE_ID: "STRIPE_PRICE_EXTRA_SCAN_MEMBER",
+    STRIPE_VOICED_PRICE_ID: "STRIPE_PRICE_VOICED_ANALYSIS",
   };
   const env: Record<string, boolean> = {};
   for (const name of CHECKED) {

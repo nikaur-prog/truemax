@@ -60,6 +60,27 @@ test("an existing server-stamped subscription survives a price replacement", () 
   assert.equal(result?.priceId, "price_grandfathered");
 });
 
+test("a Customer Portal upgrade follows the current price, not stale Checkout metadata", () => {
+  const result = entitlementFromSubscription(
+    subscription({
+      metadata: { supabase_user_id: "00000000-0000-0000-0000-000000000001", tier: "starter" },
+      items: { data: [{ price: { id: "price_max_live" }, current_period_end: 1_800_000_000 }] },
+    }) as never,
+    { STRIPE_MAX_PRICE_ID: "price_max_live" },
+  );
+  assert.equal(result?.tier, "max");
+});
+
+test("a Customer Portal downgrade also follows the current price", () => {
+  const result = entitlementFromSubscription(
+    subscription({
+      items: { data: [{ price: { id: "price_starter_live" }, current_period_end: 1_800_000_000 }] },
+    }) as never,
+    { STRIPE_STARTER_PRICE_ID: "price_starter_live" },
+  );
+  assert.equal(result?.tier, "starter");
+});
+
 test("unrelated Stripe subscriptions are ignored", () => {
   const result = entitlementFromSubscription(subscription({ metadata: {} }) as never);
   assert.equal(result, null);

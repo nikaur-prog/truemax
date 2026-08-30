@@ -84,20 +84,19 @@ test("rarity framing is never used to describe a below-median score", () => {
   }
 });
 
-test("above the median it still says how rare the reading is", () => {
+test("above the median stays directional rather than making the person a rarity claim", () => {
   for (let pct = 50; pct <= 100; pct += 0.5) {
     const line = populationLine(pct, "male", "profiles");
-    assert.match(line, /measure this way/, `${pct}: lost the rarity statement — "${line}"`);
+    assert.match(line, /score higher/, `${pct}: lost the population direction — "${line}"`);
+    assert.doesNotMatch(line, /\b1 in \d|measure this way|top \d+%/i, `${pct}: attached rarity to a person — "${line}"`);
   }
 });
 
-test("the two sides meet at the median without a gap or an overlap", () => {
-  // Exactly one of the two forms must apply at every percentile.
+test("every population line uses the same neutral direction", () => {
   for (let pct = 0; pct <= 100; pct += 0.25) {
     const line = populationLine(pct, "female", "faces");
-    const rare = /measure this way/.test(line);
-    const direction = /score higher/.test(line);
-    assert.ok(rare !== direction, `${pct}: produced ${rare && direction ? "both" : "neither"} form`);
+    assert.match(line, /score higher/, `${pct}: ${line}`);
+    assert.doesNotMatch(line, /measure this way|\b1 in \d/i, `${pct}: ${line}`);
   }
 });
 
@@ -171,8 +170,10 @@ test("the side chip and the sentence under it name the same band", () => {
     assert.doesNotMatch(line, /top 1%/, `${pct}: "${line}" under chip "${chip}"`);
     assert.doesNotMatch(line, /\b1 in 100\b/, `${pct}: "${line}" under chip "${chip}"`);
   }
-  // And the front, which passes no limit, is unchanged.
-  assert.match(populationLine(99.6, "male", "faces"), /top 1%/);
+  // The front passes no tail limit, but remains a directional position rather
+  // than turning the person into a rarity statement.
+  assert.match(populationLine(99.6, "male", "faces"), /score higher/);
+  assert.doesNotMatch(populationLine(99.6, "male", "faces"), /top 1%|\b1 in \d/i);
 });
 
 test("the three standing phrasings cannot drift apart", () => {

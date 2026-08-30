@@ -154,10 +154,13 @@ const el = () => ({
   swap: document.getElementById("side-swap") as HTMLButtonElement,
 });
 
-function renderSideCaptureCopy(copy: HTMLElement): void {
+function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"]): void {
+  const captureHelp = method === "upload"
+    ? "Choose a clear side-profile photo with your whole forehead and chin visible. Landscape and portrait photos are both accepted."
+    : "<b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two beeps, then a higher shutter beep. Space bar takes it immediately.";
   copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
     <p class="side-sub">Second of two. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
-    <p class="side-sub"><b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two beeps, then a higher shutter beep. Space bar takes it immediately.</p>
+    <p class="side-sub">${captureHelp}</p>
     <p class="side-sub">Afterwards, TrueMax places thirteen points for you to review. If any missed, choose edit and drag only those points before confirming.</p>`;
 }
 
@@ -232,7 +235,7 @@ export function openSideCapture(ctx: SideCtx): void {
   // by mountVerify; nothing else may show it, or it sits under a real face.
   e.frame.classList.add("awaiting");
   e.lines.replaceChildren();
-  renderSideCaptureCopy(e.panelCopy);
+  renderSideCaptureCopy(e.panelCopy, ctx.method);
 
   // The side matches how the front was taken. Shot the front on camera → open
   // the profile camera straight away; uploaded it → offer only the file drop.

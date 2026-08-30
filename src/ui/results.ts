@@ -27,7 +27,7 @@ import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
 import type { CeilingInput } from "./ceilingCta.js";
-import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
+import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { nutritionPlanHTML } from "./nutritionPlan.js";
 import { macroPanelHTML, wireMacroPanel } from "./macroPanel.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
@@ -2003,9 +2003,7 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
 }
 
 function rarityLine(r: RegionScore): string {
-  return r.percentile >= 50
-    ? `Roughly <b>${rarityText(r.percentile)}</b> faces measure this well across the ${REGION_NAMES[r.region].toLowerCase()}.`
-    : `About <b>${scoreHigherText(r.percentile)}</b> of faces score higher here, and the drill-down above shows exactly why.`;
+  return `About <b>${scoreHigherText(r.percentile)}</b> of faces score higher here, and the drill-down above shows exactly why.`;
 }
 
 // Hovering a measurement row draws that exact measurement on the face. A number

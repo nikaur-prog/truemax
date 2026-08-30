@@ -1,7 +1,20 @@
-import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import {
+  authenticatedUser,
+  getStripe,
+  getSupabaseAdmin,
+  json,
+  requestOrigin,
+  safeMessage,
+  stripeSubscriptionForUser,
+} from "./_shared.js";
 
 interface ExistingEntitlement {
-  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+}
+
+function objectId(value: { id: string } | string | null): string | null {
+  if (!value) return null;
+  return typeof value === "string" ? value : value.id;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -14,14 +27,19 @@ export async function POST(request: Request): Promise<Response> {
 
     const { data, error } = await getSupabaseAdmin()
       .from("entitlements")
-      .select("stripe_customer_id")
+      .select("stripe_subscription_id")
       .eq("user_id", user.id)
       .maybeSingle<ExistingEntitlement>();
     if (error) throw new Error(`Entitlement storage is unavailable: ${error.message}`);
-    if (!data?.stripe_customer_id) return json({ error: "No Stripe subscription is linked to this account." }, 404);
+    const subscription = await stripeSubscriptionForUser(user.id, data?.stripe_subscription_id);
+    // Only a subscription whose server-stamped metadata matches this identity
+    // may name the Customer Portal target. A projected Customer id alone is
+    // not enough evidence to expose invoices and payment methods.
+    const customerId = objectId(subscription?.customer ?? null);
+    if (!customerId) return json({ error: "No Stripe subscription is linked to this account." }, 404);
 
     const session = await getStripe().billingPortal.sessions.create({
-      customer: data.stripe_customer_id,
+      customer: customerId,
       return_url: `${origin}/`,
     });
     return json({ url: session.url });

@@ -15,6 +15,52 @@ export function getStripe(): Stripe {
   return stripeClient;
 }
 
+/**
+ * Resolve the Stripe subscription that belongs to one Supabase identity.
+ *
+ * Entitlements are a webhook-fed projection, so they can be stale at the
+ * exact moment Checkout has to decide whether an account already owns a plan.
+ * Prefer the exact linked subscription, then repair a missing link from the
+ * user id stamped by the server when Checkout created the subscription.
+ */
+export async function stripeSubscriptionForUser(
+  userId: string,
+  knownSubscriptionId?: string | null,
+): Promise<Stripe.Subscription | null> {
+  const openStatuses = new Set<Stripe.Subscription.Status>([
+    "active",
+    "trialing",
+    "past_due",
+    "unpaid",
+    "paused",
+    "incomplete",
+  ]);
+  let known: Stripe.Subscription | null = null;
+  if (knownSubscriptionId) {
+    try {
+      const candidate = await getStripe().subscriptions.retrieve(knownSubscriptionId);
+      if (candidate.metadata.supabase_user_id === userId) {
+        known = candidate;
+        if (openStatuses.has(candidate.status)) return candidate;
+      }
+    } catch {
+      // A deleted or replaced link can still be repaired from server metadata.
+    }
+  }
+
+  const result = await getStripe().subscriptions.search({
+    query: `metadata['supabase_user_id']:'${userId}'`,
+    limit: 20,
+  });
+  const searched = result.data
+    .filter((subscription) => subscription.metadata.supabase_user_id === userId)
+    .sort((a, b) => {
+      const statusOrder = Number(openStatuses.has(b.status)) - Number(openStatuses.has(a.status));
+      return statusOrder || b.created - a.created;
+    })[0] ?? null;
+  return searched ?? known;
+}
+
 export function getSupabaseAdmin(): SupabaseClient {
   if (!adminClient) {
     adminClient = createClient(
@@ -44,6 +90,11 @@ export function requestOrigin(request: Request): string | null {
   const requestUrl = new URL(request.url);
   const origin = request.headers.get("origin");
   if (origin && origin !== requestUrl.origin) return null;
+
+  // A same-origin browser request identifies the exact deployment that opened
+  // Checkout. Forcing the configured production URL here made every Preview
+  // checkout return into production, defeating safe sandbox verification.
+  if (origin) return origin;
 
   const configured = process.env.TRUEMAX_APP_URL;
   if (!configured) return requestUrl.origin;

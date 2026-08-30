@@ -15,7 +15,6 @@ import {
 } from "../engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
 import { renderAuthForm } from "./authForm.js";
-import { scoreTone } from "./scoreTone.js";
 import type { AuthMode } from "./authForm.js";
 import { announceMembershipBrand } from "./membershipBrand.js";
 import { openTrialFunnel } from "./onboardingFunnel.js";
@@ -45,22 +44,17 @@ export interface OpenAccountOptions {
   initialMode?: AuthMode;
   reason?: "account" | "analysis";
   /**
-   * The computed-but-locked result, shown INSIDE the modal as a blurred chip.
-   *
-   * The gate already blurs the full result behind this dialog, and on a phone
-   * the dialog covers all of it — so at the exact moment somebody is asked to
-   * type an email, the thing they would be typing it FOR is invisible. The
-   * chip is the same promise at the same fidelity as the preview underneath:
-   * the real number, unreadable, present.
+   * The computed-but-locked result shell shown inside the modal. It carries
+   * the visitor's local thumbnails and region labels, but no score-derived
+   * value, colour or position before authentication.
    */
   teaser?: {
-    overall: number;
     regionCount: number;
     /** The two captured photographs, as small data URLs. */
     front?: string | null;
     side?: string | null;
-    /** Region label and score, in report order. */
-    regions?: ReadonlyArray<{ label: string; score: number }>;
+    /** Region labels in report order. */
+    regions?: ReadonlyArray<{ label: string }>;
   };
   onAuthenticated?: (user: User) => void | Promise<void>;
   onDeferred?: () => void | Promise<void>;
@@ -76,25 +70,10 @@ export interface OpenAccountOptions {
  * the box read as decoration on a paywall rather than as their own result
  * sitting behind it.
  *
- * So it shows the thing. Their two photographs, the number under them, and
- * the eight region scores as a grid. Three different treatments, and each one
- * is deliberate:
- *
- *   the faces   lightly blurred — enough to read as locked, not so much that
- *               you cannot recognise your own head, which is the whole point
- *   the score   heavily blurred, and COLOURED
- *   the grid    heavily blurred, and coloured
- *
- * The colour is what makes this work. Blur destroys the digits and leaves the
- * hue completely intact, so somebody sees a green number over a grid of mostly
- * green cells with two amber ones, and knows precisely how much they want to
- * read it. That is a real tease rather than a grey rectangle claiming to be
- * one — and it gives nothing away that is not already theirs, on their own
- * device, computed before the dialog opened.
- *
- * aria-hidden and inert throughout: a screen reader announcing the real digits
- * would unblur the whole thing for exactly the people the blur is meant to
- * treat the same as everybody else.
+ * It now shows their two photographs and the shape of the result without putting
+ * a measurement in the DOM. CSS blur is presentation, not access control:
+ * exact digits, score-derived colours and a score-positioned ladder marker
+ * could all be recovered before authentication even when they looked hidden.
  */
 function teaserMarkup(t: NonNullable<OpenAccountOptions["teaser"]>): string {
   const face = (src: string | null | undefined, label: string) =>
@@ -103,8 +82,8 @@ function teaserMarkup(t: NonNullable<OpenAccountOptions["teaser"]>): string {
   const grid = (t.regions ?? [])
     .slice(0, 8)
     .map(
-      (r) => `<div class="acct-cell tone-${scoreTone(r.score)}">
-        <span>${r.label}</span><b>${r.score.toFixed(1)}</b>
+      (r) => `<div class="acct-cell">
+        <span>${r.label}</span><b>•••</b>
       </div>`,
     )
     .join("");
@@ -117,15 +96,13 @@ function teaserMarkup(t: NonNullable<OpenAccountOptions["teaser"]>): string {
   // more than one rung. Same contract as the score itself, which leaks its
   // colour and keeps its digits.
   const rungs = Array.from({ length: 9 }, (_, i) => `<i style="--i:${i}"></i>`).join("");
-  const at = Math.max(0, Math.min(8, Math.round((t.overall / 10) * 8)));
-
   return `<aside class="acct-teaser measuring" aria-hidden="true" inert>
     <span class="acct-teaser-k"><i class="acct-dot"></i><span class="acct-k-run">MEASURING ON THIS DEVICE</span><span class="acct-k-done">YOUR SCAN · MEASURED ON THIS DEVICE</span></span>
     ${faces ? `<div class="acct-faces">${faces}<span class="acct-sweep"></span></div>` : ""}
-    <div class="acct-teaser-score tone-${scoreTone(t.overall)}">
-      <b>${t.overall.toFixed(1)}</b><small>/10</small>
+    <div class="acct-teaser-score">
+      <b>•••</b><small>/10</small>
     </div>
-    <div class="acct-ladder" style="--at:${at}">${rungs}<span class="acct-mark"></span></div>
+    <div class="acct-ladder">${rungs}</div>
     ${grid ? `<div class="acct-cells">${grid}</div>` : ""}
     <em>${t.regionCount} regions measured. It unlocks the moment you are in.</em>
   </aside>`;
@@ -142,9 +119,8 @@ function teaserMarkup(t: NonNullable<OpenAccountOptions["teaser"]>): string {
  * regions cascade in, then the line underneath.
  *
  * The work is genuinely already done, on their device, before this dialog
- * opened, so the pause is theatre and is kept short. It is honest theatre in
- * the sense that every number it settles on is the real one; it is not a fake
- * progress bar waiting on a server.
+ * opened, so the pause is theatre and is kept short. The locked shell settles
+ * onto placeholders; authenticated results are the first place values appear.
  */
 export function playTeaserReveal(root: ParentNode): void {
   const teaser = root.querySelector<HTMLElement>(".acct-teaser");

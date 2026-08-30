@@ -379,13 +379,13 @@ const LADDER: Array<{
     // percentile apart reading the same label is the ladder failing at the one
     // job it has.
     kind: {
-      male: ["Remarkable", "Genuinely rare"],
-      female: ["Remarkable", "Genuinely rare"],
+      male: ["Remarkable", "Near the ceiling"],
+      female: ["Remarkable", "Near the ceiling"],
     },
     polite: { male: ["Very good"], female: ["Very good"] },
     descriptor: { male: "a very good-looking male", female: "a very good-looking female" },
     tone: "peak",
-    line: "Top five per cent of the reference set. One rung left, and almost nobody reaches it.",
+    line: "Near the ceiling of the scale, with one rung left.",
   },
   {
     // The top one per cent, and deliberately its own rung rather than an
@@ -398,11 +398,11 @@ const LADDER: Array<{
     // named a rarity, and a verdict word handed to a person is exactly where
     // CLAUDE.md says a rarity may not go. "Genuinely rare" already sits on the
     // rung below, so this reaches for the ceiling instead of the frequency.
-    kind: { male: ["As high as the scale goes"], female: ["As high as the scale goes"] },
+    kind: { male: ["At the ceiling"], female: ["At the ceiling"] },
     polite: { male: ["Top of the scale"], female: ["Top of the scale"] },
     descriptor: { male: "a male at the top of the scale", female: "a female at the top of the scale" },
     tone: "peak",
-    line: "Top one per cent. There is nothing above this: the scale ends here.",
+    line: "There is nothing above this: the scale ends here.",
   },
 ];
 

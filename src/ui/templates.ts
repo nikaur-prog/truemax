@@ -257,9 +257,7 @@ export function regionSummary(
   // faces, the ranking is a ranking of the lighting.
   const s3 = !scored
     ? `Here's why: every measurement in your ${name} moves about as much between two photos of the same face as it does between two different people. There's nothing steady enough there to rank, so I'm not giving it a score and I'm keeping it out of your total. You still get the readings.`
-    : r.percentile >= 50
-      ? `All in, that's ${r.score.toFixed(1)} out of 10 across the ${name}. Roughly ${rarityText(r.percentile)} ${sexNoun(sex)} faces measure this well.`
-      : `All in, ${r.score.toFixed(1)} out of 10 across the ${name}. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces come in above you, and you now know the exact number standing in the way. Most people never get told that.`;
+    : `All in, ${r.score.toFixed(1)} out of 10 across the ${name}. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces come in above you, and you now know the exact number standing in the way. Most people never get told that.`;
 
   return `${s1} ${s2} ${s3}`;
 }
@@ -314,15 +312,9 @@ export const rarityText = rarityPhrase;
 // direction.
 export function populationLine(pct: number, sex: Sex, subject: string, tailLimit?: number): string {
   const group = sexNoun(sex);
-  if (pct >= 50) {
-    // `tailLimit` matters here and was missed when it was added to the chip.
-    // rarityText says "the top 1%" past the resolution cap, so a side profile
-    // printed "Top 10%" in the chip and "the top 1%" in the sentence directly
-    // underneath it — the same face, two bands, one of them a claim the side
-    // sample cannot support. Clamping the percentile before it reaches the
-    // phrase keeps both readings on the same number.
-    return `Roughly ${rarityText(clampToTail(pct, tailLimit))} ${group} ${subject} measure this way.`;
-  }
+  // Directional position is useful; turning the same percentile into "1 in
+  // N" makes the person's face the rarity claim. The scale explainer may teach
+  // the curve with counts, but a report says only how many score higher.
   return `About ${scoreHigherText(clampToTail(pct, tailLimit))} of ${group} ${subject} score higher.`;
 }
 
