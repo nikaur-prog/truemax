@@ -28,6 +28,7 @@ import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, rarityText, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { nutritionPlanHTML } from "./nutritionPlan.js";
+import { macroPanelHTML, wireMacroPanel } from "./macroPanel.js";
 import { stopTypewriter, typewrite } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
@@ -2313,6 +2314,7 @@ function showImprove(): void {
         )
         .join("")}
       ${nutritionPlanHTML(r, { dietAdvice: profile.advice.diet, maxAccess })}
+      ${macroPanelHTML({ sex: r.sex, dateOfBirth: birthDate, maxAccess, dietAdvice: profile.advice.diet })}
       ${recsHTML(profile)}
       ${maxAccess || gated ? "" : upsell()}`;
 
@@ -2348,6 +2350,21 @@ function showImprove(): void {
   // painted from the cached front capture rather than re-read from the live
   // canvas, which by now may be showing the side profile.
   paintCeilingCta(body(), frontPhoto);
+
+  // Only the live copy. A gated plan renders the same markup twice, once behind
+  // the blur, and wiring the blurred one would put a working form inside a lock
+  // and a second element sharing every id with the real one.
+  const macros = gated
+    ? null
+    : body().querySelector<HTMLElement>(".panel.mac");
+  if (macros) {
+    wireMacroPanel(macros, {
+      sex: r.sex,
+      dateOfBirth: birthDate,
+      maxAccess,
+      dietAdvice: profile.advice.diet,
+    });
+  }
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
   document.getElementById("btn-again")!.onclick = () => {
@@ -2445,6 +2462,15 @@ export function setAdult(value: boolean): void {
   syncMaxSurfaces();
 }
 
+// The date of birth behind that flag, kept because the macro calculator's age
+// gate reads a DATE rather than a boolean. Null until a profile loads, and null
+// closes the gate: same direction as adultUser, for the same reason.
+let birthDate: string | null = null;
+
+export function setBirthDate(value: string | null): void {
+  birthDate = value && value.trim() ? value.trim() : null;
+}
+
 // What this account can currently see. Defaults to "rating" — the safe
 // direction, same reasoning as maxAccess: a failed entitlement read shows a
 // wall to a paying customer, who can retry, rather than handing the paid
@@ -2469,6 +2495,11 @@ export function clearResultsIdentityState(): void {
   // the thing the detail card was opened FROM.
   closeMetricDetail();
   closePillarSheet();
+  // The macro panel's age gate keys off this, and a stale date across an
+  // account change is exactly the kind of thing that opens an 18+ surface to
+  // the wrong person. The body itself is stored under the account's own key,
+  // so it does not need clearing; the date does.
+  birthDate = null;
   ctx = null;
   maxAccess = false;
   adultUser = false;

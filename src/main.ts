@@ -27,7 +27,7 @@ import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
-import { clearResultsIdentityState, renderResults, setAdult, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
+import { clearResultsIdentityState, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
@@ -996,6 +996,9 @@ async function ensureOnboarded(user: User): Promise<void> {
   knownAdult = profileIsAdult(profile);
   knownFirstName = profile.firstName?.trim() || null;
   setAdult(knownAdult);
+  // The macro calculator's gate reads the date rather than the flag, because an
+  // age it derives itself cannot be a tick box somebody set.
+  setBirthDate(profile.dateOfBirth ?? null);
   if (onboardingComplete(profile)) return;
   await openTrialFunnel(user, undefined, { required: true });
 }
