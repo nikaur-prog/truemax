@@ -30,7 +30,10 @@ const PG_BIN = ["/usr/lib/postgresql/16/bin", "/usr/lib/postgresql/15/bin", "/us
     }
   });
 
-const PORT = 55433;
+// Derived from the pid rather than fixed, so two runs on one machine do not
+// collide on the socket. Range chosen to stay well clear of the default 5432
+// and of anything a developer is likely to have bound.
+const PORT = 55000 + (process.pid % 900);
 let dir = "";
 let ready = false;
 
@@ -82,7 +85,22 @@ test.before(() => {
       asUser(`${PG_BIN}/pg_ctl -D ${dir} -o "-k /tmp -p ${PORT} -c listen_addresses=''" -l ${dir}/log start`),
       { stdio: "ignore" },
     );
-    execSync("sleep 2");
+    // POLLED, NOT SLEPT. A fixed wait is a coin flip on a loaded or slow
+    // machine: too short and every test in the file fails for a reason that has
+    // nothing to do with the SQL, which is the most expensive kind of flake
+    // because it looks like a real regression.
+    let up = false;
+    for (let attempt = 0; attempt < 40 && !up; attempt++) {
+      try {
+        execFileSync("psql", ["-h", "/tmp", "-p", String(PORT), "-U", "postgres", "-tAc", "select 1"], {
+          stdio: "pipe",
+        });
+        up = true;
+      } catch {
+        execSync("sleep 0.25");
+      }
+    }
+    if (!up) throw new Error(`postgres did not accept connections on port ${PORT}`);
 
     // The COMMITTED migrations, not a paraphrase of them. The base file carries
     // the table and the original functions; the Studio file is the change under
