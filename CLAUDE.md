@@ -54,7 +54,21 @@ Marlon level.
 
 ## Claims
 
-- Never print a rarity claim the data cannot support. **"1 in N" is never said.**
+- Never print a rarity claim the data cannot support. **A rarity is never stated
+  about a PERSON**: no scan, report, video or export tells somebody how rare
+  their own face is. "1 in every 100 guys is below you" is the sentence this
+  bars, and `templates.ts` has named it as the thing to avoid since the
+  percentile work.
+- The scale note's ladder is the one place a count appears, and it is not about
+  anybody. It explains what the rungs of the curve mean before a person has
+  seen their own number. It is derived from the curve rather than typed
+  (`LADDER` in `rarity.ts`), it reads the STATED percentile so it agrees with
+  every other figure in the product, and it stops at 8 because roughly a
+  hundred reference faces per sex cannot resolve a rung past it. Raw floored
+  values were tried there and reverted at the owner's call: they read 1 in
+  2 / 4 / 16 / 90, which is more accurate and materially harder to hold in your
+  head, and a rung nobody parses teaches nothing. If the reference set grows,
+  the ladder grows a real rung on its own.
 - `fwhr` is excluded from the videos: its measured reliability is 0.00.
 - Percentiles and repeatability claims stay inside what the sample supports; see
   `docs/SCORING_VALIDATION.md`.
