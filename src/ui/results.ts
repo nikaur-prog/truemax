@@ -251,7 +251,7 @@ export function renderResults(c: Ctx): void {
   buildTabs("front");
   // The initial mount does not scroll: main.ts owns where the page sits when
   // the results arrive, and a second scroll from here would fight it.
-  select("overall", undefined, { scroll: false });
+  select("overall", undefined, { silent: true });
 }
 
 // Which half of the scan the tab row is currently describing.
@@ -558,13 +558,26 @@ function scrollReportToTop(): void {
 }
 
 /**
- * `scroll` is opt-out rather than opt-in because every caller that is a person
- * pressing something wants it, and the two that do not are both the initial
- * mount — where the page has just been built and moving it would fight the
- * scroll main.ts does when the results arrive.
+ * `silent` marks a select that no person asked for: the initial mount, and the
+ * repaint when a late entitlement read lands. Two behaviours hang off it, and
+ * both would be wrong on a programmatic call.
+ *
+ * It must not SCROLL, because the page position belongs to whoever set it.
+ * And it must not open the OFFER: the plan tab is walled, so a person pressing
+ * it is asking to see the offer, while an entitlement read resolving under an
+ * already-open plan tab is not — that one would fire a paywall at somebody who
+ * pressed nothing.
  */
-function select(id: string, forceView?: "front" | "side", opts: { scroll?: boolean } = {}): void {
+function select(id: string, forceView?: "front" | "side", opts: { silent?: boolean } = {}): void {
   if (!ctx) return;
+  // The wall. Measurement is free and coaching is paid, so this is the single
+  // door the plan is behind — the tab, the lead button, the support row and
+  // "See my current plan" all arrive here, and gating the door rather than the
+  // four handles is why there is nothing to keep in step.
+  if (id === "improve" && depth !== "plan" && !opts.silent) {
+    ctx.onUpgrade?.();
+    return;
+  }
   stopTypewriter();
   // Leaving Coach Max's read is the signal that the first read is over —
   // which is what arms the pet's entrance (ten seconds later, from the edge).
@@ -604,7 +617,7 @@ function select(id: string, forceView?: "front" | "side", opts: { scroll?: boole
   else showRegion(id as RegionId);
   // After the new panel exists, not before: scrolling to a rail that is about
   // to be re-measured under fresh content lands in the wrong place.
-  if (opts.scroll !== false) scrollReportToTop();
+  if (!opts.silent) scrollReportToTop();
 }
 
 // Which region the overlay is currently lit for, so a transition knows what it
@@ -2092,9 +2105,14 @@ function showImprove(): void {
       </div>`
     : "";
 
-  // Whether this account is past its free allowance — decided up front because
-  // it changes what goes INTO the plan body, not just what covers it.
-  const gated = depth === "rating";
+  // Whether the plan is walled for this account — decided up front because it
+  // changes what goes INTO the plan body, not just what covers it.
+  //
+  // The wall is at "plan" now rather than at "rating". Reaching this function
+  // walled should be rare, since select() sends a person pressing Plan to the
+  // offer instead; this covers the paths that arrive without a press, such as
+  // an entitlement lapsing while the tab is already open.
+  const gated = depth !== "plan";
 
   // The percentile translation sits beside the ceiling everywhere the ceiling
   // appears. On a PSL-shaped scale a 7 reads as "a bit above average" to
@@ -2276,11 +2294,16 @@ export function setAdult(value: boolean): void {
   syncMaxSurfaces();
 }
 
-// What this account can currently see. Defaults to "rating" — the safe
-// direction, same reasoning as maxAccess: a failed entitlement read shows a
-// wall to a paying customer, who can retry, rather than handing the paid
-// product to everyone during an outage.
-let depth: Depth = "rating";
+// What this account can currently see. Defaults to "depth" — which is both the
+// safe direction and the free floor, since the measurements are free to
+// everyone and the wall is at the plan.
+//
+// It defaulted to "rating" while depth was the thing being sold, and leaving
+// it there would now open every report with a flash of blurred region tabs
+// that unblur a moment later, for content nobody is being charged for. The
+// property that still matters is unchanged: a failed entitlement read must
+// never land on "plan".
+let depth: Depth = "depth";
 let scansLeft = 0;
 
 // Account changes are a harder boundary than a new photograph. Late profile
@@ -2299,7 +2322,7 @@ export function clearResultsIdentityState(): void {
   maxAccess = false;
   adultUser = false;
   pathway = "build";
-  depth = "rating";
+  depth = "depth";
   scansLeft = 0;
   unmountMaxPet();
 }
@@ -2318,10 +2341,7 @@ export function setMaxAccess(value: boolean): void {
 export function setPathwayState(next: PathwayState): void {
   if (next === pathway) return;
   pathway = next;
-  for (const id of ["btn-continue", "sn-continue"]) {
-    const span = document.getElementById(id)?.querySelector("span");
-    if (span) span.textContent = pathwayLabel();
-  }
+  paintPathwayLabels();
   // "See your plan" in the support row goes to the same tab as the lead
   // button now does, and two buttons for one destination is how the row got
   // confusing in the first place. Drop the duplicate rather than render it.
@@ -2332,7 +2352,22 @@ export function setPathwayState(next: PathwayState): void {
 }
 
 function pathwayLabel(): string {
-  return pathway === "plan" ? "See my current plan" : "Build my pathway";
+  // Being signed in is not the same as having a plan. `pathway` only knows
+  // whether there is an account, so on its own it put "See my current plan" in
+  // front of free accounts that have never had one — a label that promises
+  // something the press cannot deliver, which is exactly the kind of small lie
+  // that makes the offer behind it feel like a trick rather than an offer.
+  // "Build my pathway" is true for them, and the offer is what building it
+  // costs.
+  return pathway === "plan" && depth === "plan" ? "See my current plan" : "Build my pathway";
+}
+
+/** The one writer for the lead button's words, shared by both late reads. */
+function paintPathwayLabels(): void {
+  for (const id of ["btn-continue", "sn-continue"]) {
+    const span = document.getElementById(id)?.querySelector("span");
+    if (span) span.textContent = pathwayLabel();
+  }
 }
 
 // Read at click time, never captured at render time. The label is painted
@@ -2379,11 +2414,16 @@ export function setDepth(next: Depth, remainingFreeScans = 0): void {
   scansLeft = remainingFreeScans;
   if (next === depth) return;
   depth = next;
+  // The label reads both `pathway` and `depth`, so whichever of the two late
+  // reads lands second has to repaint it. This one used not to, which left a
+  // Max account whose entitlement resolved after its session still being
+  // offered "Build my pathway" for a plan it had already paid for.
+  paintPathwayLabels();
   const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
   // Re-selects the tab already open, to repaint it now that the entitlement
   // is known. Nobody pressed anything, so nothing may move: a late network
   // read is not allowed to yank the page out from under someone mid-sentence.
-  if (open) select(open.dataset.id || "overall", undefined, { scroll: false });
+  if (open) select(open.dataset.id || "overall", undefined, { silent: true });
 }
 
 // Wraps in-depth content in a blur with an unlock card over it.

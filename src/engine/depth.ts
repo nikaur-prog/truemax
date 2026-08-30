@@ -67,13 +67,30 @@ export function depthFor({ entitlement, scanCount, credits = 0, admin = false }:
   const tier = tierOf(entitlement);
   if (tier === "max") return "plan";
   if (tier === "starter") return "depth";
-  // The free allowance. Scans are zero-indexed from the account's history, so
-  // "has run fewer than two" is the first and second scan.
-  if (scanCount < TRIAL_SCANS) return "depth";
-  // A purchased credit is exactly one more scan of the same depth the
-  // allowance gave. It does not touch the plan tier — that is Max's.
-  if (credits > 0) return "depth";
-  return "rating";
+  // A free account keeps the measurements. Forever, on every scan.
+  //
+  // This used to expire: two scans at "depth", then "rating" — the score alone,
+  // with the region tabs behind a blur. The line has moved, and the new one is
+  // easier to say and harder to resent: MEASUREMENT IS FREE, COACHING IS PAID.
+  //
+  // The argument for it is the product's own pitch. "We show the actual maths"
+  // cannot be true on a screen that hides the maths, and the geometry is also
+  // the thing that gets screenshotted and shared, which is the loop that
+  // brings people in at all. What somebody actually pays for is being told
+  // what to DO about it, which is the plan, and that is now walled from the
+  // first scan rather than the third.
+  //
+  // `scanCount` no longer decides depth. It is still an input because the
+  // allowance in scanAllowance.ts uses it, and because a caller passing it
+  // here is asking a question this function should keep answering the same way
+  // however the trial is later counted.
+  void scanCount;
+  // A purchased credit predates the change and still buys what it was sold as:
+  // one scan at full depth without a subscription. Now that depth is free the
+  // grant is a no-op for anyone holding one, which is the right direction for
+  // a credit to fail in.
+  void credits;
+  return "depth";
 }
 
 export function canSeeDepth(input: AccessInput): boolean {
