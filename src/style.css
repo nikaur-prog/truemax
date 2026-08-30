@@ -3348,6 +3348,18 @@ body.auth-modal-open { overflow: hidden; }
   padding: 10px 12px; margin: 0 0 14px; border-radius: 11px;
   background: var(--acc-soft); color: var(--ink); font-size: 12.5px; line-height: 1.45;
 }
+.purchase-notice {
+  position: fixed; z-index: 500; left: 50%; bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%); width: min(92vw, 540px); display: flex; align-items: center;
+  gap: 10px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--acc) 34%, var(--line));
+  border-radius: 14px; background: rgba(255,255,255,.97); color: var(--ink);
+  box-shadow: 0 16px 50px rgba(20,21,24,.18); font-size: 13px; line-height: 1.4;
+}
+.purchase-notice span { flex: 1; }
+.purchase-notice button {
+  border: 0; background: transparent; color: var(--acc); font: inherit; font-weight: 700; cursor: pointer;
+}
+.purchase-notice .purchase-notice-close { color: var(--mut); font-size: 22px; line-height: 1; }
 .acct-membership {
   border: 1px solid var(--line); border-radius: 14px; padding: 14px;
   margin: 0 0 16px; background: var(--soft);

@@ -15,6 +15,16 @@ interface EntitlementUpdate {
   cancelAtPeriodEnd: boolean;
 }
 
+type PriceEnvironment = Partial<Record<
+  | "STRIPE_STARTER_PRICE_ID"
+  | "STRIPE_PRICE_STARTER_MONTHLY"
+  | "STRIPE_MAX_PRICE_ID"
+  | "STRIPE_PRICE_MAX_MONTHLY"
+  | "STRIPE_MAX_ANNUAL_PRICE_ID"
+  | "STRIPE_PRICE_MAX_ANNUAL",
+  string | undefined
+>>;
+
 export function configuredWebhookSecrets(
   env: Partial<Record<"STRIPE_WEBHOOK_SECRET" | "SIGNING_SECRET", string | undefined>> = process.env,
 ): string[] {
@@ -48,7 +58,10 @@ function objectId(value: { id: string } | string | null): string | null {
   return typeof value === "string" ? value : value.id;
 }
 
-export function entitlementFromSubscription(subscription: Subscription): EntitlementUpdate | null {
+export function entitlementFromSubscription(
+  subscription: Subscription,
+  env: PriceEnvironment = process.env,
+): EntitlementUpdate | null {
   const userId = subscription.metadata.supabase_user_id;
   const customerId = objectId(subscription.customer);
   if (!userId || !customerId) return null;
@@ -56,15 +69,29 @@ export function entitlementFromSubscription(subscription: Subscription): Entitle
   const item = subscription.items.data[0];
   const priceId = item?.price.id ?? null;
   const paidStatus = subscription.status === "active" || subscription.status === "trialing";
-  // The server stamps this metadata when it creates Checkout. Trusting that
-  // marker keeps existing subscribers entitled if a new price replaces the
-  // current STRIPE_MAX_PRICE_ID; unrelated Stripe products have no marker.
+  // A Customer Portal plan switch changes the Price without rewriting the tier
+  // Checkout stamped in metadata. Prefer a currently configured matching Price
+  // and retain the stamp as the fallback for a grandfathered catalogue item.
   const stampedTier = subscription.metadata.tier;
-  if (stampedTier !== "starter" && stampedTier !== "max") return null;
+  const starterPrices = [env.STRIPE_STARTER_PRICE_ID, env.STRIPE_PRICE_STARTER_MONTHLY];
+  const maxPrices = [
+    env.STRIPE_MAX_PRICE_ID,
+    env.STRIPE_PRICE_MAX_MONTHLY,
+    env.STRIPE_MAX_ANNUAL_PRICE_ID,
+    env.STRIPE_PRICE_MAX_ANNUAL,
+  ];
+  const priceTier = starterPrices.some((configured) => Boolean(configured) && configured === priceId)
+    ? "starter"
+    : maxPrices.some((configured) => Boolean(configured) && configured === priceId)
+      ? "max"
+      : null;
+  const paidTier = priceTier
+    ?? (stampedTier === "starter" || stampedTier === "max" ? stampedTier : null);
+  if (!paidTier) return null;
 
   return {
     userId,
-    tier: paidStatus ? stampedTier : "free",
+    tier: paidStatus ? paidTier : "free",
     status: subscription.status,
     customerId,
     subscriptionId: subscription.id,
@@ -121,40 +148,37 @@ export async function POST(request: Request): Promise<Response> {
       if (session.metadata?.purpose === "scan_credit" && session.payment_status === "paid") {
         const userId = session.metadata.supabase_user_id;
         if (userId) {
-          const { error } = await getSupabaseAdmin().rpc("apply_one_time_credit", {
-            p_event_id: event.id,
-            p_checkout_session_id: session.id,
-            p_user_id: userId,
-            p_credit_kind: "scan",
-            p_credits: 1,
-          });
-          if (error) throw new Error(`Scan credit grant failed: ${error.message}`);
-
-          // The downsell burns here, at fulfilment, and only here.
-          //
-          // Stamping it when the Checkout Session was created would take the
-          // offer away from somebody who opened it and closed it, and opening
-          // a checkout is not a purchase. Stamping it on a payment that
-          // completed is what makes it a one-time exit offer instead of a
-          // standing half-price tier for anybody who declined once.
-          //
-          // Ordered after the credit so a failure here cannot cost somebody
-          // the scan they paid for. The credit grant is idempotent on the
-          // event id; this write is idempotent by being a single timestamp.
-          //
-          // Somebody who subscribed between opening this checkout and paying
-          // it still gets the credit rather than a refusal. They paid, and a
-          // scan credit is worth something to a member too: it skips the
-          // weekly wait. Refusing to deliver a thing somebody has already been
-          // charged for is the worse of the two outcomes, and the session's
-          // own 31-minute expiry is what bounds how stale that can get.
-          if (session.metadata.offer === "decline_downsell") {
-            const stamped = await getSupabaseAdmin()
-              .from("profiles")
-              .update({ downsell_redeemed_at: new Date().toISOString() })
-              .eq("user_id", userId)
-              .is("downsell_redeemed_at", null);
-            if (stamped.error) throw new Error(`Downsell stamp failed: ${stamped.error.message}`);
+          const claimId = session.metadata.downsell_claim_id;
+          if (session.metadata.offer === "decline_downsell" && claimId) {
+            // Grant and permanent redemption are one database transaction.
+            // A retry can observe the completed state but can never land in a
+            // paid-and-credited state whose one-time stamp is still absent.
+            const { error } = await getSupabaseAdmin().rpc("redeem_downsell_credit", {
+              p_event_id: event.id,
+              p_checkout_session_id: session.id,
+              p_user_id: userId,
+              p_claim_id: claimId,
+            });
+            if (error) throw new Error(`Downsell fulfilment failed: ${error.message}`);
+          } else {
+            // Sessions created by the deployment before claim IDs existed must
+            // still be delivered after the migration rolls out.
+            const { error } = await getSupabaseAdmin().rpc("apply_one_time_credit", {
+              p_event_id: event.id,
+              p_checkout_session_id: session.id,
+              p_user_id: userId,
+              p_credit_kind: "scan",
+              p_credits: 1,
+            });
+            if (error) throw new Error(`Scan credit grant failed: ${error.message}`);
+            if (session.metadata.offer === "decline_downsell") {
+              const stamped = await getSupabaseAdmin()
+                .from("profiles")
+                .update({ downsell_redeemed_at: new Date().toISOString() })
+                .eq("user_id", userId)
+                .is("downsell_redeemed_at", null);
+              if (stamped.error) throw new Error(`Downsell stamp failed: ${stamped.error.message}`);
+            }
           }
         }
       }
@@ -175,18 +199,30 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    if (event.type === "checkout.session.expired") {
+    if (
+      event.type === "checkout.session.expired"
+      || event.type === "checkout.session.async_payment_failed"
+    ) {
       const session = event.data.object;
       const userId = session.metadata?.supabase_user_id;
-      const reservationId = session.metadata?.trial_reservation_id;
-      if (userId && reservationId) {
+      const trialReservationId = session.metadata?.trial_reservation_id;
+      if (userId && trialReservationId) {
         const { error } = await getSupabaseAdmin()
           .from("trial_redemptions")
           .delete()
           .eq("user_id", userId)
-          .eq("reservation_id", reservationId)
+          .eq("reservation_id", trialReservationId)
           .eq("status", "reserved");
         if (error) throw new Error(`Expired trial release failed: ${error.message}`);
+      }
+      const downsellClaimId = session.metadata?.downsell_claim_id;
+      if (userId && downsellClaimId) {
+        const { error } = await getSupabaseAdmin().rpc("release_downsell_checkout", {
+          p_user_id: userId,
+          p_claim_id: downsellClaimId,
+          p_checkout_session_id: session.id,
+        });
+        if (error) throw new Error(`Closed downsell release failed: ${error.message}`);
       }
       return json({ received: true });
     }
@@ -202,7 +238,10 @@ export async function POST(request: Request): Promise<Response> {
       event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted"
     ) {
-      update = entitlementFromSubscription(event.data.object);
+      // Deliveries may be late or out of order. Read Stripe's current object
+      // instead of letting an older payload overwrite a newer plan or status.
+      const current = await getStripe().subscriptions.retrieve(event.data.object.id);
+      update = entitlementFromSubscription(current);
     } else {
       return json({ received: true, ignored: true });
     }

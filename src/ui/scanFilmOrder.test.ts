@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 // drift back into the wrong sequence, and the only symptom is a flow nobody
 // notices until they run it on a phone.
 const src = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+const passSrc = readFileSync(new URL("measurePass.ts", import.meta.url), "utf8");
 
 test("the film plays before the wall goes up", () => {
   const plays = src.indexOf("await playMeasurePass(front, sideReport, token, generation)");
@@ -43,6 +44,16 @@ test("the wall reads one score, computed the same way the report will be", () =>
   const wall = src.indexOf('track("gate-shown")');
   const frames = src.lastIndexOf("front = analyzeFrames(", wall);
   assert.ok(frames > 0, "the gate path should use the multi-frame median");
+});
+
+test("the signed-out film draws real constructions without disclosing values", () => {
+  assert.equal(
+    (passSrc.match(/\{ labels: false \}/g) ?? []).length,
+    2,
+    "both front and side overlays must suppress their value chips",
+  );
+  assert.match(passSrc, /say\(step\.label, step\.metric\.def\.name\)/);
+  assert.doesNotMatch(passSrc, /say\([^\n]*step\.metric\.value/);
 });
 
 // The photograph is no longer dimmed while the pass runs, at the owner's call

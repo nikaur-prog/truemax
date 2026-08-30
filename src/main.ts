@@ -65,11 +65,14 @@ import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import type { OpenAccountOptions } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
+  clearPurchaseResult,
+  consumePurchaseResult,
   hasMaxAccess,
   consumeScanCreditForScan,
   loadEntitlement,
   loadIsAdmin,
   loadScanCredits,
+  reconcilePurchase,
 } from "./engine/entitlement.js";
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
 import type { EntitlementTier } from "./engine/entitlement.js";
@@ -615,6 +618,67 @@ landingHistory?.addEventListener("click", () => openHistory());
 // With no keys this call returns immediately and adds no header button, so the
 // signed-out product is exactly what shipped before. See src/engine/auth.ts.
 mountAccountButton();
+
+const returnedPurchase = consumePurchaseResult();
+let purchaseReconcileRunning = false;
+
+function showPurchaseNotice(message: string, retry?: () => void): void {
+  document.querySelector(".purchase-notice")?.remove();
+  const notice = document.createElement("div");
+  notice.className = "purchase-notice";
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "polite");
+  const text = document.createElement("span");
+  text.textContent = message;
+  notice.append(text);
+  if (retry) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Retry";
+    button.addEventListener("click", retry, { once: true });
+    notice.append(button);
+  }
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "purchase-notice-close";
+  close.setAttribute("aria-label", "Dismiss payment notice");
+  close.textContent = "×";
+  close.addEventListener("click", () => notice.remove());
+  notice.append(close);
+  document.body.append(notice);
+}
+
+async function reconcileReturnedPurchase(): Promise<void> {
+  if (
+    purchaseReconcileRunning
+    || !returnedPurchase
+    || returnedPurchase.status !== "success"
+    || !returnedPurchase.sessionId
+  ) return;
+  purchaseReconcileRunning = true;
+  showPurchaseNotice("Confirming your payment…");
+  const kind = await reconcilePurchase(returnedPurchase.sessionId);
+  purchaseReconcileRunning = false;
+  if (kind === "scan") {
+    clearPurchaseResult();
+    await refreshMaxAccess();
+    showPurchaseNotice("Payment confirmed. Your scan credit is ready.");
+  } else if (kind === "voice") {
+    clearPurchaseResult();
+    showPurchaseNotice("Payment confirmed. Your voiced analysis credit is ready.");
+  } else {
+    showPurchaseNotice(
+      "Payment is not confirmed yet. Nothing will be granted twice; retry in a moment.",
+      () => void reconcileReturnedPurchase(),
+    );
+  }
+}
+
+if (returnedPurchase?.status === "cancelled") {
+  showPurchaseNotice("Checkout was cancelled. Nothing was charged.");
+} else if (returnedPurchase?.status === "success" && !returnedPurchase.sessionId) {
+  showPurchaseNotice("The payment return was incomplete. Open your account to check your balance.");
+}
 
 // The idealized silhouette is a framing guide for the camera, not landing art
 let outline: ReturnType<typeof mountFaceOutline> | null = null;
@@ -2077,7 +2141,8 @@ function clearMeasuredOnScreen(): void {
 
 /**
  * The measurement film: the mesh landing, then every construction drawn on the
- * face that produced it, on the real photographs and the real numbers.
+ * face that produced it. It uses the computed metrics to choose the real lines
+ * but deliberately leaves their numeric values for the authenticated report.
  *
  * Split out of runFullAnalysis because it is now played from two places. It
  * paints, animates and waits, and it persists nothing: everything it needs is
@@ -2538,10 +2603,10 @@ async function gateAnalysis(
     }
     const owner = activeScanOwner();
     if (owner && scanSession.snapshot().owner !== owner) scanSession.claim(token, owner);
-    // A signed-in account reached without the capture ever asking whose face
-    // this is (signed in from another tab mid-scan) is asked now, before the
-    // scan is attributed to anyone.
-    if (user && !(await askLateSubject())) return;
+    if (user) {
+      await continueAuthenticatedAnalysis(sideReport, token, generation);
+      return;
+    }
     if (!scanIsCurrent(token, generation) || !pending) return;
     if (!scanSession.transition(token, "analyzing")) return;
     startConsentedSideFeedback();
@@ -2577,14 +2642,17 @@ async function gateAnalysis(
   // only screen asking somebody to commit to it. They were being asked to buy
   // the measuring on the strength of having taken two photographs.
   //
-  // So the pass plays here, on their own face, showing every construction and
-  // every real number, and the wall goes up at the end of it — at the exact
+  // So the pass plays here, on their own face, showing the measurement
+  // constructions without printing the score values, and the wall goes up at
+  // the end of it — at the exact
   // moment the result would otherwise appear. Nothing about what is being
   // withheld changes: the scan is still not stored, attributed or counted
   // until there is an account. What changes is that by the time the question
   // is asked, they have watched the answer being computed.
   //
-  // Nothing here persists anything. See playMeasurePass.
+  // The film itself stores nothing. The reduced device-local redirect copy was
+  // already written above when this browser supported it; nothing is sent to a
+  // server, attributed, counted or charged before authentication.
   let front: Report | null = null;
   try {
     if (pending) {
@@ -2619,10 +2687,9 @@ async function gateAnalysis(
     drawCalm(el.overlayCanvas, pending.landmarks, pending.width, pending.height);
   }
   // The result exists before the account does. The analysis is pure, on-device
-  // arithmetic, so it is computed here and shown BLURRED behind the gate: the
-  // person sees the shape of their own finished result — the big number, their
-  // region scores, all unreadable — instead of a wall claiming a result that,
-  // for all they know, might not exist. "Sign up to see what is already there"
+  // arithmetic, so it is computed here while the gate shows only the shape of
+  // a finished report. Exact values never enter the signed-out DOM: CSS blur
+  // is presentation rather than access control. "Sign up to see what is already there"
   // and "sign up and then we will run it" are different promises, and only the
   // first one is the acquisition flow this screen was meant to be.
   let preview = "";
@@ -2630,26 +2697,23 @@ async function gateAnalysis(
   try {
     if (pending && front) {
       const merged = sideReport ? mergeReports(front, sideReport) : front;
-      // The photographs travel with the numbers. A blurred score on its own
-      // was a grey smudge nobody could read as their own result; their own two
-      // faces beside it are unmistakable, and they are thumbnails of pictures
-      // that never leave this device either way.
+      // The photographs make the shell recognisably theirs without putting a
+      // score, tone or ladder position behind a cosmetic blur.
       //
       // From `pending`, not from the pane. The pane is whatever the pass last
       // painted, which for a two-view scan is the PROFILE — thumbnailing it
       // would have put the side capture in the front slot of the teaser.
       teaser = {
-        overall: merged.overall,
         regionCount: merged.regions.length,
         front: toThumb(pending.photo),
         side: lastSide?.photo ? toThumb(lastSide.photo) : null,
-        regions: merged.regions.map((g) => ({ label: REGION_NAMES[g.region], score: g.score })),
+        regions: merged.regions.map((g) => ({ label: REGION_NAMES[g.region] })),
       };
       preview = `<div class="lockblur gate-preview" aria-hidden="true" inert>
-        <div class="gate-prev-score">${merged.overall.toFixed(1)}<small>/10</small></div>
+        <div class="gate-prev-score">•••<small>/10</small></div>
         <div class="gate-prev-grid">${merged.regions
           .slice(0, 8)
-          .map((g) => `<div class="gate-prev-cell"><span>${REGION_NAMES[g.region]}</span><b>${g.score.toFixed(1)}</b></div>`)
+          .map((g) => `<div class="gate-prev-cell"><span>${REGION_NAMES[g.region]}</span><b>•••</b></div>`)
           .join("")}</div>
       </div>`;
     }
@@ -2716,48 +2780,8 @@ async function gateAnalysis(
         // one password login cannot analyze and append history twice.
         if (saved) resumePendingStarted = true;
         scanSession.claim(token, `user:${signedInUser.id}`);
-
-        // THE ACCOUNT IS READ BEFORE ANYTHING IS DECIDED ABOUT IT.
-        //
-        // Claiming the continuation above is what stops a double analysis, and
-        // it also took this path out from under resumePendingAfterAuth, which
-        // is the only other place ensureScanAllowed runs after a sign-in. The
-        // result was a way around both the weekly limit and the decline:
-        // capture signed out, sign in with a password at the wall, and answer
-        // a chooser that had consulted nothing but this device. On a phone the
-        // account had never used, the decline mirror is empty and the server
-        // was never asked, so a declined account got "It's me" back.
-        //
-        // refreshMaxAccess is the read: it fetches the entitlement and the
-        // decline stamp and settles both caches. It is also the call that was
-        // missing from authenticated startup generally, which is why a member
-        // who subscribed and came back on a full reload kept a stale decline
-        // lock until some later screen happened to refresh it.
-        await refreshMaxAccess();
-        if (!scanSession.isCurrent(token)) return;
-
-        // And now the gate, with a real tier behind it. Signed-out capture is
-        // allowed to run to the end precisely so this question can be asked
-        // once there is an account to ask it about; skipping it here made that
-        // design into the hole it was written to avoid.
-        if (!(await ensureScanAllowed(() => undefined))) {
-          // Refused. The capture stays in storage and the wall stays up, so
-          // buying a credit or waiting out the week finishes this scan rather
-          // than starting a new one. resumePendingStarted goes back down so
-          // the deferred path can pick it up when they return.
-          resumePendingStarted = false;
-          return;
-        }
-        if (!scanSession.isCurrent(token)) return;
-
-        // The capture ran signed out, so nobody was ever asked whose face
-        // this is — and the person signing in at the gate is not necessarily
-        // the person in the photographs (an owner's expired session, a
-        // friend's scan). Attribution happens only after the answer, and only
-        // after the two reads above, so the chooser knows what it is offering.
-        if (!(await askLateSubject())) return;
-        startConsentedSideFeedback();
-        await runFullAnalysis(sideReport, token);
+        const continued = await continueAuthenticatedAnalysis(sideReport, token, generation);
+        if (!continued) resumePendingStarted = false;
       },
     }).catch(() => {
       // Keep the visible inline gate available if a browser blocks or fails to
@@ -2771,6 +2795,34 @@ async function gateAnalysis(
   requestAnimationFrame(() => void openGate());
 }
 
+/**
+ * The one authenticated continuation for an in-memory capture.
+ *
+ * Entitlement and decline are refreshed before either the weekly gate or the
+ * subject chooser reads their caches. Keeping every route here prevents a
+ * signed-in-at-start scan and a signed-in-at-the-wall scan from enforcing two
+ * different products. A film already played before the wall is skipped by
+ * runFullAnalysis's persistent scan-ID guard from PR #199.
+ */
+async function continueAuthenticatedAnalysis(
+  sideReport: Report,
+  token: ScanToken,
+  generation: number,
+): Promise<boolean> {
+  await refreshMaxAccess();
+  if (!scanIsCurrent(token, generation) || !pending) return false;
+  // A scan that asked the subject question before capture already passed the
+  // allowance gate at its upload/camera entry point. A signed-out capture has
+  // not, so it must pass after authentication before the late chooser opens.
+  if (!subjectAsked && !(await ensureScanAllowed(() => undefined))) return false;
+  if (!scanIsCurrent(token, generation) || !pending) return false;
+  if (!(await askLateSubject())) return false;
+  if (!scanIsCurrent(token, generation) || !pending) return false;
+  startConsentedSideFeedback();
+  await runFullAnalysis(sideReport, token);
+  return true;
+}
+
 let resumePendingStarted = false;
 async function resumePendingAfterAuth(): Promise<void> {
   if (resumePendingStarted) return;
@@ -2779,6 +2831,19 @@ async function resumePendingAfterAuth(): Promise<void> {
   if (generation !== scanGeneration || !user) return;
   const saved = claimPendingAnalysis(user.id);
   if (!saved) return;
+
+  // Claim the redirect continuation before its first network read. Supabase
+  // may emit INITIAL_SESSION and SIGNED_IN for the same navigation; without
+  // the latch both callbacks can reach the allowance gate concurrently.
+  resumePendingStarted = true;
+
+  // A redirect starts with default module state. Read this account before the
+  // allowance gate consults tier or decline caches.
+  await refreshMaxAccess();
+  if (generation !== scanGeneration) {
+    resumePendingStarted = false;
+    return;
+  }
 
   // The weekly gate is asked HERE, because this is the first point where there
   // is an account to ask about. scanGate.ts lets signed-out capture run to the
@@ -2790,10 +2855,15 @@ async function resumePendingAfterAuth(): Promise<void> {
   // credit and coming back finishes the scan rather than restarting it.
   // ensureScanAllowed spends a held credit when it passes, so the answer is
   // also the payment.
-  if (!(await ensureScanAllowed(() => undefined))) return;
-  if (generation !== scanGeneration) return;
+  if (!(await ensureScanAllowed(() => undefined))) {
+    resumePendingStarted = false;
+    return;
+  }
+  if (generation !== scanGeneration) {
+    resumePendingStarted = false;
+    return;
+  }
 
-  resumePendingStarted = true;
   const token = scanSession.resume(`user:${user.id}`, saved.scanId);
 
   // Decoded into a canvas this scan OWNS, then copied onto the shared pane —
@@ -3153,7 +3223,13 @@ if (isAuthAvailable()) {
     // Give an in-page password flow the first chance to continue with its
     // full-resolution canvases. OAuth and email-confirmation returns have no
     // in-page callback, so the saved scan resumes on the next navigation.
-    if (user) setTimeout(() => void resumePendingAfterAuth(), 0);
+    if (user) {
+      void refreshMaxAccess();
+      void reconcileReturnedPurchase();
+      setTimeout(() => void resumePendingAfterAuth(), 0);
+    } else if (returnedPurchase?.status === "success") {
+      showPurchaseNotice("Sign in to confirm the payment and add it to this account.");
+    }
     // Consented side-landmark feedback that could not be sent earlier because
     // there was no session yet. The consent flow runs BEFORE the account gate
     // on a first scan, so the first attempt always lacked a token and the note

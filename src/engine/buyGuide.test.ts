@@ -134,11 +134,11 @@ test("the search link is built from the category, not the advice headline", () =
 });
 
 test("a topical whose legal status varies says where it does not sit on a shelf", () => {
-  // Adapalene is genuinely over the counter in the US and much of the EU, so
+  // Adapalene is genuinely over the counter in the US, so
   // a blanket ban on naming it would be wrong: it is the one retinoid a
   // person can usually just buy. What is wrong is implying that is true
   // everywhere. "At the counter in most other places" read as an assurance,
-  // and in the UK, Australia and New Zealand it is prescription-only.
+  // and the UK, Australia and New Zealand apply different controls.
   //
   // The rule this pins is narrow and checkable: if the guide sends somebody
   // to a pharmacy for something whose status differs by country, the `where`
@@ -156,7 +156,7 @@ test("a topical whose legal status varies says where it does not sit on a shelf"
   // pharmacist supply up to 1 mg/g in packs of 30 g or less. Telling somebody
   // they need a doctor when a pharmacist can hand it over is its own kind of
   // wrong answer: it costs them an appointment they did not need.
-  assert.match(guide!.where, /Australia and New Zealand a pharmacist/, guide!.where);
+  assert.match(guide!.where, /supplied by a pharmacist in Australia and New Zealand/, guide!.where);
   assert.doesNotMatch(
     guide!.where,
     /Prescription-only in the UK, Australia and New Zealand/,

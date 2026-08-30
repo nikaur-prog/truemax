@@ -28,13 +28,29 @@ import { getStripe, json } from "./_shared.js";
 // Every price the server will try to charge, under both accepted names. Kept
 // in step with create-checkout-session.ts and scan pricing: a price that is
 // resolved at runtime but missing from this list is a hole in the check.
-const PRICES: Array<{ label: string; names: string[] }> = [
-  { label: "Starter monthly", names: ["STRIPE_STARTER_PRICE_ID", "STRIPE_PRICE_STARTER_MONTHLY"] },
-  { label: "Max monthly", names: ["STRIPE_MAX_PRICE_ID", "STRIPE_PRICE_MAX_MONTHLY"] },
-  { label: "Max annual", names: ["STRIPE_MAX_ANNUAL_PRICE_ID", "STRIPE_PRICE_MAX_ANNUAL"] },
-  { label: "Extra scan", names: ["STRIPE_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_STANDARD"] },
-  { label: "Extra scan (member)", names: ["STRIPE_MEMBER_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_MEMBER"] },
-  { label: "Voiced analysis", names: ["STRIPE_VOICED_PRICE_ID", "STRIPE_PRICE_VOICED_ANALYSIS"] },
+const PRICES: Array<{
+  label: string;
+  names: string[];
+  cents: number;
+  interval: "month" | "year" | null;
+}> = [
+  { label: "Starter monthly", names: ["STRIPE_STARTER_PRICE_ID", "STRIPE_PRICE_STARTER_MONTHLY"], cents: 799, interval: "month" },
+  { label: "Max monthly", names: ["STRIPE_MAX_PRICE_ID", "STRIPE_PRICE_MAX_MONTHLY"], cents: 1199, interval: "month" },
+  { label: "Max annual", names: ["STRIPE_MAX_ANNUAL_PRICE_ID", "STRIPE_PRICE_MAX_ANNUAL"], cents: 8999, interval: "year" },
+  { label: "Extra scan", names: ["STRIPE_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_STANDARD"], cents: 599, interval: null },
+  { label: "Extra scan (member)", names: ["STRIPE_MEMBER_SCAN_PRICE_ID", "STRIPE_PRICE_EXTRA_SCAN_MEMBER"], cents: 299, interval: null },
+  {
+    label: "Decline downsell",
+    names: [
+      "STRIPE_DOWNSELL_PRICE_ID",
+      "STRIPE_PRICE_SCAN_DOWNSELL",
+      "STRIPE_MEMBER_SCAN_PRICE_ID",
+      "STRIPE_PRICE_EXTRA_SCAN_MEMBER",
+    ],
+    cents: 299,
+    interval: null,
+  },
+  { label: "Voiced analysis", names: ["STRIPE_VOICED_PRICE_ID", "STRIPE_PRICE_VOICED_ANALYSIS"], cents: 299, interval: null },
 ];
 
 interface PriceReport {
@@ -45,6 +61,8 @@ interface PriceReport {
   livemode?: boolean;
   amount?: string;
   interval?: string;
+  expected?: string;
+  matchesExpected?: boolean;
   product?: string;
   error?: string;
 }
@@ -59,9 +77,9 @@ export async function GET(request: Request): Promise<Response> {
   const key = process.env.STRIPE_SECRET_KEY ?? "";
   // The prefix, not a value. sk_live_ vs sk_test_ is the single most useful
   // fact here and it is the part of the key that is not a credential.
-  const keyMode = key.startsWith("sk_live_")
+  const keyMode = /^(?:sk|rk)_live_/.test(key)
     ? "live"
-    : key.startsWith("sk_test_")
+    : /^(?:sk|rk)_test_/.test(key)
       ? "test"
       : key
         ? "unrecognised"
@@ -79,6 +97,12 @@ export async function GET(request: Request): Promise<Response> {
     try {
       const price = await stripe.prices.retrieve(id, { expand: ["product"] });
       const product = price.product;
+      const expectedInterval = entry.interval ?? "one-time";
+      const actualInterval = price.recurring?.interval ?? "one-time";
+      const matchesExpected = price.currency === "usd"
+        && price.unit_amount === entry.cents
+        && actualInterval === expectedInterval
+        && (price.recurring?.interval_count ?? 1) === 1;
       prices.push({
         label: entry.label,
         configured: true,
@@ -89,7 +113,9 @@ export async function GET(request: Request): Promise<Response> {
           price.unit_amount == null
             ? "n/a"
             : `${(price.unit_amount / 100).toFixed(2)} ${price.currency.toUpperCase()}`,
-        interval: price.recurring?.interval ?? "one-time",
+        interval: actualInterval,
+        expected: `${(entry.cents / 100).toFixed(2)} USD · ${expectedInterval}`,
+        matchesExpected,
         product: typeof product === "string" || product.deleted ? undefined : product.name,
       });
     } catch (error) {
@@ -107,7 +133,9 @@ export async function GET(request: Request): Promise<Response> {
 
   // The headline. Anything configured that does not resolve, or that resolves
   // into a different mode than the key, will fail at checkout.
-  const broken = prices.filter((p) => p.configured && (!p.resolves || p.active === false));
+  const broken = prices.filter(
+    (p) => !p.configured || !p.resolves || p.active === false || p.matchesExpected === false,
+  );
   const mismatched = prices.filter(
     (p) => p.resolves && p.livemode !== undefined && p.livemode !== (keyMode === "live"),
   );
@@ -119,7 +147,7 @@ export async function GET(request: Request): Promise<Response> {
       summary:
         broken.length || mismatched.length
           ? `${broken.length} unusable, ${mismatched.length} in the wrong mode — checkout will fail for these`
-          : "every configured price resolves in the key's own mode",
+          : "every required price resolves with the expected amount, currency, cadence and mode",
       prices,
     },
     200,

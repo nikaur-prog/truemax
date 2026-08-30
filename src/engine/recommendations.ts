@@ -195,13 +195,13 @@ export const RECS: Rec[] = [
       "The best-evidenced non-prescription active for acne, and it improves texture over months rather than days. Expect irritation for the first few weeks.",
     otc: true,
     caution:
-      "Over the counter in the US; pharmacist-only or prescription in the UK, EU, Australia and New Zealand, so ask a pharmacist what's available where you are. Retinoids are not for use in pregnancy.",
+      "Over the counter in the US; pharmacist-only in Australia and New Zealand within local strength and pack limits; prescription-only in the UK; availability differs across the EU. Ask a pharmacist what's available where you are. Retinoids are not for use in pregnancy.",
     buy: {
       category: "An adapalene gel",
-      strength: "0.1%, the only over-the-counter strength",
+      strength: "0.1%, the non-prescription strength where local rules allow it",
       example:
-        "Sold as Differin in most places, and as pharmacy own-brand adapalene where it is stocked. A 45g tube lasts months.",
-      where: "A pharmacy, and how you get it differs by country. Off the shelf in the US and much of the EU. In Australia and New Zealand a pharmacist hands it over rather than a shelf, with no prescription needed. In the UK it is prescription-only. Ask at the counter rather than assuming.",
+        "Often sold as Differin, and as pharmacy own-brand adapalene where it is stocked. Permitted pack sizes differ by country.",
+      where: "A pharmacy, and how you get it differs by country. It is sold off the shelf in the US, supplied by a pharmacist in Australia and New Zealand within local limits, and prescription-only in the UK. Ask at the counter elsewhere rather than assuming.",
     },
   },
   {

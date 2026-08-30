@@ -1,10 +1,22 @@
 import { isAdult } from "../src/engine/age.js";
-import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import type Stripe from "stripe";
+import {
+  authenticatedUser,
+  getStripe,
+  getSupabaseAdmin,
+  json,
+  requestOrigin,
+  safeMessage,
+  stripeSubscriptionForUser,
+} from "./_shared.js";
 
 type PaidTier = "starter" | "max";
 
+// Stripe API 2026-03-25+ uses this to group and compare the TrueMax Checkout
+// integration in Workbench. Keep the suffix stable so reporting is useful.
+const CHECKOUT_INTEGRATION_ID = "truemax_kqjdvmsa";
+
 interface ExistingEntitlement {
-  stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   status: string;
 }
@@ -36,6 +48,11 @@ function isBilling(value: unknown): value is Billing {
   return value === "monthly" || value === "annual";
 }
 
+function stripeObjectId(value: { id: string } | string | null | undefined): string | null {
+  if (!value) return null;
+  return typeof value === "string" ? value : value.id;
+}
+
 // Each price answers to two names: the one the code was written against and
 // the one the values were actually stored under in Vercel. Renaming deployed
 // environment variables to satisfy the code is exactly the kind of manual step
@@ -63,12 +80,26 @@ async function releaseReservation(userId: string, reservationId: string): Promis
     .eq("status", "reserved");
 }
 
+async function releaseDownsellClaim(
+  userId: string,
+  claimId: string,
+  checkoutSessionId: string | null = null,
+): Promise<void> {
+  await getSupabaseAdmin().rpc("release_downsell_checkout", {
+    p_user_id: userId,
+    p_claim_id: claimId,
+    p_checkout_session_id: checkoutSessionId,
+  });
+}
+
 export async function POST(request: Request): Promise<Response> {
   const origin = requestOrigin(request);
   if (!origin) return json({ error: "Cross-origin checkout is not allowed." }, 403);
 
   let userId: string | null = null;
   let reservationId: string | null = null;
+  let downsellClaimId: string | null = null;
+  let downsellCheckoutSessionId: string | null = null;
   try {
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in before starting checkout." }, 401);
@@ -85,11 +116,21 @@ export async function POST(request: Request): Promise<Response> {
     if (body?.purchase === "scan") {
       const { data: ent, error: entitlementError } = await getSupabaseAdmin()
         .from("entitlements")
-        .select("stripe_customer_id,status,tier")
+        .select("stripe_subscription_id,status,tier")
         .eq("user_id", user.id)
-        .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
+        .maybeSingle<{
+          stripe_subscription_id: string | null;
+          status: string;
+          tier: string;
+        }>();
       if (entitlementError) throw new Error(`Scan pricing lookup failed: ${entitlementError.message}`);
-      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
+      const stripeSubscription = await stripeSubscriptionForUser(user.id, ent?.stripe_subscription_id);
+      const member = Boolean(stripeSubscription && ["active", "trialing"].includes(stripeSubscription.status));
+      // A Customer id is reusable only after a Stripe subscription carrying
+      // this exact Supabase user id proves ownership. Trusting a projected id
+      // by itself could open or charge the wrong customer if that row were
+      // ever corrupted; a duplicate Customer is cheaper than cross-user billing.
+      const customerId = stripeObjectId(stripeSubscription?.customer);
       const scanPrice = member
         ? process.env.STRIPE_MEMBER_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER || null
         : process.env.STRIPE_SCAN_PRICE_ID || process.env.STRIPE_PRICE_EXTRA_SCAN_STANDARD || null;
@@ -97,12 +138,13 @@ export async function POST(request: Request): Promise<Response> {
       const session = await getStripe().checkout.sessions.create(
         {
           mode: "payment",
+          integration_identifier: CHECKOUT_INTEGRATION_ID,
           expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
           line_items: [{ price: scanPrice, quantity: 1 }],
-          success_url: `${origin}/?purchase=scan-success`,
+          success_url: `${origin}/?purchase=scan-success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/?purchase=scan-cancelled`,
           client_reference_id: user.id,
-          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
+          ...(customerId ? { customer: customerId } : { customer_email: user.email }),
           metadata: { supabase_user_id: user.id, purpose: "scan_credit" },
           custom_text: {
             submit: { message: "One in-depth scan, added to your account the moment payment completes. No subscription." },
@@ -133,78 +175,68 @@ export async function POST(request: Request): Promise<Response> {
     // member, and those are exactly the two that make the offer honest.
     //
     // The purpose marker is the ordinary scan_credit one: this is the same
-    // product, bought at a different moment, so the webhook needs to know
-    // nothing about the downsell existing.
+    // product, bought at a different moment. The claim marker binds the
+    // discounted Session to the one server-side reservation it may redeem.
     if (body?.purchase === "downsell") {
       const admin = getSupabaseAdmin();
-      const { data: ent, error: entitlementError } = await admin
-        .from("entitlements")
-        .select("stripe_customer_id,status,tier")
-        .eq("user_id", user.id)
-        .maybeSingle<{ stripe_customer_id: string | null; status: string; tier: string }>();
-      if (entitlementError) throw new Error(`Downsell pricing lookup failed: ${entitlementError.message}`);
-      // A failed eligibility read REFUSES the offer rather than throwing.
-      //
-      const member = Boolean(ent && ent.tier !== "free" && ["active", "trialing"].includes(ent.status));
-      // A member is refused before anything is claimed: they already have the
-      // thing this sells, and charging them for it because a stale tab offered
-      // it would be the worse outcome.
-      if (member) {
-        return json({ error: "That offer is not available on this account." }, 403);
-      }
-
-      // CLAIMED, not checked.
-      //
-      // The first version read a redemption timestamp here and decided from
-      // it, which is read-then-act with a network round trip and a human
-      // paying in between. Two concurrent requests both read null, both got a
-      // discounted session, both were paid, and the second webhook stamp
-      // updated no row and reported success: two discounted purchases against
-      // a promise of one.
-      //
-      // claim_downsell does the whole test in a single UPDATE ... WHERE, so
-      // Postgres serialises the two callers on the row and exactly one of them
-      // gets true back. It also carries the "has declined" test, which is why
-      // the profile is not read separately any more: one statement decides,
-      // and there is no window between deciding and acting.
-      //
-      // A claim expires after 35 minutes, slightly outlasting the 31-minute
-      // Checkout Session below it, so abandoning a checkout gives the offer
-      // back but never while a payable session for it is still alive.
-      const { data: claimed, error: claimError } = await admin.rpc("claim_downsell", {
-        p_user_id: user.id,
-      });
-      // A failed claim REFUSES rather than throwing, in the direction every
-      // other check on this endpoint fails: this hands out a discount, so an
-      // unreadable eligibility fact must mean "no offer", never a 500 and
-      // never the offer anyway. It also removes a deploy-order hazard: between
-      // a merge and this migration being applied the RPC does not exist, and
-      // every declining account would otherwise meet a server error instead of
-      // a closed offer.
-      if (claimError || claimed !== true) {
-        return json({ error: "That offer is not available on this account." }, 403);
-      }
       const downsellPrice =
         process.env.STRIPE_DOWNSELL_PRICE_ID
         || process.env.STRIPE_PRICE_SCAN_DOWNSELL
-        // Falls back to the member scan price, which is the same amount for
-        // the same product. A dedicated price is worth configuring so the
-        // downsell can be read separately in Stripe, but the offer working is
-        // worth more than the reporting.
         || process.env.STRIPE_MEMBER_SCAN_PRICE_ID
         || process.env.STRIPE_PRICE_EXTRA_SCAN_MEMBER
         || null;
       if (!downsellPrice) return json({ error: "Single scans are still being connected." }, 503);
+
+      const { data: ent, error: entitlementError } = await admin
+        .from("entitlements")
+        .select("stripe_subscription_id")
+        .eq("user_id", user.id)
+        .maybeSingle<{ stripe_subscription_id: string | null }>();
+      if (entitlementError) {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+
+      // The Stripe object is authoritative for a billing decision. The local
+      // row can lag a webhook; quoting a decline discount to an active,
+      // delinquent or incomplete subscriber would create a second purchase
+      // while that account already has an open subscription relationship.
+      let stripeSubscription: Stripe.Subscription | null;
+      try {
+        stripeSubscription = await stripeSubscriptionForUser(user.id, ent?.stripe_subscription_id);
+      } catch {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+      if (stripeSubscription && !["canceled", "incomplete_expired"].includes(stripeSubscription.status)) {
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+
+      downsellClaimId = crypto.randomUUID();
+      const { data: claimed, error: claimError } = await admin.rpc("reserve_downsell_checkout", {
+        p_user_id: user.id,
+        p_claim_id: downsellClaimId,
+      });
+      if (claimError || claimed !== true) {
+        downsellClaimId = null;
+        return json({ error: "That offer is not available on this account." }, 403);
+      }
+
+      const customerId = stripeObjectId(stripeSubscription?.customer);
       const session = await getStripe().checkout.sessions.create(
         {
           mode: "payment",
+          integration_identifier: CHECKOUT_INTEGRATION_ID,
           expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
           line_items: [{ price: downsellPrice, quantity: 1 }],
-          success_url: `${origin}/?purchase=scan-success`,
+          success_url: `${origin}/?purchase=scan-success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/?purchase=scan-cancelled`,
           client_reference_id: user.id,
-          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
-          metadata: { supabase_user_id: user.id, purpose: "scan_credit", offer: "decline_downsell" },
+          ...(customerId ? { customer: customerId } : { customer_email: user.email }),
+          metadata: {
+            supabase_user_id: user.id,
+            purpose: "scan_credit",
+            offer: "decline_downsell",
+            downsell_claim_id: downsellClaimId,
+          },
           custom_text: {
             submit: { message: "Your full analysis, unlocked the moment payment completes. One payment, no subscription." },
           },
@@ -214,6 +246,16 @@ export async function POST(request: Request): Promise<Response> {
           : undefined,
       );
       if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+      downsellCheckoutSessionId = session.id;
+      const { data: linked, error: linkError } = await admin.rpc("link_downsell_checkout", {
+        p_user_id: user.id,
+        p_claim_id: downsellClaimId,
+        p_checkout_session_id: session.id,
+      });
+      if (linkError || linked !== true) {
+        await getStripe().checkout.sessions.expire(session.id).catch(() => undefined);
+        throw new Error(linkError?.message || "Downsell Checkout could not be linked");
+      }
       return json({ url: session.url });
     }
 
@@ -223,22 +265,25 @@ export async function POST(request: Request): Promise<Response> {
     if (body?.purchase === "voice") {
       const { data: ent, error: entitlementError } = await getSupabaseAdmin()
         .from("entitlements")
-        .select("stripe_customer_id")
+        .select("stripe_subscription_id")
         .eq("user_id", user.id)
-        .maybeSingle<{ stripe_customer_id: string | null }>();
+        .maybeSingle<{ stripe_subscription_id: string | null }>();
       if (entitlementError) throw new Error(`Voice checkout lookup failed: ${entitlementError.message}`);
+      const stripeSubscription = await stripeSubscriptionForUser(user.id, ent?.stripe_subscription_id);
+      const customerId = stripeObjectId(stripeSubscription?.customer);
       const voicePrice =
         process.env.STRIPE_VOICED_PRICE_ID || process.env.STRIPE_PRICE_VOICED_ANALYSIS || null;
       if (!voicePrice) return json({ error: "Voiced analysis checkout is still being connected." }, 503);
       const session = await getStripe().checkout.sessions.create(
         {
           mode: "payment",
+          integration_identifier: CHECKOUT_INTEGRATION_ID,
           expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
           line_items: [{ price: voicePrice, quantity: 1 }],
-          success_url: `${origin}/?purchase=voice-success`,
+          success_url: `${origin}/?purchase=voice-success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/?purchase=voice-cancelled`,
           client_reference_id: user.id,
-          ...(ent?.stripe_customer_id ? { customer: ent.stripe_customer_id } : { customer_email: user.email }),
+          ...(customerId ? { customer: customerId } : { customer_email: user.email }),
           metadata: { supabase_user_id: user.id, purpose: "voice_credit" },
           custom_text: {
             submit: { message: "One voiced analysis video, unlocked the moment payment completes. No subscription." },
@@ -278,7 +323,7 @@ export async function POST(request: Request): Promise<Response> {
     ] = await Promise.all([
       admin
         .from("entitlements")
-        .select("stripe_customer_id,stripe_subscription_id,status")
+        .select("stripe_subscription_id,status")
         .eq("user_id", user.id)
         .maybeSingle<ExistingEntitlement>(),
       admin
@@ -299,9 +344,15 @@ export async function POST(request: Request): Promise<Response> {
     if (tier === "max" && !isAdult(profile.date_of_birth)) {
       return json({ error: "Max is available from age 18. Starter is available now." }, 403);
     }
+    const stripeSubscription = await stripeSubscriptionForUser(
+      user.id,
+      entitlement?.stripe_subscription_id,
+    );
     if (
-      entitlement?.stripe_subscription_id &&
-      !["canceled", "incomplete_expired", "none"].includes(entitlement.status)
+      (stripeSubscription && !["canceled", "incomplete_expired"].includes(stripeSubscription.status))
+      || (!stripeSubscription
+        && entitlement?.stripe_subscription_id
+        && !["canceled", "incomplete_expired", "none"].includes(entitlement.status))
     ) {
       return json({ error: "This account already has a subscription. Open billing to manage it." }, 409);
     }
@@ -337,11 +388,12 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: "This account has already used its free trial, or a trial Checkout is already open." }, 409);
     }
 
-    const customerId = entitlement?.stripe_customer_id || null;
+    const customerId = stripeObjectId(stripeSubscription?.customer);
     const planName = tier === "starter" ? "Starter" : "Max";
     const session = await getStripe().checkout.sessions.create(
       {
         mode: "subscription",
+        integration_identifier: CHECKOUT_INTEGRATION_ID,
         expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
         line_items: [{ price: priceId, quantity: 1 }],
         // Stripe replaces this literal placeholder after Checkout. The client
@@ -399,6 +451,20 @@ export async function POST(request: Request): Promise<Response> {
     return json({ url: session.url });
   } catch (error) {
     if (userId && reservationId) await releaseReservation(userId, reservationId).catch(() => undefined);
+    if (userId && downsellClaimId) {
+      if (!downsellCheckoutSessionId) {
+        await releaseDownsellClaim(userId, downsellClaimId).catch(() => undefined);
+      } else {
+        // Never release a claim while its Session may still accept payment.
+        // Expire first and release only after Stripe confirms it is closed.
+        const closed = await getStripe().checkout.sessions.expire(downsellCheckoutSessionId)
+          .then((session) => session.status === "expired")
+          .catch(() => false);
+        if (closed) {
+          await releaseDownsellClaim(userId, downsellClaimId, downsellCheckoutSessionId).catch(() => undefined);
+        }
+      }
+    }
     console.error("create-checkout-session", safeMessage(error));
     return json({ error: "Checkout is not available yet. Try again shortly." }, 503);
   }

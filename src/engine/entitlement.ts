@@ -134,6 +134,119 @@ export async function reconcileEntitlement(sessionId?: string | null): Promise<b
   }
 }
 
+export interface PurchaseResult {
+  kind: "scan" | "voice";
+  status: "success" | "cancelled";
+  sessionId: string | null;
+}
+
+const PURCHASE_RETURN_KEY = "truemax.purchase-return.v1";
+const PURCHASE_RETURN_TTL_MS = 2 * 60 * 60 * 1000;
+
+interface StoredPurchaseResult extends PurchaseResult {
+  savedAt: number;
+}
+
+function forgetStoredPurchaseResult(): void {
+  try {
+    sessionStorage.removeItem(PURCHASE_RETURN_KEY);
+  } catch {
+    // Storage may be unavailable in a hardened/private browser. The webhook
+    // remains authoritative; this is only the browser-return recovery path.
+  }
+}
+
+function rememberPurchaseResult(result: PurchaseResult): void {
+  if (result.status !== "success" || !result.sessionId) {
+    forgetStoredPurchaseResult();
+    return;
+  }
+  try {
+    const stored: StoredPurchaseResult = { ...result, savedAt: Date.now() };
+    sessionStorage.setItem(PURCHASE_RETURN_KEY, JSON.stringify(stored));
+  } catch {
+    // See forgetStoredPurchaseResult: a storage failure must not block the
+    // normal webhook fulfilment or the in-memory return on this page.
+  }
+}
+
+function storedPurchaseResult(): PurchaseResult | null {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(PURCHASE_RETURN_KEY) ?? "null") as
+      Partial<StoredPurchaseResult> | null;
+    if (
+      !parsed
+      || (parsed.kind !== "scan" && parsed.kind !== "voice")
+      || parsed.status !== "success"
+      || typeof parsed.sessionId !== "string"
+      || typeof parsed.savedAt !== "number"
+      || Date.now() - parsed.savedAt > PURCHASE_RETURN_TTL_MS
+    ) {
+      forgetStoredPurchaseResult();
+      return null;
+    }
+    return { kind: parsed.kind, status: parsed.status, sessionId: parsed.sessionId };
+  } catch {
+    forgetStoredPurchaseResult();
+    return null;
+  }
+}
+
+/**
+ * Consume a one-time Checkout return without leaving its Session id in browser
+ * history. A short-lived sessionStorage copy survives an OAuth round-trip when
+ * the Supabase session expired during Checkout; the server still binds the
+ * Session to the authenticated user before granting anything.
+ */
+export function consumePurchaseResult(): PurchaseResult | null {
+  const url = new URL(location.href);
+  const value = url.searchParams.get("purchase");
+  const match = value?.match(/^(scan|voice)-(success|cancelled)$/);
+  if (!match) return storedPurchaseResult();
+  const sessionId = url.searchParams.get("session_id");
+  url.searchParams.delete("purchase");
+  url.searchParams.delete("session_id");
+  history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  const result: PurchaseResult = {
+    kind: match[1] as PurchaseResult["kind"],
+    status: match[2] as PurchaseResult["status"],
+    sessionId,
+  };
+  rememberPurchaseResult(result);
+  return result;
+}
+
+/** Clear the recovery copy only after the exact paid Session reconciles. */
+export function clearPurchaseResult(): void {
+  forgetStoredPurchaseResult();
+}
+
+export async function reconcilePurchase(sessionId: string): Promise<"scan" | "voice" | null> {
+  const accessToken = await currentAccessToken();
+  if (!accessToken) return null;
+  try {
+    const response = await fetch("/api/reconcile-purchase", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+    const body = await response.json().catch(() => null) as {
+      reconciled?: boolean;
+      kind?: unknown;
+    } | null;
+    return response.ok
+      && body?.reconciled === true
+      && (body.kind === "scan" || body.kind === "voice")
+      ? body.kind
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // One-time scan credits: the non-subscription way through the depth gate.
 // The balance lives server-side and moves only through SECURITY DEFINER

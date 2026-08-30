@@ -38,12 +38,12 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const isLink = mode === "link";
   const analysis = options.context === "analysis";
   const title = analysis
-    ? "Create an account to analyse your face"
+    ? "Create an account to see your analysis"
     : isSignup
       ? "Create your account"
       : "Welcome back";
   const lede = analysis
-    ? "In order to be able to analyse your face, you must create an account. Sign up or log in to continue."
+    ? "Your scan is already measured on this device. Sign up or log in to open the result."
     : "Photos stay on this device by default. Your account keeps your membership attached to you across browsers.";
 
   root.innerHTML = `
