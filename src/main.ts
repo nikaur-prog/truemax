@@ -49,7 +49,12 @@ import type { SidePoints } from "./engine/sideMetrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { cameraCount, isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
-import { enterCameraTakeover, exitCameraTakeover } from "./ui/camTakeover.js";
+import {
+  clearCameraTakeover,
+  enterCameraTakeover,
+  exitCameraTakeover,
+  flipThrough,
+} from "./ui/camTakeover.js";
 import { mountDemoReel } from "./ui/demoReel.js";
 import { closeHistory, openHistory } from "./ui/historyView.js";
 import { loadPhotos } from "./engine/photoStore.js";
@@ -1218,7 +1223,19 @@ async function openCamera(): Promise<void> {
 // Tear the live preview down and put the landing screen back exactly as it
 // was, celebrity reel and all. Shared by capture and cancel so the two can
 // never drift apart and leave the page half in camera mode.
-async function closeCamera(): Promise<void> {
+//
+// `instant` skips the fold-back animation only. Everything else — the stream,
+// the listeners, the HUD, the landmarker mode — is torn down identically, so
+// the two paths still cannot drift.
+//
+// Cancel folds back, because the person really is returning to the landing
+// screen and should watch themselves get there. Capture must NOT: the photo
+// is taken, the scan is about to run, and a 560ms fold-back of the viewfinder
+// into the small landing card put the pre-photo screen on the display for
+// half a second in between. Reported as "it takes you back to the pre-photo
+// screen, and then it will go through and scan the photo", and that is
+// exactly what it was doing.
+async function closeCamera(opts: { instant?: boolean } = {}): Promise<void> {
   autoFront?.cancel();
   autoFront = null;
   if (frontKeyHandler) {
@@ -1228,7 +1245,8 @@ async function closeCamera(): Promise<void> {
   cam?.stop();
   cam = null;
   lastCheck = null;
-  exitCameraTakeover(document.getElementById("capture-stage"));
+  if (opts.instant) clearCameraTakeover();
+  else exitCameraTakeover(document.getElementById("capture-stage"));
   el.camSwap.classList.add("hidden");
   el.ovalFrame.classList.remove("live", "ready", "tracking");
   el.stage.classList.remove("live-cam");
@@ -1294,7 +1312,10 @@ el.btnCamera.addEventListener("click", async () => {
   // Remember that the front came from the camera, so the side step defaults to
   // the camera too rather than making the user switch capture method mid-flow.
   captureMethod = "camera";
-  await closeCamera();
+  // No fold-back: the scan stage takes the screen over from the viewfinder,
+  // so animating the viewfinder back down into the landing card would be
+  // showing the person a screen they are not going to.
+  await closeCamera({ instant: true });
   if (shot) await handleCanvas(shot, 1, generation, token, burst.slice(1));
   else scanSession.reset();
 });
@@ -1600,7 +1621,9 @@ async function handleCanvas(
   // mode, and the still-image detector then threw "Landmarker is in VIDEO
   // mode". Capturing had always torn the camera down first; choosing a file
   // never did.
-  if (cam) await closeCamera();
+  // Same reasoning as the capture path: whichever way the photo arrived, the
+  // next thing on screen is the scan, not the landing card.
+  if (cam) await closeCamera({ instant: true });
   if (!scanIsCurrent(token, generation)) return;
   const width = src.width;
   const height = src.height;
@@ -2008,7 +2031,11 @@ async function runFullAnalysis(
     await pruneArchivesTo(keep);
   })();
 
-  el.frame.classList.remove("scanning");
+  // Leaving `scanning` is what drops the photograph out of the full-screen
+  // scan stage and back into the report's 38% column, so it is a geometry
+  // change of the same size the camera takeover makes — and it gets the same
+  // FLIP rather than a cut.
+  flipThrough(el.frame, () => el.frame.classList.remove("scanning"));
   el.capRight.textContent = "ANALYZED";
   el.status.textContent = "";
   el.status.classList.remove("swapping");

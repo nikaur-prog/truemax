@@ -29,7 +29,34 @@
 // so the claim on screen and the data on disk cannot drift apart silently.
 export const REFERENCE_N = 100;
 
-export function statedPct(pct: number): number {
+// How far into a tail a percentile may be STATED, for a reading whose own
+// repeatability is not established.
+//
+// The default is 1: the front's tail behaviour is settled, the ladder in
+// rarity.ts is derived from it, and it is not being reopened here.
+//
+// The side profile is the exception, and it is not a rounding question. A
+// profile score comes off thirteen points placed by hand on one photograph,
+// and whether the same face measures the same way twice is still an open
+// question (task #54 — the side metrics failed the repeatability test the
+// front metrics passed). A 3.5 was therefore printed as "Bottom 1%": the most
+// precise-sounding claim anywhere in the product, sitting on the least
+// established measurement in it. CLAUDE.md's Claims rule is exactly this —
+// percentiles stay inside what the sample supports.
+//
+// So until the side's repeatability is measured, the side may not name a band
+// narrower than the outer decile, in either direction. Ten is a policy, not a
+// derived constant, and it is deliberately reversible: when #54 lands with a
+// number, this becomes that number, or goes away.
+//
+// Only the WORDING is capped. Scores, ordering, ranking, the potential
+// calculation and stored history all keep the exact percentile, so a profile
+// genuinely moving through the tail still moves in the data while the label
+// holds at ten.
+export const SIDE_TAIL_LIMIT_PCT = 10;
+
+export function statedPct(pct: number, tailLimit = 1): number {
   if (!Number.isFinite(pct)) return 50;
-  return Math.max(1, Math.min(99, Math.round(pct / 5) * 5));
+  const rounded = Math.round(pct / 5) * 5;
+  return Math.max(tailLimit, Math.min(100 - tailLimit, rounded));
 }

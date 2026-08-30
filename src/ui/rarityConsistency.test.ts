@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { percentileLine, populationLine, rankShort, rarityText, scoreHigherText, topPctText } from "./templates.js";
 import { oneInN, rarityPhrase } from "../engine/rarity.js";
+import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
 
 // The two ways this app states the same fact must state the same fact.
 //
@@ -133,6 +134,25 @@ test("the bottom of the reference set is never 'Bottom 0%'", () => {
   for (const pct of [0, 0.001, 0.4]) {
     assert.equal(rankShort(pct), "Bottom 1%");
   }
+});
+
+test("the side profile may not name a band narrower than the outer decile", () => {
+  // A 3.5 profile printed "Bottom 1%": the most precise-sounding claim in the
+  // product, off thirteen points placed by hand, on a metric set whose
+  // repeatability is still open (#54). The floor is a policy tied to that open
+  // question, so it is pinned here — if #54 lands and someone narrows it, this
+  // test is the thing that makes them say so out loud.
+  for (const pct of [0, 0.4, 1, 4, 9]) {
+    assert.equal(rankShort(pct, SIDE_TAIL_LIMIT_PCT), "Bottom 10%");
+  }
+  for (const pct of [91, 96, 99, 100]) {
+    assert.equal(rankShort(pct, SIDE_TAIL_LIMIT_PCT), "Top 10%");
+  }
+  // Inside the floor the profile still reads exactly like everything else.
+  assert.equal(rankShort(37, SIDE_TAIL_LIMIT_PCT), rankShort(37));
+  assert.equal(rankShort(72, SIDE_TAIL_LIMIT_PCT), rankShort(72));
+  // And the front is untouched: this widened one reading, not the product.
+  assert.equal(rankShort(0.4), "Bottom 1%");
 });
 
 test("the three standing phrasings cannot drift apart", () => {

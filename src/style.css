@@ -1816,6 +1816,78 @@ body.cam-takeover .cam-hud {
 body.cam-takeover .cam-info,
 body.cam-takeover .cam-swap { top: calc(12px + env(safe-area-inset-top, 0px)); }
 
+/* ---------- the measurement pass runs full-bleed ----------
+   #v-main is a 38% / 1fr grid, so while the pass was running the photograph
+   sat in a ~450px column of a 1240px page whose other column was still empty.
+   The most impressive thing the product does was also the smallest thing on
+   the screen, and next to a competitor that fills the frame it read as a
+   loading spinner rather than as an instrument working.
+
+   Keyed off the frame's own `scanning` class rather than a body flag, because
+   every exit from the pass — results ready, no face found, photo rejected,
+   the scan reset out from under it — already clears that class. A second
+   piece of state would be a second thing to forget to clear, and the failure
+   mode is a page stuck under a full-screen overlay.
+
+   Scoped to #frame so the side flow's own `.face-frame.scanning` (a small
+   card inside the profile step, deliberately) is untouched.
+
+   z-index sits above the camera takeover's 322 so the handover from
+   viewfinder to scan can overlap by a frame with nothing showing through. */
+body:has(#frame.scanning) { overflow: hidden; }
+body:has(#frame.scanning) #v-main {
+  position: fixed; inset: 0; z-index: 323;
+  display: flex; align-items: center; justify-content: center;
+  max-width: none; margin: 0; padding: 24px;
+  background: rgba(12, 13, 15, 0.94);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+/* Width shrink-wraps to the frame, so the caption, the narration line and the
+   bar all come out exactly as wide as the photograph they belong to. */
+body:has(#frame.scanning) .pane-photo {
+  position: static; top: auto;
+  width: auto; display: flex; flex-direction: column; align-items: stretch;
+}
+/* HEIGHT drives this, not width, and that is the whole trick.
+   `width: min(560px, ...)` was the obvious way to write it and it made the
+   stage SMALLER than the report layout it replaced: a portrait photograph
+   560px wide is 747px tall, which does not fit on a laptop, so the frame's
+   max-height cropped the chin off. Fixing the height at 76vh and letting the
+   3:4 ratio pick the width fills every screen to the same proportion instead,
+   and `contain` means a photograph of any shape lands whole inside it rather
+   than being cropped to fit the box. */
+body:has(#frame.scanning) #frame {
+  aspect-ratio: 3 / 4; height: 76vh; width: auto; max-width: 92vw; max-height: none;
+  align-self: center; border-radius: 20px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+}
+body:has(#frame.scanning) #frame .zoomable { height: 100%; }
+body:has(#frame.scanning) #frame .zoomable canvas {
+  width: 100%; height: 100%; object-fit: contain;
+}
+/* The caption, the narration line and the bar come with the photograph, and
+   they are written for the light page. On the dark stage they need the same
+   inversion the takeover HUD gets. */
+body:has(#frame.scanning) .photo-caption,
+body:has(#frame.scanning) .scan-status { color: rgba(255, 255, 255, 0.74); }
+body:has(#frame.scanning) .photo-caption b { color: rgba(255, 255, 255, 0.92); }
+body:has(#frame.scanning) .bar { background: rgba(255, 255, 255, 0.16); }
+/* Nothing else belongs on the stage: the analysis column is empty during the
+   pass anyway, and the toggle and chips are answers to a scan that has not
+   finished. */
+body:has(#frame.scanning) .pane-analysis,
+body:has(#frame.scanning) .pane-photo .viewtoggle,
+body:has(#frame.scanning) .pane-photo .quality-chips,
+body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
+@media (max-width: 760px) {
+  /* The phone rules give .pane-photo a flex order for every child; the stage
+     keeps that ordering and only takes the frame up to the room it now has. */
+  body:has(#frame.scanning) #v-main { padding: 12px; }
+  /* On a phone the width runs out before the height does, so max-width takes
+     over and the ratio picks the height. Nothing else needs to change. */
+  body:has(#frame.scanning) #frame { height: 70vh; max-width: 94vw; }
+}
+
 /* The camera switch: front/back on a phone, next device on a desktop. Same
    glassy chip as the info button, opposite corner. */
 .cam-swap {

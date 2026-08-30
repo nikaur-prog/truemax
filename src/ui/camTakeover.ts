@@ -51,6 +51,20 @@ function flip(stage: HTMLElement | null, applyClass: () => void): void {
   });
 }
 
+/**
+ * The same FLIP, for any element whose geometry a class change is about to
+ * move.
+ *
+ * The measurement pass leaves its full-screen stage the moment the results
+ * are ready, which drops the photograph from the middle of the screen into
+ * the 38% column of the report. Cutting there is the same jarring frame the
+ * camera fold-back used to be, and this is already the routine that solves
+ * it: measure, apply, measure, play the difference on the compositor.
+ */
+export function flipThrough(el: HTMLElement | null, applyClass: () => void): void {
+  flip(el, applyClass);
+}
+
 /** Lift a capture stage into the full-screen viewfinder. */
 export function enterCameraTakeover(stage: HTMLElement | null): void {
   flip(stage, () => document.body.classList.add("cam-takeover"));

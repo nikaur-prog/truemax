@@ -50,6 +50,7 @@ import { armMaxPetReveal, mountMaxPet, unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
+import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
 
 interface Ctx {
   report: Report;
@@ -248,7 +249,9 @@ export function renderResults(c: Ctx): void {
   placeQualityChips();
   tabView = "front";
   buildTabs("front");
-  select("overall");
+  // The initial mount does not scroll: main.ts owns where the page sits when
+  // the results arrive, and a second scroll from here would fight it.
+  select("overall", undefined, { scroll: false });
 }
 
 // Which half of the scan the tab row is currently describing.
@@ -388,10 +391,15 @@ function buildTabs(view: "front" | "side"): void {
 // is three boxes to say what one already said.
 function viewCards(r: Report): string {
   if (!r.views) return "";
-  const cards: Array<[string, number, number]> = [
-    ["OVERALL", r.overall, r.overallPercentile],
-    ["FRONT", r.views.front.score, r.views.front.percentile],
-    ["SIDE", r.views.side.score, r.views.side.percentile],
+  // The fourth column is how far into a tail that card may name a band. The
+  // profile gets a wider floor than the other two: thirteen points placed by
+  // hand, on a metric set whose repeatability is still open, printed "Bottom
+  // 1%" beside a 3.5 — the most precise-sounding claim in the product sitting
+  // on its least established measurement. See SIDE_TAIL_LIMIT_PCT.
+  const cards: Array<[string, number, number, number | undefined]> = [
+    ["OVERALL", r.overall, r.overallPercentile, undefined],
+    ["FRONT", r.views.front.score, r.views.front.percentile, undefined],
+    ["SIDE", r.views.side.score, r.views.side.percentile, SIDE_TAIL_LIMIT_PCT],
   ];
   // One decimal, matching the headline and the pillars. Two decimals were an
   // attempt at precision the measurement cannot support — a single scan moves
@@ -400,11 +408,11 @@ function viewCards(r: Report): string {
   // 4.2, 4.2 reads as three numbers that happen to agree.
   const same = new Set(cards.map(([, score]) => score.toFixed(1))).size === 1;
   return `<div class="viewcards">${cards
-    .map(([label, score, pct]) => {
+    .map(([label, score, pct, tailLimit]) => {
       const tone = scoreTone(score);
       return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
         <span class="vc-label">${label}</span>
-        <span class="vc-rank">${rankShort(pct)}</span>
+        <span class="vc-rank">${rankShort(pct, tailLimit)}</span>
         <b class="vc-score ${tone}"><span data-count="${score}" data-decimals="1">0.0</span><small>/10</small></b>
       </div>`;
     })
@@ -522,7 +530,40 @@ function resultActions(merged: boolean, ctx: Ctx): string {
   </div>`;
 }
 
-function select(id: string, forceView?: "front" | "side"): void {
+/**
+ * Put the reader back at the top of the report.
+ *
+ * Switching to Side, or to a region tab, replaces the whole right-hand column
+ * under a scroll position that was correct for the column that just left. So
+ * pressing Side from halfway down the front's measurement list dropped the
+ * person into the middle of the side's list, past the heading, past the score,
+ * past Coach Max's read — reported as "it auto-scrolls me down to the
+ * ratings". Nothing was scrolling. Nothing was un-scrolling either, which is
+ * the actual bug: this is the only place in the report that ever moves the
+ * page, and until now it did not exist.
+ *
+ * The rail is the target rather than the photograph. It carries its own
+ * scroll-margin under the sticky header, it is the top of the thing that
+ * changed, and on a phone the photo column sits above it and stays reachable
+ * with one flick up.
+ */
+function scrollReportToTop(): void {
+  const rail = ctx?.analysis.querySelector<HTMLElement>(".rtabs-rail");
+  if (!rail) return;
+  // Already at or above the top of the report: a scroll here would drag
+  // somebody who is reading the photograph downward, which is the opposite of
+  // the complaint.
+  if (rail.getBoundingClientRect().top >= 0) return;
+  rail.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/**
+ * `scroll` is opt-out rather than opt-in because every caller that is a person
+ * pressing something wants it, and the two that do not are both the initial
+ * mount — where the page has just been built and moving it would fight the
+ * scroll main.ts does when the results arrive.
+ */
+function select(id: string, forceView?: "front" | "side", opts: { scroll?: boolean } = {}): void {
   if (!ctx) return;
   stopTypewriter();
   // Leaving Coach Max's read is the signal that the first read is over —
@@ -561,6 +602,9 @@ function select(id: string, forceView?: "front" | "side"): void {
   else if (id === "side") showSide();
   else if (onSide) showSideRegion(id.slice(5) as RegionId);
   else showRegion(id as RegionId);
+  // After the new panel exists, not before: scrolling to a rail that is about
+  // to be re-measured under fresh content lands in the wrong place.
+  if (opts.scroll !== false) scrollReportToTop();
 }
 
 // Which region the overlay is currently lit for, so a transition knows what it
@@ -1229,12 +1273,12 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       <div class="score-head">
         <div><div class="klabel">SIDE PROFILE · 25% OF THE TOTAL</div>
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
-        <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile)}</span></div>
+        <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile, SIDE_TAIL_LIMIT_PCT)}</span></div>
       </div>
       ${provenance(measured)}
       ${implausibleBanner(report)}
       ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
-      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile) })}
+      <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile, SIDE_TAIL_LIMIT_PCT) })}
         ${curveLegend()}
         <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles")}</p></div>
       ${regions.map((r) => sideRegionDeck(r, report)).join("")}
@@ -2336,7 +2380,10 @@ export function setDepth(next: Depth, remainingFreeScans = 0): void {
   if (next === depth) return;
   depth = next;
   const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel");
-  if (open) select(open.dataset.id || "overall");
+  // Re-selects the tab already open, to repaint it now that the entitlement
+  // is known. Nobody pressed anything, so nothing may move: a late network
+  // read is not allowed to yank the page out from under someone mid-sentence.
+  if (open) select(open.dataset.id || "overall", undefined, { scroll: false });
 }
 
 // Wraps in-depth content in a blur with an unlock card over it.

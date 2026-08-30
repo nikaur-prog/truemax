@@ -701,8 +701,13 @@ export function leverFor(m: ScoredMetric): Lever {
 // `statedPct` clamps to [1, 99], so "Bottom 0%" — the nonsense an earlier
 // separately-computed version printed for a face at the very bottom of the
 // reference set — is unreachable here by construction.
-function standing(pct: number): { top: boolean; pct: number } {
-  const shown = statedPct(pct);
+//
+// `tailLimit` is how far into a tail this particular reading is allowed to
+// name a band. It defaults to the front's settled behaviour and is widened
+// only for the side profile, whose repeatability is still open — see
+// SIDE_TAIL_LIMIT_PCT in engine/precision.ts for why.
+function standing(pct: number, tailLimit?: number): { top: boolean; pct: number } {
+  const shown = statedPct(pct, tailLimit);
   return shown < 50 ? { top: false, pct: shown } : { top: true, pct: 100 - shown };
 }
 
@@ -713,13 +718,13 @@ function standing(pct: number): { top: boolean; pct: number } {
 // version of the cards computed it separately and got a "Bottom 47%" sitting
 // directly beneath a "Top 53.4%" on the chart. Both were describing the same
 // face and one of them was arithmetically wrong.
-export function rankShort(pct: number): string {
-  const s = standing(pct);
+export function rankShort(pct: number, tailLimit?: number): string {
+  const s = standing(pct, tailLimit);
   return s.top ? `Top ${s.pct}%` : `Bottom ${s.pct}%`;
 }
 
-export function percentileLine(pct: number, sex: Sex): string {
-  const s = standing(pct);
+export function percentileLine(pct: number, sex: Sex, tailLimit?: number): string {
+  const s = standing(pct, tailLimit);
   const group = sex === "male" ? "men" : "women";
   return s.top ? `Top ${s.pct}% of ${group}` : `Bottom ${s.pct}% of ${group}`;
 }
