@@ -519,7 +519,7 @@ export async function openTrialFunnel(
         <article class="plan-card starter" data-plan="starter">
           <div class="plan-top"><span>STARTER</span><b>${priceInner(STARTER_MONTHLY, "month")}</b></div>
           <p>A clear weekly pathway to keep your progress moving.</p>
-          <div class="plan-feat"><ul><li>Your weekly pathway, ordered by what moves</li><li>Daily accountability tracker</li><li>Progress tracking scan to scan</li><li>Scan other people too</li></ul></div>
+          <div class="plan-feat"><ul><li>One scan a week</li><li>In-depth analysis of every measurement</li><li>Progress tracking scan to scan</li><li>Personalised recommendations</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="starter">Start 7-day free trial</button>
           <small>Then $${STARTER_MONTHLY.toFixed(2)}/month. Cancel anytime.</small>
@@ -530,7 +530,7 @@ export async function openTrialFunnel(
           <div class="plan-top"><span>TRUE<span>MAX</span></span><b>${priceInner(MAX_MONTHLY, "month")}</b></div>
           ${adult ? `<span class="plan-week">$${weeklyOf(MAX_MONTHLY * 12)}/week. The leading weekly-priced app: $3.99/week.</span>` : ""}
           <p>Your highest-touch experience with Max alongside you.</p>
-          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Two scans a week</li></ul></div>
+          <div class="plan-feat"><ul><li>Everything in Starter</li><li>Coach Max, your AI coach</li><li>Step-by-step plans, catered to you</li><li>Scan up to 50 other people a week</li></ul></div>
           <span class="plan-hint">Tap for what's included</span>
           <button class="btn plan-cta" type="button" data-checkout="max" ${adult ? "" : "disabled"}>
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
@@ -557,7 +557,7 @@ export async function openTrialFunnel(
       </div>
       <p class="trial-status" role="status"></p>
       <button class="trial-decline" type="button">Not now</button>
-      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout.</p>
+      <p class="trial-legal">Subscriptions renew monthly until cancelled, and your plan and trial terms are shown again in secure Checkout. Not ready for a subscription? Individual scans can be bought one at a time instead — the option is on your results screen.</p>
     </div>`;
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);

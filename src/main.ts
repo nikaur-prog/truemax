@@ -64,11 +64,12 @@ import type { OpenAccountOptions } from "./ui/authModal.js";
 import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
   hasMaxAccess,
+  consumeScanCreditForScan,
   loadEntitlement,
   loadIsAdmin,
   loadScanCredits,
 } from "./engine/entitlement.js";
-import { depthFor, tierOf } from "./engine/depth.js";
+import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
 import type { User } from "@supabase/supabase-js";
 import { openSexChooser } from "./ui/sexChooser.js";
 import { openSubjectChooser } from "./ui/subjectChooser.js";
@@ -178,20 +179,25 @@ async function refreshMaxAccess(): Promise<void> {
       loadIsAdmin().catch(() => false),
     ]);
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
-    // No credit is spent to look at the results any more.
-    //
-    // This used to consume one purchased scan credit whenever a free account
-    // past its two-scan allowance opened a report, because the report was the
-    // thing the credit bought. Depth is free now, so leaving this in place
-    // would take a paid credit in exchange for content the account already
-    // has — charging somebody for nothing, silently, on a screen that does not
-    // mention it. A credit's remaining job is skipping the weekly wait, and
-    // scanAllowance's gate is the one place that spends it.
+    let currentPaidScan = false;
+    if (
+      resultAccessContext
+      && !admin
+      && tierOf(entitlement) === "free"
+      && scanCount >= TRIAL_SCANS
+    ) {
+      const use = await consumeScanCreditForScan(resultAccessContext.scanId).catch(() => null);
+      if (owner !== activeScanOwner() || generation !== scanGeneration) return;
+      currentPaidScan = use?.consumed === true;
+    }
     setMaxAccess(hasMaxAccess(entitlement) || admin);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     setMemberPricing(tierOf(entitlement) !== "free");
-    setDepth(depthFor({ entitlement, scanCount, credits, admin }));
+    setDepth(
+      depthFor({ entitlement, scanCount, credits: currentPaidScan ? Math.max(1, credits) : credits, admin }),
+      freeScansLeft({ entitlement, scanCount }),
+    );
   } catch {
     if (owner !== activeScanOwner() || generation !== scanGeneration) return;
     // Both fail closed. A wall shown to a paying customer is recoverable — they
@@ -202,7 +208,7 @@ async function refreshMaxAccess(): Promise<void> {
     // somebody we could not confirm is a member sets up a charge that does not
     // match what they were shown.
     setMemberPricing(false);
-    setDepth(depthFor({ entitlement: null, scanCount }));
+    setDepth(depthFor({ entitlement: null, scanCount }), freeScansLeft({ entitlement: null, scanCount }));
   }
 }
 

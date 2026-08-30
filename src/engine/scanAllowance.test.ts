@@ -4,6 +4,7 @@ import {
   SCAN_WINDOW_MS,
   mergeScanTimes,
   nextScanSlotAt,
+  guestAllowance,
   scansInWindow,
   weeklyAllowance,
 } from "./scanAllowance.js";
@@ -12,11 +13,24 @@ const NOW = 1_756_100_000_000;
 const DAY = 24 * 60 * 60 * 1000;
 
 test("the allowance matches what the plan cards sell", () => {
-  // Starter's card says "One scan a week"; Max's says "Two scans a week".
-  // These numbers ARE the promise — a change here must change the cards.
+  // These numbers ARE the promise — a change here must change the cards, and
+  // this one did: Max's card sold "Two scans a week" and now sells "Scan up to
+  // 50 other people a week".
+  //
+  // One personal scan on every tier. The tiers differ on other people's faces
+  // instead, which is the axis Max is actually sold on and the one where
+  // "unlimited" was quietly giving Starter and Max the same product.
   assert.equal(weeklyAllowance("free"), 1);
   assert.equal(weeklyAllowance("starter"), 1);
-  assert.equal(weeklyAllowance("max"), 2);
+  assert.equal(weeklyAllowance("max"), 1);
+});
+
+test("guest scans are where the tiers actually differ", () => {
+  assert.equal(guestAllowance("starter"), 3);
+  assert.equal(guestAllowance("max"), 50);
+  // Free is zero, and states it rather than leaving it implied: the subject
+  // chooser is member-gated, so a free account cannot declare a guest at all.
+  assert.equal(guestAllowance("free"), 0);
 });
 
 test("only scans inside the trailing week count, newest first", () => {
