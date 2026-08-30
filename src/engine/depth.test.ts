@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TRIAL_SCANS, canSeeDepth, canSeePlan, depthFor, freeScansLeft, tierOf } from "./depth.js";
+import { canSeeDepth, canSeePlan, depthFor, tierOf } from "./depth.js";
 import type { Entitlement, EntitlementTier } from "./entitlement.js";
 
 const ent = (tier: EntitlementTier, status = "active"): Entitlement => ({
@@ -12,11 +12,13 @@ const ent = (tier: EntitlementTier, status = "active"): Entitlement => ({
 
 test("the score and the ranking are never gated", () => {
   // The pitch is "we show the actual math". A paywall over the number itself
-  // would make that a lie on the first screen, so "rating" is the floor and
-  // there is no level below it.
+  // would make that a lie on the first screen, so nothing depthFor can return
+  // hides it — "rating" is the floor and there is no level below it.
+  //
+  // Asserted as "at least rating" rather than by listing the union, which the
+  // type already guarantees and which made this test pass for any value at all.
   for (const scanCount of [0, 1, 2, 50]) {
-    assert.notEqual(depthFor({ entitlement: null, scanCount }), undefined);
-    assert.ok(["rating", "depth", "plan"].includes(depthFor({ entitlement: null, scanCount })));
+    assert.ok(canSeeDepth({ entitlement: null, scanCount }) || depthFor({ entitlement: null, scanCount }) === "rating");
   }
 });
 
@@ -37,13 +39,6 @@ test("free never reaches the plan, however many scans it runs", () => {
   for (const scanCount of [0, 2, 9, 500]) {
     assert.notEqual(depthFor({ entitlement: null, scanCount }), "plan", `at ${scanCount} scans`);
   }
-});
-
-test("two scans, because one scan cannot show a delta", () => {
-  // Guards the number itself. Dropping to one would end the trial before
-  // anybody has seen their score move, which is the half of the product a
-  // screenshot cannot convey.
-  assert.equal(TRIAL_SCANS, 2);
 });
 
 test("starter buys depth, max buys the plan", () => {
@@ -87,16 +82,6 @@ test("a failed entitlement read locks rather than unlocks", () => {
   // plan, and that is what this pins.
   assert.notEqual(depthFor({ entitlement: null, scanCount: 5 }), "plan");
   assert.equal(depthFor({ entitlement: null, scanCount: 5 }), "depth");
-});
-
-test("the remaining-scan count only speaks to free accounts", () => {
-  assert.equal(freeScansLeft({ entitlement: null, scanCount: 0 }), 2);
-  assert.equal(freeScansLeft({ entitlement: null, scanCount: 1 }), 1);
-  assert.equal(freeScansLeft({ entitlement: null, scanCount: 2 }), 0);
-  assert.equal(freeScansLeft({ entitlement: null, scanCount: 7 }), 0, "never negative");
-  // A paying account has no allowance to report, and a sentence about free
-  // scans on a paid screen reads as a downgrade notice.
-  assert.equal(freeScansLeft({ entitlement: ent("starter"), scanCount: 0 }), 0);
 });
 
 test("a purchased credit never grants the plan, and is now a no-op below it", () => {

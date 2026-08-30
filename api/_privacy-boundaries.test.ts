@@ -105,7 +105,17 @@ test("guest scans do not spend the owner's depth allowance or enter Max context"
   const results = read("src/ui/results.ts");
   assert.match(main, /resultAccessContext\?\.priorScanCount \?\? ownScans\(readAllHistory\(\)\)\.length/);
   assert.match(main, /ownScans\(historyBefore\)\.length - \(existingScan && !scanSubject \? 1 : 0\)/);
-  assert.match(gate, /ownScans\(readAllHistory\(\)\)\.length >= TRIAL_SCANS/);
+  // The gate's guest guard, from both ends. `recordScanRun` refuses to stamp
+  // the week for a guest, and `scanTimes` counts own scans only, so a scan of
+  // somebody else's face can neither spend the owner's week nor appear as one
+  // of their slots.
+  //
+  // This used to assert a third guard in the same file, which stood down the
+  // credit spend for a free account past its depth allowance. There is no
+  // depth allowance any more and nothing left to stand down for, so the line
+  // is gone; these two are the guards that were ever about guests.
+  assert.match(gate, /if \(guest\) return;/);
+  assert.match(gate, /const history = ownScans\(readAllHistory\(\)\)/);
   assert.match(results, /scans: ownScans\(readAllHistory\(\)\)\.length/);
 });
 

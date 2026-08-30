@@ -32,7 +32,6 @@ import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcer
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, RECS, recsFor, productSearchUrl } from "../engine/recommendations.js";
 import { loadVoiceCredits, startScanCreditCheckout, startVoiceCreditCheckout } from "../engine/entitlement.js";
-import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
@@ -2184,7 +2183,6 @@ function showImprove(): void {
               ${ceilingCtaMarkup({ overall: r.overall, potential: r.potential, photo: frontPhoto })}
               <p>The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
-              <button class="linkish lock-single" id="btn-single-scan">Or buy just this one scan for ${scanPrice()}</button>
             </div>
           </div>`
         : planBody}
@@ -2304,7 +2302,6 @@ export function setAdult(value: boolean): void {
 // property that still matters is unchanged: a failed entitlement read must
 // never land on "plan".
 let depth: Depth = "depth";
-let scansLeft = 0;
 
 // Account changes are a harder boundary than a new photograph. Late profile
 // or entitlement reads may still resolve, so dropping the result context keeps
@@ -2323,7 +2320,6 @@ export function clearResultsIdentityState(): void {
   adultUser = false;
   pathway = "build";
   depth = "depth";
-  scansLeft = 0;
   unmountMaxPet();
 }
 
@@ -2410,8 +2406,7 @@ function syncMaxSurfaces(): void {
 // Arrives late, like maxAccess, because the entitlement is a network read and
 // blocking a finished analysis on a round trip would hold the result hostage.
 // The screen renders locked and unlocks in place.
-export function setDepth(next: Depth, remainingFreeScans = 0): void {
-  scansLeft = remainingFreeScans;
+export function setDepth(next: Depth): void {
   if (next === depth) return;
   depth = next;
   // The label reads both `pathway` and `depth`, so whichever of the two late
@@ -2439,27 +2434,41 @@ export function setDepth(next: Depth, remainingFreeScans = 0): void {
 // focusable, so nothing behind the wall is reachable by keyboard or a screen
 // reader. A paywall you can tab through is not a paywall.
 function locked(content: string): string {
-  const left = scansLeft > 0
-    ? `<p class="lockcard-note">${scansLeft} free in-depth ${scansLeft === 1 ? "scan" : "scans"} left on this account.</p>`
-    : "";
+  // This card sold the measurements, and the measurements are free now. Two
+  // things had to go with them.
+  //
+  // The pitch. "All thirty-one measurements, what each one did to the number"
+  // described exactly what the reader can already see on the region tabs
+  // behind this card, so it was selling them something they had. What is
+  // actually behind the wall is what to DO about it.
+  //
+  // The one-off scan credit. It bought a full-depth scan without a
+  // subscription, and depthFor has never let a credit reach the plan tier —
+  // so from a card that now only ever covers the plan, that button took money
+  // and did not open the door in front of it. It stays in the weekly gate,
+  // where it buys the thing it is still able to buy.
+  //
+  // The blurred layer is inert: pointer-events off, aria-hidden, and not
+  // focusable, so nothing behind the wall is reachable by keyboard or a screen
+  // reader. A paywall you can tab through is not a paywall.
   return `<div class="lockwrap">
     <div class="lockblur" aria-hidden="true" inert>${content}</div>
     <div class="lockcard">
-      <span class="lockcard-eyebrow">IN-DEPTH ANALYSIS</span>
-      <h4>Every measurement behind your score</h4>
-      <p>Your score and your ranking are free on every plan, and always will be. This is the part underneath: all thirty-one measurements, what each one did to the number, and how far it can actually move.</p>
-      ${left}
-      <div class="navrow"><button class="btn pri" id="btn-unlock">Unlock in-depth · 7 days free</button></div>
-      <button class="linkish lock-single" id="btn-single-scan">Just this once, buy one scan for ${scanPrice()}</button>
+      <span class="lockcard-eyebrow">YOUR PATHWAY</span>
+      <h4>What to actually do about it</h4>
+      <p>Every measurement on your face is free, on every scan, and always will be. This is the part that turns them into a routine: what to work on first, in what order, and what to expect from each of it.</p>
+      <div class="navrow"><button class="btn pri" id="btn-unlock">Build my pathway · 7 days free</button></div>
     </div>
   </div>`;
 }
 
 function wireUnlock(): void {
   document.getElementById("btn-unlock")?.addEventListener("click", () => ctx?.onUpgrade?.());
-  // The non-subscription road through the same gate. One price per person, two
-  // prices on the label, and the server decides which applies — the client
-  // never picks its own price.
+  // The single-scan button is no longer rendered by either lock card in this
+  // file: both of them now cover the PLAN, and depthFor has never let a credit
+  // reach the plan tier, so the button would have taken money without opening
+  // the door in front of it. The wiring stays because the query is null-safe
+  // and the same credit is still sold, correctly, by the weekly scan gate.
   const single = document.getElementById("btn-single-scan") as HTMLButtonElement | null;
   single?.addEventListener("click", async () => {
     track("single-scan-started");

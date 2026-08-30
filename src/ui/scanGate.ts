@@ -7,7 +7,7 @@ import {
   loadScanCredits,
   startScanCreditCheckout,
 } from "../engine/entitlement.js";
-import { TRIAL_SCANS, tierOf } from "../engine/depth.js";
+import { tierOf } from "../engine/depth.js";
 import { mergeScanTimes, nextScanSlotAt, weeklyAllowance } from "../engine/scanAllowance.js";
 import { SCAN_PRICE_MEMBER, isMemberPricing, scanPrice, setMemberPricing } from "../engine/scanPricing.js";
 import { track } from "../engine/track.js";
@@ -192,12 +192,12 @@ export async function ensureScanAllowed(proceed: () => void): Promise<boolean> {
     return true;
   }
   if (credits > 0) {
-    // The credit pays for skipping the wait, except for a free-tier account
-    // past its trial, where the depth gate on the results screen already
-    // spends one credit per full-depth scan. Spending it here too would
-    // charge that account twice for one scan.
-    const alsoSpentByDepthGate = !member && ownScans(readAllHistory()).length >= TRIAL_SCANS;
-    if (!alsoSpentByDepthGate) pendingWeeklyCreditOwner = owner;
+    // The credit pays for skipping the wait, and this is now the only place
+    // that spends one. The results screen used to spend a second credit for
+    // the same scan whenever a free account was past its depth allowance, so
+    // this had to check for that and stand down; depth is free now, that spend
+    // is gone, and the double-charge it was avoiding cannot happen.
+    pendingWeeklyCreditOwner = owner;
     proceed();
     return true;
   }
