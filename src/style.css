@@ -1630,6 +1630,11 @@ button.pillar:active { transform: translateY(0); }
 .side-mode-copy { color: var(--mut); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px; }
 /* Side by side, equal widths, because neither of these is the wrong answer. */
 .side-mode-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* One answer, when the engine has already measured the seed and can prove it
+   is wrong. There is nothing to weigh, so there is nothing to weigh it
+   against: a second button here would be offering a choice we know the answer
+   to. */
+.side-mode-actions.single { grid-template-columns: 1fr; }
 .side-mode-actions .btn { width: 100%; padding: 11px 8px; font-size: 13.5px; min-width: 0; }
 /* Under the buttons, quieter than everything above it, and it never claims the
    automatic placement is fine. */
@@ -1645,19 +1650,9 @@ button.pillar:active { transform: translateY(0); }
    whole page up by one button row. */
 #side-actions.mode-pending { visibility: hidden; }
 
-/* Did the points land right? Asked in the panel under the frame, once, only
-   after somebody took the automatic placement. */
-.side-accuracy {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  flex-wrap: wrap; margin-top: 12px; padding: 12px 14px;
-  border: 1px solid var(--line); border-radius: 12px;
-}
-.side-accuracy p { margin: 0; font-size: 12.5px; line-height: 1.5; }
-.side-accuracy-btns { display: flex; gap: 8px; }
-.side-accuracy-btns .btn { min-width: 64px; padding: 7px 14px; font-size: 12.5px; }
-#side-actions { flex-wrap: wrap; }
-#side-actions .btn { min-width: 130px; }
-.drop-side { width: 100%; padding: 28px 22px; text-align: center; }
+/* The in-panel accuracy question is gone; see sideFlow's afterAutomatic. It
+   is a dialog now, asked before the scan runs rather than as a third control
+   competing with Confirm on the review screen. */
 
 .side-feedback-backdrop {
   position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center;
@@ -2150,7 +2145,20 @@ body:has(#frame.scanning) #v-main {
   position: fixed; inset: 0; z-index: 323;
   display: flex; align-items: center; justify-content: center;
   max-width: none; margin: 0; padding: 24px;
-  background: rgba(12, 13, 15, 0.94);
+  /* THE STAGE KEEPS THE PRODUCT'S PALETTE.
+
+     It painted rgba(12,13,15,0.94) — a near-black room, on the reasoning that
+     a dark ground makes a measurement read like an instrument. Every other
+     screen in TrueMax is light, so what that actually produced was one screen
+     that looks like a different application, arriving in the middle of a
+     sequence with no explanation. It was read as a fault rather than as a
+     mode, which is the same thing that happened to the photo dim above.
+
+     Nothing is lost by making it light. The measurement lines are drawn on
+     the PHOTOGRAPH, not on the surround, and they carry their own dark halo,
+     so contrast against the face is unchanged by the colour of the room. The
+     shadow under the frame does the separating now. */
+  background: var(--bg);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
 }
 /* Width shrink-wraps to the frame, so the caption, the narration line and the
@@ -2170,7 +2178,10 @@ body:has(#frame.scanning) .pane-photo {
 body:has(#frame.scanning) #frame {
   aspect-ratio: 3 / 4; height: 76vh; width: auto; max-width: 92vw; max-height: none;
   align-self: center; border-radius: 20px;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+  /* Softer, because it is no longer a bright rectangle in a black room. On a
+     light ground a 0.45 shadow reads as grime around the frame rather than as
+     depth under it. */
+  box-shadow: 0 24px 70px rgba(20, 21, 24, 0.22);
 }
 body:has(#frame.scanning) #frame .zoomable { height: 100%; }
 body:has(#frame.scanning) #frame .zoomable canvas {
@@ -2179,10 +2190,8 @@ body:has(#frame.scanning) #frame .zoomable canvas {
 /* The caption, the narration line and the bar come with the photograph, and
    they are written for the light page. On the dark stage they need the same
    inversion the takeover HUD gets. */
-body:has(#frame.scanning) .photo-caption,
-body:has(#frame.scanning) .scan-status { color: rgba(255, 255, 255, 0.74); }
-body:has(#frame.scanning) .photo-caption b { color: rgba(255, 255, 255, 0.92); }
-body:has(#frame.scanning) .bar { background: rgba(255, 255, 255, 0.16); }
+/* The three overrides that existed ONLY because the ground was dark are gone
+   with it. Light ink on a light stage was the bug those would now cause. */
 /* Nothing else belongs on the stage: the analysis column is empty during the
    pass anyway, and the toggle and chips are answers to a scan that has not
    finished. */

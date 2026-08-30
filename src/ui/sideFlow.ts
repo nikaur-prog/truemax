@@ -95,6 +95,21 @@ export interface SidePlacementReview {
   seedMethod: SideSeedMethod;
   feedback: SideFeedbackIntent | null;
   /**
+   * Whether a human stood behind these thirteen points.
+   *
+   * True when somebody either affirmed the automatic placement or moved points
+   * themselves. False in exactly one case: they were asked whether the points
+   * looked right, said no, were offered the walkthrough, and declined it.
+   *
+   * That case is scored rather than refused, at the owner's call, because a
+   * person who will not spend thirty seconds on thirteen rings will not spend
+   * them on a retake either and would simply leave. But the report has to say
+   * so. A side score built on points their own subject called wrong is not the
+   * same object as one built on points they confirmed, and printing the two
+   * identically is the kind of quiet dishonesty this product exists not to do.
+   */
+  verified: boolean;
+  /**
    * The reviewed photograph, as an OWNED copy taken at the moment of confirm.
    *
    * A correction is only worth anything paired with the picture it corrects, and
@@ -777,10 +792,6 @@ function mountVerify(
   // complaint — not re-asked at confirm.
   let flaggedWrong = false;
   let consentAnswer: boolean | null = null;
-  // Set when the automatic placement was TAKEN rather than walked through, so
-  // the review panel knows to ask whether it was right. Cleared once answered:
-  // the question is asked once, not every time the panel repaints.
-  let askedAccuracy = false;
   // Set once the "nothing was moved" prompt has been shown, so the second press
   // goes through. Scoped per mounted photo, so the next face asks again.
   let untouchedAcknowledged = false;
@@ -1143,38 +1154,14 @@ function mountVerify(
         </svg>
       </button>
       <button class="btn gho" id="side-guided">One by one</button>
-      ${askedAccuracy ? "" : `<button class="btn gho" id="side-wrong">Points are wrong</button>`}
+      <button class="btn gho" id="side-wrong">Points are wrong</button>
       <button class="btn pri" id="side-go">Confirm</button>`;
-    if (askedAccuracy) {
-      // Asked as a question with two answers rather than left as a button
-      // somebody has to think to press. "Points are wrong" is a complaint, and
-      // people do not complain, they shrug and carry on: the yes half of this
-      // is what makes answering it feel like part of the flow. Only the no
-      // half goes anywhere, which is the same consent ask the button had.
-      const ask = document.createElement("div");
-      ask.className = "side-accuracy";
-      ask.innerHTML = `<p>Do you think the points landed in the right places?</p>
-        <span class="side-accuracy-btns">
-          <button type="button" class="btn gho" data-acc="no">No</button>
-          <button type="button" class="btn gho" data-acc="yes">Yes</button>
-        </span>`;
-      e.panelCopy.appendChild(ask);
-      ask.onclick = async (ev) => {
-        const answer = (ev.target as HTMLElement).dataset.acc;
-        if (!answer) return;
-        askedAccuracy = false;
-        if (answer === "yes") {
-          ask.innerHTML = `<p>Noted. Drag any ring that still looks off, then confirm.</p>`;
-          return;
-        }
-        ask.innerHTML = `<p>Thanks. Drag each wrong ring onto the feature it names, then confirm.</p>`;
-        flaggedWrong = true;
-        consentAnswer = await askSideFeedbackConsent();
-        ask.innerHTML = `<p>${consentAnswer
-          ? "That photo and your corrections will be shared privately after you confirm, and they directly teach the automatic placement to land closer."
-          : "Nothing will be shared. Drag each wrong ring onto the feature it names, then confirm."}</p>`;
-      };
-    }
+    // The in-panel accuracy question that used to live here is gone. It only
+    // ever appeared on the automatic path, and that path no longer arrives at
+    // this screen: the question is asked as a dialog now, before the scan runs,
+    // where it is the only thing on screen instead of a third control competing
+    // with Confirm and One by one. This screen is reached by people who are
+    // editing, and "Points are wrong" is the complaint route for them.
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
       drawGuides(e.lines, automaticPoints, w, h);
@@ -1209,7 +1196,24 @@ function mountVerify(
 
 
 
-  const confirmPlacement = async () => {
+  /**
+   * Take the placement and go.
+   *
+   * `auto` marks the path where both questions have already been asked and
+   * answered in dialogs, so the two prompts this function grew for the review
+   * screen are skipped: the untouched guard (a second press to accept a seed
+   * nobody moved) and the in-panel consent ask. Skipping the untouched guard
+   * is not a weakening. That guard exists because untouched seeds produced
+   * measurements disagreeing with an independent product by 22, 12 and 48
+   * degrees, and an explicit answer to "do these look right?" is a stronger
+   * form of the same protection than a second button press: it is a person
+   * saying yes rather than a person clicking twice.
+   */
+  const confirmPlacement = async (opts: {
+    auto?: boolean;
+    verified?: boolean;
+    consented?: boolean;
+  } = {}) => {
     if (!verifier) return;
     const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
     if (confirmButton) confirmButton.disabled = true;
@@ -1297,7 +1301,7 @@ function mountVerify(
       // confirmed untouched, and their measurements disagree with an
       // independent product by 22, 12 and 48 degrees on metrics that agreed to
       // within two degrees on the one capture that happened to seed well.
-      if (!movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
+      if (!opts.auto && !movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
         untouchedAcknowledged = true;
         if (confirmButton) {
           confirmButton.disabled = false;
@@ -1320,8 +1324,8 @@ function mountVerify(
       //                            ask now, framed around the edit.
       //   Confirmed untouched    — the seed was right and there is nothing to
       //                            teach. Asking would be pure friction.
-      let consented = consentAnswer ?? false;
-      if (!flaggedWrong && consentAnswer === null) {
+      let consented = opts.consented ?? consentAnswer ?? false;
+      if (!opts.auto && !flaggedWrong && consentAnswer === null) {
         const moved = movedSidePointIds(automaticPoints, correctedPoints);
         if (moved.length > 0) consented = await askSideFeedbackConsent(true);
       }
@@ -1343,6 +1347,11 @@ function mountVerify(
         seedMethod,
         feedback,
         photo: reviewed,
+        // Anything that reaches here through the review screen has been
+        // looked at: the person either moved a point or pressed Confirm on a
+        // screen showing all thirteen. Only the automatic path can carry a
+        // false, and only when it says so.
+        verified: opts.verified ?? true,
       });
     } catch (err) {
       if (confirmButton) confirmButton.disabled = false;
@@ -1355,17 +1364,96 @@ function mountVerify(
     }
   };
 
+  /**
+   * Everything that happens after somebody takes the automatic placement.
+   *
+   * This used to be one line — set a flag, repaint the review screen — and
+   * that was the whole problem. Taking the automatic points landed you on the
+   * same all-thirteen review screen with the same One by one / Points are
+   * wrong / Confirm row underneath, so "automatic" cost exactly as many taps
+   * as "manual" and bought nothing. An automatic placement that still requires
+   * a manual confirmation is not an automatic placement.
+   *
+   * Now the two things actually worth asking are asked, as questions, and then
+   * the scan goes. No confirm screen.
+   *
+   *   Do these look right?
+   *     yes  -> consent, then analysis
+   *     no   -> would you like to place them yourself?
+   *               yes -> the walkthrough, which ends at the review screen and
+   *                      its own confirm, because at that point a person IS
+   *                      editing and the row is the tool for it
+   *               no  -> consent, then analysis, with the side recorded
+   *                      UNVERIFIED
+   *
+   * The unverified branch is deliberate and is the owner's call. Somebody who
+   * will not spend thirty seconds on thirteen rings will not spend them on a
+   * retake either; refusing them loses the scan and teaches us nothing. So it
+   * is scored, and the report says what it is built on.
+   */
+  const afterAutomatic = async () => {
+    const right = await askSideQuestion({
+      klabel: "ONE QUESTION",
+      title: "Do these points look right?",
+      copy: "The front of the face is measured from the photo. The five behind it, the jaw"
+        + " corner, the ear, the hinge and the neck point, are estimated from an average head,"
+        + " so those are the ones that drift.",
+      no: "No, they look off",
+      yes: "Yes, they look right",
+      fine: "Either answer takes you straight to your analysis.",
+    });
+    if (right === null) return;
+    if (right) {
+      const consented = await askSideFeedbackConsent();
+      if (!verifier) return;
+      await confirmPlacement({ auto: true, verified: true, consented });
+      return;
+    }
+
+    // They said the placement is wrong, which is the single most useful thing
+    // anybody tells us about the seeder. Offer the fix before asking for it.
+    flaggedWrong = true;
+    const edit = await askSideQuestion({
+      klabel: "YOUR CHOICE",
+      title: "Would you like to place them yourself?",
+      copy: "Thirteen points, one at a time, each one named and shown on a reference face."
+        + " It takes about thirty seconds and it is the difference between a side score that"
+        + " measures your face and one that measures a guess.",
+      no: "No, score it as it is",
+      yes: "Yes, place them",
+      fine: "Declining is fine. Your report will say the side profile was not verified.",
+    });
+    if (edit === null) return;
+    if (edit) {
+      // Into the walkthrough. Consent is asked at the end of it, on the review
+      // screen, where there is a correction worth sharing.
+      showGuidedActions();
+      return;
+    }
+
+    const consented = await askSideFeedbackConsent();
+    if (!verifier) return;
+    await confirmPlacement({ auto: true, verified: false, consented });
+  };
+
   if (startInGuidedMode) {
     // The choice, before the walkthrough rather than instead of it.
     //
     // A fresh seed used to drop straight into thirteen guided taps whether the
     // automatic placement was good or not, so somebody whose points had landed
     // perfectly still had to confirm every one of them, and somebody whose had
-    // not could not tell until they were four points in. The seed is already
-    // computed by the time this runs, so there is nothing to save by hiding
-    // it: showing the rings and asking is strictly more information for the
-    // person and one fewer decision made on their behalf.
+    // not could not tell until they were four points in.
     //
+    // WITH ONE EXCEPTION, and it is the one the product was missing. Every
+    // measurement carries anatomical bounds and the engine already flags a
+    // reading outside them. That check ran at confirm time, which meant the
+    // product would offer a seed under the heading "We placed the points for
+    // you", let somebody accept it, and only then announce that one of the
+    // resulting measurements is not a shape a human face can be. Asking a
+    // person to evaluate a placement we can already prove is broken is asking
+    // them to do our job badly. So the seed is measured first, and a seed that
+    // fails is not offered.
+    const broken = seedReadings(seed.points, seed.faceDir, ctx.sex);
     // The review state is put up first, so whichever answer comes back lands
     // on a finished screen rather than building one underneath the person.
     showReviewActions();
@@ -1374,7 +1462,7 @@ function mountVerify(
     // leaving it live means a person can answer twice, and the two answers do
     // not have to agree.
     e.actions.classList.add("mode-pending");
-    void askPlacementMode(e.canvas, seed.points, seed.confidence ?? 1).then((mode) => {
+    void askPlacementMode(e.canvas, seed.points, seed.confidence ?? 1, broken).then(async (mode) => {
       e.actions.classList.remove("mode-pending");
       // Null is a cancelled dialog: the flow was closed or the identity changed
       // underneath it, and there is nothing left for either branch to act on.
@@ -1383,13 +1471,7 @@ function mountVerify(
         showGuidedActions();
         return;
       }
-      // Taking the automatic placement is the branch that owes an answer back:
-      // the person has just accepted a guess, and whether the guess was right
-      // is the single most useful thing they can tell us. Asked in the review
-      // panel rather than in another sheet, because a second modal in a row
-      // reads as an interrogation.
-      askedAccuracy = true;
-      showReviewActions();
+      await afterAutomatic();
     });
   } else showReviewActions();
 }
@@ -1428,15 +1510,26 @@ function askPlacementMode(
   photo: HTMLCanvasElement,
   points: SidePoints,
   confidence: number,
+  broken: string[] = [],
 ): Promise<"auto" | "manual" | null> {
-  const low = confidence < 0.7;
+  // Three states, not two, and the third is the one that was missing.
+  //
+  //   broken   the engine has measured this seed and one of the readings is
+  //            not a shape a face can be. There is no "use these points" on
+  //            offer, because we can prove they are wrong.
+  //   low      the seeder reported low confidence in itself.
+  //   ok       a normal placement.
+  const blocked = broken.length > 0;
+  const low = !blocked && confidence < 0.7;
   return new Promise((resolve) => {
     let done = false;
     const backdrop = document.createElement("div");
     backdrop.className = "side-mode-backdrop";
     backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-mode-title">
-      <span class="klabel">${low ? "LOW CONFIDENCE" : "AUTOMATIC PLACEMENT"}</span>
-      <h2 id="side-mode-title">${low ? "Here is our best guess" : "We placed the points for you"}</h2>
+      <span class="klabel">${blocked ? "PLACEMENT FAILED" : low ? "LOW CONFIDENCE" : "AUTOMATIC PLACEMENT"}</span>
+      <h2 id="side-mode-title">${blocked
+        ? "We could not place these"
+        : low ? "Here is our best guess" : "We placed the points for you"}</h2>
       <figure class="side-mode-shot">
         <button type="button" class="side-mode-zoom" data-zoom aria-expanded="false"
           aria-label="Enlarge the photo to see the points">
@@ -1448,14 +1541,19 @@ function askPlacementMode(
         </button>
         <canvas data-zoom aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
-      <p class="side-mode-copy">${low
-        ? "This photo was a hard one to read, so treat these as starting positions rather than an answer."
-        : "This is where our system put them, on your photo."}</p>
-      <div class="side-mode-actions">
-        <button type="button" class="btn gho" data-mode="manual">Place them myself</button>
-        <button type="button" class="btn pri" data-mode="auto">Use these points</button>
+      <p class="side-mode-copy">${blocked
+        ? `Our own measurement says at least one of these is in the wrong place: ${broken.join("; ")}. Rather than hand you a number built on it, we would like you to place them.`
+        : low
+          ? "This photo was a hard one to read, so treat these as starting positions rather than an answer."
+          : "This is where our system put them, on your photo."}</p>
+      <div class="side-mode-actions${blocked ? " single" : ""}">
+        ${blocked ? "" : `<button type="button" class="btn gho" data-mode="manual">Place them myself</button>`}
+        <button type="button" class="btn pri" data-mode="${blocked ? "manual" : "auto"}">${
+          blocked ? "Place them myself" : "Use these points"}</button>
       </div>
-      <p class="side-mode-fine">Placing them yourself gives a more accurate score. Taking these still lets you drag any point.</p>
+      <p class="side-mode-fine">${blocked
+        ? "It takes about thirty seconds. Each point is named and shown one at a time."
+        : "Placing them yourself gives a more accurate score. Taking these still lets you drag any point."}</p>
     </section>`;
     document.body.appendChild(backdrop);
     const shot = backdrop.querySelector("canvas")!;
@@ -1503,6 +1601,93 @@ function askPlacementMode(
       settle(mode);
     };
   });
+}
+
+/**
+ * A two-answer question, in the same card as the placement dialog.
+ *
+ * Three questions in this flow are now asked the same way and in the same
+ * place: whether the points look right, whether the person wants to place them
+ * themselves, and (in askSideFeedbackConsent, which predates this) whether the
+ * correction can be shared. They were previously a dialog, a panel section
+ * under the photograph and a third dialog, which is three visual languages for
+ * one conversation.
+ *
+ * Resolves null when the flow is torn down underneath it, like every other
+ * dialog here.
+ */
+function askSideQuestion(opts: {
+  klabel: string;
+  title: string;
+  copy: string;
+  no: string;
+  yes: string;
+  fine?: string;
+}): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const backdrop = document.createElement("div");
+    backdrop.className = "side-mode-backdrop";
+    backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-q-title">
+      <span class="klabel">${opts.klabel}</span>
+      <h2 id="side-q-title">${opts.title}</h2>
+      <p class="side-mode-copy">${opts.copy}</p>
+      <div class="side-mode-actions">
+        <button type="button" class="btn gho" data-answer="no">${opts.no}</button>
+        <button type="button" class="btn pri" data-answer="yes">${opts.yes}</button>
+      </div>
+      ${opts.fine ? `<p class="side-mode-fine">${opts.fine}</p>` : ""}
+    </section>`;
+    document.body.appendChild(backdrop);
+    backdrop.querySelector<HTMLButtonElement>('[data-answer="yes"]')?.focus();
+    const settle = (answer: boolean | null) => {
+      if (done) return;
+      done = true;
+      untrack();
+      backdrop.remove();
+      resolve(answer);
+    };
+    const untrack = trackDialog(() => settle(null));
+    backdrop.onclick = (ev) => {
+      const answer = (ev.target as HTMLElement).closest<HTMLElement>("[data-answer]")?.dataset.answer;
+      if (answer !== "yes" && answer !== "no") return;
+      settle(answer === "yes");
+    };
+  });
+}
+
+/**
+ * What the engine already knows about a placement, asked EARLY.
+ *
+ * Every measurement carries anatomical bounds, and scoreMetric already sets
+ * `implausible` on any reading outside them and drops it from every aggregate.
+ * confirmPlacement has always checked this. The problem was purely one of
+ * timing: it checked at the END, so the product would offer somebody a set of
+ * points under the heading "We placed the points for you", let them accept it,
+ * and only then announce that one of the resulting measurements is not a shape
+ * a human face can be.
+ *
+ * Asked here instead, on the seed, before anything is offered. A seed the
+ * engine can prove wrong is not presented as a choice.
+ */
+function seedReadings(points: SidePoints, faceDir: number, sex: Sex): string[] {
+  try {
+    const report = analyzeSide(points, faceDir, sex);
+    return report.metrics
+      .filter((m) => m.implausible)
+      .map((m) => {
+        const bound = m.def.plausible;
+        const value = m.value.toFixed(m.def.decimals);
+        return bound
+          ? `${m.def.name} ${value} (a face is ${bound[0]}\u2013${bound[1]})`
+          : `${m.def.name} ${value}`;
+      });
+  } catch {
+    // A seed that cannot be measured at all is not evidence that it is wrong,
+    // and this check must never be the thing that blocks a scan. The confirm
+    // path still has the same guard behind it.
+    return [];
+  }
 }
 
 /**
