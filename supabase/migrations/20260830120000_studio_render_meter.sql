@@ -29,6 +29,28 @@
 -- split later by reading history rather than by guessing now.
 -- ---------------------------------------------------------------------------
 
+-- THE COLUMN HAS TO ADMIT THE VALUE BEFORE THE FUNCTION CAN INSERT IT.
+--
+-- The table was created with `check (meter in ('league', 'voice'))`, so
+-- teaching claim_tts_render about a third meter without widening this raises
+-- 23514 on the insert at the very bottom of the function: the whole feature
+-- fails on its first real call, with a green test suite behind it.
+--
+-- It got that far because the tests asserted the TEXT of this migration and
+-- never executed it, and never looked at the table it inserts into. There is
+-- now a test that loads both files into a real Postgres and performs a claim
+-- (api/_studio-meter.db.test.ts), which reproduces the failure above in a
+-- second and would not have let this through.
+--
+-- Dropped by name and re-added rather than altered, because a check constraint
+-- cannot be modified in place. The name is Postgres's own default for this
+-- column, confirmed against the created table.
+alter table public.tts_render_reservations
+  drop constraint if exists tts_render_reservations_meter_check;
+alter table public.tts_render_reservations
+  add constraint tts_render_reservations_meter_check
+  check (meter in ('league', 'voice', 'studio'));
+
 create or replace function public.claim_tts_render(p_user_id uuid, p_meter text)
 returns uuid
 language plpgsql

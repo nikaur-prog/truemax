@@ -93,10 +93,9 @@ function subject(sex: string, description: string): string {
  * version rather than a heavy one: an operator who picked nothing has said
  * nothing, not asked for the worst.
  */
-function showing(flaws: readonly FaceFlaw[], typed: string): string {
-  const parts = [...flaws.map((f) => f.add), ...(typed ? [typed] : [])];
-  if (!parts.length) return "Tired and unstyled: dull skin, uneven tone, unkempt hair.";
-  return `Visible on this shot: ${parts.join("; ")}.`;
+function showing(flaws: readonly FaceFlaw[]): string {
+  if (!flaws.length) return "Tired and unstyled: dull skin, uneven tone, unkempt hair.";
+  return `Visible on this shot: ${flaws.map((f) => f.add).join("; ")}.`;
 }
 
 /**
@@ -106,10 +105,9 @@ function showing(flaws: readonly FaceFlaw[], typed: string): string {
  * becomes a different one. Every phrase here names something to take away or
  * tidy, and the catalogue is written so that they can be read in a row.
  */
-function cleared(flaws: readonly FaceFlaw[], typed: string): string {
-  const parts = [...flaws.map((f) => f.clear), ...(typed ? [typed] : [])];
-  const removals = parts.length
-    ? `Clear ${parts.join("; clear ")}.`
+function cleared(flaws: readonly FaceFlaw[]): string {
+  const removals = flaws.length
+    ? `Clear ${flaws.map((f) => f.clear).join("; clear ")}.`
     : "Clear the blemishes and even out the skin tone.";
   return `${removals} Clear healthy skin, groomed hair and brows, well rested.`;
 }
@@ -162,21 +160,28 @@ export async function POST(request: Request): Promise<Response> {
     const body = (await request.json().catch(() => null)) as {
       sex?: unknown;
       description?: unknown;
-      blemishes?: unknown;
       flaws?: unknown;
     } | null;
 
     const sex = body?.sex === "female" ? "female" : "male";
     const description = typeof body?.description === "string" ? body.description.trim() : "";
-    const blemishes = typeof body?.blemishes === "string" ? body.blemishes.trim() : "";
-    // Ids, resolved against the catalogue here rather than trusted as text.
-    // Unknown ids are dropped, so the worst a crafted body achieves is fewer
-    // flaws than were asked for, never arbitrary wording in a prompt we pay to
-    // run. The free-text box survives for anything the catalogue misses and is
-    // still capped and sanitised, but it is no longer the main road.
+    // IDS ONLY. There is no free-text route into the flaw half of either
+    // prompt, and this is the second time that box has had to go.
+    //
+    // It shipped alongside the catalogue as "anything the chips do not cover",
+    // capped and appended to both halves. Which meant a crafted body, or the
+    // visible optional box, could send "a narrow jaw and a recessed chin" and
+    // the after prompt would dutifully ask the model to CLEAR them: exactly the
+    // structural before-and-after the catalogue exists to make impossible,
+    // reachable by typing. A guarantee with a text box beside it is not a
+    // guarantee, and an allowlist for free text is just a second catalogue with
+    // worse wording.
+    //
+    // The description field is unaffected: it says who the person IS, is used
+    // identically in both halves, and cannot move anything between them.
     const flaws = flawsFromIds(Array.isArray(body?.flaws) ? body.flaws : []);
     if (!description) return json({ error: "Describe the character first." }, 400);
-    if (description.length + blemishes.length > MAX_CHARS) {
+    if (description.length > MAX_CHARS) {
       return json({ error: `Description is too long; the ceiling is ${MAX_CHARS} characters.` }, 413);
     }
 
@@ -189,7 +194,7 @@ export async function POST(request: Request): Promise<Response> {
     // what actually produces a visible difference.
     const beforePrompt = [
       subject(sex, description),
-      showing(flaws, blemishes),
+      showing(flaws),
       "Do not retouch. This is the unflattering photograph of this person.",
     ].join(" ");
 
@@ -214,7 +219,7 @@ export async function POST(request: Request): Promise<Response> {
     // how it becomes a different one.
     const afterPrompt = [
       "Keep this exact person: same face, same bone structure, same eyes, same age, same hair colour.",
-      cleared(flaws, blemishes),
+      cleared(flaws),
       // SAME SHOT, and this line is doing real work. A before in flat light
       // beside an after in good light is the standard lie of glow-up content:
       // nothing about the person changed. Holding the photograph constant is
@@ -274,11 +279,29 @@ export async function POST(request: Request): Promise<Response> {
  * the generate path sends JSON. Keeping both here means the caller above reads
  * as two prompts rather than as two different HTTP shapes.
  */
+/**
+ * How long ONE image call may run before it is abandoned.
+ *
+ * fetch has no default timeout, and this one is worse than the usual case: a
+ * hung call holds a serverless invocation open until the platform kills it AND
+ * holds a reserved quota slot while it does. The stale sweep would eventually
+ * return the slot, but not before the creator had spent a month believing they
+ * were one render poorer.
+ *
+ * Generous, because image generation genuinely takes tens of seconds, and set
+ * so that two of them plus the surrounding work stay inside a 300s Vercel
+ * function ceiling with room to spare.
+ */
+const IMAGE_TIMEOUT_MS = 90_000;
+
 async function openaiImage(
   apiKey: string,
   options: { prompt: string; edit?: string },
 ): Promise<{ b64: string } | { error: string; status: number }> {
   let response: Response;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), IMAGE_TIMEOUT_MS);
+  try {
 
   if (options.edit) {
     const form = new FormData();
@@ -292,12 +315,14 @@ async function openaiImage(
     );
     response = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
+      signal: abort.signal,
       headers: { authorization: `Bearer ${apiKey}` },
       body: form,
     });
   } else {
     response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
+      signal: abort.signal,
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({ model: MODEL, prompt: options.prompt, size: SIZE, n: 1 }),
     });
@@ -324,4 +349,17 @@ async function openaiImage(
   const b64 = payload.data?.[0]?.b64_json;
   if (!b64) return { error: "The image service returned nothing.", status: 502 };
   return { b64 };
+  } catch (error) {
+    // An abort lands here, and so does a socket failure. Returned rather than
+    // thrown so the caller's ordinary "either half failed" path refunds the
+    // slot, instead of a second error type needing its own handling.
+    const aborted = (error as { name?: string }).name === "AbortError";
+    console.error("OpenAI images", aborted ? "timed out" : safeMessage(error));
+    return {
+      error: aborted ? "The image service did not respond in time." : "The image service failed.",
+      status: 504,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }

@@ -3112,15 +3112,13 @@ el.aiForm.onsubmit = async (event) => {
   event.preventDefault();
   const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
   const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
-  const blemishes =
-    (document.getElementById("q-ai-blemish") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name || !desc) return;
 
   // Saved BEFORE the request, not after. Generation is the slow, billable and
   // failable half; the character is the half worth keeping either way, and
   // losing a description because an image service was rate limited is the kind
   // of thing that stops somebody using a tool.
-  saveAiCharacter({ name, sex: aiSex, description: desc, blemishes });
+  saveAiCharacter({ name, sex: aiSex, description: desc, flaws: selectedFlawIds() });
 
   const go = document.getElementById("q-ai-go") as HTMLButtonElement | null;
   el.aiMsg.classList.remove("err");
@@ -3137,7 +3135,7 @@ el.aiForm.onsubmit = async (event) => {
         "content-type": "application/json",
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ sex: aiSex, description: desc, blemishes, flaws: selectedFlawIds() }),
+      body: JSON.stringify({ sex: aiSex, description: desc, flaws: selectedFlawIds() }),
     });
     const payload = (await response.json().catch(() => ({}))) as {
       before?: string;
@@ -3234,19 +3232,24 @@ interface AiCharacter {
   sex: Sex;
   description: string;
   /**
-   * What the BEFORE shot should show, and only the before.
+   * What the BEFORE shot should show, as catalogue ids.
    *
-   * The description is what stays the same across the pair — face, hair, age,
-   * build — because a before/after where the person changes is not a before and
-   * after. This is the half that is meant to disappear: the acne, the patchy
-   * stubble, the tired eyes.
+   * The description is what stays the same across the pair (face, hair, age,
+   * build) because a before/after where the person changes is not a before and
+   * after. This is the half that is meant to disappear.
+   *
+   * IDS RATHER THAN PROSE, and that was a correction. A free-text field here
+   * fed straight into both prompts, so "a narrow jaw" could be typed into the
+   * before and then asked to be CLEARED in the after: the structural pair the
+   * flaw catalogue exists to prevent, reachable by typing. See
+   * src/engine/faceFlawCatalog.ts.
    *
    * There is deliberately no equivalent for the after. "Glowed up" is the
    * absence of these rather than a list of its own, and asking somebody to
    * describe an improvement twice is how the two shots stop looking like one
    * person.
    */
-  blemishes?: string;
+  flaws?: string[];
 }
 
 const AI_CHARACTERS_KEY = "truemax.aiCharacters";

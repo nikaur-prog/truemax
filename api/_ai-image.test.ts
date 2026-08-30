@@ -98,3 +98,43 @@ test("the service role is the only caller", () => {
   assert.match(migration, /revoke all on function public\.claim_tts_render\(uuid, text\) from public, anon, authenticated/);
   assert.match(migration, /grant execute on function public\.claim_tts_render\(uuid, text\) to service_role/);
 });
+
+// --- the four defects found on 81dd49e ---------------------------------------
+
+test("there is no free-text route into either prompt", () => {
+  // It shipped as "anything the chips do not cover", capped and appended to
+  // both halves. Which meant "a narrow jaw and a recessed chin" could be typed
+  // into the before and then asked to be CLEARED in the after: exactly the
+  // structural pair the catalogue exists to prevent, reachable by typing.
+  // A guarantee with a text box beside it is not a guarantee.
+  assert.doesNotMatch(route, /blemishes\?: unknown/);
+  assert.doesNotMatch(route, /body\?\.blemishes/);
+  assert.match(route, /function showing\(flaws: readonly FaceFlaw\[\]\): string/);
+  assert.match(route, /function cleared\(flaws: readonly FaceFlaw\[\]\): string/);
+  const html = readFileSync(new URL("../quick.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /q-ai-blemish/);
+  const client = readFileSync(new URL("../src/quick.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(client, /blemishes,/, "the client no longer sends one either");
+});
+
+test("both image calls are bounded", () => {
+  // A hung call holds a serverless invocation AND a reserved quota slot. The
+  // stale sweep returns the slot eventually, but not before the creator has
+  // spent a month believing they are one render poorer.
+  assert.match(route, /const IMAGE_TIMEOUT_MS = 90_000/);
+  assert.equal((route.match(/signal: abort\.signal/g) ?? []).length, 2, "both calls, not one");
+  assert.match(route, /clearTimeout\(timer\)/);
+  // Returned rather than thrown, so the caller's ordinary failure path refunds.
+  assert.match(route, /name === "AbortError"/);
+  assert.match(route, /did not respond in time/);
+});
+
+test("the grant can actually be given through the admin panel", () => {
+  // The instruction was "tick studio on Adrian's row", and the panel offered
+  // only three checkboxes, none of them studio.
+  const league = readFileSync(new URL("../src/league/main.ts", import.meta.url), "utf8");
+  assert.match(league, /data-grant="studio"/);
+  // And staff without a creator row hold every key, or the founder sees their
+  // own new tool as NOT IN YOUR PLAN.
+  assert.match(league, /pillar_grants: \{ cta: true, clips: true, polisher: true, studio: true \}/);
+});

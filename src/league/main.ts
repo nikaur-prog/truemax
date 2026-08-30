@@ -1100,6 +1100,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             <label><input type="checkbox" data-grant="cta" checked />CTA Generator</label>
             <label><input type="checkbox" data-grant="clips" checked />Clips Library</label>
             <label><input type="checkbox" data-grant="polisher" />Polisher</label>
+            <label><input type="checkbox" data-grant="studio" />Studio</label>
             <label>Quota <input type="number" data-quota value="30" style="width:70px" /></label>
           </div>
           <div style="display:flex;gap:10px">
@@ -1442,7 +1443,7 @@ async function boot(): Promise<void> {
     // Admin without applying to their own league.
     if (staff) {
       return renderDash(
-        { user_id: user.id, handle: "founder", display_name: "Founder", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true }, monthly_render_quota: 9999 },
+        { user_id: user.id, handle: "founder", display_name: "Founder", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999 },
         true,
       );
     }
