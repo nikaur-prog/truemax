@@ -2,9 +2,8 @@
 //
 // One fixed headline is the safe answer and it is also the wrong one here,
 // because this page gets visited far more than once. The same eight words on
-// every return stop being read at all, and the strongest sentence the product
-// owns — that looks are no longer subjective — is worth more when it is not
-// wallpaper. So the page rotates, and it rotates in order rather than at
+// every return stop being read at all, and the clearest product promise is
+// worth more when it is not wallpaper. So the page rotates, and it rotates in order rather than at
 // random: random repeats, and a headline that repeats twice in a row reads as
 // a page that failed to load rather than a page with more than one thing to
 // say.
@@ -36,12 +35,13 @@ export interface HeadlineContext {
   visit: number;
 }
 
-// Signed out. Three ways of saying the same promise, strongest first, because
-// visit 0 is the one that has to carry a stranger.
+// Signed out. Three factual ways into the same product, strongest first,
+// because visit 0 is the one that has to carry a stranger. None turns a
+// measurement tool into a universal verdict about attractiveness.
 const ANONYMOUS: Headline[] = [
-  { lead: "Looks are no longer ", em: "subjective", tail: "." },
-  { lead: "Your dream glowup, ", em: "one scan away", tail: "." },
-  { lead: "Attractiveness, ", em: "now measurable", tail: "." },
+  { lead: "Your face score, ", em: "measurement by measurement", tail: "." },
+  { lead: "See what works, ", em: "and what can move", tail: "." },
+  { lead: "Understand your face, ", em: "without the guesswork", tail: "." },
 ];
 
 // A week is the shortest gap over which this instrument can tell a change from
@@ -66,7 +66,7 @@ export function pickHeadline(ctx: HeadlineContext): Headline {
     return rotate(
       [
         { lead: `${name}, let's get your `, em: "first read", tail: "." },
-        { lead: `${name}, looks are no longer `, em: "subjective", tail: "." },
+        { lead: `${name}, start with your `, em: "measurements", tail: "." },
       ],
       ctx.visit,
     );

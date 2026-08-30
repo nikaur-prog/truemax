@@ -3,24 +3,65 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TrueMax · Facial Analysis</title>
+    <title>Face Score and Facial Analysis App | TrueMax</title>
     <!-- Link previews. Without these, a share of truemax.app on TikTok,
          iMessage or anywhere else renders as a bare URL: no image, no claim.
          The image is generated from the Max drawing by scripts/make-og.mjs. -->
-    <meta name="description" content="Facial analysis that shows the actual math. 43 measurements against published reference ranges, scored on your device. Your photos never leave your phone." />
-    <meta property="og:title" content="TrueMax · Facial analysis that shows the actual math" />
-    <meta property="og:description" content="43 measurements against published reference ranges, scored on your device. Your photos never leave your phone." />
+    <meta name="description" content="Rate your face with 43 measurements against published reference ranges. Get a private, on-device face score and practical ways to improve your appearance." />
+    <link rel="canonical" href="https://www.truemax.app/" />
+    <meta property="og:title" content="Face Score and Facial Analysis App | TrueMax" />
+    <meta property="og:description" content="Rate your face with 43 measurements, understand your results and find practical ways to improve your appearance. Analysis runs on your device." />
     <meta property="og:image" content="https://www.truemax.app/og.png" />
     <meta property="og:url" content="https://www.truemax.app/" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TrueMax" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="TrueMax · Facial analysis that shows the actual math" />
+    <meta name="twitter:title" content="Face Score and Facial Analysis App | TrueMax" />
+    <meta name="twitter:description" content="A private, on-device face score built from 43 facial measurements and published reference ranges." />
     <meta name="twitter:image" content="https://www.truemax.app/og.png" />
     <meta name="theme-color" content="#141518" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="alternate icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://www.truemax.app/#organization",
+            "name": "TrueMax",
+            "url": "https://www.truemax.app/",
+            "logo": "https://www.truemax.app/icon-512.png"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://www.truemax.app/#website",
+            "url": "https://www.truemax.app/",
+            "name": "TrueMax",
+            "publisher": { "@id": "https://www.truemax.app/#organization" },
+            "inLanguage": "en"
+          },
+          {
+            "@type": "WebApplication",
+            "@id": "https://www.truemax.app/#app",
+            "name": "TrueMax Facial Analysis",
+            "url": "https://www.truemax.app/",
+            "applicationCategory": "LifestyleApplication",
+            "operatingSystem": "Any modern web browser",
+            "description": "An on-device facial analysis app that compares 43 facial measurements with published reference ranges.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD",
+              "description": "Free face score"
+            },
+            "publisher": { "@id": "https://www.truemax.app/#organization" }
+          }
+        ]
+      }
+    </script>
     <!-- The face model is NOT preloaded. It is 3.32 MB brotli and its
          companion WASM runtime is another 3.14 MB, and this hint pulled the
          first of them down at 22ms into a landing page that does not measure
@@ -48,7 +89,7 @@
 
     <!-- Capture / upload -->
     <section id="v-upload">
-      <h1>Looks are no longer <em>subjective</em>.</h1>
+      <h1>Your face score, <em>measurement by measurement</em>.</h1>
 
       <!-- The full list is what someone reads once and never again. Behind a
            disclosure it stops pushing the camera below the fold. -->
@@ -424,7 +465,7 @@
 
     <p class="foot">
       TRUEMAX · ON-DEVICE MEASUREMENT ENGINE · TRUEMAX.APP · <span id="build-stamp">·······</span>
-      <span class="foot-links"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
+      <span class="foot-links"><a href="/guides">Guides</a> · <a href="/methodology">Methodology</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
     </p>
     <script type="module" src="/src/main.ts"></script>
   </body>

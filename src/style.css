@@ -3587,6 +3587,45 @@ body.auth-modal-open { overflow: hidden; }
 .foot-links { display: block; margin-top: 8px; letter-spacing: 0.06em; }
 .foot-links a { color: inherit; }
 
+/* Search guides use the legal-page reading shell because it is fast, static
+   and already tuned for long-form reading. These additions give editorial
+   content enough hierarchy without importing the application shell. */
+.guide-shell { max-width: 70ch; padding-bottom: 52px; }
+.guide-deck { font-size: 18px !important; color: var(--mut); margin-bottom: 28px !important; }
+.guide-breadcrumbs {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  color: var(--mut); margin-bottom: 22px;
+}
+.guide-breadcrumbs a { color: inherit; }
+.guide-callout {
+  background: var(--acc-soft); border: 1px solid rgba(113, 238, 184, 0.18);
+  border-radius: 16px; padding: 18px 20px 5px; margin: 24px 0;
+}
+.guide-callout h2 { color: var(--acc); font-size: 15px; margin-top: 0; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 22px 0 30px; }
+.guide-card {
+  display: block; color: var(--ink) !important; text-decoration: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 18px;
+}
+.guide-card:hover { border-color: var(--acc); }
+.guide-card b { display: block; font-size: 15px; margin-bottom: 6px; }
+.guide-card span { color: var(--mut); font-size: 13px; line-height: 1.5; }
+.guide-steps { counter-reset: guide-step; list-style: none; margin-left: 0 !important; }
+.guide-steps li { position: relative; padding-left: 38px; }
+.guide-steps li::before {
+  counter-increment: guide-step; content: counter(guide-step);
+  position: absolute; left: 0; top: 1px; width: 24px; height: 24px;
+  display: grid; place-items: center; border-radius: 50%;
+  background: var(--acc-soft); color: var(--acc); font-family: var(--mono); font-size: 10px;
+}
+.guide-cta {
+  margin-top: 38px; padding: 22px; border-radius: 16px;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.guide-cta h2 { margin-top: 0; }
+.guide-cta .btn { display: inline-flex; color: #fff; text-decoration: none; margin-top: 4px; }
+
 @media (max-width: 640px) {
   .legal-shell { margin-top: 24px; padding: 0 18px; }
   .legal-shell h1 { font-size: 31px; }
@@ -3596,6 +3635,7 @@ body.auth-modal-open { overflow: hidden; }
   .legal-table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
   .legal-table td { display: block; border: 0; padding: 0 0 4px; }
   .legal-table td:first-child { font-weight: 600; }
+  .guide-grid { grid-template-columns: 1fr; }
 }
 
 /* ---------------------------------------------------------------------------

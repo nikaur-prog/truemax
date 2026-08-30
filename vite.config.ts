@@ -15,7 +15,9 @@ export default defineConfig({
   build: {
     target: "es2020",
     rollupOptions: {
-      // Four entry points: two unlisted engine tools, the product, and the
+      // Entry points include the product, unlisted engine tools and static
+      // search guides. Each guide is real HTML so its content is available
+      // without waiting for the application bundle.
       // dedicated account portal. The tools share the engine rather than
       // approximating it — that shared import is what keeps the
       // numbers they show identical to the real ones.
@@ -46,6 +48,12 @@ export default defineConfig({
         // The Creator League: creator-facing, invite-gated, and deliberately
         // NOT importing the consumer app's engine or styles.
         league: resolve(import.meta.dirname, "league.html"),
+        guides: resolve(import.meta.dirname, "guides.html"),
+        faceScore: resolve(import.meta.dirname, "face-score.html"),
+        improveLooks: resolve(import.meta.dirname, "improve-your-looks.html"),
+        looksmaxxingGuide: resolve(import.meta.dirname, "looksmaxxing-guide.html"),
+        glowUpGuide: resolve(import.meta.dirname, "glow-up-guide.html"),
+        methodology: resolve(import.meta.dirname, "methodology.html"),
       },
     },
   },

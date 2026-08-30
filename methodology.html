@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Facial Analysis Methodology and Limits | TrueMax</title>
+    <meta name="description" content="See how TrueMax turns facial landmarks into measurements, scores them against reference ranges and protects photo privacy, including important limitations." />
+    <link rel="canonical" href="https://www.truemax.app/methodology" />
+    <meta property="og:title" content="How TrueMax Measures a Face" />
+    <meta property="og:description" content="The inputs, reference ranges, scoring boundaries, privacy design and limitations behind TrueMax facial analysis." />
+    <meta property="og:url" content="https://www.truemax.app/methodology" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="TrueMax" />
+    <meta property="og:image" content="https://www.truemax.app/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#141518" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Article",
+            "headline": "How TrueMax measures a face",
+            "description": "The inputs, reference ranges, scoring boundaries, privacy design and limitations behind TrueMax facial analysis.",
+            "dateModified": "2026-08-31",
+            "mainEntityOfPage": "https://www.truemax.app/methodology",
+            "author": { "@id": "https://www.truemax.app/#organization" },
+            "publisher": { "@id": "https://www.truemax.app/#organization" }
+          },
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.truemax.app/" },
+              { "@type": "ListItem", "position": 2, "name": "Methodology", "item": "https://www.truemax.app/methodology" }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="legal-page">
+    <header class="topbar">
+      <a class="wordmark" href="/">TRUE<b>MAX</b></a>
+      <a class="auth-scan-link" href="/">Run an analysis →</a>
+    </header>
+    <main class="legal-shell guide-shell">
+      <nav class="guide-breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a> / Methodology</nav>
+      <p class="legal-kicker">Transparency</p>
+      <h1>How TrueMax measures a face</h1>
+      <p class="legal-meta">Updated 31 August 2026</p>
+      <p class="guide-deck">TrueMax is a facial measurement tool. This page explains what enters the analysis, how the output is organised and where the method stops.</p>
+
+      <h2>Inputs</h2>
+      <p>The complete analysis uses one front photograph and one 90-degree side-profile photograph. The front view supplies symmetry, vertical and horizontal proportions, eye, nose, lip and jaw measurements. The side view supplies measurements that do not exist in a front projection, including profile angles and relative projection.</p>
+      <p>Image quality matters. Pose, expression, occlusion, camera distance and lens distortion can all move landmarks. TrueMax validates the photograph and omits measurements that cannot be supported reliably enough by the available view.</p>
+
+      <h2>Landmarks and measurements</h2>
+      <p>The front analysis detects a 478-point facial mesh. Named points and groups of points become distances, ratios, angles and symmetry comparisons. The side profile uses a smaller set of visible landmarks that you can review before the analysis continues.</p>
+      <p>Distances are normalised against stable dimensions of the same face. This prevents the pixel size of the photograph from becoming the measurement. Some measurements need the front view, some need the side view and some combine evidence from both.</p>
+
+      <h2>Reference ranges</h2>
+      <p>Each measurement is compared with a defined reference range. TrueMax asks which sex reference population to use because the reference distributions differ and a weak visual guess should not make that choice. The app does not infer ethnicity.</p>
+      <p>Reference data describes a population distribution. It does not say that every person should move toward its centre, and it cannot represent every cultural or individual preference.</p>
+
+      <h2>Score and percentile</h2>
+      <p>Measurement-level results are combined into a canonical score from 0 to 10. Population percentile is calculated and displayed separately. The overall score is not silently stretched to create a more dramatic rating.</p>
+      <p>Measurements with lower confidence can be excluded or identified as unavailable. A result based on incomplete evidence should not pretend to have the same certainty as a clean front and side pair.</p>
+
+      <div class="guide-callout">
+        <h2>What the score means</h2>
+        <p>It summarises how the measured geometry compares with the app's stated reference ranges. It does not measure personal worth, health, personality, compatibility or a universal form of attractiveness.</p>
+      </div>
+
+      <h2>Privacy boundary</h2>
+      <p>The measurement engine runs in your browser. Your front photograph is not uploaded to TrueMax. Scan photographs and thumbnails are stored in the browser so history can work on that device. An optional, separate consent step can send one side-profile image and reviewed landmark positions to improve automatic placement. Declining does not change the score or account.</p>
+      <p>The complete operational details, retention periods and processor list are in the <a href="/privacy">privacy policy</a>.</p>
+
+      <h2>Known limitations</h2>
+      <ul>
+        <li>A two-dimensional image cannot fully represent three-dimensional facial structure.</li>
+        <li>Different cameras, distances, poses and expressions can change apparent geometry.</li>
+        <li>Landmark models can make placement errors, particularly with occlusion or unusual angles.</li>
+        <li>Reference samples do not capture every population or preference equally.</li>
+        <li>Facial geometry is only one part of how a person is perceived in motion and in context.</li>
+      </ul>
+
+      <h2>Not medical advice</h2>
+      <p>TrueMax does not diagnose skin, dental, breathing, nutritional or mental-health conditions. Recommendations are general appearance guidance. Concerns involving pain, function, disease, medication, body-image distress or permanent procedures require an appropriately qualified professional.</p>
+
+      <h2>Reading your result</h2>
+      <p>Start with the measurement detail and its confidence, not only the total. Use a repeatable photograph if you track change. Prefer safe, reversible changes. The <a href="/face-score">face score guide</a> explains how to interpret the number, while the <a href="/improve-your-looks">appearance guide</a> turns observations into a practical order of operations.</p>
+
+      <section class="guide-cta">
+        <h2>See the method applied to your face</h2>
+        <p>The overall face score is free. Paid plans add deeper analysis and planning.</p>
+        <a class="btn pri" href="/">Start a scan</a>
+      </section>
+      <p class="legal-nav"><a href="/guides">All guides</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+    </main>
+  </body>
+</html>
