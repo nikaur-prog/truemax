@@ -946,7 +946,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       calls that cost us money (a voiceover, a 4K pass), everything else is unmetered.</p>
       <div class="lg-card" id="lg-quota-card">
         <div class="lg-row" style="border:none;padding:0 0 8px"><h3>Renders this month</h3>
-        <b class="lg-num" id="lg-quota-num">, / ${me.monthly_render_quota}</b></div>
+        <b class="lg-num" id="lg-quota-num">– / ${me.monthly_render_quota}</b></div>
         <div class="lg-bar"><i id="lg-quota-fill" style="width:0%"></i></div>
         <div class="lg-bar-note">Resets on the 1st. Need more? Ask, quotas are set per creator.</div>
       </div>

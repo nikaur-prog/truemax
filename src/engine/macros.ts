@@ -272,13 +272,27 @@ export function macroPlan(input: BodyInput): MacroPlan {
   const floorKcal = protein * KCAL_PER_G.protein + fat * KCAL_PER_G.fat + carbs * KCAL_PER_G.carbs;
   const day = Math.max(calories, floorKcal);
 
+  // The card prints whole grams and whole kcal. Rounding those four figures
+  // independently can make the food line larger than the day above it (for
+  // example 4,382 kcal of rounded macros under a 4,374 kcal day). Preserve the
+  // nearest whole gram for each macro, then let the displayed day contain the
+  // displayed food. This changes only presentation-level rounding, never the
+  // formula, floor or split used to produce it.
+  const printedProtein = Math.round(protein);
+  const printedCarbs = Math.round(carbs);
+  const printedFat = Math.round(fat);
+  const printedMacroKcal =
+    printedProtein * KCAL_PER_G.protein
+    + printedCarbs * KCAL_PER_G.carbs
+    + printedFat * KCAL_PER_G.fat;
+
   return {
     bmr: Math.round(bmr),
     maintenance: Math.round(maintenance),
-    calories: Math.round(day),
-    protein: Math.round(protein),
-    carbs: Math.round(carbs),
-    fat: Math.round(fat),
+    calories: Math.max(Math.round(day), printedMacroKcal),
+    protein: printedProtein,
+    carbs: printedCarbs,
+    fat: printedFat,
     basis: useKatch ? "katch" : "mifflin",
     floored,
   };

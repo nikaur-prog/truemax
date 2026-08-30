@@ -194,8 +194,8 @@ export function historyPanelMarkup(opts: { closable: boolean }): string {
     <h2>Your scans</h2>
     <div class="hist-stats">
       <div><b>${mine.length}</b><span>YOUR SCANS</span></div>
-      <div><b>${mine.length ? avg.toFixed(1) : ", "}</b><span>YOUR AVERAGE</span></div>
-      <div><b>${mine.length ? best.toFixed(1) : ", "}</b><span>BEST</span></div>
+      <div><b>${mine.length ? avg.toFixed(1) : "–"}</b><span>YOUR AVERAGE</span></div>
+      <div><b>${mine.length ? best.toFixed(1) : "–"}</b><span>BEST</span></div>
     </div>
     ${mine.length >= 2 ? trendSVG(mine) : ""}
     <p class="hist-note">The shaded band is the ±${NOISE_SD.toFixed(1)}-point spread between two photos of one face.

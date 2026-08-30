@@ -243,16 +243,29 @@ test("the macros never total more energy than the day they are printed under", (
       for (const goal of ["lean", "hold", "build"] as const) {
         const plan = macroPlan({ ...HEAVY, goal, weightKg, ...(bodyFat === undefined ? {} : { bodyFat }) });
         const sum = plan.protein * 4 + plan.carbs * 4 + plan.fat * 9;
-        // Three gram figures rounded to whole grams cannot land exactly on a
-        // rounded kcal figure, so the tolerance is the rounding and nothing
-        // more: 9 kcal is one gram of fat.
         assert.ok(
-          sum - plan.calories <= 9,
+          sum <= plan.calories,
           `${weightKg}kg at ${bodyFat}: ${Math.round(sum)} kcal of macros under a ${plan.calories} kcal day`,
         );
       }
     }
   }
+});
+
+test("the accepted rounding regression cannot print more food than the day", () => {
+  const input: BodyInput = {
+    age: 20,
+    sex: "male",
+    heightCm: 213,
+    weightKg: 283,
+    activity: "light",
+    goal: "lean",
+    bodyFat: 0.41,
+  };
+  assert.equal(bodyInputIsUsable(input), true);
+  const plan = macroPlan(input);
+  const sum = plan.protein * 4 + plan.carbs * 4 + plan.fat * 9;
+  assert.ok(sum <= plan.calories, `${sum} kcal of macros under a ${plan.calories} kcal day`);
 });
 
 test("protein is taken against lean tissue rather than scale weight", () => {

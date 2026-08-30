@@ -1349,7 +1349,7 @@ function paintSong(): void {
   const sure = g.confidence >= 0.5;
   wrap.innerHTML = `
     <div class="brp-songcard${sure ? "" : " unsure"}">
-      <b>${g.bpm ? g.bpm.toFixed(1) : ", "} BPM</b>
+      <b>${g.bpm ? g.bpm.toFixed(1) : "–"} BPM</b>
       <span>${escapeHTML(song.name)}</span>
       <em>${
         !g.bpm
