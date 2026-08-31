@@ -55,6 +55,7 @@ import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
 import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
+import { confirmScanAction } from "./scanConfirm.js";
 
 interface Ctx {
   report: Report;
@@ -1228,11 +1229,19 @@ function showOverall(): void {
     else ctx?.onEditFront?.();
   });
   const newBtn = document.getElementById("btn-new")!;
-  newBtn.onclick = () => {
+  newBtn.onclick = async () => {
     // Leaving the report throws away the screen somebody may have spent ten
     // minutes reading, and this button sits one slip below "See your plan".
     // A genuine press costs one extra tap; an accidental one costs nothing.
-    if (window.confirm("Start over with a new photo? This report will close.")) ctx?.onNewPhoto();
+    // This is app UI rather than window.confirm because embedded mobile
+    // browsers can suppress native dialogs and make the control appear dead.
+    const startOver = await confirmScanAction({
+      title: "Start a new photo?",
+      copy: "Your current report will close. You can stay here if that was an accidental tap.",
+      confirmLabel: "Start new photo",
+      cancelLabel: "Keep this report",
+    });
+    if (startOver) ctx?.onNewPhoto();
   };
   // Guest and recalled reports are observations-only, so resultActions omits
   // this button. Wiring the shared overview must tolerate that smaller DOM.
@@ -2413,8 +2422,14 @@ function showImprove(): void {
   }
 
   document.getElementById("btn-back")!.onclick = () => select("overall");
-  document.getElementById("btn-again")!.onclick = () => {
-    if (window.confirm("Scan another face? This report will close.")) ctx?.onNewPhoto();
+  document.getElementById("btn-again")!.onclick = async () => {
+    const startOver = await confirmScanAction({
+      title: "Scan another face?",
+      copy: "This report will close. You can stay here if that was an accidental tap.",
+      confirmLabel: "Start another scan",
+      cancelLabel: "Keep this report",
+    });
+    if (startOver) ctx?.onNewPhoto();
   };
   const upgrade = document.getElementById("btn-upgrade");
   if (upgrade) upgrade.onclick = () => ctx?.onUpgrade?.();

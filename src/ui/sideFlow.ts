@@ -1546,13 +1546,13 @@ function mountVerify(
  * words. Two live readings of the same screen both called it cluttered, and
  * both were reading four buttons where there are two decisions.
  *
- * So the evidence moves INTO the dialog instead of being framed around it. The
- * preview is small on purpose: at this size nobody is auditing a landmark, they
- * are answering "did that land roughly on my face" — which is the whole
- * question, and the one the full-size frame behind is there to answer properly
- * once an answer is given. The row below is hidden while this is up, because a
- * control offering a choice that is currently being asked in a modal is not a
- * shortcut, it is a second answer to the same question.
+ * So the evidence moves INTO the dialog instead of being framed around it. It
+ * opens at inspection size because this is the moment somebody is being asked
+ * to judge the placement; hiding that evidence behind a zoom control made the
+ * first view less useful than the decision attached to it. The row below is
+ * hidden while this is up, because a control offering a choice that is
+ * currently being asked in a modal is not a shortcut, it is a second answer
+ * to the same question.
  *
  * The fine print is not boilerplate and does not always say the same thing.
  * The seeder already reports its own confidence, and the walkthrough copy
@@ -1588,15 +1588,7 @@ function askPlacementMode(
         ? "We could not place these"
         : low ? "Here is our best guess" : "We placed the points for you"}</h2>
       <figure class="side-mode-shot">
-        <button type="button" class="side-mode-zoom" data-zoom aria-expanded="false"
-          aria-label="Enlarge the photo to see the points">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path class="zoom-out" d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>
-            <path class="zoom-in" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/>
-          </svg>
-        </button>
-        <canvas data-zoom aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+        <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
       <p class="side-mode-copy">${blocked
         ? `Our own measurement says at least one of these is in the wrong place: ${broken.join("; ")}. Rather than hand you a number built on it, we would like you to place them.`
@@ -1614,26 +1606,18 @@ function askPlacementMode(
     </section>`;
     document.body.appendChild(backdrop);
     const shot = backdrop.querySelector("canvas")!;
-    const zoom = backdrop.querySelector<HTMLButtonElement>(".side-mode-zoom")!;
-    // Small by default and big on demand.
-    //
-    // Thirteen rings on a 168px picture land within a few pixels of each other
-    // around the nose and mouth, which reads as one teal smudge: enough to
-    // answer "did those go on my face", not enough to answer "is that one on
-    // my lip". Both questions get asked here, so both get a size. The card
-    // grows with the picture rather than the picture escaping the card.
-    let expanded = false;
+    // The evidence opens at inspection size. Starting with a thumbnail made
+    // the points look like one cluster and required a hidden extra action
+    // before the person could answer the question the dialog was asking.
+    backdrop.classList.add("expanded");
     const draw = () => {
-      paintPlacementPreview(shot, photo, points, expanded);
-      zoom.setAttribute("aria-expanded", String(expanded));
-      zoom.setAttribute("aria-label", expanded ? "Shrink the photo" : "Enlarge the photo to see the points");
-      backdrop.classList.toggle("expanded", expanded);
+      paintPlacementPreview(shot, photo, points, true);
     };
     draw();
     // Re-measured rather than re-scaled: the expanded size is bounded by the
     // viewport, and a phone that rotates mid-decision would otherwise keep a
     // picture sized for the other orientation.
-    const onResize = () => { if (expanded) draw(); };
+    const onResize = () => draw();
     window.addEventListener("resize", onResize);
     backdrop.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
     const settle = (mode: "auto" | "manual" | null) => {
@@ -1646,13 +1630,8 @@ function askPlacementMode(
     };
     const untrack = trackDialog(() => settle(null));
     backdrop.onclick = (ev) => {
-      const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-zoom],[data-mode]");
+      const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-mode]");
       if (!el) return;
-      if (el.hasAttribute("data-zoom")) {
-        expanded = !expanded;
-        draw();
-        return;
-      }
       const mode = el.dataset.mode;
       if (mode !== "auto" && mode !== "manual") return;
       settle(mode);
@@ -1690,15 +1669,7 @@ function askSideQuestion(opts: {
       <span class="klabel">${opts.klabel}</span>
       <h2 id="side-q-title">${opts.title}</h2>
       ${opts.preview ? `<figure class="side-mode-shot">
-        <button type="button" class="side-mode-zoom" data-zoom aria-expanded="false"
-          aria-label="Enlarge the photo to see the points">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path class="zoom-out" d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>
-            <path class="zoom-in" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/>
-          </svg>
-        </button>
-        <canvas data-zoom aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+        <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>` : ""}
       <p class="side-mode-copy">${opts.copy}</p>
       <div class="side-mode-actions">
@@ -1708,18 +1679,14 @@ function askSideQuestion(opts: {
       ${opts.fine ? `<p class="side-mode-fine">${opts.fine}</p>` : ""}
     </section>`;
     document.body.appendChild(backdrop);
-    let expanded = false;
+    if (opts.preview) backdrop.classList.add("expanded");
     const previewCanvas = backdrop.querySelector<HTMLCanvasElement>(".side-mode-shot canvas");
-    const zoom = backdrop.querySelector<HTMLButtonElement>(".side-mode-zoom");
     const drawPreview = () => {
-      if (!opts.preview || !previewCanvas || !zoom) return;
-      paintPlacementPreview(previewCanvas, opts.preview.photo, opts.preview.points, expanded);
-      zoom.setAttribute("aria-expanded", String(expanded));
-      zoom.setAttribute("aria-label", expanded ? "Shrink the photo" : "Enlarge the photo to see the points");
-      backdrop.classList.toggle("expanded", expanded);
+      if (!opts.preview || !previewCanvas) return;
+      paintPlacementPreview(previewCanvas, opts.preview.photo, opts.preview.points, true);
     };
     drawPreview();
-    const onResize = () => { if (expanded) drawPreview(); };
+    const onResize = () => drawPreview();
     window.addEventListener("resize", onResize);
     backdrop.querySelector<HTMLButtonElement>('[data-answer="yes"]')?.focus();
     const settle = (answer: boolean | null) => {
@@ -1732,12 +1699,7 @@ function askSideQuestion(opts: {
     };
     const untrack = trackDialog(() => settle(null));
     backdrop.onclick = (ev) => {
-      const target = (ev.target as HTMLElement).closest<HTMLElement>("[data-zoom],[data-answer]");
-      if (target?.hasAttribute("data-zoom")) {
-        expanded = !expanded;
-        drawPreview();
-        return;
-      }
+      const target = (ev.target as HTMLElement).closest<HTMLElement>("[data-answer]");
       const answer = target?.dataset.answer;
       if (answer !== "yes" && answer !== "no") return;
       settle(answer === "yes");
@@ -1799,11 +1761,11 @@ function seedReadings(points: SidePoints, faceDir: number, sex: Sex): string[] {
  */
 export const PLACEMENT_PREVIEW_W = 168;
 export const PLACEMENT_PREVIEW_H = 200;
-// The collapsed teaser is dense around the nose and lips. Keep its marks small
-// enough to remain separate instead of merging into a teal cluster; the
-// expanded view gets a little more size because it has room to show it.
-export const PLACEMENT_PREVIEW_RING = 1.7;
-export const PLACEMENT_EXPANDED_RING = 3.8;
+// These are location pins, not touch targets. The draggable editor keeps its
+// finger-sized controls; the read-only previews use pinpoint rings so thirteen
+// nearby landmarks never coagulate into a teal mask over the face.
+export const PLACEMENT_PREVIEW_RING = 1;
+export const PLACEMENT_EXPANDED_RING = 1.35;
 
 export function placementPreviewBox(
   photoW: number,
@@ -1881,7 +1843,7 @@ function paintPlacementPreview(
   // deliberately finer than the enlarged inspection view.
   const ring = expanded ? PLACEMENT_EXPANDED_RING : PLACEMENT_PREVIEW_RING;
   g.strokeStyle = "rgba(143, 243, 224, 0.42)";
-  g.lineWidth = 1;
+  g.lineWidth = expanded ? 0.75 : 0.65;
   const pairs: [keyof SidePoints, keyof SidePoints][] = [
     ["pronasale", "pogonion"],
     ["glabella", "subnasale"],
@@ -1898,7 +1860,7 @@ function paintPlacementPreview(
     g.stroke();
   }
   g.strokeStyle = "#8ff3e0";
-  g.lineWidth = expanded ? 1.4 : 1;
+  g.lineWidth = expanded ? 0.9 : 0.75;
   for (const def of SIDE_POINTS) {
     const p = at(def.id);
     g.beginPath();

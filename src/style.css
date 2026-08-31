@@ -1647,6 +1647,55 @@ button.pillar:active { transform: translateY(0); }
   padding: 12px 14px; font-size: 12.5px; line-height: 1.55;
 }
 
+/* Mobile-safe confirmation for a captured front photo and for leaving a scan.
+   Native `window.confirm` is suppressed by some in-app browsers, where it
+   made New photo look like a dead button. This is ordinary document UI, and
+   the card scrolls on short screens instead of putting either answer below an
+   unreachable fold. */
+body.scan-confirm-open { overflow: hidden; }
+.scan-confirm-backdrop {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; align-items: center; justify-content: center; overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(12, 13, 15, .7); backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: side-mode-in .24s ease-out;
+}
+.scan-confirm-card {
+  width: min(520px, 100%); margin: auto; flex: 0 0 auto;
+  padding: 26px; text-align: center; color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: 24px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .3);
+  animation: side-mode-card-in .38s cubic-bezier(.2, .8, .28, 1) backwards;
+}
+.scan-confirm-card h2 {
+  margin: 9px 0 12px; font: 300 30px/1.12 var(--serif); letter-spacing: -.025em;
+}
+.scan-confirm-preview {
+  margin: 16px 0; overflow: hidden; border: 1px solid var(--line);
+  border-radius: 16px; background: #0d0f11;
+}
+.scan-confirm-preview canvas {
+  display: block; width: auto; height: auto; max-width: 100%;
+  max-height: min(48dvh, 520px); margin: auto; object-fit: contain;
+}
+.scan-confirm-copy {
+  max-width: 42ch; margin: 0 auto 20px; color: var(--mut); font-size: 14px; line-height: 1.55;
+}
+.scan-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.scan-confirm-actions .btn { width: 100%; min-width: 0; }
+.btn.positive { background: var(--acc); color: #fff; }
+.btn.positive:hover { filter: brightness(1.05); }
+@media (max-width: 420px) {
+  .scan-confirm-card { padding: 22px 18px 18px; }
+  .scan-confirm-card h2 { font-size: 27px; }
+  .scan-confirm-actions { grid-template-columns: 1fr; }
+  .scan-confirm-actions .positive { grid-row: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-confirm-backdrop, .scan-confirm-card { animation: none; }
+}
+
 /* Take these points, or place them yourself.
 
    A centred dialog over a blurred page, not a sheet along the bottom of the
@@ -1703,33 +1752,17 @@ button.pillar:active { transform: translateY(0); }
   font-family: var(--serif); font-weight: 300; font-size: 26px;
   letter-spacing: -0.02em; margin: 9px 0 16px; line-height: 1.15;
 }
-/* The photograph, at a size that answers "did that land on my face" and does
-   not pretend to answer "is that landmark two pixels out". The full frame
-   behind is for the second question. */
+/* The photograph opens at its inspection size. A collapsed thumbnail made
+   the dense nose and mouth points look like one mark and hid the evidence
+   behind an extra zoom action. */
 .side-mode-shot { margin: 0 0 16px; display: flex; justify-content: center; position: relative; }
 .side-mode-shot canvas {
   display: block; border-radius: 12px; border: 1px solid var(--line);
-  background: #0d0f11; max-width: 100%; cursor: zoom-in;
+  background: #0d0f11; max-width: 100%;
   /* The box travels; the bitmap inside it is already painted at the size it is
      arriving at, so this reads as the picture growing rather than as a swap. */
   transition: width .3s cubic-bezier(.22,.61,.36,1), height .3s cubic-bezier(.22,.61,.36,1);
 }
-.side-mode-backdrop.expanded .side-mode-shot canvas { cursor: zoom-out; }
-/* Top right of the picture, which is the corner the profile never occupies:
-   the head faces one way or the other and the space above the shoulder is
-   empty in both. */
-.side-mode-zoom {
-  position: absolute; top: 7px; right: 7px; z-index: 1;
-  width: 26px; height: 26px; display: grid; place-items: center;
-  border-radius: 7px; cursor: pointer;
-  border: 1px solid rgba(143, 243, 224, 0.34);
-  background: rgba(12, 20, 18, 0.72); color: #8ff3e0;
-  transition: border-color .2s ease, transform .2s ease;
-}
-.side-mode-zoom:hover { border-color: #8ff3e0; transform: scale(1.06); }
-.side-mode-zoom .zoom-in { display: none; }
-.side-mode-backdrop.expanded .side-mode-zoom .zoom-in { display: inline; }
-.side-mode-backdrop.expanded .side-mode-zoom .zoom-out { display: none; }
 /* The card follows the picture rather than the picture escaping the card. */
 .side-mode-backdrop.expanded .side-mode-card { width: min(640px, 100%); }
 .side-mode-copy { color: var(--mut); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px; }
