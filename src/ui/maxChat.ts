@@ -49,6 +49,7 @@ let host: HTMLElement | null = null;
 let transcript: Turn[] = [];
 let inFlight: AbortController | null = null;
 let chatGeneration = 0;
+let keydownListener: ((event: KeyboardEvent) => void) | null = null;
 // Every question put to him this session, so the follow-up chips never offer
 // one back.
 let askedThisSession: string[] = [];
@@ -61,6 +62,10 @@ export function closeMaxChat(): void {
   chatGeneration += 1;
   inFlight?.abort();
   inFlight = null;
+  if (keydownListener) {
+    document.removeEventListener("keydown", keydownListener);
+    keydownListener = null;
+  }
   host?.remove();
   host = null;
   transcript = [];
@@ -186,15 +191,11 @@ export function openMaxChat(
     if (event.target === host) closeMaxChat();
   });
   // Escape closes, which is the one keyboard affordance a modal genuinely owes
-  // somebody. Self-removing so a closed panel leaves nothing behind.
-  const onKey = (event: KeyboardEvent): void => {
-    if (!host) {
-      document.removeEventListener("keydown", onKey);
-      return;
-    }
+  // somebody. closeMaxChat removes this exact listener on every close path.
+  keydownListener = (event: KeyboardEvent): void => {
     if (event.key === "Escape") closeMaxChat();
   };
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", keydownListener);
 
   form.onsubmit = (event) => {
     event.preventDefault();
