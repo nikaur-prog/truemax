@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_HISTORY_TURNS,
+  MAX_OUTPUT_TOKENS,
   SAFETY_RULES,
   buildSystemBlocks,
   buildSystemPrompt,
@@ -77,16 +78,16 @@ test("Max is told not to use em dashes", () => {
   assert.ok(/Never use em dashes/.test(buildSystemPrompt(ctx())));
 });
 
-test("the nutrition stance is honest and complete", () => {
+test("the coaching stance stays concise, causal and actionable", () => {
   const prompt = buildSystemPrompt(ctx());
-  // Steer away from ultra-processed food and heavily processed seed oils...
-  assert.ok(/highly processed, easily oxidised seed oils/.test(prompt));
-  // ...without pretending the seed-oil-specific claim is settled science.
-  assert.ok(/debated and not settled/.test(prompt));
-  // Training covers the easy high-burn work, not just lifting.
-  assert.ok(/zone 2 steady-state cardio/.test(prompt));
-  // And nothing recommendable comes in a bottle.
+  assert.ok(/no more than 180 words total/.test(prompt));
+  assert.ok(/cannot identify why it looked that way/.test(prompt));
+  assert.ok(/Never claim it proves poor sleep/.test(prompt));
+  assert.ok(/open your TrueMax plan and choose which of these you want to track/.test(prompt));
+  assert.ok(/Do not claim you already created, saved, attached, or awarded points/.test(prompt));
+  assert.doesNotMatch(prompt, /seed oils?/i);
   assert.ok(/ever comes in a bottle/.test(prompt));
+  assert.ok(MAX_OUTPUT_TOKENS <= 700, "the provider ceiling should still bound a runaway reply");
 });
 
 // ---------------------------------------------------------------------------

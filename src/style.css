@@ -5129,6 +5129,15 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxchat-msg .mc-wait i:nth-child(2) { animation-delay: .16s; }
 .maxchat-msg .mc-wait i:nth-child(3) { animation-delay: .32s; }
 
+.maxchat-action { flex: none; padding: 0 16px 10px; }
+.maxchat-action[hidden] { display: none; }
+.maxchat-action button {
+  width: 100%; padding: 11px 14px; border: 0; border-radius: 12px;
+  background: var(--up); color: #fff; font: 650 14px var(--sans); cursor: pointer;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--up) 20%, transparent);
+}
+.maxchat-action button:hover { background: color-mix(in srgb, var(--up) 90%, #000); }
+
 /* Suggested follow-ups. Rebuilt after every answer rather than shown once, so
    the row scrolls sideways instead of wrapping to three lines and shoving the
    composer off a phone screen. */

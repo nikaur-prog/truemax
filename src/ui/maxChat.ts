@@ -2,6 +2,7 @@ import { currentAccessToken } from "../engine/auth.js";
 import { maxCharacterMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
+import { requestedActionPlan } from "./maxActionBridge.js";
 
 // ---------------------------------------------------------------------------
 // Talking to Max.
@@ -73,15 +74,15 @@ function greeting(context: MaxChatContext | null): string {
   if (!context) {
     return "Hey. Run a scan first and I will have some numbers to work with. Then ask me anything about them.";
   }
-  const weakest = context.focus[0]?.split(",")[0];
+  const weakest = context.focus[0]?.split(",")[0]?.replace(/\s*:\s*/g, " to ").toLowerCase();
   return weakest
-    ? `Hey, I'm Max. I've got your scan in front of me. ${weakest} is the one I'd look at first, but ask me whatever you like.`
+    ? `Hey, I'm Max. I've got your scan. I'd start with ${weakest}, but ask me whatever you want.`
     : "Hey, I'm Max. I've got your scan in front of me. Ask me anything about it.";
 }
 
 export function openMaxChat(
   context: MaxChatContext | null,
-  options: { greeting?: string } = {},
+  options: { greeting?: string; onOpenPlan?: () => void } = {},
 ): void {
   if (host) return;
   const generation = ++chatGeneration;
@@ -100,6 +101,7 @@ export function openMaxChat(
         <button type="button" class="maxchat-close" aria-label="Close chat">&times;</button>
       </header>
       <div class="maxchat-log" role="log" aria-live="polite"></div>
+      <div class="maxchat-action" hidden></div>
       <div class="maxchat-chips"></div>
       <form class="maxchat-composer">
         <input type="text" name="q" autocomplete="off" placeholder="Ask Coach Max something" maxlength="600" />
@@ -110,6 +112,7 @@ export function openMaxChat(
   wireMaxInteractions(host.querySelector(".maxchat-face"));
 
   const log = host.querySelector<HTMLElement>(".maxchat-log")!;
+  const action = host.querySelector<HTMLElement>(".maxchat-action")!;
   const chips = host.querySelector<HTMLElement>(".maxchat-chips")!;
   const form = host.querySelector<HTMLFormElement>(".maxchat-composer")!;
   const input = form.querySelector<HTMLInputElement>("input")!;
@@ -134,6 +137,21 @@ export function openMaxChat(
       };
       chips.appendChild(chip);
     }
+  };
+
+  const renderPlanAction = (show: boolean): void => {
+    action.innerHTML = "";
+    action.hidden = !show || !options.onOpenPlan;
+    if (action.hidden) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Choose habits to track";
+    button.onclick = () => {
+      const openPlan = options.onOpenPlan;
+      closeMaxChat();
+      openPlan?.();
+    };
+    action.appendChild(button);
   };
 
   // He says hello, and no longer waves about it.
@@ -184,9 +202,11 @@ export function openMaxChat(
     if (!question || inFlight) return;
     input.value = "";
     askedThisSession.push(question);
+    renderPlanAction(false);
     renderChips([]);
     void ask(log, form, question, context, generation).then((reply) => {
       if (generation !== chatGeneration || !host) return;
+      renderPlanAction(Boolean(reply) && requestedActionPlan(question));
       renderChips(reply ? suggestFollowUps(context, reply, askedThisSession) : []);
     });
   };

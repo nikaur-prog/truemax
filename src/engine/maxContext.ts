@@ -77,10 +77,10 @@ function standing(m: ScoredMetric): string {
 // sentence was describing the skull when it meant the outline.
 function movability(m: ScoredMetric): string {
   if (m.def.fixability >= 0.5) {
-    return "the measured outline responds to soft-tissue change (leanness, water, sleep); the bone under it does not move";
+    return "the photographed soft-tissue outline can change; this scan cannot tell whether body composition, hydration, sleep or capture conditions caused today's reading; the bone under it does not move";
   }
   if (m.def.fixability >= 0.2) {
-    return "moves a little, soft tissue and photo conditions, not the underlying structure";
+    return "the photographed soft tissue can move a little; this scan does not identify the cause, and the underlying structure does not move";
   }
   return "essentially fixed skeletal geometry, not changeable";
 }

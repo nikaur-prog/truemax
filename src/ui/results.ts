@@ -1891,7 +1891,11 @@ function wireMaxAsk(): void {
     // is only going to be refused.
     if (!maxAccess || !adultUser || observationsOnly()) return;
     const cc = chatContext();
-    if (cc) openMaxChat(cc);
+    if (cc) {
+      openMaxChat(cc, {
+        onOpenPlan: () => select("improve"),
+      });
+    }
   });
 }
 
