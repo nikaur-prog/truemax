@@ -89,11 +89,18 @@ and Apple Developer fields are in
 
 ## 4. Enable Google
 
+Production should use the branded Supabase custom domain
+`https://auth.truemax.app` so Google does not present the random project host
+to customers. The safe DNS, callback, CSP and verification order is captured in
+[`SUPABASE_AUTH_PROVIDER_SETUP.md`](SUPABASE_AUTH_PROVIDER_SETUP.md). Do not
+change `VITE_SUPABASE_URL` until Supabase has verified and activated that host.
+
 1. Create a Web OAuth client in Google Auth Platform.
-2. Set the authorised callback URI to:
+2. Keep the old callback during cutover and add the branded callback:
 
    ```text
    https://ruvgkrlfmixfnmnzqgap.supabase.co/auth/v1/callback
+   https://auth.truemax.app/auth/v1/callback
    ```
 
 3. Configure the consent-screen branding and the minimum `openid`, email and
