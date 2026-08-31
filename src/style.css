@@ -2910,9 +2910,12 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 }
 .dash-faces-strip:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(20, 21, 24, 0.08); }
 .dash-faces-fan { display: flex; flex: none; padding-left: 14px; }
-.dash-faces-fan img {
+.dash-faces-fan i {
+  display: grid; place-items: center; font-style: normal;
   width: 38px; height: 38px; border-radius: 10px; object-fit: cover;
-  border: 2px solid var(--card); margin-left: -14px; background: var(--soft);
+  border: 2px solid var(--card); margin-left: -14px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 16%, var(--card)), var(--soft));
+  color: var(--ink); font-family: var(--mono); font-size: 9px; letter-spacing: 0.05em;
 }
 .dash-faces-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dash-faces-copy b { font-size: 14px; font-weight: 600; }
@@ -3076,10 +3079,23 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .celeb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
 .celeb-card {
   border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--card);
+  padding: 0; color: var(--ink); font: inherit; text-align: left;
 }
 .celeb-card.hidden { display: none; }
 .celeb-photo { aspect-ratio: 1; background: var(--soft); overflow: hidden; }
 .celeb-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.celeb-reference {
+  position: relative; display: grid; place-items: center;
+  color: color-mix(in srgb, var(--acc) 78%, var(--ink));
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--acc) 13%, transparent), transparent 48%),
+    linear-gradient(145deg, var(--card), var(--soft));
+}
+.celeb-reference svg { width: 58%; height: 58%; opacity: .52; }
+.celeb-reference > b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--serif); font-size: clamp(18px, 4vw, 28px); font-weight: 400;
+}
 .celeb-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 11px 12px 4px; }
 .celeb-meta b { font-size: 13.5px; font-weight: 600; line-height: 1.2; }
 .celeb-score { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
@@ -3091,6 +3107,10 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .celeb-pill i { position: absolute; left: 0; top: 0; height: 100%; background: color-mix(in srgb, var(--acc) 40%, var(--line)); }
 .celeb-pill span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: var(--mono); font-size: 8px; color: var(--ink); z-index: 1; }
+.celeb-reference-meta {
+  display: flex; flex-direction: column; gap: 2px; padding: 3px 12px 13px;
+  color: var(--mut); font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.06em;
+}
 .celeb-empty { color: var(--mut); text-align: center; padding: 30px; }
 .celeb-card { cursor: pointer; transition: transform 0.14s ease, box-shadow 0.14s ease; }
 .celeb-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(20, 21, 24, 0.09); }
@@ -3126,6 +3146,7 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .cd-head { display: flex; gap: 20px; align-items: center; margin: 8px 0 28px; }
 .cd-photo { width: 132px; height: 132px; border-radius: 20px; overflow: hidden; flex: none; background: var(--soft); }
 .cd-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cd-photo.cd-reference > b { font-size: 30px; }
 .cd-meta h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(26px, 4vw, 38px); margin: 0 0 4px; }
 .cd-score { font-size: 40px; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
 .cd-score small, .cd-region b small { font-size: 13px; color: var(--mut); }
@@ -3146,6 +3167,18 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .cd-credit { font-size: 10.5px; color: var(--mut); margin: 0 0 10px; }
 .cd-note { font-size: 11.5px; color: var(--mut); line-height: 1.55; margin: 0; }
 .cd-note code { font-family: var(--mono); background: var(--soft); padding: 1px 5px; border-radius: 5px; }
+.cd-measure-groups {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px; margin-bottom: 24px;
+}
+.cd-measure-group { border: 1px solid var(--line); border-radius: 16px; padding: 15px 16px 10px; background: var(--card); }
+.cd-measure-group .cd-h2 { margin-bottom: 8px; }
+.cd-measure {
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px;
+  padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px;
+}
+.cd-measure span { color: var(--mut); line-height: 1.35; }
+.cd-measure b { font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* Auto-capture countdown. The visible half of it — the audible ticks in
    ui/autoCapture.ts are what actually carry the count on the side profile,
@@ -3211,6 +3244,10 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
   justify-content: center; padding: 5vh 16px; overflow-y: auto;
   background: rgba(20, 21, 24, 0.5); backdrop-filter: blur(3px);
 }
+/* A recall opens from inside the dashboard, whose own fixed layer is 300.
+   The shared history overlay predates that dashboard and otherwise opens
+   successfully behind it, making every scan row look dead. */
+.recall-overlay { z-index: 340; }
 .hist-panel {
   position: relative; width: min(680px, 100%); background: var(--card, #fff);
   border-radius: 20px; padding: 28px 26px 22px; box-shadow: 0 30px 80px rgba(20, 21, 24, 0.25);
