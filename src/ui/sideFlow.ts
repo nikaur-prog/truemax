@@ -1,6 +1,7 @@
 import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
+import { classifySidePlacement } from "../engine/sidePlacementQuality.js";
 import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
@@ -733,7 +734,10 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   const [seedResult] = await Promise.all([
     seedSidePointsSmart(
       e.canvas,
-      (points, faceDir) => seedReadings(points, faceDir, ctx.sex).length === 0,
+      (points, faceDir) => {
+        const assessment = seedAssessment(points, faceDir, ctx.sex);
+        return assessment.hard.length === 0 && assessment.marginal.length === 0;
+      },
     ),
     wait(READ_BEAT_MS),
   ]);
@@ -1208,9 +1212,9 @@ function mountVerify(
           <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
         </svg>
       </button>
+      <button class="btn side-confirm" id="side-go">Confirm</button>
       <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>
-      <button class="btn pri" id="side-go">Confirm</button>`;
+      <button class="btn gho" id="side-wrong">Points are wrong</button>`;
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
     // this screen: the question is asked as a dialog now, before the scan runs,
@@ -1293,8 +1297,10 @@ function mountVerify(
       const correctedPoints = cloneSidePoints(verifier.points);
       const report = analyzeSide(verifier.points, faceDir, ctx.sex);
 
-      // A measurement outside anatomical bounds is a misplaced point, and this
-      // is the last moment it can be caught.
+      // A material measurement failure is a misplaced point, and this is the
+      // last moment it can be caught. One reading just across a conservative
+      // boundary is different: the engine already excludes that reading, so
+      // classifySidePlacement lets the rest of a sound scan continue.
       //
       // sidePointIntegrityIssues above checks the POINTS against each other —
       // ordering, spacing, facing. It cannot see a pair that is individually
@@ -1310,7 +1316,7 @@ function mountVerify(
       // metric from every aggregate. It just was not telling anybody. This says
       // it, names the measurement, and refuses to store the scan until the
       // points behind it have been moved.
-      const impossible = report.metrics.filter((m) => m.implausible);
+      const impossible = classifySidePlacement(report.metrics).hard;
       if (impossible.length) {
         if (confirmButton) confirmButton.disabled = false;
         e.cap.textContent = "CHECK LANDMARKS";
@@ -1508,7 +1514,7 @@ function mountVerify(
     // person to evaluate a placement we can already prove is broken is asking
     // them to do our job badly. So the seed is measured first, and a seed that
     // fails is not offered.
-    const broken = seedReadings(seed.points, seed.faceDir, ctx.sex);
+    const assessment = seedAssessment(seed.points, seed.faceDir, ctx.sex);
     // The review state is put up first, so whichever answer comes back lands
     // on a finished screen rather than building one underneath the person.
     showReviewActions();
@@ -1517,7 +1523,13 @@ function mountVerify(
     // leaving it live means a person can answer twice, and the two answers do
     // not have to agree.
     e.actions.classList.add("mode-pending");
-    void askPlacementMode(e.canvas, seed.points, seed.confidence ?? 1, broken).then(async (mode) => {
+    void askPlacementMode(
+      e.canvas,
+      seed.points,
+      seed.confidence ?? 1,
+      assessment.hard,
+      assessment.marginal,
+    ).then(async (mode) => {
       e.actions.classList.remove("mode-pending");
       // Null is a cancelled dialog: the flow was closed or the identity changed
       // underneath it, and there is nothing left for either branch to act on.
@@ -1566,6 +1578,7 @@ function askPlacementMode(
   points: SidePoints,
   confidence: number,
   broken: string[] = [],
+  marginal: string[] = [],
 ): Promise<"auto" | "manual" | null> {
   // Three states, not two, and the third is the one that was missing.
   //
@@ -1575,7 +1588,7 @@ function askPlacementMode(
   //   low      the seeder reported low confidence in itself.
   //   ok       a normal placement.
   const blocked = broken.length > 0;
-  const low = !blocked && confidence < 0.7;
+  const low = !blocked && (confidence < 0.7 || marginal.length > 0);
   return new Promise((resolve) => {
     let done = false;
     const backdrop = document.createElement("div");
@@ -1599,7 +1612,9 @@ function askPlacementMode(
       <p class="side-mode-copy">${blocked
         ? `Our own measurement says at least one of these is in the wrong place: ${broken.join("; ")}. Rather than hand you a number built on it, we would like you to place them.`
         : low
-          ? "This photo was a hard one to read, so treat these as starting positions rather than an answer."
+          ? marginal.length
+            ? `One reading is just outside the safety range: ${marginal.join("; ")}. You can use these points, but that reading will be left out of the score.`
+            : "This photo was a hard one to read, so treat these as starting positions rather than an answer."
           : "This is where our system put them, on your photo."}</p>
       <div class="side-mode-actions${blocked ? " single" : ""}">
         ${blocked ? "" : `<button type="button" class="btn gho" data-mode="manual">Place them myself</button>`}
@@ -1716,32 +1731,33 @@ function askSideQuestion(opts: {
  *
  * Every measurement carries anatomical bounds, and scoreMetric already sets
  * `implausible` on any reading outside them and drops it from every aggregate.
- * confirmPlacement has always checked this. The problem was purely one of
- * timing: it checked at the END, so the product would offer somebody a set of
- * points under the heading "We placed the points for you", let them accept it,
- * and only then announce that one of the resulting measurements is not a shape
- * a human face can be.
+ * A material miss blocks the placement. One small miss is retained as a
+ * low-confidence warning while that individual reading stays excluded.
  *
  * Asked here instead, on the seed, before anything is offered. A seed the
  * engine can prove wrong is not presented as a choice.
  */
-function seedReadings(points: SidePoints, faceDir: number, sex: Sex): string[] {
+function seedAssessment(
+  points: SidePoints,
+  faceDir: number,
+  sex: Sex,
+): { hard: string[]; marginal: string[] } {
   try {
     const report = analyzeSide(points, faceDir, sex);
-    return report.metrics
-      .filter((m) => m.implausible)
-      .map((m) => {
+    const assessment = classifySidePlacement(report.metrics);
+    const format = (metrics: typeof assessment.hard): string[] => metrics.map((m) => {
         const bound = m.def.plausible;
         const value = m.value.toFixed(m.def.decimals);
         return bound
           ? `${m.def.name} ${value} (a face is ${bound[0]}\u2013${bound[1]})`
           : `${m.def.name} ${value}`;
       });
+    return { hard: format(assessment.hard), marginal: format(assessment.marginal) };
   } catch {
     // A seed that cannot be measured at all is not evidence that it is wrong,
     // and this check must never be the thing that blocks a scan. The confirm
     // path still has the same guard behind it.
-    return [];
+    return { hard: [], marginal: [] };
   }
 }
 
