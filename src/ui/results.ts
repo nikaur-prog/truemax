@@ -1234,7 +1234,10 @@ function showOverall(): void {
     // A genuine press costs one extra tap; an accidental one costs nothing.
     if (window.confirm("Start over with a new photo? This report will close.")) ctx?.onNewPhoto();
   };
-  document.getElementById("btn-plan")!.onclick = () => select("improve");
+  // Guest and recalled reports are observations-only, so resultActions omits
+  // this button. Wiring the shared overview must tolerate that smaller DOM.
+  const planBtn = document.getElementById("btn-plan");
+  if (planBtn) planBtn.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");
   if (continueBtn) continueBtn.onclick = () => goPathway();
   const sideBtn = document.getElementById("btn-side");
