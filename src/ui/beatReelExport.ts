@@ -77,6 +77,10 @@ export interface BeatReelOptions {
    * option and not a default they cannot see.
    */
   outroBeats?: number;
+  /** Append the shipped 30-second CTA film, including its voice track. This is
+   * the default for creator reels; callers turn it off when a custom CTA will
+   * be added in an external edit. Rundown exports do not use this renderer. */
+  longCta?: boolean;
   /** Painted over the clip that lands on the drop — the reveal. */
   onDropFrame?: (ctx: CanvasRenderingContext2D, w: number, h: number, into: number, hold: number) => void;
   onProgress?: (fraction: number, label: string) => void;
@@ -90,6 +94,114 @@ export interface RenderedReel {
   codec: string;
   /** The extension to save under — the container, but without the guessing. */
   extension: string;
+}
+
+interface LongCtaAsset {
+  video: HTMLVideoElement;
+  channels: Float32Array[];
+  duration: number;
+  dispose(): void;
+}
+
+/** Linear resampling is sufficient for a spoken CTA and avoids asking an
+ * OfflineAudioContext to render while the main encoder already owns WebAudio.
+ */
+export function resampleAudioChannel(
+  input: Float32Array,
+  sourceRate: number,
+  targetRate: number,
+  duration: number,
+): Float32Array {
+  const length = Math.max(1, Math.round(duration * targetRate));
+  const output = new Float32Array(length);
+  if (!input.length || sourceRate <= 0 || targetRate <= 0) return output;
+  for (let i = 0; i < length; i++) {
+    const source = i * sourceRate / targetRate;
+    if (source >= input.length) continue;
+    const lo = Math.floor(source);
+    const hi = Math.min(input.length - 1, lo + 1);
+    const mix = source - lo;
+    output[i] = input[lo] * (1 - mix) + input[hi] * mix;
+  }
+  return output;
+}
+
+/** Join two pieces of audio without changing either one's level. */
+export function appendAudio(
+  base: readonly Float32Array[],
+  tail: readonly Float32Array[],
+): Float32Array[] {
+  const baseLength = base[0]?.length ?? 0;
+  const tailLength = tail[0]?.length ?? 0;
+  const count = Math.max(1, base.length, tail.length);
+  return Array.from({ length: count }, (_, channel) => {
+    const out = new Float32Array(baseLength + tailLength);
+    const a = base[channel] ?? base[0];
+    const b = tail[channel] ?? tail[0];
+    if (a) out.set(a.subarray(0, baseLength), 0);
+    if (b) out.set(b.subarray(0, tailLength), baseLength);
+    return out;
+  });
+}
+
+async function loadLongCta(targetRate: number): Promise<LongCtaAsset> {
+  const response = await fetch("/cta/cta2.mp4", { cache: "force-cache" });
+  if (!response.ok) throw new Error("The 30-second CTA film could not be loaded. Turn it off or retry.");
+  const bytes = await response.arrayBuffer();
+  const url = URL.createObjectURL(new Blob([bytes], { type: "video/mp4" }));
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = url;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error("The 30-second CTA film did not decode.")), 15_000);
+      const done = () => {
+        window.clearTimeout(timer);
+        video.removeEventListener("loadeddata", done);
+        video.removeEventListener("error", failed);
+        resolve();
+      };
+      const failed = () => {
+        window.clearTimeout(timer);
+        video.removeEventListener("loadeddata", done);
+        video.removeEventListener("error", failed);
+        reject(new Error("The 30-second CTA film did not decode."));
+      };
+      video.addEventListener("loadeddata", done);
+      video.addEventListener("error", failed);
+      video.load();
+    });
+
+    const AudioCtor = window.AudioContext
+      ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) throw new Error("This browser cannot decode the 30-second CTA voice track.");
+    const context = new AudioCtor();
+    let decoded: AudioBuffer;
+    try {
+      decoded = await context.decodeAudioData(bytes.slice(0));
+    } finally {
+      await context.close().catch(() => undefined);
+    }
+    const duration = 30;
+    const channels = Array.from({ length: Math.max(1, decoded.numberOfChannels) }, (_, i) =>
+      resampleAudioChannel(decoded.getChannelData(i), decoded.sampleRate, targetRate, duration));
+    return {
+      video,
+      channels,
+      duration,
+      dispose: () => {
+        video.removeAttribute("src");
+        video.load();
+        URL.revokeObjectURL(url);
+      },
+    };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
 }
 
 /**
@@ -106,13 +218,20 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
   const { onProgress } = options;
   const period = plan.bpm > 0 ? 60 / plan.bpm : 0;
   const outroSeconds = Math.max(0, options.outroBeats ?? 0) * period;
-  const total = plan.duration + outroSeconds;
+  const reelSeconds = plan.duration + outroSeconds;
 
   onProgress?.(0.02, "Preparing the music");
   // The music runs under the outro too — the card is the last cut of the
-  // edit, not a separate video stapled on after the song stops.
-  const channels = sliceAudio(song.channels, song.sampleRate, plan.songStart, total);
-  applyEdgeFades(channels, song.sampleRate);
+  // edit, not a separate video stapled on after the song stops. The long CTA
+  // has its own voice track and starts after that music has faded.
+  const reelChannels = sliceAudio(song.channels, song.sampleRate, plan.songStart, reelSeconds);
+  applyEdgeFades(reelChannels, song.sampleRate);
+  onProgress?.(0.035, options.longCta ? "Preparing the CTA film" : "Preparing the music");
+  const longAsset = options.longCta ? await loadLongCta(song.sampleRate) : null;
+  const channels = longAsset ? appendAudio(reelChannels, longAsset.channels) : reelChannels;
+  const total = reelSeconds + (longAsset?.duration ?? 0);
+
+  try {
 
   const {
     Output,
@@ -205,6 +324,26 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
   for (let frame = 0; frame < frameCount; frame++) {
     const t = frame / FPS;
 
+    if (longAsset && t >= reelSeconds) {
+      const local = t - reelSeconds;
+      await seekTo(longAsset.video, local);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, size.w, size.h);
+      const rect = coverRect(
+        longAsset.video.videoWidth,
+        longAsset.video.videoHeight,
+        size.w,
+        size.h,
+        0,
+      );
+      if (rect.sw > 0 && rect.sh > 0) {
+        ctx.drawImage(longAsset.video, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, size.w, size.h);
+      }
+      await videoSource.add(t, 1 / FPS, { keyFrame: frame % (FPS * 2) === 0 });
+      if (frame % 10 === 0) onProgress?.(0.08 + 0.88 * (frame / frameCount), "Appending CTA film");
+      continue;
+    }
+
     // The outro claims everything after the last cut. Checked FIRST, because
     // activeCut deliberately hands t >= the final cut's end back to the final
     // clip (its guard against a black last frame), and here that time belongs
@@ -265,6 +404,9 @@ export async function renderBeatReel(options: BeatReelOptions): Promise<Rendered
     codec: videoCodec,
     extension: chosen.container,
   };
+  } finally {
+    longAsset?.dispose();
+  }
 }
 
 /**
