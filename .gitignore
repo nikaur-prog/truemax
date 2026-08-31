@@ -114,3 +114,9 @@ tools/_*.mjs
 _*.mjs
 _*.html
 probe-*.html
+
+# Scratch worktrees created by isolated review agents. Same class as the
+# entries above and named here for the same reason: the directory appears at
+# the repo root while an agent is running, and a `git add -A` would carry
+# somebody else's checkout into a public repository.
+.claude/worktrees/

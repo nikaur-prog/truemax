@@ -3088,11 +3088,13 @@ function renderAiNote(): void {
   // before/after is that the bones underneath did not change.
   const wide = gap >= 3.5;
   el.aiNote.innerHTML = wide
-    ? `<b>${before.toFixed(1)} → ${after.toFixed(1)} is a wide jump.</b> Past about three points the
-       generator tends to hand back a different face rather than the same one improved, and the
-       comment section spots that instantly. These numbers steer the prompt; the scan decides.`
-    : `These numbers steer the prompt: the generator has never seen our percentile tables, so the
-       scan may land a point either side. The pair is built to keep one face throughout.`;
+    ? `<b>${before.toFixed(1)} → ${after.toFixed(1)} is a wide jump.</b> The after is generated first
+       at the level you set here, and the before is that same face with the chips applied. A gap this
+       wide applies them heavily, which starts to read as a different person rather than the same one
+       improved. The scan still decides the number.`
+    : `The after is generated first at the level you set here, then the before is that same face with
+       the chips applied. The generator has never seen our percentile tables, so the scan may land a
+       point either side.`;
 }
 
 for (const b of el.aiSex.querySelectorAll<HTMLButtonElement>("button")) {
@@ -3120,9 +3122,15 @@ el.aiForm.onsubmit = async (event) => {
   // of thing that stops somebody using a tool.
   saveAiCharacter({ name, sex: aiSex, description: desc, flaws: selectedFlawIds() });
 
+  const beforeScore = Number((document.getElementById("q-ai-before") as HTMLInputElement).value);
+  const afterScore = Number((document.getElementById("q-ai-after") as HTMLInputElement).value);
+  const fullBody = (document.getElementById("q-ai-fullbody") as HTMLInputElement | null)?.checked === true;
+
   const go = document.getElementById("q-ai-go") as HTMLButtonElement | null;
   el.aiMsg.classList.remove("err");
-  el.aiMsg.textContent = "Making the before…";
+  // The after comes first now, and saying so matters: four images take a while
+  // and a status line naming the wrong one reads as a stuck request.
+  el.aiMsg.textContent = fullBody ? "Making the after, then three more…" : "Making the after…";
   if (go) {
     go.disabled = true;
     go.textContent = "Generating…";
@@ -3135,11 +3143,23 @@ el.aiForm.onsubmit = async (event) => {
         "content-type": "application/json",
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ sex: aiSex, description: desc, flaws: selectedFlawIds() }),
+      body: JSON.stringify({
+        sex: aiSex,
+        description: desc,
+        flaws: selectedFlawIds(),
+        // SENT NOW. These two inputs sat under a note claiming they steered the
+        // prompt and were never put in the body, so asking for an eight and
+        // getting a five was the form talking to itself.
+        beforeScore,
+        afterScore,
+        fullBody,
+      }),
     });
     const payload = (await response.json().catch(() => ({}))) as {
       before?: string;
       after?: string;
+      beforeBody?: string | null;
+      afterBody?: string | null;
       error?: string;
     };
     if (!response.ok || !payload.before || !payload.after) {
@@ -3148,7 +3168,7 @@ el.aiForm.onsubmit = async (event) => {
       return;
     }
     el.aiMsg.textContent = "";
-    showAiPair(name, payload.before, payload.after);
+    showAiPair(name, payload.before, payload.after, payload.beforeBody, payload.afterBody);
   } catch {
     el.aiMsg.classList.add("err");
     el.aiMsg.textContent = "Could not reach the image service.";
@@ -3165,16 +3185,30 @@ el.aiForm.onsubmit = async (event) => {
 // Downloadable individually rather than as one composite: these are the INPUT
 // to the Reel Creator, which wants two separate photographs to scan, not a
 // picture of two photographs.
-function showAiPair(name: string, before: string, after: string): void {
+function showAiPair(
+  name: string,
+  before: string,
+  after: string,
+  beforeBody?: string | null,
+  afterBody?: string | null,
+): void {
   const host = document.getElementById("q-ai-preview");
   if (!host) return;
   const isImageData = (value: string) => /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+=*$/i.test(value);
-  if (!isImageData(before) || !isImageData(after)) {
+  // Every frame is checked, not just the first two. A second pair arriving
+  // unvalidated would be the one place a crafted data URL could reach an
+  // <img src>, which is exactly what this guard exists to stop.
+  const frames = [before, after, beforeBody, afterBody].filter((v): v is string => typeof v === "string");
+  if (!frames.every(isImageData)) {
     el.aiMsg.classList.add("err");
     el.aiMsg.textContent = "The image service returned an unsafe image response.";
     return;
   }
+  const hasBody = typeof beforeBody === "string" && typeof afterBody === "string";
   host.classList.remove("hidden");
+  // The full-length pair sits UNDER the portrait pair rather than replacing it:
+  // the portrait is what the reel opens on, and the body shot is there to show
+  // what the described build actually produced before anybody films with it.
   host.innerHTML = `
     <div class="q-ai-pair">
       <figure><img data-pair="before" /><figcaption>BEFORE</figcaption></figure>
@@ -3184,18 +3218,43 @@ function showAiPair(name: string, before: string, after: string): void {
       <button type="button" class="btn pri" data-save="before">Save the before</button>
       <button type="button" class="btn pri" data-save="after">Save the after</button>
     </div>
-    <p class="q-ai-note">Scan these two in Reel Creator to get the measured before/after.</p>`;
-  const beforeImage = host.querySelector<HTMLImageElement>('[data-pair="before"]')!;
-  const afterImage = host.querySelector<HTMLImageElement>('[data-pair="after"]')!;
-  beforeImage.src = before;
-  beforeImage.alt = `${name}, before`;
-  afterImage.src = after;
-  afterImage.alt = `${name}, after`;
+    ${
+      hasBody
+        ? `<div class="q-ai-pair">
+             <figure><img data-pair="beforeBody" /><figcaption>BEFORE, FULL LENGTH</figcaption></figure>
+             <figure><img data-pair="afterBody" /><figcaption>AFTER, FULL LENGTH</figcaption></figure>
+           </div>
+           <div class="q-ai-pair-actions">
+             <button type="button" class="btn" data-save="beforeBody">Save the full-length before</button>
+             <button type="button" class="btn" data-save="afterBody">Save the full-length after</button>
+           </div>`
+        : ""
+    }
+    <p class="q-ai-note">Scan the two portraits in Reel Creator to get the measured before/after.
+    The full-length shots are for checking the build, not for scanning.</p>`;
+  const sources: Record<string, string> = { before, after };
+  if (hasBody) {
+    sources.beforeBody = beforeBody as string;
+    sources.afterBody = afterBody as string;
+  }
+  const labels: Record<string, string> = {
+    before: `${name}, before`,
+    after: `${name}, after`,
+    beforeBody: `${name}, before, full length`,
+    afterBody: `${name}, after, full length`,
+  };
+  for (const [key, src] of Object.entries(sources)) {
+    const image = host.querySelector<HTMLImageElement>(`[data-pair="${key}"]`);
+    if (!image) continue;
+    image.src = src;
+    image.alt = labels[key];
+  }
   for (const button of host.querySelectorAll<HTMLButtonElement>("[data-save]")) {
     button.onclick = async () => {
-      const which = button.dataset.save === "after" ? after : before;
+      const key = button.dataset.save ?? "before";
+      const which = sources[key] ?? before;
       const blob = await (await fetch(which)).blob();
-      await saveFile(blob, exportName("card", "png", button.dataset.save), "card");
+      await saveFile(blob, exportName("card", "png", key), "card");
     };
   }
   host.scrollIntoView({ behavior: "smooth", block: "start" });

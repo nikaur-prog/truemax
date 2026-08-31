@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { FACE_FLAWS, concernsFor, flawsFromIds, unknownConcernIds } from "./faceFlawCatalog.js";
 
 // The catalogue exists to stop the generator producing two people and calling
@@ -92,32 +92,8 @@ test("selection order does not change the result", () => {
   assert.deepEqual(a, b);
 });
 
-// --- how the endpoint uses it ----------------------------------------------
-const route = readFileSync(new URL("../../api/ai-image.ts", import.meta.url), "utf8");
-
-test("the structural anchor is in the half BOTH calls share", () => {
-  // Its absence was the whole defect: with no word about structure the model
-  // returned its default face, the before degraded it, and the after cleared
-  // the degradation. Average in, average out.
-  const fn = route.slice(route.indexOf("function subject("));
-  const body = fn.slice(0, fn.indexOf("\n}\n"));
-  assert.match(body, /bone structure/i);
-  assert.match(body, /defined jawline/i);
-  // In subject(), which the after inherits by editing the before's pixels, and
-  // NOT pasted separately into each prompt where the two could drift.
-  const beforePrompt = route.slice(route.indexOf("const beforePrompt"), route.indexOf("const afterPrompt"));
-  assert.match(beforePrompt, /subject\(sex, description\)/);
-});
-
-test("the after names only removals, never a face", () => {
-  const fn = route.slice(route.indexOf("function cleared("));
-  const body = fn.slice(0, fn.indexOf("\n}\n"));
-  assert.match(body, /f\.clear/, "the removal half of each flaw, not the add half");
-  assert.doesNotMatch(body, /f\.add/, "describing the face again is how it becomes a different one");
-});
-
-test("the after is pinned to the same photograph", () => {
-  const afterPrompt = route.slice(route.indexOf("const afterPrompt"), route.indexOf("const after ="));
-  assert.match(afterPrompt, /Same pose, same framing, same background, same lighting, same camera/);
-  assert.match(afterPrompt, /Do not restructure the face/);
-});
+// How the ENDPOINT uses this catalogue is tested in aiPairPrompt.test.ts, by
+// building the prompts and reading them, rather than here by regexing the file
+// that contains them. Three separate rounds of review landed on the same
+// criticism of the old assertions: they pinned the SHAPE of the source and
+// would keep passing through a rewrite that broke the behaviour they described.

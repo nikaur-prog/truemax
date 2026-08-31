@@ -796,15 +796,34 @@ function drawMattedPhoto(
   W: number,
   H: number,
 ): void {
-  const ring = ovalRing(landmarks, photo, crop, W, H);
+  // THE MATTE IS BUILT AT DEVICE RESOLUTION, not at the 720x1280 logical size.
+  //
+  // It used to be built at W x H and then blitted with ctx.drawImage(matte, 0,
+  // 0), which the export transform scaled up to 1080x1920. That put TWO
+  // resamples between the photograph and the encoder: source crop down to 1280
+  // rows in this scratch canvas, then 1280 up to 1920 on the way out. The
+  // second step got imageSmoothingQuality "high" from the output context; the
+  // first ran at the browser default, which is bilinear. So the short cut, the
+  // one the paid video actually uses, was doing its single biggest
+  // magnification at the lowest available quality and then interpolating the
+  // result again.
+  //
+  // Sizing the scratch to the real output pixels collapses that to one
+  // resample, straight from the source photograph to the pixels that get
+  // encoded. The full cut already did this by drawing the crop directly, which
+  // is why it always looked sharper than the short cut on the same photo.
+  const px = Math.max(1, ctx.getTransform().a || 1);
+  const MW = Math.round(W * px);
+  const MH = Math.round(H * px);
+  const ring = ovalRing(landmarks, photo, crop, MW, MH);
   if (ring.length < 3) {
     ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
     return;
   }
-  const mask = scratch("mask", W, H);
+  const mask = scratch("mask", MW, MH);
   const mctx = mask.getContext("2d")!;
-  mctx.clearRect(0, 0, W, H);
-  mctx.filter = `blur(${Math.round(W * MATTE_FEATHER)}px)`;
+  mctx.clearRect(0, 0, MW, MH);
+  mctx.filter = `blur(${Math.round(MW * MATTE_FEATHER)}px)`;
   mctx.fillStyle = "#fff";
   mctx.beginPath();
   mctx.moveTo(ring[0][0], ring[0][1]);
@@ -813,24 +832,31 @@ function drawMattedPhoto(
   mctx.fill();
   mctx.filter = "none";
 
-  const matte = scratch("matte", W, H);
+  const matte = scratch("matte", MW, MH);
   const tctx = matte.getContext("2d")!;
-  tctx.clearRect(0, 0, W, H);
-  tctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+  // The one place the photograph is resampled. Say so explicitly rather than
+  // inheriting the browser default, which is what the old chain did.
+  tctx.imageSmoothingEnabled = true;
+  tctx.imageSmoothingQuality = "high";
+  tctx.clearRect(0, 0, MW, MH);
+  tctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, MW, MH);
   tctx.globalCompositeOperation = "destination-in";
   tctx.drawImage(mask, 0, 0);
   tctx.globalCompositeOperation = "source-over";
 
   // A soft pool of light behind the head, so the subject sits IN the dark
-  // rather than pasted onto it.
-  const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length;
-  const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+  // rather than pasted onto it. Drawn in LOGICAL units, because it is painted
+  // rather than sampled and the ring came back in device units.
+  const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length / px;
+  const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length / px;
   const glow = ctx.createRadialGradient(cx, cy, W * 0.05, cx, cy, W * 0.75);
   glow.addColorStop(0, "rgba(38,48,50,0.55)");
   glow.addColorStop(1, "rgba(5,6,6,0)");
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
-  ctx.drawImage(matte, 0, 0);
+  // Back down to logical units: the transform maps this 1:1 onto the device
+  // pixels the matte was built at, so nothing is resampled a second time.
+  ctx.drawImage(matte, 0, 0, W, H);
 }
 
 export function drawRundownFrame(
@@ -965,44 +991,34 @@ export function drawRundownFrame(
   } else if (kind === "card") {
     // The face moves to the top and the breakdown arrives under it.
     //
-    // Not a cut: the crop the previous beat left off on eases up into the band
-    // over the first third of this one, so the photograph appears to travel
-    // rather than to be replaced. A hard cut here loses the connection between
-    // the face just measured and the numbers now being read off it, which is
-    // the one thing the card is for.
-    // Settled against the FIRST card beat, not this one — the card is one
-    // continuous state narrated over two sentences, so the entrance belongs
-    // to the state, not to the sentence.
+    // THE PHOTOGRAPH JUST APPEARS. No slide, no flash.
     //
-    // The entrance itself is a FLASH-SWIPE, not a squish. The previous move
-    // eased the full-bleed photograph up into the top band, which meant a
-    // second of the face visibly compressing — watched back it read as the
-    // frame buckling rather than as a cut. The verdict deserves an arrival:
-    // a hard cut to the card composition, the photo band sliding down into
-    // place from a few percent above, under a brief white flash that reads
-    // as the camera's shutter. Same grammar as the short cut's cutaways.
-    const settle = cardSettle(input, beat, t);
+    // It has now been through three entrances. The first eased the full-bleed
+    // crop up into the band, which read as the frame buckling. The second
+    // replaced that with a drop from a few percent above under a white shutter
+    // flash. Watched back on a dark frame that reads as a glitch rather than
+    // as a cut, and the drop still draws the eye to the band's edge instead of
+    // to the face inside it.
+    //
+    // A hard cut is not a missing transition here. Every other beat in the
+    // rundown already cuts, the card is the one frame the viewer is meant to
+    // read rather than watch, and movement on the photograph competes with the
+    // rows arriving underneath it. Those rows still fade and the figures still
+    // count up: the entrance belongs to the numbers, which are the new
+    // information, not to the face, which the viewer has been looking at for
+    // the whole video.
     const boxH = H * CARD_PHOTO;
     const target = regionCrop(photo, landmarks, "proportions", W / boxH);
-    const slide = (1 - settle) * -boxH * 0.22;
-    ctx.drawImage(photo, target.x, target.y, target.w, target.h, 0, slide, W, boxH);
-    // The photograph fades into the card rather than ending on a hard edge.
-    const fade = ctx.createLinearGradient(0, boxH * 0.55, 0, boxH);
+    ctx.drawImage(photo, target.x, target.y, target.w, target.h, 0, 0, W, boxH);
+    // A short blend into the card body so the band does not end on a hard
+    // horizontal line. Deliberately short: this used to start at 55% of the
+    // band and wash the bottom HALF of the photograph to black, which took the
+    // jaw and neck out of the one frame that is summing up the face.
+    const fade = ctx.createLinearGradient(0, boxH * 0.86, 0, boxH);
     fade.addColorStop(0, "rgba(5,6,6,0)");
     fade.addColorStop(1, "#050606");
     ctx.fillStyle = fade;
-    ctx.fillRect(0, boxH * 0.55, W, boxH * 0.45 + 2);
-    // The flash is far faster than the settle: a shutter is over in a quarter
-    // second, while the band is still easing into place behind it.
-    const firstCard = input.timeline.beats.find((b) => b.beat.kind === "card") ?? beat;
-    const flash = 1 - clamp01((t - firstCard.start) / 0.28);
-    if (flash > 0) {
-      ctx.save();
-      ctx.globalAlpha = flash * 0.4;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, W, H);
-      ctx.restore();
-    }
+    ctx.fillRect(0, boxH * 0.86, W, boxH * 0.14 + 2);
   } else if (input.cut === "short" && kind === "metric") {
     // Through the stage dip: a change of photograph rises out of the frame's
     // own black exactly the way a cutaway does, so the two cut grammars match.
@@ -1017,38 +1033,13 @@ export function drawRundownFrame(
     ctx.restore();
   }
 
-  // Everything except the measurement goes dark. A uniform scrim rather than a
-  // shaped mask: masking around the active region means computing a region
-  // outline, and a slightly wrong outline draws attention to itself far more
-  // than an even dim does.
-  // Lighter over a cutaway. The scrim exists to make ONE measurement stand out
-  // of a photograph; a cutaway has no measurement to stand out of, so the same
-  // dimming just produces a dull frame at the exact moment the video is meant
-  // to feel like it has more than one shot in it. Enough is kept at the top and
-  // bottom to hold the caption and the bar, which carry their own shadows.
-  const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  const matted = input.cut === "short" && kind === "metric" && !cutaway;
-  if (matted) {
-    // The ground is already dark on a matted frame — the scrim's only
-    // remaining job is holding the caption and the bar, so it keeps the top
-    // and bottom bands and stays out of the face.
-    scrim.addColorStop(0, "rgba(3,5,5,.40)");
-    scrim.addColorStop(0.34, "rgba(3,5,5,.02)");
-    scrim.addColorStop(0.68, "rgba(3,5,5,.10)");
-    scrim.addColorStop(1, "rgba(3,5,5,.72)");
-  } else if (cutaway) {
-    scrim.addColorStop(0, "rgba(3,5,5,.46)");
-    scrim.addColorStop(0.34, "rgba(3,5,5,.06)");
-    scrim.addColorStop(0.68, "rgba(3,5,5,.20)");
-    scrim.addColorStop(1, "rgba(3,5,5,.78)");
-  } else {
-    scrim.addColorStop(0, "rgba(3,5,5,.72)");
-    scrim.addColorStop(0.34, "rgba(3,5,5,.34)");
-    scrim.addColorStop(0.68, "rgba(3,5,5,.42)");
-    scrim.addColorStop(1, "rgba(3,5,5,.92)");
+  const stops = scrimStops(kind, input.cut === "short" && kind === "metric" && !cutaway, Boolean(cutaway));
+  if (stops.length) {
+    const scrim = ctx.createLinearGradient(0, 0, 0, H);
+    for (const [at, colour] of stops) scrim.addColorStop(at, colour);
+    ctx.fillStyle = scrim;
+    ctx.fillRect(0, 0, W, H);
   }
-  ctx.fillStyle = scrim;
-  ctx.fillRect(0, 0, W, H);
 
   // The curve and the search bar pop in FRONT of the face, so the face goes
   // most of the way down. Not all the way to black: keeping the photograph
@@ -1330,6 +1321,64 @@ export function fitFont(
     if (ctx.measureText(text).width <= maxWidth) return font(px);
   }
   return font(min);
+}
+
+/**
+ * The dimming gradient over a frame, or nothing.
+ *
+ * Everything except the measurement goes dark. A uniform scrim rather than a
+ * shaped mask: masking around the active region means computing a region
+ * outline, and a slightly wrong outline draws attention to itself far more than
+ * an even dim does.
+ *
+ * Lighter over a cutaway. The scrim exists to make ONE measurement stand out of
+ * a photograph; a cutaway has no measurement to stand out of, so the same
+ * dimming just produces a dull frame at the exact moment the video is meant to
+ * feel like it has more than one shot in it. Enough is kept at the top and
+ * bottom to hold the caption and the bar, which carry their own shadows.
+ *
+ * AND NOTHING AT ALL ON THE CARD. That is a fix rather than an omission, and it
+ * is why this is a function with a test rather than a branch inside a draw
+ * call. The card draws no measurement: it is the face in a band across the top
+ * with the numbers underneath. The default gradient was landing on that band at
+ * .72 black over the crown, easing to roughly .38 by the chin, and dimming the
+ * one frame in the video that exists to be read. The card paints its own dark
+ * body and its own blend into it, which is the contrast the rows actually need.
+ *
+ * Deliberately empty rather than a lighter gradient: there is no measurement to
+ * separate the face from, and a faint scrim would be the same bug quieter.
+ */
+export function scrimStops(
+  kind: string,
+  matted: boolean,
+  cutaway: boolean,
+): Array<[number, string]> {
+  if (kind === "card") return [];
+  if (matted) {
+    // The ground is already dark on a matted frame, so the scrim's only
+    // remaining job is holding the caption and the bar. It keeps the top and
+    // bottom bands and stays out of the face.
+    return [
+      [0, "rgba(3,5,5,.40)"],
+      [0.34, "rgba(3,5,5,.02)"],
+      [0.68, "rgba(3,5,5,.10)"],
+      [1, "rgba(3,5,5,.72)"],
+    ];
+  }
+  if (cutaway) {
+    return [
+      [0, "rgba(3,5,5,.46)"],
+      [0.34, "rgba(3,5,5,.06)"],
+      [0.68, "rgba(3,5,5,.20)"],
+      [1, "rgba(3,5,5,.78)"],
+    ];
+  }
+  return [
+    [0, "rgba(3,5,5,.72)"],
+    [0.34, "rgba(3,5,5,.34)"],
+    [0.68, "rgba(3,5,5,.42)"],
+    [1, "rgba(3,5,5,.92)"],
+  ];
 }
 
 // How much of the frame the photograph keeps once the card is up.
