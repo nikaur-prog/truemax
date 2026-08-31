@@ -14,6 +14,7 @@ import {
   unlocked,
 } from "./earnings.js";
 import { campaignTag, DEFAULT_CAMPAIGN_TAG } from "./compliance.js";
+import { payoutSetupAudience, staffPayoutSetupHTML } from "./payoutSetup.js";
 
 // ---------------------------------------------------------------------------
 // The TrueMax Creator League — /league.
@@ -42,6 +43,9 @@ interface CreatorRow {
   status: "applied" | "approved" | "rejected" | "paused";
   pillar_grants: Record<string, boolean>;
   monthly_render_quota: number;
+  /** True only for the in-memory founder row used when staff has not applied
+   * to the League. It is never read from or written to Supabase. */
+  synthetic_staff?: true;
 }
 
 interface SprintRow {
@@ -602,7 +606,10 @@ interface PayoutSetupState {
   requirementsDue?: number;
 }
 
-async function payoutSetupHTML(): Promise<string> {
+async function payoutSetupHTML(me: CreatorRow): Promise<string> {
+  if (payoutSetupAudience(me.synthetic_staff === true) === "staff") {
+    return staffPayoutSetupHTML();
+  }
   const result = await leaguePost<PayoutSetupState>("/api/league-connect", { action: "status" });
   if (!result.ok || !result.data) {
     return `<div class="lg-card"><h3>Stripe payout account</h3>
@@ -870,7 +877,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       .select("amount_cents,currency,note,status,due_at,transferred_at,created_at")
       .eq("creator_id", me.user_id)
       .order("created_at", { ascending: false }),
-      payoutSetupHTML(),
+      payoutSetupHTML(me),
     ]);
     if (payoutError) {
       mount.innerHTML = `<h1 class="lg-h">Money</h1><p class="lg-error">Payout history could not be loaded.</p>`;
@@ -1772,7 +1779,7 @@ async function boot(): Promise<void> {
     // Admin without applying to their own league.
     if (staff) {
       return renderDash(
-        { user_id: user.id, handle: "founder", display_name: "Founder", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999 },
+        { user_id: user.id, handle: "founder", display_name: "Founder", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999, synthetic_staff: true },
         true,
       );
     }
