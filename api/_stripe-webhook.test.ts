@@ -2,9 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   configuredWebhookSecrets,
+  creditAdjustmentAction,
   entitlementFromSubscription,
   verifyWebhookEvent,
 } from "./stripe-webhook.js";
+
+test("only a full refund revokes a one-time credit", () => {
+  assert.equal(creditAdjustmentAction("charge.refunded", {
+    refunded: false,
+    amount: 599,
+    amount_refunded: 100,
+  }), null);
+  assert.equal(creditAdjustmentAction("charge.refunded", {
+    refunded: true,
+    amount: 599,
+    amount_refunded: 599,
+  }), "refund_full");
+});
+
+test("disputes revoke on open and restore only when won", () => {
+  assert.equal(creditAdjustmentAction("charge.dispute.created", {}), "dispute_open");
+  assert.equal(creditAdjustmentAction("charge.dispute.closed", { status: "lost" }), null);
+  assert.equal(creditAdjustmentAction("charge.dispute.closed", { status: "won" }), "dispute_won");
+});
 
 function subscription(overrides: Record<string, unknown> = {}) {
   return {

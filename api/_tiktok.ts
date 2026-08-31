@@ -20,7 +20,7 @@ export const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 export const tiktokClientKey = (): string => (process.env.TIKTOK_CLIENT_KEY || "").trim();
 export const tiktokClientSecret = (): string => (process.env.TIKTOK_CLIENT_SECRET || "").trim();
 const VIDEOS_URL =
-  "https://open.tiktokapis.com/v2/video/list/?fields=id,title,view_count,like_count,comment_count,share_count,create_time,share_url";
+  "https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,view_count,like_count,comment_count,share_count,create_time,share_url";
 
 export interface TikTokTokenPayload {
   access_token?: string;
@@ -88,6 +88,7 @@ export async function freshTikTokAccess(userId: string, row: LinkedTokens): Prom
 export interface TikTokVideo {
   id: string;
   title: string;
+  description: string;
   views: number;
   likes: number;
   comments: number;
@@ -118,7 +119,7 @@ export async function listOwnTikTokVideos(
     if (!response.ok) return page === 0 ? null : out;
     const listing = (await response.json().catch(() => ({}))) as {
       data?: {
-        videos?: Array<{ id?: string; title?: string; view_count?: number; like_count?: number; comment_count?: number; share_count?: number; share_url?: string }>;
+        videos?: Array<{ id?: string; title?: string; video_description?: string; view_count?: number; like_count?: number; comment_count?: number; share_count?: number; share_url?: string }>;
         cursor?: number;
         has_more?: boolean;
       };
@@ -132,6 +133,7 @@ export async function listOwnTikTokVideos(
       out.push({
         id: v.id,
         title: v.title ?? "",
+        description: v.video_description ?? "",
         views: v.view_count ?? 0,
         likes: v.like_count ?? 0,
         comments: v.comment_count ?? 0,

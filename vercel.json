@@ -21,7 +21,7 @@
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" },
-    { "path": "/api/league-track", "schedule": "45 2 * * *" }
+    { "path": "/api/league-track", "schedule": "15 * * * *" }
   ],
   "headers": [
     {

@@ -1,30 +1,31 @@
-# Payments (Stripe + Supabase) — setup
+# Payments (Stripe + Supabase) setup
 
 Stripe Checkout, the Customer Portal, a signed webhook and a Supabase
 entitlement read model exist. The web implementation now includes the
-Starter/Max trial funnel, but it is not ready to take live money until the
-catalog, migration, secrets and sandbox acceptance test are complete.
+Starter/Max trial funnel and one-time scan/voice products. Consumer billing and
+Creator League payouts have separate launch checklists below.
 
 See [`BILLING_CATALOG.md`](BILLING_CATALOG.md) for the connected-account audit,
 target product catalog and the bugs that must be fixed before accepting money.
 See [`PRICING_DECISION.md`](PRICING_DECISION.md) for the confirmed prices and
 seven-day trial decision.
 
-## Current verified state (12 August 2026)
+## Current verified state (31 August 2026)
 
-- Stripe MCP is authenticated to the TrueMax account
-  `acct_1U3RfMJdkPdozJUk`.
-- That connected account currently has no active products, prices or webhook
-  endpoints.
+- Sandbox and live product/price catalogues are configured for Starter, Max,
+  annual Max, standard/member single scans, the decline offer and narration.
+- A signed sandbox webhook delivery has reached the deployed handler with a
+  200 response. Checkout metadata and Supabase fulfilment are idempotent.
 - The entitlement tables and hardened RPC exist in the production Supabase
   project.
-- The current branch supports `free | starter | max`, a one-trial-per-account
+- The app supports `free | starter | max`, a one-trial-per-account
   reservation, server-side age enforcement and duplicate-subscription blocking.
-- The post-analysis onboarding and responsive Starter/Max offer are built and
-  browser-verified at desktop and phone viewports.
-- No sandbox checkout → webhook → entitlement → cancellation cycle has passed.
-- Do not add live prices yet: weekly and purchased scan-credit enforcement is
-  still outstanding.
+- Purchased scan and narration credits are granted and consumed from atomic
+  server ledgers. Full refunds and disputes are reconciled by the webhook.
+- The remaining consumer billing gate is a complete authenticated sandbox cycle
+  covering trial conversion, Portal changes, refund, dispute and deletion.
+- Creator payouts use Stripe Connect and have their own fail-closed runbook at
+  [`LEAGUE_PAYOUT_LAUNCH.md`](LEAGUE_PAYOUT_LAUNCH.md).
 
 ## 1. Finalize the remaining product rules
 
@@ -94,11 +95,12 @@ After deploying the target payment PR, add a sandbox webhook destination:
 https://<the-preview-host>/api/stripe-webhook
 ```
 
-Select `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.created`,
-`customer.subscription.updated` and `customer.subscription.deleted` for the
-current trial implementation. Add invoice, async-payment and refund events when
-one-time scan credits are implemented. Put the destination's `whsec_...` into the
-Preview environment as `STRIPE_WEBHOOK_SECRET`, then redeploy.
+Select `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `checkout.session.expired`,
+`customer.subscription.created`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `invoice.paid`, `charge.refunded`,
+`charge.dispute.created` and `charge.dispute.closed`. Put the destination's
+`whsec_...` into the Preview environment as `STRIPE_WEBHOOK_SECRET`, then redeploy.
 
 Stripe signs the exact raw request body. The handler must stay non-2xx on a
 temporary server failure so Stripe retries it, but repeated events must remain

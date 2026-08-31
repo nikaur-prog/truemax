@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "tsx --test api/_*.test.ts src/engine/*.test.ts src/ui/*.test.ts",
+    "test": "tsx --test api/_*.test.ts src/engine/*.test.ts src/league/*.test.ts src/ui/*.test.ts",
     "preview": "vite preview",
     "postinstall": "node scripts/copy-wasm.mjs",
     "harvest": "node scripts/harvest-clips.mjs"

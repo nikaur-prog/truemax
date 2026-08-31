@@ -13,6 +13,7 @@ import {
   unlockProgress,
   unlocked,
 } from "./earnings.js";
+import { campaignTag, DEFAULT_CAMPAIGN_TAG } from "./compliance.js";
 
 // ---------------------------------------------------------------------------
 // The TrueMax Creator League — /league.
@@ -53,6 +54,7 @@ interface SprintRow {
   starts_at: string;
   ends_at: string;
   status: string;
+  campaign_tag: string;
 }
 
 const sprintFormula = (s: SprintRow): EarningsFormula | null => formulaFrom(s.formula);
@@ -75,9 +77,19 @@ interface SubmissionRow {
   platform: string;
   status: string;
   created_at: string;
-  /** Set by the nightly tracker when the URL matched a video on the
+  /** Set by the hourly tracker when the URL matched a video on the
    *  creator's own linked TikTok — ownership proven, counts automatic. */
   tiktok_video_id: string | null;
+  caption_snapshot: string | null;
+  caption_checked_at: string | null;
+  caption_compliant: boolean;
+  compliance_hold_reason: string | null;
+  creator_cta_attested_at: string | null;
+  creator_disclosure_attested_at: string | null;
+  cta_variant: "short" | "long" | "custom" | null;
+  cta_verified_at: string | null;
+  disclosure_verified_at: string | null;
+  review_note: string | null;
 }
 
 /** One creator's submitted audience breakdown, awaiting or carrying a review. */
@@ -164,6 +176,32 @@ function formulaCardsHTML(f: EarningsFormula): string {
   </div>`;
 }
 
+interface PublicLeagueOffer {
+  id: string;
+  name: string;
+  poolCents: number;
+  currency: string;
+  formula: EarningsFormula;
+  startsAt: string;
+  endsAt: string;
+}
+
+async function publicOfferHTML(): Promise<string> {
+  const response = await fetch("/api/league-offer").catch(() => null);
+  const payload = response
+    ? await response.json().catch(() => null) as { offer?: PublicLeagueOffer | null } | null
+    : null;
+  const offer = payload?.offer;
+  if (!response?.ok || !offer || !formulaFrom(offer.formula)) {
+    return `<div class="lg-card"><h3>Applications are open</h3>
+      <p class="lg-sub">There is no live sprint right now. Every sprint shows its exact rate,
+      pool, caps and dates before you submit a video. Applying does not commit you to post.</p></div>`;
+  }
+  return `<p class="lg-note" style="margin-top:24px">CURRENT OFFER · ${esc(offer.name)} ·
+    ${fmtMoney(offer.poolCents)} USD POOL · CLOSES ${new Date(offer.endsAt).toLocaleDateString()}</p>
+    ${formulaCardsHTML(offer.formula)}`;
+}
+
 function topBarHTML(right = ""): string {
   return `<div class="lg-top">
     <div class="lg-mark"><img src="/brand/truemax-mark-512.png" alt="" />TRUEMAX <span class="lg-league">CREATOR LEAGUE</span></div>
@@ -187,8 +225,8 @@ function renderGate(): void {
            poster keeps the box honest until then. -->
       <video src="/league/montage.mp4" poster="/og.png" autoplay muted loop playsinline></video>
     </div>
-    ${formulaCardsHTML(DEFAULT_FORMULA)}
-    <p class="lg-note">Views and comments combine across all your TrueMax videos. Every post
+    <div id="lg-public-offer"><p class="lg-note">Loading the current sprint terms…</p></div>
+    <p class="lg-note">Views and comments combine across all approved TrueMax videos. Every post
     counts. No cliffs: 237k views is worth exactly what 237k views is worth. Comments are the
     bot filter: silent view farms earn half-rate.</p>
     <ol class="lg-how">
@@ -222,6 +260,10 @@ function renderGate(): void {
   };
   document.getElementById("lg-apply")!.onclick = show;
   document.getElementById("lg-signin")!.onclick = show;
+  void publicOfferHTML().then((html) => {
+    const offer = document.getElementById("lg-public-offer");
+    if (offer) offer.innerHTML = html;
+  });
   document.getElementById("lg-auth-go")!.onclick = async () => {
     const email = (document.getElementById("lg-email") as HTMLInputElement).value.trim();
     const pass = (document.getElementById("lg-pass") as HTMLInputElement).value;
@@ -275,6 +317,10 @@ function renderApply(): void {
       <p class="lg-note" style="margin-top:14px">The League leaderboard shows your name, handle
       and earnings to other approved members: that's the game. Nothing else about your account
       is ever visible to anyone.</p>
+      <label class="lg-check"><input id="ap-adult" type="checkbox" /> I confirm I am at least 18 years old.</label>
+      <label class="lg-check"><input id="ap-terms" type="checkbox" /> I accept the
+      <a href="/terms#creator-league" target="_blank" rel="noopener">Creator League terms</a>,
+      including the sprint pool, validation and payout rules.</label>
       <p style="margin-top:16px"><button class="lg-btn pri" id="ap-send">Send application</button></p>
       <p class="lg-error" id="ap-err"></p>
     </div>
@@ -298,13 +344,21 @@ function renderApply(): void {
       err.textContent = "Add 2–3 full https:// links to your work.";
       return;
     }
-    const { error } = await client.from("league_creators").insert({
-      user_id: user.id,
-      display_name: name,
-      handle,
-      niche: (document.getElementById("ap-niche") as HTMLSelectElement).value,
-      links,
-      pitch: (document.getElementById("ap-pitch") as HTMLTextAreaElement).value.trim() || null,
+    const adult = (document.getElementById("ap-adult") as HTMLInputElement).checked;
+    const accepted = (document.getElementById("ap-terms") as HTMLInputElement).checked;
+    if (!adult || !accepted) {
+      err.textContent = "The Creator League is 18+ and requires the current creator terms.";
+      return;
+    }
+    const { error } = await client.rpc("apply_to_creator_league", {
+      p_handle: handle,
+      p_display_name: name,
+      p_niche: (document.getElementById("ap-niche") as HTMLSelectElement).value,
+      p_links: links,
+      p_pitch: (document.getElementById("ap-pitch") as HTMLTextAreaElement).value.trim() || null,
+      p_adult: adult,
+      p_accept_terms: accepted,
+      p_terms_version: "2026-08-31",
     });
     if (error) {
       err.textContent = error.message;
@@ -521,6 +575,95 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
   };
 }
 
+async function leaguePost<T>(path: string, body: Record<string, unknown>): Promise<{
+  ok: boolean;
+  status: number;
+  data: (T & { error?: string }) | null;
+}> {
+  const token = await currentAccessToken().catch(() => null);
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  }).catch(() => null);
+  if (!response) return { ok: false, status: 0, data: null };
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: await response.json().catch(() => null) as (T & { error?: string }) | null,
+  };
+}
+
+interface PayoutSetupState {
+  status: "not_started" | "needs_attention" | "ready";
+  livemode: boolean;
+  transfersStatus?: string;
+  payoutsStatus?: string;
+  requirementsDue?: number;
+}
+
+async function payoutSetupHTML(): Promise<string> {
+  const result = await leaguePost<PayoutSetupState>("/api/league-connect", { action: "status" });
+  if (!result.ok || !result.data) {
+    return `<div class="lg-card"><h3>Stripe payout account</h3>
+      <p class="lg-error">Payout setup could not be checked. Reload before a sprint closes.</p></div>`;
+  }
+  if (result.data.status === "ready") {
+    return `<div class="lg-card"><div class="lg-row" style="border:none;padding:0">
+      <div><h3>Stripe payout account</h3><p class="lg-sub" style="margin:4px 0 0">
+      Ready to receive Creator League transfers.</p></div><span class="lg-chip ok">READY</span></div>
+      <p style="margin:14px 0 0"><button class="lg-btn" id="lg-payout-onboard">Update payout details</button></p></div>`;
+  }
+  if (result.data.status === "needs_attention") {
+    return `<div class="lg-card"><div class="lg-row" style="border:none;padding:0">
+      <div><h3>Finish Stripe payout setup</h3><p class="lg-sub" style="margin:4px 0 0">
+      Stripe still needs information before TrueMax can transfer earnings.</p></div>
+      <span class="lg-chip warn">ACTION NEEDED</span></div>
+      <p style="margin:14px 0 0"><button class="lg-btn pri" id="lg-payout-onboard">Continue with Stripe</button></p></div>`;
+  }
+  return `<div class="lg-card lg-form" id="lg-payout-start"><h3>Set up payouts</h3>
+    <p class="lg-sub">Stripe collects and verifies your legal identity and bank details. TrueMax
+    receives only your account status and sends your approved earnings to your Stripe balance.</p>
+    <div class="lg-payout-grid">
+      <label>Legal country <input id="lg-payout-country" maxlength="2" value="NZ" autocomplete="country" /></label>
+      <label>Account type <select id="lg-payout-entity">
+        <option value="individual">Individual</option>
+        <option value="company">Company</option>
+        <option value="non_profit">Non-profit</option>
+      </select></label>
+    </div>
+    <p style="margin:14px 0 0"><button class="lg-btn pri" id="lg-payout-onboard">Set up with Stripe</button></p>
+    <p class="lg-error" id="lg-payout-error"></p></div>`;
+}
+
+function bindPayoutSetup(mount: HTMLElement): void {
+  const button = mount.querySelector<HTMLButtonElement>("#lg-payout-onboard");
+  if (!button) return;
+  button.onclick = async () => {
+    button.disabled = true;
+    const country = mount.querySelector<HTMLInputElement>("#lg-payout-country")?.value.trim().toUpperCase();
+    const entityType = mount.querySelector<HTMLSelectElement>("#lg-payout-entity")?.value;
+    const result = await leaguePost<{ url?: string }>("/api/league-connect", {
+      action: "onboard",
+      ...(country ? { country } : {}),
+      ...(entityType ? { entityType } : {}),
+    });
+    const error = mount.querySelector<HTMLElement>("#lg-payout-error");
+    if (!result.ok || !result.data?.url) {
+      if (error) error.textContent = result.data?.error ?? "Payout setup is unavailable. Try again.";
+      button.disabled = false;
+      return;
+    }
+    const url = httpsUrl(result.data.url);
+    if (!url || (url.hostname !== "stripe.com" && !url.hostname.endsWith(".stripe.com"))) {
+      if (error) error.textContent = "Stripe returned an unsafe setup address.";
+      button.disabled = false;
+      return;
+    }
+    location.href = url.href;
+  };
+}
+
 
 const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> | void> = {
   async overview(mount, me) {
@@ -584,12 +727,21 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
 
   async submit(mount, me) {
     const sprints = (await loadSprints()).filter((s) => sprintIsLive(s));
+    const firstTag = campaignTag(sprints[0]?.campaign_tag) ?? DEFAULT_CAMPAIGN_TAG;
     mount.innerHTML = `<h1 class="lg-h">Submit a video</h1>
-      <p class="lg-sub">Paste the link the moment it's live. Only submitted, approved links count
-      toward your totals. If we can't see it, we can't pay on it.</p>
+      <p class="lg-sub">Paste the link the moment it is live. A connected account proves ownership,
+      but payout starts only after we verify the official TrueMax outro, campaign tag and disclosure.</p>
       <div class="lg-card lg-form" style="max-width:520px;margin-left:0">
         <label for="sb-sprint">Sprint</label>
         <select id="sb-sprint">${sprints.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
+        <div class="lg-proof-rule">
+          <b>Before you post</b>
+          <ol>
+            <li>Finish with the rundown's embedded <b>Short CTA</b>, the optional <b>Long CTA</b> from <a href="/league/tools#cta">Creator Tools</a>, or a custom TrueMax CTA approved in review.</li>
+            <li>Keep <code id="sb-tag">${esc(firstTag)}</code> in the public caption until the sprint is settled.</li>
+            <li>Turn on the platform's paid partnership or commercial-content disclosure when required.</li>
+          </ol>
+        </div>
         <label for="sb-url">Video link</label>
         <input id="sb-url" type="url" placeholder="https://www.tiktok.com/@you/video/…" />
         <label for="sb-platform">Platform</label>
@@ -598,25 +750,42 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           <option value="instagram">Instagram</option>
           <option value="youtube">YouTube</option>
         </select>
+        <label class="lg-check"><input id="sb-cta" type="checkbox" />
+          <span>I confirm this exact post ends with a clear TrueMax CTA.</span></label>
+        <label class="lg-check"><input id="sb-disclosure" type="checkbox" />
+          <span>I confirm its caption has the sprint tag and its commercial-content disclosure is correct.</span></label>
         <p style="margin-top:16px"><button class="lg-btn pri" id="sb-go" ${sprints.length ? "" : "disabled"}>Submit</button></p>
         <p class="lg-error" id="sb-err"></p>
       </div>`;
-    document.getElementById("sb-go")!.onclick = async () => {
-      const err = document.getElementById("sb-err")!;
+    const sprintSelect = mount.querySelector<HTMLSelectElement>("#sb-sprint")!;
+    sprintSelect.onchange = () => {
+      const selected = sprints.find((s) => s.id === sprintSelect.value);
+      mount.querySelector<HTMLElement>("#sb-tag")!.textContent = campaignTag(selected?.campaign_tag) ?? DEFAULT_CAMPAIGN_TAG;
+    };
+    mount.querySelector<HTMLButtonElement>("#sb-go")!.onclick = async () => {
+      const err = mount.querySelector<HTMLElement>("#sb-err")!;
       err.textContent = "";
-      const url = (document.getElementById("sb-url") as HTMLInputElement).value.trim();
-      const platform = (document.getElementById("sb-platform") as HTMLSelectElement).value;
+      const url = mount.querySelector<HTMLInputElement>("#sb-url")!.value.trim();
+      const platform = mount.querySelector<HTMLSelectElement>("#sb-platform")!.value;
       const validated = platformUrl(url, platform);
       if (!validated) {
         err.textContent = `That needs to be a full ${platform} https:// link.`;
         return;
       }
+      if (!mount.querySelector<HTMLInputElement>("#sb-cta")!.checked
+          || !mount.querySelector<HTMLInputElement>("#sb-disclosure")!.checked) {
+        err.textContent = "Confirm the CTA, campaign tag and disclosure before submitting.";
+        return;
+      }
       const client = await getSupabaseClient();
+      const attestedAt = new Date().toISOString();
       const { error } = await client.from("league_submissions").insert({
         creator_id: me.user_id,
-        sprint_id: (document.getElementById("sb-sprint") as HTMLSelectElement).value,
+        sprint_id: sprintSelect.value,
         url: validated.href,
         platform,
+        creator_cta_attested_at: attestedAt,
+        creator_disclosure_attested_at: attestedAt,
       });
       if (error) {
         err.textContent = /duplicate/i.test(error.message)
@@ -641,10 +810,35 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           ${externalLink(s.url, s.url.replace(/^https:\/\/(www\.)?/, "").slice(0, 48))}
           <span style="display:flex;gap:8px">
             ${s.tiktok_video_id ? `<span class="lg-chip ok">AUTO-TRACKED</span>` : ""}
+            ${s.caption_compliant ? `<span class="lg-chip ok">TAG VERIFIED</span>` : `<span class="lg-chip warn">TAG WAITING</span>`}
+            ${s.cta_verified_at ? `<span class="lg-chip ok">${esc((s.cta_variant ?? "CTA").toUpperCase())} CTA</span>` : `<span class="lg-chip warn">CTA REVIEW</span>`}
             ${chip(s.status)}
           </span>
+          ${s.compliance_hold_reason ? `<p class="lg-note" style="width:100%">${esc(s.compliance_hold_reason)}</p>` : ""}
+          ${s.review_note ? `<p class="lg-note" style="width:100%">Review: ${esc(s.review_note)}</p>` : ""}
+          ${!s.creator_cta_attested_at || !s.creator_disclosure_attested_at
+            ? `<p style="width:100%;margin:8px 0 0"><button class="lg-btn" data-attest="${s.id}">Confirm CTA and disclosure</button></p>`
+            : ""}
         </div>`).join("")}</div>`
       : `<div class="lg-card"><h3>Nothing yet</h3><p class="lg-sub">Post, then submit the link. Every video counts.</p></div>`}`;
+    mount.querySelectorAll<HTMLButtonElement>("[data-attest]").forEach((button) => {
+      button.onclick = async () => {
+        if (!window.confirm("Confirm that this exact post ends with the official TrueMax CTA, keeps the sprint hashtag, and has the correct commercial-content disclosure?")) return;
+        button.disabled = true;
+        const client = await getSupabaseClient();
+        const { data, error } = await client.rpc("attest_league_submission", {
+          p_submission_id: button.dataset.attest!,
+          p_cta_attested: true,
+          p_disclosure_attested: true,
+        });
+        if (error || data !== true) {
+          button.disabled = false;
+          window.alert(error?.message ?? "The declaration was not saved.");
+          return;
+        }
+        void PAGES.mine(mount, me);
+      };
+    });
   },
 
   async ranks(mount) {
@@ -670,13 +864,28 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async money(mount, me) {
     mount.innerHTML = `<h1 class="lg-h">Money</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const { data } = await client
+    const [{ data, error: payoutError }, setup] = await Promise.all([
+      client
       .from("league_payouts")
-      .select("amount_cents, note, status, created_at")
+      .select("amount_cents,currency,note,status,due_at,transferred_at,created_at")
       .eq("creator_id", me.user_id)
-      .order("created_at", { ascending: false });
-    const rows = (data ?? []) as Array<{ amount_cents: number; note: string | null; status: string; created_at: string }>;
-    const total = rows.filter((r) => r.status === "paid").reduce((a, r) => a + r.amount_cents, 0);
+      .order("created_at", { ascending: false }),
+      payoutSetupHTML(),
+    ]);
+    if (payoutError) {
+      mount.innerHTML = `<h1 class="lg-h">Money</h1><p class="lg-error">Payout history could not be loaded.</p>`;
+      return;
+    }
+    const rows = (data ?? []) as Array<{
+      amount_cents: number;
+      currency: string;
+      note: string | null;
+      status: string;
+      due_at: string | null;
+      transferred_at: string | null;
+      created_at: string;
+    }>;
+    const total = rows.filter((r) => r.status === "transferred").reduce((a, r) => a + r.amount_cents, 0);
     // Live accrual for formula sprints: the number that moves between
     // payouts, clearly marked as accruing rather than owed. Locked totals
     // become payout rows below at sprint close.
@@ -703,14 +912,17 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       </div>`;
     }));
     mount.innerHTML = `<h1 class="lg-h">Money</h1>
+      ${setup}
       ${accrualCards.join("")}
-      <div class="lg-card"><div class="lg-row"><span>Paid out, all time</span>
+      <div class="lg-card"><div class="lg-row"><span>Sent to Stripe, all time</span>
       <span class="lg-money">${fmtMoney(total)}</span></div></div>
       ${rows.length ? `<div class="lg-card">${rows.map((r) => `
         <div class="lg-row">
-          <span>${new Date(r.created_at).toLocaleDateString()} ${r.note ? `· ${esc(r.note)}` : ""}</span>
-          <span class="lg-money">${fmtMoney(r.amount_cents)}</span>
+          <span>${new Date(r.transferred_at ?? r.created_at).toLocaleDateString()} ${r.note ? `· ${esc(r.note)}` : ""}
+          <span class="lg-note"> · ${r.status === "transferred" ? "sent to Stripe" : r.status.replace("_", " ")}</span></span>
+          <span class="lg-money">${fmtMoney(r.amount_cents)} ${esc(r.currency.toUpperCase())}</span>
         </div>`).join("")}</div>` : `<p class="lg-sub">Payouts land here once a sprint settles.</p>`}`;
+    bindPayoutSetup(mount);
   },
 
   /**
@@ -998,9 +1210,9 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   async admin(mount) {
     mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-sub">Loading…</p>`;
     const client = await getSupabaseClient();
-    const [{ data: apps }, { data: pending }, { data: allSprints }, { data: proofs }] = await Promise.all([
+    const [appResult, pendingResult, sprintResult, proofResult] = await Promise.all([
       client.from("league_creators").select("*").eq("status", "applied").order("created_at"),
-      client.from("league_submissions").select("*").eq("status", "pending").order("created_at"),
+      client.from("league_submissions").select("*").in("status", ["pending", "approved", "earning"]).order("created_at"),
       // Every status, drafts included — loadSprints deliberately hides drafts
       // from creators, and the admin is exactly who drafts exist for.
       client.from("league_sprints").select("*").order("starts_at", { ascending: false }),
@@ -1010,10 +1222,24 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         .eq("status", "pending")
         .order("submitted_at"),
     ]);
+    const firstLoadError = [appResult.error, pendingResult.error, sprintResult.error, proofResult.error].find(Boolean);
+    if (firstLoadError) {
+      mount.innerHTML = `<h1 class="lg-h">Admin</h1><p class="lg-error">${esc(firstLoadError.message)}</p>`;
+      return;
+    }
+    const { data: apps } = appResult;
+    const { data: pending } = pendingResult;
+    const { data: allSprints } = sprintResult;
+    const { data: proofs } = proofResult;
     const applications = (apps ?? []) as (CreatorRow & { links: string[]; pitch: string | null })[];
     const subs = (pending ?? []) as SubmissionRow[];
     const sprints = (allSprints ?? []) as SprintRow[];
     const f = DEFAULT_FORMULA;
+    const liveOffer = sprints.find((s) => sprintIsLive(s) && sprintFormula(s));
+    const liveFormula = liveOffer ? sprintFormula(liveOffer) : null;
+    const outreachDeal = liveOffer && liveFormula
+      ? `$${(liveFormula.rpmCents / 100).toFixed(2)} per 1,000 views, engagement up to ${liveFormula.eMax.toFixed(1)}x, unlocking at ${fmtCount(liveFormula.thresholdViews)} combined views. The ${fmtMoney(liveOffer.pool_cents)} ${liveOffer.status === "active" ? "live" : "planned"} sprint pool closes ${new Date(liveOffer.ends_at).toLocaleDateString()}.`
+      : "Applications are open, but there is no live sprint offer to quote yet. Send the application link and share exact terms when the next sprint activates.";
 
     const sprintChip = (s: string) =>
       s === "active" ? `<span class="lg-chip ok">ACTIVE</span>`
@@ -1062,7 +1288,8 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       <div class="lg-card"><h3>Sprints · ${sprints.length}</h3>
         ${sprints.map((s) => `<div class="lg-row" style="flex-wrap:wrap">
           <span><b>${esc(s.name)}</b> <span class="lg-note">${day(s.starts_at)} → ${day(s.ends_at)} ·
-          pool ${fmtMoney(s.pool_cents)} · ${sprintFormula(s) ? "formula" : "tier ladder"}</span></span>
+          pool ${fmtMoney(s.pool_cents)} · ${esc(campaignTag(s.campaign_tag) ?? DEFAULT_CAMPAIGN_TAG)} ·
+          ${sprintFormula(s) ? "formula" : "tier ladder"}</span></span>
           <span style="display:flex;gap:8px;align-items:center">
             ${sprintChip(s.status)}
             ${s.status === "draft" ? `<button class="lg-btn pri" data-sprint-activate="${s.id}">Activate</button>` : ""}
@@ -1077,6 +1304,8 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           <div class="lg-sprint-grid">
             <label>Name <input id="sp-name" maxlength="60" placeholder="Sprint 1, September" /></label>
             <label>Pool ($) <input id="sp-pool" type="number" min="0" step="50" value="2000" /></label>
+            <label>Currency <input id="sp-currency" maxlength="3" value="USD" /></label>
+            <label>Required hashtag <input id="sp-tag" maxlength="33" value="${DEFAULT_CAMPAIGN_TAG}" /></label>
             <label>Starts <input id="sp-start" type="date" /></label>
             <label>Ends <input id="sp-end" type="date" /></label>
             <label>$ per 1,000 views <input id="sp-rpm" type="number" min="0" step="0.25" value="${(f.rpmCents / 100).toFixed(2)}" /></label>
@@ -1109,27 +1338,42 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           </div>
         </div>`).join("") || `<p class="lg-sub">Inbox zero.</p>`}</div>
 
-      <div class="lg-card"><h3>Submissions to review · ${subs.length}</h3>
-        <p class="lg-sub">ON LINKED ACCOUNT means the nightly tracker found this exact video on
-        the creator's own connected TikTok, ownership is proven. Approval is still your call:
-        it says the video is actually TrueMax content, which no API can check.</p>
-        ${subs.map((s) => `
-        <div class="lg-row" style="flex-wrap:wrap">
-          <span style="display:flex;gap:10px;align-items:center;min-width:0">
-            ${externalLink(s.url, s.url.slice(0, 52))}
-            ${s.tiktok_video_id ? `<span class="lg-chip ok">ON LINKED ACCOUNT</span>` : ""}
-          </span>
-          <span style="display:flex;gap:8px;align-items:center">
-            <button class="lg-btn pri" data-sub-approve="${s.id}">Approve</button>
-            <button class="lg-btn danger" data-sub-reject="${s.id}">Reject</button>
-          </span>
-          <span class="lg-counts">
-            <input type="number" placeholder="views" data-v="${s.id}" />
-            <input type="number" placeholder="likes" data-l="${s.id}" />
-            <input type="number" placeholder="comments" data-c="${s.id}" />
-            <button class="lg-btn" data-snap="${s.id}">Record counts</button>
-          </span>
-        </div>`).join("") || `<p class="lg-sub">Nothing waiting.</p>`}</div>
+      <div class="lg-card"><h3>Submission compliance · ${subs.length}</h3>
+        <p class="lg-sub">A linked account proves ownership only. Open every post and confirm
+        the official TrueMax short or long outro is visibly present, the campaign tag remains in
+        the caption, and the platform disclosure is on. Counts cannot accrue until all four checks pass.</p>
+        ${subs.map((s) => {
+          const waiting = s.status === "pending";
+          const recheck = s.status === "approved" || s.status === "earning";
+          const manuallyTracked = s.platform !== "tiktok" && (s.status === "approved" || s.status === "earning");
+          return `
+          <div class="lg-row" style="flex-wrap:wrap;align-items:flex-start">
+            <span style="display:flex;gap:10px;align-items:center;min-width:0;flex-wrap:wrap">
+              ${externalLink(s.url, s.url.slice(0, 52))}
+              ${s.tiktok_video_id ? `<span class="lg-chip ok">OWNED</span>` : `<span class="lg-chip warn">OWNERSHIP WAITING</span>`}
+              ${s.caption_compliant ? `<span class="lg-chip ok">TAG VERIFIED</span>` : `<span class="lg-chip warn">TAG WAITING</span>`}
+              ${s.cta_verified_at ? `<span class="lg-chip ok">${esc((s.cta_variant ?? "CTA").toUpperCase())} CTA</span>` : ""}
+            </span>
+            ${s.caption_snapshot ? `<p class="lg-note" style="width:100%;margin:4px 0">Caption: ${esc(s.caption_snapshot.slice(0, 300))}</p>` : ""}
+            ${s.compliance_hold_reason ? `<p class="lg-error" style="width:100%;margin:4px 0">${esc(s.compliance_hold_reason)}</p>` : ""}
+            ${waiting || recheck ? `<div class="lg-review-checks">
+              <label class="lg-check"><input type="checkbox" data-sub-viewed="${s.id}" />I opened and watched the actual post.</label>
+              <label>Outro
+                <select data-sub-cta="${s.id}"><option value="">Choose</option><option value="short">Short CTA</option><option value="long">Long CTA</option><option value="custom">Approved custom CTA</option></select>
+              </label>
+              ${s.platform === "tiktok" ? "" : `<label class="lg-check"><input type="checkbox" data-sub-caption="${s.id}" />Campaign tag is in the caption.</label>`}
+              <label class="lg-check"><input type="checkbox" data-sub-disclosure="${s.id}" />Paid partnership / commercial disclosure is correct.</label>
+              <button class="lg-btn pri" data-sub-approve="${s.id}">${waiting ? "Approve verified post" : "Re-check before settlement"}</button>
+              <button class="lg-btn danger" data-sub-reject="${s.id}">Reject</button>
+            </div>` : ""}
+            ${manuallyTracked ? `<span class="lg-counts">
+              <input type="number" min="0" placeholder="views" data-v="${s.id}" />
+              <input type="number" min="0" placeholder="likes" data-l="${s.id}" />
+              <input type="number" min="0" placeholder="comments" data-c="${s.id}" />
+              <button class="lg-btn" data-snap="${s.id}">Record counts</button>
+            </span>` : ""}
+          </div>`;
+        }).join("") || `<p class="lg-sub">Nothing waiting or earning.</p>`}</div>
 
       <div class="lg-card"><h3>Outreach</h3>
         <p class="lg-sub">The daily engine: 100 DMs and 50 emails, sent by hand, tracked by hand.
@@ -1143,7 +1387,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             },
             {
               t: "DM · message 2 (they replied)",
-              s: "We run TrueMax: you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks insane on camera.\n\nWe pay $2 per 1,000 views on any video you make with it, engagement can raise that up to 1.3×, and it unlocks at 25k combined views, then every view you already have counts. Want the link to apply?",
+              s: `We run TrueMax: you scan your face, it scores it against real measurements, and a coach tells you what to actually work on. The scan looks strong on camera.\n\n${outreachDeal}\n\nWant the link to apply?`,
             },
             {
               t: "DM · follow-up (48h silence)",
@@ -1151,11 +1395,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             },
             {
               t: "Email (from their bio / Linktree / YouTube About)",
-              s: "Subject: Paid promo: your {niche} content\n\nHey {name},\n\nSaw {video}: that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on. The scan itself is the most filmable thing in the niche.\n\nThe deal: $2 per 1,000 views on videos made with the app, engagement raises the rate up to 1.3×, unlocks at 25k combined views and then counts everything retroactively. Pool is capped per sprint and paid within 7 days of close.\n\nApply at truemax.app/league, two minutes. Happy to answer anything on here first.\n",
-            },
-            {
-              t: "Referral bounty (to anyone signed)",
-              s: "$100 if you send a mate who gets approved and unlocks. Number or email is enough, we'll do the rest.",
+              s: `Subject: Paid promo: your {niche} content\n\nHey {name},\n\nSaw {video}: that's exactly the style we pay for. We run TrueMax (truemax.app): a face-scan app that scores real facial measurements and coaches what to work on.\n\n${outreachDeal}\n\nApproved amounts are sent to your Stripe balance within 7 days of sprint close once payout setup is complete. Apply at truemax.app/league, two minutes. Happy to answer anything here first.\n`,
             },
           ].map((x, i) => `<div class="lg-row" style="align-items:flex-start">
             <div style="flex:1;min-width:0"><b style="font-size:13.5px">${x.t}</b>
@@ -1171,91 +1411,114 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       </div>
 
       <div class="lg-card"><h3>Settlement</h3>
-        <p class="lg-sub">Every approved creator's accrual under the sprint's formula, from the
-        latest snapshots, with the pro-rata factor if the pool is oversubscribed. The suggested
-        numbers ARE the payouts; recording them is still a decision you make per row.</p>
+        <p class="lg-sub">Closing a sprint freezes its final counts and computes every amount in
+        one database transaction. The browser cannot supply or edit money. Review each immutable
+        row, then approve its idempotent Stripe transfer.</p>
         <div id="lg-settle-sprints"></div>
         <div id="lg-settle-out"></div>
       </div>`;
 
-    // Settlement: staff-only arithmetic over data staff can already read.
-    // Client-side on purpose — the same earnings.ts the creators' own
-    // dashboards use produces these numbers, so what a creator watched
-    // accrue all month and what settlement offers can never disagree.
+    // Settlement rows are already frozen by the database. This client only
+    // displays them, records the staff approval and asks the server to send the
+    // exact stored amount to the exact stored creator account.
     {
-      const sprints = (await loadSprints()).filter((s) => s.status === "closed" && sprintFormula(s));
+      const closedSprints = (await loadSprints()).filter((s) => s.status === "closed" && sprintFormula(s));
       const box = mount.querySelector<HTMLElement>("#lg-settle-sprints")!;
       const out = mount.querySelector<HTMLElement>("#lg-settle-out")!;
-      box.innerHTML = sprints.length
-        ? sprints.map((s) => `<button class="lg-btn" data-settle="${s.id}" style="margin:6px 8px 0 0">Compute · ${esc(s.name)}</button>`).join("")
+      box.innerHTML = closedSprints.length
+        ? closedSprints.map((s) => `<button class="lg-btn" data-settle="${s.id}" style="margin:6px 8px 0 0">Open · ${esc(s.name)}</button>`).join("")
         : `<p class="lg-sub">No closed formula sprint ready to settle.</p>`;
       mount.querySelectorAll<HTMLButtonElement>("[data-settle]").forEach((b) => {
         b.onclick = async () => {
-          const sprint = sprints.find((s) => s.id === b.dataset.settle)!;
-          const f = sprintFormula(sprint)!;
-          out.innerHTML = `<p class="lg-sub">Computing…</p>`;
-          const { data: creators } = await client
-            .from("league_creators").select("user_id, display_name, handle").eq("status", "approved");
-          const rows = await Promise.all(((creators ?? []) as CreatorRow[]).map(async (c) => {
-            const videos = await myVideoTotalsFor(sprint, c.user_id);
-            return { c, accrued: creatorAccruedCents(f, videos), totals: sumTotals(videos) };
-          }));
-          const earning = rows.filter((r) => r.accrued > 0).sort((a, b2) => b2.accrued - a.accrued);
-          const totalAccrued = earning.reduce((a, r) => a + r.accrued, 0);
-          const scale = poolScale(sprint.pool_cents, totalAccrued);
-          const { data: paidRows } = await client
+          const sprint = closedSprints.find((s) => s.id === b.dataset.settle)!;
+          out.innerHTML = `<p class="lg-sub">Loading frozen settlement…</p>`;
+          const { data: payoutRows, error } = await client
             .from("league_payouts")
-            .select("creator_id")
-            .eq("sprint_id", sprint.id);
-          const paid = new Set((paidRows ?? []).map((row: { creator_id: string }) => row.creator_id));
-          out.innerHTML = `
-            <div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
+            .select("id,creator_display_name,creator_handle,amount_cents,accrued_cents,currency,status,final_views,final_comments,calculation,due_at")
+            .eq("sprint_id", sprint.id)
+            .order("amount_cents", { ascending: false });
+          if (error) {
+            out.innerHTML = `<p class="lg-error">${esc(error.message)}</p>`;
+            return;
+          }
+          const rows = (payoutRows ?? []) as Array<{
+            id: string;
+            creator_display_name: string | null;
+            creator_handle: string | null;
+            amount_cents: number;
+            accrued_cents: number | null;
+            currency: string;
+            status: string;
+            final_views: number;
+            final_comments: number;
+            calculation: { totalAccruedCents?: number; poolScale?: number };
+            due_at: string | null;
+          }>;
+          const total = rows.reduce((sum, row) => sum + row.amount_cents, 0);
+          const totalAccrued = rows[0]?.calculation?.totalAccruedCents ?? rows.reduce((sum, row) => sum + (row.accrued_cents ?? 0), 0);
+          const scale = rows[0]?.calculation?.poolScale ?? poolScale(sprint.pool_cents, totalAccrued);
+          const actionLabel = (status: string) => status === "computed" ? "Approve and send"
+            : status === "failed" ? "Retry transfer"
+              : status === "approved" ? "Send transfer"
+                : status === "processing" ? "Sending"
+                  : "Sent to Stripe";
+          out.innerHTML = `<div class="lg-row"><span>Total accrued</span><b class="lg-num">${fmtMoney(totalAccrued)}</b></div>
             <div class="lg-row"><span>Pool</span><b class="lg-num">${fmtMoney(sprint.pool_cents)}</b></div>
-            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${scale === 1 ? "1.00, pool covers everyone" : scale.toFixed(3)}</b></div>
-            ${earning.map((r, i) => `<div class="lg-row">
-              <span>${esc(r.c.display_name)} <span class="lg-note">${esc(r.c.handle)} ·
-              ${fmtCount(r.totals.views)} views</span></span>
+            <div class="lg-row"><span>Allocated exactly</span><b class="lg-num">${fmtMoney(total)}</b></div>
+            <div class="lg-row"><span>Pro-rata factor</span><b class="lg-num">${Number(scale) === 1 ? "1.00, pool covers everyone" : Number(scale).toFixed(6)}</b></div>
+            ${rows.map((r) => `<div class="lg-row">
+              <span>${esc(r.creator_display_name ?? "Deleted creator")} <span class="lg-note">${esc(r.creator_handle ?? "")} ·
+              ${fmtCount(r.final_views)} views · ${fmtCount(r.final_comments)} comments ·
+              due ${r.due_at ? new Date(r.due_at).toLocaleDateString() : "after review"}</span></span>
               <span style="display:flex;gap:10px;align-items:center">
-                <span class="lg-money">${fmtMoney(Math.round(r.accrued * scale))}</span>
-                <button class="lg-btn" data-pay="${i}" ${paid.has(r.c.user_id) ? "disabled" : ""}>${paid.has(r.c.user_id) ? "Recorded" : "Record paid"}</button>
+                <span class="lg-money">${fmtMoney(r.amount_cents)} ${esc(r.currency.toUpperCase())}</span>
+                <button class="lg-btn" data-pay="${r.id}" ${["processing", "transferred"].includes(r.status) ? "disabled" : ""}>${actionLabel(r.status)}</button>
               </span>
-            </div>`).join("") || `<p class="lg-sub">Nobody over the threshold yet.</p>`}`;
-          // Recording a payout is the LAST step, pressed after the money has
-          // actually moved — the row is what feeds the leaderboard and the
-          // creator's own Money page, and both promise "real money that
-          // actually moved". Per row rather than one big button, because each
-          // transfer is its own decision and its own bank action.
+            </div>`).join("") || `<p class="lg-sub">Nobody crossed the payout threshold.</p>`}`;
           out.querySelectorAll<HTMLButtonElement>("[data-pay]").forEach((btn) => {
             btn.onclick = async () => {
-              const r = earning[Number(btn.dataset.pay)];
+              const r = rows.find((row) => row.id === btn.dataset.pay);
               if (!r) return;
               btn.disabled = true;
-              const { data: recorded, error } = await client.rpc("record_league_payout", {
-                p_sprint_id: sprint.id,
-                p_creator_id: r.c.user_id,
-                p_amount_cents: Math.round(r.accrued * scale),
-                p_note: sprint.name,
-              });
-              btn.textContent = error ? "Failed, retry" : recorded === false ? "Already recorded" : "Recorded";
-              if (error) btn.disabled = false;
+              if (r.status === "computed") {
+                const approval = await client.rpc("approve_league_payout", { p_payout_id: r.id });
+                if (approval.error || approval.data !== true) {
+                  btn.textContent = "Approval failed";
+                  btn.disabled = false;
+                  return;
+                }
+              }
+              btn.textContent = "Sending…";
+              const sent = await leaguePost<{ transferred?: boolean }>("/api/league-payout", { payoutId: r.id });
+              btn.textContent = sent.ok && sent.data?.transferred
+                ? "Sent to Stripe"
+                : sent.status === 503 && r.status === "computed"
+                  ? "Approved, transfers locked"
+                  : sent.data?.error ?? "Failed, retry";
+              if (!sent.ok) btn.disabled = false;
             };
           });
         };
       });
     }
 
-    // Sprint lifecycle. Draft → active is the launch; active → closed freezes
-    // the counts settlement reads. Both are staff-only writes RLS already
-    // enforces — these buttons are the convenience, not the boundary.
+    // Lifecycle changes are RPCs because direct writes cannot freeze counts and
+    // settlement in one transaction.
     mount.querySelectorAll<HTMLButtonElement>("[data-sprint-activate]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_sprints").update({ status: "active" }).eq("id", b.dataset.sprintActivate!);
+        const { data, error } = await client.rpc("activate_league_sprint", { p_sprint_id: b.dataset.sprintActivate! });
+        if (error || data !== true) return window.alert(error?.message ?? "Sprint was not activated.");
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-sprint-close]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_sprints").update({ status: "closed" }).eq("id", b.dataset.sprintClose!);
+        b.disabled = true;
+        const { error } = await client.rpc("finalize_league_sprint", { p_sprint_id: b.dataset.sprintClose! });
+        if (error) {
+          b.disabled = false;
+          return window.alert(error.message);
+        }
         refresh();
       };
     });
@@ -1277,23 +1540,28 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           err.textContent = "The end has to come after the start.";
           return;
         }
-        const { error } = await client.from("league_sprints").insert({
-          name,
-          pool_cents: Math.round(num("sp-pool") * 100),
-          // tiers is the legacy ladder column and NOT NULL; a formula sprint
-          // carries an empty ladder and the formula does the paying.
-          tiers: [],
-          formula: {
+        const tag = campaignTag(str("sp-tag"));
+        if (str("sp-currency").toLowerCase() !== "usd" || !tag) {
+          err.textContent = "Launch sprints use USD and one hashtag such as #truemax.";
+          return;
+        }
+        const { error } = await client.rpc("create_league_sprint", {
+          p_name: name,
+          p_pool_cents: Math.round(num("sp-pool") * 100),
+          p_currency: str("sp-currency").toLowerCase(),
+          p_campaign_tag: tag,
+          p_formula: {
             rpmCents: Math.round(num("sp-rpm") * 100),
+            parCommentsPer1k: DEFAULT_FORMULA.parCommentsPer1k,
+            eMin: DEFAULT_FORMULA.eMin,
             eMax: num("sp-emax"),
             thresholdViews: num("sp-tviews"),
             thresholdComments: num("sp-tcomments"),
             videoCapCents: Math.round(num("sp-vcap") * 100),
             creatorCapCents: Math.round(num("sp-ccap") * 100),
           },
-          starts_at: new Date(starts).toISOString(),
-          ends_at: new Date(ends).toISOString(),
-          status: "draft",
+          p_starts_at: new Date(starts).toISOString(),
+          p_ends_at: new Date(ends).toISOString(),
         });
         if (error) {
           err.textContent = error.message;
@@ -1361,45 +1629,106 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {
       b.onclick = async () => {
+        b.disabled = true;
         const row = b.closest(".lg-row")!;
         const grants: Record<string, boolean> = {};
         row.querySelectorAll<HTMLInputElement>("[data-grant]").forEach((g) => (grants[g.dataset.grant!] = g.checked));
         const quota = Number(row.querySelector<HTMLInputElement>("[data-quota]")?.value || 30);
-        await client.from("league_creators").update({
+        const { error } = await client.from("league_creators").update({
           status: "approved", pillar_grants: grants, monthly_render_quota: quota,
           approved_at: new Date().toISOString(),
         }).eq("user_id", b.dataset.approve!);
+        if (error) {
+          b.disabled = false;
+          return window.alert(`Creator was not approved: ${error.message}`);
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-reject]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_creators").update({ status: "rejected" }).eq("user_id", b.dataset.reject!);
+        b.disabled = true;
+        const { error } = await client.from("league_creators").update({ status: "rejected" }).eq("user_id", b.dataset.reject!);
+        if (error) {
+          b.disabled = false;
+          return window.alert(`Creator was not rejected: ${error.message}`);
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-sub-approve]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_submissions").update({ status: "approved" }).eq("id", b.dataset.subApprove!);
+        b.disabled = true;
+        const id = b.dataset.subApprove!;
+        const viewed = mount.querySelector<HTMLInputElement>(`[data-sub-viewed="${id}"]`)?.checked === true;
+        const disclosure = mount.querySelector<HTMLInputElement>(`[data-sub-disclosure="${id}"]`)?.checked === true;
+        const caption = mount.querySelector<HTMLInputElement>(`[data-sub-caption="${id}"]`)?.checked === true;
+        const cta = mount.querySelector<HTMLSelectElement>(`[data-sub-cta="${id}"]`)?.value || null;
+        const { error } = await client.rpc("review_league_submission", {
+          p_submission_id: id,
+          p_approved: true,
+          p_cta_variant: cta,
+          p_disclosure_verified: disclosure,
+          p_caption_verified: caption,
+          p_content_viewed: viewed,
+          p_note: null,
+        });
+        if (error) {
+          b.disabled = false;
+          return window.alert(`Submission was not approved: ${error.message}. Open the post and complete every verification first.`);
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-sub-reject]").forEach((b) => {
       b.onclick = async () => {
-        await client.from("league_submissions").update({ status: "rejected" }).eq("id", b.dataset.subReject!);
+        const note = window.prompt("Why is this post being rejected? The creator sees this.");
+        if (note === null) return;
+        b.disabled = true;
+        const { error } = await client.rpc("review_league_submission", {
+          p_submission_id: b.dataset.subReject!,
+          p_approved: false,
+          p_cta_variant: null,
+          p_disclosure_verified: false,
+          p_caption_verified: false,
+          p_content_viewed: false,
+          p_note: note,
+        });
+        if (error) {
+          b.disabled = false;
+          return window.alert(`Submission was not rejected: ${error.message}`);
+        }
         refresh();
       };
     });
     mount.querySelectorAll<HTMLButtonElement>("[data-snap]").forEach((b) => {
       b.onclick = async () => {
         const id = b.dataset.snap!;
-        const num = (sel: string) =>
-          Math.max(0, Number(mount.querySelector<HTMLInputElement>(`[data-${sel}="${id}"]`)?.value || 0));
-        await client.from("league_stat_snapshots").insert({
-          submission_id: id, views: num("v"), likes: num("l"), comments: num("c"), source: "manual",
+        const num = (sel: string) => {
+          const value = Number(mount.querySelector<HTMLInputElement>(`[data-${sel}="${id}"]`)?.value || 0);
+          return Number.isSafeInteger(value) && value >= 0 ? value : null;
+        };
+        const views = num("v");
+        const likes = num("l");
+        const comments = num("c");
+        if (views === null || likes === null || comments === null) {
+          window.alert("Counts must be whole, non-negative numbers.");
+          return;
+        }
+        b.disabled = true;
+        const { error } = await client.from("league_stat_snapshots").insert({
+          submission_id: id, views, likes, comments, source: "manual",
         });
+        if (error) {
+          b.disabled = false;
+          b.textContent = "Record counts";
+          return window.alert(`Counts were not recorded: ${error.message}`);
+        }
         b.textContent = "Recorded";
-        window.setTimeout(() => (b.textContent = "Record counts"), 1400);
+        window.setTimeout(() => {
+          b.textContent = "Record counts";
+          b.disabled = false;
+        }, 1400);
       };
     });
   },

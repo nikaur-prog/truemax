@@ -21,7 +21,7 @@
     <main class="legal-shell">
       <p class="legal-kicker">TrueMax</p>
       <h1>Privacy Policy</h1>
-      <p class="legal-meta">Last updated 29 August 2026</p>
+      <p class="legal-meta">Last updated 31 August 2026</p>
 
       <!-- The summary is not decoration and it is not marketing. Almost nobody
            reads a privacy policy end to end, so the two facts that actually
@@ -148,10 +148,12 @@
           </tr>
           <tr>
             <td>Creator League application, post links and statistics, TikTok
-              account link and tokens, and earnings records</td>
+              account link and tokens, Stripe recipient account status, and
+              settlement and transfer records</td>
             <td>To operate the League if you apply or connect TikTok</td>
-            <td>Supabase and TikTok. TikTok tokens are server-only and are not
-              exposed to your browser</td>
+            <td>Supabase, TikTok and Stripe. TikTok tokens are server-only.
+              Stripe collects legal identity and bank details directly; TrueMax
+              stores the Stripe account ID and readiness status, not the bank details</td>
           </tr>
           <tr>
             <td>Pseudonymous side-feedback consent events</td>
@@ -175,7 +177,8 @@
       <ul>
         <li><b>Supabase</b>: accounts, database and storage.</li>
         <li><b>Vercel</b>: hosting and delivery of the website.</li>
-        <li><b>Stripe</b>: payments and subscription management.</li>
+        <li><b>Stripe</b>: customer payments, subscription management, and
+          identity, bank and payout handling for approved Creator League members.</li>
         <li><b>Anthropic</b>: Coach Max replies, only when you use Max.</li>
         <li><b>ElevenLabs and OpenAI</b>: generated narration, with OpenAI used
           as a fallback. OpenAI also generates staff-only fictional model images.</li>
@@ -252,12 +255,16 @@
       <p>
         You can revoke an individual side-feedback submission from Settings, or
         <b>delete your account from inside the app</b> at any time. Account
-        deletion removes your server-side account data, schedules any active
+        deletion removes your ordinary server-side account data, schedules any active
         subscription to stop, and queues any remaining side-profile feedback
         images you contributed for deletion. Scan history and thumbnails stored
         in your browser do not leave that browser and therefore are not removed
         from the device by server-side account deletion. Use the in-app history
-        controls or clear this site's browser data to remove them.
+        controls or clear this site's browser data to remove them. An unsettled
+        Creator League payout must be resolved before deletion. Stripe and
+        TrueMax may retain the minimum settlement, transfer, tax and verification
+        records required by financial law; the public creator identity is removed
+        or detached from that retained ledger.
         If you have uninstalled the app or cannot sign in, there is a route that
         does not need either. See <a href="/delete-account">deleting your
         account</a>.
@@ -274,7 +281,8 @@
       <p>
         TrueMax is not intended for anyone under 13, and we do not knowingly
         collect information from children under 13. People under 18 are limited to
-        specific plans. If you believe a child under 13 has given us information,
+        specific plans. The Creator League is only available to adults aged 18 or
+        over. If you believe a child under 13 has given us information,
         contact us and we will delete it.
       </p>
 
