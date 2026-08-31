@@ -3,6 +3,8 @@ import type { Entitlement } from "../engine/entitlement.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { openMaxChat } from "./maxChat.js";
 import { MAX_MONTHLY } from "./onboardingFunnel.js";
+import { readProtocols } from "../engine/protocol.js";
+import { mountProtocolCard } from "./protocolCard.js";
 
 // ---------------------------------------------------------------------------
 // The Max tab on the dashboard.
@@ -64,6 +66,37 @@ const BENEFITS = [
   "Scan up to 50 other people a week",
 ];
 
+function escapeHTML(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char]!);
+}
+
+function performanceItems(): string {
+  const active = readProtocols().filter((protocol) => protocol.status !== "declined" && protocol.status !== "judged");
+  if (!active.length) {
+    return `<p class="maxtab-tracker-empty">Nothing is being tracked yet. Choose an action from your TrueMax plan and it will appear here.</p>`;
+  }
+  return `<div class="maxtab-tracker-list">${active.map((protocol) => {
+    const state = protocol.status === "running"
+      ? "In progress"
+      : protocol.status === "committed"
+        ? "Ready to start"
+        : "Waiting for your choice";
+    return `<div class="maxtab-tracker-row"><b>${escapeHTML(protocol.title)}</b><span>${state}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function performanceTrackerMarkup(): string {
+  return `<section class="maxtab-tracker" aria-labelledby="maxtab-tracker-title">
+    <span class="klabel">PERFORMANCE TRACKER</span>
+    <h3 id="maxtab-tracker-title">Your current plan</h3>
+    <p>Check-ins and follow-ups live here, separate from the analysis of a new scan.</p>
+    <div data-performance-due></div>
+    <div data-performance-items>${performanceItems()}</div>
+  </section>`;
+}
+
 export function maxTabMarkup(paid: boolean): string {
   const composer = `
     <form class="maxtab-composer" autocomplete="off">
@@ -78,6 +111,7 @@ export function maxTabMarkup(paid: boolean): string {
         <h2>Ask Coach Max anything</h2>
         <p>He has read every measurement in your scans. Plans, priorities, what moved and what did not: that is what he is for.</p>
       </div>
+      ${performanceTrackerMarkup()}
       ${composer}
     </div>`;
   }
@@ -122,6 +156,10 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
   const input = form.querySelector<HTMLInputElement>("input")!;
 
   if (opts.paid) {
+    const items = root.querySelector<HTMLElement>("[data-performance-items]");
+    mountProtocolCard(root.querySelector<HTMLElement>("[data-performance-due]"), null, () => {
+      if (items) items.innerHTML = performanceItems();
+    });
     // Any intent — focus, tap, submit — opens the real chat. The composer here
     // is a doorknob shaped like the door.
     const open = () => {

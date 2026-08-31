@@ -60,6 +60,7 @@ export interface MaxContext {
   pillars: Array<{ label: string; score: number }>;
   regions: Array<{ label: string; percentile: number }>;
   focus: string[];
+  activePlan: string[];
   measurements: MaxMeasurement[];
   scans: number;
   movement?: string;
@@ -143,6 +144,7 @@ export function sanitiseContext(value: unknown, age: number): MaxContext | null 
       return label && percentile !== undefined ? { label, percentile } : null;
     }),
     focus: (Array.isArray(raw.focus) ? raw.focus : []).slice(0, 8).map((f) => clean(f, 120)).filter(Boolean),
+    activePlan: (Array.isArray(raw.activePlan) ? raw.activePlan : []).slice(0, 8).map((item) => clean(item, 100)).filter(Boolean),
     measurements: rows(raw.measurements, (m) => {
       const label = clean(m.label, 40);
       const reading = clean(m.reading, 40);
@@ -231,6 +233,7 @@ How you talk:
 - You can say a routine is not working. That is the honest half of the job. Say what the numbers did and what you would change, not that they failed. Never say "you already know that" or talk down to them.
 - When you do not know, say so. You cannot see their photograph, only the numbers below.
 - A scan can show a soft-tissue outline. It cannot identify why it looked that way that day. Never claim it proves poor sleep, dehydration, salt intake, diet, training, or body fat. Present those as possible inputs to discuss, not diagnoses or facts about this person.
+- For a broad "what should I improve" question, give the useful balance a coach would: one or two things already reading strongly, the weakest changeable area, and the easiest honest action to take now. If there is no active plan, offer to build one. If there is one, point back to it before proposing anything new.
 
 What you actually help with: grooming, hair, skin basics, sleep, posture, body composition through training and food in general terms, how to stand and light and angle for a photograph, glasses and styling, and how to read their own numbers. That is the whole surface.
 
@@ -239,6 +242,7 @@ When somebody asks you for a plan, build one from their numbers, concrete enough
 - For each, give the daily or weekly actions, specific enough to follow without another question. Types of product that go ON the face or body are fine to name in general terms. Nothing swallowed or injected, ever, and the hard rules below still apply to every line.
 - Put a rough timeframe on each part, and end with when to rescan, because the rescan is how the plan is scored: the numbers either moved or they did not.
 - Finish with: "If you want, open your TrueMax plan and choose which of these you want to track." The app will show a real button for that. Do not claim you already created, saved, attached, or awarded points for a habit. Rebuild the advice on request until it fits, and do not defend the old version.
+- If the scan data lists an active plan that already covers the requested action, say to keep following it and offer to adjust it. Do not invent a second plan on top of one that is already running.
 
 On food and training, hold these lines:
 - Body composition can affect a photographed outline, but TrueMax does not measure body fat and this scan cannot tell whether it is relevant for this person. Ask about their goal before making it part of a plan. Never prescribe a target weight, body-fat percentage, or calorie deficit.
@@ -281,6 +285,10 @@ function contextBlock(context: MaxContext): string {
   if (context.focus.length) {
     lines.push("What their plan currently points at:");
     for (const f of context.focus) lines.push(`  ${f}`);
+  }
+  if (context.activePlan.length) {
+    lines.push("Actions already in their performance tracker:");
+    for (const item of context.activePlan) lines.push(`  ${item}`);
   }
   if (!context.overall && !context.measurements.length) {
     lines.push("This person has not completed a scan yet. Do not guess at numbers. Encourage them to run one.");

@@ -12,7 +12,7 @@ import { DISPLAY_NOISE } from "../engine/history.js";
 import type { ScanDelta } from "../engine/history.js";
 
 // ---------------------------------------------------------------------------
-// The check-in, on the report.
+// The check-in, in the performance tracker.
 //
 // engine/protocol.ts decides WHETHER Max has anything to say about a running
 // protocol and WHAT. This renders that, takes the answer, and writes it back.
@@ -141,6 +141,7 @@ export function mountProtocolCard(
         const opt = WHEN_OPTIONS[Number(b.dataset.when)]!;
         const updated = answerWhen(p, opt.days, now());
         save(readProtocols(), updated);
+        onChange?.();
         // The clock is explicit, because a promise with a vague date is not a
         // promise. Said as the date it starts, not as "in five days".
         settle(el, `Nice one. I'll check in once you've started. Remember the ${p.weeksToJudge} weeks runs from the day you actually begin, not from today.`);

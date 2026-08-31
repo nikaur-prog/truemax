@@ -27,7 +27,7 @@ const MAX_CHIPS = 3;
 // Openers, before anything has been said. Broad on purpose: at this point the
 // only thing known about the reader is that they have a scan and no question.
 export const OPENING_SUGGESTIONS = [
-  "What can I actually change?",
+  "What's strong and what needs work?",
   "What should I do first?",
   "Create a plan for me.",
 ];

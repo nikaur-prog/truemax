@@ -5260,6 +5260,28 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxtab-stage .maxtab-face { display: inline-block; width: 96px; cursor: pointer; }
 .maxtab-stage h2 { font-family: var(--serif); font-weight: 300; font-size: 26px; margin: 10px 0 6px; }
 .maxtab-stage p { color: var(--mut); font-size: 13.5px; line-height: 1.55; max-width: 380px; margin: 0 auto; }
+.maxtab-tracker {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  padding: 16px;
+}
+.maxtab-tracker h3 { margin: 4px 0 3px; font-size: 17px; }
+.maxtab-tracker > p { margin: 0 0 12px; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
+.maxtab-tracker [data-performance-due]:empty { display: none; }
+.maxtab-tracker .protocard { margin: 0 0 12px; }
+.maxtab-tracker-empty { margin: 0 !important; }
+.maxtab-tracker-list { display: grid; gap: 8px; }
+.maxtab-tracker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.maxtab-tracker-row b { font-size: 13px; }
+.maxtab-tracker-row span { color: var(--acc); font-size: 11px; white-space: nowrap; }
 
 /* Unpaid: the room through frosted glass. */
 .maxtab-head { display: flex; align-items: center; gap: 12px; padding: 4px 2px; }
