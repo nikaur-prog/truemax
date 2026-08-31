@@ -1208,9 +1208,9 @@ function mountVerify(
           <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
         </svg>
       </button>
+      <button class="btn side-confirm" id="side-go">Confirm</button>
       <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>
-      <button class="btn pri" id="side-go">Confirm</button>`;
+      <button class="btn gho" id="side-wrong">Points are wrong</button>`;
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
     // this screen: the question is asked as a dialog now, before the scan runs,

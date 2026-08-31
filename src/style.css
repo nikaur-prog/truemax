@@ -1416,6 +1416,11 @@ button.pillar:active { transform: translateY(0); }
 .btn:active { transform: scale(0.985); }
 .btn.pri { background: var(--ink); color: #fff; }
 .btn.gho { background: var(--card); border: 1px solid var(--line); }
+.btn.side-confirm {
+  background: var(--up); color: #fff;
+  box-shadow: 0 9px 22px color-mix(in srgb, var(--up) 24%, transparent);
+}
+.btn.side-confirm:hover { background: color-mix(in srgb, var(--up) 90%, #000); }
 
 /* ---------- side profile: verify step ---------- */
 /* The photo is the work surface, so it gets the room.

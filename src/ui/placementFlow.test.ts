@@ -34,6 +34,18 @@ test("the accuracy question is asked once, as a dialog, not in the panel", () =>
   assert.doesNotMatch(css, /\.side-accuracy/);
 });
 
+test("the primary confirmation is first in the review order and reads as success", () => {
+  const review = src.indexOf("const showReviewActions");
+  const rowStart = src.indexOf('e.actions.innerHTML = `', review);
+  const row = src.slice(rowStart, src.indexOf("`;", rowStart));
+  const confirm = row.indexOf('id="side-go"');
+  const guided = row.indexOf('id="side-guided"');
+  const wrong = row.indexOf('id="side-wrong"');
+  assert.ok(confirm > 0 && confirm < guided && guided < wrong, "Confirm should be encountered before editing alternatives");
+  assert.match(row, /class="btn side-confirm" id="side-go"/);
+  assert.match(css, /\.btn\.side-confirm\s*\{[^}]*background:\s*var\(--up\)/s);
+});
+
 test("consent is asked on every terminal branch", () => {
   // Whether the points were right, wrong-and-fixed, or wrong-and-left, the
   // correction is the thing that teaches the seeder. Missing the ask on any
