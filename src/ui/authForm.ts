@@ -50,11 +50,11 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     <h2 id="auth-title">${title}</h2>
     <p class="acct-lede">${lede}</p>
     <div class="acct-social" aria-label="Social sign in">
-      <button type="button" class="acct-oauth" data-provider="google">
-        ${socialLabel("google")}
+      <button type="button" class="acct-oauth" data-provider="google" data-available="checking" disabled>
+        ${socialLabel("google")}<small>Checking…</small>
       </button>
-      <button type="button" class="acct-oauth apple" data-provider="apple">
-        ${socialLabel("apple")}
+      <button type="button" class="acct-oauth apple" data-provider="apple" data-available="checking" disabled>
+        ${socialLabel("apple")}<small>Checking…</small>
       </button>
     </div>
     <div class="acct-divider"><span>or</span></div>
@@ -113,6 +113,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const form = root.querySelector(".acct-form") as HTMLFormElement;
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
+  syncSubmitState(form, submit, !isLink);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -170,31 +171,50 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   // Provider configuration lives in Supabase, so these buttons become active
   // automatically the moment Google/Apple credentials are enabled—no redeploy.
   //
-  // The early return here used to be `if (!availability) return`, which failed
-  // OPEN: socialAvailability() returns null on any fetch failure, and the null
-  // left every provider button enabled and clickable. That is how a live-looking
-  // "Continue with Apple" appeared on a project where Apple is not configured —
-  // pressing it could only ever produce an error, and the error blamed the
-  // person's connection.
-  //
-  // Unknown now means unavailable. A button that cannot work should not look
-  // like one that can, and this self-heals the moment the settings read
-  // succeeds. The two states are worded differently on purpose, because "we
-  // have not set this up" and "we could not check" are different problems and
-  // only one of them is the user's to wait out.
+  // Buttons start disabled, so a quick tap cannot beat this settings read on a
+  // slow phone. Unknown stays unavailable; a provider becomes clickable only
+  // after Supabase confirms it is configured.
   void socialAvailability().then((availability) => {
     for (const button of root.querySelectorAll<HTMLButtonElement>("[data-provider]")) {
       const provider = button.dataset.provider as "google" | "apple";
-      if (availability?.[provider]) continue;
+      if (!availability) {
+        const name = provider === "google" ? "Google" : "Apple";
+        button.dataset.available = "false";
+        button.disabled = true;
+        button.title = `${name} sign-in could not be checked. Use email below.`;
+        button.setAttribute("aria-label", button.title);
+        button.innerHTML = `${socialLabel(provider)}<small>Try email</small>`;
+        continue;
+      }
+      if (availability[provider]) {
+        button.dataset.available = "true";
+        button.disabled = false;
+        button.title = "";
+        button.removeAttribute("aria-label");
+        button.innerHTML = socialLabel(provider);
+        continue;
+      }
       const name = provider === "google" ? "Google" : "Apple";
+      button.dataset.available = "false";
       button.disabled = true;
-      button.title = availability
-        ? `${name} sign-in is awaiting provider setup`
-        : `${name} sign-in could not be checked. Use email below.`;
+      button.title = `${name} sign-in is awaiting provider setup`;
       button.setAttribute("aria-label", button.title);
-      button.innerHTML = `${socialLabel(provider)}<small>${availability ? "Coming soon" : "Unavailable"}</small>`;
+      button.innerHTML = `${socialLabel(provider)}<small>Coming soon</small>`;
     }
   });
+}
+
+function syncSubmitState(form: HTMLFormElement, button: HTMLButtonElement, requiresPassword: boolean): void {
+  const update = () => {
+    const email = form.querySelector<HTMLInputElement>('input[name="email"]');
+    const password = form.querySelector<HTMLInputElement>('input[name="password"]');
+    const ready = Boolean(email?.value.trim() && email.validity.valid)
+      && (!requiresPassword || Boolean(password && password.value.length >= 6));
+    button.disabled = !ready;
+    button.classList.toggle("ready", ready);
+  };
+  form.addEventListener("input", update);
+  update();
 }
 
 function renderForgot(root: HTMLElement, options: AuthFormOptions): void {
@@ -276,7 +296,9 @@ function setWorking(button: HTMLButtonElement, working: boolean, idleText = "Wor
 }
 
 function disableSocial(root: HTMLElement, disabled: boolean): void {
-  for (const button of root.querySelectorAll<HTMLButtonElement>(".acct-oauth")) button.disabled = disabled;
+  for (const button of root.querySelectorAll<HTMLButtonElement>(".acct-oauth")) {
+    button.disabled = disabled || button.dataset.available === "false";
+  }
 }
 
 function say(node: HTMLElement, text: string, kind: "err" | "ok"): void {

@@ -91,6 +91,7 @@ import {
 } from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
+import { automaticCaptureDetail } from "./ui/captureCopy.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
 import { mountFaceOutline } from "./ui/faceOutline.js";
@@ -1305,7 +1306,7 @@ async function openCamera(): Promise<void> {
         }
         el.camHint.classList.add("counting");
         el.camHintTitle.textContent = `Hold still · ${remaining}`;
-        el.camHintDetail.textContent = "Taking it automatically · space to take it now";
+        el.camHintDetail.textContent = automaticCaptureDetail();
         setCameraLabel(`Capturing in ${remaining}`);
       },
       onFire: () => el.btnCamera.click(),

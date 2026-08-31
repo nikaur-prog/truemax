@@ -39,6 +39,7 @@ import { resetSideTracking } from "../engine/captureGuide.js";
 import { createAutoCapture } from "./autoCapture.js";
 import type { AutoCapture } from "./autoCapture.js";
 import type { CameraHandle } from "./camera.js";
+import { automaticCaptureDetail, sideCaptureInstruction } from "./captureCopy.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -173,7 +174,7 @@ const el = () => ({
 function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"]): void {
   const captureHelp = method === "upload"
     ? "Choose a clear side-profile photo with your whole forehead and chin visible. Landscape and portrait photos are both accepted."
-    : "<b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two beeps, then a higher shutter beep. Space bar takes it immediately.";
+    : sideCaptureInstruction();
   copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
     <p class="side-sub">Second of two. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
     <p class="side-sub">${captureHelp}</p>
@@ -391,7 +392,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       }
       e.hint.classList.add("counting");
       e.hintTitle.textContent = `Hold still · ${remaining}`;
-      e.hintDetail.textContent = "Taking it automatically · space to take it now";
+      e.hintDetail.textContent = automaticCaptureDetail();
       if (shoot) shoot.textContent = `Capturing in ${remaining}`;
     },
     onFire: () => {
@@ -1450,6 +1451,7 @@ function mountVerify(
     const right = await askSideQuestion({
       klabel: "ONE QUESTION",
       title: "Do these points look right?",
+      preview: { photo: e.canvas, points: verifier!.points },
       copy: "The front of the face is measured from the photo. The five behind it, the jaw"
         + " corner, the ear, the hinge and the neck point, are estimated from an average head,"
         + " so those are the ones that drift.",
@@ -1674,6 +1676,7 @@ function askPlacementMode(
 function askSideQuestion(opts: {
   klabel: string;
   title: string;
+  preview?: { photo: HTMLCanvasElement; points: SidePoints };
   copy: string;
   no: string;
   yes: string;
@@ -1686,6 +1689,17 @@ function askSideQuestion(opts: {
     backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-q-title">
       <span class="klabel">${opts.klabel}</span>
       <h2 id="side-q-title">${opts.title}</h2>
+      ${opts.preview ? `<figure class="side-mode-shot">
+        <button type="button" class="side-mode-zoom" data-zoom aria-expanded="false"
+          aria-label="Enlarge the photo to see the points">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path class="zoom-out" d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>
+            <path class="zoom-in" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/>
+          </svg>
+        </button>
+        <canvas data-zoom aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+      </figure>` : ""}
       <p class="side-mode-copy">${opts.copy}</p>
       <div class="side-mode-actions">
         <button type="button" class="btn gho" data-answer="no">${opts.no}</button>
@@ -1694,17 +1708,37 @@ function askSideQuestion(opts: {
       ${opts.fine ? `<p class="side-mode-fine">${opts.fine}</p>` : ""}
     </section>`;
     document.body.appendChild(backdrop);
+    let expanded = false;
+    const previewCanvas = backdrop.querySelector<HTMLCanvasElement>(".side-mode-shot canvas");
+    const zoom = backdrop.querySelector<HTMLButtonElement>(".side-mode-zoom");
+    const drawPreview = () => {
+      if (!opts.preview || !previewCanvas || !zoom) return;
+      paintPlacementPreview(previewCanvas, opts.preview.photo, opts.preview.points, expanded);
+      zoom.setAttribute("aria-expanded", String(expanded));
+      zoom.setAttribute("aria-label", expanded ? "Shrink the photo" : "Enlarge the photo to see the points");
+      backdrop.classList.toggle("expanded", expanded);
+    };
+    drawPreview();
+    const onResize = () => { if (expanded) drawPreview(); };
+    window.addEventListener("resize", onResize);
     backdrop.querySelector<HTMLButtonElement>('[data-answer="yes"]')?.focus();
     const settle = (answer: boolean | null) => {
       if (done) return;
       done = true;
       untrack();
+      window.removeEventListener("resize", onResize);
       backdrop.remove();
       resolve(answer);
     };
     const untrack = trackDialog(() => settle(null));
     backdrop.onclick = (ev) => {
-      const answer = (ev.target as HTMLElement).closest<HTMLElement>("[data-answer]")?.dataset.answer;
+      const target = (ev.target as HTMLElement).closest<HTMLElement>("[data-zoom],[data-answer]");
+      if (target?.hasAttribute("data-zoom")) {
+        expanded = !expanded;
+        drawPreview();
+        return;
+      }
+      const answer = target?.dataset.answer;
       if (answer !== "yes" && answer !== "no") return;
       settle(answer === "yes");
     };

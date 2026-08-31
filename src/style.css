@@ -3436,6 +3436,11 @@ body.auth-modal-open { overflow: hidden; }
 .acct-msg.err { color: var(--warm); }
 .acct-msg.ok { color: var(--acc); }
 .acct-submit { width: 100%; margin-top: 2px; }
+.acct-submit:disabled { opacity: .48; cursor: not-allowed; }
+.acct-submit.ready {
+  background: var(--acc); color: #fff;
+  box-shadow: 0 8px 22px rgba(17, 138, 113, .22);
+}
 .acct-switch { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
 .acct-switch button {
   background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12.5px;
