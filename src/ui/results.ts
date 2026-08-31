@@ -21,8 +21,7 @@ import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
 import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
-import { mountProtocolCard } from "./protocolCard.js";
-import { commitProtocol, offerProtocol, protocolFor, readProtocols, writeProtocols } from "../engine/protocol.js";
+import { commitProtocol, offerProtocol, protocolFor, readProtocols, startKindFor, writeProtocols } from "../engine/protocol.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { renderShareCard, shareCard } from "./shareCard.js";
@@ -1274,11 +1273,6 @@ function showOverall(): void {
       })
       .catch(() => undefined);
   }
-  // The overview carries the real delta, so a protocol coming due here can be
-  // judged against actual scan movement rather than against nothing. The
-  // check-ins are the OWNER'S promises about their own face — never surfaced
-  // over a guest's scan or a recalled record.
-  if (!observationsOnly()) mountProtocolIfDue(ctx?.delta ?? null);
 }
 
 // The $2.99 gate in front of the render. No credit: straight to Checkout,
@@ -1453,7 +1447,6 @@ function renderSideInto(host: HTMLElement, report: Report): void {
     </div>`;
 
   revealBars();
-  if (!observationsOnly()) mountProtocolIfDue(null);
   wireModeSwitcher(showSide);
   wireSideNav();
 }
@@ -1771,22 +1764,6 @@ const ANALYSIS_POSES: Array<{ mood: MaxMood; waving?: boolean }> = [
 //
 // So the profile says nothing about movement rather than something untrue. The
 // front keeps the tracking line, where it is about the number directly above it.
-// Mount the check-in into whichever read was just painted.
-//
-// Called after the innerHTML rather than folded into it, because the card owns
-// its own click handlers and writes back to storage — building it as a string
-// would mean re-wiring it by hand at both call sites and getting it wrong at
-// one of them. Safe to call when there is no slot and safe to call twice: it
-// returns null unless a slot exists and is empty.
-let protocolCard: { destroy(): void } | null = null;
-function mountProtocolIfDue(delta: ScanDelta | null): void {
-  protocolCard?.destroy();
-  protocolCard = null;
-  const slot = document.querySelector<HTMLElement>("[data-protocol-slot]");
-  if (!slot || slot.childElementCount) return;
-  protocolCard = mountProtocolCard(slot, delta);
-}
-
 function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "side" = "front", guestName?: string, selfName?: string): string {
   const pose = ANALYSIS_POSES[Math.abs(Math.round(r.overall * 10) + r.metrics.length) % ANALYSIS_POSES.length];
 
@@ -1807,11 +1784,6 @@ function maxAnalysisHTML(r: Report, delta: ScanDelta | null, scope: "front" | "s
       <span class="klabel">COACH MAX'S READ</span>
       <p><b>${read.good}</b> ${read.work}</p>
       ${read.memory ? `<p class="maxan-track">${read.memory}</p>` : ""}
-      <!-- The protocol check-in, when there is one. Empty most of the time by
-           design: engine/protocol.ts returns nothing while a protocol is
-           waiting on a date somebody gave, inside the gap between check-ins,
-           or once it has been judged. -->
-      <div class="protocard-slot" data-protocol-slot></div>
       <p class="maxan-invite">${read.invite}</p>
       <!-- Looks like the thing it starts, rather than describing it.
            "Tap me in the corner" asked the reader to find a separate control
@@ -1866,7 +1838,6 @@ function wireRecTracking(): void {
       className: "rec-track rec-track-on",
       textContent: "On your list",
     }));
-    mountProtocolIfDue(ctx?.delta ?? null);
   });
 }
 
@@ -1891,7 +1862,11 @@ function wireMaxAsk(): void {
     // is only going to be refused.
     if (!maxAccess || !adultUser || observationsOnly()) return;
     const cc = chatContext();
-    if (cc) openMaxChat(cc);
+    if (cc) {
+      openMaxChat(cc, {
+        onOpenPlan: () => select("improve"),
+      });
+    }
   });
 }
 
@@ -2820,12 +2795,16 @@ function wireAskMax(): void {
 // future surface agree about what Max can see.
 function chatContext() {
   if (!ctx) return null;
+  const activePlan = readProtocols()
+    .filter((protocol) => protocol.status !== "declined" && protocol.status !== "judged")
+    .map((protocol) => `${protocol.title}: ${protocol.status}`);
   return buildMaxContext({
     report: ctx.report,
     tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
     scans: ownScans(readAllHistory()).length,
     potential: maxAccess ? ctx.report.potential : undefined,
     movement: ctx.delta ? deltaReadingCopy(ctx.delta) : undefined,
+    activePlan,
   });
 }
 
@@ -2955,13 +2934,20 @@ function buyBlock(r: Rec): string {
 // It also states the timeline up front. Somebody who knows going in that a
 // retinoid needs twelve weeks is somebody who does not quit at week three, and
 // it is the honest thing to put next to a purchase.
-function recTrackHTML(r: { id: string; weeksToJudge?: number; guardian?: true }): string {
+function recTrackHTML(r: {
+  id: string;
+  weeksToJudge?: number;
+  guardian?: true;
+  group?: "topical" | "food" | "habit" | "professional";
+  start?: "acquire" | "book" | "commit" | "instant";
+}): string {
   // No commitment clock on a medicine for a minor. "I'm going with this"
   // starts a protocol Max then follows up on, which turns a card somebody was
   // reading into a course they have started.
   if (r.guardian && !adultUser) return "";
   const already = protocolFor(r.id);
-  const weeks = Math.max(4, r.weeksToJudge ?? 4);
+  const instant = startKindFor(r) === "instant";
+  const weeks = instant ? 1 : Math.max(4, r.weeksToJudge ?? 4);
   if (already && already.status !== "offered") {
     const label = already.status === "declined"
       ? "Not for you"
@@ -2973,7 +2959,7 @@ function recTrackHTML(r: { id: string; weeksToJudge?: number; guardian?: true })
     return `<span class="rec-track rec-track-on">${label}</span>`;
   }
   return `<button type="button" class="rec-track" data-track-rec="${r.id}">
-    I'm going with this<em>${weeks} weeks to know</em>
+    I'm going with this<em>${instant ? "Shows straight away" : `${weeks} weeks to know`}</em>
   </button>`;
 }
 

@@ -79,6 +79,13 @@ export type StartKind = "acquire" | "book" | "commit" | "instant";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// These three recommendations were shipped before `start` existed. A stored
+// entry from that build defaults to `acquire`, which turns an immediate salon
+// or grooming job into a parcel and asks when it will be "in your hands". The
+// catalogue now marks them correctly, but existing localStorage rows need the
+// same correction or the bad conversation survives every deploy.
+const INSTANT_RECOMMENDATIONS = new Set(["brow-tint", "brow-shape", "hair-colour"]);
+
 export interface CheckIn {
   at: number;
   /** Did they say they were still running it? Null means they did not answer. */
@@ -219,6 +226,18 @@ export function protocolFor(recId: string): Protocol | null {
 
 const KEY = () => scopedStorageKey("truemax:protocols");
 
+/** Repair rows written before recommendation start kinds were persisted. */
+export function normaliseStoredProtocol(protocol: Protocol): Protocol {
+  if (!INSTANT_RECOMMENDATIONS.has(protocol.recId)) return protocol;
+  const startBy = protocol.status === "committed" && protocol.startBy == null
+    ? protocol.offeredAt + 7 * DAY_MS
+    : protocol.startBy;
+  if (protocol.start === "instant" && protocol.weeksToJudge === 1 && startBy === protocol.startBy) {
+    return protocol;
+  }
+  return { ...protocol, start: "instant", weeksToJudge: 1, startBy };
+}
+
 export function readProtocols(): Protocol[] {
   const key = KEY();
   if (!key) return [];
@@ -226,7 +245,19 @@ export function readProtocols(): Protocol[] {
     const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Protocol[]).filter(isProtocol) : [];
+    if (!Array.isArray(parsed)) return [];
+    let changed = false;
+    const list = (parsed as Protocol[]).filter(isProtocol).map((protocol) => {
+      // A legacy yes had no date because the old flow was waiting to ask for
+      // delivery. Give that commitment the same seven-day check-back a new
+      // instant choice receives, so the next question names the service and
+      // asks whether it happened instead of asking about an unnamed parcel.
+      const normalised = normaliseStoredProtocol(protocol);
+      if (normalised !== protocol) changed = true;
+      return normalised;
+    });
+    if (changed) localStorage.setItem(key, JSON.stringify(list.slice(-40)));
+    return list;
   } catch {
     return [];
   }
