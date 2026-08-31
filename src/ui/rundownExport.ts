@@ -187,11 +187,32 @@ const MAX_UPSCALE = 2;
 /**
  * And never past this long edge, whatever the enlargement asks for.
  *
- * The measurement overlay allocates a canvas at the photo's own size, so this
- * ceiling is a memory budget for a phone as much as a quality one. 3200 keeps
- * the overlay under about 40MB at 4 bytes a pixel.
+ * 3200 was chosen by budgeting ONE canvas, which was the wrong unit. The
+ * sharpen that runs over the result is the expensive part: applyEnhance splits
+ * the frame into three Float32 planes and holds two more per channel while it
+ * blurs, so the working set is several times the canvas rather than equal to
+ * it. At 3200 on the long edge that is a couple of hundred megabytes of
+ * Float32 alone, on top of the prepared canvas, its ImageData, the original,
+ * the render canvas, the measurement overlay allocated at the photo's own size
+ * and a growing in-memory MP4. On a 4GB phone that is a credible tab reload
+ * during a step whose caption says "Preparing the photograph".
  */
-const MAX_PREPARED_EDGE = 3200;
+const MAX_PREPARED_EDGE = 2600;
+
+/**
+ * The pixel count above which the sharpen is skipped and only the clean
+ * resample is kept.
+ *
+ * A long-edge cap alone does not bound this: a square 2600x2600 source is 1.8x
+ * the pixels of a 2600-tall portrait one. Budgeting the actual area is what
+ * makes the ceiling mean the same thing for every aspect ratio.
+ *
+ * Skipping the sharpen is a real loss and a small one. The resample is what
+ * removes the per-frame browser magnification, which was the larger half of
+ * the problem; the unsharp mask recovers edge contrast on top of that. A photo
+ * big enough to trip this has plenty of detail to begin with.
+ */
+const MAX_ENHANCED_PIXELS = 4_000_000;
 
 /**
  * How much to enlarge, from the sizes alone.
@@ -228,6 +249,8 @@ function prepareRenderPhoto(photo: HTMLCanvasElement, outH: number): HTMLCanvasE
   octx.imageSmoothingEnabled = true;
   octx.imageSmoothingQuality = "high";
   octx.drawImage(photo, 0, 0, w, h);
+
+  if (w * h > MAX_ENHANCED_PIXELS) return out;
 
   try {
     const frame = octx.getImageData(0, 0, w, h);

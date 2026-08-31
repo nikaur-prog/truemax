@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/ai-image.ts": {
+      "maxDuration": 300
+    }
+  },
   "redirects": [
     { "source": "/index.html", "destination": "/", "permanent": true }
   ],

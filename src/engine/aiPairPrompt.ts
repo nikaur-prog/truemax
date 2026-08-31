@@ -56,6 +56,11 @@ export function usableScore(value: unknown, fallback: number): number {
   if (value === null || value === undefined) return fallback;
   if (typeof value === "string" && !value.trim()) return fallback;
   if (typeof value !== "number" && typeof value !== "string") return fallback;
+  // Plain decimal only. Number() happily reads "0x8" as 8, "0b10" as 2, "0o10"
+  // as 8 and "1e1" as 10, so a crafted request could select a band the form
+  // cannot produce. The form emits a decimal or nothing; anything else is not
+  // a number this field ever meant.
+  if (typeof value === "string" && !/^[+-]?\d*\.?\d+$/.test(value.trim())) return fallback;
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(10, Math.max(1, n));
@@ -70,10 +75,24 @@ export function usableScore(value: unknown, fallback: number): number {
  * actually moves the output, and the UI says so plainly rather than implying a
  * contract the generator never signed.
  *
- * Deliberately structural and grooming language only. Nothing here names a skin
- * tone, a hair type or any feature that stands in for ethnicity: the operator's
- * own description is the only place that gets decided, and a house prompt that
- * encoded a look would be applying one standard of attractiveness to everybody.
+ * ABOUT THE STANDARD THIS ENCODES, honestly, because the comment that used to
+ * sit here was self-contradictory. It claimed a house prompt encoding a look
+ * "would be applying one standard of attractiveness to everybody" while doing
+ * precisely that: one fixed template per sex, applied to every character an
+ * operator asks for. There is no way to write a prompt that asks for a
+ * good-looking face without encoding some idea of what that means, so the
+ * pretence was the problem rather than the template.
+ *
+ * What the rule in CLAUDE.md actually forbids is a standard that VARIES: no
+ * ethnicity is inferred anywhere, and no different bar is applied to anybody.
+ * This is one bar for everyone, which is the compliant shape.
+ *
+ * Two things follow, and both are enforced below. The language stays structural
+ * and grooming only, naming no skin tone, hair type or feature that stands in
+ * for ethnicity, so the template composes with any description rather than
+ * fighting it. And the operator's own description is stated to WIN: it is what
+ * makes this a starting point they can steer instead of a house face wearing
+ * their words.
  */
 function beautyBand(score: number, sex: PairSex): string {
   const shared =
@@ -161,6 +180,10 @@ export function afterPortraitPrompt(spec: PairSpec): string {
     `A photorealistic head-and-shoulders studio portrait of one ${spec.sex === "female" ? "woman" : "man"}.`,
     beautyBand(spec.afterScore, spec.sex),
     spec.description,
+    // The operator's description outranks the template above it. Without this
+    // the house features quietly overrule whatever they actually asked for,
+    // and the tool stops being theirs.
+    "Where the description above conflicts with any of these features, follow the description.",
     BODY_WORDS_STAY_ON_THE_BODY,
     "Clear healthy well-hydrated skin, groomed hair, groomed brows, visibly well rested.",
     "Front on, looking straight at the camera, neutral expression, mouth closed.",

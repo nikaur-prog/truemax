@@ -159,6 +159,39 @@ test("scores are clamped to the scale rather than rejected", () => {
   assert.equal(usableScore("8.5", 7.5), 8.5);
 });
 
+test("a non-decimal numeric string cannot pick a band the form cannot produce", () => {
+  // Number() reads "0x8" as 8, "0b10" as 2, "0o10" as 8 and "1e1" as 10, all
+  // finite and all in range, so a crafted request could select a beauty band
+  // by a syntax the number input never emits.
+  for (const crafted of ["0x8", "0b10", "0o10", "1e1", "1e400", "Infinity", " 0x8 "]) {
+    assert.equal(usableScore(crafted, 7.5), 7.5, `${crafted} must not be read as a score`);
+  }
+  // And the shapes a real form DOES emit still work.
+  for (const [input, want] of [["8.5", 8.5], ["8", 8], [".5", 1], ["-4", 1], [" 7.5 ", 7.5]] as Array<[string, number]>) {
+    assert.equal(usableScore(input, 7.5), want);
+  }
+});
+
+test("the operator's description outranks the house template", () => {
+  // Otherwise the fixed features quietly overrule what they actually asked
+  // for, and the tool stops being theirs.
+  const built = afterPortraitPrompt(spec());
+  assert.match(built, /Where the description above conflicts with any of these features, follow the description\./);
+  assert.ok(
+    built.indexOf(spec().description) < built.indexOf("follow the description"),
+    "the override must come after the description it defers to",
+  );
+});
+
+test("the same bar is applied regardless of the description", () => {
+  // What CLAUDE.md forbids is a standard that VARIES. One template for
+  // everybody is the compliant shape; a different bar per description would
+  // not be. Two very different descriptions must produce the same band text.
+  const band = (description: string) =>
+    afterPortraitPrompt(spec({ description })).replace(description, "");
+  assert.equal(band("20, brown hair, tan."), band("40, grey hair, freckles, glasses."));
+});
+
 test("a missing or unusable score falls back rather than producing NaN", () => {
   // A NaN reaching beautyBand would fail every comparison and silently pick the
   // bottom band, which is the same defect as not sending the number at all.

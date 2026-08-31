@@ -62,6 +62,25 @@ const MODEL = "gpt-image-1";
 // Portrait, because every downstream use of these is a 9:16 reel.
 const SIZE = "1024x1536";
 
+// JPEG, NOT PNG, and this is a correctness fix rather than a size preference.
+//
+// A Vercel function response is capped at 4.5MB. Four photorealistic
+// 1024x1536 PNGs, base64-encoded into JSON, blow through that comfortably:
+// each would have to average under about 860KiB raw to fit, and a detailed
+// face at 1.5 megapixels does not. The failure is the worst shape available:
+// generation SUCCEEDS, both quota slots are consumed, and then the platform
+// replaces the whole response with FUNCTION_RESPONSE_PAYLOAD_TOO_LARGE, so the
+// creator is billed two renders for nothing and the finally block has no
+// reservation left to refund.
+//
+// Asking the provider for JPEG directly is what fixes it: roughly a fifth of
+// the bytes, and no server-side transcoding in a function with no image
+// library. The chained edits re-render the whole frame rather than preserving
+// pixels, so successive encodes are not compounding a lossy copy the way
+// re-saving a file would.
+const OUTPUT_FORMAT = "jpeg";
+const OUTPUT_COMPRESSION = 88;
+
 export async function POST(request: Request): Promise<Response> {
   // Held here so every exit below, thrown or returned, can give the slots back.
   //
@@ -154,6 +173,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const spec: PairSpec = { sex, description, flaws, afterScore, beforeScore };
+    const deadline = Date.now() + TOTAL_BUDGET_MS;
 
     // RESERVED BEFORE THE FIRST BILLABLE CALL, and released if any frame fails.
     // One reservation per PAIR, because the pair is the unit that is worth
@@ -176,7 +196,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     // --- the AFTER portrait: the root, and the only invented face ----------
-    const afterPortrait = await openaiImage(apiKey, { prompt: afterPortraitPrompt(spec) });
+    const afterPortrait = await openaiImage(apiKey, { prompt: afterPortraitPrompt(spec), deadline });
     if ("error" in afterPortrait) return json({ error: afterPortrait.error }, afterPortrait.status);
 
     // --- the BEFORE portrait, as an edit that ADDS the flaws ---------------
@@ -187,6 +207,7 @@ export async function POST(request: Request): Promise<Response> {
     const beforePortrait = await openaiImage(apiKey, {
       prompt: beforeFromAfterPrompt(spec),
       edit: afterPortrait.b64,
+      deadline,
     });
     if ("error" in beforePortrait) return json({ error: beforePortrait.error }, beforePortrait.status);
 
@@ -202,11 +223,13 @@ export async function POST(request: Request): Promise<Response> {
       const bodyAfter = await openaiImage(apiKey, {
         prompt: afterBodyPrompt(spec),
         edit: afterPortrait.b64,
+        deadline,
       });
       if ("error" in bodyAfter) return json({ error: bodyAfter.error }, bodyAfter.status);
       const bodyBefore = await openaiImage(apiKey, {
         prompt: beforeBodyPrompt(spec),
         edit: bodyAfter.b64,
+        deadline,
       });
       if ("error" in bodyBefore) return json({ error: bodyBefore.error }, bodyBefore.status);
       afterBody = bodyAfter.b64;
@@ -224,12 +247,19 @@ export async function POST(request: Request): Promise<Response> {
       try {
         await finalizeTtsRender(slot, user.id);
       } catch (finalizeError) {
-        console.error("ai-image finalize failed", safeMessage(finalizeError));
-        reservations.push(slot);
+        // NOT pushed back for refund, and that is the fix rather than an
+        // oversight. A finalize that throws before its transaction commits
+        // leaves the row 'reserved', so refunding it here would succeed and
+        // hand the slot back to somebody who is about to receive the images:
+        // two frames for nothing, or four for nothing if both throw. Leaving
+        // it reserved costs the creator nothing either, because the
+        // 15-minute stale sweep in claim_tts_render releases it. The images
+        // still go out, which is right for the person who waited for them.
+        console.error("ai-image finalize failed, slot left reserved", safeMessage(finalizeError));
       }
     }
 
-    const png = (b64: string) => `data:image/png;base64,${b64}`;
+    const png = (b64: string) => `data:image/${OUTPUT_FORMAT};base64,${b64}`;
     return json({
       before: png(beforePortrait.b64),
       after: png(afterPortrait.b64),
@@ -275,19 +305,47 @@ export async function POST(request: Request): Promise<Response> {
  * return the slot, but not before the creator had spent a month believing they
  * were one render poorer.
  *
- * Generous, because image generation genuinely takes tens of seconds, and set
- * so that two of them plus the surrounding work stay inside a 300s Vercel
- * function ceiling with room to spare.
+ * Generous, because image generation genuinely takes tens of seconds.
+ *
+ * THIS NUMBER IS TIED TO THE CALL COUNT, and the tie was broken when the
+ * full-length pair took the route from two calls to four. At 90s each, four
+ * dependent calls is 360s against a 300s function ceiling: the platform kills
+ * the invocation, no response is sent, `finally` is not guaranteed to run, and
+ * both reserved slots sit unusable until the 15-minute stale sweep. The old
+ * comment here said it was sized "so that two of them" fit, which is exactly
+ * the reasoning that stopped being true.
+ *
+ * 65s x 4 is 260s, and TOTAL_BUDGET_MS below enforces the ceiling directly
+ * rather than trusting the multiplication to stay correct if a fifth call is
+ * ever added.
  */
-const IMAGE_TIMEOUT_MS = 90_000;
+const IMAGE_TIMEOUT_MS = 65_000;
+
+/**
+ * The wall clock the whole run may spend on the provider.
+ *
+ * Checked before each call, so a slow early frame shortens the later ones
+ * instead of running the invocation off the end of its own ceiling. Set below
+ * the 300s configured in vercel.json to leave room for the reservation work
+ * and for serialising the response.
+ */
+const TOTAL_BUDGET_MS = 250_000;
 
 async function openaiImage(
   apiKey: string,
-  options: { prompt: string; edit?: string },
+  options: { prompt: string; edit?: string; deadline?: number },
 ): Promise<{ b64: string } | { error: string; status: number }> {
   let response: Response;
+  // The shorter of this call's own timeout and whatever is left of the run's
+  // total budget. A slow early frame therefore shortens the later ones rather
+  // than running the invocation off the end of its ceiling, where no response
+  // is sent and `finally` is not guaranteed to run.
+  const remaining = options.deadline ? options.deadline - Date.now() : IMAGE_TIMEOUT_MS;
+  if (remaining <= 1_000) {
+    return { error: "The image service did not respond in time.", status: 504 };
+  }
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), IMAGE_TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(), Math.min(IMAGE_TIMEOUT_MS, remaining));
   try {
 
   if (options.edit) {
@@ -295,10 +353,12 @@ async function openaiImage(
     form.append("model", MODEL);
     form.append("prompt", options.prompt);
     form.append("size", SIZE);
+    form.append("output_format", OUTPUT_FORMAT);
+    form.append("output_compression", String(OUTPUT_COMPRESSION));
     form.append(
       "image",
-      new Blob([Uint8Array.from(atob(options.edit), (c) => c.charCodeAt(0))], { type: "image/png" }),
-      "before.png",
+      new Blob([Uint8Array.from(atob(options.edit), (c) => c.charCodeAt(0))], { type: "image/jpeg" }),
+      "source.jpg",
     );
     response = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
@@ -311,7 +371,14 @@ async function openaiImage(
       method: "POST",
       signal: abort.signal,
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, prompt: options.prompt, size: SIZE, n: 1 }),
+      body: JSON.stringify({
+        model: MODEL,
+        prompt: options.prompt,
+        size: SIZE,
+        n: 1,
+        output_format: OUTPUT_FORMAT,
+        output_compression: OUTPUT_COMPRESSION,
+      }),
     });
   }
 

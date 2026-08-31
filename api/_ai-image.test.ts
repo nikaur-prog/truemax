@@ -147,11 +147,55 @@ test("there is no free-text route into either prompt", () => {
   assert.doesNotMatch(client, /blemishes,/, "the client no longer sends one either");
 });
 
+test("the response cannot be rejected for being too large", () => {
+  // A Vercel function response is capped at 4.5MB. Four photorealistic
+  // 1024x1536 PNGs, base64-encoded into JSON, do not fit, and the failure is
+  // the worst available shape: generation succeeds, both slots are consumed,
+  // and the platform replaces the whole response so the creator is billed two
+  // renders for nothing.
+  assert.match(route, /const OUTPUT_FORMAT = "jpeg"/);
+  assert.doesNotMatch(route, /data:image\/png;base64/, "the declared mime must follow the format asked for");
+  // Asked for on BOTH provider routes, not just the generate one: the edit
+  // path sends multipart and the generate path sends JSON, so the format has
+  // to be set twice or half the frames come back as PNG anyway.
+  assert.equal((route.match(/output_format/g) ?? []).length, 2, "both the edit and generate routes");
+});
+
+test("four calls cannot run past the function ceiling", () => {
+  // The old timeout was documented as sized "so that two of them" fit inside
+  // 300s. The full-length pair took the route to four and nothing revisited
+  // the number: 4 x 90s is 360s, and past the ceiling there is no response and
+  // no guaranteed finally, so both slots sit unusable until the stale sweep.
+  const perCall = /const IMAGE_TIMEOUT_MS = (\d+)_(\d+)/.exec(route);
+  assert.ok(perCall, "the per-call timeout must be findable");
+  const ms = Number(`${perCall![1]}${perCall![2]}`);
+  const budget = /const TOTAL_BUDGET_MS = (\d+)_(\d+)/.exec(route);
+  assert.ok(budget, "a total budget must exist, not just a per-call timeout");
+  const total = Number(`${budget![1]}${budget![2]}`);
+  const calls = (route.match(/await openaiImage\(apiKey/g) ?? []).length;
+  assert.ok(ms * calls <= 300_000, `${calls} calls at ${ms}ms each exceeds the 300s ceiling`);
+  assert.ok(total < 300_000, "the budget must sit below the ceiling, not on it");
+  // And it must actually be enforced rather than merely declared.
+  assert.match(route, /options\.deadline \? options\.deadline - Date\.now\(\)/);
+  assert.equal((route.match(/deadline,?\s*\}/g) ?? []).length >= 3, true, "every call carries the deadline");
+});
+
+test("a failed finalize does not hand the slot back", () => {
+  // A finalize that throws before committing leaves the row 'reserved', so
+  // refunding it would succeed and give the slot to somebody who is about to
+  // receive the images. The 15-minute stale sweep releases it instead.
+  const block = route.slice(route.indexOf("catch (finalizeError)"), route.indexOf("catch (finalizeError)") + 700);
+  assert.doesNotMatch(block, /reservations\.push/, "a failed finalize must not queue the slot for refund");
+  assert.match(block, /slot left reserved/);
+});
+
 test("both image calls are bounded", () => {
   // A hung call holds a serverless invocation AND a reserved quota slot. The
   // stale sweep returns the slot eventually, but not before the creator has
   // spent a month believing they are one render poorer.
-  assert.match(route, /const IMAGE_TIMEOUT_MS = 90_000/);
+  // The number itself is asserted by the ceiling test above; here it only has
+  // to exist and be enforced on every call.
+  assert.match(route, /const IMAGE_TIMEOUT_MS = \d+_\d+/);
   assert.equal((route.match(/signal: abort\.signal/g) ?? []).length, 2, "both calls, not one");
   assert.match(route, /clearTimeout\(timer\)/);
   // Returned rather than thrown, so the caller's ordinary failure path refunds.

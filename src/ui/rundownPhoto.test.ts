@@ -51,7 +51,7 @@ test("the enlargement is capped, so a phone is not asked for an unbounded canvas
   ]) {
     const scale = preparedScale(w, h, OUT_H);
     assert.ok(scale <= 2, "never more than double");
-    assert.ok(Math.max(w, h) * scale <= 3200 + 1, "and never past the long-edge ceiling");
+    assert.ok(Math.max(w, h) * scale <= 2600 + 1, "and never past the long-edge ceiling");
   }
 });
 
@@ -60,7 +60,7 @@ test("the long-edge ceiling binds before the doubling does", () => {
   // fits, not the whole of it.
   const scale = preparedScale(1500, 2000, OUT_H);
   assert.ok(scale > 1);
-  assert.ok(2000 * scale <= 3200 + 1);
+  assert.ok(2000 * scale <= 2600 + 1);
 });
 
 test("a degenerate size is passed through rather than producing NaN or Infinity", () => {
@@ -76,6 +76,36 @@ test("a degenerate size is passed through rather than producing NaN or Infinity"
     const scale = preparedScale(w, h, out);
     assert.ok(Number.isFinite(scale), `${w}x${h} -> ${out} must be finite`);
     assert.ok(scale >= 1);
+  }
+});
+
+test("enlargement never pushes past the ceiling, whatever the aspect ratio", () => {
+  // The cap bounds what this function ADDS. A square source is 1.8x the pixels
+  // of a portrait one at the same long edge, so the ceiling has to hold for
+  // both shapes rather than for the one that was measured when it was chosen.
+  for (const [w, h] of [
+    [2600, 2600],
+    [1950, 2600],
+    [800, 1000],
+    [1200, 1200],
+    [400, 1600],
+  ]) {
+    const scale = preparedScale(w, h, OUT_H);
+    assert.ok(Math.max(w, h) * scale <= 2600 + 1, `${w}x${h} exceeded the long-edge ceiling`);
+  }
+});
+
+test("a source already past the ceiling is left exactly as it is", () => {
+  // Not shrunk. Throwing pixels away here would be the bug this whole pass
+  // exists to undo, so an oversized photo returns a scale of 1 and is handled
+  // by the area guard in prepareRenderPhoto, which hands back the original
+  // canvas and allocates nothing at all.
+  for (const [w, h] of [
+    [3000, 3000],
+    [4032, 3024],
+    [6000, 4000],
+  ]) {
+    assert.equal(preparedScale(w, h, OUT_H), 1, `${w}x${h} must be passed through untouched`);
   }
 });
 
