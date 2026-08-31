@@ -107,7 +107,13 @@ test("the beauty language never names colouring or ethnicity", () => {
   // applying one standard of attractiveness to everybody, which is the thing
   // this product does not do anywhere else either. The operator's own
   // description is the only place colouring gets decided.
-  const banned = /\b(?:white|black|asian|caucasian|european|african|latina|latino|hispanic|blonde|pale|fair[- ]skinned|light[- ]skinned|dark[- ]skinned)\b/i;
+  // Bare colour words cannot be banned: the character sheet deliberately wears
+  // plain BLACK clothing so the scenes can dress it, and a garment colour says
+  // nothing about a person. What must never appear is colouring OF THE PERSON,
+  // so the skin and hair terms are matched explicitly and the unambiguous
+  // ethnicity words on their own.
+  const banned =
+    /\b(?:asian|caucasian|european|african|latina|latino|hispanic|blonde|brunette|redhead|pale|olive[- ]skinned|tanned complexion|(?:white|black|light|dark|fair)[- ](?:skin|skinned|complexion))\b/i;
   const houseText = (built: string) => built.replace(spec().description, "");
   for (const built of [
     afterPortraitPrompt(spec({ sex: "female" })),

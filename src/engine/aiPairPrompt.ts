@@ -1,4 +1,6 @@
 import type { FaceFlaw } from "./faceFlawCatalog.js";
+import { HANDHELD } from "./aiSceneCatalog.js";
+import type { AiScene } from "./aiSceneCatalog.js";
 
 // ---------------------------------------------------------------------------
 // The prompts behind the AI Model Reel pair.
@@ -162,6 +164,16 @@ const BODY_WORDS_STAY_ON_THE_BODY =
   "The face itself stays lean and sculpted with a clearly defined jawline, " +
   "defined cheekbones and no softness or fullness under the chin.";
 
+/**
+ * What the character sheet wears, always.
+ *
+ * Stated once and shared, so the pair reads as a reference rather than as a
+ * look. The scenes dress the same person afterwards.
+ */
+export const DEFAULT_OUTFIT =
+  "Plain black fitted clothing with no pattern, print or logo: a plain black " +
+  "top and plain black bottoms. Neutral and simple, so the clothing says nothing.";
+
 /** Held identical across every frame so the photograph never becomes the variable. */
 const CAMERA = [
   "Plain mid-grey studio background, even soft light, no harsh shadows across the face.",
@@ -252,9 +264,15 @@ export function afterBodyPrompt(spec: PairSpec): string {
     "Reframe to a full-length standing shot showing them head to toe, the whole body in frame with room above the head and below the feet.",
     spec.description,
     "In proportion, fit and toned, with good posture. Athletic rather than heavy.",
-    `Plain fitted neutral clothing that shows the figure: ${
-      spec.sex === "female" ? "a fitted top and leggings" : "a fitted t-shirt and shorts"
-    }.`,
+    // A DEFAULT OUTFIT, identical for everybody, and that is the point.
+    //
+    // This frame is a character sheet rather than a post: it exists to be
+    // approved, and then to be the identity anchor every scene descends from.
+    // Clothing that varies here would fight the outfits the scenes choose and
+    // would make two characters differ by wardrobe rather than by face. Plain
+    // black is the neutral that photographs the silhouette without adding
+    // anything of its own.
+    DEFAULT_OUTFIT,
     "Standing straight, arms relaxed at their sides, facing the camera.",
     CAMERA,
   ].join(" ");
@@ -266,7 +284,7 @@ export function beforeBodyPrompt(spec: PairSpec): string {
     ? `${flawWeight(spec)}: ${spec.flaws.map((f) => f.add).join("; ")}.`
     : "Make the skin dull and uneven in tone, the hair unstyled, the posture slack, and the person look tired and unrested.";
   return [
-    "Keep this exact person: same face, same bone structure, same height, same hair colour, same clothing, same age.",
+    "Keep this exact person: same face, same bone structure, same height, same hair colour, same plain black clothing, same age.",
     "This is the unflattering photograph of them, taken before any of it was dealt with.",
     added,
     "Same pose, same full-length framing, same background, same lighting, same camera, same distance from the lens.",
@@ -319,4 +337,49 @@ export function redoPrompt(frame: PairFrame, instruction: string): string {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+/**
+ * One SCENE, as an edit of the approved character.
+ *
+ * The pair is a character sheet: plain background, plain black clothes, front
+ * on, made to be approved. These are the posts. Same person, somewhere, doing
+ * something, dressed for it.
+ *
+ * Always an edit of the approved full-length frame rather than a fresh
+ * generation, for the reason every other frame in this file is an edit: a
+ * second text-to-image call from the same description returns a sibling, and a
+ * set of five clips of five near-identical strangers is worthless.
+ *
+ * The scene overrules the character sheet on exactly three things and nothing
+ * else: where they are, what they are wearing, and how it is shot. The face is
+ * carried in the pixels and is stated to be untouchable, because a set whose
+ * face drifts scene to scene is the one failure this format cannot survive.
+ */
+export function scenePrompt(scene: AiScene, side: "before" | "after", spec: PairSpec): string {
+  const flaws = spec.flaws.length
+    ? `${flawWeight(spec)}: ${spec.flaws.map((f) => f.add).join("; ")}.`
+    : "Dull uneven skin, unstyled hair, and a tired unrested look.";
+  return [
+    "Keep this exact person: same face, same bone structure, same eyes, same age, same hair colour, same build.",
+    // The three things a scene is allowed to change, named as changes so the
+    // model treats the character sheet's plain studio setup as replaceable
+    // rather than as something to preserve.
+    `Place them here instead: ${scene.setting}`,
+    `Reframe: ${scene.camera}`,
+    `Relight: ${scene.light}`,
+    `They are ${scene.action.charAt(0).toLowerCase()}${scene.action.slice(1)}`,
+    `Change the clothing to: ${scene.wardrobe}`,
+    HANDHELD,
+    side === "before"
+      ? // The before scene carries the same refusals as the before portrait. A
+        // scene is exactly where a structural change would be easiest to hide,
+        // because so much else is legitimately different from the after.
+        `This is the same person BEFORE, in the same scene. ${flaws} ` +
+        "Do not restructure the face. Do not change the bone structure, the jaw width, the nose or the eye shape. " +
+        "Do not make them a different person, older, or younger."
+      : "Clear healthy skin, groomed hair, visibly well rested. Do not restructure the face.",
+    BODY_WORDS_STAY_ON_THE_BODY,
+    "An adult.",
+  ].join(" ");
 }

@@ -4950,6 +4950,18 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 }
 .q-ai-redo:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
 .q-ai-redo:disabled { opacity: .55; cursor: default; }
+.q-ai-scenes { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.q-ai-scenes h3 { font-size: 17px; margin: 0 0 6px; }
+/* Two up on a phone, five up on a desktop: the set is read as a contact sheet,
+   so seeing a whole row of one side at once is what makes it judgeable. */
+.q-ai-scene-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+@media (min-width: 760px) { .q-ai-scene-grid { grid-template-columns: repeat(5, 1fr); } }
+.q-ai-scene-grid figure { margin: 0; }
+.q-ai-scene-grid img { width: 100%; border-radius: 12px; border: 1px solid var(--line); display: block; }
+.q-ai-scene-grid figcaption {
+  margin-top: 5px; font: 600 10px var(--mono); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--mut);
+}
 .q-ai-light {
   position: fixed; inset: 0; z-index: 600; background: rgba(8, 9, 10, .92);
   display: grid; place-items: center; padding: 24px; cursor: zoom-out;

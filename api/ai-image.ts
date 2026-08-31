@@ -15,9 +15,11 @@ import {
   beforeBodyPrompt,
   beforeFromAfterPrompt,
   redoPrompt,
+  scenePrompt,
   usableScore,
   MAX_REDO_CHARS,
 } from "../src/engine/aiPairPrompt.js";
+import { sceneById } from "../src/engine/aiSceneCatalog.js";
 import type { PairFrame, PairSpec } from "../src/engine/aiPairPrompt.js";
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,8 @@ export async function POST(request: Request): Promise<Response> {
       instruction?: unknown;
       anchor?: unknown;
       current?: unknown;
+      scene?: unknown;
+      side?: unknown;
     } | null;
 
     const sex = body?.sex === "female" ? "female" : "male";
@@ -177,6 +181,53 @@ export async function POST(request: Request): Promise<Response> {
     if (!description) return json({ error: "Describe the character first." }, 400);
     if (description.length > MAX_CHARS) {
       return json({ error: `Description is too long; the ceiling is ${MAX_CHARS} characters.` }, 413);
+    }
+
+    // --- ONE SCENE ---------------------------------------------------------
+    //
+    // The same person, somewhere, doing something. Always ONE per request and
+    // never a batch, and that is a hard constraint rather than a preference: a
+    // set is ten images, and ten base64 frames in one JSON response is several
+    // times the 4.5MB a function may return. The failure is the worst shape
+    // available, because generation SUCCEEDS and every slot is consumed before
+    // the platform discards the reply. The four-image path already had to be
+    // rescued from a smaller version of exactly this.
+    //
+    // One call also keeps a scene well inside the function's duration ceiling,
+    // and lets the client show the set filling in one frame at a time rather
+    // than staring at a spinner for ten sequential generations.
+    if (body?.mode === "scene") {
+      const scene = sceneById(sex, typeof body?.scene === "string" ? body.scene : "");
+      const side = body?.side === "before" ? "before" : "after";
+      // The APPROVED FULL-LENGTH frame is the anchor: it carries the face, the
+      // build and the default black outfit the scene is about to replace.
+      const base = dataUrlBody(typeof body?.anchor === "string" ? body.anchor : "");
+      if (!scene || !base) {
+        return json({ error: "Pick a scene, and approve the character first." }, 400);
+      }
+      if (!description) return json({ error: "Describe the character first." }, 400);
+
+      // Metered per scene, because each one is its own billable call. A set of
+      // ten costing one slot would be the same hole the pair path was fixed for.
+      if (meter) {
+        const slot = await claimTtsRender(user.id, meter);
+        if (!slot) return json({ error: "Monthly render quota reached. It resets on the 1st." }, 429);
+        reservations.push(slot);
+      }
+      const shot = await openaiImage(apiKey, {
+        prompt: scenePrompt(scene, side, { sex, description, flaws, afterScore, beforeScore }),
+        edit: base,
+        deadline: Date.now() + IMAGE_TIMEOUT_MS,
+      });
+      if ("error" in shot) return json({ error: shot.error }, shot.status);
+      for (const slot of reservations.splice(0)) {
+        try {
+          await finalizeTtsRender(slot, user.id);
+        } catch (finalizeError) {
+          console.error("ai-image finalize failed, slot left reserved", safeMessage(finalizeError));
+        }
+      }
+      return json({ frame: `data:image/${OUTPUT_FORMAT};base64,${shot.b64}`, scene: scene.id, side });
     }
 
     // --- ONE FRAME, REDONE -------------------------------------------------

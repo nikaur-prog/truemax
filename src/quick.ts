@@ -1,4 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { scenesFor } from "./engine/aiSceneCatalog.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
 import { captureAttribution } from "./engine/attribution.js";
 import { FACE_FLAWS } from "./engine/faceFlawCatalog.js";
@@ -3258,6 +3259,113 @@ function openAiLightbox(src: string, alt: string): void {
   document.body.appendChild(wrap);
 }
 
+/**
+ * The scene set: the approved character, filmed.
+ *
+ * Ten stills, five before and five after, generated ONE AT A TIME. Sequential
+ * rather than parallel for two reasons that both matter: the route bills a slot
+ * per scene and firing ten at once would spend a month's quota before the first
+ * result came back, and a set that fills in frame by frame lets an operator
+ * abandon a bad character after two rather than after ten.
+ *
+ * Stills before clips, deliberately. A clip costs many times a still and takes
+ * minutes rather than seconds, so approving a set of stills first is what makes
+ * the eventual video step cheap: an approved still IS the clip's first frame,
+ * so identity is locked before anything expensive happens.
+ */
+async function makeSceneSet(name: string, anchor: string, host: HTMLElement): Promise<void> {
+  const scenes = scenesFor(aiSex);
+  const shots: Array<{ scene: string; side: "before" | "after"; src: string }> = [];
+  const grid = host.querySelector<HTMLElement>("[data-scene-grid]");
+  const status = host.querySelector<HTMLElement>("[data-scene-status]");
+  const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
+
+  const paint = () => {
+    if (!grid) return;
+    grid.innerHTML = shots
+      .map(
+        (shot, index) => `<figure>
+          <button type="button" class="q-ai-zoom" data-scene-zoom="${index}"><img data-scene-shot="${index}" /></button>
+          <figcaption>${escapeHtml(shot.scene.replace(/-/g, " "))} · ${shot.side}</figcaption>
+          <button type="button" class="q-ai-redo" data-scene-save="${index}">Save</button>
+        </figure>`,
+      )
+      .join("");
+    for (const [index, shot] of shots.entries()) {
+      const image = grid.querySelector<HTMLImageElement>(`[data-scene-shot="${index}"]`);
+      if (image) {
+        image.src = shot.src;
+        image.alt = `${name}, ${shot.scene}, ${shot.side}`;
+      }
+    }
+    for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-zoom]")) {
+      button.onclick = () => {
+        const shot = shots[Number(button.dataset.sceneZoom)];
+        if (shot) openAiLightbox(shot.src, `${name}, ${shot.scene}`);
+      };
+    }
+    for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-save]")) {
+      button.onclick = async () => {
+        const shot = shots[Number(button.dataset.sceneSave)];
+        if (!shot) return;
+        try {
+          await saveFile(
+            dataUrlToBlob(shot.src),
+            exportName("card", extensionOf(shot.src), `${shot.scene}-${shot.side}`),
+            "card",
+          );
+        } catch (error) {
+          if (status) status.textContent = `Could not save that one. ${(error as Error).message}`;
+        }
+      };
+    }
+  };
+
+  const token = await currentAccessToken();
+  const wanted: Array<{ scene: string; side: "before" | "after" }> = [];
+  for (const side of ["after", "before"] as const) {
+    for (const scene of scenes) wanted.push({ scene: scene.id, side });
+  }
+
+  for (const [index, want] of wanted.entries()) {
+    if (status) status.textContent = `Filming ${index + 1} of ${wanted.length}: ${want.scene.replace(/-/g, " ")}, ${want.side}…`;
+    try {
+      const response = await fetch("/api/ai-image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          mode: "scene",
+          scene: want.scene,
+          side: want.side,
+          anchor,
+          sex: aiSex,
+          description: desc,
+          flaws: selectedFlawIds(),
+          beforeScore: Number((document.getElementById("q-ai-before") as HTMLInputElement).value),
+          afterScore: Number((document.getElementById("q-ai-after") as HTMLInputElement).value),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { frame?: string; error?: string };
+      if (!response.ok || !payload.frame) {
+        // STOPS rather than grinding on. The likeliest failure is the quota,
+        // and carrying on would spend nine more requests learning the same
+        // thing while the operator watches.
+        if (status) status.textContent = payload.error ?? "The set could not be finished.";
+        return;
+      }
+      shots.push({ scene: want.scene, side: want.side, src: payload.frame });
+      paint();
+    } catch {
+      if (status) status.textContent = "Could not reach the image service.";
+      return;
+    }
+  }
+  if (status) status.textContent = `${shots.length} shots. Save the ones you want, or change the character and film it again.`;
+}
+
 // The pair, side by side, each downloadable.
 //
 // Downloadable individually rather than as one composite: these are the INPUT
@@ -3309,7 +3417,21 @@ function showAiPair(
         : ""
     }
     <p class="q-ai-note">Scan the two portraits in Reel Creator to get the measured before/after.
-    The full-length shots are for checking the build, not for scanning.</p>`;
+    The full-length shots are the character reference: plain black, so the scenes can dress them.</p>
+    ${
+      hasBody
+        ? `<div class="q-ai-scenes">
+             <h3>Film this character</h3>
+             <p class="q-ai-note">Five scenes as the after and the same five as the before, from the
+             full-length shot above. Stills first: each one is also the first frame a clip would be
+             made from, so the face is locked before anything is animated. One render per shot.</p>
+             <button type="button" class="btn pri" data-film>Film the set</button>
+             <p class="q-ai-note" data-scene-status></p>
+             <div class="q-ai-scene-grid" data-scene-grid></div>
+           </div>`
+        : `<p class="q-ai-note">Tick the full-length pair to unlock the scene set: the scenes are
+           built from the full-length shot.</p>`
+    }`;
   const sources: Record<string, string> = { before, after };
   if (hasBody) {
     sources.beforeBody = beforeBody as string;
@@ -3327,6 +3449,22 @@ function showAiPair(
     image.src = src;
     image.alt = labels[key];
   }
+  const film = host.querySelector<HTMLButtonElement>("[data-film]");
+  if (film) {
+    film.onclick = async () => {
+      film.disabled = true;
+      film.textContent = "Filming…";
+      try {
+        // The AFTER full-length frame is the anchor. It carries the face, the
+        // build and the neutral outfit every scene is about to replace.
+        await makeSceneSet(name, sources.afterBody ?? sources.after, host);
+      } finally {
+        film.disabled = false;
+        film.textContent = "Film the set again";
+      }
+    };
+  }
+
   for (const button of host.querySelectorAll<HTMLButtonElement>("[data-zoom]")) {
     button.onclick = () => {
       const key = button.dataset.zoom ?? "before";

@@ -11,6 +11,7 @@ const route = readFileSync(new URL("./ai-image.ts", import.meta.url), "utf8");
 // The route now has two independent billable paths: the pair generation and a
 // single-frame redo. Counting calls across the whole file conflates them, so
 // each is sliced out and asserted on its own terms.
+const SCENE = route.slice(route.indexOf('if (body?.mode === "scene")'), route.indexOf('if (body?.mode === "redo")'));
 const REDO = route.slice(route.indexOf('if (body?.mode === "redo")'), route.indexOf("const spec: PairSpec"));
 const PAIR = route.slice(route.indexOf("const spec: PairSpec"));
 
@@ -66,10 +67,15 @@ test("a slot is claimed for every billable pair, not one for all four", () => {
   assert.equal((PAIR.match(/await openaiImage\(apiKey/g) ?? []).length, 4);
   assert.equal((REDO.match(/await openaiImage\(apiKey/g) ?? []).length, 1, "a redo is one call");
   assert.equal((REDO.match(/await claimTtsRender/g) ?? []).length, 1, "and it costs one slot");
+  // A scene is one call and one slot too. A whole set is ten requests rather
+  // than one, which is what keeps it inside both the response ceiling and the
+  // function duration ceiling.
+  assert.equal((SCENE.match(/await openaiImage\(apiKey/g) ?? []).length, 1, "a scene is one call");
+  assert.equal((SCENE.match(/await claimTtsRender/g) ?? []).length, 1, "and it costs one slot");
 });
 
 test("each path finalizes only after its own frames succeed", () => {
-  for (const [name, block] of [["pair", PAIR], ["redo", REDO]] as Array<[string, string]>) {
+  for (const [name, block] of [["pair", PAIR], ["redo", REDO], ["scene", SCENE]] as Array<[string, string]>) {
     const lastImage = block.lastIndexOf("await openaiImage(apiKey");
     const finalize = block.indexOf("await finalizeTtsRender");
     assert.ok(lastImage > -1, `${name} must make a billable call`);
@@ -201,6 +207,22 @@ test("a failed finalize does not hand the slot back", () => {
   const block = route.slice(route.indexOf("catch (finalizeError)"), route.indexOf("catch (finalizeError)") + 700);
   assert.doesNotMatch(block, /reservations\.push/, "a failed finalize must not queue the slot for refund");
   assert.match(block, /slot left reserved/);
+});
+
+test("a scene set can never be returned as one oversized response", () => {
+  // Ten base64 frames in one JSON reply is several times the 4.5MB a function
+  // may return, and the failure consumes every slot before the platform
+  // discards the response. The route must therefore hand back ONE frame.
+  assert.match(SCENE, /return json\(\{ frame:/);
+  assert.doesNotMatch(SCENE, /frames:\s*\[/, "a scene path must not assemble an array of images");
+  assert.doesNotMatch(SCENE, /for \(const scene of/, "the route must not loop the catalogue itself");
+});
+
+test("a scene cannot borrow the other sex's framing", () => {
+  // sceneById is scoped by sex, and the route passes the request's own sex to
+  // it. Crossing them would produce the wrong shot rather than a near-enough
+  // one, because the framing and the light are the sex-specific part.
+  assert.match(SCENE, /sceneById\(sex,/);
 });
 
 test("both image calls are bounded", () => {
