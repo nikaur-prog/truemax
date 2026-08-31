@@ -274,3 +274,49 @@ export function beforeBodyPrompt(spec: PairSpec): string {
     "Do not make them a different person.",
   ].join(" ");
 }
+
+/** Which frame of the set a redo is aimed at. */
+export type PairFrame = "after" | "before" | "afterBody" | "beforeBody";
+
+/** How much steering text a redo may carry. */
+export const MAX_REDO_CHARS = 240;
+
+/**
+ * One frame, regenerated with a change the operator asked for.
+ *
+ * The point is to stop a set being thrown away over one bad image. Liking the
+ * after and not the before used to mean spending another render on both, so
+ * the cheap fix was to accept the worse one.
+ *
+ * The operator's instruction goes in FIRST and the structural refusals go in
+ * LAST, deliberately. Everything this product will not do to a face has to
+ * survive a person typing the opposite into a free box, and the last word in
+ * the prompt is the one that holds. It is the same reasoning that removed the
+ * free-text flaw field: the difference is that a redo steers a frame the
+ * operator is already looking at, rather than reaching into the half of the
+ * pair that defines what a glow-up is allowed to be.
+ */
+export function redoPrompt(frame: PairFrame, instruction: string): string {
+  const asked = instruction.trim().slice(0, MAX_REDO_CHARS);
+  const isBefore = frame === "before" || frame === "beforeBody";
+  const isBody = frame === "afterBody" || frame === "beforeBody";
+  return [
+    "Keep this exact person: same face, same bone structure, same eyes, same age, same hair colour.",
+    asked,
+    isBody
+      ? "Keep the full-length framing, head to toe."
+      : "Keep the head-and-shoulders framing.",
+    "Same background, same lighting, same camera, same distance from the lens.",
+    isBefore
+      ? // A redo of the before is the one that could quietly turn this into the
+        // structural lie the whole catalogue exists to prevent, so it carries
+        // the refusals whatever was typed above.
+        "This is still the unflattering photograph of the SAME person as the after. " +
+        "Do not restructure the face. Do not change the bone structure, the jaw width, the nose or the eye shape. " +
+        "Do not make them a different person, older, or younger."
+      : "Do not restructure the face. Do not make them a different person.",
+    BODY_WORDS_STAY_ON_THE_BODY,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}

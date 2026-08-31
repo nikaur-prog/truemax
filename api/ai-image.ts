@@ -14,9 +14,11 @@ import {
   afterPortraitPrompt,
   beforeBodyPrompt,
   beforeFromAfterPrompt,
+  redoPrompt,
   usableScore,
+  MAX_REDO_CHARS,
 } from "../src/engine/aiPairPrompt.js";
-import type { PairSpec } from "../src/engine/aiPairPrompt.js";
+import type { PairFrame, PairSpec } from "../src/engine/aiPairPrompt.js";
 
 // ---------------------------------------------------------------------------
 // The before/after pair for the AI Model Reel.
@@ -139,6 +141,11 @@ export async function POST(request: Request): Promise<Response> {
       beforeScore?: unknown;
       afterScore?: unknown;
       fullBody?: unknown;
+      mode?: unknown;
+      frame?: unknown;
+      instruction?: unknown;
+      anchor?: unknown;
+      current?: unknown;
     } | null;
 
     const sex = body?.sex === "female" ? "female" : "male";
@@ -170,6 +177,54 @@ export async function POST(request: Request): Promise<Response> {
     if (!description) return json({ error: "Describe the character first." }, 400);
     if (description.length > MAX_CHARS) {
       return json({ error: `Description is too long; the ceiling is ${MAX_CHARS} characters.` }, 413);
+    }
+
+    // --- ONE FRAME, REDONE -------------------------------------------------
+    //
+    // A set used to be all or nothing: liking three of four images and wanting
+    // the fourth changed meant spending another render on every one of them,
+    // so the cheap move was to accept the worse image. This regenerates the one
+    // frame the operator picked.
+    //
+    // Metered as a full slot even though it is a single call. It is a billable
+    // provider request either way, and a cheaper redo would be the obvious way
+    // to get images for less than they cost.
+    if (body?.mode === "redo") {
+      const frames: PairFrame[] = ["after", "before", "afterBody", "beforeBody"];
+      const frame = frames.find((f) => f === body?.frame);
+      const instruction = typeof body?.instruction === "string" ? body.instruction.trim() : "";
+      // The frame being redone is what gets edited. The after portrait is sent
+      // alongside as the anchor and is used when the requested frame has no
+      // pixels of its own to work from.
+      const source = typeof body?.current === "string" ? body.current : "";
+      const anchor = typeof body?.anchor === "string" ? body.anchor : "";
+      const base = dataUrlBody(source) || dataUrlBody(anchor);
+      if (!frame || !instruction || !base) {
+        return json({ error: "Say which frame to redo and what should change." }, 400);
+      }
+      if (instruction.length > MAX_REDO_CHARS) {
+        return json({ error: `Keep the change under ${MAX_REDO_CHARS} characters.` }, 413);
+      }
+
+      if (meter) {
+        const slot = await claimTtsRender(user.id, meter);
+        if (!slot) return json({ error: "Monthly render quota reached. It resets on the 1st." }, 429);
+        reservations.push(slot);
+      }
+      const redone = await openaiImage(apiKey, {
+        prompt: redoPrompt(frame, instruction),
+        edit: base,
+        deadline: Date.now() + IMAGE_TIMEOUT_MS,
+      });
+      if ("error" in redone) return json({ error: redone.error }, redone.status);
+      for (const slot of reservations.splice(0)) {
+        try {
+          await finalizeTtsRender(slot, user.id);
+        } catch (finalizeError) {
+          console.error("ai-image finalize failed, slot left reserved", safeMessage(finalizeError));
+        }
+      }
+      return json({ frame: `data:image/${OUTPUT_FORMAT};base64,${redone.b64}` });
     }
 
     const spec: PairSpec = { sex, description, flaws, afterScore, beforeScore };
@@ -320,6 +375,19 @@ export async function POST(request: Request): Promise<Response> {
  * ever added.
  */
 const IMAGE_TIMEOUT_MS = 65_000;
+
+/**
+ * The base64 payload of a data URL, or "" for anything that is not one.
+ *
+ * The redo path is the first time this route accepts an IMAGE from the client
+ * rather than only text, so the shape is checked rather than trusted: only a
+ * png or jpeg data URL with a base64 body gets through, and everything else
+ * returns empty and is refused by the caller.
+ */
+function dataUrlBody(value: string): string {
+  const match = /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/]+=*)$/i.exec(value.trim());
+  return match ? match[1] : "";
+}
 
 /**
  * The wall clock the whole run may spend on the provider.

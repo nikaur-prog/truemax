@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAX_REDO_CHARS,
   afterBodyPrompt,
   afterPortraitPrompt,
   beforeBodyPrompt,
   beforeFromAfterPrompt,
+  redoPrompt,
   usableScore,
 } from "./aiPairPrompt.js";
 import { flawsFromIds } from "./faceFlawCatalog.js";
@@ -199,4 +201,53 @@ test("a missing or unusable score falls back rather than producing NaN", () => {
     assert.equal(usableScore(bad, 7.5), 7.5);
   }
   assert.match(afterPortraitPrompt(spec({ afterScore: usableScore(undefined, 7.5) })), /notably good-looking/i);
+});
+
+// --- redoing one frame ------------------------------------------------------
+
+test("a redo carries what was asked for", () => {
+  const built = redoPrompt("after", "give her shorter hair");
+  assert.match(built, /give her shorter hair/);
+  assert.match(built, /Keep this exact person/);
+});
+
+test("the structural refusals come AFTER whatever was typed", () => {
+  // The last word in a prompt is the one that holds, so everything this
+  // product will not do to a face has to sit below the free text rather than
+  // above it. Somebody typing the opposite must not be able to win.
+  const built = redoPrompt("before", "make the jaw much narrower and the chin weaker");
+  const typed = built.indexOf("make the jaw much narrower");
+  const refusal = built.indexOf("Do not restructure the face");
+  assert.ok(typed > -1 && refusal > typed, "the refusal must follow the instruction");
+});
+
+test("a redo of a BEFORE frame carries the full structural refusal", () => {
+  // This is the frame that could quietly turn the pair into the structural lie
+  // the catalogue exists to prevent, so it gets the long form.
+  for (const frame of ["before", "beforeBody"] as const) {
+    const built = redoPrompt(frame, "rougher skin");
+    assert.match(built, /still the unflattering photograph of the SAME person/);
+    assert.match(built, /Do not change the bone structure, the jaw width, the nose or the eye shape/);
+    assert.match(built, /Do not make them a different person, older, or younger/);
+  }
+});
+
+test("a redo holds the photograph and the framing constant", () => {
+  assert.match(redoPrompt("after", "warmer tone"), /same background, same lighting, same camera/i);
+  assert.match(redoPrompt("afterBody", "different shoes"), /full-length framing, head to toe/i);
+  assert.match(redoPrompt("after", "different top"), /head-and-shoulders framing/i);
+});
+
+test("a redo instruction is capped", () => {
+  // An unbounded box is an unbounded prompt, and the cost of a long one lands
+  // on us rather than on whoever typed it.
+  const built = redoPrompt("after", "x".repeat(MAX_REDO_CHARS + 500));
+  assert.ok(built.includes("x".repeat(MAX_REDO_CHARS)));
+  assert.ok(!built.includes("x".repeat(MAX_REDO_CHARS + 1)));
+});
+
+test("build wording is fenced to the body on a redo too", () => {
+  // The same bleed that turned "curvy" into a fuller jaw would come straight
+  // back through a redo box otherwise.
+  assert.match(redoPrompt("after", "curvier figure"), /describes the BODY only/);
 });

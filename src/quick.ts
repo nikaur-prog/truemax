@@ -3180,6 +3180,84 @@ el.aiForm.onsubmit = async (event) => {
   }
 };
 
+/**
+ * A data URL to a Blob, decoded in place.
+ *
+ * NOT `await fetch(dataUrl)`, which is what this used to do and why Save did
+ * nothing. The production CSP allows data: on img-src, so the previews render,
+ * and does NOT allow it on connect-src, which is what governs fetch. So every
+ * save was blocked by the policy, rejected inside an async click handler, and
+ * disappeared into an unhandled rejection: no file, no error, no clue.
+ *
+ * Decoding the base64 ourselves needs no network permission at all, which also
+ * makes it correct on any future tightening of connect-src.
+ */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  const header = dataUrl.slice(0, comma);
+  const mime = /data:([^;]+)/.exec(header)?.[1] ?? "image/jpeg";
+  const binary = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/**
+ * The file extension the image actually is.
+ *
+ * Hardcoded as "png" until the route began asking the provider for JPEG, so
+ * every saved frame carried a name that disagreed with its own bytes. Reading
+ * it off the data URL means the two can never drift again.
+ */
+function extensionOf(dataUrl: string): string {
+  return /^data:image\/png/i.test(dataUrl) ? "png" : "jpg";
+}
+
+/**
+ * One frame: the picture, its caption, and the two things you can do to it.
+ *
+ * Tap the picture to enlarge. Redo asks what to change and regenerates only
+ * this frame, which is the difference between liking three of four images and
+ * having to spend another render on all of them.
+ */
+function aiFrame(key: string, caption: string): string {
+  return `<figure>
+    <button type="button" class="q-ai-zoom" data-zoom="${key}" aria-label="Enlarge the ${caption.toLowerCase()}">
+      <img data-pair="${key}" />
+    </button>
+    <figcaption>${caption}</figcaption>
+    <button type="button" class="q-ai-redo" data-redo="${key}">Redo this one</button>
+  </figure>`;
+}
+
+/**
+ * The enlarged view.
+ *
+ * A generated face is judged on detail that a 160px preview cannot show, so
+ * approving one at preview size is guessing. Escape and a tap on the backdrop
+ * both close it, because a lightbox with only a small × is a trap on a phone.
+ */
+function openAiLightbox(src: string, alt: string): void {
+  const wrap = document.createElement("div");
+  wrap.className = "q-ai-light";
+  wrap.innerHTML = `<button type="button" class="q-ai-light-close" aria-label="Close">✕</button><img alt="" />`;
+  const image = wrap.querySelector("img")!;
+  image.src = src;
+  image.alt = alt;
+  const close = () => {
+    wrap.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape") close();
+  };
+  wrap.onclick = (event) => {
+    if (event.target === wrap || (event.target as HTMLElement).classList.contains("q-ai-light-close")) close();
+  };
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(wrap);
+}
+
 // The pair, side by side, each downloadable.
 //
 // Downloadable individually rather than as one composite: these are the INPUT
@@ -3211,8 +3289,8 @@ function showAiPair(
   // what the described build actually produced before anybody films with it.
   host.innerHTML = `
     <div class="q-ai-pair">
-      <figure><img data-pair="before" /><figcaption>BEFORE</figcaption></figure>
-      <figure><img data-pair="after" /><figcaption>AFTER</figcaption></figure>
+      ${aiFrame("before", "BEFORE")}
+      ${aiFrame("after", "AFTER")}
     </div>
     <div class="q-ai-pair-actions">
       <button type="button" class="btn pri" data-save="before">Save the before</button>
@@ -3221,8 +3299,8 @@ function showAiPair(
     ${
       hasBody
         ? `<div class="q-ai-pair">
-             <figure><img data-pair="beforeBody" /><figcaption>BEFORE, FULL LENGTH</figcaption></figure>
-             <figure><img data-pair="afterBody" /><figcaption>AFTER, FULL LENGTH</figcaption></figure>
+             ${aiFrame("beforeBody", "BEFORE, FULL LENGTH")}
+             ${aiFrame("afterBody", "AFTER, FULL LENGTH")}
            </div>
            <div class="q-ai-pair-actions">
              <button type="button" class="btn" data-save="beforeBody">Save the full-length before</button>
@@ -3249,12 +3327,99 @@ function showAiPair(
     image.src = src;
     image.alt = labels[key];
   }
+  for (const button of host.querySelectorAll<HTMLButtonElement>("[data-zoom]")) {
+    button.onclick = () => {
+      const key = button.dataset.zoom ?? "before";
+      openAiLightbox(sources[key] ?? before, labels[key] ?? name);
+    };
+  }
+
+  for (const button of host.querySelectorAll<HTMLButtonElement>("[data-redo]")) {
+    button.onclick = async () => {
+      const key = button.dataset.redo ?? "before";
+      const instruction = window.prompt(
+        `What should change about the ${(labels[key] ?? key).replace(`${name}, `, "")}?\n` +
+          "Describe the change only. The face, the framing and the lighting are held.",
+        "",
+      );
+      if (instruction === null) return;
+      const asked = instruction.trim();
+      if (!asked) return;
+
+      button.disabled = true;
+      button.textContent = "Redoing…";
+      el.aiMsg.classList.remove("err");
+      el.aiMsg.textContent = "Redoing that one…";
+      try {
+        const token = await currentAccessToken();
+        const response = await fetch("/api/ai-image", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          // The ANCHOR is the after portrait, always, whichever frame is being
+          // redone. It is the root the whole set descends from, so sending it
+          // is what stops a redo quietly becoming a different person.
+          body: JSON.stringify({
+            mode: "redo",
+            frame: key,
+            instruction: asked,
+            anchor: sources.after,
+            current: sources[key],
+            sex: aiSex,
+            description: (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim(),
+            flaws: selectedFlawIds(),
+            beforeScore: Number((document.getElementById("q-ai-before") as HTMLInputElement).value),
+            afterScore: Number((document.getElementById("q-ai-after") as HTMLInputElement).value),
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { frame?: string; error?: string };
+        if (!response.ok || !payload.frame) {
+          el.aiMsg.classList.add("err");
+          el.aiMsg.textContent = payload.error ?? "That frame could not be redone.";
+          return;
+        }
+        // Re-render the whole set with the one frame swapped, so the redone
+        // image is what every button below it now saves and zooms.
+        el.aiMsg.textContent = "";
+        showAiPair(
+          name,
+          key === "before" ? payload.frame : before,
+          key === "after" ? payload.frame : after,
+          key === "beforeBody" ? payload.frame : beforeBody,
+          key === "afterBody" ? payload.frame : afterBody,
+        );
+      } catch {
+        el.aiMsg.classList.add("err");
+        el.aiMsg.textContent = "Could not reach the image service.";
+      } finally {
+        button.disabled = false;
+        button.textContent = "Redo this one";
+      }
+    };
+  }
+
   for (const button of host.querySelectorAll<HTMLButtonElement>("[data-save]")) {
     button.onclick = async () => {
       const key = button.dataset.save ?? "before";
       const which = sources[key] ?? before;
-      const blob = await (await fetch(which)).blob();
-      await saveFile(blob, exportName("card", "png", key), "card");
+      const label = button.textContent ?? "Save";
+      button.disabled = true;
+      try {
+        await saveFile(dataUrlToBlob(which), exportName("card", extensionOf(which), key), "card");
+        el.aiMsg.classList.remove("err");
+        el.aiMsg.textContent = "Saved.";
+      } catch (error) {
+        // SURFACED, not swallowed. This handler is async, so a rejection had
+        // nowhere to go but the console: pressing Save did nothing at all and
+        // said nothing about it, which is indistinguishable from a dead button.
+        el.aiMsg.classList.add("err");
+        el.aiMsg.textContent = `That image could not be saved. ${(error as Error).message}`;
+      } finally {
+        button.disabled = false;
+        button.textContent = label;
+      }
     };
   }
   host.scrollIntoView({ behavior: "smooth", block: "start" });

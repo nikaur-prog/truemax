@@ -8,6 +8,12 @@ import { readFileSync } from "node:fs";
 // rot silently: a refactor that moves the reservation after the first image
 // call still passes every other test in this repository.
 const route = readFileSync(new URL("./ai-image.ts", import.meta.url), "utf8");
+// The route now has two independent billable paths: the pair generation and a
+// single-frame redo. Counting calls across the whole file conflates them, so
+// each is sliced out and asserted on its own terms.
+const REDO = route.slice(route.indexOf('if (body?.mode === "redo")'), route.indexOf("const spec: PairSpec"));
+const PAIR = route.slice(route.indexOf("const spec: PairSpec"));
+
 const migration = readFileSync(
   new URL("../supabase/migrations/20260830120000_studio_render_meter.sql", import.meta.url),
   "utf8",
@@ -54,16 +60,22 @@ test("a slot is claimed for every billable pair, not one for all four", () => {
   // The full-length shots are two MORE calls to the same provider at the same
   // price. One slot covering four images would have halved the protection this
   // meter exists to give, quietly, on the day the body shot shipped.
-  assert.match(route, /for \(let i = 0; i < \(fullBody \? 2 : 1\); i \+= 1\)/);
-  // Four billable calls in total, and only when the body pair was asked for.
-  assert.equal((route.match(/await openaiImage\(apiKey/g) ?? []).length, 4);
+  assert.match(PAIR, /for \(let i = 0; i < \(fullBody \? 2 : 1\); i \+= 1\)/);
+  // Four billable calls on the pair path, and only when the body pair was asked
+  // for. The redo path is a separate invocation and is counted separately.
+  assert.equal((PAIR.match(/await openaiImage\(apiKey/g) ?? []).length, 4);
+  assert.equal((REDO.match(/await openaiImage\(apiKey/g) ?? []).length, 1, "a redo is one call");
+  assert.equal((REDO.match(/await claimTtsRender/g) ?? []).length, 1, "and it costs one slot");
 });
 
-test("it is finalized only after every requested frame succeeds", () => {
-  const lastImage = route.lastIndexOf("await openaiImage(apiKey");
-  const finalize = route.indexOf("await finalizeTtsRender");
-  assert.ok(finalize > lastImage, "half a pair is not a cheaper product, it is nothing");
-  assert.equal((route.match(/await finalizeTtsRender/g) ?? []).length, 1);
+test("each path finalizes only after its own frames succeed", () => {
+  for (const [name, block] of [["pair", PAIR], ["redo", REDO]] as Array<[string, string]>) {
+    const lastImage = block.lastIndexOf("await openaiImage(apiKey");
+    const finalize = block.indexOf("await finalizeTtsRender");
+    assert.ok(lastImage > -1, `${name} must make a billable call`);
+    assert.ok(finalize > lastImage, `${name}: half a set is not a cheaper product, it is nothing`);
+    assert.equal((block.match(/await finalizeTtsRender/g) ?? []).length, 1, `${name} finalizes once`);
+  }
 });
 
 test("every failing exit gives the slot back", () => {
@@ -172,7 +184,9 @@ test("four calls cannot run past the function ceiling", () => {
   const budget = /const TOTAL_BUDGET_MS = (\d+)_(\d+)/.exec(route);
   assert.ok(budget, "a total budget must exist, not just a per-call timeout");
   const total = Number(`${budget![1]}${budget![2]}`);
-  const calls = (route.match(/await openaiImage\(apiKey/g) ?? []).length;
+  // The PAIR path is the long one: four dependent calls in a single
+  // invocation. A redo is one call and cannot approach the ceiling.
+  const calls = (PAIR.match(/await openaiImage\(apiKey/g) ?? []).length;
   assert.ok(ms * calls <= 300_000, `${calls} calls at ${ms}ms each exceeds the 300s ceiling`);
   assert.ok(total < 300_000, "the budget must sit below the ceiling, not on it");
   // And it must actually be enforced rather than merely declared.
