@@ -19,7 +19,14 @@ import { join } from "node:path";
 // source-regex suite once passed with a feature completely dead.
 // ---------------------------------------------------------------------------
 
-const PG_BIN = ["/usr/lib/postgresql/16/bin", "/usr/lib/postgresql/15/bin", "/usr/local/pgsql/bin"]
+const PG_BIN = [
+  "/usr/lib/postgresql/16/bin",
+  "/usr/lib/postgresql/15/bin",
+  "/opt/homebrew/opt/postgresql@17/bin",
+  "/opt/homebrew/opt/postgresql@16/bin",
+  "/opt/homebrew/opt/postgresql@15/bin",
+  "/usr/local/pgsql/bin",
+]
   .find((d) => {
     try {
       execFileSync("test", ["-x", join(d, "initdb")]);
@@ -214,4 +221,28 @@ test("a non-array links value is still refused", (t) => {
     const result = apply(shape);
     assert.ok(!result.ok, `${shape} must not be accepted as links`);
   }
+});
+
+test("crafted link elements cannot bypass the browser validation", (t) => {
+  if (!guard(t)) return;
+  reset();
+  for (const links of [
+    "[42]",
+    "[{}]",
+    '["http://a.com"]',
+    '["https://a.com/has a space"]',
+    `["https://a.com/${"x".repeat(2049)}"]`,
+  ]) {
+    const result = apply(links);
+    assert.ok(!result.ok, `${links.slice(0, 80)} must not be accepted as links`);
+    assert.match(result.message, /Invalid Creator League application/);
+  }
+  assert.equal(q("select count(*) from public.league_creators"), "0");
+});
+
+test("only authenticated browser users can execute the application RPC", (t) => {
+  if (!guard(t)) return;
+  const signature = "public.apply_to_creator_league(text,text,text,jsonb,text,boolean,boolean,text)";
+  assert.equal(q(`select has_function_privilege('anon', '${signature}', 'execute')`), "f");
+  assert.equal(q(`select has_function_privilege('authenticated', '${signature}', 'execute')`), "t");
 });

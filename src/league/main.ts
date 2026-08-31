@@ -355,7 +355,11 @@ function renderApply(): void {
     // to be a real https link, because a broken one is worse than none. It is
     // just no longer required to be there at all.
     const links = (document.getElementById("ap-links") as HTMLTextAreaElement).value
-      .split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3);
+      .split("\n").map((l) => l.trim()).filter(Boolean);
+    if (links.length > 3) {
+      err.textContent = "Add no more than three links.";
+      return;
+    }
     if (links.some((link) => !httpsUrl(link))) {
       err.textContent = "Those links need to be full https:// addresses, or leave the box empty.";
       return;

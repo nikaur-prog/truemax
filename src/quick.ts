@@ -3481,9 +3481,9 @@ function showAiPair(
       hasBody
         ? `<div class="q-ai-scenes">
              <h3>Film this character</h3>
-             <p class="q-ai-note">Five scenes as the after and the same five as the before, from the
+             <p class="q-ai-note">Eight scenes as the after and the same eight as the before, from the
              full-length shot above. Stills first: each one is also the first frame a clip would be
-             made from, so the face is locked before anything is animated. One render per shot.</p>
+             made from, so the face is locked before anything is animated. Sixteen renders total.</p>
              <button type="button" class="btn pri" data-film>Film the set</button>
              <p class="q-ai-note" data-scene-status></p>
              <div class="q-ai-scene-grid" data-scene-grid></div>
