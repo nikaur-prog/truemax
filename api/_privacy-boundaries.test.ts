@@ -213,6 +213,15 @@ test("the Stripe catalogue probe validates every required offer exactly", () => 
   assert.match(probe, /\(\?:sk\|rk\)_test_/);
 });
 
+test("the billing catalog names the shipped live offers rather than the retired scaffold", () => {
+  const catalog = read("docs/BILLING_CATALOG.md");
+  assert.match(catalog, /TrueMax Starter \| Recurring monthly \| \$7\.99 USD/);
+  assert.match(catalog, /TrueMax Max \| Recurring yearly \| \$89\.99 USD/);
+  assert.match(catalog, /Decline downsell \| One-time eligible account \| \$2\.99 USD/);
+  assert.match(catalog, /Voiced analysis \| One-time \| \$2\.99 USD/);
+  assert.doesNotMatch(catalog, /no active products|One-time scan payments are not fulfilled/);
+});
+
 test("billing Customer ids are accepted only through a user-bound Stripe subscription", () => {
   const shared = read("api/_shared.ts");
   const portal = read("api/create-portal-session.ts");

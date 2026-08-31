@@ -1,106 +1,78 @@
-# TrueMax billing catalog and implementation review
+# TrueMax billing catalog and launch state
 
-Last reviewed: 12 August 2026 (Pacific/Auckland)
+Last reviewed: 31 August 2026 (Pacific/Auckland)
 
-## Connected Stripe account
+## Live Stripe catalog
 
-The Stripe MCP connection is authenticated to account `acct_1U3RfMJdkPdozJUk`
-(`TrueMax`). At review time the connected account returned:
+Production uses the TrueMax live Stripe account. Product and price IDs stay in
+Vercel server-side environment variables and are never accepted from the
+browser.
 
-- no active products;
-- no active prices; and
-- no webhook endpoints.
-
-This audit did not create anything. The connector did not expose whether its
-current scope was sandbox/test or live, so no mutation was attempted. Product
-setup must start in a clearly labelled Stripe sandbox and be copied to live only
-after the full flow passes.
-
-## Target Stripe catalog
-
-Stripe should handle payment terms and money. Supabase should handle scan
-allowances and product access.
-
-| Stripe product | Price type | Amount | Server key |
+| Offer | Price type | Amount | Server key |
 | --- | --- | ---: | --- |
-| TrueMax Starter | Recurring monthly | $6.99 USD | `STRIPE_STARTER_PRICE_ID` |
+| TrueMax Starter | Recurring monthly | $7.99 USD | `STRIPE_STARTER_PRICE_ID` |
 | TrueMax Max | Recurring monthly | $11.99 USD | `STRIPE_MAX_PRICE_ID` |
-| TrueMax Extra Scan | One-time member price | $2.99 USD | `STRIPE_MEMBER_SCAN_PRICE_ID` |
-| TrueMax Extra Scan | One-time standard price | $5.99 USD | `STRIPE_SCAN_PRICE_ID` |
+| TrueMax Max | Recurring yearly | $89.99 USD | `STRIPE_MAX_ANNUAL_PRICE_ID` |
+| Extra scan | One-time standard | $5.99 USD | `STRIPE_SCAN_PRICE_ID` |
+| Extra scan | One-time member | $2.99 USD | `STRIPE_MEMBER_SCAN_PRICE_ID` |
+| Decline downsell | One-time eligible account | $2.99 USD | `STRIPE_DOWNSELL_PRICE_ID` |
+| Voiced analysis | One-time | $2.99 USD | `STRIPE_VOICED_PRICE_ID` |
 
-The seven-day trial belongs on the Checkout-created subscription, not in a
-second product or price.
+Starter and Max begin with one seven-day trial per account. An existing legacy
+Starter subscription can remain on its original price; new Checkout Sessions
+use the current $7.99 price.
 
-Consumer Checkout creates ordinary Billing invoices and receipts, so the MVP
-does not need a separate Invoicing API flow. Use Dashboard-created one-off
-invoices only for exceptional manual support cases.
+## Shipped implementation
 
-## Existing implementation
+- Checkout resolves every price from a server-owned allowlist.
+- Active or trialing subscribers cannot open a second subscription.
+- Max eligibility is checked from the server-side date of birth and requires an
+  adult account.
+- Trial and decline-downsell reservations are atomic and one-time.
+- Scan and voice credits are granted only after Stripe confirms payment.
+- Async payment success and failure, subscription changes, paid invoices,
+  refunds and disputes are handled by the signed webhook.
+- Credits and fulfilment are idempotent. Refund and dispute reconciliation can
+  revoke unused value or record debt after value has been consumed.
+- Entitlements and credit ledgers are server-written and owner-readable under
+  row-level security.
+- The Customer Portal is the self-service billing surface.
+- TikTok attribution metadata is allowlisted and copied to subscriptions for
+  renewal reporting; it never carries face data or email to TikTok.
 
-The current code has good security foundations:
+## Production verification
 
-- Stripe and Supabase secret keys stay in same-origin Vercel Functions;
-- Checkout uses a server-owned price ID rather than accepting one from the
-  browser;
-- webhook signatures are checked against the exact request body;
-- webhook event IDs are idempotent and older events cannot normally overwrite
-  newer entitlement state;
-- entitlement rows are server-written and owner-readable under RLS; and
-- the Customer Portal is used for self-service billing.
+The live webhook listens for Checkout, subscription, invoice, refund and dispute
+events. The protected `/api/stripe-config` probe is the authority for whether
+every deployed price resolves with the expected amount, currency, cadence and
+Stripe mode. Presence of an environment variable alone is not proof.
 
-The current funnel branch also adds `free | starter | max`, atomic trial
-reservation, duplicate-subscription blocking, server-side adult enforcement,
-safe paid-account deletion and the post-analysis offer. It does not yet
-implement one-time scan purchases, weekly scan grants, native-store receipts or
-the immutable credit ledger.
+Before calling consumer billing launch-verified:
 
-## Bugs and gaps to fix before accepting money
+1. Complete Stripe identity verification.
+2. Run the protected production catalog probe.
+3. Complete one controlled live one-time purchase with a fresh account.
+4. Confirm the webhook grants exactly one credit and the receipt is correct.
+5. Refund the controlled purchase only with explicit owner approval, then
+   confirm reconciliation.
+6. Obtain the New Zealand GST decision before enabling automatic tax in API
+   Checkout Sessions.
 
-1. **One-time scan payments are not fulfilled.** Credits must be granted only
-   after a paid Checkout event. Async payment methods must not receive a credit
-   from an unpaid `checkout.session.completed` event.
-2. **There is no immutable scan-credit ledger.** A balance alone is too easy to
-   corrupt. Store grants, purchases, use, expiry and refunds as ledger entries.
-3. **Past-due access is revoked immediately.** Decide whether a short grace
-   period is intended and align it with Stripe Smart Retries and customer
-   emails.
-4. **Same-second webhook ordering is ambiguous.** Stripe event timestamps have
-   second precision. The database currently permits a later-processed event
-   with the same timestamp to overwrite state; add a deterministic status or
-   event ordering rule before launch.
+## Creator League payouts
 
-## Target Supabase model
+Creator payouts are separate from consumer billing. They use Stripe Connect
+recipient accounts and server-created Transfers from the funded TrueMax platform
+balance. The browser never chooses a payout amount or destination.
 
-- `profiles`: onboarding answers, age band and consent version. Keep sensitive
-  free text optional and separate from Auth metadata.
-- `entitlements`: `free | starter | max`, billing source (`stripe | apple |
-  google`), status and renewal dates.
-- `trial_redemptions`: one server-owned redemption per account/person.
-- `scan_credit_ledger`: immutable grants and debits with source, expiry,
-  payment reference and reversal reference.
-- `billing_customers`: stable provider customer IDs, separated from feature
-  entitlement state.
+Keep `LEAGUE_PAYOUTS_ENABLED=false` or unset until the Connect business model is
+approved, the sandbox runbook in `LEAGUE_PAYOUT_LAUNCH.md` passes, the first pool
+is funded and one controlled live creator transfer succeeds. Supported creator
+countries are restricted by `LEAGUE_PAYOUT_COUNTRIES`, which defaults to `NZ`.
 
-The initial free analysis is an application entitlement, not a zero-dollar
-Stripe subscription. Weekly scan allowances are also application grants, not
-Stripe metered usage.
+## Payment methods
 
-## Webhook coverage
-
-At minimum, handle subscription lifecycle, successful and failed invoices,
-trial-ending reminders, paid one-time Checkout sessions, async payment success
-and refunds. Every provider event must be idempotent. Refunds or chargebacks for
-an unused extra scan should reverse its credit; a used credit needs an explicit
-support policy.
-
-## Safe rollout order
-
-1. Complete the Starter/Max feature table and weekly-credit rules.
-2. Add the immutable credit-ledger migration with RLS tests.
-3. Extend Checkout using a server allowlist for the two one-time scan price IDs.
-4. Extend signed webhooks and add replay/out-of-order tests.
-5. Create the four prices in a Stripe sandbox and configure Customer Portal,
-   recovery emails, trial notices and Radar.
-6. Add Vercel Preview secrets and run end-to-end sandbox tests.
-7. Copy products to live mode, create a separate live webhook and set live
-   Production secrets only after the sandbox gate is green.
+Stripe Checkout dynamically presents only methods compatible with the customer,
+currency and purchase type. Enabling a method in the Dashboard does not prove it
+works for every one-time and recurring offer. Test each method the product plans
+to advertise, including its delayed-payment, refund and dispute path, before
+naming it as supported in marketing copy.
