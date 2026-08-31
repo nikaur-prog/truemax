@@ -1,6 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { SidePoints } from "./engine/sideMetrics.js";
 import { captureAttribution } from "./engine/attribution.js";
+import { FACE_FLAWS } from "./engine/faceFlawCatalog.js";
 import { detect, initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
@@ -171,15 +172,27 @@ void quickAccessProfile().then((access) => {
 
 // Which pillar buttons each grant unlocks, and which rooms only staff see.
 //
-// The grant keys are the League's ("cta", "polisher", "clips"), ticked by the
-// owner at approval; the buttons are this page's modes. CTA covers both
-// content cuts because they are the same job — footage of a scan, posted.
-// The AI Model Reel and Calibrate are not grants at all: /api/ai-image is
-// staff-gated server-side and Calibrate feeds the rating corpus, so for a
-// creator those buttons are REMOVED rather than locked — a door that would
-// 404 should not exist, which is the page's standing philosophy.
-const PILLAR_GRANT: Record<string, string> = { reel: "cta", analysis: "cta", enhance: "polisher" };
-const STAFF_ONLY_MODES = ["ai", "calibrate"];
+// The grant keys are the League's ("cta", "polisher", "clips", "studio"),
+// ticked by the owner at approval; the buttons are this page's modes. CTA
+// covers both content cuts because they are the same job: footage of a scan,
+// posted.
+//
+// The AI Model Reel moved from staff-only to the `studio` grant, and the move
+// is the point of it. Generating a pair costs money per call, which is why it
+// was locked to staff at all, but "costs money" is what a METER is for and the
+// League already has one. A grant plus a reserved quota slot lets somebody run
+// the room without holding the keys to the whole product.
+//
+// Calibrate stays staff-only and is REMOVED rather than locked, because it
+// feeds the rating corpus the scoring is fitted against: it is not a tool
+// somebody is missing from their plan, it is not a tool at all.
+const PILLAR_GRANT: Record<string, string> = {
+  reel: "cta",
+  analysis: "cta",
+  enhance: "polisher",
+  ai: "studio",
+};
+const STAFF_ONLY_MODES = ["calibrate"];
 
 function applyPillarGrants(access: { staff: boolean; grants: Record<string, boolean> }): void {
   if (access.staff) return;
@@ -221,6 +234,10 @@ function openFromHash(): void {
     // analysis room — the video is built from a scan — so the door opens that
     // room.
     rundown: "analysis",
+    // The Studio card's door. Without this the League link landed on the
+    // pillar menu, which reads as the link being broken.
+    ai: "ai",
+    studio: "ai",
   }[location.hash.slice(1).toLowerCase()];
   if (target) {
     const button = document.querySelector<HTMLButtonElement>(`.q-pillar[data-mode="${target}"]`);
@@ -242,6 +259,10 @@ function openFromHashInner(): void {
   }
   if (hash === "analysis" || hash === "rundown") {
     enterMode("analysis");
+    return;
+  }
+  if (hash === "ai" || hash === "studio") {
+    enterMode("ai");
     return;
   }
   if (hash === "clips") {
@@ -654,6 +675,7 @@ function enterMode(next: QuickMode): void {
   if (next === "ai") {
     el.ai.classList.remove("hidden");
     el.capture.classList.add("hidden");
+    paintFlawChips();
     renderAiNote();
     track("quick-visit");
     return;
@@ -3090,15 +3112,13 @@ el.aiForm.onsubmit = async (event) => {
   event.preventDefault();
   const name = (document.getElementById("q-ai-name") as HTMLInputElement).value.trim();
   const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
-  const blemishes =
-    (document.getElementById("q-ai-blemish") as HTMLTextAreaElement | null)?.value.trim() || undefined;
   if (!name || !desc) return;
 
   // Saved BEFORE the request, not after. Generation is the slow, billable and
   // failable half; the character is the half worth keeping either way, and
   // losing a description because an image service was rate limited is the kind
   // of thing that stops somebody using a tool.
-  saveAiCharacter({ name, sex: aiSex, description: desc, blemishes });
+  saveAiCharacter({ name, sex: aiSex, description: desc, flaws: selectedFlawIds() });
 
   const go = document.getElementById("q-ai-go") as HTMLButtonElement | null;
   el.aiMsg.classList.remove("err");
@@ -3115,7 +3135,7 @@ el.aiForm.onsubmit = async (event) => {
         "content-type": "application/json",
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ sex: aiSex, description: desc, blemishes }),
+      body: JSON.stringify({ sex: aiSex, description: desc, flaws: selectedFlawIds() }),
     });
     const payload = (await response.json().catch(() => ({}))) as {
       before?: string;
@@ -3181,6 +3201,29 @@ function showAiPair(name: string, before: string, after: string): void {
   host.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// The flaw chips, painted once from the catalogue.
+//
+// From the catalogue rather than typed into the markup so the list, the prompt
+// fragments and the tests cannot drift: adding a chip is one entry in one file.
+function paintFlawChips(): void {
+  const host = document.getElementById("q-ai-flaws");
+  if (!host || host.childElementCount) return;
+  host.innerHTML = FACE_FLAWS.map(
+    (f) => `<button type="button" class="q-flaw" data-flaw="${f.id}">${f.label}</button>`,
+  ).join("");
+  host.addEventListener("click", (ev) => {
+    const chip = (ev.target as HTMLElement).closest<HTMLButtonElement>("[data-flaw]");
+    if (chip) chip.classList.toggle("on");
+  });
+}
+
+/** The chips currently lit, as catalogue ids for the server to resolve. */
+function selectedFlawIds(): string[] {
+  return [...document.querySelectorAll<HTMLElement>("#q-ai-flaws .q-flaw.on")]
+    .map((el) => el.dataset.flaw ?? "")
+    .filter(Boolean);
+}
+
 // The library the operator was promised: describe somebody once, film them
 // again next week. Local for now, because a character is a prompt and a name —
 // there is nothing here worth a round trip until the generator is wired up.
@@ -3189,19 +3232,24 @@ interface AiCharacter {
   sex: Sex;
   description: string;
   /**
-   * What the BEFORE shot should show, and only the before.
+   * What the BEFORE shot should show, as catalogue ids.
    *
-   * The description is what stays the same across the pair — face, hair, age,
-   * build — because a before/after where the person changes is not a before and
-   * after. This is the half that is meant to disappear: the acne, the patchy
-   * stubble, the tired eyes.
+   * The description is what stays the same across the pair (face, hair, age,
+   * build) because a before/after where the person changes is not a before and
+   * after. This is the half that is meant to disappear.
+   *
+   * IDS RATHER THAN PROSE, and that was a correction. A free-text field here
+   * fed straight into both prompts, so "a narrow jaw" could be typed into the
+   * before and then asked to be CLEARED in the after: the structural pair the
+   * flaw catalogue exists to prevent, reachable by typing. See
+   * src/engine/faceFlawCatalog.ts.
    *
    * There is deliberately no equivalent for the after. "Glowed up" is the
    * absence of these rather than a list of its own, and asking somebody to
    * describe an improvement twice is how the two shots stop looking like one
    * person.
    */
-  blemishes?: string;
+  flaws?: string[];
 }
 
 const AI_CHARACTERS_KEY = "truemax.aiCharacters";

@@ -69,7 +69,7 @@ export async function quickAccessProfile(): Promise<QuickAccess> {
   // end for everybody else.
   if (!token) return DENIED;
   if (await loadIsAdmin().catch(() => false)) {
-    return { allowed: true, staff: true, grants: { cta: true, clips: true, polisher: true } };
+    return { allowed: true, staff: true, grants: { cta: true, clips: true, polisher: true, studio: true } };
   }
   // The League door. Reads the caller's OWN league_creators row — the RLS
   // select policy is `auth.uid() = user_id or staff`, and the explicit eq

@@ -133,6 +133,11 @@ let busy = false;
 // part of the reel that is ours, and it is a checkbox precisely so nobody
 // discovers it in their export.
 let outro = true;
+// The polished 30-second CTA film is the default tail for TikTok reels. It is
+// still optional: a creator cutting a custom CTA can turn it off before the
+// render instead of trimming a finished file afterwards. The short card above
+// remains a separate choice and is the only CTA embedded in a full Rundown.
+let longCta = true;
 
 export function closeBeatReelPanel(): void {
   // A render still writing must keep its sources: closing mid-render would
@@ -156,6 +161,7 @@ export function closeBeatReelPanel(): void {
   quality = "1080";
   songStart = 0;
   outro = true;
+  longCta = true;
   analysisSource = null;
   analysisOn = false;
   analysisAt = 0;
@@ -609,7 +615,7 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
       </section>
 
       <section class="brp-sec" id="brp-preview-sec" hidden>
-        <div class="brp-head"><span>▶ THE PREVIEW</span><small id="brp-prevnote">Loops until you stop it. What it shows is what renders.</small></div>
+        <div class="brp-head"><span>▶ THE PREVIEW</span><small id="brp-prevnote">Loops the beat cut exactly. The selected 30-second CTA film appends after it.</small></div>
         <div class="brp-prevwrap" id="brp-prevwrap" hidden>
           <canvas id="brp-prev" width="270" height="480"></canvas>
         </div>
@@ -655,6 +661,9 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
         <div class="brp-drop">
           <label class="brp-outro"><input type="checkbox" id="brp-outro" checked />
             End on the TrueMax card <em>one bar · "truemax.app"</em></label>
+          <label class="brp-outro"><input type="checkbox" id="brp-long-cta" checked />
+            Append the polished TrueMax CTA film <em>30s · voice and visuals</em></label>
+          <small>Turn the long film off when you are adding a custom CTA in your editor. Rundowns already carry their short CTA and do not use this switch.</small>
         </div>
         <div class="brp-drop">
           <button type="button" class="btn gho" id="brp-drop-set">Mark the drop here</button>
@@ -791,6 +800,10 @@ function wire(el: HTMLElement): void {
 
   el.querySelector<HTMLInputElement>("#brp-outro")!.onchange = (e) => {
     outro = (e.target as HTMLInputElement).checked;
+    paint();
+  };
+  el.querySelector<HTMLInputElement>("#brp-long-cta")!.onchange = (e) => {
+    longCta = (e.target as HTMLInputElement).checked;
     paint();
   };
   el.querySelector<HTMLButtonElement>("#brp-drop-set")!.onclick = () => {
@@ -1601,7 +1614,7 @@ function paintPlan(): void {
   const outroSec = outro && g2 ? g2.period * g2.beatsPerBar : 0;
   note(
     "brp-plannote",
-    `${plan.cuts.length} cuts, ${plan.duration.toFixed(2)}s${outroSec ? ` + ${outroSec.toFixed(2)}s card` : ""}, every one on a beat at ${plan.bpm.toFixed(1)} BPM.`,
+    `${plan.cuts.length} cuts, ${plan.duration.toFixed(2)}s${outroSec ? ` + ${outroSec.toFixed(2)}s card` : ""}${longCta ? " + 30s CTA film" : ""}, every cut on a beat at ${plan.bpm.toFixed(1)} BPM.`,
   );
   const wrap = host!.querySelector<HTMLElement>("#brp-cuts")!;
   // Each tile states its length in beats AND seconds: the beats are the
@@ -1633,6 +1646,7 @@ async function render(): Promise<void> {
       song: { channels: song.channels, sampleRate: song.sampleRate },
       quality,
       outroBeats: outro ? grid()!.beatsPerBar : 0,
+      longCta,
       onProgress: (f, label) => {
         progress.textContent = `${label}, ${Math.round(f * 100)}%`;
       },

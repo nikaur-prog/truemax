@@ -356,6 +356,22 @@
 }
 .q-ai-field small { font-size: 12px; color: var(--muted, #6b716d); line-height: 1.4; }
 
+/* The flaw chips. A wrapping grid rather than a select, because picking four
+   of seventeen is a glance-and-tap job and a multi-select hides everything not
+   currently scrolled to. */
+.q-flaws { display: flex; flex-wrap: wrap; gap: 7px; margin: 4px 0 8px; }
+.q-flaw {
+  border: 1px solid var(--line, #dcdfdc); background: var(--card, #fff); color: var(--mut, #6b706c);
+  border-radius: 99px; padding: 7px 13px; font-size: 13px; cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.q-flaw:hover { border-color: var(--ink, #16181a); color: var(--ink, #16181a); }
+.q-flaw.on {
+  background: var(--ink, #16181a); border-color: var(--ink, #16181a); color: var(--bg, #fff);
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) { .q-flaw { transition: none; } }
+
 .q-seg { display: inline-flex; background: var(--soft, #eef1ef); border-radius: 99px; padding: 3px; gap: 2px; }
 .q-seg button {
   border: 0; background: none; cursor: pointer; font: inherit; font-size: 13px;
