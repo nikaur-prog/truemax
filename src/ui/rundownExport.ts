@@ -5,6 +5,7 @@ import { buildReelScript, narrationFrom, narrationOffsets, reelBlockers } from "
 import { alignTimeline, buildTimeline, fitTimeline } from "../engine/rundownTimeline.js";
 import { decodeVoice, fetchNarration, mixRundownAudio, speechSpan } from "./rundownAudio.js";
 import { CUTAWAY_TAIL, brollFor, drawRundownFrame, stageChanged } from "./rundownFrame.js";
+import { LOOKS, applyEnhance, lookFor } from "../engine/enhance.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { exportName, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
@@ -145,6 +146,104 @@ export interface RundownResult {
   voiceProvider?: string;
 }
 
+
+// ---------------------------------------------------------------------------
+// Resampling the source ONCE, deliberately, before the render starts.
+//
+// The rundown never shows a whole photograph. It shows a crop of roughly a
+// face and a half, blown up to fill a 1080x1920 frame, and then pushes in
+// another 3.5% over each beat. On a 1280-tall capture that is more than 2x
+// magnification, which is why an otherwise fine photo came back looking
+// pixelated: the browser was doing that enlargement inline, per frame, with
+// whatever filtering it felt like.
+//
+// Two things fix that, and they are different things. Raising the ingest cap
+// (MAX_IMAGE_DIM in main.ts) stops the pixels being thrown away in the first
+// place, and matters most. This pass handles what is left: it resamples cleanly
+// to the size the crop will actually be asked for, once, and then runs the
+// unsharp mask over the result so the edge contrast the phone's own encoder
+// smeared away comes back at the size it will be seen.
+//
+// It is NOT an AI upscaler and does not invent detail. See the header of
+// engine/enhance.ts for why that was rejected: a neural enhancer hallucinated
+// glossy plastic skin onto a real face, which is worse than the softness.
+// Everything here recovers or emphasises information that is already in the
+// frame, which is the only kind of sharpening that can be trusted on a face
+// this product is about to put a number on.
+
+/**
+ * How much of the photo's height the tightest rundown crop takes.
+ *
+ * regionCrop fits a head box of roughly faceH * 1.5, and a framed portrait puts
+ * the face at something like 40% of frame height, so the crop lands near 60% of
+ * the source. Deliberately an estimate: the real crop varies per beat, and
+ * sizing for the tightest one wastes memory on every frame of the rest.
+ */
+const CROP_FRACTION = 0.6;
+
+/** Never enlarge more than this, whatever the arithmetic asks for. */
+const MAX_UPSCALE = 2;
+
+/**
+ * And never past this long edge, whatever the enlargement asks for.
+ *
+ * The measurement overlay allocates a canvas at the photo's own size, so this
+ * ceiling is a memory budget for a phone as much as a quality one. 3200 keeps
+ * the overlay under about 40MB at 4 bytes a pixel.
+ */
+const MAX_PREPARED_EDGE = 3200;
+
+/**
+ * How much to enlarge, from the sizes alone.
+ *
+ * Split out from the canvas work so the arithmetic can be tested in node. It is
+ * the half that can go quietly wrong: a factor below 1 would DOWNSCALE the
+ * photograph on its way into the render, which is the exact bug this pass
+ * exists to undo, and it would look like a fix while making things worse.
+ */
+export function preparedScale(photoW: number, photoH: number, outH: number): number {
+  const long = Math.max(photoW, photoH);
+  if (!Number.isFinite(long) || long <= 0 || !Number.isFinite(outH) || outH <= 0) return 1;
+  const byNeed = photoH > 0 ? outH / CROP_FRACTION / photoH : 1;
+  const byCeiling = MAX_PREPARED_EDGE / long;
+  // NEVER below 1. Throwing pixels away here would be worse than the softness
+  // this is meant to fix, and a ceiling smaller than the photo is a reason to
+  // leave it alone rather than to shrink it.
+  return Math.max(1, Math.min(MAX_UPSCALE, byCeiling, Math.max(1, byNeed)));
+}
+
+function prepareRenderPhoto(photo: HTMLCanvasElement, outH: number): HTMLCanvasElement {
+  const factor = preparedScale(photo.width, photo.height, outH);
+  if (factor === 1 && photo.width * photo.height > MAX_PREPARED_EDGE * MAX_PREPARED_EDGE) return photo;
+
+  const w = Math.max(1, Math.round(photo.width * factor));
+  const h = Math.max(1, Math.round(photo.height * factor));
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const octx = out.getContext("2d", { willReadFrequently: true });
+  // No context is a broken canvas, not a reason to lose the export. Hand back
+  // the original and let the renderer magnify it the way it always did.
+  if (!octx) return photo;
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = "high";
+  octx.drawImage(photo, 0, 0, w, h);
+
+  try {
+    const frame = octx.getImageData(0, 0, w, h);
+    // "subtle" rather than "standard" because this runs on EVERY rundown
+    // without anybody asking for it. A visible sharpening artefact on a face
+    // the video is about to score would be a worse failure than the softness,
+    // and an operator who wants more has the Enhance panel.
+    applyEnhance(frame.data, w, h, lookFor(LOOKS.subtle, Math.max(w, h)));
+    octx.putImageData(frame, 0, 0);
+  } catch {
+    // A tainted canvas throws on getImageData. The clean resample above still
+    // stands; only the sharpen is lost, and losing it silently is correct.
+  }
+  return out;
+}
+
 export async function downloadRundownVideo(
   photo: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
@@ -280,6 +379,13 @@ export async function downloadRundownVideo(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
+  // Done here rather than at the top of the function because it needs outH: the
+  // point is to resample to the size this render will ask for, and that is not
+  // known until the codec fallback above has settled on a raster.
+  onProgress?.(0.12, "Preparing the photograph");
+  const renderPhoto = prepareRenderPhoto(photo, outH);
+  ensureCurrent();
+
   // One overlay canvas for the whole render. drawMeasurement reallocates its
   // backing buffer whenever the size changes, and at thirty frames a second for
   // a minute that would be eighteen hundred reallocations of a full-resolution
@@ -363,7 +469,7 @@ export async function downloadRundownVideo(
     // compositor saves and restores freely, and a transform that survived a
     // stray restore would silently draw one frame at the wrong size.
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    drawRundownFrame(ctx, photo, landmarks, input, t, {
+    drawRundownFrame(ctx, renderPhoto, landmarks, input, t, {
       width: LOGICAL_W,
       height: LOGICAL_H,
       overlayCanvas,

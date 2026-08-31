@@ -129,7 +129,19 @@ import { closeSettings, openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
 import { markPlatform } from "./engine/platform.js";
 
-const MAX_IMAGE_DIM = 1280;
+// Ingest cap, and it is an EXPORT setting as much as a detection one.
+//
+// This was 1280, and /quick raised its own copy to 2160 for exactly the reason
+// written beside it there: the rundown frame is authored at 720x1280 and
+// encoded at 1080x1920, the photograph fills most of that height, and the crop
+// is roughly a face-and-a-half tall. A 1280-tall source is therefore magnified
+// past 2x into every frame of the paid video, which is what "still kind of
+// pixelated" looks like. The fix never reached this file, so the $2.99 product
+// shipped with the softer of the two ingests.
+//
+// Detection cost is unchanged: MediaPipe resizes internally. Only the one-off
+// skin pass pays for the extra pixels, once, off the render path.
+const MAX_IMAGE_DIM = 2160;
 
 // Torn down whenever the gate is replaced, so a stale reel cannot keep painting
 // into a canvas that is no longer on the page.

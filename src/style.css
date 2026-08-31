@@ -4885,6 +4885,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 }
 .prod-add:hover { border-color: var(--acc); color: var(--acc); }
 /* ---------- the AI pair ---------- */
+/* The full-length toggle. A checkbox rather than a second button because it
+   modifies the one generation rather than starting another. */
+.q-ai-check { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px; cursor: pointer; }
+.q-ai-check input { width: 18px; height: 18px; accent-color: var(--ink); flex: none; cursor: pointer; }
+.q-ai-check span { font-size: 14px; font-weight: 600; }
+.q-ai-sub { display: block; color: var(--mut); font-size: 12.5px; line-height: 1.45; margin: 0 0 14px 28px; }
+
 .q-ai-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 12px; }
 .q-ai-pair figure { margin: 0; }
 .q-ai-pair img { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; }

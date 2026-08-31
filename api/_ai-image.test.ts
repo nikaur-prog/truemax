@@ -27,18 +27,42 @@ test("the quota is claimed in SQL, not counted and then spent", () => {
 });
 
 test("the slot is reserved BEFORE the first billable call", () => {
-  const claim = route.indexOf("reservation = await claimTtsRender");
-  const firstImage = route.indexOf("const before = await openaiImage");
-  const secondImage = route.indexOf("const after = await openaiImage");
-  assert.ok(claim > -1 && firstImage > -1);
+  const claim = route.indexOf("await claimTtsRender(user.id, meter)");
+  const firstImage = route.indexOf("const afterPortrait = await openaiImage");
+  const secondImage = route.indexOf("const beforePortrait = await openaiImage");
+  assert.ok(claim > -1 && firstImage > -1 && secondImage > -1);
   assert.ok(claim < firstImage, "reserving after the spend is not reserving");
   assert.ok(firstImage < secondImage);
 });
 
-test("it is finalized once, only after the COMPLETE pair succeeds", () => {
-  const secondImage = route.indexOf("const after = await openaiImage");
+test("the AFTER is the root call and the before descends from it", () => {
+  // The inversion, pinned. Making the before first capped the pair at whatever
+  // face the first call happened to return, so an operator asking for an eight
+  // got the model's default person with the puffiness removed. If this order
+  // ever flips back, that ceiling comes back with it and nothing else in the
+  // suite would notice.
+  const afterCall = route.indexOf("const afterPortrait = await openaiImage");
+  const beforeCall = route.indexOf("const beforePortrait = await openaiImage");
+  assert.ok(afterCall < beforeCall, "the after defines the face; the before is an edit of it");
+  // And the before is genuinely an EDIT of the after's pixels, not a second
+  // generation from the same words, which would return a sibling.
+  const beforeBlock = route.slice(beforeCall, beforeCall + 400);
+  assert.match(beforeBlock, /edit: afterPortrait\.b64/);
+});
+
+test("a slot is claimed for every billable pair, not one for all four", () => {
+  // The full-length shots are two MORE calls to the same provider at the same
+  // price. One slot covering four images would have halved the protection this
+  // meter exists to give, quietly, on the day the body shot shipped.
+  assert.match(route, /for \(let i = 0; i < \(fullBody \? 2 : 1\); i \+= 1\)/);
+  // Four billable calls in total, and only when the body pair was asked for.
+  assert.equal((route.match(/await openaiImage\(apiKey/g) ?? []).length, 4);
+});
+
+test("it is finalized only after every requested frame succeeds", () => {
+  const lastImage = route.lastIndexOf("await openaiImage(apiKey");
   const finalize = route.indexOf("await finalizeTtsRender");
-  assert.ok(finalize > secondImage, "half a pair is not a cheaper product, it is nothing");
+  assert.ok(finalize > lastImage, "half a pair is not a cheaper product, it is nothing");
   assert.equal((route.match(/await finalizeTtsRender/g) ?? []).length, 1);
 });
 
@@ -109,8 +133,14 @@ test("there is no free-text route into either prompt", () => {
   // A guarantee with a text box beside it is not a guarantee.
   assert.doesNotMatch(route, /blemishes\?: unknown/);
   assert.doesNotMatch(route, /body\?\.blemishes/);
-  assert.match(route, /function showing\(flaws: readonly FaceFlaw\[\]\): string/);
-  assert.match(route, /function cleared\(flaws: readonly FaceFlaw\[\]\): string/);
+  // The prompts moved to src/engine/aiPairPrompt.ts so they could be built and
+  // read by a test rather than regexed here. What matters for THIS assertion is
+  // unchanged: the only thing reaching either prompt's flaw half is a
+  // catalogue lookup keyed by id.
+  assert.match(route, /flawsFromIds\(Array\.isArray\(body\?\.flaws\) \? body\.flaws : \[\]\)/);
+  const prompts = readFileSync(new URL("../src/engine/aiPairPrompt.ts", import.meta.url), "utf8");
+  assert.match(prompts, /spec\.flaws\.map\(\(f\) => f\.add\)/);
+  assert.doesNotMatch(prompts, /body\?\./, "the prompt builders never see the raw request");
   const html = readFileSync(new URL("../quick.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /q-ai-blemish/);
   const client = readFileSync(new URL("../src/quick.ts", import.meta.url), "utf8");

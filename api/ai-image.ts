@@ -9,7 +9,14 @@ import {
   safeMessage,
 } from "./_shared.js";
 import { concernsFor, flawsFromIds } from "../src/engine/faceFlawCatalog.js";
-import type { FaceFlaw } from "../src/engine/faceFlawCatalog.js";
+import {
+  afterBodyPrompt,
+  afterPortraitPrompt,
+  beforeBodyPrompt,
+  beforeFromAfterPrompt,
+  usableScore,
+} from "../src/engine/aiPairPrompt.js";
+import type { PairSpec } from "../src/engine/aiPairPrompt.js";
 
 // ---------------------------------------------------------------------------
 // The before/after pair for the AI Model Reel.
@@ -20,21 +27,24 @@ import type { FaceFlaw } from "../src/engine/faceFlawCatalog.js";
 //
 // THE HARD PART IS NOT GENERATING TWO IMAGES. It is generating two images of
 // the SAME PERSON. A before/after where the face changes is not a before and
-// after — it is two strangers, and every viewer sees that instantly even when
+// after: it is two strangers, and every viewer sees that instantly even when
 // they cannot say why. Two independent text-to-image calls from one description
 // produce exactly that: same hair, same age, same vibe, different bone
 // structure.
 //
-// So the after is an EDIT of the before rather than a second generation. The
-// first call makes the person; the second call is handed that image and asked
-// to clear the blemishes and nothing else. Identity is carried by the pixels
-// rather than re-described in words, which is the only way it survives.
+// So exactly ONE call invents a person and every other frame is an edit
+// descending from it. Identity is carried by the pixels rather than re-described
+// in words, which is the only way it survives.
 //
-// That ordering is also why the two prompts are asymmetric, and why the form
-// asks for blemishes but not for a glow-up. "What is wrong in the before" is a
-// list a person can write; "what does better look like" is not, and asking for
-// it produces a second description that pulls the after away from the first
-// face. The after is defined as the before minus the flaws.
+// THE ROOT CALL IS THE AFTER. That is the correction this route needed. It used
+// to make the before first and clear its blemishes to get the after, which set
+// the pair's ceiling at whatever face the first call happened to return: an
+// operator asking for an eight got the model's default person with the
+// puffiness removed. The reasoning for the old order was that models resist
+// making a face worse, which is true of a text prompt and false of an edit.
+// "Add shadows under the eyes" to a photograph that already exists is a small
+// local retouch and the model does it readily. The prompts themselves live in
+// src/engine/aiPairPrompt.ts, where they can be read by a test.
 //
 // Gates match api/tts.ts exactly and for the same reason: /quick is an internal
 // tool, this costs money per call at a rate nobody is paying us for, and an
@@ -52,69 +62,15 @@ const MODEL = "gpt-image-1";
 // Portrait, because every downstream use of these is a 9:16 reel.
 const SIZE = "1024x1536";
 
-/**
- * The shared half of both prompts: who this person is.
- *
- * Stated once and reused verbatim so nothing in the wording can drift between
- * the two calls. Photographic language rather than beauty language — "shot on"
- * and "even light" hold the framing steady, which matters more for a pair than
- * any single adjective does.
- */
-function subject(sex: string, description: string): string {
-  const person = sex === "female" ? "woman" : "man";
-  return [
-    `A photorealistic head-and-shoulders portrait of one ${person}.`,
-    // THE ANCHOR, and its absence was the whole defect.
-    //
-    // Without a word about structure the model returns its default face, the
-    // before prompt degrades it, and the after clears the degradation: an
-    // average person made worse, then made average again. Neither end is worth
-    // looking at, and the after in particular is not a face anybody wants.
-    //
-    // Anchoring structure here, in the half both calls share verbatim, is also
-    // the honest construction. Bone does not move; what the before and after
-    // differ by is surface, which is exactly what a protocol can change. The
-    // after inherits this face by being an EDIT of the before's pixels, so this
-    // sentence is what both halves are built on rather than a wish repeated
-    // twice.
-    "Strong clear bone structure: a defined jawline, high cheekbones, balanced facial proportions and symmetrical features.",
-    description,
-    "Front on, looking straight at the camera, neutral expression, mouth closed.",
-    "Plain mid-grey background, even soft light, no shadows across the face.",
-    "Shot on an 85mm lens. Natural skin texture with visible pores.",
-  ].join(" ");
-}
-
-/**
- * What the before shows, from the chips plus whatever was typed.
- *
- * A default exists because a pair with no flaws at all is two identical
- * photographs, which is not a before and after. It is the mildest honest
- * version rather than a heavy one: an operator who picked nothing has said
- * nothing, not asked for the worst.
- */
-function showing(flaws: readonly FaceFlaw[]): string {
-  if (!flaws.length) return "Tired and unstyled: dull skin, uneven tone, unkempt hair.";
-  return `Visible on this shot: ${flaws.map((f) => f.add).join("; ")}.`;
-}
-
-/**
- * What the after clears. ONLY REMOVALS.
- *
- * Never a description of the face, because describing it again is how it
- * becomes a different one. Every phrase here names something to take away or
- * tidy, and the catalogue is written so that they can be read in a row.
- */
-function cleared(flaws: readonly FaceFlaw[]): string {
-  const removals = flaws.length
-    ? `Clear ${flaws.map((f) => f.clear).join("; clear ")}.`
-    : "Clear the blemishes and even out the skin tone.";
-  return `${removals} Clear healthy skin, groomed hair and brows, well rested.`;
-}
-
 export async function POST(request: Request): Promise<Response> {
-  // Held here so every exit below, thrown or returned, can give the slot back.
-  let reservation: string | null = null;
+  // Held here so every exit below, thrown or returned, can give the slots back.
+  //
+  // A LIST, because a run can now bill for two pairs. The portrait pair costs a
+  // slot and the optional full-length pair costs a second one, since it is two
+  // more billable calls to the same provider at the same price. One slot
+  // covering four images would have halved the protection this meter exists to
+  // give, quietly, on the day the body shot shipped.
+  const reservations: string[] = [];
   let claimant: string | null = null;
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin generation is not allowed." }, 403);
@@ -161,6 +117,9 @@ export async function POST(request: Request): Promise<Response> {
       sex?: unknown;
       description?: unknown;
       flaws?: unknown;
+      beforeScore?: unknown;
+      afterScore?: unknown;
+      fullBody?: unknown;
     } | null;
 
     const sex = body?.sex === "female" ? "female" : "male";
@@ -180,76 +139,102 @@ export async function POST(request: Request): Promise<Response> {
     // The description field is unaffected: it says who the person IS, is used
     // identically in both halves, and cannot move anything between them.
     const flaws = flawsFromIds(Array.isArray(body?.flaws) ? body.flaws : []);
+    // THE SCORES ARE ACTUALLY USED NOW, and their absence was the complaint that
+    // started this. The form has always shown a before and an after field under
+    // a note reading "these numbers steer the prompt". They were never sent.
+    // Asking for an eight and receiving a five was not the generator missing:
+    // it had never been told. Clamped rather than rejected because a number
+    // input is the wrong place to argue with somebody.
+    const afterScore = usableScore(body?.afterScore, 7.5);
+    const beforeScore = usableScore(body?.beforeScore, 4.5);
+    const fullBody = body?.fullBody === true;
     if (!description) return json({ error: "Describe the character first." }, 400);
     if (description.length > MAX_CHARS) {
       return json({ error: `Description is too long; the ceiling is ${MAX_CHARS} characters.` }, 413);
     }
 
-    // --- the BEFORE -------------------------------------------------------
-    //
-    // Generated first because it is the one that defines the face. Doing it the
-    // other way round — make the good-looking one, then degrade it — sounds
-    // equivalent and is not: models resist making a face worse and comply
-    // readily with making one better, so starting from the flawed version is
-    // what actually produces a visible difference.
-    const beforePrompt = [
-      subject(sex, description),
-      showing(flaws),
-      "Do not retouch. This is the unflattering photograph of this person.",
-    ].join(" ");
+    const spec: PairSpec = { sex, description, flaws, afterScore, beforeScore };
 
-    // RESERVED BEFORE THE FIRST BILLABLE CALL, and released if either half
-    // fails. One reservation for the PAIR, because the pair is the unit that
-    // is worth anything: half a before-and-after is not a cheaper product, it
-    // is nothing.
+    // RESERVED BEFORE THE FIRST BILLABLE CALL, and released if any frame fails.
+    // One reservation per PAIR, because the pair is the unit that is worth
+    // anything: half a before-and-after is not a cheaper product, it is nothing.
     if (meter) {
-      reservation = await claimTtsRender(user.id, meter);
-      if (!reservation) {
-        return json({ error: "Monthly render quota reached. It resets on the 1st." }, 429);
+      for (let i = 0; i < (fullBody ? 2 : 1); i += 1) {
+        const slot = await claimTtsRender(user.id, meter);
+        if (!slot) {
+          return json(
+            {
+              error: fullBody
+                ? "Monthly render quota reached. A full-length set costs two renders; it resets on the 1st."
+                : "Monthly render quota reached. It resets on the 1st.",
+            },
+            429,
+          );
+        }
+        reservations.push(slot);
       }
     }
 
-    const before = await openaiImage(apiKey, { prompt: beforePrompt });
-    if ("error" in before) return json({ error: before.error }, before.status);
+    // --- the AFTER portrait: the root, and the only invented face ----------
+    const afterPortrait = await openaiImage(apiKey, { prompt: afterPortraitPrompt(spec) });
+    if ("error" in afterPortrait) return json({ error: afterPortrait.error }, afterPortrait.status);
 
-    // --- the AFTER, as an edit of the before -------------------------------
+    // --- the BEFORE portrait, as an edit that ADDS the flaws ---------------
     //
-    // The identity carries in the pixels. Everything named here is a thing to
-    // REMOVE or tidy; nothing describes the face, because describing it again is
-    // how it becomes a different one.
-    const afterPrompt = [
-      "Keep this exact person: same face, same bone structure, same eyes, same age, same hair colour.",
-      cleared(flaws),
-      // SAME SHOT, and this line is doing real work. A before in flat light
-      // beside an after in good light is the standard lie of glow-up content:
-      // nothing about the person changed. Holding the photograph constant is
-      // what makes the difference attributable to the face.
-      "Same pose, same framing, same background, same lighting, same camera.",
-      "Do not restructure the face. Do not slim it. Do not change the features.",
-    ].join(" ");
+    // The identity carries in the pixels. Everything named in this prompt is a
+    // thing to put ON the face; nothing describes the face, because describing
+    // it again is how it becomes a different one.
+    const beforePortrait = await openaiImage(apiKey, {
+      prompt: beforeFromAfterPrompt(spec),
+      edit: afterPortrait.b64,
+    });
+    if ("error" in beforePortrait) return json({ error: beforePortrait.error }, beforePortrait.status);
 
-    const after = await openaiImage(apiKey, { prompt: afterPrompt, edit: before.b64 });
-    if ("error" in after) return json({ error: after.error }, after.status);
-
-    // Both halves landed. Spend the slot, once.
+    // --- the full-length pair, optional and descending from the same face ---
     //
-    // A finalize that throws must not lose the pair somebody just waited for,
-    // so it is caught and the reservation is left standing: the block below
-    // then attempts a refund, which no-ops harmlessly if the row was in fact
-    // consumed and genuinely returns the slot if it was not. Both outcomes
-    // favour the person who is holding two images either way.
-    if (reservation) {
+    // Chained off the after PORTRAIT rather than generated fresh, for the same
+    // reason as everything else here: a second text-to-image call from one
+    // description returns a sibling, and a reel that cuts from a face to a body
+    // belonging to somebody else is worse than having no body shot at all.
+    let afterBody: string | null = null;
+    let beforeBody: string | null = null;
+    if (fullBody) {
+      const bodyAfter = await openaiImage(apiKey, {
+        prompt: afterBodyPrompt(spec),
+        edit: afterPortrait.b64,
+      });
+      if ("error" in bodyAfter) return json({ error: bodyAfter.error }, bodyAfter.status);
+      const bodyBefore = await openaiImage(apiKey, {
+        prompt: beforeBodyPrompt(spec),
+        edit: bodyAfter.b64,
+      });
+      if ("error" in bodyBefore) return json({ error: bodyBefore.error }, bodyBefore.status);
+      afterBody = bodyAfter.b64;
+      beforeBody = bodyBefore.b64;
+    }
+
+    // Every frame landed. Spend the slots, once each.
+    //
+    // A finalize that throws must not lose the set somebody just waited for, so
+    // it is caught and the reservation is left standing: the finally block then
+    // attempts a refund, which no-ops harmlessly if the row was in fact consumed
+    // and genuinely returns the slot if it was not. Both outcomes favour the
+    // person who is holding the images either way.
+    for (const slot of reservations.splice(0)) {
       try {
-        await finalizeTtsRender(reservation, user.id);
-        reservation = null;
+        await finalizeTtsRender(slot, user.id);
       } catch (finalizeError) {
         console.error("ai-image finalize failed", safeMessage(finalizeError));
+        reservations.push(slot);
       }
     }
 
+    const png = (b64: string) => `data:image/png;base64,${b64}`;
     return json({
-      before: `data:image/png;base64,${before.b64}`,
-      after: `data:image/png;base64,${after.b64}`,
+      before: png(beforePortrait.b64),
+      after: png(afterPortrait.b64),
+      beforeBody: beforeBody ? png(beforeBody) : null,
+      afterBody: afterBody ? png(afterBody) : null,
       // What the product would recognise in that before, so the plan the video
       // shows can be the real plan for what is on screen.
       concerns: concernsFor(flaws),
@@ -264,10 +249,12 @@ export async function POST(request: Request): Promise<Response> {
     // swallowed, because the 15-minute stale sweep in claim_tts_render is the
     // backstop and an error here would replace one lost slot with a lost
     // response.
-    if (reservation && claimant) {
-      await refundTtsRender(reservation, claimant).catch((refundError) => {
-        console.error("ai-image refund failed", safeMessage(refundError));
-      });
+    if (claimant) {
+      for (const slot of reservations) {
+        await refundTtsRender(slot, claimant).catch((refundError) => {
+          console.error("ai-image refund failed", safeMessage(refundError));
+        });
+      }
     }
   }
 }

@@ -80,8 +80,12 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   const constraints = (): MediaStreamConstraints => ({
     video: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: facing }),
-      width: { ideal: 1280 },
-      height: { ideal: 1280 },
+      // ideal, not exact: a camera that cannot reach this returns its best and
+      // the stream still opens. 1280 was leaving the video path a full stop
+      // softer than the file path for no reason, and the capture feeds the
+      // same rundown crop that magnifies it past 2x.
+      width: { ideal: 1920 },
+      height: { ideal: 1920 },
     },
     audio: false,
   });

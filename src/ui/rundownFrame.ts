@@ -796,15 +796,34 @@ function drawMattedPhoto(
   W: number,
   H: number,
 ): void {
-  const ring = ovalRing(landmarks, photo, crop, W, H);
+  // THE MATTE IS BUILT AT DEVICE RESOLUTION, not at the 720x1280 logical size.
+  //
+  // It used to be built at W x H and then blitted with ctx.drawImage(matte, 0,
+  // 0), which the export transform scaled up to 1080x1920. That put TWO
+  // resamples between the photograph and the encoder: source crop down to 1280
+  // rows in this scratch canvas, then 1280 up to 1920 on the way out. The
+  // second step got imageSmoothingQuality "high" from the output context; the
+  // first ran at the browser default, which is bilinear. So the short cut, the
+  // one the paid video actually uses, was doing its single biggest
+  // magnification at the lowest available quality and then interpolating the
+  // result again.
+  //
+  // Sizing the scratch to the real output pixels collapses that to one
+  // resample, straight from the source photograph to the pixels that get
+  // encoded. The full cut already did this by drawing the crop directly, which
+  // is why it always looked sharper than the short cut on the same photo.
+  const px = Math.max(1, ctx.getTransform().a || 1);
+  const MW = Math.round(W * px);
+  const MH = Math.round(H * px);
+  const ring = ovalRing(landmarks, photo, crop, MW, MH);
   if (ring.length < 3) {
     ctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
     return;
   }
-  const mask = scratch("mask", W, H);
+  const mask = scratch("mask", MW, MH);
   const mctx = mask.getContext("2d")!;
-  mctx.clearRect(0, 0, W, H);
-  mctx.filter = `blur(${Math.round(W * MATTE_FEATHER)}px)`;
+  mctx.clearRect(0, 0, MW, MH);
+  mctx.filter = `blur(${Math.round(MW * MATTE_FEATHER)}px)`;
   mctx.fillStyle = "#fff";
   mctx.beginPath();
   mctx.moveTo(ring[0][0], ring[0][1]);
@@ -813,24 +832,31 @@ function drawMattedPhoto(
   mctx.fill();
   mctx.filter = "none";
 
-  const matte = scratch("matte", W, H);
+  const matte = scratch("matte", MW, MH);
   const tctx = matte.getContext("2d")!;
-  tctx.clearRect(0, 0, W, H);
-  tctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
+  // The one place the photograph is resampled. Say so explicitly rather than
+  // inheriting the browser default, which is what the old chain did.
+  tctx.imageSmoothingEnabled = true;
+  tctx.imageSmoothingQuality = "high";
+  tctx.clearRect(0, 0, MW, MH);
+  tctx.drawImage(photo, crop.x, crop.y, crop.w, crop.h, 0, 0, MW, MH);
   tctx.globalCompositeOperation = "destination-in";
   tctx.drawImage(mask, 0, 0);
   tctx.globalCompositeOperation = "source-over";
 
   // A soft pool of light behind the head, so the subject sits IN the dark
-  // rather than pasted onto it.
-  const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length;
-  const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+  // rather than pasted onto it. Drawn in LOGICAL units, because it is painted
+  // rather than sampled and the ring came back in device units.
+  const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length / px;
+  const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length / px;
   const glow = ctx.createRadialGradient(cx, cy, W * 0.05, cx, cy, W * 0.75);
   glow.addColorStop(0, "rgba(38,48,50,0.55)");
   glow.addColorStop(1, "rgba(5,6,6,0)");
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
-  ctx.drawImage(matte, 0, 0);
+  // Back down to logical units: the transform maps this 1:1 onto the device
+  // pixels the matte was built at, so nothing is resampled a second time.
+  ctx.drawImage(matte, 0, 0, W, H);
 }
 
 export function drawRundownFrame(

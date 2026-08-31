@@ -131,7 +131,9 @@
           <label class="q-ai-field">
             <span>Describe them</span>
             <textarea id="q-ai-desc" rows="3" placeholder="Mid-twenties, brown hair, freckles, a bit of acne along the jaw" required></textarea>
-            <small>Face first. Hair, skin, age, build: the things that stay the same between the two shots.</small>
+            <small>Face first. Hair, skin, age, build: the things that stay the same between the two shots.
+            Words about build and figure are applied to the body, not to the face, so "curvy" no longer
+            comes back as a fuller jaw.</small>
           </label>
           <div class="q-ai-row">
             <label class="q-ai-field">
@@ -147,6 +149,14 @@
                disappointing one: the numbers steer the prompt, they are not
                promises the scanner has agreed to. -->
           <p class="q-ai-note" id="q-ai-note"></p>
+          <!-- Off by default because it is a second billable pair, not a
+               free extra view of the same one. -->
+          <label class="q-ai-check">
+            <input type="checkbox" id="q-ai-fullbody" />
+            <span>Also generate a full-length pair</span>
+          </label>
+          <small class="q-ai-sub">Head to toe, the same person, under the portrait pair. Costs a second
+          render from the monthly quota because it is two more images.</small>
           <button type="submit" class="btn pri" id="q-ai-go">Generate the preview pair</button>
           <p class="q-ai-msg" id="q-ai-msg" role="status"></p>
         </form>
