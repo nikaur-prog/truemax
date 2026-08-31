@@ -16,6 +16,24 @@ interface EntitlementUpdate {
   cancelAtPeriodEnd: boolean;
 }
 
+export type CreditAdjustmentAction = "refund_full" | "dispute_open" | "dispute_won";
+
+export function creditAdjustmentAction(
+  eventType: string,
+  object: { refunded?: boolean; amount?: number; amount_refunded?: number; status?: string },
+): CreditAdjustmentAction | null {
+  if (
+    eventType === "charge.refunded"
+    && (object.refunded === true
+      || (typeof object.amount === "number"
+        && typeof object.amount_refunded === "number"
+        && object.amount_refunded >= object.amount))
+  ) return "refund_full";
+  if (eventType === "charge.dispute.created") return "dispute_open";
+  if (eventType === "charge.dispute.closed" && object.status === "won") return "dispute_won";
+  return null;
+}
+
 type PriceEnvironment = Partial<Record<
   | "STRIPE_STARTER_PRICE_ID"
   | "STRIPE_PRICE_STARTER_MONTHLY"
@@ -111,6 +129,38 @@ async function fromCheckout(session: CheckoutSession): Promise<EntitlementUpdate
   return entitlementFromSubscription(subscription);
 }
 
+async function checkoutSessionForPaymentIntent(paymentIntentId: string): Promise<CheckoutSession | null> {
+  const sessions = await getStripe().checkout.sessions.list({
+    payment_intent: paymentIntentId,
+    limit: 1,
+  });
+  return sessions.data[0] ?? null;
+}
+
+async function paymentIntentForAdjustment(
+  eventType: string,
+  object: unknown,
+): Promise<{ action: CreditAdjustmentAction; paymentIntentId: string } | null> {
+  const candidate = object as {
+    payment_intent?: string | { id: string } | null;
+    charge?: string | { id: string; payment_intent?: string | { id: string } | null } | null;
+    refunded?: boolean;
+    amount?: number;
+    amount_refunded?: number;
+    status?: string;
+  };
+  const action = creditAdjustmentAction(eventType, candidate);
+  if (!action) return null;
+  let paymentIntentId = objectId(candidate.payment_intent ?? null);
+  if (!paymentIntentId && candidate.charge) {
+    const charge = typeof candidate.charge === "string"
+      ? await getStripe().charges.retrieve(candidate.charge)
+      : candidate.charge;
+    paymentIntentId = objectId(charge.payment_intent ?? null);
+  }
+  return paymentIntentId ? { action, paymentIntentId } : null;
+}
+
 export async function POST(request: Request): Promise<Response> {
   const signature = request.headers.get("stripe-signature");
   // There are two live Stripe webhook endpoints for the same production URL,
@@ -161,6 +211,38 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   try {
+    // A full refund or an open dispute revokes an unused one-time credit. If
+    // the credit was already spent, the ledger records one unit of debt so a
+    // later purchase cannot create a free replacement. A won dispute restores
+    // the credit only when no full refund still blocks it. Subscription access
+    // remains driven by subscription events rather than charge guesses.
+    if (
+      event.type === "charge.refunded"
+      || event.type === "charge.dispute.created"
+      || event.type === "charge.dispute.closed"
+    ) {
+      const adjustment = await paymentIntentForAdjustment(event.type, event.data.object);
+      if (!adjustment) return settle({ received: true, ignored: true });
+      const session = await checkoutSessionForPaymentIntent(adjustment.paymentIntentId);
+      if (!session) return settle({ received: true, ignored: true });
+      if (session.metadata?.purpose !== "scan_credit" && session.metadata?.purpose !== "voice_credit") {
+        return settle({ received: true, ignored: true });
+      }
+      const { data: reconciled, error } = await getSupabaseAdmin().rpc("reconcile_one_time_credit", {
+        p_event_id: event.id,
+        p_checkout_session_id: session.id,
+        p_action: adjustment.action,
+      });
+      if (error || reconciled !== true) {
+        // Stripe deliveries are unordered. A dispute can arrive before the
+        // paid Checkout event has created its credit ledger row; a non-2xx
+        // response makes Stripe retry instead of silently leaving a free
+        // credit behind. The RPC returns true for an already-applied event.
+        throw new Error(`Credit reversal failed: ${error?.message ?? "purchase ledger not ready"}`);
+      }
+      return settle({ received: true });
+    }
+
     if (
       event.type === "checkout.session.completed"
       || event.type === "checkout.session.async_payment_succeeded"

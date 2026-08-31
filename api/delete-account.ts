@@ -1,4 +1,5 @@
 import { authenticatedUser, getStripe, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import { stripeLivemode } from "./_league-payout.js";
 
 interface BillingIdentity {
   stripe_subscription_id: string | null;
@@ -15,6 +16,26 @@ export async function POST(request: Request): Promise<Response> {
     if (!user) return json({ error: "Sign in before deleting your account." }, 401);
 
     const admin = getSupabaseAdmin();
+    const [{ count: unsettled, error: payoutError }, { data: payoutAccount, error: accountError }] = await Promise.all([
+      admin
+        .from("league_payouts")
+        .select("id", { count: "exact", head: true })
+        .eq("creator_id", user.id)
+        .in("status", ["computed", "approved", "processing", "failed"]),
+      admin
+        .from("league_payout_accounts")
+        .select("stripe_account_id")
+        .eq("user_id", user.id)
+        .eq("livemode", stripeLivemode())
+        .maybeSingle<{ stripe_account_id: string | null }>(),
+    ]);
+    if (payoutError || accountError) throw new Error("Creator payout lookup failed");
+    if ((unsettled ?? 0) > 0) {
+      return json({
+        error: "Your account has a Creator League payout still being settled. Contact support so we can pay it before deletion.",
+      }, 409);
+    }
+
     const { data, error } = await admin
       .from("entitlements")
       .select("stripe_subscription_id,status")
@@ -37,6 +58,14 @@ export async function POST(request: Request): Promise<Response> {
     const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
     if (deleteError) throw new Error(`Account deletion failed: ${deleteError.message}`);
     restoreSubscription = null;
+    // Local identity and payout setup are already gone. Closing the matching
+    // Stripe recipient prevents any future transfers while Stripe retains only
+    // records it must keep for financial and identity-verification law.
+    if (payoutAccount?.stripe_account_id) {
+      await getStripe().v2.core.accounts.close(payoutAccount.stripe_account_id).catch((closeError) => {
+        console.error("delete-account payout close", safeMessage(closeError));
+      });
+    }
     return json({ deleted: true });
   } catch (error) {
     console.error("delete-account", safeMessage(error));

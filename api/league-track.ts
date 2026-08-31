@@ -1,10 +1,11 @@
 import { getSupabaseAdmin, json, safeMessage } from "./_shared.js";
 import { freshTikTokAccess, listOwnTikTokVideos, tiktokVideoIdFromUrl } from "./_tiktok.js";
+import { captionIncludesCampaignTag, submissionCanAccrue } from "../src/league/compliance.js";
 
 // ---------------------------------------------------------------------------
 // The nightly count walk — Phase 2 tracking, closed.
 //
-// Once a night (vercel.json crons), this walks every linked TikTok account,
+// Once an hour (vercel.json crons), this walks every linked TikTok account,
 // lists that account's own recent videos through the Display API, and does
 // two things with the result:
 //
@@ -13,10 +14,15 @@ import { freshTikTokAccess, listOwnTikTokVideos, tiktokVideoIdFromUrl } from "./
 //      lives on the account the creator authorised — the ownership half of
 //      review. The content half stays human: matching never auto-approves.
 //
-//   2. SNAPSHOTS the counts for every matched submission already in a paying
-//      status (approved / earning), as league_stat_snapshots rows with
-//      source 'api'. These are the exact numbers the pay formula reads, so
-//      views and comments flow into accruals nightly with nobody typing.
+//   2. CHECKS the sprint hashtag from TikTok's own caption field. A linked
+//      account proves ownership, but it does not prove a creator submitted
+//      TrueMax content. A missing tag places the submission on compliance
+//      hold and stops new counts.
+//
+//   3. SNAPSHOTS the counts only after a human has watched the actual video
+//      and verified the embedded short, optional long, or an approved custom
+//      TrueMax CTA plus the commercial-content disclosure. The database
+//      repeats this gate, so this job cannot bypass it accidentally.
 //
 // Privacy shape unchanged: each account's tokens read only that account's
 // own videos, and what is learned lands only on that creator's own
@@ -41,7 +47,10 @@ interface SubmissionRow {
   url: string;
   status: string;
   tiktok_video_id: string | null;
-  league_sprints?: { status?: string; starts_at?: string; ends_at?: string } | null;
+  caption_compliant: boolean;
+  cta_verified_at: string | null;
+  disclosure_verified_at: string | null;
+  league_sprints?: { status?: string; starts_at?: string; ends_at?: string; campaign_tag?: string } | null;
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -52,22 +61,24 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     const admin = getSupabaseAdmin();
-    const [{ data: links }, { data: subs }] = await Promise.all([
+    const [linkResult, submissionResult] = await Promise.all([
       admin.from("league_tiktok_accounts").select("user_id, access_token, refresh_token, expires_at"),
       // Pending rows are matched (ownership evidence for review); paying rows
       // are matched AND snapshotted. paid_out is settled history and rejected
       // is a decision — neither needs another number.
       admin
         .from("league_submissions")
-        .select("id, creator_id, url, status, tiktok_video_id, league_sprints!inner(status,starts_at,ends_at)")
+        .select("id, creator_id, url, status, tiktok_video_id, caption_compliant, cta_verified_at, disclosure_verified_at, league_sprints!inner(status,starts_at,ends_at,campaign_tag)")
         .in("status", ["pending", "approved", "earning"])
+        .eq("platform", "tiktok")
         .eq("league_sprints.status", "active")
-        .lte("league_sprints.starts_at", new Date().toISOString())
-        .gt("league_sprints.ends_at", new Date().toISOString()),
+        .lte("league_sprints.starts_at", new Date().toISOString()),
     ]);
+    if (linkResult.error) throw new Error(`TikTok account lookup failed: ${linkResult.error.message}`);
+    if (submissionResult.error) throw new Error(`League submission lookup failed: ${submissionResult.error.message}`);
 
-    const linked = (links ?? []) as LinkedRow[];
-    const submissions = (subs ?? []) as SubmissionRow[];
+    const linked = (linkResult.data ?? []) as LinkedRow[];
+    const submissions = (submissionResult.data ?? []) as SubmissionRow[];
     const byCreator = new Map<string, SubmissionRow[]>();
     for (const s of submissions) {
       const list = byCreator.get(s.creator_id) ?? [];
@@ -79,6 +90,7 @@ export async function GET(request: Request): Promise<Response> {
     let deadLinks = 0;
     let matched = 0;
     let snapshots = 0;
+    let complianceHolds = 0;
 
     for (const link of linked) {
       const own = byCreator.get(link.user_id);
@@ -108,16 +120,42 @@ export async function GET(request: Request): Promise<Response> {
       for (const sub of own) {
         const videoId = sub.tiktok_video_id ?? tiktokVideoIdFromUrl(sub.url);
         const video = videoId ? byId.get(videoId) : undefined;
-        if (!video) continue;
-        if (!sub.tiktok_video_id) {
-          const { error } = await admin.from("league_submissions").update({ tiktok_video_id: video.id }).eq("id", sub.id);
-          if (error) {
-            console.error("league-track match failed", error.code);
-            continue;
+        if (!video) {
+          if (sub.tiktok_video_id) {
+            const { error } = await admin.from("league_submissions").update({
+              caption_checked_at: new Date().toISOString(),
+              caption_compliant: false,
+              compliance_hold_reason: "The linked TikTok video is unavailable. Restore it before the sprint closes.",
+            }).eq("id", sub.id);
+            if (error) console.error("league-track unavailable hold failed", error.code);
+            else complianceHolds += 1;
           }
-          matched += 1;
+          continue;
         }
-        if (sub.status === "approved" || sub.status === "earning") {
+        const compliant = captionIncludesCampaignTag(video.description, sub.league_sprints?.campaign_tag);
+        const { error: complianceError } = await admin.from("league_submissions").update({
+          tiktok_video_id: video.id,
+          caption_snapshot: video.description,
+          caption_checked_at: new Date().toISOString(),
+          caption_compliant: compliant,
+          compliance_hold_reason: compliant
+            ? null
+            : `The caption must keep ${sub.league_sprints?.campaign_tag ?? "the sprint tag"} until settlement.`,
+        }).eq("id", sub.id);
+        if (complianceError) {
+          console.error("league-track compliance update failed", complianceError.code);
+          continue;
+        }
+        if (!sub.tiktok_video_id) matched += 1;
+        if (!compliant) complianceHolds += 1;
+
+        const beforeDeadline = new Date(sub.league_sprints?.ends_at ?? 0).getTime() >= Date.now();
+        if (beforeDeadline && submissionCanAccrue({
+          status: sub.status,
+          captionCompliant: compliant,
+          ctaVerifiedAt: sub.cta_verified_at,
+          disclosureVerifiedAt: sub.disclosure_verified_at,
+        })) {
           const { error } = await admin.from("league_stat_snapshots").insert({
             submission_id: sub.id,
             views: video.views,
@@ -132,7 +170,7 @@ export async function GET(request: Request): Promise<Response> {
       }
     }
 
-    return json({ accounts, deadLinks, matched, snapshots });
+    return json({ accounts, deadLinks, matched, complianceHolds, snapshots });
   } catch (error) {
     console.error("league-track failed", safeMessage(error));
     return json({ error: "Tracking failed." }, 500);

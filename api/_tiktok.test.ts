@@ -18,12 +18,14 @@ test("TikTok paging keeps cursor zero and filters empty video IDs", async () => 
     bodies.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
     call += 1;
     return Response.json(call === 1
-      ? { data: { videos: [{ id: "", title: "bad" }, { id: "1", view_count: 4 }], cursor: 0, has_more: true } }
+      ? { data: { videos: [{ id: "", title: "bad" }, { id: "1", video_description: "Glow up #TrueMax", view_count: 4 }], cursor: 0, has_more: true } }
       : { data: { videos: [{ id: "2", comment_count: 3 }], has_more: false } });
   }) as typeof fetch;
   try {
     const videos = await listOwnTikTokVideos("token", 40, new Set(["2"]));
     assert.deepEqual(videos?.map((video) => video.id), ["1", "2"]);
+    assert.equal(videos?.[0].description, "Glow up #TrueMax");
+    assert.equal(videos?.[1].description, "");
     assert.equal(bodies[0].cursor, undefined);
     assert.equal(bodies[1].cursor, 0);
   } finally {
