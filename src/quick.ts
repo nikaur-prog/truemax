@@ -55,6 +55,8 @@ import { mergeReports } from "./engine/scoring.js";
 import { assessPhotoQuality } from "./engine/photoQuality.js";
 import type { PhotoQuality } from "./engine/photoQuality.js";
 import { LOOKS, applyEnhance, lookFor } from "./engine/enhance.js";
+import { closeCarouselCreator, openCarouselCreator } from "./ui/carouselCreator.js";
+import { decodeImageDataUrl } from "./ui/dataUrl.js";
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -87,6 +89,7 @@ const MAX_DIM = 2160;
 
 const el = {
   pillars: document.getElementById("q-pillars")!,
+  carousel: document.getElementById("q-carousel")!,
   ai: document.getElementById("q-ai")!,
   cal: document.getElementById("q-cal")!,
   calBody: document.getElementById("q-cal-body")!,
@@ -132,6 +135,7 @@ let cam: CameraHandle | null = null;
 let camOpening = false;
 let camOpenAttempt = 0;
 let ready = false;
+let quickOwnerId: string | null = null;
 
 // Checked before anything else starts.
 //
@@ -149,10 +153,16 @@ void quickAccessProfile().then((access) => {
     denyQuickAccess();
     return;
   }
-  applyPillarGrants(access);
-  document.querySelector(".q-wrap")?.classList.remove("q-locked");
-  openFromHash();
-  initLandmarker()
+  void currentUser().then((user) => {
+    if (!user || user.id !== access.userId) {
+      denyQuickAccess();
+      return;
+    }
+    quickOwnerId = user.id;
+    applyPillarGrants(access);
+    document.querySelector(".q-wrap")?.classList.remove("q-locked");
+    openFromHash();
+    return initLandmarker()
   .then(() => {
     el.engine.textContent = "ENGINE READY";
     el.engine.classList.add("ready");
@@ -168,6 +178,7 @@ void quickAccessProfile().then((access) => {
     el.engine.textContent = "ENGINE FAILED TO LOAD · REFRESH";
     el.engine.classList.add("error");
   });
+  }).catch(() => denyQuickAccess());
 });
 
 // Which pillar buttons each grant unlocks, and which rooms only staff see.
@@ -191,6 +202,7 @@ const PILLAR_GRANT: Record<string, string> = {
   analysis: "cta",
   enhance: "polisher",
   ai: "studio",
+  carousel: "studio",
 };
 const STAFF_ONLY_MODES = ["calibrate"];
 
@@ -238,6 +250,7 @@ function openFromHash(): void {
     // pillar menu, which reads as the link being broken.
     ai: "ai",
     studio: "ai",
+    carousel: "carousel",
   }[location.hash.slice(1).toLowerCase()];
   if (target) {
     const button = document.querySelector<HTMLButtonElement>(`.q-pillar[data-mode="${target}"]`);
@@ -263,6 +276,10 @@ function openFromHashInner(): void {
   }
   if (hash === "ai" || hash === "studio") {
     enterMode("ai");
+    return;
+  }
+  if (hash === "carousel") {
+    enterMode("carousel");
     return;
   }
   if (hash === "clips") {
@@ -440,7 +457,15 @@ if (!isAuthAvailable()) {
     const owner = activeScanOwner();
     const changed = previousOwner !== undefined && previousOwner !== owner;
     previousOwner = owner;
-    if (changed) leaveMode();
+    quickOwnerId = owner;
+    if (changed) {
+      leaveMode();
+      // Re-run both the staff/League gate and the per-pillar grants. Keeping
+      // this page alive across an account switch would let the next person use
+      // the previous creator's client-side access and device draft.
+      location.reload();
+      return;
+    }
     void refreshLibrary();
   };
   onAuthChange(() => syncOwner());
@@ -601,12 +626,13 @@ let shown: Report | null = null;
 //              page the person doing that work already has open, and because a
 //              calibration tool nobody opens calibrates nothing.
 // ---------------------------------------------------------------------------
-type QuickMode = "reel" | "analysis" | "ai" | "calibrate";
+type QuickMode = "reel" | "analysis" | "ai" | "carousel" | "calibrate";
 
 const MODE_NAMES: Record<QuickMode, string> = {
   reel: "Reel Creator",
   analysis: "Full Analysis",
   ai: "AI Model Reel",
+  carousel: "Carousel Creator",
   calibrate: "Calibrate",
 };
 
@@ -681,7 +707,23 @@ function enterMode(next: QuickMode): void {
     return;
   }
 
+  if (next === "carousel") {
+    el.ai.classList.add("hidden");
+    el.capture.classList.add("hidden");
+    el.cal.classList.add("hidden");
+    el.carousel.classList.remove("hidden");
+    if (!quickOwnerId) {
+      denyQuickAccess();
+      return;
+    }
+    void openCarouselCreator(el.carousel, quickOwnerId, leaveMode);
+    track("quick-visit");
+    return;
+  }
+
+  el.carousel.classList.add("hidden");
   el.ai.classList.add("hidden");
+  closeCarouselCreator();
   el.modeName.textContent = MODE_NAMES[next];
   updateModeStep();
   track("quick-visit");
@@ -729,6 +771,8 @@ function leaveMode(): void {
   el.result.classList.add("hidden");
   el.ai.classList.add("hidden");
   el.cal.classList.add("hidden");
+  el.carousel.classList.add("hidden");
+  closeCarouselCreator();
   el.pillars.classList.remove("hidden");
 }
 
@@ -3040,7 +3084,9 @@ async function downloadCard(): Promise<void> {
     const url = await toPng(el.stage, { pixelRatio: 2, backgroundColor: bg, cacheBust: true });
     // Same route as the videos: on a phone the share sheet puts this in the
     // camera roll, where a still meant for a post actually needs to be.
-    await saveFile(await (await fetch(url)).blob(), exportName("scan", "png"), "scan");
+    const decoded = decodeImageDataUrl(url);
+    if (!decoded) throw new Error("Rendered image was not a supported data URL");
+    await saveFile(decoded.blob, exportName("scan", decoded.extension), "scan");
   } catch {
     if (btn) btn.textContent = "Couldn't render";
   } finally {
@@ -3253,8 +3299,22 @@ function showAiPair(
     button.onclick = async () => {
       const key = button.dataset.save ?? "before";
       const which = sources[key] ?? before;
-      const blob = await (await fetch(which)).blob();
-      await saveFile(blob, exportName("card", "png", key), "card");
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = "Saving…";
+      try {
+        const decoded = decodeImageDataUrl(which);
+        if (!decoded) throw new Error("The generated image could not be decoded.");
+        const outcome = await saveFile(decoded.blob, exportName("card", decoded.extension, key), "card");
+        button.textContent = outcomeMessage(outcome);
+      } catch (error) {
+        button.textContent = error instanceof Error ? error.message : "The image could not be saved.";
+      } finally {
+        window.setTimeout(() => {
+          button.disabled = false;
+          button.textContent = original;
+        }, 1800);
+      }
     };
   }
   host.scrollIntoView({ behavior: "smooth", block: "start" });

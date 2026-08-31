@@ -28,6 +28,7 @@
     <link rel="preload" href="/models/face_landmarker.task" as="fetch" crossorigin="anonymous" />
     <link rel="stylesheet" href="/src/style.css" />
     <link rel="stylesheet" href="/src/quick.css" />
+    <link rel="stylesheet" href="/src/carousel.css" />
   </head>
   <body class="quick">
     <main class="q-wrap q-locked">
@@ -69,8 +70,14 @@
             <span class="q-pillar-what">Describe someone, preview them, then film them</span>
             <span class="q-pillar-needs">No photos · a description</span>
           </button>
-          <button class="q-pillar" data-mode="enhance" type="button">
+          <button class="q-pillar" data-mode="carousel" type="button">
             <span class="q-pillar-kicker">04</span>
+            <b>Carousel Creator</b>
+            <span class="q-pillar-what">Build a ranked photo series from uploads, generated characters, or both</span>
+            <span class="q-pillar-needs">2-7 slides · one theme · optional CTA</span>
+          </button>
+          <button class="q-pillar" data-mode="enhance" type="button">
+            <span class="q-pillar-kicker">05</span>
             <b>Enhance</b>
             <span class="q-pillar-what">Sharper, cleaner clips and photos, enhanced on this device with nothing uploaded</span>
             <span class="q-pillar-needs">Your clips or photos</span>
@@ -80,13 +87,15 @@
                it lives here because this is the page the person who does that
                work already has open. -->
           <button class="q-pillar q-pillar-tool" data-mode="calibrate" type="button">
-            <span class="q-pillar-kicker">05</span>
+            <span class="q-pillar-kicker">06</span>
             <b>Calibrate</b>
             <span class="q-pillar-what">Rate a face, then see what the engine said</span>
             <span class="q-pillar-needs">One photo · your honest number</span>
           </button>
         </div>
       </section>
+
+      <section id="q-carousel" class="hidden" aria-label="Carousel Creator"></section>
 
       <!-- AI Model Reel: character setup.
            No photograph is taken here, so the capture section is not merely

@@ -149,6 +149,7 @@ const FOLDER: Record<ExportKind, string> = {
   reel: "Reels",
   rundown: "Rundowns",
   card: "Verdict cards",
+  carousel: "Carousels",
   scan: "Scans",
 };
 

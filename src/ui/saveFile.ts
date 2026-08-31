@@ -67,6 +67,8 @@ export type ExportKind =
   | "rundown"
   /** A score card / verdict still. */
   | "card"
+  /** One finished vertical slide from Carousel Creator. */
+  | "carousel"
   /** The scanned photograph with its landmarks. */
   | "scan";
 
