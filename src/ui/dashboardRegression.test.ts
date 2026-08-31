@@ -28,3 +28,11 @@ test("a scan recall opens above the dashboard that launched it", () => {
   assert.ok(Number.isFinite(dashZ) && Number.isFinite(recallZ));
   assert.ok(recallZ > dashZ, `recall layer ${recallZ} must sit above dashboard layer ${dashZ}`);
 });
+
+test("closing the dashboard also tears down an open celebrity detail", () => {
+  const closeBody = dashboard.slice(
+    dashboard.indexOf("export function close(): void"),
+    dashboard.indexOf("// ---------------------------------------------------------------------------", dashboard.indexOf("export function close(): void")),
+  );
+  assert.match(closeBody, /detailEl\?\.remove\(\);\s*detailEl = null;/);
+});

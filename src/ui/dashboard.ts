@@ -360,6 +360,8 @@ export function showView(name: ViewName): void {
 }
 
 export function close(): void {
+  detailEl?.remove();
+  detailEl = null;
   overlay?.remove();
   overlay = null;
   currentView = "home";
