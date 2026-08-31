@@ -150,6 +150,7 @@ export async function POST(request: Request): Promise<Response> {
       current?: unknown;
       scene?: unknown;
       side?: unknown;
+      change?: unknown;
     } | null;
 
     const sex = body?.sex === "female" ? "female" : "male";
@@ -206,6 +207,10 @@ export async function POST(request: Request): Promise<Response> {
         return json({ error: "Pick a scene, and approve the character first." }, 400);
       }
       if (!description) return json({ error: "Describe the character first." }, 400);
+      const change = typeof body?.change === "string" ? body.change.trim() : "";
+      if (change.length > MAX_REDO_CHARS) {
+        return json({ error: `Keep the change under ${MAX_REDO_CHARS} characters.` }, 413);
+      }
 
       // Metered per scene, because each one is its own billable call. A set of
       // ten costing one slot would be the same hole the pair path was fixed for.
@@ -215,7 +220,7 @@ export async function POST(request: Request): Promise<Response> {
         reservations.push(slot);
       }
       const shot = await openaiImage(apiKey, {
-        prompt: scenePrompt(scene, side, { sex, description, flaws, afterScore, beforeScore }),
+        prompt: scenePrompt(scene, side, { sex, description, flaws, afterScore, beforeScore }, change),
         edit: base,
         deadline: Date.now() + IMAGE_TIMEOUT_MS,
       });

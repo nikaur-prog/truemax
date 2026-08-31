@@ -101,6 +101,33 @@ const MEN: AiScene[] = [
     action: "Walking towards the camera, shoulders loose, mid-stride.",
     wardrobe: "Bare chested with swim shorts.",
   },
+  {
+    id: "scenic-view",
+    label: "Viewpoint",
+    setting: "At a high outdoor viewpoint, a city or a coastline spread out far below and behind them.",
+    camera: "Held at arm's length at chest height, framed from the waist up, the view filling everything behind.",
+    light: "Late afternoon sun low and warm, coming from behind so it edges the shoulders and jaw.",
+    action: "Turning back from the view towards the lens, caught mid-turn.",
+    wardrobe: "A plain fitted t-shirt or a light open overshirt.",
+  },
+  {
+    id: "going-out",
+    label: "Dressed up at night",
+    setting: "Somewhere in a city at night, out of focus lights and signage behind, a doorway or a lit street.",
+    camera: "Held slightly below eye level, framed from the chest up, close and slightly angled.",
+    light: "Mixed street light, warm on one side and cool on the other, contrasty.",
+    action: "Adjusting a collar or a chain and looking straight at the lens.",
+    wardrobe: "A well fitted dark shirt or a jacket, sharp and deliberate.",
+  },
+  {
+    id: "post-training",
+    label: "Straight off the court",
+    setting: "Outdoors on a court or a pitch, fencing and floodlights or open sky behind, mid session.",
+    camera: "Held at arm's length just above eye level, framed from the waist up, the frame moving with them.",
+    light: "Hard daylight or floodlight from above, sweat catching the light.",
+    action: "Breathing hard between points, glancing at the camera and away again.",
+    wardrobe: "A training vest or a jersey, shorts.",
+  },
 ];
 
 const WOMEN: AiScene[] = [
@@ -148,6 +175,33 @@ const WOMEN: AiScene[] = [
     light: "Full open sunlight, a bright sky, hard clean shadows.",
     action: "Walking towards the camera and gesturing, mid-stride.",
     wardrobe: "A fitted cropped tee and shorts.",
+  },
+  {
+    id: "scenic-view",
+    label: "Viewpoint",
+    setting: "At a high outdoor viewpoint, a coastline or a valley spread out far below and behind them.",
+    camera: "Held at chest height pointing slightly up, framed from mid-thigh to above the head, the view filling the background.",
+    light: "Late afternoon sun low and warm, coming from behind and catching the edges of the hair.",
+    action: "Turning back from the view towards the lens, hair moving, caught mid-turn.",
+    wardrobe: "A fitted top and a long skirt or shorts, light fabric moving in the wind.",
+  },
+  {
+    id: "going-out",
+    label: "Dressed up at night",
+    setting: "Somewhere in a city at night, out of focus lights behind, a lit doorway or a restaurant window.",
+    camera: "Held at chest height pointing slightly up, framed from mid-thigh to above the head.",
+    light: "Warm street light with cooler light behind, contrasty and flattering.",
+    action: "Half turning to check the shot, one hand at the hem, weight on one hip.",
+    wardrobe: "A well fitted going-out dress, plain and dark, deliberately dressed up.",
+  },
+  {
+    id: "filming-tiktok",
+    label: "Filming a TikTok",
+    setting: "In an ordinary room with the phone propped up rather than held, a bed or a sofa and a wall of posters behind.",
+    camera: "Propped at chest height and completely still, framed from mid-thigh to above the head, the whole figure in shot.",
+    light: "Ordinary warm room light with a window off to one side.",
+    action: "Doing a small repeating dance to a song, arms and hips moving, looking just past the lens at their own screen.",
+    wardrobe: "A fitted top and shorts, casual and at home.",
   },
 ];
 

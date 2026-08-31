@@ -4962,6 +4962,14 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   margin-top: 5px; font: 600 10px var(--mono); letter-spacing: .12em;
   text-transform: uppercase; color: var(--mut);
 }
+.q-ai-change {
+  width: 100%; margin-top: 6px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  font: 400 12px var(--sans);
+}
+.q-ai-change::placeholder { color: var(--mut); }
+.q-ai-shot-actions { display: flex; gap: 6px; margin-top: 6px; }
+.q-ai-shot-actions .q-ai-redo { margin-top: 0; }
 .q-ai-light {
   position: fixed; inset: 0; z-index: 600; background: rgba(8, 9, 10, .92);
   display: grid; place-items: center; padding: 24px; cursor: zoom-out;

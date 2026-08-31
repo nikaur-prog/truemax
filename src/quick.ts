@@ -3273,6 +3273,48 @@ function openAiLightbox(src: string, alt: string): void {
  * the eventual video step cheap: an approved still IS the clip's first frame,
  * so identity is locked before anything expensive happens.
  */
+/**
+ * One scene shot, requested.
+ *
+ * Shared by the initial run and by a redo, so a rerolled frame is built the
+ * same way as the one it replaces rather than by a second code path that can
+ * drift from it.
+ */
+async function filmOne(
+  want: { scene: string; side: "before" | "after" },
+  anchor: string,
+  description: string,
+  token: string | null,
+  change = "",
+): Promise<string | { error: string }> {
+  try {
+    const response = await fetch("/api/ai-image", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        mode: "scene",
+        scene: want.scene,
+        side: want.side,
+        anchor,
+        change,
+        sex: aiSex,
+        description,
+        flaws: selectedFlawIds(),
+        beforeScore: Number((document.getElementById("q-ai-before") as HTMLInputElement).value),
+        afterScore: Number((document.getElementById("q-ai-after") as HTMLInputElement).value),
+      }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as { frame?: string; error?: string };
+    if (!response.ok || !payload.frame) return { error: payload.error ?? "That shot could not be made." };
+    return payload.frame;
+  } catch {
+    return { error: "Could not reach the image service." };
+  }
+}
+
 async function makeSceneSet(name: string, anchor: string, host: HTMLElement): Promise<void> {
   const scenes = scenesFor(aiSex);
   const shots: Array<{ scene: string; side: "before" | "after"; src: string }> = [];
@@ -3287,7 +3329,12 @@ async function makeSceneSet(name: string, anchor: string, host: HTMLElement): Pr
         (shot, index) => `<figure>
           <button type="button" class="q-ai-zoom" data-scene-zoom="${index}"><img data-scene-shot="${index}" /></button>
           <figcaption>${escapeHtml(shot.scene.replace(/-/g, " "))} · ${shot.side}</figcaption>
-          <button type="button" class="q-ai-redo" data-scene-save="${index}">Save</button>
+          <input type="text" class="q-ai-change" data-scene-change="${index}"
+                 placeholder="change something (optional)" maxlength="240" />
+          <div class="q-ai-shot-actions">
+            <button type="button" class="q-ai-redo" data-scene-redo="${index}">Redo</button>
+            <button type="button" class="q-ai-redo" data-scene-save="${index}">Save</button>
+          </div>
         </figure>`,
       )
       .join("");
@@ -3304,6 +3351,41 @@ async function makeSceneSet(name: string, anchor: string, host: HTMLElement): Pr
         if (shot) openAiLightbox(shot.src, `${name}, ${shot.scene}`);
       };
     }
+    for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-redo]")) {
+      button.onclick = async () => {
+        const index = Number(button.dataset.sceneRedo);
+        const shot = shots[index];
+        if (!shot) return;
+        // The box is OPTIONAL, and that is the whole interaction. Empty means
+        // "this one just came out wrong, roll it again"; filled means "this one
+        // is close, change that". Making the operator type something to reroll
+        // would turn the commonest case into the most work.
+        const change = grid.querySelector<HTMLInputElement>(`[data-scene-change="${index}"]`)?.value.trim() ?? "";
+        button.disabled = true;
+        button.textContent = "…";
+        if (status) status.textContent = `Redoing ${shot.scene.replace(/-/g, " ")}, ${shot.side}…`;
+        try {
+          const again = await filmOne(
+            { scene: shot.scene, side: shot.side },
+            anchor,
+            desc,
+            await currentAccessToken(),
+            change,
+          );
+          if (typeof again === "string") {
+            shots[index] = { ...shot, src: again };
+            paint();
+            if (status) status.textContent = "";
+          } else if (status) {
+            status.textContent = again.error;
+          }
+        } finally {
+          button.disabled = false;
+          button.textContent = "Redo";
+        }
+      };
+    }
+
     for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-save]")) {
       button.onclick = async () => {
         const shot = shots[Number(button.dataset.sceneSave)];
@@ -3329,39 +3411,16 @@ async function makeSceneSet(name: string, anchor: string, host: HTMLElement): Pr
 
   for (const [index, want] of wanted.entries()) {
     if (status) status.textContent = `Filming ${index + 1} of ${wanted.length}: ${want.scene.replace(/-/g, " ")}, ${want.side}…`;
-    try {
-      const response = await fetch("/api/ai-image", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          mode: "scene",
-          scene: want.scene,
-          side: want.side,
-          anchor,
-          sex: aiSex,
-          description: desc,
-          flaws: selectedFlawIds(),
-          beforeScore: Number((document.getElementById("q-ai-before") as HTMLInputElement).value),
-          afterScore: Number((document.getElementById("q-ai-after") as HTMLInputElement).value),
-        }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { frame?: string; error?: string };
-      if (!response.ok || !payload.frame) {
-        // STOPS rather than grinding on. The likeliest failure is the quota,
-        // and carrying on would spend nine more requests learning the same
-        // thing while the operator watches.
-        if (status) status.textContent = payload.error ?? "The set could not be finished.";
-        return;
-      }
-      shots.push({ scene: want.scene, side: want.side, src: payload.frame });
-      paint();
-    } catch {
-      if (status) status.textContent = "Could not reach the image service.";
+    const result = await filmOne(want, anchor, desc, token);
+    if (typeof result !== "string") {
+      // STOPS rather than grinding on. The likeliest failure is the quota, and
+      // carrying on would spend fifteen more requests learning the same thing
+      // while the operator watches.
+      if (status) status.textContent = result.error;
       return;
     }
+    shots.push({ scene: want.scene, side: want.side, src: result });
+    paint();
   }
   if (status) status.textContent = `${shots.length} shots. Save the ones you want, or change the character and film it again.`;
 }

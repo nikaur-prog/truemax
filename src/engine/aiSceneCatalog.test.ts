@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { HANDHELD, sceneById, scenesFor } from "./aiSceneCatalog.js";
-import { scenePrompt } from "./aiPairPrompt.js";
+import { MAX_REDO_CHARS, scenePrompt } from "./aiPairPrompt.js";
 import { flawsFromIds } from "./faceFlawCatalog.js";
 import type { PairSpec } from "./aiPairPrompt.js";
 
@@ -17,9 +17,12 @@ const spec = (over: Partial<PairSpec> = {}): PairSpec => ({
 
 // --- the catalogue ----------------------------------------------------------
 
-test("both sexes get a full set of five scenes", () => {
+test("both sexes get a full set of eight scenes", () => {
+  // Eight rather than five so a set of five can be drawn without repeats, and
+  // so a character can be filmed twice without producing the same contact
+  // sheet.
   for (const sex of ["male", "female"] as const) {
-    assert.equal(scenesFor(sex).length, 5, `${sex} needs five`);
+    assert.equal(scenesFor(sex).length, 8, `${sex} needs eight`);
   }
 });
 
@@ -143,4 +146,41 @@ test("no scene names colouring or ethnicity", () => {
       assert.doesNotMatch(text, banned, `${sex}/${scene.id}`);
     }
   }
+});
+
+// --- redoing one shot with a change ----------------------------------------
+
+test("a redo with no change reproduces the same prompt", () => {
+  // The empty box is the commonest case: "that one just came out wrong, roll
+  // it again". Making it differ from the original request would mean a reroll
+  // silently asked for something else.
+  const scene = scenesFor("female")[0];
+  assert.equal(scenePrompt(scene, "after", spec()), scenePrompt(scene, "after", spec(), ""));
+  assert.equal(scenePrompt(scene, "after", spec()), scenePrompt(scene, "after", spec(), "   "));
+});
+
+test("a change is carried, and sits between the scene and the refusals", () => {
+  // After the scene so it wins on anything they disagree about; before the
+  // structural refusals so it never wins on those.
+  const scene = scenesFor("female")[0];
+  const built = scenePrompt(scene, "before", spec(), "make the room darker");
+  const sceneAt = built.indexOf(scene.setting);
+  const changeAt = built.indexOf("make the room darker");
+  const refusalAt = built.indexOf("Do not restructure the face");
+  assert.ok(sceneAt > -1 && changeAt > sceneAt, "the change must follow the scene");
+  assert.ok(refusalAt > changeAt, "the refusals must follow the change");
+});
+
+test("a change cannot restructure a face however it is worded", () => {
+  const scene = scenesFor("male")[0];
+  const built = scenePrompt(scene, "before", spec({ sex: "male" }), "give him a much weaker chin and a narrow jaw");
+  assert.match(built, /Do not change the bone structure, the jaw width, the nose or the eye shape/);
+  assert.ok(built.lastIndexOf("Do not restructure") > built.indexOf("weaker chin"));
+});
+
+test("a change is capped", () => {
+  const scene = scenesFor("female")[0];
+  const built = scenePrompt(scene, "after", spec(), "y".repeat(500));
+  assert.ok(built.includes("y".repeat(MAX_REDO_CHARS)));
+  assert.ok(!built.includes("y".repeat(MAX_REDO_CHARS + 1)));
 });

@@ -356,7 +356,12 @@ export function redoPrompt(frame: PairFrame, instruction: string): string {
  * carried in the pixels and is stated to be untouchable, because a set whose
  * face drifts scene to scene is the one failure this format cannot survive.
  */
-export function scenePrompt(scene: AiScene, side: "before" | "after", spec: PairSpec): string {
+export function scenePrompt(
+  scene: AiScene,
+  side: "before" | "after",
+  spec: PairSpec,
+  change = "",
+): string {
   const flaws = spec.flaws.length
     ? `${flawWeight(spec)}: ${spec.flaws.map((f) => f.add).join("; ")}.`
     : "Dull uneven skin, unstyled hair, and a tired unrested look.";
@@ -370,6 +375,10 @@ export function scenePrompt(scene: AiScene, side: "before" | "after", spec: Pair
     `Relight: ${scene.light}`,
     `They are ${scene.action.charAt(0).toLowerCase()}${scene.action.slice(1)}`,
     `Change the clothing to: ${scene.wardrobe}`,
+    // The operator's optional change, placed AFTER the scene it is adjusting so
+    // it wins on anything they disagree about, and BEFORE the structural
+    // refusals so it never wins on those.
+    change.trim() ? `Also: ${change.trim().slice(0, MAX_REDO_CHARS)}` : "",
     HANDHELD,
     side === "before"
       ? // The before scene carries the same refusals as the before portrait. A
