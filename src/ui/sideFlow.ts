@@ -1765,6 +1765,11 @@ function seedReadings(points: SidePoints, faceDir: number, sex: Sex): string[] {
  */
 export const PLACEMENT_PREVIEW_W = 168;
 export const PLACEMENT_PREVIEW_H = 200;
+// The collapsed teaser is dense around the nose and lips. Keep its marks small
+// enough to remain separate instead of merging into a teal cluster; the
+// expanded view gets a little more size because it has room to show it.
+export const PLACEMENT_PREVIEW_RING = 1.7;
+export const PLACEMENT_EXPANDED_RING = 3.8;
 
 export function placementPreviewBox(
   photoW: number,
@@ -1837,10 +1842,10 @@ function paintPlacementPreview(
   g.scale(dpr, dpr);
   g.drawImage(photo, 0, 0, w, h);
   const at = (id: keyof SidePoints) => ({ x: points[id].x * scale, y: points[id].y * scale });
-  // Ring and line weight are in DISPLAY units, not image units, so they stay
-  // the same apparent thickness at both sizes. Scaling them with the picture
-  // would make the enlarged view thirteen fat discs and defeat the enlarging.
-  const ring = expanded ? 5.4 : 3.1;
+  // Ring and line weight are in DISPLAY units, not image units. The teaser's
+  // thirteen marks crowd together around the nose and mouth, so its rings are
+  // deliberately finer than the enlarged inspection view.
+  const ring = expanded ? PLACEMENT_EXPANDED_RING : PLACEMENT_PREVIEW_RING;
   g.strokeStyle = "rgba(143, 243, 224, 0.42)";
   g.lineWidth = 1;
   const pairs: [keyof SidePoints, keyof SidePoints][] = [
@@ -1859,7 +1864,7 @@ function paintPlacementPreview(
     g.stroke();
   }
   g.strokeStyle = "#8ff3e0";
-  g.lineWidth = expanded ? 1.8 : 1.4;
+  g.lineWidth = expanded ? 1.4 : 1;
   for (const def of SIDE_POINTS) {
     const p = at(def.id);
     g.beginPath();

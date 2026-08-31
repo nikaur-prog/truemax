@@ -4,8 +4,10 @@ import { readFileSync } from "node:fs";
 import {
   placementPreviewBox,
   expandedPreviewLimits,
+  PLACEMENT_EXPANDED_RING,
   PLACEMENT_PREVIEW_W,
   PLACEMENT_PREVIEW_H,
+  PLACEMENT_PREVIEW_RING,
 } from "./sideFlow.js";
 
 // "Take these points, or place them yourself" moved out of a sheet pinned to
@@ -103,6 +105,12 @@ test("the enlarged size is bounded by the screen it is read on", () => {
   // And a large display does not get a 1.8-metre face: the caps hold.
   assert.equal(desktop.maxW, 560);
   assert.equal(desktop.maxH, 640);
+});
+
+test("the teaser rings stay separate around the dense nose and mouth points", () => {
+  assert.ok(PLACEMENT_PREVIEW_RING <= 1.7, "the collapsed marks should not merge into a teal cluster");
+  assert.ok(PLACEMENT_EXPANDED_RING > PLACEMENT_PREVIEW_RING, "the inspection view can use larger rings");
+  assert.ok(PLACEMENT_EXPANDED_RING <= 3.8, "even the expanded marks should leave the photo visible");
 });
 
 test("a very short window still gets a preview, never a zero-height one", () => {

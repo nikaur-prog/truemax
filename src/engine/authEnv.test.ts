@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 // The URL guard, tested directly.
 //
@@ -23,6 +24,17 @@ const resolve = (configured?: string) => usableUrl(configured) ?? DEFAULT_URL;
 
 test("a real project URL is used as given", () => {
   assert.equal(resolve("https://ruvgkrlfmixfnmnzqgap.supabase.co"), DEFAULT_URL);
+});
+
+test("the branded Supabase Auth domain is a valid production override", () => {
+  assert.equal(resolve("https://auth.truemax.app"), "https://auth.truemax.app");
+});
+
+test("the production CSP permits the branded Auth domain during cutover", () => {
+  const vercel = readFileSync(new URL("../../vercel.json", import.meta.url), "utf8");
+  assert.match(vercel, /https:\/\/auth\.truemax\.app/);
+  assert.match(vercel, /wss:\/\/auth\.truemax\.app/);
+  assert.match(vercel, /https:\/\/ruvgkrlfmixfnmnzqgap\.supabase\.co/);
 });
 
 test("surrounding whitespace does not break it", () => {
