@@ -8,7 +8,21 @@
     }
   },
   "redirects": [
-    { "source": "/index.html", "destination": "/", "permanent": true }
+    { "source": "/index.html", "destination": "/", "permanent": true },
+    { "source": "/auth.html", "destination": "/auth", "permanent": true },
+    { "source": "/quick.html", "destination": "/quick", "permanent": true },
+    { "source": "/calib.html", "destination": "/calib", "permanent": true },
+    { "source": "/privacy.html", "destination": "/privacy", "permanent": true },
+    { "source": "/delete-account.html", "destination": "/delete-account", "permanent": true },
+    { "source": "/terms.html", "destination": "/terms", "permanent": true },
+    { "source": "/brand.html", "destination": "/brand", "permanent": true },
+    { "source": "/league.html", "destination": "/league", "permanent": true },
+    { "source": "/guides.html", "destination": "/guides", "permanent": true },
+    { "source": "/face-score.html", "destination": "/face-score", "permanent": true },
+    { "source": "/improve-your-looks.html", "destination": "/improve-your-looks", "permanent": true },
+    { "source": "/looksmaxxing-guide.html", "destination": "/looksmaxxing-guide", "permanent": true },
+    { "source": "/glow-up-guide.html", "destination": "/glow-up-guide", "permanent": true },
+    { "source": "/methodology.html", "destination": "/methodology", "permanent": true }
   ],
   "rewrites": [
     { "source": "/auth", "destination": "/auth.html" },

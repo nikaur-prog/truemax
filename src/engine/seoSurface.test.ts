@@ -53,9 +53,28 @@ test("robots exposes the sitemap and lets noindex headers remain visible", () =>
   assert.doesNotMatch(robots, /^Disallow:/m, "noindex pages must remain crawlable so robots can see the directive");
 });
 
-test("the duplicate index URL permanently redirects to the canonical home", () => {
+test("every emitted HTML entry permanently redirects to its clean public route", () => {
   const config = JSON.parse(read("vercel.json"));
-  assert.deepEqual(config.redirects, [{ source: "/index.html", destination: "/", permanent: true }]);
+  const redirects = new Map(
+    config.redirects.map((redirect: { source: string; destination: string; permanent: boolean }) => [
+      redirect.source,
+      redirect,
+    ]),
+  );
+  for (const [route, file] of pages) {
+    const redirect = redirects.get(`/${file}`);
+    assert.deepEqual(redirect, { source: `/${file}`, destination: route, permanent: true });
+  }
+});
+
+test("indexable support pages declare clean canonical URLs", () => {
+  for (const route of ["/privacy", "/terms", "/delete-account"]) {
+    const html = read(`${route.slice(1)}.html`);
+    assert.ok(
+      html.includes(`<link rel="canonical" href="https://www.truemax.app${route}" />`),
+      `${route} canonical mismatch`,
+    );
+  }
 });
 
 test("guide links resolve to an intentional public route", () => {
