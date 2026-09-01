@@ -5,6 +5,7 @@ import test from "node:test";
 const results = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../style.css", import.meta.url), "utf8");
 const shareCard = readFileSync(new URL("./shareCard.ts", import.meta.url), "utf8");
+const photoLifecycle = readFileSync(new URL("./scoreStrip.ts", import.meta.url), "utf8");
 
 test("mobile results start with one complete score summary before navigation", () => {
   assert.match(results, /c\.analysis\.appendChild\(mobileSummary\);\s+c\.analysis\.appendChild\(rail\)/);
@@ -14,7 +15,8 @@ test("mobile results start with one complete score summary before navigation", (
 });
 
 test("the old mobile duplicates and provenance pills stay out of the hierarchy", () => {
-  assert.match(styles, /\.pane-photo \.scorestrip,[\s\S]*\.pane-photo \.quality-chips,[\s\S]*\.pane-photo \.viewtoggle/);
+  assert.match(styles, /\.pane-photo \.quality-chips,[\s\S]*\.pane-photo \.viewtoggle/);
+  assert.doesNotMatch(styles, /\.ss-score|\.ss-rank|\.ss-share/);
   assert.match(styles, /\.side-score-head,[\s\S]*\.sideprov,[\s\S]*\.side-overview-regions \{ display: none; \}/);
   assert.doesNotMatch(results, /btn-diag/);
 });
@@ -37,4 +39,10 @@ test("the exported share card carries overall, front, side and pillars", () => {
   assert.match(shareCard, /label: "FRONT"/);
   assert.match(shareCard, /label: "SIDE"/);
   assert.match(shareCard, /Object\.entries\(report\.pillars\)/);
+});
+
+test("mobile photo pinning does not build or animate a hidden score card", () => {
+  assert.match(photoLifecycle, /pane\.classList\.add\("results-ready"\)/);
+  assert.match(photoLifecycle, /detach = watchScroll\(pane\)/);
+  assert.doesNotMatch(photoLifecycle, /createElement|countUp|typeInto|renderShareCard|setInterval/);
 });

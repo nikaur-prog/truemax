@@ -172,6 +172,19 @@ test("total failure still returns something to look at", () => {
   assert.doesNotMatch(body, /return null/);
 });
 
+test("landmark dragging paints no faster than the display", () => {
+  assert.match(verify, /queuedMove = \{ id: dragging,[\s\S]*requestAnimationFrame\(paintMove\)/);
+  assert.match(verify, /const up = \(\) => \{[\s\S]*flushMove\(\);[\s\S]*dragging = null/);
+  assert.match(verify, /const placeOne = \(id: SidePointId\)/);
+});
+
+test("guide lines are updated in place instead of reparsed during a drag", () => {
+  const draw = src.slice(src.indexOf("function drawGuides"), src.indexOf("function loadImage"));
+  assert.match(draw, /createElementNS/);
+  assert.match(draw, /line\.setAttribute\("x1"/);
+  assert.doesNotMatch(draw, /innerHTML/);
+});
+
 // The Studio door. The AI room was staff-only in two places, so Adrian could
 // not use it without being made an admin of the whole product.
 const quickSrc = readFileSync(new URL("../quick.ts", import.meta.url), "utf8");

@@ -1,6 +1,7 @@
 import { REGION_NAMES } from "./scoring.js";
 import type { Report, ScoredMetric } from "./types.js";
 import type { VerdictTone } from "./analysisMode.js";
+import { ordinal } from "./ordinal.js";
 
 // ---------------------------------------------------------------------------
 // What Max is allowed to know.
@@ -57,10 +58,10 @@ function target(m: ScoredMetric): string {
 function standing(m: ScoredMetric): string {
   const p = Math.round(m.percentile);
   if (p >= 85) return `top ${100 - p}%, a strength`;
-  if (p >= 60) return `${p}th percentile, above average`;
-  if (p >= 40) return `${p}th percentile, average`;
-  if (p >= 15) return `${p}th percentile, below average`;
-  return `${p}th percentile, the weakest end`;
+  if (p >= 60) return `${ordinal(p)} percentile, above average`;
+  if (p >= 40) return `${ordinal(p)} percentile, average`;
+  if (p >= 15) return `${ordinal(p)} percentile, below average`;
+  return `${ordinal(p)} percentile, the weakest end`;
 }
 
 // Whether the measurement can move at all without surgery. Max is forbidden

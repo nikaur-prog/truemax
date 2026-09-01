@@ -4,7 +4,8 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
 
-test("a recalled report can omit the plan button without breaking overview wiring", () => {
-  assert.match(source, /const planBtn = document\.getElementById\("btn-plan"\);\s+if \(planBtn\) planBtn\.onclick/);
-  assert.doesNotMatch(source, /getElementById\("btn-plan"\)!\.onclick/);
+test("the pathway has one action, whose label follows the live state", () => {
+  assert.match(source, /actionButton\("btn-continue", pathwayLabel\(\), "pathway", "lead"\)/);
+  assert.match(source, /paintPathwayLabels\(\)/);
+  assert.doesNotMatch(source, /actionButton\("btn-plan"|actionButton\("sn-plan"/);
 });

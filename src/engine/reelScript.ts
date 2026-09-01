@@ -8,6 +8,7 @@ import { reliabilityOf } from "./reliability.js";
 import { SPREAD, spreadLine } from "./rarity.js";
 import { PHRASES, SHORT_PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
 import { eyeShapeFrom } from "./traits.js";
+import { ordinal } from "./ordinal.js";
 
 // ---------------------------------------------------------------------------
 // The celebrity breakdown, as an ordered list of beats.
@@ -632,13 +633,6 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   ];
 
   const pct = statedPct(report.overallPercentile);
-  // "92th percentile" was printed on the badge of the frame this video builds
-  // to. English ordinals: 11, 12 and 13 take "th" despite ending in 1, 2, 3.
-  const ord = (n: number) => {
-    const t = n % 100;
-    if (t >= 11 && t <= 13) return `${n}th`;
-    return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
-  };
   const beats: Beat[] = [
     { kind: "hook", line: openingLine(options.opening, name) },
     ...metricBeats,
@@ -761,7 +755,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       kind: "curve",
       line: spreadLine(report.sex),
       percentile: report.overallPercentile,
-      badge: `${ord(pct)} percentile`,
+      badge: `${ordinal(pct)} percentile`,
     },
     // The second curve line is the full cut's luxury: the short cut has made
     // its point by now and the search bar is waiting.

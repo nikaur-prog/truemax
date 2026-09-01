@@ -1268,6 +1268,12 @@ export function mountVerifier(
       el.style.top = `${(points[id].y / photo.height) * 100}%`;
     }
   };
+  const placeOne = (id: SidePointId) => {
+    const el = handles.get(id);
+    if (!el) return;
+    el.style.left = `${(points[id].x / photo.width) * 100}%`;
+    el.style.top = `${(points[id].y / photo.height) * 100}%`;
+  };
   place();
 
   // Ground truth, exportable.
@@ -1464,21 +1470,44 @@ export function mountVerifier(
     host.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
-  const move = (e: PointerEvent) => {
-    if (!dragging) return;
-    const p = toPhoto(e.clientX, e.clientY);
-    points[dragging] = {
+  let queuedMove: { id: SidePointId; clientX: number; clientY: number } | null = null;
+  let moveFrame = 0;
+  const paintMove = () => {
+    moveFrame = 0;
+    const next = queuedMove;
+    queuedMove = null;
+    if (!next) return;
+    const p = toPhoto(next.clientX, next.clientY);
+    points[next.id] = {
       x: Math.max(0, Math.min(photo.width, p.x)),
       y: Math.max(0, Math.min(photo.height, p.y)),
     };
-    place();
-    paintMagnifier(dragging);
+    // A drag changes one handle. Repositioning all thirteen forced style work
+    // for twelve stationary nodes on every raw pointer event.
+    placeOne(next.id);
+    paintMagnifier(next.id);
     onChange(points);
-    api.onDragMove?.(dragging);
+    api.onDragMove?.(next.id);
     noteGuidedMove();
+  };
+  const flushMove = () => {
+    if (!queuedMove) return;
+    if (moveFrame) cancelAnimationFrame(moveFrame);
+    paintMove();
+  };
+  const move = (e: PointerEvent) => {
+    if (!dragging) return;
+    // Pointer hardware can report much faster than the display refreshes. Use
+    // the newest coalesced sample and paint once per frame; `up` flushes the
+    // queue so the coordinate where the finger lifted is never lost.
+    const samples = e.getCoalescedEvents?.() ?? [];
+    const latest = samples[samples.length - 1] ?? e;
+    queuedMove = { id: dragging, clientX: latest.clientX, clientY: latest.clientY };
+    if (!moveFrame) moveFrame = requestAnimationFrame(paintMove);
   };
   const up = () => {
     if (!dragging) return;
+    flushMove();
     handles.get(dragging)?.classList.remove("grabbing");
     dragging = null;
     api.onDragChange?.(false);
@@ -1564,6 +1593,8 @@ export function mountVerifier(
       paintGuided();
     },
     destroy() {
+      if (moveFrame) cancelAnimationFrame(moveFrame);
+      queuedMove = null;
       host.removeEventListener("contextmenu", blockMenu);
       host.removeEventListener("pointerdown", down);
       host.removeEventListener("pointermove", move);
