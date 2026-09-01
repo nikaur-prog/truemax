@@ -707,44 +707,23 @@ function setZoom(region: RegionId | null): void {
   if (shownPhoto === "side") {
     shownRegion = null;
     applyZoom(ctx.zoomable, IDENTITY_ZOOM);
-    ctx.zoomable.style.removeProperty("--crop-x");
-    ctx.zoomable.style.removeProperty("--crop-y");
     drawSidePoints();
     return;
   }
 
   if (region) {
-    // On a phone a region press enlarges the pinned photograph so the WHOLE
-    // face can be read beside the region's overlay. Desktop keeps the closer
-    // anatomical camera move; it has enough room for that treatment.
+    // On a phone keep the whole face framed if the person scrolls back to the
+    // photograph after choosing a region. Desktop keeps the closer anatomical
+    // camera move; it has enough room for that treatment.
     const z = mobileRegionFocused() ? IDENTITY_ZOOM : zoomFor(region, ctx.landmarks);
     // translate+scale rather than transform-origin+scale, because CSS tweens a
     // transform and applies a changed origin INSTANTLY — every region change
     // used to open with a sideways jump as the pivot teleported. One
     // interpolable transform glides. See zoomTransform.ts.
     applyZoom(ctx.zoomable, z);
-    // The same point, handed to the shrunk layout as a crop.
-    //
-    // Once the pane collapses to a 96px strip the canvas is cropped by
-    // object-fit, and that crop was pinned to "center 34%" — the upper third,
-    // chosen so the strip showed a face rather than hair. Fixed, though, so it
-    // showed the FOREHEAD whatever region was selected: tap Eyes, tap Jaw, tap
-    // Chin, same forehead. The transform above still ran underneath it and was
-    // simply not what you were looking at.
-    //
-    // Only read while shrunk (see the custom properties in style.css), so the
-    // full-size pane keeps its centred framing and goes on being driven by the
-    // transform alone.
-    if (mobileRegionFocused()) setFaceCrop("front", true);
-    else {
-      ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
-      ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
-    }
+    if (mobileRegionFocused()) setFaceCrop("front");
   } else {
     applyZoom(ctx.zoomable, IDENTITY_ZOOM);
-    // Back to the framing that shows a whole face in a strip.
-    ctx.zoomable.style.removeProperty("--crop-x");
-    ctx.zoomable.style.removeProperty("--crop-y");
   }
 
   const from = shownRegion ? REGION_LANDMARKS[shownRegion] : undefined;
@@ -858,15 +837,11 @@ function sideFaceCenter(): { x: number; y: number } {
   };
 }
 
-function setFaceCrop(which: "front" | "side", forceRegion = false): void {
+function setFaceCrop(which: "front" | "side"): void {
   if (!ctx) return;
   const centre = which === "side" ? sideFaceCenter() : frontFaceCenter();
   ctx.zoomable.style.setProperty("--face-x", `${centre.x.toFixed(2)}%`);
   ctx.zoomable.style.setProperty("--face-y", `${centre.y.toFixed(2)}%`);
-  if (forceRegion || mobileRegionFocused()) {
-    ctx.zoomable.style.setProperty("--crop-x", `${centre.x.toFixed(2)}%`);
-    ctx.zoomable.style.setProperty("--crop-y", `${centre.y.toFixed(2)}%`);
-  }
 }
 
 // Repaint the visible pane only after canvasRecovery has rebuilt both hidden
@@ -958,9 +933,7 @@ function calmSide(): void {
   transition = null;
   shownRegion = null;
   ctx.zoomable.style.transform = "none";
-  ctx.zoomable.style.removeProperty("--crop-x");
-  ctx.zoomable.style.removeProperty("--crop-y");
-  setFaceCrop("side", mobileRegionFocused());
+  setFaceCrop("side");
   drawSidePoints();
 }
 
@@ -1194,8 +1167,6 @@ function wireSideMeasurementTaps(report: Report): void {
   const aimSide = (z: ZoomSpec) => {
     if (!ctx) return;
     applyZoom(ctx.zoomable, z);
-    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
-    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
   };
 
   const show = (id: string | null) => {
@@ -2279,22 +2250,14 @@ const HINT_IDLE = `<i>◱</i>Hover to draw it on your face · tap to open`;
 // The camera leans onto the measurement being looked at.
 //
 // The region zoom frames a neighbourhood; the measurement's own bounds frame
-// the evidence. Only the transform moves — the overlay animation, the photo
-// swap and the shrunk-strip crop are all driven elsewhere — so this composes
-// with every path through show() and cannot double-run an animation. A null
-// metric puts the camera back on the region.
+// the evidence. Only the transform moves, so this composes with every path
+// through show() and cannot double-run an animation. A null metric puts the
+// camera back on the region.
 function focusMeasurement(metric: ScoredMetric | null, region: RegionId, onSide: boolean): void {
   if (!ctx) return;
-  // Once the pane collapses to a 96px strip the transform is not what you are
-  // looking at — object-position is, driven by --crop-x/--crop-y (see the
-  // shrunk rules in style.css). setZoom writes them; this has to as well, or
-  // on a phone the camera "moves" while the strip keeps showing the region it
-  // was last given. Same spec, both channels.
   const aim = (z: ZoomSpec) => {
     if (!ctx) return;
     applyZoom(ctx.zoomable, z);
-    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
-    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
   };
   if (metric && onSide && ctx.sidePoints && ctx.sidePhoto) {
     const b = sideMeasurementBounds(metric, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height);
