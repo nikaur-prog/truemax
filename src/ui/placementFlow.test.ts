@@ -185,7 +185,7 @@ test("guide lines are updated in place instead of reparsed during a drag", () =>
   assert.doesNotMatch(draw, /innerHTML/);
 });
 
-// The Studio door. The AI room was staff-only in two places, so Adrian could
+// The Cast door. The AI room was staff-only in two places, so Adrian could
 // not use it without being made an admin of the whole product.
 const quickSrc = readFileSync(new URL("../quick.ts", import.meta.url), "utf8");
 const gateSrc = readFileSync(new URL("./quickGate.ts", import.meta.url), "utf8");
@@ -206,7 +206,11 @@ test("the League card's link opens the room rather than the menu", () => {
   assert.match(quickSrc, /ai: "ai",/);
   assert.match(quickSrc, /if \(hash === "ai" \|\| hash === "studio"\)/);
   const league = readFileSync(new URL("../league/main.ts", import.meta.url), "utf8");
-  assert.match(league, /id: "studio", n: "04", name: "Studio"/);
+  // Asserted by GRANT and by DESTINATION, not by display name. What this test
+  // is about is that card 04 opens the room instead of the pillar grid; the
+  // name on the card is a copy decision and pinning it here made a rename look
+  // like a broken link.
+  assert.match(league, /id: "studio", n: "04"/);
   assert.match(league, /href: "\/league\/tools#ai"/);
 });
 

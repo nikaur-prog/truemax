@@ -247,7 +247,7 @@ function openFromHash(): void {
     // analysis room — the video is built from a scan — so the door opens that
     // room.
     rundown: "analysis",
-    // The Studio card's door. Without this the League link landed on the
+    // The Cast card's door. Without this the League link landed on the
     // pillar menu, which reads as the link being broken.
     ai: "ai",
     studio: "ai",

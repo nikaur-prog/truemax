@@ -211,7 +211,7 @@ function html(): string {
         <button type="button" class="btn pri" data-carousel-save-all>Save all ready slides</button>
       </div>
       <p class="q-ai-msg" data-carousel-message role="status"></p>
-      <p class="carousel-privacy">Uploaded photos stay on this device when used as-is. A source is sent only after you choose Morph and confirm permission. Generated and morphed slides use one Studio render each.</p>
+      <p class="carousel-privacy">Uploaded photos stay on this device when used as-is. A source is sent only after you choose Morph and confirm permission. Generated and morphed slides use one render each.</p>
     </div>`;
 }
 

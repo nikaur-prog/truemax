@@ -17,7 +17,7 @@ import { enhanceVideo } from "./enhanceExport.js";
 // Two tiers, honestly labelled. The tier that ships is ON-DEVICE: clean
 // resample toward 1080p, unsharp mask, colour and contrast — operations that
 // recover what compression smeared, and cannot hallucinate. The server tier
-// ("Studio") is a visible placeholder and stays OFF: the first engine we
+// (the server pass) is a visible placeholder and stays OFF: the first engine we
 // evaluated (a state-of-the-art commercial video enhancer) plasticised a
 // face, and we will not ship a quality tool that makes faces worse. The
 // placeholder exists so the pillar's shape is set and the day an engine
@@ -91,7 +91,7 @@ export function openEnhancePanel(): void {
         </div>
         <div class="enh-tiers">
           <span class="enh-tier on">On this device, free, private</span>
-          <span class="enh-tier off" title="The first server engine we evaluated plasticised faces. Not shipping that.">Studio · server, Max, coming soon</span>
+          <span class="enh-tier off" title="The first server engine we evaluated plasticised faces. Not shipping that.">Server pass · stronger, coming soon</span>
         </div>
       </section>
 
