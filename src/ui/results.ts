@@ -137,10 +137,13 @@ interface Ctx {
 
 let ctx: Ctx | null = null;
 let photoRecovery: CanvasRecoveryHandle | null = null;
+let detachReportRail: (() => void) | null = null;
 
 export function clearResultPhotoRecovery(): void {
   photoRecovery?.destroy();
   photoRecovery = null;
+  detachReportRail?.();
+  detachReportRail = null;
 }
 
 // Whether the screen is showing observations only — a guest's scan or a
@@ -236,6 +239,24 @@ export function renderResults(c: Ctx): void {
   rail.appendChild(track);
   mountTabScrollbar(tabs, track);
 
+  // Once the photograph has left a phone viewport, the category rail is the
+  // only pinned surface. Keep a tiny piece of visual context in that rail and
+  // make it the way back to the evidence: FRONT / PROFILE plus an up-arrow.
+  // It is deliberately absent while the photograph is still visible, and on
+  // desktop where the photograph already stays beside the report.
+  const returnToFace = document.createElement("button");
+  returnToFace.type = "button";
+  returnToFace.className = "rtabs-face-back";
+  returnToFace.innerHTML = `<span class="rtabs-face-label">FRONT</span><b aria-hidden="true">↑</b>`;
+  returnToFace.setAttribute("aria-label", "Return to front photograph");
+  returnToFace.onclick = () => {
+    const face = document.querySelector<HTMLElement>(".pane-photo .face-frame");
+    if (!face) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    face.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+  };
+  rail.appendChild(returnToFace);
+
   // The Side tab is gone from this row: it is not a ninth region, it is the
   // other half of the scan, and burying it among eight regions made a quarter
   // of the score and fifteen measurements read as a footnote. It is now the
@@ -264,6 +285,7 @@ export function renderResults(c: Ctx): void {
   const body = document.createElement("div");
   body.id = "body";
   c.analysis.appendChild(body);
+  detachReportRail = mountReportRailState(rail);
   placeQualityChips();
   tabView = "front";
   buildTabs("front");
@@ -318,6 +340,42 @@ function mountTabScrollbar(tabs: HTMLElement, track: HTMLElement): void {
   tabs.addEventListener("scroll", sync, { passive: true });
   if (typeof ResizeObserver !== "undefined") new ResizeObserver(sync).observe(tabs);
   sync();
+}
+
+/**
+ * Publish the two useful states of the mobile category rail without doing any
+ * scroll-time layout work: whether it is pinned, and whether the photograph
+ * has completely left the viewport above it. CSS owns the visual treatment.
+ * One passive listener, coalesced to one animation frame, keeps long reports
+ * cheap on iOS Safari.
+ */
+function mountReportRailState(rail: HTMLElement): () => void {
+  let frame = 0;
+  const sync = (): void => {
+    frame = 0;
+    const mobile = window.matchMedia?.("(max-width: 850px)").matches ?? window.innerWidth <= 850;
+    if (!mobile) {
+      rail.classList.remove("is-stuck", "photo-away");
+      return;
+    }
+    const stickyTop = Number.parseFloat(getComputedStyle(rail).top) || 0;
+    const railTop = rail.getBoundingClientRect().top;
+    const face = document.querySelector<HTMLElement>(".pane-photo .face-frame");
+    const faceBottom = face?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY;
+    rail.classList.toggle("is-stuck", railTop <= stickyTop + 1 && window.scrollY > 0);
+    rail.classList.toggle("photo-away", faceBottom <= stickyTop + 2);
+  };
+  const schedule = (): void => {
+    if (!frame) frame = requestAnimationFrame(sync);
+  };
+  window.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", schedule, { passive: true });
+  schedule();
+  return () => {
+    window.removeEventListener("scroll", schedule);
+    window.removeEventListener("resize", schedule);
+    if (frame) cancelAnimationFrame(frame);
+  };
 }
 
 // The tab row belongs to the view, not to the report.
@@ -664,6 +722,13 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
   }
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
+  }
+  const faceBack = ctx.analysis.querySelector<HTMLButtonElement>(".rtabs-face-back");
+  const faceLabel = faceBack?.querySelector<HTMLElement>(".rtabs-face-label");
+  if (faceBack && faceLabel) {
+    const label = onSide ? "PROFILE" : "FRONT";
+    faceLabel.textContent = label;
+    faceBack.setAttribute("aria-label", `Return to ${label.toLowerCase()} photograph`);
   }
   const isRegion = id.startsWith("side:") || (!viewNeutral && id !== "side");
   document.querySelector(".pane-photo")?.classList.toggle("region-focus", isRegion);

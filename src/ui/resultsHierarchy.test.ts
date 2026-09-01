@@ -53,3 +53,13 @@ test("mobile report scrolling compacts chrome without building a hidden score ca
   assert.match(styles, /\.pane-photo \{\s+position: static/);
   assert.match(styles, /\.rtabs-rail \{ top: var\(--report-header-h, 38px\); \}/);
 });
+
+test("the pinned category rail preserves photo context and a cheap return path", () => {
+  assert.match(results, /className = "rtabs-face-back"/);
+  assert.match(results, /face\.scrollIntoView\(\{ behavior: reduced \? "auto" : "smooth", block: "start" \}\)/);
+  assert.match(results, /requestAnimationFrame\(sync\)/);
+  assert.match(results, /classList\.toggle\("photo-away", faceBottom <= stickyTop \+ 2\)/);
+  assert.match(results, /const label = onSide \? "PROFILE" : "FRONT"/);
+  assert.match(styles, /\.rtabs-rail\.photo-away \.rtabs-face-back/);
+  assert.match(styles, /\.rtabs-rail\.is-stuck/);
+});
