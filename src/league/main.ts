@@ -278,8 +278,10 @@ function renderGate(): void {
   const signInMode = document.getElementById("lg-auth-signin") as HTMLButtonElement;
   const signUpMode = document.getElementById("lg-auth-signup") as HTMLButtonElement;
   let authMode: "signin" | "signup" = "signin";
+  let authWorking = false;
   const syncAuthButton = () => {
-    const ready = Boolean(emailInput.value.trim() && emailInput.validity.valid && passInput.value.length >= 6);
+    const ready = !authWorking
+      && Boolean(emailInput.value.trim() && emailInput.validity.valid && passInput.value.length >= 6);
     authButton.disabled = !ready;
     authButton.classList.toggle("ready", ready);
   };
@@ -301,6 +303,7 @@ function renderGate(): void {
   passInput.addEventListener("input", syncAuthButton);
   syncAuthButton();
   authButton.onclick = async () => {
+    if (authWorking) return;
     const email = emailInput.value.trim();
     const pass = passInput.value;
     const err = document.getElementById("lg-auth-err")!;
@@ -311,23 +314,27 @@ function renderGate(): void {
       err.textContent = "Email and a password of at least 6 characters.";
       return;
     }
+    authWorking = true;
     authButton.disabled = true;
     authButton.textContent = authMode === "signin" ? "Signing in…" : "Creating…";
     if (authMode === "signin") {
       const si = await signIn(email, pass);
       if (si.ok) return void boot();
       err.textContent = si.message || "That didn't work. Try again.";
+      authWorking = false;
       setAuthMode("signin", false);
       return;
     }
     const su = await signUp(email, pass);
     if (su.ok && su.needsConfirmation) {
       err.textContent = `Check ${email} for the confirmation link, then return here to apply.`;
+      authWorking = false;
       setAuthMode("signup", false);
       return;
     }
     if (su.ok) return void boot();
     err.textContent = su.message || "That didn't work. Try again.";
+    authWorking = false;
     setAuthMode("signup", false);
   };
 }
