@@ -1200,6 +1200,19 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     // as its own door. Both video doors share the cta grant: they are the
     // same room in /quick and the same render meter; splitting the card is a
     // navigation fix, not a new entitlement.
+    // The DISPLAY names changed; the grant keys deliberately did not.
+    //
+    // "Studio" named two different tools and the render currency as well, so a
+    // sentence like "the Carousel uses one Studio render" pointed at three
+    // things at once. The two doors are named by what they actually do now:
+    // The Cut works on a face you HAVE, The Cast invents one you do not.
+    // "Cast" is already the house word for the generated people, in CLAUDE.md
+    // and in the scene catalogue, so it was not a new coinage.
+    //
+    // `id` stays "cta"/"studio"/"polisher"/"clips" because those strings are
+    // rows in the database: pillar_grants on league_creators, and the meter
+    // name on the render reservations. Renaming a display string is free;
+    // renaming those would silently revoke every grant already issued.
     const tools = [
       {
         id: "cta", n: "01", name: "The Rundown",
@@ -1207,23 +1220,23 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         needs: "A scan and 1-4 extra photos of the same face", href: "/league/tools#rundown",
       },
       {
-        id: "cta", n: "02", name: "Video Studio",
+        id: "cta", n: "02", name: "The Cut",
         body: "Score videos, ratio videos, breakdowns and the outro, rendered in the house style, voiced, ready to post.",
         needs: "One photo · a face worth talking about", href: "/league/tools#cta",
       },
       {
         id: "polisher", n: "03", name: "The Polisher",
-        body: "Clean up a soft clip on this device: sharpen, colour, and a 4K upscale for the ones worth it.",
+        body: "Sharpen, colour and a real 4K upscale for photos, all on this device. Clips are cleaned at their own size. Nothing is uploaded and no detail is invented.",
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
-        id: "studio", n: "04", name: "Studio",
+        id: "studio", n: "04", name: "The Cast",
         body: "Describe a character, generate the before and after of the same face, then film them. The bone structure is identical in both shots because that is what a real glow-up does.",
         needs: "No photos, a description, and one render slot a pair", href: "/league/tools#ai",
       },
       {
         id: "studio", n: "05", name: "Carousel Creator",
-        body: "Build a ranked photo carousel from generated characters, uploaded sources, or both. Every generated or morphed slide uses one Studio render.",
+        body: "Build a ranked photo carousel from generated characters, uploaded sources, or both. Every generated or morphed slide uses one render.",
         needs: "One theme · 2-7 slides · optional CTA", href: "/league/tools#carousel",
       },
       {
@@ -1400,10 +1413,10 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
           ${a.pitch ? `<p class="lg-sub" style="margin:6px 0">${esc(a.pitch)}</p>` : ""}
           ${(a.links ?? []).map((l) => `<div>${externalLink(l, l.slice(0, 60))}</div>`).join("")}</div>
           <div class="lg-grants">
-            <label><input type="checkbox" data-grant="cta" checked />CTA Generator</label>
+            <label><input type="checkbox" data-grant="cta" checked />Rundown + The Cut</label>
             <label><input type="checkbox" data-grant="clips" checked />Clips Library</label>
             <label><input type="checkbox" data-grant="polisher" />Polisher</label>
-            <label><input type="checkbox" data-grant="studio" />Studio</label>
+            <label><input type="checkbox" data-grant="studio" />The Cast + Carousel</label>
             <label>Quota <input type="number" data-quota value="30" style="width:70px" /></label>
           </div>
           <div style="display:flex;gap:10px">

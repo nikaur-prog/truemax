@@ -11,21 +11,24 @@ import type { VerdictTone } from "../engine/analysisMode.js";
 // analysis on day one and switches to one-word answers in month two has still
 // never been asked, and must be.
 //
-// Two things it is doing at once.
+// What this is for, now that no register carries slang.
 //
-// The obvious one: some people want to be called chopped by a face app and some
-// do not, and no photograph tells you which.
+// It used to be a consent gate: one option handed people "chopped" and
+// "mogger", and being asked first is the difference between opting into a joke
+// and being insulted by a product. Those words are gone from every ladder, so
+// that job is done in the data rather than in a dialog.
 //
-// The one that matters commercially: consent. A person who was asked and chose
-// the blunt wording opted into the joke. A person who was never asked was
-// insulted by a product. Those are different events — to them, to an app-store
-// reviewer, and to a parent reading it over a fifteen-year-old's shoulder — and
-// the difference is one dialog.
+// What remains is a real preference, and it is not about how harsh the words
+// are. Every register says the same thing at the same percentile; they differ
+// in what they describe. One describes the FACE ("average looking", "great
+// looking"), the other describes the PERSON'S POSITION and what is left to
+// work with ("plenty to work with", "turns heads"). People screenshot the
+// first and act on the second.
 //
-// Deliberately NOT phrased as "are you easily offended". That reads as a dare,
-// which pressures exactly the people the question exists to protect into
-// picking the harsher option to avoid looking soft. Asking what they want to
-// read has no wrong answer to be embarrassed by.
+// Still deliberately NOT phrased as "are you easily offended". That reads as a
+// dare, which pressures exactly the people the question exists to protect into
+// picking the option that sounds tougher. Asking what they want to read has no
+// wrong answer to be embarrassed by.
 // ---------------------------------------------------------------------------
 
 let host: HTMLElement | null = null;
@@ -53,12 +56,12 @@ export function askVerdictTone(force = false): Promise<VerdictTone> {
           top of it.</p>
         <div class="toneask-opts">
           <button type="button" class="toneask-opt" data-tone="blunt">
-            <b>Straight up</b>
-            <span>The real words people use. Expect “chopped”, “mid” and “mogger”.</span>
+            <b>Describe the face</b>
+            <span>What it looks like, said plainly. “Average looking”, “good looking”, “great looking”.</span>
           </button>
           <button type="button" class="toneask-opt" data-tone="kind">
-            <b>Keep it civil</b>
-            <span>Same result, said plainly. No slang, nothing designed to sting.</span>
+            <b>Tell me where I stand</b>
+            <span>The same result, framed around what there is to work with.</span>
           </button>
         </div>
         <p class="toneask-foot">You can change this whenever you like.</p>

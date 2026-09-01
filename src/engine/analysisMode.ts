@@ -199,9 +199,29 @@ export interface Verdict {
   descriptor: string;
 }
 
-// Eight rungs, and where the words differ by reference population they differ,
-// because "she-mogger" and "mogger" are not the same joke and neither is a
-// translation of the other.
+// Nine rungs of PLAIN ENGLISH. No slang on any of them, in any register.
+//
+// This ladder used to be the slang one: "chopped", "mid", "mogger", "cracked",
+// "fine shyt", "certified baddie". It came out at the owner's call after a
+// scan came back "Cracked" and the videos carrying these words started getting
+// taken down. Two separate problems, and both are fixed by the same change.
+//
+// The moderation one is the concrete one. A short video about somebody's face
+// captioned with censored profanity or with a word a classifier cannot read as
+// anything but an insult is a video a platform removes, and the removal costs
+// the whole upload rather than the one word.
+//
+// The other is that a verdict nobody can parse teaches nothing. "Cracked" is a
+// compliment to the people who already know it is one; to everybody else it
+// reads as damage, which is the opposite of what the eighty-second percentile
+// means. A measurement that has to be translated before it can be understood
+// is not a measurement yet.
+//
+// The words are the same for both sexes now. They were split when they were
+// jokes, because "she-mogger" and "mogger" were not the same joke. Plain
+// English needs no such split, and the plain ladder below already says why:
+// a number does not change with who is reading it. What stays sex-specific is
+// `descriptor`, the spoken phrase that names the person.
 //
 // Several rungs carry two words and alternate between them. That is the whole
 // reason this mode gets re-run and re-screenshotted: two friends landing on the
@@ -210,7 +230,7 @@ export interface Verdict {
 // verdict that changes when you press the button again is a verdict nobody
 // believes.
 //
-// There is still no rung below "You're cooked", and there is deliberately no
+// There is still no rung below the floor, and there is deliberately no
 // "whale". Two independent reasons and either one is sufficient: this engine
 // measures a FACE and cannot see body fat, so the word would be a fabrication
 // dressed as a measurement; and a weight insult aimed at a thirteen-year-old is
@@ -219,11 +239,9 @@ export interface Verdict {
 const LADDER: Array<{
   min: number;
   words: Record<Sex, string[]>;
-  // The same band, in plain English. Every rung carries one, including the good
-  // ones — not because a compliment needs softening, but because the dialog
-  // promises "no slang", and "Fine shyt" is slang whether or not it is a nice
-  // thing to be called. Someone who asked for it civil asked for it civil all
-  // the way up.
+  // The same band, framed around what there is to work with rather than what
+  // the face measures. Every rung carries one, including the good ones: someone
+  // who asked to be let down gently did not ask only about the bottom half.
   kind: Record<Sex, string[]>;
   /**
    * The ordinary-English ladder, and the one the exports use by default.
@@ -250,7 +268,7 @@ const LADDER: Array<{
 }> = [
   {
     min: 0,
-    words: { male: ["You're cooked"], female: ["You're cooked"] },
+    words: { male: ["A lot to work on"], female: ["A lot to work on"] },
     kind: { male: ["Starting point", "Early days"], female: ["Starting point", "Early days"] },
     // Not "an unattractive male". The bottom rung is the one place this product
     // could do real damage, and there is a difference between telling somebody
@@ -267,7 +285,10 @@ const LADDER: Array<{
   },
   {
     min: 12,
-    words: { male: ["Chopped", "Undercooked", "Raw"], female: ["Chopped", "Undercooked", "Raw"] },
+    words: {
+      male: ["A long way to go", "Rough around the edges"],
+      female: ["A long way to go", "Rough around the edges"],
+    },
     kind: {
       male: ["Plenty to work with", "Lots of upside"],
       female: ["Plenty to work with", "Lots of upside"],
@@ -280,8 +301,8 @@ const LADDER: Array<{
   {
     min: 26,
     words: {
-      male: ["Mildly chopped", "Rough", "Half baked", "Unfinished"],
-      female: ["Mildly chopped", "Rough", "Half baked", "Unfinished"],
+      male: ["A bit below average", "Some way to go"],
+      female: ["A bit below average", "Some way to go"],
     },
     kind: { male: ["Coming along", "On the way up"], female: ["Coming along", "On the way up"] },
     polite: { male: ["Below average"], female: ["Below average"] },
@@ -293,22 +314,12 @@ const LADDER: Array<{
     // The widest band in practice, so it carries the most alternates — this is
     // the rung most people will actually land on and screenshot.
     min: 40,
-    // Every one of these is a joke about being GENERIC, which is the honest
-    // reading of the fortieth-to-fifty-second percentile — and the reason the
-    // rung lands as banter rather than an insult. None of them says anything is
-    // wrong with the face, because nothing is.
+    // The honest reading of the fortieth-to-fifty-second percentile is
+    // ORDINARY, and these say exactly that. None of them says anything is wrong
+    // with the face, because nothing is: this is where most faces are.
     words: {
-      male: ["Mid", "NPC", "Background character", "Stock photo", "Default settings", "Extra", "Filler", "Beige"],
-      female: [
-        "Mid",
-        "Girl next door",
-        "NPC",
-        "Stock photo",
-        "Default settings",
-        "Background character",
-        "Extra",
-        "Beige",
-      ],
+      male: ["Average looking", "Ordinary looking", "Middle of the road"],
+      female: ["Average looking", "Ordinary looking", "Middle of the road"],
     },
     kind: {
       male: ["Right in the middle", "Middle of the pack", "Bang on average"],
@@ -322,8 +333,8 @@ const LADDER: Array<{
   {
     min: 52,
     words: {
-      male: ["Aight", "Solid", "Not bad", "Passable", "Respectable"],
-      female: ["Aight", "Cute", "Solid", "Not bad", "Passable", "Respectable"],
+      male: ["A bit above average", "Fairly good looking"],
+      female: ["A bit above average", "Fairly good looking"],
     },
     kind: {
       male: ["Good base", "Solid footing", "Comfortably above average"],
@@ -337,8 +348,8 @@ const LADDER: Array<{
   {
     min: 65,
     words: {
-      male: ["Good looking", "Attractive", "Sharp", "Top tier", "Clean", "Chiselled"],
-      female: ["Good looking", "Attractive", "Striking", "Top tier", "Clean", "Sculpted"],
+      male: ["Good looking", "Nice looking", "Sharp looking"],
+      female: ["Good looking", "Nice looking", "Sharp looking"],
     },
     kind: {
       male: ["Good looking", "Handsome", "Well put together"],
@@ -357,8 +368,8 @@ const LADDER: Array<{
     // tautology with a name in it. Any word naming a specific person has the
     // same failure waiting in it the moment that person is the subject.
     words: {
-      male: ["Mogger", "Cracked", "Built different"],
-      female: ["She-mogger", "Fine shyt"],
+      male: ["Very good looking", "Great looking", "Really good looking"],
+      female: ["Very good looking", "Great looking", "Really good looking"],
     },
     kind: {
       male: ["Striking", "Turns heads", "Exceptional"],
@@ -372,10 +383,10 @@ const LADDER: Array<{
   {
     min: 95,
     words: {
-      male: ["Looksmaxxing final boss"],
-      female: ["Certified baddie"],
+      male: ["Model looks", "Outstanding looking"],
+      female: ["Model looks", "Outstanding looking"],
     },
-    // No word repeats across rungs, in either tone. Two people a fifteen-point
+    // No word repeats across rungs, in any register. Two people a fifteen-point
     // percentile apart reading the same label is the ladder failing at the one
     // job it has.
     kind: {
@@ -393,7 +404,7 @@ const LADDER: Array<{
     // not a ceiling — it is just the top band with a second name, and it makes
     // the rung under it worth less. Roughly an 8.0+ headline score.
     min: 99,
-    words: { male: ["True Adam"], female: ["True Eve"] },
+    words: { male: ["As good as it gets"], female: ["As good as it gets"] },
     // Not a count. Every other rung of this ladder names a quality; this one
     // named a rarity, and a verdict word handed to a person is exactly where
     // CLAUDE.md says a rarity may not go. "Genuinely rare" already sits on the

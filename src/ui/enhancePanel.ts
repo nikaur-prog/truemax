@@ -1,4 +1,14 @@
-import { applyEnhance, LOOKS, lookFor, upscaleFor } from "../engine/enhance.js";
+import {
+  applyEnhance,
+  IMAGE_TARGET,
+  LOOKS,
+  lookFor,
+  MAX_UPSCALE,
+  upscaleFor,
+  upscalePlan,
+  VIDEO_TARGET,
+} from "../engine/enhance.js";
+import type { UpscalePlan } from "../engine/enhance.js";
 import { enhanceVideo } from "./enhanceExport.js";
 
 // ---------------------------------------------------------------------------
@@ -7,7 +17,7 @@ import { enhanceVideo } from "./enhanceExport.js";
 // Two tiers, honestly labelled. The tier that ships is ON-DEVICE: clean
 // resample toward 1080p, unsharp mask, colour and contrast — operations that
 // recover what compression smeared, and cannot hallucinate. The server tier
-// ("Studio") is a visible placeholder and stays OFF: the first engine we
+// (the server pass) is a visible placeholder and stays OFF: the first engine we
 // evaluated (a state-of-the-art commercial video enhancer) plasticised a
 // face, and we will not ship a quality tool that makes faces worse. The
 // placeholder exists so the pillar's shape is set and the day an engine
@@ -81,12 +91,12 @@ export function openEnhancePanel(): void {
         </div>
         <div class="enh-tiers">
           <span class="enh-tier on">On this device, free, private</span>
-          <span class="enh-tier off" title="The first server engine we evaluated plasticised faces. Not shipping that.">Studio · server, Max, coming soon</span>
+          <span class="enh-tier off" title="The first server engine we evaluated plasticised faces. Not shipping that.">Server pass · stronger, coming soon</span>
         </div>
       </section>
 
       <section class="brp-sec" id="enh-prev-sec" hidden>
-        <div class="brp-head"><span>3 · BEFORE / AFTER</span><small>Drag the line. Left is the original.</small></div>
+        <div class="brp-head"><span>3 · BEFORE / AFTER</span><small id="enh-plan">Drag the line. Left is the original.</small></div>
         <div class="enh-prevwrap">
           <canvas id="enh-prev" width="540" height="540"></canvas>
           <input id="enh-wipe" type="range" min="0" max="100" value="50" aria-label="Before/after split" />
@@ -213,6 +223,8 @@ function paint(): void {
     ? `${items.length} file${items.length === 1 ? "" : "s"}, each is enhanced and saved separately.`
     : "Photos and clips, together is fine.";
   host.querySelector<HTMLElement>("#enh-prev-sec")!.hidden = !items.length;
+  const plan = host.querySelector<HTMLElement>("#enh-plan")!;
+  plan.textContent = items[selected] ? plannedNote(items[selected]) : "Drag the line. Left is the original.";
   host.querySelector<HTMLButtonElement>("#enh-go")!.disabled = busy || !items.length;
   for (const b of host.querySelectorAll<HTMLButtonElement>("[data-look]")) {
     b.classList.toggle("on", b.dataset.look === lookKey);
@@ -311,12 +323,40 @@ function download(blob: Blob, name: string): void {
 
 const stem = (name: string): string => name.replace(/\.[^.]+$/, "");
 
+/**
+ * What this file's resize did, or did not do, in words.
+ *
+ * The reason matters more than the numbers. A photo that comes back the same
+ * size it went in is the correct outcome when it was already past the target,
+ * and it is indistinguishable from a broken tool unless somebody says so.
+ */
+function sizeNote(plan: UpscalePlan, sw: number, sh: number): string {
+  if (plan.reason === "already-sharp") {
+    return `${sw} x ${sh}, already at or past the target, so it was sharpened at full size rather than resized.`;
+  }
+  if (plan.reason === "capped") {
+    return `${sw} x ${sh} to ${plan.w} x ${plan.h}, held at ${MAX_UPSCALE}x because past that an upscale only makes the softness bigger.`;
+  }
+  return `${sw} x ${sh} to ${plan.w} x ${plan.h}.`;
+}
+
+/** The same sentence, before anything is spent, for the file in the preview. */
+function plannedNote(it: EnhItem): string {
+  if (it.kind === "image") {
+    const img = it.image!;
+    return `Output: ${sizeNote(upscalePlan(img.naturalWidth, img.naturalHeight, IMAGE_TARGET), img.naturalWidth, img.naturalHeight)}`;
+  }
+  const v = it.video!;
+  return `Output: ${sizeNote(upscalePlan(v.videoWidth, v.videoHeight, VIDEO_TARGET), v.videoWidth, v.videoHeight)} Clips stay at ${VIDEO_TARGET}p: every frame is processed on this device.`;
+}
+
 async function run(): Promise<void> {
   if (busy || !items.length || !host) return;
   busy = true;
   const go = host.querySelector<HTMLButtonElement>("#enh-go")!;
   go.disabled = true;
   const progress = host.querySelector<HTMLElement>("#enh-progress")!;
+  const done: string[] = [];
   try {
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
@@ -324,9 +364,9 @@ async function run(): Promise<void> {
       if (it.kind === "image") {
         progress.textContent = `${tag}Enhancing ${it.name}`;
         const img = it.image!;
-        const scale = Math.min(upscaleFor(img.naturalWidth, img.naturalHeight), 4096 / Math.max(img.naturalWidth, img.naturalHeight));
-        const w = Math.max(2, Math.round(img.naturalWidth * Math.max(1, scale)));
-        const h = Math.max(2, Math.round(img.naturalHeight * Math.max(1, scale)));
+        const plan = upscalePlan(img.naturalWidth, img.naturalHeight, IMAGE_TARGET);
+        const w = plan.w;
+        const h = plan.h;
         const canvas = document.createElement("canvas");
         canvas.width = w;
         canvas.height = h;
@@ -342,6 +382,7 @@ async function run(): Promise<void> {
         );
         if (!blob) throw new Error("Could not encode the enhanced image.");
         download(blob, `${stem(it.name)}-enhanced.${png ? "png" : "jpg"}`);
+        done.push(`${it.name}: ${sizeNote(plan, img.naturalWidth, img.naturalHeight)}`);
       } else {
         const bytes = await it.file.arrayBuffer();
         const v = it.video!;
@@ -349,15 +390,18 @@ async function run(): Promise<void> {
           video: v,
           bytes,
           look: LOOKS[lookKey],
-          scale: upscaleFor(v.videoWidth, v.videoHeight),
+          scale: upscaleFor(v.videoWidth, v.videoHeight, VIDEO_TARGET),
           onProgress: (f, label) => {
             progress.textContent = `${tag}${label} ${it.name}, ${Math.round(f * 100)}%`;
           },
         });
         download(out.blob, `${stem(it.name)}-enhanced.${out.extension}`);
+        done.push(`${it.name}: ${sizeNote(upscalePlan(v.videoWidth, v.videoHeight, VIDEO_TARGET), v.videoWidth, v.videoHeight)}`);
       }
     }
-    progress.textContent = "Saved.";
+    // "Saved." on its own is what let a no-op look like a success for months.
+    // The sizes are the receipt.
+    progress.textContent = `Saved. ${done.join("  ")}`;
   } catch (err) {
     progress.textContent = err instanceof Error ? err.message : "Enhancement failed.";
   } finally {

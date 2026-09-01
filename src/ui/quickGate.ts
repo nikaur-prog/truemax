@@ -59,7 +59,7 @@ const DENIED: QuickAccess = { allowed: false, staff: false, userId: null, grants
  * (allowed at all?) and once per pillar (the owner ticks grants at approval,
  * and a grant the interface ignores is a checkbox that lies). Staff see
  * everything; a creator sees the pillars they were granted. Calibrate stays
- * staff-only, while paid generation is controlled by the Studio grant and a
+ * staff-only, while paid generation is controlled by the `studio` grant and a
  * server-side render reservation.
  */
 export async function quickAccessProfile(): Promise<QuickAccess> {
