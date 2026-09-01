@@ -152,13 +152,58 @@ export function isAuthAvailable(): boolean {
   return authEnv() !== null;
 }
 
+/**
+ * Where the session is kept in localStorage, PINNED rather than derived.
+ *
+ * supabase-js builds this itself when you do not pass one, as
+ * `sb-${new URL(supabaseUrl).hostname.split(".")[0]}-auth-token` (verified in
+ * the installed package, not from memory). So the key is a function of the
+ * HOSTNAME, and the hostname is the one thing about this client that is
+ * planned to change:
+ *
+ *   https://ruvgkrlfmixfnmnzqgap.supabase.co  ->  sb-ruvgkrlfmixfnmnzqgap-auth-token
+ *   https://auth.truemax.app                 ->  sb-auth-auth-token
+ *
+ * Setting VITE_SUPABASE_URL to the branded domain would therefore move every
+ * stored session to a key nothing reads, and every signed-in person on the
+ * product would be signed out at once, with no error and nothing in the logs
+ * to explain it. The same thing happens in reverse the moment the branded
+ * domain fails its reachability check and resolvedAuthEnv falls back, which
+ * would sign people out mid-session rather than at deploy.
+ *
+ * The rule is that the key follows the PROJECT, not the address used to reach
+ * it. The branded domain is an alias for the built-in project, which is
+ * exactly what authUrlCandidates already says, so both resolve to the built-in
+ * project's key. A genuinely different project keeps deriving its own, because
+ * two tenants sharing one storage key would hand one project's session to the
+ * other.
+ */
+export function authStorageKey(url: string): string {
+  const project = url === BRANDED_URL ? DEFAULT_URL : url;
+  let host: string;
+  try {
+    host = new URL(project).hostname;
+  } catch {
+    // Unreachable through authEnv, which validates first. Falling back to the
+    // built-in project's key is still the safe answer: it is the key every
+    // existing session is already under.
+    host = new URL(DEFAULT_URL).hostname;
+  }
+  return `sb-${host.split(".")[0]}-auth-token`;
+}
+
 let clientPromise: Promise<SupabaseClient> | null = null;
 export async function getSupabaseClient(): Promise<SupabaseClient> {
   const env = await resolvedAuthEnv();
   if (!clientPromise) {
     clientPromise = Promise.resolve(
       createClient(env.url, env.key, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storageKey: authStorageKey(env.url),
+        },
       }),
     );
   }
