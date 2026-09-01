@@ -165,6 +165,12 @@ test("there is no free-text route into either prompt", () => {
   assert.doesNotMatch(client, /blemishes,/, "the client no longer sends one either");
 });
 
+test("the UGC character sheet includes both framings by default", () => {
+  const html = readFileSync(new URL("../quick.html", import.meta.url), "utf8");
+  assert.match(html, /id="q-ai-fullbody" checked/);
+  assert.match(html, /chest-up and head-to-toe before\/after images/);
+});
+
 test("the response cannot be rejected for being too large", () => {
   // A Vercel function response is capped at 4.5MB. Four photorealistic
   // 1024x1536 PNGs, base64-encoded into JSON, do not fit, and the failure is

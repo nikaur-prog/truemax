@@ -106,7 +106,7 @@ function beautyBand(score: number, sex: PairSex): string {
           "full lips",
           "a straight refined nose",
           "a long neck",
-          "smooth taut poreless-looking skin",
+          "clear healthy skin with realistic visible pores and fine texture",
         ]
       : [
           "a strong square jaw with a sharp gonial angle",
@@ -164,6 +164,21 @@ const BODY_WORDS_STAY_ON_THE_BODY =
   "The face itself stays lean and sculpted with a clearly defined jawline, " +
   "defined cheekbones and no softness or fullness under the chin.";
 
+const CREATOR_CASTING =
+  "Style them with the immediate appeal of a premium short-form social creator: " +
+  "current hair, deliberate grooming, confident natural presence and polished styling, " +
+  "while keeping believable phone-camera skin texture rather than beauty-filter plasticity.";
+
+function bodyCasting(spec: PairSpec): string {
+  if (spec.sex === "male") {
+    return "A visibly athletic natural build: broad shoulders, a tapered waist, developed arms and legs, and upright relaxed posture. Use a current modern haircut and polished grooming.";
+  }
+  const tanDetail = /\b(?:tan|tanned|bronzed)\b/i.test(spec.description)
+    ? " Preserve the described tan, including subtle believable tan variation or tasteful clothing tan lines only where the outfit naturally reveals them."
+    : "";
+  return `A fit, toned natural build with balanced proportions, confident posture, current hair and polished creator styling.${tanDetail}`;
+}
+
 /**
  * What the character sheet wears, always.
  *
@@ -197,6 +212,7 @@ export function afterPortraitPrompt(spec: PairSpec): string {
     // and the tool stops being theirs.
     "Where the description above conflicts with any of these features, follow the description.",
     BODY_WORDS_STAY_ON_THE_BODY,
+    CREATOR_CASTING,
     "Clear healthy well-hydrated skin, groomed hair, groomed brows, visibly well rested.",
     "Front on, looking straight at the camera, neutral expression, mouth closed.",
     CAMERA,
@@ -263,7 +279,9 @@ export function afterBodyPrompt(spec: PairSpec): string {
     "Keep this exact person: same face, same bone structure, same hair, same skin, same age.",
     "Reframe to a full-length standing shot showing them head to toe, the whole body in frame with room above the head and below the feet.",
     spec.description,
-    "In proportion, fit and toned, with good posture. Athletic rather than heavy.",
+    bodyCasting(spec),
+    CREATOR_CASTING,
+    "In proportion, fit and toned, with good posture. Athletic rather than heavy or exaggerated.",
     // A DEFAULT OUTFIT, identical for everybody, and that is the point.
     //
     // This frame is a character sheet rather than a post: it exists to be

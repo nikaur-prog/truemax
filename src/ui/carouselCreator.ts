@@ -2,6 +2,7 @@ import { currentAccessToken } from "../engine/auth.js";
 import {
   CAROUSEL_MAX_DESCRIPTION,
   CAROUSEL_MAX_INSTRUCTION,
+  CAROUSEL_MAX_SERIES_DIRECTION,
   CAROUSEL_MAX_SLIDES,
   CAROUSEL_MIN_SLIDES,
   CAROUSEL_THEMES,
@@ -13,9 +14,11 @@ import type { CarouselThemeId } from "../engine/carouselSpec.js";
 import { decodeImageDataUrl } from "./dataUrl.js";
 import { exportName, outcomeMessage, saveFile } from "./saveFile.js";
 import type { SaveOutcome } from "./saveFile.js";
+import { buildStoredZip } from "./zipArchive.js";
 
 type SlideSource = "synthetic" | "upload";
 type UploadAction = "as-is" | "morph";
+type CarouselLayout = "editorial" | "dossier" | "immersive";
 
 interface CarouselSlideDraft {
   id: string;
@@ -30,9 +33,14 @@ interface CarouselSlideDraft {
 }
 
 interface CarouselDraft {
-  version: 1;
+  version: 2;
   theme: CarouselThemeId;
   includeCta: boolean;
+  avatarDescription: string;
+  seriesDirection: string;
+  identityLock: boolean;
+  layout: CarouselLayout;
+  safeGuides: boolean;
   slides: CarouselSlideDraft[];
 }
 
@@ -43,6 +51,7 @@ interface CarouselSession {
   leave: () => void;
   run: number;
   busy: Set<string>;
+  batchBusy: boolean;
   saveTimer: number | null;
 }
 
@@ -67,12 +76,29 @@ function freshSlide(level: number): CarouselSlideDraft {
   };
 }
 
+function progressionLevel(index: number, total: number): number {
+  if (total <= 1) return 3;
+  return Math.max(1, Math.min(5, 1 + Math.round((index * 4) / (total - 1))));
+}
+
+function rebalanceProgression(slides: CarouselSlideDraft[]): void {
+  slides.forEach((slide, index) => {
+    slide.level = progressionLevel(index, slides.length);
+    invalidateGenerated(slide);
+  });
+}
+
 function freshDraft(): CarouselDraft {
   return {
-    version: 1,
+    version: 2,
     theme: "puffiness",
     includeCta: true,
-    slides: Array.from({ length: 5 }, (_, index) => freshSlide(index + 1)),
+    avatarDescription: "",
+    seriesDirection: "One consistent camera, lighting setup, background and styling language across the full series.",
+    identityLock: true,
+    layout: "editorial",
+    safeGuides: false,
+    slides: Array.from({ length: 5 }, (_, index) => freshSlide(progressionLevel(index, 5))),
   };
 }
 
@@ -136,7 +162,7 @@ function normalizeDraft(value: unknown): CarouselDraft | null {
   if (!value || typeof value !== "object") return null;
   const saved = value as Record<string, unknown>;
   const theme = carouselTheme(saved.theme);
-  if (saved.version !== 1 || !theme || !Array.isArray(saved.slides)
+  if ((saved.version !== 1 && saved.version !== 2) || !theme || !Array.isArray(saved.slides)
     || saved.slides.length < CAROUSEL_MIN_SLIDES || saved.slides.length > CAROUSEL_MAX_SLIDES) return null;
   const seen = new Set<string>();
   const slides = saved.slides.map((candidate, index): CarouselSlideDraft => {
@@ -161,7 +187,21 @@ function normalizeDraft(value: unknown): CarouselDraft | null {
       consent: raw.consent === true,
     };
   });
-  return { version: 1, theme: theme.id, includeCta: saved.includeCta !== false, slides };
+  const layout: CarouselLayout = saved.layout === "dossier" || saved.layout === "immersive"
+    ? saved.layout
+    : "editorial";
+  return {
+    version: 2,
+    theme: theme.id,
+    includeCta: saved.includeCta !== false,
+    avatarDescription: restoredText(saved.avatarDescription, CAROUSEL_MAX_DESCRIPTION),
+    seriesDirection: restoredText(saved.seriesDirection, CAROUSEL_MAX_SERIES_DIRECTION)
+      || "One consistent camera, lighting setup, background and styling language across the full series.",
+    identityLock: saved.identityLock !== false,
+    layout,
+    safeGuides: saved.safeGuides === true,
+    slides,
+  };
 }
 
 function setMessage(active: CarouselSession, text: string, error = false): void {
@@ -188,13 +228,13 @@ function html(): string {
   return `<div class="q-modebar">
       <button type="button" class="linkish" data-carousel-back>← All modes</button>
       <span class="q-modebar-name">Carousel Creator</span>
-      <span class="q-modebar-step">One face per slide</span>
+      <span class="q-modebar-step">One identity across every stage</span>
     </div>
     <div class="carousel-shell">
       <header class="carousel-intro">
         <span class="klabel">CREATOR STUDIO</span>
         <h1>Build the swipe</h1>
-        <p>One theme, several faces. Upload a source, generate a fictional character, or mix both in the same carousel.</p>
+        <p>Choose one default avatar, then show that exact person progressing from the strongest visible issue to the most optimised stage.</p>
       </header>
       <section class="carousel-settings" aria-label="Carousel settings">
         <label><span>Theme</span><select data-carousel-theme></select></label>
@@ -205,10 +245,34 @@ function html(): string {
         <label class="carousel-cta-check"><input type="checkbox" data-carousel-cta /><span>Add a final TrueMax CTA slide</span></label>
       </section>
       <p class="carousel-theme-note" data-carousel-theme-note></p>
+      <section class="carousel-series" aria-labelledby="carousel-series-title">
+        <div class="carousel-series-heading">
+          <div><span class="klabel">SERIES SYSTEM</span><h2 id="carousel-series-title">Direct the whole story once</h2></div>
+          <span class="carousel-premium-pill">Premium workflow</span>
+        </div>
+        <div class="carousel-series-grid">
+          <label class="carousel-avatar-description"><span>Default avatar</span><textarea rows="3" maxlength="${CAROUSEL_MAX_DESCRIPTION}" data-carousel-avatar placeholder="Adult age 21–25, attractive short-form creator look, modern hair, build, clothing, setting and camera"></textarea></label>
+          <label class="carousel-series-direction"><span>Series direction</span><textarea rows="3" maxlength="${CAROUSEL_MAX_SERIES_DIRECTION}" data-carousel-series-direction placeholder="The camera, light, setting and styling shared by every slide"></textarea></label>
+          <label><span>Layout</span><select data-carousel-layout><option value="editorial">Editorial</option><option value="dossier">Dossier</option><option value="immersive">Immersive</option></select></label>
+          <div class="carousel-series-toggles">
+            <label class="carousel-cta-check"><input type="checkbox" data-carousel-identity-lock /><span>Lock the fictional identity from slide one</span></label>
+            <label class="carousel-cta-check"><input type="checkbox" data-carousel-safe-guides /><span>Show TikTok safe-area guides</span></label>
+          </div>
+        </div>
+        <div class="carousel-series-actions">
+          <button type="button" class="btn gho" data-carousel-copy-character>Apply default avatar to every stage</button>
+          <button type="button" class="btn pri" data-carousel-generate-series>Generate unfinished series</button>
+        </div>
+        <p class="carousel-series-help">Identity lock generates the first stage from your default avatar, then edits that exact fictional face through the remaining 3–6 stages. The final stage keeps the same anatomy while presenting the most polished, attractive version.</p>
+      </section>
+      <section class="carousel-storyboard" aria-labelledby="carousel-storyboard-title">
+        <div class="carousel-storyboard-heading"><div><span class="klabel">STORYBOARD</span><h2 id="carousel-storyboard-title">The swipe at a glance</h2></div><span data-carousel-ready-count></span></div>
+        <div class="carousel-filmstrip" data-carousel-filmstrip></div>
+      </section>
       <div class="carousel-slides" data-carousel-slides></div>
       <div class="carousel-footer-actions">
         <button type="button" class="btn gho" data-carousel-add>Add a slide</button>
-        <button type="button" class="btn pri" data-carousel-save-all>Save all ready slides</button>
+        <button type="button" class="btn pri" data-carousel-save-all>Export carousel pack</button>
       </div>
       <p class="q-ai-msg" data-carousel-message role="status"></p>
       <p class="carousel-privacy">Uploaded photos stay on this device when used as-is. A source is sent only after you choose Morph and confirm permission. Generated and morphed slides use one render each.</p>
@@ -219,8 +283,8 @@ function slideHtml(active: CarouselSession, slide: CarouselSlideDraft, index: nu
   const usesProvider = needsProvider(slide);
   const ready = Boolean(activeImage(slide));
   const slideBusy = active.busy.has(slide.id);
-  const structureBusy = active.busy.size > 0;
-  const fieldLock = slideBusy ? "disabled" : "";
+  const structureBusy = active.busy.size > 0 || active.batchBusy;
+  const fieldLock = slideBusy || active.batchBusy ? "disabled" : "";
   return `<article class="carousel-slide-card" data-slide-id="${slide.id}">
     <header><div><span class="klabel">SLIDE ${index + 1} OF ${total}</span><h2>${carouselLevelLabel(active.draft.theme, slide.level)}</h2></div>
       <div class="carousel-order">
@@ -234,7 +298,7 @@ function slideHtml(active: CarouselSession, slide: CarouselSlideDraft, index: nu
         <label><span>Source</span><select data-field="source" ${fieldLock}><option value="synthetic">Generate a character</option><option value="upload">Upload a photo</option></select></label>
         <label class="${slide.source === "upload" ? "" : "hidden"}"><span>Photo</span><input type="file" accept="image/jpeg,image/png,image/webp" data-upload ${fieldLock} /></label>
         <label class="${slide.source === "upload" ? "" : "hidden"}"><span>Use the photo</span><select data-field="uploadAction" ${fieldLock}><option value="as-is">As-is, on device</option><option value="morph">Morph this photo</option></select></label>
-        <label class="${slide.source === "synthetic" ? "" : "hidden"}"><span>Character description</span><textarea rows="3" maxlength="500" data-field="description" placeholder="Adult subject, hairstyle, expression, clothes and camera angle" ${fieldLock}></textarea></label>
+        <label class="${slide.source === "synthetic" && !active.draft.identityLock ? "" : "hidden"}"><span>Stage-specific avatar override</span><textarea rows="3" maxlength="500" data-field="description" placeholder="Leave the default avatar unchanged or override it for this stage" ${fieldLock}></textarea></label>
         <label class="${usesProvider ? "" : "hidden"}"><span>${slide.source === "synthetic" ? "Extra direction" : "Morph instruction"}</span><textarea rows="2" maxlength="320" data-field="instruction" placeholder="What should this level show?" ${fieldLock}></textarea></label>
         <label><span>Band</span><select data-field="level" ${fieldLock}>${Array.from({ length: 5 }, (_, levelIndex) => {
           const value = levelIndex + 1;
@@ -245,7 +309,7 @@ function slideHtml(active: CarouselSession, slide: CarouselSlideDraft, index: nu
         </label>
         <button type="button" class="btn pri ${usesProvider ? "" : "hidden"}" data-generate ${fieldLock}>${slideBusy ? "Generating one slide..." : ready ? "Redo this slide" : "Generate this slide"}</button>
       </div>
-      <div class="carousel-preview ${ready ? "ready" : ""}" data-preview>
+      <div class="carousel-preview ${ready ? "ready" : ""} ${active.draft.safeGuides ? "safe-guides" : ""}" data-preview>
         ${ready ? `<button type="button" data-zoom title="Enlarge slide"><img alt="Finished slide ${index + 1}" /></button>
           <div class="carousel-preview-actions"><button type="button" class="btn" data-save>Save slide</button></div>`
           : `<div class="carousel-empty"><b>${slide.source === "upload" ? "Attach a source" : "Describe the character"}</b><span>The finished 9:16 slide appears here.</span></div>`}
@@ -298,32 +362,79 @@ async function composeSlide(active: CarouselSession, slide: CarouselSlideDraft):
   canvas.height = 1920;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  cover(ctx, image, 0, 220, 1080, 1450);
-  const shade = ctx.createLinearGradient(0, 1220, 0, 1920);
-  shade.addColorStop(0, "rgba(0,0,0,0)");
-  shade.addColorStop(0.55, "rgba(0,0,0,.68)");
-  shade.addColorStop(1, "#000");
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 1120, 1080, 800);
   ctx.textAlign = "center";
-  ctx.fillStyle = "#fff";
-  ctx.font = "900 54px Inter, Arial, sans-serif";
-  ctx.fillText(overlay.position, 540, 74);
-  ctx.font = "900 72px Inter, Arial, sans-serif";
-  ctx.fillText(overlay.themeTitle, 540, 162, 980);
-  ctx.fillStyle = "#10d8b0";
-  ctx.fillRect(76, 1570, 928, 6);
-  ctx.fillStyle = "#fff";
-  ctx.font = "900 96px Inter, Arial, sans-serif";
-  ctx.fillText(overlay.levelLabel, 540, 1715, 930);
-  ctx.fillStyle = "rgba(255,255,255,.72)";
-  ctx.font = "600 28px Inter, Arial, sans-serif";
-  ctx.fillText(overlay.note, 540, 1788, 930);
-  ctx.fillStyle = "#10d8b0";
-  ctx.font = "800 32px Inter, Arial, sans-serif";
-  ctx.fillText(overlay.brand, 540, 1870);
+  if (active.draft.layout === "dossier") {
+    ctx.fillStyle = "#f4f2ed";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#121615";
+    ctx.font = "800 34px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.position, 540, 70);
+    ctx.font = "900 64px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.themeTitle, 540, 154, 940);
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(54, 214, 972, 1300, 34);
+    ctx.clip();
+    cover(ctx, image, 54, 214, 972, 1300);
+    ctx.restore();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.roundRect(54, 1470, 972, 350, 32);
+    ctx.fill();
+    ctx.fillStyle = "#0aa889";
+    ctx.fillRect(98, 1516, 884, 7);
+    ctx.fillStyle = "#111514";
+    ctx.font = "900 90px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.levelLabel, 540, 1646, 860);
+    ctx.fillStyle = "rgba(17,21,20,.62)";
+    ctx.font = "600 26px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.note, 540, 1718, 840);
+    ctx.fillStyle = "#078b73";
+    ctx.font = "800 30px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.brand, 540, 1780);
+  } else {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const imageTop = active.draft.layout === "immersive" ? 0 : 220;
+    const imageHeight = active.draft.layout === "immersive" ? 1920 : 1450;
+    cover(ctx, image, 0, imageTop, 1080, imageHeight);
+    const shade = ctx.createLinearGradient(0, active.draft.layout === "immersive" ? 1000 : 1120, 0, 1920);
+    shade.addColorStop(0, "rgba(0,0,0,0)");
+    shade.addColorStop(0.55, "rgba(0,0,0,.7)");
+    shade.addColorStop(1, "#000");
+    ctx.fillStyle = shade;
+    ctx.fillRect(0, active.draft.layout === "immersive" ? 850 : 1120, 1080, active.draft.layout === "immersive" ? 1070 : 800);
+    if (active.draft.layout === "immersive") {
+      ctx.fillStyle = "rgba(0,0,0,.58)";
+      ctx.beginPath();
+      ctx.roundRect(64, 62, 168, 64, 32);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 30px Inter, Arial, sans-serif";
+      ctx.fillText(overlay.position, 148, 105);
+      ctx.textAlign = "left";
+      ctx.font = "900 54px Inter, Arial, sans-serif";
+      ctx.fillText(overlay.themeTitle, 64, 184, 930);
+      ctx.textAlign = "center";
+    } else {
+      ctx.fillStyle = "#fff";
+      ctx.font = "900 54px Inter, Arial, sans-serif";
+      ctx.fillText(overlay.position, 540, 74);
+      ctx.font = "900 72px Inter, Arial, sans-serif";
+      ctx.fillText(overlay.themeTitle, 540, 162, 980);
+    }
+    ctx.fillStyle = "#10d8b0";
+    ctx.fillRect(76, 1570, 928, 6);
+    ctx.fillStyle = "#fff";
+    ctx.font = "900 96px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.levelLabel, 540, 1715, 930);
+    ctx.fillStyle = "rgba(255,255,255,.72)";
+    ctx.font = "600 28px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.note, 540, 1788, 930);
+    ctx.fillStyle = "#10d8b0";
+    ctx.font = "800 32px Inter, Arial, sans-serif";
+    ctx.fillText(overlay.brand, 540, 1870);
+  }
   return canvas.toDataURL("image/jpeg", 0.9);
 }
 
@@ -409,6 +520,34 @@ function showZoom(dataUrl: string, alt: string): void {
   document.body.appendChild(modal);
 }
 
+function renderFilmstrip(active: CarouselSession): void {
+  const host = active.host.querySelector<HTMLElement>("[data-carousel-filmstrip]");
+  if (!host) return;
+  host.innerHTML = active.draft.slides.map((slide, index) => {
+    const image = activeImage(slide);
+    return `<button type="button" class="carousel-film-tile ${image ? "ready" : ""}" data-film-slide="${slide.id}">
+      <span class="carousel-film-number">${String(index + 1).padStart(2, "0")}</span>
+      ${image ? `<img alt="Slide ${index + 1} source preview" />` : `<span class="carousel-film-placeholder">${carouselLevelLabel(active.draft.theme, slide.level)}</span>`}
+      <b>${carouselLevelLabel(active.draft.theme, slide.level)}</b>
+    </button>`;
+  }).join("") + (active.draft.includeCta
+    ? `<div class="carousel-film-tile carousel-film-cta"><span class="carousel-film-number">CTA</span><strong>TRUEMAX</strong><b>Final slide</b></div>`
+    : "");
+  active.draft.slides.forEach((slide) => {
+    const tile = host.querySelector<HTMLElement>(`[data-film-slide="${slide.id}"]`);
+    const image = tile?.querySelector<HTMLImageElement>("img");
+    if (image) image.src = activeImage(slide) ?? "";
+    tile?.addEventListener("click", () => {
+      active.host.querySelector(`[data-slide-id="${slide.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  const count = active.host.querySelector<HTMLElement>("[data-carousel-ready-count]");
+  if (count) {
+    const ready = active.draft.slides.filter((slide) => activeImage(slide)).length;
+    count.textContent = `${ready} of ${active.draft.slides.length} ready`;
+  }
+}
+
 async function repaintPreview(active: CarouselSession, slide: CarouselSlideDraft): Promise<void> {
   const card = active.host.querySelector<HTMLElement>(`[data-slide-id="${slide.id}"]`);
   if (!card) return;
@@ -448,7 +587,13 @@ function renderSlides(active: CarouselSession): void {
   const theme = active.host.querySelector<HTMLSelectElement>("[data-carousel-theme]");
   if (theme) theme.disabled = active.busy.size > 0;
   const add = active.host.querySelector<HTMLButtonElement>("[data-carousel-add]");
-  if (add) add.disabled = active.busy.size > 0 || active.draft.slides.length >= CAROUSEL_MAX_SLIDES;
+  if (add) add.disabled = active.busy.size > 0 || active.batchBusy || active.draft.slides.length >= CAROUSEL_MAX_SLIDES;
+  const generateSeries = active.host.querySelector<HTMLButtonElement>("[data-carousel-generate-series]");
+  if (generateSeries) {
+    generateSeries.disabled = active.busy.size > 0 || active.batchBusy;
+    generateSeries.textContent = active.batchBusy ? "Generating series…" : "Generate unfinished series";
+  }
+  renderFilmstrip(active);
 }
 
 function updateThemeNote(active: CarouselSession): void {
@@ -511,6 +656,7 @@ function bindCard(active: CarouselSession, card: HTMLElement, slide: CarouselSli
   card.querySelector("[data-remove]")?.addEventListener("click", () => {
     if (active.busy.size > 0 || active.draft.slides.length <= CAROUSEL_MIN_SLIDES) return;
     active.draft.slides = active.draft.slides.filter((candidate) => candidate.id !== slide.id);
+    rebalanceProgression(active.draft.slides);
     scheduleDraftSave(active);
     renderSlides(active);
   });
@@ -527,29 +673,42 @@ function bindCard(active: CarouselSession, card: HTMLElement, slide: CarouselSli
   }
 }
 
-async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft): Promise<void> {
-  if (active.busy.has(slide.id)) return;
+function identityAnchor(active: CarouselSession, slide: CarouselSlideDraft): string | null {
+  if (!active.draft.identityLock) return null;
+  const index = active.draft.slides.findIndex((candidate) => candidate.id === slide.id);
+  const first = active.draft.slides[0];
+  if (index <= 0 || !first || first.source !== "synthetic") return null;
+  return activeImage(first);
+}
+
+async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft): Promise<boolean> {
+  if (active.busy.has(slide.id)) return false;
+  const anchor = identityAnchor(active, slide);
+  const defaultAvatar = active.draft.avatarDescription.trim();
+  const description = active.draft.identityLock
+    ? defaultAvatar
+    : slide.description.trim() || defaultAvatar;
   if (slide.source === "upload" && slide.uploadAction === "as-is") {
     setMessage(active, "Source ready. Choose morph if you want the provider to change it.");
     await repaintPreview(active, slide);
-    return;
+    return true;
   }
-  if (slide.source === "synthetic" && !slide.description.trim()) {
-    setMessage(active, "Describe this character before generating it.", true);
-    return;
+  if (slide.source === "synthetic" && !anchor && !description) {
+    setMessage(active, "Describe the default avatar before generating the progression.", true);
+    return false;
   }
   if (slide.source === "upload" && !slide.sourceDataUrl) {
     setMessage(active, "Attach the source photo first.", true);
-    return;
+    return false;
   }
   if (slide.source === "upload" && slide.uploadAction === "morph" && !slide.consent) {
     setMessage(active, "Confirm permission before sending the source to the image provider.", true);
-    return;
+    return false;
   }
   const token = await currentAccessToken().catch(() => null);
   if (!token) {
     setMessage(active, "Your session expired. Sign in again before generating.", true);
-    return;
+    return false;
   }
   active.busy.add(slide.id);
   renderSlides(active);
@@ -562,9 +721,12 @@ async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft)
     total: active.draft.slides.length,
     source: slide.source,
     uploadAction: slide.uploadAction,
-    description: slide.description,
+    description,
     instruction: slide.instruction,
     sourceDataUrl: slide.sourceDataUrl,
+    providerSourceMode: anchor ? "morph" : slide.source === "synthetic" ? "synthetic" : "morph",
+    providerSourceDataUrl: anchor ?? (slide.source === "upload" ? slide.sourceDataUrl : null),
+    seriesDirection: active.draft.seriesDirection,
   };
   try {
     const response = await fetch("/api/carousel-slide", {
@@ -575,10 +737,11 @@ async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft)
         position: requestState.position,
         level: requestState.level,
         total: requestState.total,
-        sourceMode: requestState.source === "synthetic" ? "synthetic" : "morph",
+        sourceMode: requestState.providerSourceMode,
         description: requestState.description,
         instruction: requestState.instruction,
-        sourceDataUrl: requestState.source === "upload" ? requestState.sourceDataUrl : undefined,
+        sourceDataUrl: requestState.providerSourceDataUrl ?? undefined,
+        seriesDirection: requestState.seriesDirection,
       }),
     });
     const payload = await response.json().catch(() => null) as { image?: unknown; error?: unknown } | null;
@@ -587,16 +750,19 @@ async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft)
     }
     const currentSlide = active.draft.slides.find((candidate) => candidate.id === slide.id);
     const currentPosition = active.draft.slides.findIndex((candidate) => candidate.id === slide.id) + 1;
-    if (!currentSlide) return;
+    if (!currentSlide) return false;
     if (active.draft.theme !== requestState.theme || currentPosition !== requestState.position
       || currentSlide.level !== requestState.level || active.draft.slides.length !== requestState.total
       || currentSlide.source !== requestState.source || currentSlide.uploadAction !== requestState.uploadAction
-      || currentSlide.description !== requestState.description || currentSlide.instruction !== requestState.instruction
-      || currentSlide.sourceDataUrl !== requestState.sourceDataUrl) {
+      || (active.draft.identityLock ? active.draft.avatarDescription.trim() : currentSlide.description.trim() || active.draft.avatarDescription.trim()) !== requestState.description
+      || currentSlide.instruction !== requestState.instruction
+      || currentSlide.sourceDataUrl !== requestState.sourceDataUrl
+      || active.draft.seriesDirection !== requestState.seriesDirection
+      || identityAnchor(active, currentSlide) !== anchor) {
       if (session === active && active.run === requestRun) {
         setMessage(active, "This slide changed while it was generating. Generate it again with the current settings.", true);
       }
-      return;
+      return false;
     }
     currentSlide.generatedDataUrl = payload.image;
     await storeDraft(active);
@@ -604,10 +770,12 @@ async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft)
       renderSlides(active);
       setMessage(active, "Slide ready. Tap it to inspect the full-size result.");
     }
+    return true;
   } catch (error) {
     if (session === active && active.run === requestRun) {
       setMessage(active, error instanceof Error ? error.message : "The slide could not be generated.", true);
     }
+    return false;
   } finally {
     active.busy.delete(slide.id);
     if (session === active && active.run === requestRun) {
@@ -616,36 +784,78 @@ async function generateSlide(active: CarouselSession, slide: CarouselSlideDraft)
   }
 }
 
+async function generateSeries(active: CarouselSession): Promise<void> {
+  if (active.batchBusy || active.busy.size > 0) return;
+  if (active.draft.identityLock && active.draft.slides[0]?.source !== "synthetic") {
+    setMessage(active, "Identity lock needs slide one to be a generated fictional character. Turn it off to mix uploaded sources.", true);
+    return;
+  }
+  if (!active.draft.avatarDescription.trim() && active.draft.slides[0]?.source === "synthetic") {
+    setMessage(active, "Describe the default avatar before generating the progression.", true);
+    return;
+  }
+  active.batchBusy = true;
+  renderSlides(active);
+  const unfinished = active.draft.slides.filter((slide) => !activeImage(slide));
+  if (!unfinished.length) {
+    setMessage(active, "Every slide is already ready. Redo an individual slide if you want a new version.");
+    active.batchBusy = false;
+    renderSlides(active);
+    return;
+  }
+  setMessage(active, `Building ${unfinished.length} unfinished slide${unfinished.length === 1 ? "" : "s"} in story order.`);
+  try {
+    for (const slide of unfinished) {
+      const ok = await generateSlide(active, slide);
+      if (!ok) break;
+    }
+  } finally {
+    active.batchBusy = false;
+    renderSlides(active);
+  }
+  const remaining = active.draft.slides.filter((slide) => !activeImage(slide)).length;
+  setMessage(active, remaining ? `${remaining} slide${remaining === 1 ? "" : "s"} still need attention.` : "The full series is ready to review in the storyboard.", remaining > 0);
+}
+
 async function saveAll(active: CarouselSession): Promise<void> {
   const ready = active.draft.slides.filter((slide) => activeImage(slide));
   if (!ready.length) {
     setMessage(active, "Finish at least one slide before saving.", true);
     return;
   }
-  setMessage(active, `Saving ${ready.length}${active.draft.includeCta ? " plus the CTA" : ""}. Your device may show a share sheet for each file.`);
+  setMessage(active, `Packing ${ready.length}${active.draft.includeCta ? " plus the CTA" : ""} into one ordered ZIP with a caption draft.`);
   try {
-    let saved = 0;
-    for (const slide of ready) {
+    const files: Record<string, Uint8Array> = {};
+    for (let index = 0; index < ready.length; index += 1) {
+      const slide = ready[index];
       const dataUrl = await composeSlide(active, slide);
       if (!dataUrl) continue;
-      const outcome = await saveDataUrl(dataUrl, `slide-${slide.level}`);
-      if (outcome === "cancelled") {
-        setMessage(active, `Saving stopped. ${saved} file${saved === 1 ? "" : "s"} saved.`);
-        return;
-      }
-      saved += 1;
+      const decoded = decodeImageDataUrl(dataUrl);
+      if (!decoded) continue;
+      files[`${String(index + 1).padStart(2, "0")}-${carouselLevelLabel(active.draft.theme, slide.level).toLowerCase().replace(/[^a-z0-9]+/g, "-")}.jpg`] = new Uint8Array(await decoded.blob.arrayBuffer());
     }
     if (active.draft.includeCta) {
-      const outcome = await saveDataUrl(await composeCta(), "cta");
-      if (outcome === "cancelled") {
-        setMessage(active, `Saving stopped. ${saved} file${saved === 1 ? "" : "s"} saved.`);
-        return;
-      }
-      saved += 1;
+      const decoded = decodeImageDataUrl(await composeCta());
+      if (decoded) files[`${String(ready.length + 1).padStart(2, "0")}-truemax-cta.jpg`] = new Uint8Array(await decoded.blob.arrayBuffer());
     }
-    setMessage(active, `${saved} file${saved === 1 ? "" : "s"} saved.`);
+    const theme = carouselTheme(active.draft.theme);
+    const levels = ready.map((slide) => carouselLevelLabel(active.draft.theme, slide.level).toLowerCase()).join(" → ");
+    files["caption.txt"] = new TextEncoder().encode([
+      `${theme?.label ?? "TrueMax visual comparison"}: ${levels}.`,
+      "",
+      theme?.note ?? "Visual comparison only.",
+      "",
+      "Measure your face and build your next move at truemax.app.",
+    ].join("\n"));
+    const zip = buildStoredZip(files);
+    const outcome = await saveFile(
+      new Blob([zip.buffer as ArrayBuffer], { type: "application/zip" }),
+      exportName("carousel", "zip", `${theme?.label ?? "series"}-pack`),
+      "carousel",
+    );
+    setMessage(active, outcomeMessage(outcome));
   } catch (error) {
-    setMessage(active, error instanceof Error ? error.message : "A slide could not be saved.", true);
+    setMessage(active, error instanceof Error ? error.message : "The carousel pack could not be saved.", true);
   }
 }
 
@@ -671,8 +881,9 @@ function bindShell(active: CarouselSession): void {
     count.addEventListener("change", () => {
       if (active.busy.size > 0) return;
       const desired = Number(count.value);
-      while (active.draft.slides.length < desired) active.draft.slides.push(freshSlide(Math.min(5, active.draft.slides.length + 1)));
+      while (active.draft.slides.length < desired) active.draft.slides.push(freshSlide(5));
       if (active.draft.slides.length > desired) active.draft.slides.splice(desired);
+      rebalanceProgression(active.draft.slides);
       scheduleDraftSave(active);
       renderSlides(active);
     });
@@ -683,12 +894,78 @@ function bindShell(active: CarouselSession): void {
     cta.addEventListener("change", () => {
       active.draft.includeCta = cta.checked;
       scheduleDraftSave(active);
+      renderFilmstrip(active);
     });
   }
+  const direction = active.host.querySelector<HTMLTextAreaElement>("[data-carousel-series-direction]");
+  if (direction) {
+    direction.value = active.draft.seriesDirection;
+    direction.addEventListener("input", () => {
+      active.draft.seriesDirection = direction.value.slice(0, CAROUSEL_MAX_SERIES_DIRECTION);
+      scheduleDraftSave(active);
+    });
+  }
+  const avatar = active.host.querySelector<HTMLTextAreaElement>("[data-carousel-avatar]");
+  if (avatar) {
+    avatar.value = active.draft.avatarDescription;
+    avatar.addEventListener("input", () => {
+      active.draft.avatarDescription = avatar.value.slice(0, CAROUSEL_MAX_DESCRIPTION);
+      scheduleDraftSave(active);
+    });
+  }
+  const layout = active.host.querySelector<HTMLSelectElement>("[data-carousel-layout]");
+  if (layout) {
+    layout.value = active.draft.layout;
+    layout.addEventListener("change", () => {
+      active.draft.layout = layout.value === "dossier" || layout.value === "immersive" ? layout.value : "editorial";
+      scheduleDraftSave(active);
+      renderSlides(active);
+      setMessage(active, `${layout.selectedOptions[0]?.textContent ?? "Layout"} applied to every preview and export.`);
+    });
+  }
+  const identity = active.host.querySelector<HTMLInputElement>("[data-carousel-identity-lock]");
+  if (identity) {
+    identity.checked = active.draft.identityLock;
+    identity.addEventListener("change", () => {
+      active.draft.identityLock = identity.checked;
+      scheduleDraftSave(active);
+      renderSlides(active);
+      setMessage(active, identity.checked
+        ? "Identity lock is on. Slide one becomes the source for the fictional series."
+        : "Identity lock is off. Each generated slide can use a different character.");
+    });
+  }
+  const safeGuides = active.host.querySelector<HTMLInputElement>("[data-carousel-safe-guides]");
+  if (safeGuides) {
+    safeGuides.checked = active.draft.safeGuides;
+    safeGuides.addEventListener("change", () => {
+      active.draft.safeGuides = safeGuides.checked;
+      scheduleDraftSave(active);
+      renderSlides(active);
+    });
+  }
+  active.host.querySelector("[data-carousel-copy-character]")?.addEventListener("click", () => {
+    if (active.busy.size > 0 || active.batchBusy) return;
+    const anchor = active.draft.avatarDescription.trim();
+    if (!anchor) {
+      setMessage(active, "Describe the default avatar first.", true);
+      return;
+    }
+    for (const slide of active.draft.slides.slice(1)) {
+      if (slide.source !== "synthetic") continue;
+      slide.description = anchor;
+      invalidateGenerated(slide);
+    }
+    scheduleDraftSave(active);
+    renderSlides(active);
+    setMessage(active, "The default avatar now seeds every synthetic stage.");
+  });
+  active.host.querySelector("[data-carousel-generate-series]")?.addEventListener("click", () => void generateSeries(active));
   active.host.querySelector("[data-carousel-back]")?.addEventListener("click", active.leave);
   active.host.querySelector("[data-carousel-add]")?.addEventListener("click", () => {
     if (active.busy.size > 0 || active.draft.slides.length >= CAROUSEL_MAX_SLIDES) return;
-    active.draft.slides.push(freshSlide(Math.min(5, active.draft.slides.length + 1)));
+    active.draft.slides.push(freshSlide(5));
+    rebalanceProgression(active.draft.slides);
     scheduleDraftSave(active);
     renderSlides(active);
   });
@@ -720,6 +997,7 @@ export async function openCarouselCreator(host: HTMLElement, ownerId: string, le
     leave,
     run,
     busy: new Set(),
+    batchBusy: false,
     saveTimer: null,
   };
   session = active;
