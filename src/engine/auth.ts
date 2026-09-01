@@ -48,6 +48,7 @@ interface AuthEnv {
 // VITE_SUPABASE_ANON_KEY in Vercel and they override these.
 const DEFAULT_URL = "https://ruvgkrlfmixfnmnzqgap.supabase.co";
 const DEFAULT_KEY = "sb_publishable_XLs-l72FzRD5C_QzP9xlkA_vMahWmgw";
+const BRANDED_URL = "https://auth.truemax.app";
 
 // A configured value only wins if it is actually usable.
 //
@@ -111,14 +112,49 @@ function authEnv(): AuthEnv | null {
   return { url: url ?? DEFAULT_URL, key: key ?? DEFAULT_KEY };
 }
 
+/**
+ * The branded URL is an alias for the built-in project, not another tenant.
+ * During DNS/certificate activation it can resolve while still returning
+ * "Project not specified". Only that known alias may fall back: silently
+ * swapping an arbitrary staging project for production would cross identities.
+ */
+export function authUrlCandidates(configured: string | undefined): string[] {
+  const selected = usableUrl(configured) ?? DEFAULT_URL;
+  return selected === BRANDED_URL ? [BRANDED_URL, DEFAULT_URL] : [selected];
+}
+
+let resolvedAuthEnvPromise: Promise<AuthEnv> | null = null;
+
+async function resolvedAuthEnv(): Promise<AuthEnv> {
+  const env = authEnv();
+  if (!env) throw new Error("Auth is not configured");
+  const [primary, fallback] = authUrlCandidates(env.url);
+  if (!fallback) return env;
+  if (!resolvedAuthEnvPromise) {
+    resolvedAuthEnvPromise = (async () => {
+      try {
+        const response = await fetch(`${primary}/auth/v1/settings`, {
+          headers: { apikey: env.key },
+          cache: "no-store",
+        });
+        if (response.ok) return env;
+        console.error("[auth] branded Auth domain is not active; using the project URL", response.status);
+      } catch (error) {
+        console.error("[auth] branded Auth domain could not be reached; using the project URL", error);
+      }
+      return { ...env, url: fallback };
+    })();
+  }
+  return resolvedAuthEnvPromise;
+}
+
 export function isAuthAvailable(): boolean {
   return authEnv() !== null;
 }
 
 let clientPromise: Promise<SupabaseClient> | null = null;
 export async function getSupabaseClient(): Promise<SupabaseClient> {
-  const env = authEnv();
-  if (!env) throw new Error("Auth is not configured");
+  const env = await resolvedAuthEnv();
   if (!clientPromise) {
     clientPromise = Promise.resolve(
       createClient(env.url, env.key, {
@@ -150,11 +186,11 @@ export function authRedirects(origin = window.location.origin): { scan: string; 
 }
 
 export async function socialAvailability(): Promise<SocialAvailability | null> {
-  const env = authEnv();
-  if (!env) return null;
   try {
+    const env = await resolvedAuthEnv();
     const response = await fetch(`${env.url}/auth/v1/settings`, {
       headers: { apikey: env.key },
+      cache: "no-store",
     });
     if (!response.ok) {
       console.error("[auth] provider settings read failed", response.status, response.statusText);
@@ -260,11 +296,16 @@ export async function signInWithLink(email: string): Promise<AuthResult> {
 
 export async function signInWithProvider(provider: SocialProvider): Promise<AuthResult> {
   try {
+    const env = await resolvedAuthEnv();
     const c = await getSupabaseClient();
-    const { error } = await c.auth.signInWithOAuth({
+    const { data, error } = await c.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: authRedirects().scan,
+        // Do not let the SDK navigate until it has produced a real authorize
+        // URL. An unconfigured provider used to leave iPhone users staring at
+        // a blank OAuth document before the error could be painted in-app.
+        skipBrowserRedirect: true,
         // Always show the account chooser.
         //
         // Not a Google bug and not a phone bug: with no prompt asked for,
@@ -289,10 +330,29 @@ export async function signInWithProvider(provider: SocialProvider): Promise<Auth
       console.error("[auth] signInWithOAuth rejected", provider, error);
       return { ok: false, message: friendly(error.message) };
     }
+    const target = safeOAuthRedirect(data.url, env.url);
+    if (!target) {
+      console.error("[auth] provider returned no safe authorize URL", provider);
+      return { ok: false, message: "That sign-in option could not be opened. Try email instead." };
+    }
+    window.location.assign(target);
     return { ok: true, redirecting: true };
   } catch (error) {
     console.error("[auth] signInWithOAuth threw", provider, error);
     return { ok: false, message: "Could not start social sign-in. Try again." };
+  }
+}
+
+export function safeOAuthRedirect(value: string | null, authOrigin: string): string | null {
+  if (!value) return null;
+  try {
+    const target = new URL(value);
+    const expected = new URL(authOrigin);
+    if (target.origin !== expected.origin) return null;
+    if (target.pathname !== "/auth/v1/authorize") return null;
+    return target.toString();
+  } catch {
+    return null;
   }
 }
 

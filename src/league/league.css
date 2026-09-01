@@ -95,6 +95,22 @@ label { display: block; font-size: 13px; color: var(--lg-mut); margin: 14px 0 6p
 .lg-btn.danger { color: var(--lg-danger); }
 .lg-btn[disabled] { opacity: 0.5; cursor: default; }
 
+.lg-auth-modes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  margin-top: 18px; padding: 4px; border-radius: 12px;
+  background: var(--lg-bg); border: 1px solid var(--lg-line);
+}
+.lg-auth-mode {
+  border: 0; border-radius: 9px; padding: 9px 10px;
+  background: transparent; color: var(--lg-mut); font-weight: 650;
+}
+.lg-auth-mode.active { background: var(--lg-panel-2); color: var(--lg-ink); }
+.lg-auth-submit { width: 100%; transition: background .16s ease, box-shadow .16s ease, opacity .16s ease; }
+.lg-auth-submit.ready {
+  background: var(--lg-mint-bright); border-color: var(--lg-mint-bright); color: #05231a;
+  box-shadow: 0 0 0 1px rgba(121, 232, 210, .28), 0 0 24px rgba(121, 232, 210, .22);
+}
+
 /* ---- frame ---- */
 .lg-top {
   display: flex;

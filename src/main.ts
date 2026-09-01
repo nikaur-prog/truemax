@@ -91,7 +91,9 @@ import {
 } from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
+import { automaticCaptureDetail } from "./ui/captureCopy.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
+import { closeScanConfirm, confirmScanAction } from "./ui/scanConfirm.js";
 import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
 import { mountFaceOutline } from "./ui/faceOutline.js";
 import type { CameraHandle } from "./ui/camera.js";
@@ -1306,7 +1308,7 @@ async function openCamera(): Promise<void> {
         }
         el.camHint.classList.add("counting");
         el.camHintTitle.textContent = `Hold still · ${remaining}`;
-        el.camHintDetail.textContent = "Taking it automatically · space to take it now";
+        el.camHintDetail.textContent = automaticCaptureDetail();
         setCameraLabel(`Capturing in ${remaining}`);
       },
       onFire: () => el.btnCamera.click(),
@@ -1510,23 +1512,30 @@ el.btnNoGlasses.addEventListener("click", () => {
 // asks in words. Declining re-pushes the sentinel; accepting steps back past
 // where the sentinel sat.
 // ---------------------------------------------------------------------------
-let leaveGuard = false;
-let guardEntryPushed = false;
+type LeaveGuard = "scan" | "report";
 
-function armLeaveGuard(): void {
-  leaveGuard = true;
-  if (!guardEntryPushed) {
-    try {
-      history.pushState({ tmReport: true }, "");
-      guardEntryPushed = true;
-    } catch {
-      /* history unavailable: beforeunload still covers refresh and close */
-    }
+let leaveGuard: LeaveGuard | null = null;
+let guardEntryPushed = false;
+let leavePromptOpen = false;
+
+function pushLeaveGuardEntry(): boolean {
+  try {
+    history.pushState({ tmReport: true }, "");
+    guardEntryPushed = true;
+    return true;
+  } catch {
+    guardEntryPushed = false;
+    return false;
   }
 }
 
+function armLeaveGuard(kind: LeaveGuard): void {
+  leaveGuard = kind;
+  if (!guardEntryPushed) pushLeaveGuardEntry();
+}
+
 function disarmLeaveGuard(): void {
-  leaveGuard = false;
+  leaveGuard = null;
 }
 
 window.addEventListener("beforeunload", (event) => {
@@ -1542,17 +1551,43 @@ window.addEventListener("popstate", () => {
     guardEntryPushed = false;
     return;
   }
-  if (window.confirm("Leave this report? It closes when you leave the page.")) {
-    disarmLeaveGuard();
-    guardEntryPushed = false;
-    history.back();
-  } else {
-    try {
-      history.pushState({ tmReport: true }, "");
-    } catch {
-      guardEntryPushed = false;
-    }
+  // This pop consumed the sentinel. Reinstall it even if the first leave
+  // question is still open: repeated iOS back-swipes otherwise walk behind
+  // the dialog and leave no guard for a later gesture.
+  guardEntryPushed = false;
+  if (leavePromptOpen) {
+    pushLeaveGuardEntry();
+    return;
   }
+  leavePromptOpen = true;
+  const kind = leaveGuard;
+  // Put the sentinel back before waiting for an asynchronous app dialog. A
+  // second iOS back-swipe while the question is open must not leave the page
+  // behind the dialog. Accepting then skips both the replacement sentinel and
+  // this document's original entry.
+  pushLeaveGuardEntry();
+  void confirmScanAction({
+    title: kind === "scan" ? "Leave this scan?" : "Leave this report?",
+    copy: kind === "scan"
+      ? "Your captured photo and current scan progress will be discarded."
+      : "This report will close. You can stay here if that back gesture was accidental.",
+    confirmLabel: kind === "scan" ? "Leave scan" : "Leave report",
+    cancelLabel: kind === "scan" ? "Keep scanning" : "Keep this report",
+  }).then((leave) => {
+    leavePromptOpen = false;
+    // The scan may have been reset or the account changed while this question
+    // was open. A stale answer never rebuilds history for a different run.
+    if (leaveGuard !== kind) return;
+    if (leave) {
+      const sentinelPresent = guardEntryPushed;
+      disarmLeaveGuard();
+      guardEntryPushed = false;
+      if (sentinelPresent) history.go(-2);
+      else history.back();
+      return;
+    }
+    if (!guardEntryPushed) pushLeaveGuardEntry();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1609,6 +1644,7 @@ async function reopenArchivedScan(scan: StoredScan): Promise<void> {
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "RECALLED";
   el.status.textContent = "";
+  armLeaveGuard("report");
   renderResults({
     report: archive.report,
     delta: null,
@@ -1633,6 +1669,7 @@ async function reopenArchivedScan(scan: StoredScan): Promise<void> {
 setScanReopen((scan) => void reopenArchivedScan(scan));
 
 function resetToUpload(): void {
+  closeScanConfirm();
   disarmLeaveGuard();
   scanGeneration++;
   scanSession.reset();
@@ -1948,9 +1985,26 @@ async function handleCanvas(
   // render front-only; the interactive flow always supplies a side report.
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "FRONT CAPTURED";
+  drawCalm(el.overlayCanvas, landmarks, width, height);
+  armLeaveGuard("scan");
+  const method = captureMethod;
+  const accepted = await confirmScanAction({
+    eyebrow: "CHECK YOUR PHOTO",
+    title: "Happy with this front photo?",
+    copy: "Use a clear, straight-on photo you are happy to be measured from. Retake it now if it is blurry, tilted or not the photo you want rated.",
+    confirmLabel: "Use this photo",
+    cancelLabel: "Retake photo",
+    preview: frontShot,
+    tone: "positive",
+  });
+  if (!scanIsCurrent(token, generation)) return;
+  if (!accepted) {
+    resetToUpload();
+    if (method === "camera") el.btnCamera.click();
+    return;
+  }
   track("scan-front-done");
   el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
-  drawCalm(el.overlayCanvas, landmarks, width, height);
   if (!scanSession.transition(token, "side")) return;
   startSide();
 }
@@ -2568,7 +2622,7 @@ async function runFullAnalysis(
     },
   };
   track("results-shown");
-  armLeaveGuard();
+  armLeaveGuard("report");
   // The report does not cut in — it arrives. The pass has just spent ten
   // seconds moving smoothly over the face; a hard innerHTML swap at the end
   // of it is the one jolt that would undo all of that. The class fades and
