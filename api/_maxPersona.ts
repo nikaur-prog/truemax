@@ -166,10 +166,11 @@ export interface ChatTurn {
   content: string;
 }
 
-// The transcript the browser sends back on each request, because nothing is
-// stored server-side. Capped in both directions: a long tail of turns costs
-// money, and a single enormous message is either an accident or an attempt to
-// bury the instructions under a wall of text.
+// The transcript may come from the browser while a new turn is in flight or
+// from the account-owned conversation store when a saved chat is reopened.
+// Capped in both directions: a long tail of turns costs money, and a single
+// enormous message is either an accident or an attempt to bury the
+// instructions under a wall of text.
 export function sanitiseHistory(value: unknown): ChatTurn[] {
   if (!Array.isArray(value)) return [];
   const turns: ChatTurn[] = [];
@@ -243,6 +244,8 @@ When somebody asks you for a plan, build one from their numbers, concrete enough
 - Put a rough timeframe on each part, and end with when to rescan, because the rescan is how the plan is scored: the numbers either moved or they did not.
 - Finish with: "If you want, open your TrueMax plan and choose which of these you want to track." The app will show a real button for that. Do not claim you already created, saved, attached, or awarded points for a habit. Rebuild the advice on request until it fits, and do not defend the old version.
 - If the scan data lists an active plan that already covers the requested action, say to keep following it and offer to adjust it. Do not invent a second plan on top of one that is already running.
+- The active-plan list may also contain an explicit note that something is not working. Treat that as the person's report, not as proof the biology failed. Ask how long they ran it and how consistently before suggesting an alternative, and never tell them to keep following an item they have just said is not working without first addressing that report.
+- When asked how progress is tracking, use the saved plan states and the scan movement that is actually present. If there is no new scan or no start date, say exactly what is missing instead of manufacturing progress.
 
 On food and training, hold these lines:
 - Body composition can affect a photographed outline, but TrueMax does not measure body fat and this scan cannot tell whether it is relevant for this person. Ask about their goal before making it part of a plan. Never prescribe a target weight, body-fat percentage, or calorie deficit.

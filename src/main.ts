@@ -1638,6 +1638,10 @@ async function reopenArchivedScan(scan: StoredScan): Promise<void> {
   if (owner !== activeScanOwner() || generation !== scanGeneration) return;
   closeHistory();
   closeScanRecall();
+  // History is also mounted inside the dashboard. In that route closeHistory
+  // has no overlay to remove, so the freshly rendered report used to open
+  // correctly *under* the dashboard and the button appeared to do nothing.
+  closeDashboard();
   // The results machinery lives on the main screen; a reopen from the landing
   // page has to reveal it exactly as a finished analysis would.
   el.main.classList.remove("hidden");

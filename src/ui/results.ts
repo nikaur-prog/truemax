@@ -2123,6 +2123,7 @@ function wireMaxAsk(): void {
     if (cc) {
       openMaxChat(cc, {
         onOpenPlan: () => select("improve"),
+        source: "post_analysis",
       });
     }
   });

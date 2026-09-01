@@ -186,6 +186,29 @@ export async function reconcileEntitlement(sessionId?: string | null): Promise<b
   }
 }
 
+/**
+ * Repair a Max entitlement only on an explicit attempt to enter Max.
+ *
+ * Stripe is authoritative, while the entitlements table is the fast local
+ * projection written by webhooks. A delayed or missed webhook used to leave a
+ * real subscriber looking at Checkout, where Stripe correctly refused to sell
+ * them a second subscription. This performs the existing authenticated Stripe
+ * reconciliation once, then re-reads the projection.
+ *
+ * Callers deliberately opt into this slower path. Ordinary page paints keep
+ * using loadEntitlement(), so free accounts do not trigger a Stripe search on
+ * every visit.
+ */
+export async function recoverMaxEntitlement(
+  read: () => Promise<Entitlement> = loadEntitlement,
+  repair: () => Promise<boolean> = () => reconcileEntitlement(),
+): Promise<Entitlement> {
+  const first = await read();
+  if (hasMaxAccess(first)) return first;
+  if (!(await repair())) return first;
+  return read();
+}
+
 export interface PurchaseResult {
   kind: "scan" | "voice";
   status: "success" | "cancelled";

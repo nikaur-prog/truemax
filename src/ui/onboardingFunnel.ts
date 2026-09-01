@@ -742,6 +742,7 @@ export async function openTrialFunnel(
             ${adult ? "Try Max free for 7 days" : "Available when you're 18"}
           </button>
           <small>${adult ? "Then $11.99/month. Cancel anytime." : "Starter remains fully available."}</small>
+          ${adult ? "" : `<p class="plan-age-reason">Coach Max includes weight, calorie and body-composition coaching written for adults, so Max subscriptions unlock at 18.</p>`}
           <!-- Max lives at the foot of his own plan, not at the top of the
                screen. He starts fully hidden behind the card's bottom edge:
                the card's overflow does the hiding: and pops up waist-deep
