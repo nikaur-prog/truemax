@@ -151,6 +151,25 @@ test("the full-length shots descend from the same person", () => {
   assert.match(afterBodyPrompt(spec()), /Athletic rather than heavy/);
 });
 
+test("the casting brief is premium but retains real skin texture", () => {
+  for (const sex of ["female", "male"] as const) {
+    const prompt = afterPortraitPrompt(spec({ sex }));
+    assert.match(prompt, /premium short-form social creator/i);
+    assert.match(prompt, /believable phone-camera skin texture/i);
+    assert.doesNotMatch(prompt, /poreless/i);
+  }
+});
+
+test("full-body casting is sex-aware without changing the identity", () => {
+  const man = afterBodyPrompt(spec({ sex: "male" }));
+  const woman = afterBodyPrompt(spec({ sex: "female", description: "23, tanned, long dark hair." }));
+  assert.match(man, /visibly athletic natural build/i);
+  assert.match(man, /modern haircut/i);
+  assert.match(woman, /fit, toned natural build/i);
+  assert.match(woman, /tan lines/i);
+  assert.match(woman, /same face, same bone structure/i);
+});
+
 test("the operator's own description reaches both framings", () => {
   const described = spec({ description: "26, freckles, shoulder-length hair." });
   assert.ok(afterPortraitPrompt(described).includes(described.description));

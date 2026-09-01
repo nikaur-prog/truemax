@@ -73,8 +73,8 @@
           <button class="q-pillar" data-mode="carousel" type="button">
             <span class="q-pillar-kicker">04</span>
             <b>Carousel Creator</b>
-            <span class="q-pillar-what">Build a ranked photo series from uploads, generated characters, or both</span>
-            <span class="q-pillar-needs">2-7 slides · one theme · optional CTA</span>
+            <span class="q-pillar-what">Progress one locked avatar from the strongest issue to the most polished stage</span>
+            <span class="q-pillar-needs">3-6 slides · one identity · optional CTA</span>
           </button>
           <button class="q-pillar" data-mode="enhance" type="button">
             <span class="q-pillar-kicker">05</span>
@@ -158,14 +158,15 @@
                disappointing one: the numbers steer the prompt, they are not
                promises the scanner has agreed to. -->
           <p class="q-ai-note" id="q-ai-note"></p>
-          <!-- Off by default because it is a second billable pair, not a
-               free extra view of the same one. -->
+          <!-- Included by default because the UGC workflow needs both casting
+               framings. It remains optional because it is a second billable
+               pair rather than a crop of the portrait. -->
           <label class="q-ai-check">
-            <input type="checkbox" id="q-ai-fullbody" />
-            <span>Also generate a full-length pair</span>
+            <input type="checkbox" id="q-ai-fullbody" checked />
+            <span>Include the matching full-length pair</span>
           </label>
-          <small class="q-ai-sub">Head to toe, the same person, under the portrait pair. Costs a second
-          render from the monthly quota because it is two more images.</small>
+          <small class="q-ai-sub">The default set contains chest-up and head-to-toe before/after images
+          of the same adult. Untick this to save the two additional renders.</small>
           <button type="submit" class="btn pri" id="q-ai-go">Generate the preview pair</button>
           <p class="q-ai-msg" id="q-ai-msg" role="status"></p>
         </form>

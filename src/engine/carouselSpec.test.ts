@@ -1,12 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CAROUSEL_MAX_SLIDES,
+  CAROUSEL_MIN_SLIDES,
   CAROUSEL_THEMES,
   carouselLevelLabel,
   carouselOverlayCopy,
   carouselProviderPrompt,
   parseCarouselGeneration,
 } from "./carouselSpec.js";
+
+test("creator series are deliberately limited to three through six stages", () => {
+  assert.equal(CAROUSEL_MIN_SLIDES, 3);
+  assert.equal(CAROUSEL_MAX_SLIDES, 6);
+  for (const total of [2, 7]) {
+    assert.equal(parseCarouselGeneration({
+      theme: "puffiness", position: 1, level: 1, total, sourceMode: "synthetic", description: "Adult subject",
+    }).ok, false);
+  }
+  for (const total of [3, 6]) {
+    assert.equal(parseCarouselGeneration({
+      theme: "puffiness", position: 1, level: 1, total, sourceMode: "synthetic", description: "Adult subject",
+    }).ok, true);
+  }
+});
 
 test("carousel themes have five unique levels and honest notes", () => {
   assert.equal(new Set(CAROUSEL_THEMES.map((theme) => theme.id)).size, CAROUSEL_THEMES.length);
@@ -91,18 +108,45 @@ test("control characters are removed before prompt construction", () => {
   assert.equal(result.value.spec.description, "Adult subject with calm expression");
 });
 
+test("series direction is cleaned, bounded and included in the provider prompt", () => {
+  const result = parseCarouselGeneration({
+    theme: "skin-quality",
+    position: 1,
+    level: 2,
+    total: 5,
+    sourceMode: "synthetic",
+    description: "Fictional adult subject",
+    seriesDirection: "Warm apartment\nlight with one consistent camera",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.spec.seriesDirection, "Warm apartment light with one consistent camera");
+  assert.match(carouselProviderPrompt(result.value.spec), /Series art direction: Warm apartment light/);
+  assert.equal(parseCarouselGeneration({
+    theme: "skin-quality",
+    position: 1,
+    level: 2,
+    total: 5,
+    sourceMode: "synthetic",
+    description: "Fictional adult subject",
+    seriesDirection: "x".repeat(321),
+  }).ok, false);
+});
+
 test("slide position and visual band remain independent", () => {
   const result = parseCarouselGeneration({
     theme: "jaw-width",
-    position: 2,
+    position: 3,
     level: 5,
-    total: 2,
+    total: 3,
     sourceMode: "synthetic",
     description: "Fictional adult subject",
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const prompt = carouselProviderPrompt(result.value.spec);
-  assert.match(prompt, /slide 2 of 2/);
+  assert.match(prompt, /slide 3 of 3/);
   assert.match(prompt, /Requested visual band: VERY WIDE/);
+  assert.match(prompt, /stage one shows the strongest requested issue/i);
+  assert.match(prompt, /final stage is the most polished, attractive presentation of the same adult identity/i);
 });

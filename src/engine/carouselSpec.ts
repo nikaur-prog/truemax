@@ -1,7 +1,8 @@
-export const CAROUSEL_MIN_SLIDES = 2;
-export const CAROUSEL_MAX_SLIDES = 7;
+export const CAROUSEL_MIN_SLIDES = 3;
+export const CAROUSEL_MAX_SLIDES = 6;
 export const CAROUSEL_MAX_DESCRIPTION = 500;
 export const CAROUSEL_MAX_INSTRUCTION = 320;
+export const CAROUSEL_MAX_SERIES_DIRECTION = 320;
 
 export type CarouselThemeId =
   | "puffiness"
@@ -29,6 +30,7 @@ export interface CarouselGenerationSpec {
   sourceMode: CarouselSourceMode;
   description: string;
   instruction?: string;
+  seriesDirection?: string;
 }
 
 export interface ParsedCarouselGeneration {
@@ -158,6 +160,7 @@ export function parseCarouselGeneration(value: unknown):
   if (!sourceMode) return { ok: false, error: "Choose a source for this slide." };
   const description = cleanText(body.description, CAROUSEL_MAX_DESCRIPTION);
   const instruction = cleanText(body.instruction, CAROUSEL_MAX_INSTRUCTION);
+  const seriesDirection = cleanText(body.seriesDirection, CAROUSEL_MAX_SERIES_DIRECTION);
   if (sourceMode === "synthetic" && !description) {
     return { ok: false, error: "Describe the character to generate." };
   }
@@ -167,6 +170,9 @@ export function parseCarouselGeneration(value: unknown):
   if (typeof body.instruction === "string" && body.instruction.trim().length > CAROUSEL_MAX_INSTRUCTION) {
     return { ok: false, error: `Morph instructions can be at most ${CAROUSEL_MAX_INSTRUCTION} characters.` };
   }
+  if (typeof body.seriesDirection === "string" && body.seriesDirection.trim().length > CAROUSEL_MAX_SERIES_DIRECTION) {
+    return { ok: false, error: `Series direction can be at most ${CAROUSEL_MAX_SERIES_DIRECTION} characters.` };
+  }
   const sourceDataUrl = sourceMode === "morph" && typeof body.sourceDataUrl === "string" ? body.sourceDataUrl : null;
   if (sourceMode === "morph" && !sourceDataUrl) {
     return { ok: false, error: "Attach a source photo before morphing it." };
@@ -174,7 +180,16 @@ export function parseCarouselGeneration(value: unknown):
   return {
     ok: true,
     value: {
-      spec: { theme: theme.id, position, level, total, sourceMode, description, instruction: instruction || undefined },
+      spec: {
+        theme: theme.id,
+        position,
+        level,
+        total,
+        sourceMode,
+        description,
+        instruction: instruction || undefined,
+        seriesDirection: seriesDirection || undefined,
+      },
       sourceDataUrl,
     },
   };
@@ -188,13 +203,16 @@ export function carouselProviderPrompt(spec: CarouselGenerationSpec): string {
     ? "Edit the supplied photograph. Preserve the person's recognisable identity, age range, skin tone, hair, camera angle and expression."
     : `Create one fictional adult subject from this operator description: ${spec.description}`;
   const operator = spec.instruction ? `Operator direction: ${spec.instruction}` : "";
+  const series = spec.seriesDirection ? `Series art direction: ${spec.seriesDirection}` : "";
   return [
     identity,
     `Create a clean editorial portrait for slide ${spec.position} of ${spec.total} in a consistent comparison series.`,
+    `This is progression stage ${spec.position} of ${spec.total}: stage one shows the strongest requested issue and the final stage is the most polished, attractive presentation of the same adult identity.`,
     `Theme: ${theme.title}. Requested visual band: ${label}. Across the series, ${theme.direction}.`,
     "Head and upper shoulders, front-facing unless the operator specifically asks for a side view, neutral expression, simple studio background, even lighting, natural skin texture, no text, no logos, no watermark, no frame, no UI.",
     "Do not infer ethnicity, health, stress, hormones or personality from the face. Do not change standards based on ethnicity or skin tone. Do not turn the visual concept into a diagnosis or factual biological claim.",
     "Keep the forehead, chin and both sides of the face inside the image. Do not crop through the head.",
+    series,
     operator,
   ].filter(Boolean).join("\n");
 }
