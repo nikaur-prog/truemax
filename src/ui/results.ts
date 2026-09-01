@@ -1,6 +1,5 @@
 import { countUp } from "./countUp.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { copyDiagnostics } from "./diagnostics.js";
 import type { DiagnosticsCapture } from "./diagnostics.js";
 import { aggregateScoreToPercentile, phi, REGION_NAMES, regionIsScored } from "../engine/scoring.js";
 import type { PillarId, RegionId, RegionScore, Report, ScoredMetric, Sex } from "../engine/types.js";
@@ -49,7 +48,7 @@ import { maxCharacterMarkup } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import { ownScans, readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
-import { armMaxPetReveal, mountMaxPet, unmountMaxPet } from "./maxPet.js";
+import { unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
@@ -180,26 +179,11 @@ export function renderResults(c: Ctx): void {
   // must not take the headline number off the screen.
   renderScoreStrip(c.report);
 
-  // Plan holders get Max himself, peeking from the edge of the screen with
-  // this scan's numbers in hand. Everybody else gets the card (askMaxCard),
-  // and under-18s get neither — the standing rule for every Max surface.
-  // A guest's scan and a recalled one get no Max at all: observations only.
-  if (maxAccess && adultUser && !c.subjectName && !c.archived) {
-    const cc = chatContext();
-    if (cc) mountMaxPet(cc);
-    // A scan that moved up gets a reaction from him, once he has peeked out.
-    // The coach celebrating YOUR number is the one moment the character and
-    // the product are the same thing — and only on a real rise: cheering a
-    // flat rescan would teach people his excitement means nothing.
-    if (cc && c.delta && c.delta.overall > 0.05) {
-      window.setTimeout(() => {
-        const pet = document.querySelector<HTMLElement>(".maxpet");
-        if (pet) void import("./maxCharacter.js").then((m) => m.reactMax(pet, "cheer"));
-      }, 1900);
-    }
-  } else {
-    unmountMaxPet();
-  }
+  // Max now lives in one deliberate place: the Profile tab. The floating pet
+  // competed with the report, covered controls on phones and duplicated that
+  // same character without adding another job, so every results mount removes
+  // it instead of conditionally bringing it back.
+  unmountMaxPet();
   // A new scan starts from the calm whole-face state. Without this the first
   // tab change after re-scanning would animate out of the PREVIOUS photo's
   // region, which is a transition from somewhere the user never was.
@@ -255,6 +239,11 @@ export function renderResults(c: Ctx): void {
   }
 
   c.analysis.innerHTML = "";
+  const mobileSummary = document.createElement("section");
+  mobileSummary.className = "mobile-score-summary";
+  mobileSummary.setAttribute("aria-label", "Full score summary");
+  mobileSummary.innerHTML = mobileScoreSummary(c.report);
+  c.analysis.appendChild(mobileSummary);
   c.analysis.appendChild(rail);
   const body = document.createElement("div");
   body.id = "body";
@@ -262,6 +251,7 @@ export function renderResults(c: Ctx): void {
   placeQualityChips();
   tabView = "front";
   buildTabs("front");
+  wireMobileSummary();
   // The initial mount does not scroll: main.ts owns where the page sits when
   // the results arrive, and a second scroll from here would fight it.
   select("overall", undefined, { silent: true });
@@ -273,43 +263,17 @@ let tabView: "front" | "side" = "front";
 // ---------------------------------------------------------------------------
 // Where the provenance chips live, which turns out to be a layout question
 // rather than a copy one.
-//
-// On a phone the photo column pins to the top of the screen so the score stays
-// visible while you read, and the chips — "scored against male norms",
-// "pose-corrected · 12° off-axis" — were the last thing inside it. So four
-// lines of small print about how the measurement was taken pinned themselves
-// to a third of the screen and stayed there for the entire report. They are
-// worth reading once. They are not worth a permanent seat.
-//
-// So on a phone they move out of the pinned column and into the top of the
-// analysis, directly above the tab row, where they are read once and then
-// scroll away like the rest of the small print. Desktop is untouched: there
-// the photo column is a column, not a lid, and nothing it holds is in the way.
-//
-// The node is MOVED, never rebuilt. main.ts and this module both hold a
-// reference to it from getElementById at load, and recreating it would strand
-// both of them writing into a detached div.
-// ---------------------------------------------------------------------------
-const NARROW = "(max-width: 850px)";
-
+// Keep the one live provenance node in the photograph pane. CSS removes it
+// from the mobile hierarchy; moving or recreating it would strand main.ts's
+// cached reference and duplicate low-value copy above the actual report.
 function placeQualityChips(): void {
   const chips = document.getElementById("quality-chips");
-  const analysis = ctx?.analysis ?? document.getElementById("analysis");
   const photo = document.querySelector<HTMLElement>(".pane-photo");
-  if (!chips || !analysis || !photo) return;
-  const rail = analysis.querySelector<HTMLElement>(".rtabs-rail");
-  if (window.matchMedia(NARROW).matches) {
-    if (rail && chips.parentElement !== analysis) analysis.insertBefore(chips, rail);
-  } else if (chips.parentElement !== photo) {
-    photo.appendChild(chips);
-  }
-}
-
-// Crossing the breakpoint with a report already on screen has to move them
-// back, or a desktop window narrowed to a phone width keeps its chips pinned
-// and a phone rotated to landscape leaves them stranded in the analysis.
-if (typeof window !== "undefined" && window.matchMedia) {
-  window.matchMedia(NARROW).addEventListener?.("change", () => placeQualityChips());
+  if (!chips || !photo || chips.parentElement === photo) return;
+  // Mobile hides these low-value provenance pills. Keep the one live node in
+  // its original pane rather than moving an invisible block in front of the
+  // score hierarchy.
+  photo.appendChild(chips);
 }
 
 /**
@@ -375,25 +339,69 @@ function buildTabs(view: "front" | "side"): void {
   // rendering it over somebody else's face or a weeks-old record would be
   // advice about the wrong thing.
   const plain = observationsOnly();
-  const headline = !plain && maxAccess && adultUser ? "Coach Max’s read" : "Overview";
+  const hasProfile = !plain && maxAccess && adultUser;
+  const headline = hasProfile ? "Profile" : "Overview";
   if (view === "side" && ctx.sideReport) {
-    mk("Profile", "side");
+    if (hasProfile) mk("Profile", "overall");
+    mk("Overview", "side");
     for (const r of ctx.sideReport.regions) {
       if (r.metrics.length) mk(REGION_NAMES[r.region], `side:${r.region}`);
     }
-    // These two are not front tabs that happen to be listed first. Max reads
-    // the WHOLE scan — both views are in his context — and the plan is built
-    // from every measurement in the report. Dropping them when the profile was
-    // selected meant switching view silently took away the read and the plan,
-    // and the only way back was to notice the front/side toggle under the
-    // photograph and use it. They belong on both rows.
-    mk(headline, "overall");
     if (!plain) mk("Plan →", "improve");
     return;
   }
   mk(headline, "overall");
   for (const r of ctx.report.regions) mk(REGION_NAMES[r.region], r.region);
   if (!plain) mk("Plan →", "improve");
+}
+
+function mobileScoreSummary(r: Report): string {
+  const views = r.views;
+  const cards: Array<{ label: string; score: number; percentile: number; view?: "front" | "side" }> = [
+    { label: "OVERALL", score: r.overall, percentile: r.overallPercentile },
+    ...(views
+      ? [
+          { label: "FRONT", score: views.front.score, percentile: views.front.percentile, view: "front" as const },
+          { label: "SIDE", score: views.side.score, percentile: views.side.percentile, view: "side" as const },
+        ]
+      : []),
+  ];
+  const viewMarkup = cards.map((card) => {
+    const content = `<span class="vc-label">${card.label}</span>
+      <span class="vc-rank">${rankShort(card.percentile, card.view === "side" ? SIDE_TAIL_LIMIT_PCT : undefined)}</span>
+      <b class="vc-score ${scoreTone(card.score)}">${card.score.toFixed(1)}<small>/10</small></b>`;
+    return card.view
+      ? `<button type="button" class="viewcard" data-summary-view="${card.view}" aria-pressed="false">${content}</button>`
+      : `<div class="viewcard lead">${content}</div>`;
+  }).join("");
+  const pillars = (Object.entries(r.pillars) as [PillarId, number][]).map(([pillar, score]) => {
+    const open = pillarDeck(r, pillar).length > 0;
+    const tag = open ? "button" : "div";
+    const attrs = open ? ` type="button" class="pillar can-open" data-pillar="${pillar}"` : ` class="pillar"`;
+    return `<${tag}${attrs}><b>${score.toFixed(1)}</b><span>${pillar.toUpperCase()}</span>
+      <div class="pbar"><i style="width:${score * 10}%"></i></div></${tag}>`;
+  }).join("");
+  return `<div class="mobile-viewcards">${viewMarkup}</div>
+    <div class="mobile-pillars">${pillars}</div>
+    ${views ? `<p class="mobile-score-note">Front measurements carry 75% of the overall score. Profile-only measurements carry 25%.</p>` : ""}`;
+}
+
+function wireMobileSummary(): void {
+  if (!ctx) return;
+  for (const button of ctx.analysis.querySelectorAll<HTMLButtonElement>("[data-summary-view]")) {
+    const view = button.dataset.summaryView === "side" ? "side" : "front";
+    button.onclick = () => select(view === "side" ? "side" : "overall", view);
+  }
+  paintMobileViewState();
+}
+
+function paintMobileViewState(): void {
+  if (!ctx) return;
+  for (const button of ctx.analysis.querySelectorAll<HTMLButtonElement>("[data-summary-view]")) {
+    const current = button.dataset.summaryView === tabView;
+    button.classList.toggle("current", current);
+    button.setAttribute("aria-pressed", String(current));
+  }
 }
 
 // Overall, front and side side by side, so the merge is legible: two views went
@@ -465,7 +473,6 @@ const ACT_ICON: Record<string, string> = {
   photo: `<path d="M3.5 8.5h3.2l1.6-2.4h7.4l1.6 2.4h3.2v11H3.5Z"/><circle cx="12" cy="13.6" r="3.4"/>`,
   share: `<path d="M12 15.5V4.2"/><path d="m8.2 7.6 3.8-3.4 3.8 3.4"/><path d="M5 13.5v6.3h14v-6.3"/>`,
   points: `<circle cx="7" cy="8" r="1.8"/><circle cx="17.2" cy="12" r="1.8"/><circle cx="9" cy="17.4" r="1.8"/><path d="M8.6 8.7 15.6 11M15.9 13.4 10.4 16.4" stroke-dasharray="1.6 1.8"/>`,
-  copy: `<rect x="9" y="9" width="11" height="11" rx="2.4"/><path d="M15 9V6.4a2 2 0 0 0-2-2H6.4a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/>`,
   voice: `<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v2.6"/>`,
   gauge: `<path d="M4.5 18a8.5 8.5 0 1 1 15 0"/><path d="m12 14 3.4-4.6"/><circle cx="12" cy="14.5" r="1.4"/>`,
 };
@@ -509,7 +516,7 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     // wire-up below swaps the label the moment the balance says otherwise.
     // Not on a recalled scan: the stored photograph is a 320px thumbnail,
     // and $2.99 must never buy a soft render.
-    adultUser && !ctx.archived ? actionButton("btn-voiced", "Voiced analysis · $2.99", "voice", "support") : "",
+    adultUser && !ctx.archived ? actionButton("btn-voiced", "Get a video analysis · $2.99", "voice", "support") : "",
   ].join("");
   const quiet = [
     // The front counterpart of the profile's "Re-verify the points". The
@@ -522,7 +529,6 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     // the purchase underneath it. Two buttons for one product made the row
     // longer and the flow harder to guess.
     ctx.onEditFront ? actionButton("btn-fedit", "Correct the points", "points", "quiet") : "",
-    actionButton("btn-diag", "Copy diagnostics", "copy", "quiet"),
     // The calibration ear. Quiet on purpose: it is for the person who already
     // disagrees, not an invitation to doubt the number. Own live scans only —
     // a guest's face or a recalled record is not the owner's self-assessment.
@@ -541,6 +547,40 @@ function resultActions(merged: boolean, ctx: Ctx): string {
     <div class="ract-row">${support}</div>
     <div class="ract-row ract-utils">${quiet}</div>
   </div>`;
+}
+
+// The four strongest readings make the first useful layer below the
+// population curve on a phone. Their weight is discounted by repeatability so
+// a visually dramatic but noisy measurement cannot displace a dependable one.
+// The complete regional decks remain available from the tab row.
+function primaryMeasurements(report: Report): string {
+  const primary = report.metrics
+    .filter((metric) => wasMeasured(metric) && !metric.implausible)
+    .sort((a, b) => (b.def.weight * reliabilityOf(b.def.id)) - (a.def.weight * reliabilityOf(a.def.id)))
+    .slice(0, 4);
+  if (!primary.length) return "";
+  return `<section class="primary-measurements panel" aria-labelledby="primary-measurements-title">
+    <h4 id="primary-measurements-title">PRIMARY MEASUREMENTS</h4>
+    <div class="primary-measurement-list">
+      ${primary.map((metric) => `<button type="button" class="primary-measurement"
+        data-primary-region="${metric.def.region}" data-primary-view="${metric.def.view}">
+        <span><b>${metric.def.name}</b><small>${REGION_NAMES[metric.def.region]} · ${metric.def.view}</small></span>
+        <span class="primary-reading"><b>${fmt(metric)}</b><em>${metric.score.toFixed(1)}</em></span>
+      </button>`).join("")}
+    </div>
+  </section>`;
+}
+
+function wirePrimaryMeasurements(): void {
+  if (!ctx) return;
+  for (const button of body().querySelectorAll<HTMLButtonElement>("[data-primary-region]")) {
+    button.onclick = () => {
+      const region = button.dataset.primaryRegion as RegionId | undefined;
+      const view = button.dataset.primaryView === "side" ? "side" : "front";
+      if (!region) return;
+      select(view === "side" ? `side:${region}` : region, view);
+    };
+  }
 }
 
 /**
@@ -592,10 +632,6 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
     return;
   }
   stopTypewriter();
-  // Leaving Coach Max's read is the signal that the first read is over —
-  // which is what arms the pet's entrance (ten seconds later, from the edge).
-  // Arming is idempotent and a no-op when he is hidden or not mounted.
-  if (id !== "overall") armMaxPetReveal();
   // Two tabs belong to neither view. Max reads the whole scan and the plan is
   // built from every measurement in it, so reaching either from the profile
   // row must not throw the row back to the front tabs — that would take away
@@ -623,6 +659,7 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
   for (const b of document.querySelectorAll<HTMLButtonElement>("#view-toggle .vt-btn")) {
     b.classList.toggle("on", (b.dataset.view === "side") === onSide);
   }
+  paintMobileViewState();
   if (id === "overall") showOverall();
   else if (id === "improve") showImprove();
   else if (id === "side") showSide();
@@ -849,11 +886,33 @@ function wirePillarCards(report: Report): void {
 }
 
 let pillarSheet: HTMLElement | null = null;
+let pillarFade: OverlayFade | null = null;
+let pillarRevert: number | null = null;
+
+function restoreReportPhoto(): void {
+  if (!ctx) return;
+  pillarFade?.cancel();
+  pillarFade = null;
+  if (pillarRevert !== null) window.clearTimeout(pillarRevert);
+  pillarRevert = null;
+  if (tabView === "side") {
+    showPhoto("side");
+    calmSide();
+    return;
+  }
+  showPhoto("front");
+  const selected = ctx.analysis.querySelector<HTMLButtonElement>(".rtab.sel")?.dataset.id;
+  const region = selected && selected !== "overall" && selected !== "improve"
+    ? selected as RegionId
+    : null;
+  setZoom(region);
+}
 
 function closePillarSheet(): void {
   pillarSheet?.remove();
   pillarSheet = null;
   document.removeEventListener("keydown", onPillarKey);
+  restoreReportPhoto();
 }
 
 function onPillarKey(ev: KeyboardEvent): void {
@@ -926,6 +985,24 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
   wrap.querySelector(".psx-close")!.addEventListener("click", closePillarSheet);
 
   for (const row of wrap.querySelectorAll<HTMLElement>("[data-pillar-row]")) {
+    const metric = deck[Number(row.dataset.pillarRow)];
+    if (metric && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      row.addEventListener("pointerenter", () => {
+        if (!ctx) return;
+        if (pillarRevert !== null) window.clearTimeout(pillarRevert);
+        pillarRevert = null;
+        pillarFade?.cancel();
+        const onSide = metric.def.view === "side" && Boolean(ctx.sidePhoto && ctx.sidePoints);
+        showPhoto(onSide ? "side" : "front");
+        focusMeasurement(metric, metric.def.region, onSide);
+        pillarFade = onSide && ctx.sidePhoto && ctx.sidePoints
+          ? animateSideMeasurement(ctx.overlay, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height, metric)
+          : animateMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+      });
+      row.addEventListener("pointerleave", () => {
+        pillarRevert = window.setTimeout(restoreReportPhoto, LEAVE_GRACE_MS);
+      });
+    }
     row.addEventListener("click", () => {
       if (!ctx) return;
       openMetricDetail({
@@ -1132,7 +1209,7 @@ function showOverall(): void {
           : ""
       }
       ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(r, delta, "front", ctx.subjectName, ctx.selfName) : ""}
-      <div class="score-head">
+      <div class="score-head desktop-score-head">
         <div><div class="klabel">${ctx.subjectName ? `${escapeHTML(ctx.subjectName.toUpperCase())} · ` : ""}${merged ? "OVERALL · FRONT + SIDE" : "OVERALL · FRONT ONLY"}
             · <button type="button" class="refswitch" id="ref-switch"
               title="Score against the other reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button></div>
@@ -1142,7 +1219,7 @@ function showOverall(): void {
           ${deltaHTML}
         </div>
       </div>
-      <div class="ovw">
+      <div class="ovw desktop-score-context">
       <p class="ego">${overviewCaveat()}</p>
       ${delta ? `<div class="delta-read ${delta.reading}">${deltaReadingCopy(delta)}</div>` : ""}
       ${viewCards(r)}
@@ -1154,7 +1231,7 @@ function showOverall(): void {
             : ""
       }
       </div>
-      <div class="pillars">${(Object.entries(r.pillars) as [PillarId, number][])
+      <div class="pillars desktop-pillars">${(Object.entries(r.pillars) as [PillarId, number][])
         .map(([p, s]) => {
           // A pillar with nothing measured behind it is not a button. It can
           // happen: a front-only scan whose regions mostly failed the
@@ -1171,6 +1248,7 @@ function showOverall(): void {
         .join("")}
       </div>
       ${populationBlock(r)}
+      ${primaryMeasurements(r)}
       ${resultActions(Boolean(merged), ctx)}
       ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
@@ -1180,6 +1258,7 @@ function showOverall(): void {
   const overview = body().querySelector<HTMLElement>(".overview-reveal");
   if (overview) animateOverview(overview);
   wirePillarCards(r);
+  wirePrimaryMeasurements();
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
   // Correcting the reference population where its effect is visible. Every
   // percentile on this screen comes from it, and it moves the overall score by
@@ -1187,26 +1266,6 @@ function showOverall(): void {
   // starting over.
   const refBtn = document.getElementById("ref-switch");
   if (refBtn) refBtn.onclick = () => ctx?.onSexChange?.(r.sex === "male" ? "female" : "male");
-  // The whole scan as pasteable text, front and side together.
-  //
-  // It already existed on /quick and only there, which is front-only by design
-  // — so the one number an external comparison needs most, the side, could not
-  // be got out of the app at all without screenshotting eight region cards. The
-  // merged report already carries both views' metrics, so this is the same dump
-  // reaching the screen that has both.
-  const diagBtn = document.getElementById("btn-diag") as HTMLButtonElement | null;
-  if (diagBtn) {
-    diagBtn.onclick = async () => {
-      const copied = await copyDiagnostics(r, "", ctx?.capture);
-      // Says which of the two things happened. "Copied" over a clipboard write
-      // that silently failed is the one outcome that wastes somebody's scan.
-      // Into the label, not the button: the button also holds an icon, and
-      // textContent on the parent would delete it on the first press.
-      const label = diagBtn.querySelector("span") ?? diagBtn;
-      label.textContent = copied ? "Copied" : "Copy from the box";
-      window.setTimeout(() => (label.textContent = "Copy diagnostics"), 2600);
-    };
-  }
   const selfScoreBtn = document.getElementById("btn-selfscore") as HTMLButtonElement | null;
   if (selfScoreBtn) {
     selfScoreBtn.onclick = () => {
@@ -1438,7 +1497,7 @@ function renderSideInto(host: HTMLElement, report: Report): void {
 
   host.innerHTML = `
     <div class="reveal">
-      <div class="score-head">
+      <div class="score-head side-score-head">
         <div><div class="klabel">SIDE PROFILE · 25% OF THE TOTAL</div>
           <div class="big">${report.overall.toFixed(1)}<small> /10</small></div></div>
         <div class="chipcol"><span class="chip">${topPctText(report.overallPercentile, SIDE_TAIL_LIMIT_PCT)}</span></div>
@@ -1446,17 +1505,18 @@ function renderSideInto(host: HTMLElement, report: Report): void {
       ${provenance(measured)}
       ${unverifiedBanner()}
       ${implausibleBanner(report)}
-      ${maxAccess && adultUser && !observationsOnly() ? maxAnalysisHTML(report, null, "side", ctx?.subjectName, ctx?.selfName) : ""}
       <div class="panel"><h4>POPULATION POSITION</h4>${curveSVG(report.overallPercentile, "overall", report.sex, false, { score: report.overall, rank: rankShort(report.overallPercentile, SIDE_TAIL_LIMIT_PCT) })}
         ${curveLegend()}
         <p class="rarity">${populationLine(report.overallPercentile, report.sex, "profiles", SIDE_TAIL_LIMIT_PCT)}</p></div>
-      ${regions.map((r) => sideRegionDeck(r, report)).join("")}
+      ${primaryMeasurements(report)}
+      <div class="side-overview-regions">${regions.map((r) => sideRegionDeck(r, report)).join("")}</div>
       ${modeSwitcher("full")}
       ${sideNav()}
     </div>`;
 
   revealBars();
   wireModeSwitcher(showSide);
+  wirePrimaryMeasurements();
   wireSideNav();
 }
 
@@ -1494,11 +1554,20 @@ function sideNav(): string {
     : "";
   const support = [
     plain ? "" : actionButton("sn-plan", "See your plan", "plan", "support", pathway === "plan"),
-    ctx?.onSideProfile ? actionButton("sn-retake", "Retake profile", "photo", "support") : "",
+    actionButton("sn-new", "New photo", "photo", "support"),
     actionButton("sn-share", "Share card", "share", "support"),
+    adultUser && !ctx?.archived ? actionButton("sn-voiced", "Get a video analysis · $2.99", "voice", "support") : "",
   ].join("");
   const quiet = [
-    ctx?.onRedoSide ? actionButton("sn-redo", "Re-verify the points", "points", "quiet") : "",
+    ctx?.onRedoSide ? actionButton("sn-redo", "Correct the points", "points", "quiet") : "",
+    !plain && ctx?.capture?.scanId
+      ? actionButton(
+          "sn-selfscore",
+          selfScoreSent(ctx.capture.scanId) ? "Your score is recorded" : "Think we scored you wrong?",
+          "gauge",
+          "quiet",
+        )
+      : "",
   ].join("");
   return `<div class="ractions">
     ${lead}
@@ -1516,10 +1585,41 @@ function wireSideNav(): void {
   on("sn-redo", () => ctx?.onRedoSide?.());
   on("imp-redo", () => ctx?.onRedoSide?.());
   on("unver-redo", () => ctx?.onRedoSide?.());
-  on("sn-retake", () => ctx?.onSideProfile?.());
   on("sn-continue", () => goPathway());
   on("sn-plan", () => select("improve"));
   on("sn-history", () => openHistory());
+  on("sn-new", () => {
+    void confirmScanAction({
+      title: "Start a new photo?",
+      copy: "Your current report will close. You can stay here if that was an accidental tap.",
+      confirmLabel: "Start new photo",
+      cancelLabel: "Keep this report",
+    }).then((startOver) => {
+      if (startOver) ctx?.onNewPhoto();
+    });
+  });
+  on("sn-selfscore", () => {
+    const scanId = ctx?.capture?.scanId;
+    const button = document.getElementById("sn-selfscore");
+    if (!ctx || !scanId || !button || selfScoreSent(scanId)) return;
+    openSelfScoreDialog({ scanId, ourScore: ctx.report.overall, sex: ctx.report.sex }, () => {
+      const label = button.querySelector("span") ?? button;
+      label.textContent = "Your score is recorded";
+    });
+  });
+  const voiced = document.getElementById("sn-voiced") as HTMLButtonElement | null;
+  if (voiced) {
+    voiced.onclick = () => {
+      void loadVoiceCredits().catch(() => 0).then((balance) => {
+        if (balance > 0) void downloadVoicedAnalysis(voiced);
+        else openVoicedExample(voiced);
+      });
+    };
+    void loadVoiceCredits().then((balance) => {
+      const label = voiced.querySelector("span");
+      if (balance > 0 && label) label.textContent = "Voiced analysis · ready";
+    }).catch(() => undefined);
+  }
   on("sn-share", async () => {
     if (!ctx) return;
     // photo-canvas is showing the PROFILE while this tab is open, so the card
@@ -2617,20 +2717,17 @@ function goPathway(): void {
 // re-checked when one lands, not only at render time. Missing one is exactly
 // the bug this fixes: a plan holder whose entitlement resolved a second after
 // renderResults got the tab named "Overall" and no pet at all, because the
-// mount decision had already been taken with the flag still false.
+// label decision had already been taken with the flag still false.
 function syncMaxSurfaces(): void {
   if (!ctx) return;
-  if (maxAccess && adultUser && !observationsOnly()) {
-    const cc = chatContext();
-    if (cc) mountMaxPet(cc);
-  } else {
-    unmountMaxPet();
-  }
-  // The tab label, renamed in place. Only in the front tab row — the side
-  // row has no overall tab to rename.
-  if (tabView === "front") {
-    const tab = ctx.analysis.querySelector<HTMLButtonElement>('.rtab[data-id="overall"]');
-    if (tab) tab.textContent = maxAccess && adultUser && !observationsOnly() ? "Coach Max’s read" : "Overview";
+  unmountMaxPet();
+  // Entitlement can add the Profile tab to either the front or side row. Rebuild
+  // the row and restore its selection so the decorative region icon survives;
+  // replacing button.textContent used to erase it.
+  const openId = ctx.analysis.querySelector<HTMLButtonElement>(".rtab.sel")?.dataset.id;
+  buildTabs(tabView);
+  if (openId) {
+    ctx.analysis.querySelector<HTMLButtonElement>(`.rtab[data-id="${openId}"]`)?.classList.add("sel");
   }
   // Re-render the open tab if it is one whose content keys on the flags: the
   // overview carries Max's analysis, the plan carries the CTA card and the
