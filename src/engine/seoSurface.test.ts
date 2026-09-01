@@ -53,6 +53,10 @@ test("robots exposes the sitemap and lets noindex headers remain visible", () =>
   assert.doesNotMatch(robots, /^Disallow:/m, "noindex pages must remain crawlable so robots can see the directive");
 });
 
+test("the canonical home retains Search Console ownership verification", () => {
+  assert.match(read("index.html"), /<meta name="google-site-verification" content="[^"]+" \/>/);
+});
+
 test("every emitted HTML entry permanently redirects to its clean public route", () => {
   const config = JSON.parse(read("vercel.json"));
   const redirects = new Map(
