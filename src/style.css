@@ -5800,20 +5800,68 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 @media (prefers-reduced-motion: reduce) { .scangate { animation: none; } }
 
 /* ---------------------------------------------------------------------------
-   The score, directly under the photograph.
+   Legacy score-strip hooks.
 
-   Exists because on a phone the results page is one column and the analysis
-   starts below the fold: the scan finished and the screen showed a face with
-   no number anywhere on it. Desktop already had the score beside the photo, so
-   the strip is a small-screen device and hides above the two-pane breakpoint.
+   The complete mobile score summary now opens the analysis column, so the old
+   strip stays hidden. Its node still owns the photo shrink/rail measurement
+   lifecycle in scoreStrip.ts until that behavior is extracted in the lag pass.
    --------------------------------------------------------------------------- */
 .scorestrip { display: none; }
+.mobile-score-summary,
+.primary-measurements { display: none; }
 
 @media (max-width: 850px) {
-  .scorestrip {
-    display: block; margin-top: 14px; padding: 14px 16px;
-    border: 1px solid var(--line); border-radius: 16px; background: var(--card);
-    box-shadow: 0 2px 10px rgba(20, 21, 24, .05);
+  /* One score hierarchy in the analysis column replaces the old score strip,
+     floating view toggle and capture-provenance pills. Those three surfaces
+     repeated the same answer while keeping the report itself below the fold. */
+  .pane-photo .scorestrip,
+  .pane-photo .quality-chips,
+  .pane-photo .viewtoggle,
+  .viewtoggle-anchor { display: none !important; }
+  .mobile-score-summary { display: grid; gap: 12px; margin: 2px 0 8px; }
+  .mobile-viewcards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  button.viewcard {
+    width: 100%; color: inherit; font: inherit; cursor: pointer;
+    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+  }
+  .mobile-viewcards .viewcard { min-width: 0; padding: 13px 7px 12px; }
+  .mobile-viewcards .viewcard.current {
+    border-color: color-mix(in srgb, var(--acc) 54%, var(--line));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 22%, transparent);
+  }
+  .mobile-viewcards button.viewcard:active { transform: scale(.98); }
+  .mobile-pillars { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .mobile-pillars .pillar { margin: 0; }
+  .mobile-score-note { margin: 0 2px; color: var(--acc); font-size: 12.5px; line-height: 1.55; }
+
+  /* The mobile summary above already owns these figures. Keep the richer
+     desktop composition without saying the same numbers twice on a phone. */
+  .desktop-score-head,
+  .desktop-score-context,
+  .desktop-pillars,
+  .side-score-head,
+  .sideprov,
+  .side-overview-regions { display: none; }
+
+  .primary-measurements { display: block; padding: 15px 16px 7px; }
+  .primary-measurement-list { display: grid; }
+  .primary-measurement {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 12px 0; border: 0; border-top: 1px solid var(--line); background: transparent;
+    color: inherit; text-align: left; cursor: pointer;
+  }
+  .primary-measurement:first-child { border-top: 0; }
+  .primary-measurement > span:first-child { min-width: 0; }
+  .primary-measurement b { display: block; font-size: 13px; font-weight: 600; }
+  .primary-measurement small {
+    display: block; margin-top: 4px; font: 500 8.5px var(--mono);
+    letter-spacing: .13em; text-transform: uppercase; color: var(--mut);
+  }
+  .primary-reading { flex: none; display: flex; align-items: baseline; gap: 8px; text-align: right; }
+  .primary-reading > b { font-family: var(--serif); font-size: 18px; font-weight: 400; }
+  .primary-reading em {
+    min-width: 32px; padding: 4px 7px; border-radius: 99px; background: var(--acc-soft);
+    color: var(--acc); font: 600 10px var(--mono); font-style: normal; text-align: center;
   }
   .ss-score { display: flex; align-items: baseline; gap: 10px; }
   .ss-score b {
@@ -6946,7 +6994,15 @@ body.is-member .journey { display: none; }
   .psx-card .metric { animation: none; opacity: 1; transform: none; }
 }
 @media (min-width: 900px) {
-  .psx-overlay { place-items: center; padding: 28px; }
+  /* Leave the photograph visible on the left: hovering a row draws that exact
+     construction on the face, so the list and the evidence can be read at the
+     same time instead of the dialog dimming the thing it explains. */
+  .psx-overlay {
+    place-items: center end;
+    padding: 28px max(28px, calc((100vw - 1240px) / 2 + 20px)) 28px min(42vw, 560px);
+    background: rgba(12, 14, 13, .24);
+    backdrop-filter: none;
+  }
   .psx-card { border-radius: 22px; }
 }
 .psx-head {
