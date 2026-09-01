@@ -3317,6 +3317,11 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .hist-shots img:first-child { left: 0; z-index: 2; }
 .hist-shots img.side { left: 18px; z-index: 1; opacity: .85; }
 .hist-shots img:only-child { left: 9px; }
+.hist-shot-placeholder {
+  width: 38px; height: 30px; margin: 2px 4px; display: grid; place-items: center;
+  border: 1px dashed var(--line); border-radius: 6px; color: var(--mut);
+  font: 500 7px var(--mono); letter-spacing: .08em; opacity: .72;
+}
 .hist-go { color: var(--mut, #6b7280); font-size: 17px; line-height: 1; }
 .hist-row:hover .hist-go { color: var(--acc, #107a57); }
 
@@ -5900,12 +5905,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo:not(.results-ready) .face-frame { max-height: 66vh; }
   .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
 
-  /* 112px, not 96. At 96 the strip is a letterbox slice — in practice a band
-     of eyes — and the question it has to answer while you read a region is
-     "whose face is this and where is that measurement", which needs a bit more
-     of a face than a band. Sixteen pixels is a cheap price for the pinned
-     block: it goes from about 309 to 325 on an 844px phone. */
-  .pane-photo.shrunk .face-frame { max-height: 112px; }
+  /* Compact is still a photograph, not a letterbox decoration. 27svh keeps a
+     complete face recognisable while leaving most of the screen to the report.
+     A region press gets a little over a third of the viewport: large enough to
+     read the complete face and its overlay, without returning to the opening
+     half-screen hero. */
+  .pane-photo.shrunk .face-frame { max-height: clamp(210px, 27svh, 260px); }
+  .pane-photo.shrunk.region-focus .face-frame { max-height: clamp(250px, 34svh, 330px); }
   /* The shrink used to snap because these were display:none — four elements
      leaving the flow in one frame, mid-transition, while the sticky pane was
      also resizing. Collapsing them on the same curve as the photo makes it
@@ -5930,10 +5936,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo:has(.reject-actions) .scan-status {
     max-height: none; overflow: visible;
   }
-  /* Clipping a portrait to 96px from the top shows hair and background and no
-     face, which makes the shrunk state useless as a reminder of what is being
-     measured. Crop to the upper third instead, which is where a face sits in a
-     capture this flow has already framed and quality-checked.
+  /* Clipping a portrait from the top shows hair and background and no face,
+     which makes the compact state useless as a reminder of what is measured.
+     Crop around the measured face itself.
 
      The crop FOLLOWS the selected region rather than sitting on the upper
      third forever. Pinned, it showed the forehead whether you had tapped Eyes,
@@ -5947,9 +5952,12 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      features while collapsed is exactly when this is read, and a crop that
      jumps between regions reads as the photo glitching. */
   .pane-photo.shrunk .face-frame .zoomable canvas {
-    height: 112px; object-fit: cover;
-    object-position: var(--crop-x, center) var(--crop-y, 34%);
+    height: clamp(210px, 27svh, 260px); object-fit: cover;
+    object-position: var(--crop-x, var(--face-x, center)) var(--crop-y, var(--face-y, 40%));
     transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
+  }
+  .pane-photo.shrunk.region-focus .face-frame .zoomable canvas {
+    height: clamp(250px, 34svh, 330px);
   }
   @media (prefers-reduced-motion: reduce) {
     .pane-photo.shrunk .face-frame .zoomable canvas { transition: none; }
@@ -5965,10 +5973,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      selected region (--crop-x/--crop-y), so the drawn measurement is also
      what the strip is looking at. */
   .pane-photo.shrunk #overlay-canvas {
-    height: 112px;
+    height: clamp(210px, 27svh, 260px);
     object-fit: cover;
-    object-position: var(--crop-x, center) var(--crop-y, 34%);
+    object-position: var(--crop-x, var(--face-x, center)) var(--crop-y, var(--face-y, 40%));
     transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
+  }
+  .pane-photo.shrunk.region-focus #overlay-canvas {
+    height: clamp(250px, 34svh, 330px);
   }
   @media (prefers-reduced-motion: reduce) {
     .pane-photo.shrunk #overlay-canvas { transition: none; }

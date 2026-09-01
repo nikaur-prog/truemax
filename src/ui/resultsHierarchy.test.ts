@@ -23,6 +23,8 @@ test("the old mobile duplicates and provenance pills stay out of the hierarchy",
 
 test("Max has one Profile surface and no floating results pet", () => {
   assert.match(results, /const headline = hasProfile \? "Profile" : "Overview"/);
+  assert.match(results, /mk\("Profile", "side"\)/);
+  assert.doesNotMatch(results, /mk\("Overview", "side"\)/);
   assert.doesNotMatch(results, /\bmountMaxPet\(/);
   assert.doesNotMatch(results, /\barmMaxPetReveal\(/);
   assert.match(results, /unmountMaxPet\(\)/);
@@ -45,4 +47,6 @@ test("mobile photo pinning does not build or animate a hidden score card", () =>
   assert.match(photoLifecycle, /pane\.classList\.add\("results-ready"\)/);
   assert.match(photoLifecycle, /detach = watchScroll\(pane\)/);
   assert.doesNotMatch(photoLifecycle, /createElement|countUp|typeInto|renderShareCard|setInterval/);
+  assert.match(photoLifecycle, /const startY = window\.scrollY/);
+  assert.match(styles, /\.pane-photo\.shrunk\.region-focus \.face-frame/);
 });

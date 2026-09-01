@@ -22,8 +22,8 @@ import type { Report } from "../engine/types.js";
 // flicker between sizes when somebody rests a thumb near it, because the
 // shrink itself changes the page height and can push the scroll position back
 // across the line it just crossed.
-const SHRINK_AT = 40;
-const GROW_AT = 12;
+const SHRINK_AT = 12;
+const GROW_AT = 3;
 
 let detach: (() => void) | null = null;
 
@@ -31,7 +31,7 @@ export function clearScoreStrip(): void {
   detach?.();
   detach = null;
   const pane = document.querySelector(".pane-photo");
-  pane?.classList.remove("shrunk", "results-ready");
+  pane?.classList.remove("shrunk", "region-focus", "results-ready");
 }
 
 export function renderScoreStrip(_report: Report): void {
@@ -48,6 +48,12 @@ function watchScroll(pane: HTMLElement): () => void {
   let shrunk = false;
   let queued = false;
   let frame = 0;
+  // Results do not always mount at document scroll zero: the upload card and
+  // mobile browser chrome can leave the page at a non-zero offset. Measure the
+  // person's movement FROM the finished report rather than against the page's
+  // absolute origin, or the same gesture shrinks at a different time in Safari
+  // and Google's in-app browser.
+  const startY = window.scrollY;
 
   // How far down the screen the pinned photo column reaches, published so the
   // tab row can pin directly under it instead of behind it.
@@ -68,7 +74,7 @@ function watchScroll(pane: HTMLElement): () => void {
   const measure = (): void => {
     queued = false;
     if (!pane.isConnected) return;
-    const y = window.scrollY;
+    const y = Math.max(0, window.scrollY - startY);
     if (!shrunk && y > SHRINK_AT) {
       shrunk = true;
       pane.classList.add("shrunk");
@@ -90,6 +96,6 @@ function watchScroll(pane: HTMLElement): () => void {
     if (frame) cancelAnimationFrame(frame);
     ro?.disconnect();
     main?.style.removeProperty("--pin-top");
-    pane.classList.remove("shrunk");
+    pane.classList.remove("shrunk", "region-focus");
   };
 }

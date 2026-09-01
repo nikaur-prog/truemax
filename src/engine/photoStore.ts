@@ -57,6 +57,11 @@ function ownerPrefix(owner: string): string {
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
+// The write starts before the finished report renders but IndexedDB completes
+// later. A person can open History in that gap; without this small owner-scoped
+// cache the first read returns empty and the row stays photo-less until the
+// entire panel is reopened. Disk remains the durable source after a reload.
+const memoryPhotos = new Map<string, ScanPhotos>();
 
 function open(): Promise<IDBDatabase | null> {
   if (dbPromise) return dbPromise;
@@ -125,16 +130,22 @@ export async function savePhotos(scanKey: string, photos: ScanPhotos): Promise<v
   if (!photos.front && !photos.side) return;
   const owner = activeScanOwner();
   if (!owner) return;
-  await tx("readwrite", (s) => s.put(photos, photoKey(owner, scanKey)));
+  const key = photoKey(owner, scanKey);
+  memoryPhotos.set(key, { ...photos });
+  await tx("readwrite", (s) => s.put(photos, key));
 }
 
 export async function loadPhotos(scanKey: string): Promise<ScanPhotos | null> {
   const owner = activeScanOwner();
   if (!owner) return null;
-  const v = await tx<ScanPhotos>("readonly", (s) => s.get(photoKey(owner, scanKey)));
+  const key = photoKey(owner, scanKey);
+  const cached = memoryPhotos.get(key);
+  if (cached) return { ...cached };
+  const v = await tx<ScanPhotos>("readonly", (s) => s.get(key));
   // An account can change while IndexedDB is resolving. Never deliver the old
   // owner's completed read into the new owner's dashboard.
   if (activeScanOwner() !== owner) return null;
+  if (v) memoryPhotos.set(key, { ...v });
   return v ?? null;
 }
 
@@ -142,6 +153,9 @@ export async function clearAllPhotos(): Promise<void> {
   const owner = activeScanOwner();
   if (!owner) return;
   const prefix = ownerPrefix(owner);
+  for (const key of memoryPhotos.keys()) {
+    if (key.startsWith(prefix)) memoryPhotos.delete(key);
+  }
   const keys = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
   if (!keys) return;
   for (const key of keys) {
@@ -158,6 +172,9 @@ export async function pruneTo(keepScanKeys: string[]): Promise<void> {
   if (!owner) return;
   const keep = new Set(keepScanKeys);
   const prefix = ownerPrefix(owner);
+  for (const key of memoryPhotos.keys()) {
+    if (key.startsWith(prefix) && !keep.has(key.slice(prefix.length))) memoryPhotos.delete(key);
+  }
   const keys = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
   if (!keys) return;
   for (const k of keys) {

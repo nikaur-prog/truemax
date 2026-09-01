@@ -15,9 +15,9 @@ import { regionIconMarkup } from "./regionIcons.js";
 import { scoreTone } from "./scoreTone.js";
 import { resetTapPreview, wireTapPreview } from "./tapPreview.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
-import { animateMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
+import { animateMeasurement, drawMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
-import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
+import { animateSideMeasurement, drawSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
 import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, startKindFor, writeProtocols } from "../engine/protocol.js";
@@ -43,7 +43,7 @@ import { showScalePrimer, wireScaleNote } from "./scaleNote.js";
 // speaks, which is a voice setting rather than a depth one.
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 import { buildMaxContext } from "../engine/maxContext.js";
-import { maxCharacterMarkup } from "./maxCharacter.js";
+import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import { ownScans, readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
@@ -53,6 +53,8 @@ import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
 import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
 import { confirmScanAction } from "./scanConfirm.js";
+import { mountCanvasRecovery } from "./canvasRecovery.js";
+import type { CanvasRecoveryHandle } from "./canvasRecovery.js";
 
 interface Ctx {
   report: Report;
@@ -134,6 +136,12 @@ interface Ctx {
 }
 
 let ctx: Ctx | null = null;
+let photoRecovery: CanvasRecoveryHandle | null = null;
+
+export function clearResultPhotoRecovery(): void {
+  photoRecovery?.destroy();
+  photoRecovery = null;
+}
 
 // Whether the screen is showing observations only — a guest's scan or a
 // recalled one. Every coaching surface (Max's read, the pet, the plan, the
@@ -151,6 +159,7 @@ const escapeHTML = (v: string): string =>
   v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function renderResults(c: Ctx): void {
+  clearResultPhotoRecovery();
   ctx = c;
   // The curve is taught before the first number is ever shown. Fire-and-forget
   // rather than awaited: the panel behind it renders as normal and the primer
@@ -171,6 +180,14 @@ export function renderResults(c: Ctx): void {
   // label/image disagreement this fixes.
   const pane = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
   if (pane && frontPhoto) paint(pane, frontPhoto);
+  setFaceCrop("front");
+  // Encode both captures while their pixels are definitely resident. iOS can
+  // discard canvas backing stores while the browser is in the background;
+  // when it comes back, rebuild the source canvases first and then the pane.
+  photoRecovery = mountCanvasRecovery([frontPhoto, c.sidePhoto], () => {
+    if (ctx !== c) return;
+    restoreVisiblePhoto();
+  });
   frontQualityHTML = document.getElementById("quality-chips")?.innerHTML ?? "";
   // The score under the photograph, for the phone layout where the analysis
   // column starts below the fold. Rendered here rather than inside showOverall
@@ -341,8 +358,10 @@ function buildTabs(view: "front" | "side"): void {
   const hasProfile = !plain && maxAccess && adultUser;
   const headline = hasProfile ? "Profile" : "Overview";
   if (view === "side" && ctx.sideReport) {
-    if (hasProfile) mk("Profile", "overall");
-    mk("Overview", "side");
+    // The side's Overview and the view-neutral Max Profile were two headline
+    // tabs for one photograph. Keep the side report itself, call it Profile,
+    // and use the outline profile glyph already keyed by `side`.
+    mk("Profile", "side");
     for (const r of ctx.sideReport.regions) {
       if (r.metrics.length) mk(REGION_NAMES[r.region], `side:${r.region}`);
     }
@@ -646,6 +665,8 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
   }
+  const isRegion = id.startsWith("side:") || (!viewNeutral && id !== "side");
+  document.querySelector(".pane-photo")?.classList.toggle("region-focus", isRegion);
   // The photo pane follows the tab: the side numbers next to the front
   // photograph would be describing a picture that is not on screen.
   showPhoto(onSide ? "side" : "front");
@@ -693,7 +714,10 @@ function setZoom(region: RegionId | null): void {
   }
 
   if (region) {
-    const z = zoomFor(region, ctx.landmarks);
+    // On a phone a region press enlarges the pinned photograph so the WHOLE
+    // face can be read beside the region's overlay. Desktop keeps the closer
+    // anatomical camera move; it has enough room for that treatment.
+    const z = mobileRegionFocused() ? IDENTITY_ZOOM : zoomFor(region, ctx.landmarks);
     // translate+scale rather than transform-origin+scale, because CSS tweens a
     // transform and applies a changed origin INSTANTLY — every region change
     // used to open with a sideways jump as the pivot teleported. One
@@ -711,8 +735,11 @@ function setZoom(region: RegionId | null): void {
     // Only read while shrunk (see the custom properties in style.css), so the
     // full-size pane keeps its centred framing and goes on being driven by the
     // transform alone.
-    ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
-    ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
+    if (mobileRegionFocused()) setFaceCrop("front", true);
+    else {
+      ctx.zoomable.style.setProperty("--crop-x", `${z.originX}%`);
+      ctx.zoomable.style.setProperty("--crop-y", `${z.originY}%`);
+    }
   } else {
     applyZoom(ctx.zoomable, IDENTITY_ZOOM);
     // Back to the framing that shows a whole face in a strip.
@@ -765,6 +792,7 @@ function showPhoto(which: "front" | "side"): void {
       quality.innerHTML = `<span class="qchip">Profile capture</span><span class="qchip">13 landmarks checked by you</span>`;
     }
     shownPhoto = "side";
+    setFaceCrop("side");
   } else if (which === "front" && frontPhoto) {
     paint(canvas, frontPhoto);
     drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
@@ -772,6 +800,7 @@ function showPhoto(which: "front" | "side"): void {
     if (cap) cap.textContent = "ANALYZED";
     if (quality) quality.innerHTML = frontQualityHTML;
     shownPhoto = "front";
+    setFaceCrop("front");
   }
 }
 // Always the front capture handed in by the caller, never a copy of the shared
@@ -784,6 +813,90 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
   const g = dst.getContext("2d")!;
   g.clearRect(0, 0, dst.width, dst.height);
   g.drawImage(src, 0, 0);
+}
+
+function mobileRegionFocused(): boolean {
+  return Boolean(
+    window.matchMedia?.("(max-width: 760px)").matches &&
+    document.querySelector(".pane-photo")?.classList.contains("region-focus"),
+  );
+}
+
+function frontFaceCenter(): { x: number; y: number } {
+  if (!ctx?.landmarks.length) return { x: 50, y: 40 };
+  let minX = 1;
+  let maxX = 0;
+  let minY = 1;
+  let maxY = 0;
+  for (const point of ctx.landmarks) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  return { x: ((minX + maxX) / 2) * 100, y: ((minY + maxY) / 2) * 100 };
+}
+
+function sideFaceCenter(): { x: number; y: number } {
+  if (!ctx?.sidePoints || !ctx.sidePhoto) return { x: 50, y: 42 };
+  const points = Object.values(ctx.sidePoints);
+  if (!points.length) return { x: 50, y: 42 };
+  let minX = ctx.sidePhoto.width;
+  let maxX = 0;
+  let minY = ctx.sidePhoto.height;
+  let maxY = 0;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  return {
+    x: ((minX + maxX) / 2 / ctx.sidePhoto.width) * 100,
+    y: ((minY + maxY) / 2 / ctx.sidePhoto.height) * 100,
+  };
+}
+
+function setFaceCrop(which: "front" | "side", forceRegion = false): void {
+  if (!ctx) return;
+  const centre = which === "side" ? sideFaceCenter() : frontFaceCenter();
+  ctx.zoomable.style.setProperty("--face-x", `${centre.x.toFixed(2)}%`);
+  ctx.zoomable.style.setProperty("--face-y", `${centre.y.toFixed(2)}%`);
+  if (forceRegion || mobileRegionFocused()) {
+    ctx.zoomable.style.setProperty("--crop-x", `${centre.x.toFixed(2)}%`);
+    ctx.zoomable.style.setProperty("--crop-y", `${centre.y.toFixed(2)}%`);
+  }
+}
+
+// Repaint the visible pane only after canvasRecovery has rebuilt both hidden
+// source canvases. Restore the exact overlay state where practical so coming
+// back to the app never changes what the person was reading.
+function restoreVisiblePhoto(): void {
+  if (!ctx) return;
+  const pane = document.getElementById("photo-canvas") as HTMLCanvasElement | null;
+  if (!pane) return;
+  if (shownPhoto === "side" && ctx.sidePhoto) {
+    paint(pane, ctx.sidePhoto);
+    const metric = sideActive
+      ? ctx.sideReport?.regions.flatMap((region) => region.metrics).find((item) => item.def.id === sideActive)
+      : null;
+    if (metric && ctx.sidePoints) {
+      drawSideMeasurement(ctx.overlay, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height, metric);
+    } else {
+      drawSidePoints();
+    }
+    setFaceCrop("side");
+    return;
+  }
+  if (!frontPhoto) return;
+  paint(pane, frontPhoto);
+  const metric = activeMetric
+    ? ctx.report.metrics.find((item) => item.def.id === activeMetric)
+    : null;
+  if (metric) drawMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+  else drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, shownRegion ? REGION_LANDMARKS[shownRegion] : undefined);
+  setFaceCrop("front");
 }
 
 // The side view, inside the tabbed report rather than as a separate screen.
@@ -845,6 +958,9 @@ function calmSide(): void {
   transition = null;
   shownRegion = null;
   ctx.zoomable.style.transform = "none";
+  ctx.zoomable.style.removeProperty("--crop-x");
+  ctx.zoomable.style.removeProperty("--crop-y");
+  setFaceCrop("side", mobileRegionFocused());
   drawSidePoints();
 }
 
@@ -1989,6 +2105,7 @@ function animateOverview(root: HTMLElement): void {
   add(root.querySelector(":scope > .hist-entry"));
 
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  wireMaxInteractions(root.querySelector<HTMLElement>(".maxan-face"));
   items.forEach((item, index) => {
     const delay = reduced ? 0 : 40 + index * 68;
     item.classList.add("overview-step");
@@ -2648,6 +2765,7 @@ export function clearResultsIdentityState(): void {
   // the wrong person. The body itself is stored under the account's own key,
   // so it does not need clearing; the date does.
   birthDate = null;
+  clearResultPhotoRecovery();
   ctx = null;
   maxAccess = false;
   adultUser = false;
