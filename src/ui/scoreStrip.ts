@@ -1,29 +1,22 @@
 import type { Report } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
-// The mobile photograph has two behaviours while somebody reads a report:
+// The mobile report has one scroll-state transition: its ordinary app chrome
+// becomes a compact header once somebody starts reading, and stays compact
+// until they return to the actual top of the report.
 //
-//   - the photograph SHRINKS once you start reading, because a face taking up
-//     two thirds of the viewport is worth exactly one look and then becomes an
-//     obstacle between the reader and the thing they came for;
-//   - it grows back at the top, because that is where somebody has scrolled up
-//     to look at the face again, which is the only reason to scroll up.
+// The photograph no longer shrinks or remains pinned. It is the evidence for
+// the report, so it keeps a generous size and scrolls away naturally. When the
+// facial-category rail reaches the compact header it becomes the only sticky
+// control inside the results themselves.
 //
 // The old implementation also built, animated and wired a score card here.
-// That card is now superseded by the complete overall/front/side summary at the
-// head of the report and is hidden in every layout. Keeping its invisible DOM
-// meant count-up timers, typing intervals, a share renderer and layout reads
-// still ran on every result. This module now owns only the photo lifecycle its
-// public API has always bracketed.
+// That card is superseded by the complete overall/front/side summary at the
+// head of the report. This module remains deliberately small: one passive
+// scroll listener, one resize observer and no rendered DOM of its own.
 // ---------------------------------------------------------------------------
 
-// How far down the page the shrink triggers, and how far back up it releases.
-// Two different numbers on purpose: a single threshold makes the photograph
-// flicker between sizes when somebody rests a thumb near it, because the
-// shrink itself changes the page height and can push the scroll position back
-// across the line it just crossed.
-const SHRINK_AT = 12;
-const GROW_AT = 3;
+const COMPACT_AFTER = 2;
 
 let detach: (() => void) | null = null;
 
@@ -31,7 +24,9 @@ export function clearScoreStrip(): void {
   detach?.();
   detach = null;
   const pane = document.querySelector(".pane-photo");
-  pane?.classList.remove("shrunk", "region-focus", "results-ready");
+  pane?.classList.remove("region-focus", "results-ready");
+  document.querySelector(".topbar")?.classList.remove("report-compact");
+  document.querySelector<HTMLElement>("#v-main")?.style.removeProperty("--report-header-h");
 }
 
 export function renderScoreStrip(_report: Report): void {
@@ -39,48 +34,44 @@ export function renderScoreStrip(_report: Report): void {
   const pane = document.querySelector<HTMLElement>(".pane-photo");
   if (!pane) return;
   pane.classList.add("results-ready");
-  detach = watchScroll(pane);
+  detach = watchReportScroll(pane);
 }
 
-// The shrink. Returns its own teardown, so a re-render or a new scan cannot
-// leave a scroll listener behind pointing at a detached element.
-function watchScroll(pane: HTMLElement): () => void {
-  let shrunk = false;
+// Returns its own teardown, so a re-render or new scan cannot leave a listener
+// behind compacting an unrelated page.
+function watchReportScroll(pane: HTMLElement): () => void {
+  let compact = false;
   let queued = false;
   let frame = 0;
   // Results do not always mount at document scroll zero: the upload card and
   // mobile browser chrome can leave the page at a non-zero offset. Measure the
-  // person's movement FROM the finished report rather than against the page's
-  // absolute origin, or the same gesture shrinks at a different time in Safari
-  // and Google's in-app browser.
+  // person's movement FROM the finished report so "the top" stays stable.
   const startY = window.scrollY;
 
-  // How far down the screen the pinned photo column reaches, published so the
-  // tab row can pin directly under it instead of behind it.
-  //
-  // Measured rather than assumed because the height is not a constant: the
-  // column shrinks on scroll, the score strip grows a line when the ranking
-  // wraps, and the quality chips move in and out of it at the breakpoint. A
-  // hard-coded offset would be right in exactly one of those states.
+  // The rail sticks under the app chrome. Measure the real header rather than
+  // duplicating a pixel value in TypeScript: signed-in avatars, guest buttons
+  // and accessibility font settings can all change its height.
+  const header = document.querySelector<HTMLElement>(".topbar");
   const main = pane.closest<HTMLElement>("#v-main") ?? pane.parentElement;
-  const publish = (): void => {
-    if (!main || !pane.isConnected) return;
-    main.style.setProperty("--pin-top", `${Math.round(pane.getBoundingClientRect().height)}px`);
+  const publishHeaderHeight = (): void => {
+    if (!main || !header?.isConnected || !pane.isConnected) return;
+    main.style.setProperty("--report-header-h", `${Math.round(header.getBoundingClientRect().height)}px`);
   };
-  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
-  ro?.observe(pane);
-  publish();
+  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publishHeaderHeight);
+  if (header) ro?.observe(header);
+  publishHeaderHeight();
 
   const measure = (): void => {
     queued = false;
     if (!pane.isConnected) return;
     const y = Math.max(0, window.scrollY - startY);
-    if (!shrunk && y > SHRINK_AT) {
-      shrunk = true;
-      pane.classList.add("shrunk");
-    } else if (shrunk && y < GROW_AT) {
-      shrunk = false;
-      pane.classList.remove("shrunk");
+    const next = y > COMPACT_AFTER;
+    if (next !== compact) {
+      compact = next;
+      header?.classList.toggle("report-compact", compact);
+      // ResizeObserver publishes each transition frame in modern browsers.
+      // This direct read keeps the rail correctly placed in older ones too.
+      publishHeaderHeight();
     }
   };
   const onScroll = (): void => {
@@ -95,7 +86,8 @@ function watchScroll(pane: HTMLElement): () => void {
     window.removeEventListener("scroll", onScroll);
     if (frame) cancelAnimationFrame(frame);
     ro?.disconnect();
-    main?.style.removeProperty("--pin-top");
-    pane.classList.remove("shrunk", "region-focus");
+    main?.style.removeProperty("--report-header-h");
+    header?.classList.remove("report-compact");
+    pane.classList.remove("region-focus");
   };
 }

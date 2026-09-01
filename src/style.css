@@ -5798,13 +5798,32 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .sg-err { margin: 0; font-size: 12.5px; color: var(--warm, #c07a4a); }
 @media (prefers-reduced-motion: reduce) { .scangate { animation: none; } }
 
-/* The complete mobile score summary opens the analysis column. The photo pane
-   keeps its independent sticky/shrink lifecycle without mounting a second,
-   hidden score component. */
+/* The complete mobile score summary opens the analysis column. The photograph
+   stays a stable visual and scrolls naturally; no second hidden score component
+   is mounted beside it. */
 .mobile-score-summary,
 .primary-measurements { display: none; }
 
 @media (max-width: 850px) {
+  /* Once a report starts moving, the app chrome yields most of its height to
+     the reading surface and stays compact until the report top. The live
+     height is published for the sticky category rail below. */
+  .topbar {
+    transition: padding .24s cubic-bezier(.32, 0, .15, 1), box-shadow .24s ease;
+  }
+  .topbar.report-compact {
+    padding: 5px 14px;
+    box-shadow: 0 8px 22px rgba(20, 21, 24, .055);
+  }
+  .topbar.report-compact .wordmark { font-size: 10.5px; letter-spacing: .19em; }
+  .topbar.report-compact .wordmark::before {
+    width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px;
+  }
+  .topbar.report-compact .topbar-right { gap: 6px; }
+  .topbar.report-compact .tag { display: none; }
+  .topbar.report-compact .acct-btn.in { padding: 1px; }
+  .topbar.report-compact .acct-disc { width: 25px; height: 25px; }
+
   /* One score hierarchy in the analysis column replaces the old score strip,
      floating view toggle and capture-provenance pills. Those three surfaces
      repeated the same answer while keeping the report itself below the fold. */
@@ -5856,16 +5875,15 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
     min-width: 32px; padding: 4px 7px; border-radius: 99px; background: var(--acc-soft);
     color: var(--acc); font: 600 10px var(--mono); font-style: normal; text-align: center;
   }
-  /* The photograph sticks and shrinks. Sticky rather than fixed so it stays
-     inside the grid and cannot overlap the footer, and a max-height rather
-     than a transform so the strip underneath moves up with it instead of
-     leaving a hole where the photo used to be.
-     Flex, so the order below can put the answer directly under the picture. */
+  /* The photograph is evidence, not persistent navigation. It keeps a
+     generous, stable size and moves with the document. Once it has left, the
+     facial-category rail below is the sole sticky results surface. */
   .pane-photo {
-    position: sticky; top: 0; z-index: 5;
+    position: static; z-index: 5;
     display: flex; flex-direction: column;
-    background: var(--bg); padding-top: 8px;
+    background: var(--bg); padding-top: 0;
   }
+  #v-main:has(.pane-photo.results-ready) { gap: 10px; margin-top: 8px; }
   /* Reading order on a phone: photograph, score, then the small print about
      how it was measured. The notes used to sit ABOVE the picture, which meant
      a first scan opened on a stack of red warnings with the number below the
@@ -5889,13 +5907,11 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .score-head .chip.big-chip { display: none; }
   .score-head { align-items: flex-start; gap: 10px; margin-bottom: 14px; }
   .score-head .chipcol { margin-bottom: 0; }
-  /* 52vh, not 62. The whole point of the strip is that the score is on screen
-     when the scan finishes, and at 62vh the card's last two lines fell below
-     the fold on a 667px phone, which is the smallest screen still in wide use.
-     The number was visible and the ranking under it was not, which is the same
-     bug in a smaller form. */
+  /* Slightly larger than the old 52vh opening and, importantly, unchanged by
+     scrolling. The photo now leaves by moving naturally with the document,
+     not by being squeezed into a strip. */
   .pane-photo .face-frame {
-    max-height: 52vh; transition: max-height .34s cubic-bezier(.32, 0, .15, 1);
+    max-height: min(56svh, 520px);
   }
   /* While the engine is still working there is no score strip and nothing
      below the progress bar, so the 52vh cap left the best animation in the
@@ -5903,28 +5919,22 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      until the number needs it, then eases back down on the same curve the
      rest of the strip already moves on. */
   .pane-photo:not(.results-ready) .face-frame { max-height: 66vh; }
-  .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
-
-  /* Compact is still a photograph, not a letterbox decoration. 27svh keeps a
-     complete face recognisable while leaving most of the screen to the report.
-     A region press gets a little over a third of the viewport: large enough to
-     read the complete face and its overlay, without returning to the opening
-     half-screen hero. */
-  .pane-photo.shrunk .face-frame { max-height: clamp(210px, 27svh, 260px); }
-  .pane-photo.shrunk.region-focus .face-frame { max-height: clamp(250px, 34svh, 330px); }
-  /* The shrink used to snap because these were display:none — four elements
-     leaving the flow in one frame, mid-transition, while the sticky pane was
-     also resizing. Collapsing them on the same curve as the photo makes it
-     one movement instead of a jump. */
+  .pane-photo .face-frame .zoomable canvas {
+    height: min(56svh, 520px); object-fit: cover;
+    object-position: var(--face-x, center) var(--face-y, 40%);
+  }
+  /* A finished result already names its active view in the score cards and
+     category rail. FRONT / ANALYZED plus an empty progress track was the blank
+     strip visible between the photograph and those controls. */
   .pane-photo .photo-caption,
   .pane-photo .scan-status,
   .pane-photo .bar {
     overflow: hidden; max-height: 40px; opacity: 1;
     transition: max-height .34s cubic-bezier(.32, 0, .15, 1), opacity .2s ease, margin .34s ease;
   }
-  .pane-photo.shrunk .photo-caption,
-  .pane-photo.shrunk .scan-status,
-  .pane-photo.shrunk .bar { max-height: 0; opacity: 0; margin-top: 0; margin-bottom: 0; }
+  .pane-photo.results-ready .photo-caption,
+  .pane-photo.results-ready .scan-status,
+  .pane-photo.results-ready .bar { max-height: 0; opacity: 0; margin-top: 0; margin-bottom: 0; }
   /* A rejected-photo decision is not a caption. The 40px cap above exists so
      a one-line "Front captured." can collapse smoothly while scrolling a
      finished report — it has never had to hold a title, two sentences of
@@ -5936,59 +5946,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo:has(.reject-actions) .scan-status {
     max-height: none; overflow: visible;
   }
-  /* Clipping a portrait from the top shows hair and background and no face,
-     which makes the compact state useless as a reminder of what is measured.
-     Crop around the measured face itself.
-
-     The crop FOLLOWS the selected region rather than sitting on the upper
-     third forever. Pinned, it showed the forehead whether you had tapped Eyes,
-     Jaw or Chin — the strip is the only picture on screen once the pane
-     collapses, so a fixed crop makes it a decoration instead of a reminder of
-     what is being measured. ui/results.ts sets --crop-x/--crop-y from the same
-     point the full-size zoom uses, and the fallbacks are the old framing, so
-     the calm whole-face state is unchanged.
-
-     Transitioned on the same curve as the shrink, because tabbing through
-     features while collapsed is exactly when this is read, and a crop that
-     jumps between regions reads as the photo glitching. */
-  .pane-photo.shrunk .face-frame .zoomable canvas {
-    height: clamp(210px, 27svh, 260px); object-fit: cover;
-    object-position: var(--crop-x, var(--face-x, center)) var(--crop-y, var(--face-y, 40%));
-    transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
-  }
-  .pane-photo.shrunk.region-focus .face-frame .zoomable canvas {
-    height: clamp(250px, 34svh, 330px);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .pane-photo.shrunk .face-frame .zoomable canvas { transition: none; }
-  }
-  /* The overlay stays VISIBLE in the strip, cropped exactly like the photo.
-     It used to be display:none here, on the theory that the mesh no longer
-     lined up once the photo was cropped — but both canvases share the same
-     intrinsic geometry, so giving the overlay the same object-fit crop keeps
-     every line on the anatomy it measures. Hiding it meant that on a phone,
-     tapping a measurement drew its construction onto an invisible canvas:
-     the single best thing on the results screen, silently absent on the
-     platform where nearly everybody is. The strip crop already follows the
-     selected region (--crop-x/--crop-y), so the drawn measurement is also
-     what the strip is looking at. */
-  .pane-photo.shrunk #overlay-canvas {
-    height: clamp(210px, 27svh, 260px);
-    object-fit: cover;
-    object-position: var(--crop-x, var(--face-x, center)) var(--crop-y, var(--face-y, 40%));
-    transition: object-position .34s cubic-bezier(.32, 0, .15, 1);
-  }
-  .pane-photo.shrunk.region-focus #overlay-canvas {
-    height: clamp(250px, 34svh, 330px);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .pane-photo.shrunk #overlay-canvas { transition: none; }
-  }
-  /* One column here, so the rail has the photo column above it rather than
-     beside it and has to clear whatever height that column is currently
-     pinned at. ui/scoreStrip.ts measures it — full height before the shrink,
-     around 236px after — and the rail follows it down on the same movement. */
-  .rtabs-rail { top: var(--pin-top, 0px); }
+  /* The rail takes over under the compact app chrome and remains there for the
+     report. Its top is measured from the live header rather than hard-coded. */
+  .rtabs-rail { top: var(--report-header-h, 38px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -43,10 +43,13 @@ test("the exported share card carries overall, front, side and pillars", () => {
   assert.match(shareCard, /Object\.entries\(report\.pillars\)/);
 });
 
-test("mobile photo pinning does not build or animate a hidden score card", () => {
+test("mobile report scrolling compacts chrome without building a hidden score card", () => {
   assert.match(photoLifecycle, /pane\.classList\.add\("results-ready"\)/);
-  assert.match(photoLifecycle, /detach = watchScroll\(pane\)/);
+  assert.match(photoLifecycle, /detach = watchReportScroll\(pane\)/);
   assert.doesNotMatch(photoLifecycle, /createElement|countUp|typeInto|renderShareCard|setInterval/);
   assert.match(photoLifecycle, /const startY = window\.scrollY/);
-  assert.match(styles, /\.pane-photo\.shrunk\.region-focus \.face-frame/);
+  assert.match(photoLifecycle, /classList\.toggle\("report-compact", compact\)/);
+  assert.doesNotMatch(photoLifecycle, /classList\.(?:add|remove)\("shrunk"/);
+  assert.match(styles, /\.pane-photo \{\s+position: static/);
+  assert.match(styles, /\.rtabs-rail \{ top: var\(--report-header-h, 38px\); \}/);
 });
