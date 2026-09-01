@@ -1,4 +1,10 @@
-import { hasMaxAccess, openBillingPortal, recoverMaxEntitlement, startMaxCheckout } from "../engine/entitlement.js";
+import {
+  hasMaxOrStaffAccess,
+  loadIsAdmin,
+  openBillingPortal,
+  recoverMaxEntitlement,
+  startMaxCheckout,
+} from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { openMaxChat } from "./maxChat.js";
@@ -314,10 +320,13 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
     cta.textContent = "Checking your Max access…";
     price.textContent = "Checking the subscription already attached to this account.";
     status.textContent = "";
-    void recoverMaxEntitlement()
-      .then((entitlement: Entitlement) => {
+    void Promise.all([
+      recoverMaxEntitlement(),
+      loadIsAdmin().catch(() => false),
+    ])
+      .then(([entitlement, staff]: [Entitlement, boolean]) => {
         if (!panel.isConnected) return;
-        if (hasMaxAccess(entitlement)) {
+        if (hasMaxOrStaffAccess(entitlement, staff)) {
           const question = input.value.trim();
           announceMembershipBrand("max");
           panel.innerHTML = maxTabMarkup(true);

@@ -51,6 +51,11 @@ export function hasMaxAccess(entitlement: Entitlement): boolean {
     (entitlement.status === "active" || entitlement.status === "trialing");
 }
 
+/** Staff use the same Max surface as subscribers, with server-side checks too. */
+export function hasMaxOrStaffAccess(entitlement: Entitlement, staff = false): boolean {
+  return staff || hasMaxAccess(entitlement);
+}
+
 export function hasPaidAccess(entitlement: Entitlement): boolean {
   return entitlement.tier !== "free" &&
     (entitlement.status === "active" || entitlement.status === "trialing");
