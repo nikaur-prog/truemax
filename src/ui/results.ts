@@ -23,7 +23,6 @@ import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, startKindFor, writeProtocols } from "../engine/protocol.js";
 import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
-import { renderShareCard, shareCard } from "./shareCard.js";
 import type { CeilingInput } from "./ceilingCta.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { nutritionPlanHTML } from "./nutritionPlan.js";
@@ -459,7 +458,7 @@ function viewCards(r: Report): string {
 //
 //   lead      one action, filled, with an icon. The step the product wants.
 //   support   the two or three things a person might reasonably do instead.
-//   quiet     the utilities — correcting points, copying the dump — set small
+//   quiet     the utilities — correcting points and score feedback — set small
 //             and low-contrast, findable and never competing.
 //
 // Icons on all of them, because a row of words is read left to right and a row
@@ -482,9 +481,8 @@ function actionButton(
   label: string,
   icon: keyof typeof ACT_ICON,
   tier: "lead" | "support" | "quiet",
-  hidden = false,
 ): string {
-  return `<button type="button" class="ract ract-${tier}" id="${id}"${hidden ? " hidden" : ""}>
+  return `<button type="button" class="ract ract-${tier}" id="${id}">
     <svg class="ract-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACT_ICON[icon]}</svg>
     <span>${label}</span>
   </button>`;
@@ -504,9 +502,6 @@ function resultActions(merged: boolean, ctx: Ctx): string {
       ? actionButton("btn-continue", pathwayLabel(), "pathway", "lead")
       : "";
   const support = [
-    // Hidden rather than dropped when the lead button already goes here: the
-    // session read that decides that lands after this string is built.
-    plain ? "" : actionButton("btn-plan", "See your plan", "plan", "support", pathway === "plan"),
     actionButton("btn-new", wantsSide ? "Start over" : "New photo", "photo", "support"),
     actionButton("btn-share", "Share card", "share", "support"),
     // The voiced analysis: this scan as the narrated video, Coach Max's
@@ -1289,7 +1284,7 @@ function showOverall(): void {
   const newBtn = document.getElementById("btn-new")!;
   newBtn.onclick = async () => {
     // Leaving the report throws away the screen somebody may have spent ten
-    // minutes reading, and this button sits one slip below "See your plan".
+    // minutes reading, and this button sits directly below the primary action.
     // A genuine press costs one extra tap; an accidental one costs nothing.
     // This is app UI rather than window.confirm because embedded mobile
     // browsers can suppress native dialogs and make the control appear dead.
@@ -1303,8 +1298,6 @@ function showOverall(): void {
   };
   // Guest and recalled reports are observations-only, so resultActions omits
   // this button. Wiring the shared overview must tolerate that smaller DOM.
-  const planBtn = document.getElementById("btn-plan");
-  if (planBtn) planBtn.onclick = () => select("improve");
   const continueBtn = document.getElementById("btn-continue");
   if (continueBtn) continueBtn.onclick = () => goPathway();
   const sideBtn = document.getElementById("btn-side");
@@ -1314,8 +1307,7 @@ function showOverall(): void {
   document.getElementById("btn-share")!.onclick = async () => {
     if (!ctx) return;
     const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
-    const card = await renderShareCard(ctx.report, photo);
-    await shareCard(card, ctx.report.overall);
+    await shareResult(ctx.report, photo);
   };
   const voicedBtn = document.getElementById("btn-voiced") as HTMLButtonElement | null;
   if (voicedBtn) {
@@ -1553,7 +1545,6 @@ function sideNav(): string {
     ? actionButton("sn-continue", pathwayLabel(), "pathway", "lead")
     : "";
   const support = [
-    plain ? "" : actionButton("sn-plan", "See your plan", "plan", "support", pathway === "plan"),
     actionButton("sn-new", "New photo", "photo", "support"),
     actionButton("sn-share", "Share card", "share", "support"),
     adultUser && !ctx?.archived ? actionButton("sn-voiced", "Get a video analysis · $2.99", "voice", "support") : "",
@@ -1586,7 +1577,6 @@ function wireSideNav(): void {
   on("imp-redo", () => ctx?.onRedoSide?.());
   on("unver-redo", () => ctx?.onRedoSide?.());
   on("sn-continue", () => goPathway());
-  on("sn-plan", () => select("improve"));
   on("sn-history", () => openHistory());
   on("sn-new", () => {
     void confirmScanAction({
@@ -1626,9 +1616,16 @@ function wireSideNav(): void {
     // that goes out is the profile with the merged score on it — not the front
     // photograph relabelled.
     const photo = document.getElementById("photo-canvas") as HTMLCanvasElement;
-    const card = await renderShareCard(ctx.report, photo);
-    await shareCard(card, ctx.report.overall);
+    await shareResult(ctx.report, photo);
   });
+}
+
+async function shareResult(report: Report, photo: HTMLCanvasElement): Promise<void> {
+  // Canvas export is a send-time feature. Keeping it out of the initial report
+  // bundle avoids parsing the card renderer for everybody who never shares.
+  const { renderShareCard, shareCard } = await import("./shareCard.js");
+  const card = await renderShareCard(report, photo);
+  await shareCard(card, report.overall);
 }
 
 // One profile region: its measurements beside its comparisons. Shared by the
@@ -2675,13 +2672,6 @@ export function setPathwayState(next: PathwayState): void {
   if (next === pathway) return;
   pathway = next;
   paintPathwayLabels();
-  // "See your plan" in the support row goes to the same tab as the lead
-  // button now does, and two buttons for one destination is how the row got
-  // confusing in the first place. Drop the duplicate rather than render it.
-  for (const id of ["btn-plan", "sn-plan"]) {
-    const b = document.getElementById(id);
-    if (b) b.hidden = next === "plan";
-  }
 }
 
 function pathwayLabel(): string {

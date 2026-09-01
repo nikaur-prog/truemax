@@ -1,4 +1,5 @@
 import { AGG_NORM } from "../engine/aggNorm.js";
+import { ordinal } from "../engine/ordinal.js";
 import type { Sex } from "../engine/types.js";
 
 // ---------------------------------------------------------------------------
@@ -129,7 +130,7 @@ export function curveSVG(
       : "";
 
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
-    aria-label="Where this measurement falls in the reference population: ${Math.round(pct)}th percentile">
+    aria-label="Where this measurement falls in the reference population: ${ordinal(pct)} percentile">
     <defs><clipPath id="${id}"><path d="${area}"/></clipPath></defs>
 
     <g clip-path="url(#${id})">

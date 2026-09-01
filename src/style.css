@@ -1364,12 +1364,6 @@ button.pillar:active { transform: translateY(0); }
   transition: border-color .15s ease, background-color .15s ease, transform .12s ease;
   min-width: 0;
 }
-/* `display: flex` on .ract is an author declaration, so it outranks the user
-   agent's `[hidden] { display: none }` on ORIGIN alone - specificity never
-   enters into it. Without this the hidden attribute set by setPathwayState()
-   is inert and the duplicate "See your plan" stays on screen next to the lead
-   button that now goes to the same place. Same reason as .maxchat-chips[hidden]. */
-.ract[hidden] { display: none; }
 .ract span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ract-ico { width: 17px; height: 17px; flex: none; opacity: .62; }
 .ract:hover { border-color: #c9c7c0; background: var(--bg); }
@@ -5799,14 +5793,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .sg-err { margin: 0; font-size: 12.5px; color: var(--warm, #c07a4a); }
 @media (prefers-reduced-motion: reduce) { .scangate { animation: none; } }
 
-/* ---------------------------------------------------------------------------
-   Legacy score-strip hooks.
-
-   The complete mobile score summary now opens the analysis column, so the old
-   strip stays hidden. Its node still owns the photo shrink/rail measurement
-   lifecycle in scoreStrip.ts until that behavior is extracted in the lag pass.
-   --------------------------------------------------------------------------- */
-.scorestrip { display: none; }
+/* The complete mobile score summary opens the analysis column. The photo pane
+   keeps its independent sticky/shrink lifecycle without mounting a second,
+   hidden score component. */
 .mobile-score-summary,
 .primary-measurements { display: none; }
 
@@ -5814,7 +5803,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   /* One score hierarchy in the analysis column replaces the old score strip,
      floating view toggle and capture-provenance pills. Those three surfaces
      repeated the same answer while keeping the report itself below the fold. */
-  .pane-photo .scorestrip,
   .pane-photo .quality-chips,
   .pane-photo .viewtoggle,
   .viewtoggle-anchor { display: none !important; }
@@ -5863,35 +5851,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
     min-width: 32px; padding: 4px 7px; border-radius: 99px; background: var(--acc-soft);
     color: var(--acc); font: 600 10px var(--mono); font-style: normal; text-align: center;
   }
-  .ss-score { display: flex; align-items: baseline; gap: 10px; }
-  .ss-score b {
-    font-family: var(--serif); font-size: 42px; font-weight: 600; line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-  .ss-score b small { font-size: 15px; font-weight: 400; color: var(--mut); }
-  .ss-word {
-    margin-left: auto; padding: 5px 11px; border-radius: 99px;
-    background: var(--acc-soft); color: var(--acc);
-    font-size: 12.5px; font-weight: 620; letter-spacing: .01em;
-  }
-  .ss-rank { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--mut); }
-  .ss-more {
-    display: block; margin-top: 10px; font-family: var(--mono);
-    font-size: 9.5px; letter-spacing: .16em; color: var(--mut); opacity: .8;
-  }
-  .ss-more::after { content: " ↓"; }
-  .ss-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .ss-foot .ss-more { margin-top: 0; }
-  .ss-share {
-    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
-    padding: 7px 13px; border-radius: 99px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
-    font: 600 12px var(--sans); transition: border-color .15s ease, color .15s ease;
-  }
-  .ss-share:hover { border-color: var(--acc); color: var(--acc); }
-  .ss-share:disabled { opacity: .5; cursor: default; }
-  .pane-photo.shrunk .ss-share { display: none; }
-
   /* The photograph sticks and shrinks. Sticky rather than fixed so it stays
      inside the grid and cannot overlap the footer, and a max-height rather
      than a transform so the strip underneath moves up with it instead of
@@ -5910,7 +5869,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo .quality-chips { order: 5; margin: 10px 0 0; }
   .pane-photo .viewtoggle { order: -2; margin: 0 0 8px; }
   .pane-photo .face-frame { order: 0; }
-  .pane-photo .scorestrip { order: 1; }
   .pane-photo .photo-caption { order: 2; }
   .pane-photo .scan-status { order: 3; }
   .pane-photo .bar { order: 4; }
@@ -5939,7 +5897,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      product playing in the top half of an empty screen. It gets the room
      until the number needs it, then eases back down on the same curve the
      rest of the strip already moves on. */
-  .pane-photo:not(:has(.scorestrip)) .face-frame { max-height: 66vh; }
+  .pane-photo:not(.results-ready) .face-frame { max-height: 66vh; }
   .pane-photo .face-frame .zoomable canvas { object-fit: cover; }
 
   /* 112px, not 96. At 96 the strip is a letterbox slice — in practice a band
@@ -6020,13 +5978,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      pinned at. ui/scoreStrip.ts measures it — full height before the shrink,
      around 236px after — and the rail follows it down on the same movement. */
   .rtabs-rail { top: var(--pin-top, 0px); }
-  /* The chips stay visible above the photo even when shrunk: they are one
-     small line, they explain what the number is measured against, and hiding
-     them was never what made room. */
-  .pane-photo.shrunk .scorestrip { margin-top: 10px; padding: 10px 14px; }
-  .pane-photo.shrunk .ss-score b { font-size: 28px; }
-  .pane-photo.shrunk .ss-rank,
-  .pane-photo.shrunk .ss-more { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1980,15 +1980,34 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
 function drawGuides(svg: SVGSVGElement, p: SidePoints, w: number, h: number): void {
   const X = (v: number) => (v / w) * 100;
   const Y = (v: number) => (v / h) * 100;
-  const line = (a: keyof SidePoints, b: keyof SidePoints, dash: string) =>
-    `<line x1="${X(p[a].x)}" y1="${Y(p[a].y)}" x2="${X(p[b].x)}" y2="${Y(p[b].y)}"
-      stroke="rgba(143,243,224,.75)" stroke-width="0.35" stroke-dasharray="${dash}" vector-effect="non-scaling-stroke"/>`;
-  svg.innerHTML =
-    line("pronasale", "pogonion", "2 2") +
-    line("glabella", "subnasale", "1 3") +
-    line("subnasale", "pogonion", "1 3") +
-    line("condylion", "gonion", "2 2") +
-    line("gonion", "menton", "2 2");
+  const specs: Array<[keyof SidePoints, keyof SidePoints, string]> = [
+    ["pronasale", "pogonion", "2 2"],
+    ["glabella", "subnasale", "1 3"],
+    ["subnasale", "pogonion", "1 3"],
+    ["condylion", "gonion", "2 2"],
+    ["gonion", "menton", "2 2"],
+  ];
+  let lines = [...svg.querySelectorAll<SVGLineElement>("line[data-side-guide]")];
+  if (lines.length !== specs.length) {
+    svg.replaceChildren();
+    lines = specs.map(([, , dash]) => {
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.dataset.sideGuide = "1";
+      line.setAttribute("stroke", "rgba(143,243,224,.75)");
+      line.setAttribute("stroke-width", "0.35");
+      line.setAttribute("stroke-dasharray", dash);
+      line.setAttribute("vector-effect", "non-scaling-stroke");
+      svg.appendChild(line);
+      return line;
+    });
+  }
+  specs.forEach(([a, b], index) => {
+    const line = lines[index];
+    line.setAttribute("x1", String(X(p[a].x)));
+    line.setAttribute("y1", String(Y(p[a].y)));
+    line.setAttribute("x2", String(X(p[b].x)));
+    line.setAttribute("y2", String(Y(p[b].y)));
+  });
 }
 
 function loadImage(file: File): Promise<HTMLImageElement> {
