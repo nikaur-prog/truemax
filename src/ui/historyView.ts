@@ -128,7 +128,7 @@ function rows(scans: StoredScan[]): string {
       // a list must not wait on it; a scan with no stored photo simply keeps
       // the empty slot, which is a real state and not an error.
       return `<button type="button" class="hist-row" data-recall="${i}" data-shots="${escapeAttr(scanStorageKey(s))}">
-        <span class="hist-shots" aria-hidden="true"></span>
+        <span class="hist-shots" aria-hidden="true"><span class="hist-shot-placeholder">PHOTO</span></span>
         <span class="hist-date">${fmtDate(s.date)}</span>
         <span class="hist-score">${s.overall.toFixed(1)}<small>/10</small></span>
         ${chip}
@@ -239,6 +239,10 @@ export function wireHistoryPanel(root: ParentNode): void {
     clearBtn.disabled = true;
     await clearAllPhotos();
     clearBtn.textContent = "Photos deleted";
+    for (const host of root.querySelectorAll<HTMLElement>(".hist-shots")) {
+      host.classList.remove("has");
+      host.innerHTML = `<span class="hist-shot-placeholder">PHOTO</span>`;
+    }
   };
 }
 

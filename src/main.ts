@@ -29,7 +29,7 @@ import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
 import { landPhoto } from "./ui/photoLanding.js";
-import { clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
+import { clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
@@ -1720,6 +1720,7 @@ function resetToUpload(): void {
   // shrinking a photo pane that no longer holds a photograph. The pet goes
   // with it: he belongs to a result, not to the upload screen.
   clearScoreStrip();
+  clearResultPhotoRecovery();
   unmountMaxPet();
   closeMaxChat();
 }

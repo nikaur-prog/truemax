@@ -43,6 +43,20 @@
 
 export type MaxMood = "happy" | "excited" | "thinking" | "concerned" | "sad" | "mad";
 
+// Thinking is a pose, not a loading state. A report may deliberately open on
+// it, but the thought bubble must resolve so Max can return to his ordinary
+// idle repertoire instead of looking stuck forever.
+export const THINKING_POSE_MS = 4_200;
+
+export function releaseThinkingPose(svg: SVGSVGElement, delay = THINKING_POSE_MS): number | null {
+  if (!svg.classList.contains("mx-mood-thinking")) return null;
+  return window.setTimeout(() => {
+    if (!svg.isConnected || !svg.classList.contains("mx-mood-thinking")) return;
+    svg.classList.remove("mx-mood-thinking");
+    svg.classList.add("mx-mood-happy");
+  }, delay);
+}
+
 // Palette. Kept here rather than CSS variables because the character must look
 // the same on every surface he appears on, light card or dark takeover.
 const BODY_TOP = "#84b5fb";
@@ -400,6 +414,14 @@ export function wireMaxInteractions(
   if (!svg || (svg as unknown as { __mxWired?: boolean } & SVGSVGElement).__mxWired) return;
   (svg as unknown as { __mxWired?: boolean } & SVGSVGElement).__mxWired = true;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // A deterministic results pose can be `thinking`. Keep that rotation — it
+  // gives the report some character — while making it a bounded beat. The
+  // idle controller below still has its own five-second thinking ACT later;
+  // both paths now cleanly return to the happy resting face.
+  if (svg.classList.contains("mx-mood-thinking")) {
+    releaseThinkingPose(svg, reduced ? 0 : THINKING_POSE_MS);
+  }
 
   // The idle repertoire, on every surface where he is big enough to be
   // watched — which now includes the offer screen, see the note above. Not
