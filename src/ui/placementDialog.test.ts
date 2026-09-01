@@ -108,9 +108,16 @@ test("the enlarged size is bounded by the screen it is read on", () => {
 });
 
 test("the teaser rings stay separate around the dense nose and mouth points", () => {
-  assert.ok(PLACEMENT_PREVIEW_RING <= 1.7, "the collapsed marks should not merge into a teal cluster");
+  assert.ok(PLACEMENT_PREVIEW_RING <= 1, "the thumbnail marks should be pinpoint small");
   assert.ok(PLACEMENT_EXPANDED_RING > PLACEMENT_PREVIEW_RING, "the inspection view can use larger rings");
-  assert.ok(PLACEMENT_EXPANDED_RING <= 3.8, "even the expanded marks should leave the photo visible");
+  assert.ok(PLACEMENT_EXPANDED_RING <= 1.35, "the inspection marks should remain pinpoints, not targets");
+});
+
+test("placement evidence opens enlarged instead of hiding behind a zoom action", () => {
+  const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
+  assert.match(src, /paintPlacementPreview\(shot, photo, points, true\)/);
+  assert.match(src, /paintPlacementPreview\(previewCanvas, opts\.preview\.photo, opts\.preview\.points, true\)/);
+  assert.doesNotMatch(src, /data-zoom/, "the inspection view should not start as a zoomable thumbnail");
 });
 
 test("a very short window still gets a preview, never a zero-height one", () => {

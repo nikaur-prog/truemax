@@ -217,7 +217,7 @@ function topBarHTML(right = ""): string {
 
 function renderGate(): void {
   document.title = "TrueMax Creator League";
-  root.innerHTML = `${topBarHTML(`<button class="lg-btn" id="lg-signin">Sign in / Sign up</button>`)}
+  root.innerHTML = `${topBarHTML(`<button class="lg-btn pri" id="lg-signin">Sign in / Sign up</button>`)}
   <div class="lg-gate">
     <span class="lg-chip ok">PAID ON VIEWS · APPLICATION ONLY</span>
     <h1>Make TrueMax videos.<br/>Get paid when they hit.</h1>
@@ -244,12 +244,16 @@ function renderGate(): void {
     <div class="lg-form" id="lg-authbox" hidden>
       <h3 style="margin:0 0 2px">Sign in, or create your account</h3>
       <p class="lg-note" style="margin-top:4px">One account works for the app and the League.
-      New here? The same button below creates your account.</p>
+      Choose the action you mean so a mistyped password can never become a sign-up attempt.</p>
+      <div class="lg-auth-modes" role="group" aria-label="Account action">
+        <button type="button" class="lg-auth-mode active" id="lg-auth-signin" aria-pressed="true">Sign in</button>
+        <button type="button" class="lg-auth-mode" id="lg-auth-signup" aria-pressed="false">Create account</button>
+      </div>
       <label for="lg-email">Email</label>
       <input id="lg-email" type="email" autocomplete="email" />
       <label for="lg-pass">Password</label>
-      <input id="lg-pass" type="password" autocomplete="new-password" />
-      <p style="margin-top:16px"><button class="lg-btn pri" id="lg-auth-go">Sign in / Create account</button></p>
+      <input id="lg-pass" type="password" autocomplete="current-password" />
+      <p style="margin-top:16px"><button class="lg-btn pri lg-auth-submit" id="lg-auth-go" disabled>Sign in</button></p>
       <p class="lg-error" id="lg-auth-err"></p>
       <p class="lg-note">Signing up agrees to the
       <a href="/terms" target="_blank" rel="noopener">terms</a> and
@@ -268,9 +272,40 @@ function renderGate(): void {
     const offer = document.getElementById("lg-public-offer");
     if (offer) offer.innerHTML = html;
   });
-  document.getElementById("lg-auth-go")!.onclick = async () => {
-    const email = (document.getElementById("lg-email") as HTMLInputElement).value.trim();
-    const pass = (document.getElementById("lg-pass") as HTMLInputElement).value;
+  const emailInput = document.getElementById("lg-email") as HTMLInputElement;
+  const passInput = document.getElementById("lg-pass") as HTMLInputElement;
+  const authButton = document.getElementById("lg-auth-go") as HTMLButtonElement;
+  const signInMode = document.getElementById("lg-auth-signin") as HTMLButtonElement;
+  const signUpMode = document.getElementById("lg-auth-signup") as HTMLButtonElement;
+  let authMode: "signin" | "signup" = "signin";
+  let authWorking = false;
+  const syncAuthButton = () => {
+    const ready = !authWorking
+      && Boolean(emailInput.value.trim() && emailInput.validity.valid && passInput.value.length >= 6);
+    authButton.disabled = !ready;
+    authButton.classList.toggle("ready", ready);
+  };
+  const setAuthMode = (mode: "signin" | "signup", clearError = true) => {
+    authMode = mode;
+    const signingIn = mode === "signin";
+    signInMode.classList.toggle("active", signingIn);
+    signUpMode.classList.toggle("active", !signingIn);
+    signInMode.setAttribute("aria-pressed", String(signingIn));
+    signUpMode.setAttribute("aria-pressed", String(!signingIn));
+    passInput.autocomplete = signingIn ? "current-password" : "new-password";
+    authButton.textContent = signingIn ? "Sign in" : "Create account";
+    if (clearError) document.getElementById("lg-auth-err")!.textContent = "";
+    syncAuthButton();
+  };
+  signInMode.onclick = () => setAuthMode("signin");
+  signUpMode.onclick = () => setAuthMode("signup");
+  emailInput.addEventListener("input", syncAuthButton);
+  passInput.addEventListener("input", syncAuthButton);
+  syncAuthButton();
+  authButton.onclick = async () => {
+    if (authWorking) return;
+    const email = emailInput.value.trim();
+    const pass = passInput.value;
     const err = document.getElementById("lg-auth-err")!;
     err.textContent = "";
     // 6 is the app-wide minimum (authForm.ts) — demanding 8 here locked out
@@ -279,17 +314,28 @@ function renderGate(): void {
       err.textContent = "Email and a password of at least 6 characters.";
       return;
     }
-    // Try sign-in first; a fresh visitor falls through to sign-up. One button,
-    // because "do I already have an account?" is not the applicant's problem.
-    const si = await signIn(email, pass);
-    if (si.ok) return void boot();
+    authWorking = true;
+    authButton.disabled = true;
+    authButton.textContent = authMode === "signin" ? "Signing in…" : "Creating…";
+    if (authMode === "signin") {
+      const si = await signIn(email, pass);
+      if (si.ok) return void boot();
+      err.textContent = si.message || "That didn't work. Try again.";
+      authWorking = false;
+      setAuthMode("signin", false);
+      return;
+    }
     const su = await signUp(email, pass);
     if (su.ok && su.needsConfirmation) {
       err.textContent = `Check ${email} for the confirmation link, then return here to apply.`;
+      authWorking = false;
+      setAuthMode("signup", false);
       return;
     }
     if (su.ok) return void boot();
-    err.textContent = su.message || si.message || "That didn't work. Try again.";
+    err.textContent = su.message || "That didn't work. Try again.";
+    authWorking = false;
+    setAuthMode("signup", false);
   };
 }
 
@@ -314,10 +360,12 @@ function renderApply(): void {
         <option value="lifestyle">Lifestyle / vlog</option>
         <option value="other">Something else</option>
       </select>
-      <label for="ap-links">Links to 2–3 of your videos</label>
-      <textarea id="ap-links" rows="3" placeholder="one per line"></textarea>
-      <label for="ap-pitch">Why you (one or two sentences)</label>
-      <textarea id="ap-pitch" rows="3" maxlength="500"></textarea>
+      <label for="ap-links">Links to your videos <span class="lg-optional">optional</span></label>
+      <textarea id="ap-links" rows="3" placeholder="one per line, up to 3"></textarea>
+      <p class="lg-note" style="margin:-6px 0 0">Leave this empty if you are starting a new
+      account. It helps if you have something to show, and it is not a requirement.</p>
+      <label for="ap-pitch">Why you <span class="lg-optional">optional</span></label>
+      <textarea id="ap-pitch" rows="3" maxlength="500" placeholder="one or two sentences"></textarea>
       <p class="lg-note" style="margin-top:14px">The League leaderboard shows your name, handle
       and earnings to other approved members: that's the game. Nothing else about your account
       is ever visible to anyone.</p>
@@ -342,10 +390,24 @@ function renderApply(): void {
     const user = await currentUser();
     if (!user) return renderGate();
     const client = await getSupabaseClient();
+    // Optional, and the floor is gone rather than lowered.
+    //
+    // This asked for two to three links, which is a fair bar for an
+    // established creator and an impossible one for somebody opening a fresh
+    // account to make TrueMax content. They have nothing to link to yet, and
+    // the only thing the form could say to them was no.
+    //
+    // The ceiling stays, and so does the shape check: anything typed still has
+    // to be a real https link, because a broken one is worse than none. It is
+    // just no longer required to be there at all.
     const links = (document.getElementById("ap-links") as HTMLTextAreaElement).value
-      .split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3);
-    if (links.length < 2 || links.some((link) => !httpsUrl(link))) {
-      err.textContent = "Add 2–3 full https:// links to your work.";
+      .split("\n").map((l) => l.trim()).filter(Boolean);
+    if (links.length > 3) {
+      err.textContent = "Add no more than three links.";
+      return;
+    }
+    if (links.some((link) => !httpsUrl(link))) {
+      err.textContent = "Those links need to be full https:// addresses, or leave the box empty.";
       return;
     }
     const adult = (document.getElementById("ap-adult") as HTMLInputElement).checked;

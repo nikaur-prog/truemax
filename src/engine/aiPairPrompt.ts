@@ -1,4 +1,6 @@
 import type { FaceFlaw } from "./faceFlawCatalog.js";
+import { HANDHELD } from "./aiSceneCatalog.js";
+import type { AiScene } from "./aiSceneCatalog.js";
 
 // ---------------------------------------------------------------------------
 // The prompts behind the AI Model Reel pair.
@@ -162,6 +164,16 @@ const BODY_WORDS_STAY_ON_THE_BODY =
   "The face itself stays lean and sculpted with a clearly defined jawline, " +
   "defined cheekbones and no softness or fullness under the chin.";
 
+/**
+ * What the character sheet wears, always.
+ *
+ * Stated once and shared, so the pair reads as a reference rather than as a
+ * look. The scenes dress the same person afterwards.
+ */
+export const DEFAULT_OUTFIT =
+  "Plain black fitted clothing with no pattern, print or logo: a plain black " +
+  "top and plain black bottoms. Neutral and simple, so the clothing says nothing.";
+
 /** Held identical across every frame so the photograph never becomes the variable. */
 const CAMERA = [
   "Plain mid-grey studio background, even soft light, no harsh shadows across the face.",
@@ -252,9 +264,15 @@ export function afterBodyPrompt(spec: PairSpec): string {
     "Reframe to a full-length standing shot showing them head to toe, the whole body in frame with room above the head and below the feet.",
     spec.description,
     "In proportion, fit and toned, with good posture. Athletic rather than heavy.",
-    `Plain fitted neutral clothing that shows the figure: ${
-      spec.sex === "female" ? "a fitted top and leggings" : "a fitted t-shirt and shorts"
-    }.`,
+    // A DEFAULT OUTFIT, identical for everybody, and that is the point.
+    //
+    // This frame is a character sheet rather than a post: it exists to be
+    // approved, and then to be the identity anchor every scene descends from.
+    // Clothing that varies here would fight the outfits the scenes choose and
+    // would make two characters differ by wardrobe rather than by face. Plain
+    // black is the neutral that photographs the silhouette without adding
+    // anything of its own.
+    DEFAULT_OUTFIT,
     "Standing straight, arms relaxed at their sides, facing the camera.",
     CAMERA,
   ].join(" ");
@@ -266,11 +284,111 @@ export function beforeBodyPrompt(spec: PairSpec): string {
     ? `${flawWeight(spec)}: ${spec.flaws.map((f) => f.add).join("; ")}.`
     : "Make the skin dull and uneven in tone, the hair unstyled, the posture slack, and the person look tired and unrested.";
   return [
-    "Keep this exact person: same face, same bone structure, same height, same hair colour, same clothing, same age.",
+    "Keep this exact person: same face, same bone structure, same height, same hair colour, same plain black clothing, same age.",
     "This is the unflattering photograph of them, taken before any of it was dealt with.",
     added,
     "Same pose, same full-length framing, same background, same lighting, same camera, same distance from the lens.",
     "Do not restructure the face or the skeleton. Do not change their height or their proportions.",
     "Do not make them a different person.",
+  ].join(" ");
+}
+
+/** Which frame of the set a redo is aimed at. */
+export type PairFrame = "after" | "before" | "afterBody" | "beforeBody";
+
+/** How much steering text a redo may carry. */
+export const MAX_REDO_CHARS = 240;
+
+/**
+ * One frame, regenerated with a change the operator asked for.
+ *
+ * The point is to stop a set being thrown away over one bad image. Liking the
+ * after and not the before used to mean spending another render on both, so
+ * the cheap fix was to accept the worse one.
+ *
+ * The operator's instruction goes in FIRST and the structural refusals go in
+ * LAST, deliberately. Everything this product will not do to a face has to
+ * survive a person typing the opposite into a free box, and the last word in
+ * the prompt is the one that holds. It is the same reasoning that removed the
+ * free-text flaw field: the difference is that a redo steers a frame the
+ * operator is already looking at, rather than reaching into the half of the
+ * pair that defines what a glow-up is allowed to be.
+ */
+export function redoPrompt(frame: PairFrame, instruction: string): string {
+  const asked = instruction.trim().slice(0, MAX_REDO_CHARS);
+  const isBefore = frame === "before" || frame === "beforeBody";
+  const isBody = frame === "afterBody" || frame === "beforeBody";
+  return [
+    "Keep this exact person: same face, same bone structure, same eyes, same age, same hair colour.",
+    asked,
+    isBody
+      ? "Keep the full-length framing, head to toe."
+      : "Keep the head-and-shoulders framing.",
+    "Same background, same lighting, same camera, same distance from the lens.",
+    isBefore
+      ? // A redo of the before is the one that could quietly turn this into the
+        // structural lie the whole catalogue exists to prevent, so it carries
+        // the refusals whatever was typed above.
+        "This is still the unflattering photograph of the SAME person as the after. " +
+        "Do not restructure the face. Do not change the bone structure, the jaw width, the nose or the eye shape. " +
+        "Do not make them a different person, older, or younger."
+      : "Do not restructure the face. Do not make them a different person.",
+    BODY_WORDS_STAY_ON_THE_BODY,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * One SCENE, as an edit of the approved character.
+ *
+ * The pair is a character sheet: plain background, plain black clothes, front
+ * on, made to be approved. These are the posts. Same person, somewhere, doing
+ * something, dressed for it.
+ *
+ * Always an edit of the approved full-length frame rather than a fresh
+ * generation, for the reason every other frame in this file is an edit: a
+ * second text-to-image call from the same description returns a sibling, and a
+ * set of five clips of five near-identical strangers is worthless.
+ *
+ * The scene overrules the character sheet on exactly three things and nothing
+ * else: where they are, what they are wearing, and how it is shot. The face is
+ * carried in the pixels and is stated to be untouchable, because a set whose
+ * face drifts scene to scene is the one failure this format cannot survive.
+ */
+export function scenePrompt(
+  scene: AiScene,
+  side: "before" | "after",
+  spec: PairSpec,
+  change = "",
+): string {
+  const flaws = spec.flaws.length
+    ? `${flawWeight(spec)}: ${spec.flaws.map((f) => f.add).join("; ")}.`
+    : "Dull uneven skin, unstyled hair, and a tired unrested look.";
+  return [
+    "Keep this exact person: same face, same bone structure, same eyes, same age, same hair colour, same build.",
+    // The three things a scene is allowed to change, named as changes so the
+    // model treats the character sheet's plain studio setup as replaceable
+    // rather than as something to preserve.
+    `Place them here instead: ${scene.setting}`,
+    `Reframe: ${scene.camera}`,
+    `Relight: ${scene.light}`,
+    `They are ${scene.action.charAt(0).toLowerCase()}${scene.action.slice(1)}`,
+    `Change the clothing to: ${scene.wardrobe}`,
+    // The operator's optional change, placed AFTER the scene it is adjusting so
+    // it wins on anything they disagree about, and BEFORE the structural
+    // refusals so it never wins on those.
+    change.trim() ? `Also: ${change.trim().slice(0, MAX_REDO_CHARS)}` : "",
+    HANDHELD,
+    side === "before"
+      ? // The before scene carries the same refusals as the before portrait. A
+        // scene is exactly where a structural change would be easiest to hide,
+        // because so much else is legitimately different from the after.
+        `This is the same person BEFORE, in the same scene. ${flaws} ` +
+        "Do not restructure the face. Do not change the bone structure, the jaw width, the nose or the eye shape. " +
+        "Do not make them a different person, older, or younger."
+      : "Clear healthy skin, groomed hair, visibly well rested. Do not restructure the face.",
+    BODY_WORDS_STAY_ON_THE_BODY,
+    "An adult.",
   ].join(" ");
 }

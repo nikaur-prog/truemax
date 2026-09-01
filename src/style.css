@@ -1416,6 +1416,11 @@ button.pillar:active { transform: translateY(0); }
 .btn:active { transform: scale(0.985); }
 .btn.pri { background: var(--ink); color: #fff; }
 .btn.gho { background: var(--card); border: 1px solid var(--line); }
+.btn.side-confirm {
+  background: var(--up); color: #fff;
+  box-shadow: 0 9px 22px color-mix(in srgb, var(--up) 24%, transparent);
+}
+.btn.side-confirm:hover { background: color-mix(in srgb, var(--up) 90%, #000); }
 
 /* ---------- side profile: verify step ---------- */
 /* The photo is the work surface, so it gets the room.
@@ -1647,6 +1652,55 @@ button.pillar:active { transform: translateY(0); }
   padding: 12px 14px; font-size: 12.5px; line-height: 1.55;
 }
 
+/* Mobile-safe confirmation for a captured front photo and for leaving a scan.
+   Native `window.confirm` is suppressed by some in-app browsers, where it
+   made New photo look like a dead button. This is ordinary document UI, and
+   the card scrolls on short screens instead of putting either answer below an
+   unreachable fold. */
+body.scan-confirm-open { overflow: hidden; }
+.scan-confirm-backdrop {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; align-items: center; justify-content: center; overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(12, 13, 15, .7); backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: side-mode-in .24s ease-out;
+}
+.scan-confirm-card {
+  width: min(520px, 100%); margin: auto; flex: 0 0 auto;
+  padding: 26px; text-align: center; color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: 24px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .3);
+  animation: side-mode-card-in .38s cubic-bezier(.2, .8, .28, 1) backwards;
+}
+.scan-confirm-card h2 {
+  margin: 9px 0 12px; font: 300 30px/1.12 var(--serif); letter-spacing: -.025em;
+}
+.scan-confirm-preview {
+  margin: 16px 0; overflow: hidden; border: 1px solid var(--line);
+  border-radius: 16px; background: #0d0f11;
+}
+.scan-confirm-preview canvas {
+  display: block; width: auto; height: auto; max-width: 100%;
+  max-height: min(48dvh, 520px); margin: auto; object-fit: contain;
+}
+.scan-confirm-copy {
+  max-width: 42ch; margin: 0 auto 20px; color: var(--mut); font-size: 14px; line-height: 1.55;
+}
+.scan-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.scan-confirm-actions .btn { width: 100%; min-width: 0; }
+.btn.positive { background: var(--acc); color: #fff; }
+.btn.positive:hover { filter: brightness(1.05); }
+@media (max-width: 420px) {
+  .scan-confirm-card { padding: 22px 18px 18px; }
+  .scan-confirm-card h2 { font-size: 27px; }
+  .scan-confirm-actions { grid-template-columns: 1fr; }
+  .scan-confirm-actions .positive { grid-row: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-confirm-backdrop, .scan-confirm-card { animation: none; }
+}
+
 /* Take these points, or place them yourself.
 
    A centred dialog over a blurred page, not a sheet along the bottom of the
@@ -1703,33 +1757,17 @@ button.pillar:active { transform: translateY(0); }
   font-family: var(--serif); font-weight: 300; font-size: 26px;
   letter-spacing: -0.02em; margin: 9px 0 16px; line-height: 1.15;
 }
-/* The photograph, at a size that answers "did that land on my face" and does
-   not pretend to answer "is that landmark two pixels out". The full frame
-   behind is for the second question. */
+/* The photograph opens at its inspection size. A collapsed thumbnail made
+   the dense nose and mouth points look like one mark and hid the evidence
+   behind an extra zoom action. */
 .side-mode-shot { margin: 0 0 16px; display: flex; justify-content: center; position: relative; }
 .side-mode-shot canvas {
   display: block; border-radius: 12px; border: 1px solid var(--line);
-  background: #0d0f11; max-width: 100%; cursor: zoom-in;
+  background: #0d0f11; max-width: 100%;
   /* The box travels; the bitmap inside it is already painted at the size it is
      arriving at, so this reads as the picture growing rather than as a swap. */
   transition: width .3s cubic-bezier(.22,.61,.36,1), height .3s cubic-bezier(.22,.61,.36,1);
 }
-.side-mode-backdrop.expanded .side-mode-shot canvas { cursor: zoom-out; }
-/* Top right of the picture, which is the corner the profile never occupies:
-   the head faces one way or the other and the space above the shoulder is
-   empty in both. */
-.side-mode-zoom {
-  position: absolute; top: 7px; right: 7px; z-index: 1;
-  width: 26px; height: 26px; display: grid; place-items: center;
-  border-radius: 7px; cursor: pointer;
-  border: 1px solid rgba(143, 243, 224, 0.34);
-  background: rgba(12, 20, 18, 0.72); color: #8ff3e0;
-  transition: border-color .2s ease, transform .2s ease;
-}
-.side-mode-zoom:hover { border-color: #8ff3e0; transform: scale(1.06); }
-.side-mode-zoom .zoom-in { display: none; }
-.side-mode-backdrop.expanded .side-mode-zoom .zoom-in { display: inline; }
-.side-mode-backdrop.expanded .side-mode-zoom .zoom-out { display: none; }
 /* The card follows the picture rather than the picture escaping the card. */
 .side-mode-backdrop.expanded .side-mode-card { width: min(640px, 100%); }
 .side-mode-copy { color: var(--mut); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px; }
@@ -2905,9 +2943,12 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 }
 .dash-faces-strip:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(20, 21, 24, 0.08); }
 .dash-faces-fan { display: flex; flex: none; padding-left: 14px; }
-.dash-faces-fan img {
+.dash-faces-fan i {
+  display: grid; place-items: center; font-style: normal;
   width: 38px; height: 38px; border-radius: 10px; object-fit: cover;
-  border: 2px solid var(--card); margin-left: -14px; background: var(--soft);
+  border: 2px solid var(--card); margin-left: -14px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 16%, var(--card)), var(--soft));
+  color: var(--ink); font-family: var(--mono); font-size: 9px; letter-spacing: 0.05em;
 }
 .dash-faces-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dash-faces-copy b { font-size: 14px; font-weight: 600; }
@@ -3071,10 +3112,23 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .celeb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
 .celeb-card {
   border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--card);
+  padding: 0; color: var(--ink); font: inherit; text-align: left;
 }
 .celeb-card.hidden { display: none; }
 .celeb-photo { aspect-ratio: 1; background: var(--soft); overflow: hidden; }
 .celeb-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.celeb-reference {
+  position: relative; display: grid; place-items: center;
+  color: color-mix(in srgb, var(--acc) 78%, var(--ink));
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--acc) 13%, transparent), transparent 48%),
+    linear-gradient(145deg, var(--card), var(--soft));
+}
+.celeb-reference svg { width: 58%; height: 58%; opacity: .52; }
+.celeb-reference > b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--serif); font-size: clamp(18px, 4vw, 28px); font-weight: 400;
+}
 .celeb-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 11px 12px 4px; }
 .celeb-meta b { font-size: 13.5px; font-weight: 600; line-height: 1.2; }
 .celeb-score { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
@@ -3086,6 +3140,10 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .celeb-pill i { position: absolute; left: 0; top: 0; height: 100%; background: color-mix(in srgb, var(--acc) 40%, var(--line)); }
 .celeb-pill span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: var(--mono); font-size: 8px; color: var(--ink); z-index: 1; }
+.celeb-reference-meta {
+  display: flex; flex-direction: column; gap: 2px; padding: 3px 12px 13px;
+  color: var(--mut); font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.06em;
+}
 .celeb-empty { color: var(--mut); text-align: center; padding: 30px; }
 .celeb-card { cursor: pointer; transition: transform 0.14s ease, box-shadow 0.14s ease; }
 .celeb-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(20, 21, 24, 0.09); }
@@ -3121,6 +3179,7 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .cd-head { display: flex; gap: 20px; align-items: center; margin: 8px 0 28px; }
 .cd-photo { width: 132px; height: 132px; border-radius: 20px; overflow: hidden; flex: none; background: var(--soft); }
 .cd-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cd-photo.cd-reference > b { font-size: 30px; }
 .cd-meta h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(26px, 4vw, 38px); margin: 0 0 4px; }
 .cd-score { font-size: 40px; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
 .cd-score small, .cd-region b small { font-size: 13px; color: var(--mut); }
@@ -3141,6 +3200,18 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .cd-credit { font-size: 10.5px; color: var(--mut); margin: 0 0 10px; }
 .cd-note { font-size: 11.5px; color: var(--mut); line-height: 1.55; margin: 0; }
 .cd-note code { font-family: var(--mono); background: var(--soft); padding: 1px 5px; border-radius: 5px; }
+.cd-measure-groups {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px; margin-bottom: 24px;
+}
+.cd-measure-group { border: 1px solid var(--line); border-radius: 16px; padding: 15px 16px 10px; background: var(--card); }
+.cd-measure-group .cd-h2 { margin-bottom: 8px; }
+.cd-measure {
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px;
+  padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px;
+}
+.cd-measure span { color: var(--mut); line-height: 1.35; }
+.cd-measure b { font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* Auto-capture countdown. The visible half of it — the audible ticks in
    ui/autoCapture.ts are what actually carry the count on the side profile,
@@ -3206,6 +3277,10 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
   justify-content: center; padding: 5vh 16px; overflow-y: auto;
   background: rgba(20, 21, 24, 0.5); backdrop-filter: blur(3px);
 }
+/* A recall opens from inside the dashboard, whose own fixed layer is 300.
+   The shared history overlay predates that dashboard and otherwise opens
+   successfully behind it, making every scan row look dead. */
+.recall-overlay { z-index: 340; }
 .hist-panel {
   position: relative; width: min(680px, 100%); background: var(--card, #fff);
   border-radius: 20px; padding: 28px 26px 22px; box-shadow: 0 30px 80px rgba(20, 21, 24, 0.25);
@@ -3436,6 +3511,11 @@ body.auth-modal-open { overflow: hidden; }
 .acct-msg.err { color: var(--warm); }
 .acct-msg.ok { color: var(--acc); }
 .acct-submit { width: 100%; margin-top: 2px; }
+.acct-submit:disabled { opacity: .48; cursor: not-allowed; }
+.acct-submit.ready {
+  background: var(--acc); color: #fff;
+  box-shadow: 0 8px 22px rgba(17, 138, 113, .22);
+}
 .acct-switch { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
 .acct-switch button {
   background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12.5px;
@@ -4894,6 +4974,53 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 
 .q-ai-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 12px; }
 .q-ai-pair figure { margin: 0; }
+/* The picture is a button: a generated face is judged on detail a 160px
+   preview cannot show, so approving one at preview size is guessing. */
+.q-ai-zoom {
+  display: block; width: 100%; padding: 0; border: 0; background: none;
+  cursor: zoom-in; border-radius: 14px;
+}
+.q-ai-zoom:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.q-ai-redo {
+  margin-top: 8px; width: 100%; padding: 8px 10px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--card); color: var(--mut);
+  font: 600 12.5px var(--sans); cursor: pointer;
+}
+.q-ai-redo:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
+.q-ai-redo:disabled { opacity: .55; cursor: default; }
+.q-ai-scenes { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.q-ai-scenes h3 { font-size: 17px; margin: 0 0 6px; }
+/* Two up on a phone, five up on a desktop: the set is read as a contact sheet,
+   so seeing a whole row of one side at once is what makes it judgeable. */
+.q-ai-scene-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+@media (min-width: 760px) { .q-ai-scene-grid { grid-template-columns: repeat(5, 1fr); } }
+.q-ai-scene-grid figure { margin: 0; }
+.q-ai-scene-grid img { width: 100%; border-radius: 12px; border: 1px solid var(--line); display: block; }
+.q-ai-scene-grid figcaption {
+  margin-top: 5px; font: 600 10px var(--mono); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--mut);
+}
+.q-ai-change {
+  width: 100%; margin-top: 6px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  font: 400 12px var(--sans);
+}
+.q-ai-change::placeholder { color: var(--mut); }
+.q-ai-shot-actions { display: flex; gap: 6px; margin-top: 6px; }
+.q-ai-shot-actions .q-ai-redo { margin-top: 0; }
+.q-ai-light {
+  position: fixed; inset: 0; z-index: 600; background: rgba(8, 9, 10, .92);
+  display: grid; place-items: center; padding: 24px; cursor: zoom-out;
+}
+.q-ai-light img {
+  max-width: min(100%, 720px); max-height: 92vh; border-radius: 12px;
+  display: block; object-fit: contain;
+}
+.q-ai-light-close {
+  position: absolute; top: 14px; right: 16px; width: 40px; height: 40px;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,.28);
+  background: rgba(0,0,0,.4); color: #fff; font-size: 17px; cursor: pointer;
+}
 .q-ai-pair img { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; }
 .q-ai-pair figcaption { margin-top: 6px; font: 600 10px var(--mono); letter-spacing: .18em; color: var(--mut); }
 .q-ai-pair-actions { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -5124,6 +5251,15 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxchat-msg .mc-wait i:nth-child(2) { animation-delay: .16s; }
 .maxchat-msg .mc-wait i:nth-child(3) { animation-delay: .32s; }
 
+.maxchat-action { flex: none; padding: 0 16px 10px; }
+.maxchat-action[hidden] { display: none; }
+.maxchat-action button {
+  width: 100%; padding: 11px 14px; border: 0; border-radius: 12px;
+  background: var(--up); color: #fff; font: 650 14px var(--sans); cursor: pointer;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--up) 20%, transparent);
+}
+.maxchat-action button:hover { background: color-mix(in srgb, var(--up) 90%, #000); }
+
 /* Suggested follow-ups. Rebuilt after every answer rather than shown once, so
    the row scrolls sideways instead of wrapping to three lines and shoving the
    composer off a phone screen. */
@@ -5246,6 +5382,28 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .maxtab-stage .maxtab-face { display: inline-block; width: 96px; cursor: pointer; }
 .maxtab-stage h2 { font-family: var(--serif); font-weight: 300; font-size: 26px; margin: 10px 0 6px; }
 .maxtab-stage p { color: var(--mut); font-size: 13.5px; line-height: 1.55; max-width: 380px; margin: 0 auto; }
+.maxtab-tracker {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  padding: 16px;
+}
+.maxtab-tracker h3 { margin: 4px 0 3px; font-size: 17px; }
+.maxtab-tracker > p { margin: 0 0 12px; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
+.maxtab-tracker [data-performance-due]:empty { display: none; }
+.maxtab-tracker .protocard { margin: 0 0 12px; }
+.maxtab-tracker-empty { margin: 0 !important; }
+.maxtab-tracker-list { display: grid; gap: 8px; }
+.maxtab-tracker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.maxtab-tracker-row b { font-size: 13px; }
+.maxtab-tracker-row span { color: var(--acc); font-size: 11px; white-space: nowrap; }
 
 /* Unpaid: the room through frosted glass. */
 .maxtab-head { display: flex; align-items: center; gap: 12px; padding: 4px 2px; }

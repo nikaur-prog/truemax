@@ -32,6 +32,7 @@ export interface MaxChatContext {
   regions: Array<{ label: string; percentile: number }>;
   measurements: Array<{ label: string; reading: string; target?: string; standing?: string }>;
   focus: string[];
+  activePlan?: string[];
   scans: number;
   movement?: string;
 }
@@ -77,10 +78,10 @@ function standing(m: ScoredMetric): string {
 // sentence was describing the skull when it meant the outline.
 function movability(m: ScoredMetric): string {
   if (m.def.fixability >= 0.5) {
-    return "the measured outline responds to soft-tissue change (leanness, water, sleep); the bone under it does not move";
+    return "the photographed soft-tissue outline can change; this scan cannot tell whether body composition, hydration, sleep or capture conditions caused today's reading; the bone under it does not move";
   }
   if (m.def.fixability >= 0.2) {
-    return "moves a little, soft tissue and photo conditions, not the underlying structure";
+    return "the photographed soft tissue can move a little; this scan does not identify the cause, and the underlying structure does not move";
   }
   return "essentially fixed skeletal geometry, not changeable";
 }
@@ -94,9 +95,10 @@ export interface ContextInput {
   // route around the gate the results screen enforces.
   potential?: number;
   movement?: string;
+  activePlan?: string[];
 }
 
-export function buildMaxContext({ report, tone, scans, potential, movement }: ContextInput): MaxChatContext {
+export function buildMaxContext({ report, tone, scans, potential, movement, activePlan }: ContextInput): MaxChatContext {
   const byStanding = [...report.metrics].sort((a, b) => a.zEff - b.zEff);
   const weakest = byStanding.slice(0, WEAKEST);
   const strongest = byStanding.slice(-STRONGEST).reverse();
@@ -133,6 +135,7 @@ export function buildMaxContext({ report, tone, scans, potential, movement }: Co
     // described, because the routine copy itself is long and Max writes his own
     // sentences anyway.
     focus: weakest.slice(0, 4).map((m) => `${m.def.name}, currently ${reading(m)}, ${movability(m)}`),
+    activePlan: activePlan?.slice(0, 8),
     scans,
     movement,
   };

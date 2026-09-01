@@ -6,6 +6,7 @@ import {
   commitProtocol,
   judge,
   nextPrompt,
+  normaliseStoredProtocol,
   ripeForJudgement,
   startKindFor,
   verdictCopy,
@@ -117,6 +118,31 @@ test("an instant yes queues 'did you do it', not a delivery date", () => {
   assert.equal(started.kind, "started");
   assert.match(started.ask, /done/i);
   assert.doesNotMatch(started.ask, /in your hands/i);
+});
+
+test("a stored brow tint from before start kinds is repaired on read", () => {
+  const legacy = running({
+    recId: "brow-tint",
+    title: "Brow tinting",
+    status: "committed",
+    start: undefined,
+    weeksToJudge: 4,
+    startedAt: null,
+    startBy: null,
+  });
+  const repaired = normaliseStoredProtocol(legacy);
+  assert.equal(repaired.start, "instant");
+  assert.equal(repaired.weeksToJudge, 1);
+  assert.ok(repaired.startBy != null, "the old delivery question was left queued");
+  const prompt = nextPrompt(repaired, repaired.startBy!);
+  assert.equal(prompt?.kind, "started");
+  assert.match(prompt?.ask ?? "", /brow tinting/i);
+  assert.doesNotMatch(prompt?.ask ?? "", /in your hands|weeks before/i);
+});
+
+test("stored non-instant products are not rewritten", () => {
+  const product = running({ status: "committed", startedAt: null, startBy: null, start: undefined });
+  assert.equal(normaliseStoredProtocol(product), product);
 });
 
 test("a product still gets the delivery question, unchanged", () => {

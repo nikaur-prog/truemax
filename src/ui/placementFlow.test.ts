@@ -34,6 +34,18 @@ test("the accuracy question is asked once, as a dialog, not in the panel", () =>
   assert.doesNotMatch(css, /\.side-accuracy/);
 });
 
+test("the primary confirmation is first in the review order and reads as success", () => {
+  const review = src.indexOf("const showReviewActions");
+  const rowStart = src.indexOf('e.actions.innerHTML = `', review);
+  const row = src.slice(rowStart, src.indexOf("`;", rowStart));
+  const confirm = row.indexOf('id="side-go"');
+  const guided = row.indexOf('id="side-guided"');
+  const wrong = row.indexOf('id="side-wrong"');
+  assert.ok(confirm > 0 && confirm < guided && guided < wrong, "Confirm should be encountered before editing alternatives");
+  assert.match(row, /class="btn side-confirm" id="side-go"/);
+  assert.match(css, /\.btn\.side-confirm\s*\{[^}]*background:\s*var\(--up\)/s);
+});
+
 test("consent is asked on every terminal branch", () => {
   // Whether the points were right, wrong-and-fixed, or wrong-and-left, the
   // correction is the thing that teaches the seeder. Missing the ask on any
@@ -46,9 +58,9 @@ test("consent is asked on every terminal branch", () => {
 // The engine has always known when a placement is impossible. It just said so
 // too late: after the person had been offered the points and accepted them.
 test("a seed the engine can disprove is never offered", () => {
-  assert.match(src, /const broken = seedReadings\(seed\.points, seed\.faceDir, ctx\.sex\)/);
-  const ask = src.indexOf("const broken = seedReadings");
-  const offer = src.indexOf("askPlacementMode(e.canvas", ask);
+  assert.match(src, /const assessment = seedAssessment\(seed\.points, seed\.faceDir, ctx\.sex\)/);
+  const ask = src.indexOf("const assessment = seedAssessment");
+  const offer = src.indexOf("void askPlacementMode(", ask);
   assert.ok(offer > ask, "the seed must be measured before the dialog is built");
 
   // And when it is broken there is no "use these points" button at all.
@@ -61,7 +73,7 @@ test("a seed the engine can disprove is never offered", () => {
 test("the refusal names the reading that broke, not just that something did", () => {
   // "Something is wrong" is not actionable. "The nasolabial angle came out at
   // 167.5 and a face is 55 to 145" tells somebody what they are looking at.
-  const fn = src.slice(src.indexOf("function seedReadings"));
+  const fn = src.slice(src.indexOf("function seedAssessment"));
   const body = fn.slice(0, fn.indexOf("\n}\n"));
   assert.match(body, /m\.def\.name/);
   assert.match(body, /m\.value\.toFixed\(m\.def\.decimals\)/);
@@ -71,9 +83,9 @@ test("the refusal names the reading that broke, not just that something did", ()
 test("a seed that cannot be measured at all does not block the scan", () => {
   // Absence of evidence is not evidence of a bad seed, and this check must
   // never be the thing that stops somebody scanning.
-  const fn = src.slice(src.indexOf("function seedReadings"));
+  const fn = src.slice(src.indexOf("function seedAssessment"));
   const body = fn.slice(0, fn.indexOf("\n}\n"));
-  assert.match(body, /catch \{[\s\S]*?return \[\];/);
+  assert.match(body, /catch \{[\s\S]*?return \{ hard: \[\], marginal: \[\] \};/);
 });
 
 test("the untouched guard is skipped only on the path that replaced it", () => {
@@ -133,7 +145,7 @@ const verify = readFileSync(new URL("./sideVerify.ts", import.meta.url), "utf8")
 test("every seeding method is measured before anybody is told it failed", () => {
   // The validator is threaded from the flow, where the scoring engine lives, so
   // the seeder never has to import the thing it is estimating for.
-  assert.match(src, /seedSidePointsSmart\(\s*e\.canvas,\s*\(points, faceDir\) =>\s*seedReadings\(points, faceDir, ctx\.sex\)\.length === 0,/);
+  assert.match(src, /seedSidePointsSmart\(\s*e\.canvas,[\s\S]*?const assessment = seedAssessment\(points, faceDir, ctx\.sex\);[\s\S]*?assessment\.hard\.length === 0 && assessment\.marginal\.length === 0;/);
   // Candidates are ranked geometrically and then filtered, so a seed that is
   // both plausible AND well placed still wins.
   assert.match(verify, /candidates\.sort\(\(a, b\) => b\.score - a\.score\)/);

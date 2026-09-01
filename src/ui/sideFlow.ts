@@ -1,6 +1,7 @@
 import { currentAccessToken } from "../engine/auth.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
+import { classifySidePlacement } from "../engine/sidePlacementQuality.js";
 import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
@@ -39,6 +40,7 @@ import { resetSideTracking } from "../engine/captureGuide.js";
 import { createAutoCapture } from "./autoCapture.js";
 import type { AutoCapture } from "./autoCapture.js";
 import type { CameraHandle } from "./camera.js";
+import { automaticCaptureDetail, sideCaptureInstruction } from "./captureCopy.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -173,7 +175,7 @@ const el = () => ({
 function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"]): void {
   const captureHelp = method === "upload"
     ? "Choose a clear side-profile photo with your whole forehead and chin visible. Landscape and portrait photos are both accepted."
-    : "<b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two beeps, then a higher shutter beep. Space bar takes it immediately.";
+    : sideCaptureInstruction();
   copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
     <p class="side-sub">Second of two. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
     <p class="side-sub">${captureHelp}</p>
@@ -391,7 +393,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       }
       e.hint.classList.add("counting");
       e.hintTitle.textContent = `Hold still · ${remaining}`;
-      e.hintDetail.textContent = "Taking it automatically · space to take it now";
+      e.hintDetail.textContent = automaticCaptureDetail();
       if (shoot) shoot.textContent = `Capturing in ${remaining}`;
     },
     onFire: () => {
@@ -733,7 +735,10 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   const [seedResult] = await Promise.all([
     seedSidePointsSmart(
       e.canvas,
-      (points, faceDir) => seedReadings(points, faceDir, ctx.sex).length === 0,
+      (points, faceDir) => {
+        const assessment = seedAssessment(points, faceDir, ctx.sex);
+        return assessment.hard.length === 0 && assessment.marginal.length === 0;
+      },
     ),
     wait(READ_BEAT_MS),
   ]);
@@ -1208,9 +1213,9 @@ function mountVerify(
           <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
         </svg>
       </button>
+      <button class="btn side-confirm" id="side-go">Confirm</button>
       <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>
-      <button class="btn pri" id="side-go">Confirm</button>`;
+      <button class="btn gho" id="side-wrong">Points are wrong</button>`;
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
     // this screen: the question is asked as a dialog now, before the scan runs,
@@ -1293,8 +1298,10 @@ function mountVerify(
       const correctedPoints = cloneSidePoints(verifier.points);
       const report = analyzeSide(verifier.points, faceDir, ctx.sex);
 
-      // A measurement outside anatomical bounds is a misplaced point, and this
-      // is the last moment it can be caught.
+      // A material measurement failure is a misplaced point, and this is the
+      // last moment it can be caught. One reading just across a conservative
+      // boundary is different: the engine already excludes that reading, so
+      // classifySidePlacement lets the rest of a sound scan continue.
       //
       // sidePointIntegrityIssues above checks the POINTS against each other —
       // ordering, spacing, facing. It cannot see a pair that is individually
@@ -1310,7 +1317,7 @@ function mountVerify(
       // metric from every aggregate. It just was not telling anybody. This says
       // it, names the measurement, and refuses to store the scan until the
       // points behind it have been moved.
-      const impossible = report.metrics.filter((m) => m.implausible);
+      const impossible = classifySidePlacement(report.metrics).hard;
       if (impossible.length) {
         if (confirmButton) confirmButton.disabled = false;
         e.cap.textContent = "CHECK LANDMARKS";
@@ -1450,6 +1457,7 @@ function mountVerify(
     const right = await askSideQuestion({
       klabel: "ONE QUESTION",
       title: "Do these points look right?",
+      preview: { photo: e.canvas, points: verifier!.points },
       copy: "The front of the face is measured from the photo. The five behind it, the jaw"
         + " corner, the ear, the hinge and the neck point, are estimated from an average head,"
         + " so those are the ones that drift.",
@@ -1508,7 +1516,7 @@ function mountVerify(
     // person to evaluate a placement we can already prove is broken is asking
     // them to do our job badly. So the seed is measured first, and a seed that
     // fails is not offered.
-    const broken = seedReadings(seed.points, seed.faceDir, ctx.sex);
+    const assessment = seedAssessment(seed.points, seed.faceDir, ctx.sex);
     // The review state is put up first, so whichever answer comes back lands
     // on a finished screen rather than building one underneath the person.
     showReviewActions();
@@ -1517,7 +1525,13 @@ function mountVerify(
     // leaving it live means a person can answer twice, and the two answers do
     // not have to agree.
     e.actions.classList.add("mode-pending");
-    void askPlacementMode(e.canvas, seed.points, seed.confidence ?? 1, broken).then(async (mode) => {
+    void askPlacementMode(
+      e.canvas,
+      seed.points,
+      seed.confidence ?? 1,
+      assessment.hard,
+      assessment.marginal,
+    ).then(async (mode) => {
       e.actions.classList.remove("mode-pending");
       // Null is a cancelled dialog: the flow was closed or the identity changed
       // underneath it, and there is nothing left for either branch to act on.
@@ -1544,13 +1558,13 @@ function mountVerify(
  * words. Two live readings of the same screen both called it cluttered, and
  * both were reading four buttons where there are two decisions.
  *
- * So the evidence moves INTO the dialog instead of being framed around it. The
- * preview is small on purpose: at this size nobody is auditing a landmark, they
- * are answering "did that land roughly on my face" — which is the whole
- * question, and the one the full-size frame behind is there to answer properly
- * once an answer is given. The row below is hidden while this is up, because a
- * control offering a choice that is currently being asked in a modal is not a
- * shortcut, it is a second answer to the same question.
+ * So the evidence moves INTO the dialog instead of being framed around it. It
+ * opens at inspection size because this is the moment somebody is being asked
+ * to judge the placement; hiding that evidence behind a zoom control made the
+ * first view less useful than the decision attached to it. The row below is
+ * hidden while this is up, because a control offering a choice that is
+ * currently being asked in a modal is not a shortcut, it is a second answer
+ * to the same question.
  *
  * The fine print is not boilerplate and does not always say the same thing.
  * The seeder already reports its own confidence, and the walkthrough copy
@@ -1566,6 +1580,7 @@ function askPlacementMode(
   points: SidePoints,
   confidence: number,
   broken: string[] = [],
+  marginal: string[] = [],
 ): Promise<"auto" | "manual" | null> {
   // Three states, not two, and the third is the one that was missing.
   //
@@ -1575,7 +1590,7 @@ function askPlacementMode(
   //   low      the seeder reported low confidence in itself.
   //   ok       a normal placement.
   const blocked = broken.length > 0;
-  const low = !blocked && confidence < 0.7;
+  const low = !blocked && (confidence < 0.7 || marginal.length > 0);
   return new Promise((resolve) => {
     let done = false;
     const backdrop = document.createElement("div");
@@ -1586,20 +1601,14 @@ function askPlacementMode(
         ? "We could not place these"
         : low ? "Here is our best guess" : "We placed the points for you"}</h2>
       <figure class="side-mode-shot">
-        <button type="button" class="side-mode-zoom" data-zoom aria-expanded="false"
-          aria-label="Enlarge the photo to see the points">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path class="zoom-out" d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>
-            <path class="zoom-in" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/>
-          </svg>
-        </button>
-        <canvas data-zoom aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+        <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
       <p class="side-mode-copy">${blocked
         ? `Our own measurement says at least one of these is in the wrong place: ${broken.join("; ")}. Rather than hand you a number built on it, we would like you to place them.`
         : low
-          ? "This photo was a hard one to read, so treat these as starting positions rather than an answer."
+          ? marginal.length
+            ? `One reading is just outside the safety range: ${marginal.join("; ")}. You can use these points, but that reading will be left out of the score.`
+            : "This photo was a hard one to read, so treat these as starting positions rather than an answer."
           : "This is where our system put them, on your photo."}</p>
       <div class="side-mode-actions${blocked ? " single" : ""}">
         ${blocked ? "" : `<button type="button" class="btn gho" data-mode="manual">Place them myself</button>`}
@@ -1612,26 +1621,18 @@ function askPlacementMode(
     </section>`;
     document.body.appendChild(backdrop);
     const shot = backdrop.querySelector("canvas")!;
-    const zoom = backdrop.querySelector<HTMLButtonElement>(".side-mode-zoom")!;
-    // Small by default and big on demand.
-    //
-    // Thirteen rings on a 168px picture land within a few pixels of each other
-    // around the nose and mouth, which reads as one teal smudge: enough to
-    // answer "did those go on my face", not enough to answer "is that one on
-    // my lip". Both questions get asked here, so both get a size. The card
-    // grows with the picture rather than the picture escaping the card.
-    let expanded = false;
+    // The evidence opens at inspection size. Starting with a thumbnail made
+    // the points look like one cluster and required a hidden extra action
+    // before the person could answer the question the dialog was asking.
+    backdrop.classList.add("expanded");
     const draw = () => {
-      paintPlacementPreview(shot, photo, points, expanded);
-      zoom.setAttribute("aria-expanded", String(expanded));
-      zoom.setAttribute("aria-label", expanded ? "Shrink the photo" : "Enlarge the photo to see the points");
-      backdrop.classList.toggle("expanded", expanded);
+      paintPlacementPreview(shot, photo, points, true);
     };
     draw();
     // Re-measured rather than re-scaled: the expanded size is bounded by the
     // viewport, and a phone that rotates mid-decision would otherwise keep a
     // picture sized for the other orientation.
-    const onResize = () => { if (expanded) draw(); };
+    const onResize = () => draw();
     window.addEventListener("resize", onResize);
     backdrop.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
     const settle = (mode: "auto" | "manual" | null) => {
@@ -1644,13 +1645,8 @@ function askPlacementMode(
     };
     const untrack = trackDialog(() => settle(null));
     backdrop.onclick = (ev) => {
-      const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-zoom],[data-mode]");
+      const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-mode]");
       if (!el) return;
-      if (el.hasAttribute("data-zoom")) {
-        expanded = !expanded;
-        draw();
-        return;
-      }
       const mode = el.dataset.mode;
       if (mode !== "auto" && mode !== "manual") return;
       settle(mode);
@@ -1674,6 +1670,7 @@ function askPlacementMode(
 function askSideQuestion(opts: {
   klabel: string;
   title: string;
+  preview?: { photo: HTMLCanvasElement; points: SidePoints };
   copy: string;
   no: string;
   yes: string;
@@ -1686,6 +1683,9 @@ function askSideQuestion(opts: {
     backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-q-title">
       <span class="klabel">${opts.klabel}</span>
       <h2 id="side-q-title">${opts.title}</h2>
+      ${opts.preview ? `<figure class="side-mode-shot">
+        <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
+      </figure>` : ""}
       <p class="side-mode-copy">${opts.copy}</p>
       <div class="side-mode-actions">
         <button type="button" class="btn gho" data-answer="no">${opts.no}</button>
@@ -1694,17 +1694,28 @@ function askSideQuestion(opts: {
       ${opts.fine ? `<p class="side-mode-fine">${opts.fine}</p>` : ""}
     </section>`;
     document.body.appendChild(backdrop);
+    if (opts.preview) backdrop.classList.add("expanded");
+    const previewCanvas = backdrop.querySelector<HTMLCanvasElement>(".side-mode-shot canvas");
+    const drawPreview = () => {
+      if (!opts.preview || !previewCanvas) return;
+      paintPlacementPreview(previewCanvas, opts.preview.photo, opts.preview.points, true);
+    };
+    drawPreview();
+    const onResize = () => drawPreview();
+    window.addEventListener("resize", onResize);
     backdrop.querySelector<HTMLButtonElement>('[data-answer="yes"]')?.focus();
     const settle = (answer: boolean | null) => {
       if (done) return;
       done = true;
       untrack();
+      window.removeEventListener("resize", onResize);
       backdrop.remove();
       resolve(answer);
     };
     const untrack = trackDialog(() => settle(null));
     backdrop.onclick = (ev) => {
-      const answer = (ev.target as HTMLElement).closest<HTMLElement>("[data-answer]")?.dataset.answer;
+      const target = (ev.target as HTMLElement).closest<HTMLElement>("[data-answer]");
+      const answer = target?.dataset.answer;
       if (answer !== "yes" && answer !== "no") return;
       settle(answer === "yes");
     };
@@ -1716,32 +1727,33 @@ function askSideQuestion(opts: {
  *
  * Every measurement carries anatomical bounds, and scoreMetric already sets
  * `implausible` on any reading outside them and drops it from every aggregate.
- * confirmPlacement has always checked this. The problem was purely one of
- * timing: it checked at the END, so the product would offer somebody a set of
- * points under the heading "We placed the points for you", let them accept it,
- * and only then announce that one of the resulting measurements is not a shape
- * a human face can be.
+ * A material miss blocks the placement. One small miss is retained as a
+ * low-confidence warning while that individual reading stays excluded.
  *
  * Asked here instead, on the seed, before anything is offered. A seed the
  * engine can prove wrong is not presented as a choice.
  */
-function seedReadings(points: SidePoints, faceDir: number, sex: Sex): string[] {
+function seedAssessment(
+  points: SidePoints,
+  faceDir: number,
+  sex: Sex,
+): { hard: string[]; marginal: string[] } {
   try {
     const report = analyzeSide(points, faceDir, sex);
-    return report.metrics
-      .filter((m) => m.implausible)
-      .map((m) => {
+    const assessment = classifySidePlacement(report.metrics);
+    const format = (metrics: typeof assessment.hard): string[] => metrics.map((m) => {
         const bound = m.def.plausible;
         const value = m.value.toFixed(m.def.decimals);
         return bound
           ? `${m.def.name} ${value} (a face is ${bound[0]}\u2013${bound[1]})`
           : `${m.def.name} ${value}`;
       });
+    return { hard: format(assessment.hard), marginal: format(assessment.marginal) };
   } catch {
     // A seed that cannot be measured at all is not evidence that it is wrong,
     // and this check must never be the thing that blocks a scan. The confirm
     // path still has the same guard behind it.
-    return [];
+    return { hard: [], marginal: [] };
   }
 }
 
@@ -1765,11 +1777,11 @@ function seedReadings(points: SidePoints, faceDir: number, sex: Sex): string[] {
  */
 export const PLACEMENT_PREVIEW_W = 168;
 export const PLACEMENT_PREVIEW_H = 200;
-// The collapsed teaser is dense around the nose and lips. Keep its marks small
-// enough to remain separate instead of merging into a teal cluster; the
-// expanded view gets a little more size because it has room to show it.
-export const PLACEMENT_PREVIEW_RING = 1.7;
-export const PLACEMENT_EXPANDED_RING = 3.8;
+// These are location pins, not touch targets. The draggable editor keeps its
+// finger-sized controls; the read-only previews use pinpoint rings so thirteen
+// nearby landmarks never coagulate into a teal mask over the face.
+export const PLACEMENT_PREVIEW_RING = 1;
+export const PLACEMENT_EXPANDED_RING = 1.35;
 
 export function placementPreviewBox(
   photoW: number,
@@ -1847,7 +1859,7 @@ function paintPlacementPreview(
   // deliberately finer than the enlarged inspection view.
   const ring = expanded ? PLACEMENT_EXPANDED_RING : PLACEMENT_PREVIEW_RING;
   g.strokeStyle = "rgba(143, 243, 224, 0.42)";
-  g.lineWidth = 1;
+  g.lineWidth = expanded ? 0.75 : 0.65;
   const pairs: [keyof SidePoints, keyof SidePoints][] = [
     ["pronasale", "pogonion"],
     ["glabella", "subnasale"],
@@ -1864,7 +1876,7 @@ function paintPlacementPreview(
     g.stroke();
   }
   g.strokeStyle = "#8ff3e0";
-  g.lineWidth = expanded ? 1.4 : 1;
+  g.lineWidth = expanded ? 0.9 : 0.75;
   for (const def of SIDE_POINTS) {
     const p = at(def.id);
     g.beginPath();

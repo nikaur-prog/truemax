@@ -20,6 +20,7 @@ import { safeRemoteAddress, safeRemoteImageUrl } from "../src/engine/remoteImage
 const MAX_SOURCE_BYTES = 3 * 1024 * 1024;
 const MAX_PROVIDER_BYTES = 15 * 1024 * 1024;
 const MAX_RESPONSE_JPEG_BYTES = 3 * 1024 * 1024;
+const MAX_INPUT_PIXELS = 40_000_000;
 const TOTAL_BUDGET_MS = 160_000;
 
 interface ProviderCredentials {
@@ -116,7 +117,7 @@ async function downloadGenerated(url: string, deadline: number): Promise<Buffer 
 
 async function responseJpeg(generated: Buffer): Promise<Buffer | null> {
   for (const quality of [86, 74, 60]) {
-    const jpeg = await sharp(generated, { failOn: "error" })
+    const jpeg = await sharp(generated, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS })
       .rotate()
       .resize(1080, 1920, { fit: "cover", position: "attention" })
       .jpeg({ quality, mozjpeg: true })
@@ -178,7 +179,7 @@ export async function POST(request: Request): Promise<Response> {
     const deadline = Date.now() + TOTAL_BUDGET_MS;
     let imageReference: string | undefined;
     if (sourceBuffer) {
-      const normalized = await sharp(sourceBuffer, { failOn: "error" })
+      const normalized = await sharp(sourceBuffer, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS })
         .rotate()
         .resize({ width: 1600, height: 2000, fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 88, mozjpeg: true })

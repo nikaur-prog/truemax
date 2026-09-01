@@ -95,6 +95,22 @@ label { display: block; font-size: 13px; color: var(--lg-mut); margin: 14px 0 6p
 .lg-btn.danger { color: var(--lg-danger); }
 .lg-btn[disabled] { opacity: 0.5; cursor: default; }
 
+.lg-auth-modes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  margin-top: 18px; padding: 4px; border-radius: 12px;
+  background: var(--lg-bg); border: 1px solid var(--lg-line);
+}
+.lg-auth-mode {
+  border: 0; border-radius: 9px; padding: 9px 10px;
+  background: transparent; color: var(--lg-mut); font-weight: 650;
+}
+.lg-auth-mode.active { background: var(--lg-panel-2); color: var(--lg-ink); }
+.lg-auth-submit { width: 100%; transition: background .16s ease, box-shadow .16s ease, opacity .16s ease; }
+.lg-auth-submit.ready {
+  background: var(--lg-mint-bright); border-color: var(--lg-mint-bright); color: #05231a;
+  box-shadow: 0 0 0 1px rgba(121, 232, 210, .28), 0 0 24px rgba(121, 232, 210, .22);
+}
+
 /* ---- frame ---- */
 .lg-top {
   display: flex;
@@ -233,6 +249,13 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
 .lg-proof-rule code { font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .lg-payout-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .lg-note { font-size: 13px; color: var(--lg-mut); }
+/* Says which fields somebody can skip, on the label rather than in a footnote:
+   a new account has nothing to link to, and the form should look answerable
+   before they start typing rather than after they hit the error. */
+.lg-optional {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--lg-mut); margin-left: 7px;
+}
 .lg-error { color: var(--lg-danger); font-size: 13.5px; margin-top: 10px; min-height: 18px; }
 
 /* ---- tools (pillar cards) ---- */

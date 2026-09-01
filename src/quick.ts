@@ -1,4 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { scenesFor } from "./engine/aiSceneCatalog.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
 import { captureAttribution } from "./engine/attribution.js";
 import { FACE_FLAWS } from "./engine/faceFlawCatalog.js";
@@ -3226,6 +3227,250 @@ el.aiForm.onsubmit = async (event) => {
   }
 };
 
+/**
+ * A data URL to a Blob, decoded in place.
+ *
+ * NOT `await fetch(dataUrl)`, which is what this used to do and why Save did
+ * nothing. The production CSP allows data: on img-src, so the previews render,
+ * and does NOT allow it on connect-src, which is what governs fetch. So every
+ * save was blocked by the policy, rejected inside an async click handler, and
+ * disappeared into an unhandled rejection: no file, no error, no clue.
+ *
+ * Decoding the base64 ourselves needs no network permission at all, which also
+ * makes it correct on any future tightening of connect-src.
+ */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  const header = dataUrl.slice(0, comma);
+  const mime = /data:([^;]+)/.exec(header)?.[1] ?? "image/jpeg";
+  const binary = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/**
+ * The file extension the image actually is.
+ *
+ * Hardcoded as "png" until the route began asking the provider for JPEG, so
+ * every saved frame carried a name that disagreed with its own bytes. Reading
+ * it off the data URL means the two can never drift again.
+ */
+function extensionOf(dataUrl: string): string {
+  return /^data:image\/png/i.test(dataUrl) ? "png" : "jpg";
+}
+
+/**
+ * One frame: the picture, its caption, and the two things you can do to it.
+ *
+ * Tap the picture to enlarge. Redo asks what to change and regenerates only
+ * this frame, which is the difference between liking three of four images and
+ * having to spend another render on all of them.
+ */
+function aiFrame(key: string, caption: string): string {
+  return `<figure>
+    <button type="button" class="q-ai-zoom" data-zoom="${key}" aria-label="Enlarge the ${caption.toLowerCase()}">
+      <img data-pair="${key}" />
+    </button>
+    <figcaption>${caption}</figcaption>
+    <button type="button" class="q-ai-redo" data-redo="${key}">Redo this one</button>
+  </figure>`;
+}
+
+/**
+ * The enlarged view.
+ *
+ * A generated face is judged on detail that a 160px preview cannot show, so
+ * approving one at preview size is guessing. Escape and a tap on the backdrop
+ * both close it, because a lightbox with only a small × is a trap on a phone.
+ */
+function openAiLightbox(src: string, alt: string): void {
+  const wrap = document.createElement("div");
+  wrap.className = "q-ai-light";
+  wrap.innerHTML = `<button type="button" class="q-ai-light-close" aria-label="Close">✕</button><img alt="" />`;
+  const image = wrap.querySelector("img")!;
+  image.src = src;
+  image.alt = alt;
+  const close = () => {
+    wrap.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape") close();
+  };
+  wrap.onclick = (event) => {
+    if (event.target === wrap || (event.target as HTMLElement).classList.contains("q-ai-light-close")) close();
+  };
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(wrap);
+}
+
+/**
+ * The scene set: the approved character, filmed.
+ *
+ * Ten stills, five before and five after, generated ONE AT A TIME. Sequential
+ * rather than parallel for two reasons that both matter: the route bills a slot
+ * per scene and firing ten at once would spend a month's quota before the first
+ * result came back, and a set that fills in frame by frame lets an operator
+ * abandon a bad character after two rather than after ten.
+ *
+ * Stills before clips, deliberately. A clip costs many times a still and takes
+ * minutes rather than seconds, so approving a set of stills first is what makes
+ * the eventual video step cheap: an approved still IS the clip's first frame,
+ * so identity is locked before anything expensive happens.
+ */
+/**
+ * One scene shot, requested.
+ *
+ * Shared by the initial run and by a redo, so a rerolled frame is built the
+ * same way as the one it replaces rather than by a second code path that can
+ * drift from it.
+ */
+async function filmOne(
+  want: { scene: string; side: "before" | "after" },
+  anchor: string,
+  description: string,
+  token: string | null,
+  change = "",
+): Promise<string | { error: string }> {
+  try {
+    const response = await fetch("/api/ai-image", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        mode: "scene",
+        scene: want.scene,
+        side: want.side,
+        anchor,
+        change,
+        sex: aiSex,
+        description,
+        flaws: selectedFlawIds(),
+        beforeScore: Number((document.getElementById("q-ai-before") as HTMLInputElement).value),
+        afterScore: Number((document.getElementById("q-ai-after") as HTMLInputElement).value),
+      }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as { frame?: string; error?: string };
+    if (!response.ok || !payload.frame) return { error: payload.error ?? "That shot could not be made." };
+    return payload.frame;
+  } catch {
+    return { error: "Could not reach the image service." };
+  }
+}
+
+async function makeSceneSet(name: string, anchor: string, host: HTMLElement): Promise<void> {
+  const scenes = scenesFor(aiSex);
+  const shots: Array<{ scene: string; side: "before" | "after"; src: string }> = [];
+  const grid = host.querySelector<HTMLElement>("[data-scene-grid]");
+  const status = host.querySelector<HTMLElement>("[data-scene-status]");
+  const desc = (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim();
+
+  const paint = () => {
+    if (!grid) return;
+    grid.innerHTML = shots
+      .map(
+        (shot, index) => `<figure>
+          <button type="button" class="q-ai-zoom" data-scene-zoom="${index}"><img data-scene-shot="${index}" /></button>
+          <figcaption>${escapeHtml(shot.scene.replace(/-/g, " "))} · ${shot.side}</figcaption>
+          <input type="text" class="q-ai-change" data-scene-change="${index}"
+                 placeholder="change something (optional)" maxlength="240" />
+          <div class="q-ai-shot-actions">
+            <button type="button" class="q-ai-redo" data-scene-redo="${index}">Redo</button>
+            <button type="button" class="q-ai-redo" data-scene-save="${index}">Save</button>
+          </div>
+        </figure>`,
+      )
+      .join("");
+    for (const [index, shot] of shots.entries()) {
+      const image = grid.querySelector<HTMLImageElement>(`[data-scene-shot="${index}"]`);
+      if (image) {
+        image.src = shot.src;
+        image.alt = `${name}, ${shot.scene}, ${shot.side}`;
+      }
+    }
+    for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-zoom]")) {
+      button.onclick = () => {
+        const shot = shots[Number(button.dataset.sceneZoom)];
+        if (shot) openAiLightbox(shot.src, `${name}, ${shot.scene}`);
+      };
+    }
+    for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-redo]")) {
+      button.onclick = async () => {
+        const index = Number(button.dataset.sceneRedo);
+        const shot = shots[index];
+        if (!shot) return;
+        // The box is OPTIONAL, and that is the whole interaction. Empty means
+        // "this one just came out wrong, roll it again"; filled means "this one
+        // is close, change that". Making the operator type something to reroll
+        // would turn the commonest case into the most work.
+        const change = grid.querySelector<HTMLInputElement>(`[data-scene-change="${index}"]`)?.value.trim() ?? "";
+        button.disabled = true;
+        button.textContent = "…";
+        if (status) status.textContent = `Redoing ${shot.scene.replace(/-/g, " ")}, ${shot.side}…`;
+        try {
+          const again = await filmOne(
+            { scene: shot.scene, side: shot.side },
+            anchor,
+            desc,
+            await currentAccessToken(),
+            change,
+          );
+          if (typeof again === "string") {
+            shots[index] = { ...shot, src: again };
+            paint();
+            if (status) status.textContent = "";
+          } else if (status) {
+            status.textContent = again.error;
+          }
+        } finally {
+          button.disabled = false;
+          button.textContent = "Redo";
+        }
+      };
+    }
+
+    for (const button of grid.querySelectorAll<HTMLButtonElement>("[data-scene-save]")) {
+      button.onclick = async () => {
+        const shot = shots[Number(button.dataset.sceneSave)];
+        if (!shot) return;
+        try {
+          await saveFile(
+            dataUrlToBlob(shot.src),
+            exportName("card", extensionOf(shot.src), `${shot.scene}-${shot.side}`),
+            "card",
+          );
+        } catch (error) {
+          if (status) status.textContent = `Could not save that one. ${(error as Error).message}`;
+        }
+      };
+    }
+  };
+
+  const token = await currentAccessToken();
+  const wanted: Array<{ scene: string; side: "before" | "after" }> = [];
+  for (const side of ["after", "before"] as const) {
+    for (const scene of scenes) wanted.push({ scene: scene.id, side });
+  }
+
+  for (const [index, want] of wanted.entries()) {
+    if (status) status.textContent = `Filming ${index + 1} of ${wanted.length}: ${want.scene.replace(/-/g, " ")}, ${want.side}…`;
+    const result = await filmOne(want, anchor, desc, token);
+    if (typeof result !== "string") {
+      // STOPS rather than grinding on. The likeliest failure is the quota, and
+      // carrying on would spend fifteen more requests learning the same thing
+      // while the operator watches.
+      if (status) status.textContent = result.error;
+      return;
+    }
+    shots.push({ scene: want.scene, side: want.side, src: result });
+    paint();
+  }
+  if (status) status.textContent = `${shots.length} shots. Save the ones you want, or change the character and film it again.`;
+}
+
 // The pair, side by side, each downloadable.
 //
 // Downloadable individually rather than as one composite: these are the INPUT
@@ -3257,8 +3502,8 @@ function showAiPair(
   // what the described build actually produced before anybody films with it.
   host.innerHTML = `
     <div class="q-ai-pair">
-      <figure><img data-pair="before" /><figcaption>BEFORE</figcaption></figure>
-      <figure><img data-pair="after" /><figcaption>AFTER</figcaption></figure>
+      ${aiFrame("before", "BEFORE")}
+      ${aiFrame("after", "AFTER")}
     </div>
     <div class="q-ai-pair-actions">
       <button type="button" class="btn pri" data-save="before">Save the before</button>
@@ -3267,8 +3512,8 @@ function showAiPair(
     ${
       hasBody
         ? `<div class="q-ai-pair">
-             <figure><img data-pair="beforeBody" /><figcaption>BEFORE, FULL LENGTH</figcaption></figure>
-             <figure><img data-pair="afterBody" /><figcaption>AFTER, FULL LENGTH</figcaption></figure>
+             ${aiFrame("beforeBody", "BEFORE, FULL LENGTH")}
+             ${aiFrame("afterBody", "AFTER, FULL LENGTH")}
            </div>
            <div class="q-ai-pair-actions">
              <button type="button" class="btn" data-save="beforeBody">Save the full-length before</button>
@@ -3277,7 +3522,21 @@ function showAiPair(
         : ""
     }
     <p class="q-ai-note">Scan the two portraits in Reel Creator to get the measured before/after.
-    The full-length shots are for checking the build, not for scanning.</p>`;
+    The full-length shots are the character reference: plain black, so the scenes can dress them.</p>
+    ${
+      hasBody
+        ? `<div class="q-ai-scenes">
+             <h3>Film this character</h3>
+             <p class="q-ai-note">Eight scenes as the after and the same eight as the before, from the
+             full-length shot above. Stills first: each one is also the first frame a clip would be
+             made from, so the face is locked before anything is animated. Sixteen renders total.</p>
+             <button type="button" class="btn pri" data-film>Film the set</button>
+             <p class="q-ai-note" data-scene-status></p>
+             <div class="q-ai-scene-grid" data-scene-grid></div>
+           </div>`
+        : `<p class="q-ai-note">Tick the full-length pair to unlock the scene set: the scenes are
+           built from the full-length shot.</p>`
+    }`;
   const sources: Record<string, string> = { before, after };
   if (hasBody) {
     sources.beforeBody = beforeBody as string;
@@ -3295,6 +3554,95 @@ function showAiPair(
     image.src = src;
     image.alt = labels[key];
   }
+  const film = host.querySelector<HTMLButtonElement>("[data-film]");
+  if (film) {
+    film.onclick = async () => {
+      film.disabled = true;
+      film.textContent = "Filming…";
+      try {
+        // The AFTER full-length frame is the anchor. It carries the face, the
+        // build and the neutral outfit every scene is about to replace.
+        await makeSceneSet(name, sources.afterBody ?? sources.after, host);
+      } finally {
+        film.disabled = false;
+        film.textContent = "Film the set again";
+      }
+    };
+  }
+
+  for (const button of host.querySelectorAll<HTMLButtonElement>("[data-zoom]")) {
+    button.onclick = () => {
+      const key = button.dataset.zoom ?? "before";
+      openAiLightbox(sources[key] ?? before, labels[key] ?? name);
+    };
+  }
+
+  for (const button of host.querySelectorAll<HTMLButtonElement>("[data-redo]")) {
+    button.onclick = async () => {
+      const key = button.dataset.redo ?? "before";
+      const instruction = window.prompt(
+        `What should change about the ${(labels[key] ?? key).replace(`${name}, `, "")}?\n` +
+          "Describe the change only. The face, the framing and the lighting are held.",
+        "",
+      );
+      if (instruction === null) return;
+      const asked = instruction.trim();
+      if (!asked) return;
+
+      button.disabled = true;
+      button.textContent = "Redoing…";
+      el.aiMsg.classList.remove("err");
+      el.aiMsg.textContent = "Redoing that one…";
+      try {
+        const token = await currentAccessToken();
+        const response = await fetch("/api/ai-image", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          // The ANCHOR is the after portrait, always, whichever frame is being
+          // redone. It is the root the whole set descends from, so sending it
+          // is what stops a redo quietly becoming a different person.
+          body: JSON.stringify({
+            mode: "redo",
+            frame: key,
+            instruction: asked,
+            anchor: sources.after,
+            current: sources[key],
+            sex: aiSex,
+            description: (document.getElementById("q-ai-desc") as HTMLTextAreaElement).value.trim(),
+            flaws: selectedFlawIds(),
+            beforeScore: Number((document.getElementById("q-ai-before") as HTMLInputElement).value),
+            afterScore: Number((document.getElementById("q-ai-after") as HTMLInputElement).value),
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { frame?: string; error?: string };
+        if (!response.ok || !payload.frame) {
+          el.aiMsg.classList.add("err");
+          el.aiMsg.textContent = payload.error ?? "That frame could not be redone.";
+          return;
+        }
+        // Re-render the whole set with the one frame swapped, so the redone
+        // image is what every button below it now saves and zooms.
+        el.aiMsg.textContent = "";
+        showAiPair(
+          name,
+          key === "before" ? payload.frame : before,
+          key === "after" ? payload.frame : after,
+          key === "beforeBody" ? payload.frame : beforeBody,
+          key === "afterBody" ? payload.frame : afterBody,
+        );
+      } catch {
+        el.aiMsg.classList.add("err");
+        el.aiMsg.textContent = "Could not reach the image service.";
+      } finally {
+        button.disabled = false;
+        button.textContent = "Redo this one";
+      }
+    };
+  }
+
   for (const button of host.querySelectorAll<HTMLButtonElement>("[data-save]")) {
     button.onclick = async () => {
       const key = button.dataset.save ?? "before";
