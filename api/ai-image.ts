@@ -14,9 +14,13 @@ import {
   afterPortraitPrompt,
   beforeBodyPrompt,
   beforeFromAfterPrompt,
+  redoPrompt,
+  scenePrompt,
   usableScore,
+  MAX_REDO_CHARS,
 } from "../src/engine/aiPairPrompt.js";
-import type { PairSpec } from "../src/engine/aiPairPrompt.js";
+import { sceneById } from "../src/engine/aiSceneCatalog.js";
+import type { PairFrame, PairSpec } from "../src/engine/aiPairPrompt.js";
 
 // ---------------------------------------------------------------------------
 // The before/after pair for the AI Model Reel.
@@ -139,6 +143,14 @@ export async function POST(request: Request): Promise<Response> {
       beforeScore?: unknown;
       afterScore?: unknown;
       fullBody?: unknown;
+      mode?: unknown;
+      frame?: unknown;
+      instruction?: unknown;
+      anchor?: unknown;
+      current?: unknown;
+      scene?: unknown;
+      side?: unknown;
+      change?: unknown;
     } | null;
 
     const sex = body?.sex === "female" ? "female" : "male";
@@ -170,6 +182,105 @@ export async function POST(request: Request): Promise<Response> {
     if (!description) return json({ error: "Describe the character first." }, 400);
     if (description.length > MAX_CHARS) {
       return json({ error: `Description is too long; the ceiling is ${MAX_CHARS} characters.` }, 413);
+    }
+
+    // --- ONE SCENE ---------------------------------------------------------
+    //
+    // The same person, somewhere, doing something. Always ONE per request and
+    // never a batch, and that is a hard constraint rather than a preference: a
+    // set is ten images, and ten base64 frames in one JSON response is several
+    // times the 4.5MB a function may return. The failure is the worst shape
+    // available, because generation SUCCEEDS and every slot is consumed before
+    // the platform discards the reply. The four-image path already had to be
+    // rescued from a smaller version of exactly this.
+    //
+    // One call also keeps a scene well inside the function's duration ceiling,
+    // and lets the client show the set filling in one frame at a time rather
+    // than staring at a spinner for ten sequential generations.
+    if (body?.mode === "scene") {
+      const scene = sceneById(sex, typeof body?.scene === "string" ? body.scene : "");
+      const side = body?.side === "before" ? "before" : "after";
+      // The APPROVED FULL-LENGTH frame is the anchor: it carries the face, the
+      // build and the default black outfit the scene is about to replace.
+      const base = dataUrlBody(typeof body?.anchor === "string" ? body.anchor : "");
+      if (!scene || !base) {
+        return json({ error: "Pick a scene, and approve the character first." }, 400);
+      }
+      if (!description) return json({ error: "Describe the character first." }, 400);
+      const change = typeof body?.change === "string" ? body.change.trim() : "";
+      if (change.length > MAX_REDO_CHARS) {
+        return json({ error: `Keep the change under ${MAX_REDO_CHARS} characters.` }, 413);
+      }
+
+      // Metered per scene, because each one is its own billable call. A set of
+      // ten costing one slot would be the same hole the pair path was fixed for.
+      if (meter) {
+        const slot = await claimTtsRender(user.id, meter);
+        if (!slot) return json({ error: "Monthly render quota reached. It resets on the 1st." }, 429);
+        reservations.push(slot);
+      }
+      const shot = await openaiImage(apiKey, {
+        prompt: scenePrompt(scene, side, { sex, description, flaws, afterScore, beforeScore }, change),
+        edit: base,
+        deadline: Date.now() + IMAGE_TIMEOUT_MS,
+      });
+      if ("error" in shot) return json({ error: shot.error }, shot.status);
+      for (const slot of reservations.splice(0)) {
+        try {
+          await finalizeTtsRender(slot, user.id);
+        } catch (finalizeError) {
+          console.error("ai-image finalize failed, slot left reserved", safeMessage(finalizeError));
+        }
+      }
+      return json({ frame: `data:image/${OUTPUT_FORMAT};base64,${shot.b64}`, scene: scene.id, side });
+    }
+
+    // --- ONE FRAME, REDONE -------------------------------------------------
+    //
+    // A set used to be all or nothing: liking three of four images and wanting
+    // the fourth changed meant spending another render on every one of them,
+    // so the cheap move was to accept the worse image. This regenerates the one
+    // frame the operator picked.
+    //
+    // Metered as a full slot even though it is a single call. It is a billable
+    // provider request either way, and a cheaper redo would be the obvious way
+    // to get images for less than they cost.
+    if (body?.mode === "redo") {
+      const frames: PairFrame[] = ["after", "before", "afterBody", "beforeBody"];
+      const frame = frames.find((f) => f === body?.frame);
+      const instruction = typeof body?.instruction === "string" ? body.instruction.trim() : "";
+      // The frame being redone is what gets edited. The after portrait is sent
+      // alongside as the anchor and is used when the requested frame has no
+      // pixels of its own to work from.
+      const source = typeof body?.current === "string" ? body.current : "";
+      const anchor = typeof body?.anchor === "string" ? body.anchor : "";
+      const base = dataUrlBody(source) || dataUrlBody(anchor);
+      if (!frame || !instruction || !base) {
+        return json({ error: "Say which frame to redo and what should change." }, 400);
+      }
+      if (instruction.length > MAX_REDO_CHARS) {
+        return json({ error: `Keep the change under ${MAX_REDO_CHARS} characters.` }, 413);
+      }
+
+      if (meter) {
+        const slot = await claimTtsRender(user.id, meter);
+        if (!slot) return json({ error: "Monthly render quota reached. It resets on the 1st." }, 429);
+        reservations.push(slot);
+      }
+      const redone = await openaiImage(apiKey, {
+        prompt: redoPrompt(frame, instruction),
+        edit: base,
+        deadline: Date.now() + IMAGE_TIMEOUT_MS,
+      });
+      if ("error" in redone) return json({ error: redone.error }, redone.status);
+      for (const slot of reservations.splice(0)) {
+        try {
+          await finalizeTtsRender(slot, user.id);
+        } catch (finalizeError) {
+          console.error("ai-image finalize failed, slot left reserved", safeMessage(finalizeError));
+        }
+      }
+      return json({ frame: `data:image/${OUTPUT_FORMAT};base64,${redone.b64}` });
     }
 
     const spec: PairSpec = { sex, description, flaws, afterScore, beforeScore };
@@ -320,6 +431,19 @@ export async function POST(request: Request): Promise<Response> {
  * ever added.
  */
 const IMAGE_TIMEOUT_MS = 65_000;
+
+/**
+ * The base64 payload of a data URL, or "" for anything that is not one.
+ *
+ * The redo path is the first time this route accepts an IMAGE from the client
+ * rather than only text, so the shape is checked rather than trusted: only a
+ * png or jpeg data URL with a base64 body gets through, and everything else
+ * returns empty and is refused by the caller.
+ */
+function dataUrlBody(value: string): string {
+  const match = /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/]+=*)$/i.exec(value.trim());
+  return match ? match[1] : "";
+}
 
 /**
  * The wall clock the whole run may spend on the provider.

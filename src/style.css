@@ -4936,6 +4936,53 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 
 .q-ai-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 12px; }
 .q-ai-pair figure { margin: 0; }
+/* The picture is a button: a generated face is judged on detail a 160px
+   preview cannot show, so approving one at preview size is guessing. */
+.q-ai-zoom {
+  display: block; width: 100%; padding: 0; border: 0; background: none;
+  cursor: zoom-in; border-radius: 14px;
+}
+.q-ai-zoom:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.q-ai-redo {
+  margin-top: 8px; width: 100%; padding: 8px 10px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--card); color: var(--mut);
+  font: 600 12.5px var(--sans); cursor: pointer;
+}
+.q-ai-redo:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
+.q-ai-redo:disabled { opacity: .55; cursor: default; }
+.q-ai-scenes { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.q-ai-scenes h3 { font-size: 17px; margin: 0 0 6px; }
+/* Two up on a phone, five up on a desktop: the set is read as a contact sheet,
+   so seeing a whole row of one side at once is what makes it judgeable. */
+.q-ai-scene-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+@media (min-width: 760px) { .q-ai-scene-grid { grid-template-columns: repeat(5, 1fr); } }
+.q-ai-scene-grid figure { margin: 0; }
+.q-ai-scene-grid img { width: 100%; border-radius: 12px; border: 1px solid var(--line); display: block; }
+.q-ai-scene-grid figcaption {
+  margin-top: 5px; font: 600 10px var(--mono); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--mut);
+}
+.q-ai-change {
+  width: 100%; margin-top: 6px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  font: 400 12px var(--sans);
+}
+.q-ai-change::placeholder { color: var(--mut); }
+.q-ai-shot-actions { display: flex; gap: 6px; margin-top: 6px; }
+.q-ai-shot-actions .q-ai-redo { margin-top: 0; }
+.q-ai-light {
+  position: fixed; inset: 0; z-index: 600; background: rgba(8, 9, 10, .92);
+  display: grid; place-items: center; padding: 24px; cursor: zoom-out;
+}
+.q-ai-light img {
+  max-width: min(100%, 720px); max-height: 92vh; border-radius: 12px;
+  display: block; object-fit: contain;
+}
+.q-ai-light-close {
+  position: absolute; top: 14px; right: 16px; width: 40px; height: 40px;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,.28);
+  background: rgba(0,0,0,.4); color: #fff; font-size: 17px; cursor: pointer;
+}
 .q-ai-pair img { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; }
 .q-ai-pair figcaption { margin-top: 6px; font: 600 10px var(--mono); letter-spacing: .18em; color: var(--mut); }
 .q-ai-pair-actions { display: flex; gap: 10px; flex-wrap: wrap; }
