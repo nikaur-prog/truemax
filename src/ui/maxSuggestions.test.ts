@@ -32,9 +32,10 @@ test("a reply with no offer does not put words in his mouth", () => {
   assert.ok(!chips.includes("Yes, do that."));
 });
 
-test("body fat in the answer earns the obvious follow-up", () => {
+test("body composition earns a testable follow-up, not a target-weight prompt", () => {
   const chips = suggestFollowUps(CONTEXT, "Body fat is your biggest lever.", []);
-  assert.ok(chips.includes("How lean would I need to get?"));
+  assert.ok(chips.includes("How would I test whether that matters?"));
+  assert.ok(!chips.some((chip) => /how lean|target weight|body fat percentage/i.test(chip)));
 });
 
 test("the weakest region and the strongest are both offered", () => {

@@ -27,7 +27,7 @@ const MAX_CHIPS = 3;
 // Openers, before anything has been said. Broad on purpose: at this point the
 // only thing known about the reader is that they have a scan and no question.
 export const OPENING_SUGGESTIONS = [
-  "What can I actually change?",
+  "What's strong and what needs work?",
   "What should I do first?",
   "Create a plan for me.",
 ];
@@ -99,7 +99,7 @@ export function suggestFollowUps(
   if (offeredSomething(reply)) push("Yes, do that.");
 
   // 2. Something he raised that has an obvious second question.
-  if (/\bbody ?fat|leanness|lean\b/.test(said)) push("How lean would I need to get?");
+  if (/\bbody ?fat|leanness|lean\b/.test(said)) push("How would I test whether that matters?");
   else if (/\bsurgery|surgical|procedure\b/.test(said)) push("What can I do without surgery?");
   else if (/\blighting|angle|camera|photo\b/.test(said)) push("How should I shoot the next one?");
 
@@ -112,7 +112,7 @@ export function suggestFollowUps(
   if (weakest && !said.includes(weakest.toLowerCase())) push(`Why is ${weakest.toLowerCase()} low?`);
 
   const low = lowestRegion(context);
-  if (low) push(`What is dragging my ${low.toLowerCase()} down?`);
+  if (low) push(`Which measurements lower my ${low.toLowerCase()}?`);
 
   const high = bestRegion(context);
   if (high) push(`What is my ${high.toLowerCase()} doing right?`);

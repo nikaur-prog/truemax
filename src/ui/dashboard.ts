@@ -11,12 +11,9 @@ import type { GreetingCtx } from "./greeting.js";
 import { trend } from "./dashTrend.js";
 import { loadPhotos } from "../engine/photoStore.js";
 import { historyPanelMarkup, wireHistoryPanel } from "./historyView.js";
-import { REEL } from "./demoReelData.js";
-// Only for the count on the faces strip: the gallery shows the faces with
-// photographs, and the number says how much bigger the measured set behind
-// the metric comparisons actually is. Both numbers are real.
 import { CELEBS } from "../engine/celebs.js";
-import { applyShim } from "./demoReelShim.js";
+import type { CelebEntry } from "../engine/celebs.js";
+import { METRICS } from "../engine/metrics.js";
 import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
 import { countUp } from "./countUp.js";
@@ -75,6 +72,22 @@ const SPLIT_FACE = `<svg viewBox="0 0 48 48" width="26" height="26" aria-hidden=
     <path d="M11 43c1.6-4.3 6.6-7 13-7s11.4 2.7 13 7"/>
   </g>
 </svg>`;
+
+function celebrityList(): CelebEntry[] {
+  return [...CELEBS].sort((a, b) => {
+    if (a.capture !== b.capture) return a.capture === "high" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function celebrityInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
 
 export function isDashboardOpen(): boolean {
   return overlay !== null;
@@ -158,7 +171,7 @@ export function openDashboard(opts: {
   const legacyCount = allScans.length - allComparable.length;
   const streak = computeStreak(ownScans(allScans));
   const ctx = { name: opts.name ?? null, streak };
-  const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
+  const celebrities = celebrityList();
   overlay = document.createElement("div");
   overlay.className = "dash";
   overlay.innerHTML = `
@@ -188,13 +201,13 @@ export function openDashboard(opts: {
           ${heroBlock(scans, ctx, streak)}
           ${followUpCard(scans)}
           ${scanSection(scans, legacyCount, allComparable.length - scans.length, allComparable.length)}
-          ${faces.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
+          ${celebrities.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
             <span class="dash-faces-fan">
-              ${faces.slice(0, 5).map((f) => `<img src="/demo/${f.slug}.jpg" alt="" loading="lazy" />`).join("")}
+              ${CELEBS.slice(0, 5).map((celebrity) => `<i aria-hidden="true">${celebrityInitials(celebrity.name)}</i>`).join("")}
             </span>
             <span class="dash-faces-copy">
-              <b>${faces.length} famous faces, measured the same way</b>
-              <em>Plus ${CELEBS.length - faces.length} more inside your metric comparisons →</em>
+              <b>${celebrities.length} celebrity reference profiles</b>
+              <em>Browse the real measurement set used by metric comparisons →</em>
             </span>
           </button>` : ""}
         </section>
@@ -225,19 +238,14 @@ export function openDashboard(opts: {
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 3.6 14.4 9l5.6.5-4.3 3.8 1.3 5.6L12 15.9 6.9 18.9l1.3-5.6L4 9.5 9.6 9z"/>
         </svg>
-        <span>Faces</span>
+        <span>Celebrities</span>
       </button>
       ${maxTab ? `<button class="dash-bar-btn dash-bar-maxbtn" id="dash-bar-max" data-goto="max" type="button" role="tab" aria-selected="false">
-        <!-- A glyph OF Max, not Max himself: the full character SVG shrunk to
-             21px was an unreadable smudge between four crisp stroke icons.
-             Same stroke grammar as its neighbours; the character appears at
-             full size inside the tab, where he has room to be somebody. -->
+        <!-- A sharp face mark for the coach: angular brow and jaw rather than
+             the round robot head that read as a baby face at navigation size. -->
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 5.4V3.2"/><circle cx="12" cy="2.6" r="0.9"/>
-          <rect x="5" y="5.4" width="14" height="12.6" rx="6.3"/>
-          <circle cx="9.4" cy="11" r="0.9" fill="currentColor" stroke="none"/>
-          <circle cx="14.6" cy="11" r="0.9" fill="currentColor" stroke="none"/>
-          <path d="M9.8 14.4c1.4 1 3 1 4.4 0"/>
+          <path d="m8 5 4-2 4 2 2 5-1.5 6L12 21l-4.5-5L6 10z"/>
+          <path d="m8.5 9 2-1M15.5 9l-2-1M10 12h.1M14 12h.1M10 16l2 1 2-1"/>
         </svg>
         <span>Coach</span>
       </button>` : ""}
@@ -352,6 +360,8 @@ export function showView(name: ViewName): void {
 }
 
 export function close(): void {
+  detailEl?.remove();
+  detailEl = null;
   overlay?.remove();
   overlay = null;
   currentView = "home";
@@ -660,19 +670,19 @@ function wireScanRows(root: HTMLElement): void {
 // the three tabs, and giving it a tab of its own would put a bottom-bar
 // destination behind whichever card you happened to tap.
 function facesMarkup(): string {
-  const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
+  const celebrities = celebrityList();
   return `
     <header class="dash-head">
       <h1>Celebrities</h1>
-      <p>How the same measurements read on a face people already have a number for. Search a name, or browse.</p>
+      <p>Real reference measurements used by TrueMax comparisons. Search a name, or browse the set.</p>
     </header>
     <input class="celeb-q" id="celeb-q" placeholder="Search a name" autocomplete="off" />
-    <div class="celeb-grid" id="celeb-grid">${faces.map(celebCard).join("")}</div>
+    <div class="celeb-grid" id="celeb-grid">${celebrities.map((celebrity, index) => celebCard(celebrity, index)).join("")}</div>
     <p class="celeb-empty hidden" id="celeb-empty">No one by that name in the set yet.</p>`;
 }
 
 function wireFaces(root: ParentNode): void {
-  const faces = applyShim([...REEL]).sort((a, b) => b.overall - a.overall);
+  const celebrities = celebrityList();
   const q = root.querySelector<HTMLInputElement>("#celeb-q");
   const grid = root.querySelector("#celeb-grid");
   const empty = root.querySelector("#celeb-empty");
@@ -689,8 +699,8 @@ function wireFaces(root: ParentNode): void {
   };
   for (const card of grid.querySelectorAll<HTMLElement>(".celeb-card")) {
     card.addEventListener("click", () => {
-      const f = faces.find((x) => x.slug === card.dataset.slug);
-      if (f) openCelebDetail(f);
+      const celebrity = celebrities[Number(card.dataset.celebIndex)];
+      if (celebrity) openCelebDetail(celebrity);
     });
   }
 }
@@ -700,58 +710,54 @@ export function openCelebSearch(): void {
   showView("faces");
 }
 
-// The full breakdown for one face: the same pillars and per-region scores the
-// user's own report shows, on somebody whose number they already have an
-// opinion about. That comparison is the point of the screen.
+// Raw reference measurements, without turning a real person's name into an
+// overall attractiveness verdict. The data exists for per-metric comparisons.
 let detailEl: HTMLDivElement | null = null;
-function openCelebDetail(f: ReturnType<typeof applyShim>[number]): void {
+function openCelebDetail(celebrity: CelebEntry): void {
   detailEl?.remove();
-  const regions = [...f.regions].sort((a, b) => b.score - a.score);
-  const tone = (v: number) => (v >= 7.5 ? "hi" : v >= 5.5 ? "mid" : "lo");
+  const measured = METRICS
+    .filter((def) => def.view === "front" && Number.isFinite(celebrity.metrics[def.id]))
+    .sort((a, b) => (REGION_LABEL[a.region] ?? a.region).localeCompare(REGION_LABEL[b.region] ?? b.region));
+  const grouped = new Map<string, typeof measured>();
+  for (const def of measured) {
+    const region = REGION_LABEL[def.region] ?? def.region;
+    const group = grouped.get(region) ?? [];
+    group.push(def);
+    grouped.set(region, group);
+  }
   detailEl = document.createElement("div");
   detailEl.className = "dash celeb-detail";
   detailEl.innerHTML = `
     <div class="dash-inner">
       <button class="hist-close" aria-label="Close">✕</button>
       <div class="cd-head">
-        <div class="cd-photo"><img src="/demo/${f.slug}.jpg" alt="${f.name}" /></div>
+        <div class="cd-photo cd-reference" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m16 11 8-4 8 4 4 10-3 12-9 9-9-9-3-12z"/>
+            <path d="m17 19 5-2M31 19l-5-2M19 25h.1M29 25h.1M20 33l4 2 4-2"/>
+          </svg>
+          <b>${celebrityInitials(celebrity.name)}</b>
+        </div>
         <div class="cd-meta">
-          <h1>${f.name}</h1>
-          <div class="cd-score ${tone(f.overall)}">${f.overall.toFixed(1)}<small>/10</small></div>
-          <p class="cd-sub">Scored against ${f.sex === "male" ? "men" : "women"}.</p>
+          <span class="klabel">REFERENCE PROFILE</span>
+          <h1>${escapeHtml(celebrity.name)}</h1>
+          <p class="cd-sub">${measured.length} front-view measurements · ${celebrity.capture === "high" ? "high-fidelity" : "moderate-fidelity"} source</p>
         </div>
       </div>
 
-      <h2 class="cd-h2">Pillars</h2>
-      <div class="cd-pillars">
-        ${Object.entries(f.pillars)
-          .map(
-            ([k, v]) => `<div class="cd-pillar">
-              <b>${(v as number).toFixed(1)}</b><span>${k.toUpperCase()}</span>
-              <i><em style="width:${Math.min(100, (v as number) * 10)}%"></em></i>
-            </div>`,
-          )
-          .join("")}
+      <div class="cd-measure-groups">
+        ${[...grouped.entries()].map(([region, defs]) => `<section class="cd-measure-group">
+          <h2 class="cd-h2">${escapeHtml(region)}</h2>
+          ${defs.map((def) => `<div class="cd-measure">
+            <span>${escapeHtml(def.name)}</span>
+            <b>${celebrity.metrics[def.id].toFixed(def.decimals)}${escapeHtml(def.unit)}</b>
+          </div>`).join("")}
+        </section>`).join("")}
       </div>
 
-      <h2 class="cd-h2">Region by region</h2>
-      <div class="cd-regions">
-        ${regions
-          .map(
-            (r) => `<div class="cd-region">
-              <span>${REGION_LABEL[r.id] ?? r.id}</span>
-              <i><em style="width:${Math.min(100, r.score * 10)}%"></em></i>
-              <b class="${tone(r.score)}">${r.score.toFixed(1)}</b>
-            </div>`,
-          )
-          .join("")}
-      </div>
-
-      <p class="cd-credit">${f.credit}</p>
-      <p class="cd-note">These are the scores this face is commonly given rather than a
-        live measurement, and the engine's own output is one query parameter away
-        (<code>?real=1</code>). Two photographs of one person differ by about ${DISPLAY_NOISE.toFixed(1)} points, so any
-        single number here is a reading rather than a verdict.</p>
+      <p class="cd-note">Measured from a public official portrait and used only as a per-metric
+        reference. TrueMax does not distribute that source photograph here. These are raw
+        readings, not an attractiveness verdict, and a different photograph can move them.</p>
     </div>`;
   document.body.appendChild(detailEl);
   detailEl.querySelector(".hist-close")!.addEventListener("click", () => {
@@ -760,20 +766,22 @@ function openCelebDetail(f: ReturnType<typeof applyShim>[number]): void {
   });
 }
 
-function celebCard(f: ReturnType<typeof applyShim>[number]): string {
-  const tone = f.overall >= 7.5 ? "hi" : f.overall >= 5.5 ? "mid" : "lo";
-  const pillars = Object.entries(f.pillars)
-    .map(
-      ([k, v]) => `<div class="celeb-pill"><i style="width:${Math.round((v as number) * 10)}%"></i>
-        <span>${k[0]}</span></div>`,
-    )
-    .join("");
-  return `<div class="celeb-card" data-name="${f.name.toLowerCase()}" data-slug="${f.slug}" role="button" tabindex="0">
-    <div class="celeb-photo"><img src="/demo/${f.slug}.jpg" alt="" loading="lazy" /></div>
-    <div class="celeb-meta">
-      <b>${f.name}</b>
-      <span class="celeb-score ${tone}">${f.overall.toFixed(1)}<small>/10</small></span>
+function celebCard(celebrity: CelebEntry, index: number): string {
+  const count = Object.values(celebrity.metrics).filter(Number.isFinite).length;
+  return `<button type="button" class="celeb-card" data-name="${escapeHtml(celebrity.name.toLowerCase())}" data-celeb-index="${index}">
+    <div class="celeb-photo celeb-reference" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m16 11 8-4 8 4 4 10-3 12-9 9-9-9-3-12z"/>
+        <path d="m17 19 5-2M31 19l-5-2M19 25h.1M29 25h.1M20 33l4 2 4-2"/>
+      </svg>
+      <b>${celebrityInitials(celebrity.name)}</b>
     </div>
-    <div class="celeb-pillars">${pillars}</div>
-  </div>`;
+    <div class="celeb-meta">
+      <b>${escapeHtml(celebrity.name)}</b>
+    </div>
+    <div class="celeb-reference-meta">
+      <span>${count} measurements</span>
+      <span>${celebrity.capture === "high" ? "High fidelity" : "Moderate fidelity"}</span>
+    </div>
+  </button>`;
 }

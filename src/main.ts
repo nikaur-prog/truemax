@@ -130,6 +130,7 @@ import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, profile
 import { closeSettings, openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
 import { markPlatform } from "./engine/platform.js";
+import { beginAnalysisHandoff } from "./ui/analysisHandoff.js";
 
 // Ingest cap, and it is an EXPORT setting as much as a detection one.
 //
@@ -2659,6 +2660,26 @@ async function gateAnalysis(
 ): Promise<void> {
   if (!pending || !token || !scanSession.isCurrent(token)) return;
   const generation = scanGeneration;
+  // Visible before the first await. currentUser() is a network-backed session
+  // read and took five seconds on a real iPhone; closeSide() had already
+  // removed the profile screen, so waiting to restore #v-main left only the
+  // header and footer. The existing scan animation now owns that entire wait.
+  beginAnalysisHandoff(
+    {
+      upload: el.upload,
+      main: el.main,
+      frame: el.frame,
+      analysis: el.analysis,
+      capRight: el.capRight,
+      status: el.status,
+      barFill: el.barFill,
+    },
+    () => {
+      if (!pending) return;
+      paintFrontPane(pending.photo);
+      drawCalm(el.overlayCanvas, pending.landmarks, pending.width, pending.height);
+    },
+  );
   // A temporary auth/session read failure must never strand a signed-out user
   // on an empty result view. Treat an unreadable session as signed out and
   // present the account gate, which remains usable as the fallback screen even
@@ -2705,9 +2726,6 @@ async function gateAnalysis(
       })
     : false;
   if (!scanSession.transition(token, "gate")) return;
-
-  el.upload.classList.add("hidden");
-  el.main.classList.remove("hidden");
 
   // THE FILM RUNS BEFORE THE WALL.
   //

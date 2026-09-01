@@ -353,10 +353,12 @@ function renderApply(): void {
         <option value="lifestyle">Lifestyle / vlog</option>
         <option value="other">Something else</option>
       </select>
-      <label for="ap-links">Links to 2–3 of your videos</label>
-      <textarea id="ap-links" rows="3" placeholder="one per line"></textarea>
-      <label for="ap-pitch">Why you (one or two sentences)</label>
-      <textarea id="ap-pitch" rows="3" maxlength="500"></textarea>
+      <label for="ap-links">Links to your videos <span class="lg-optional">optional</span></label>
+      <textarea id="ap-links" rows="3" placeholder="one per line, up to 3"></textarea>
+      <p class="lg-note" style="margin:-6px 0 0">Leave this empty if you are starting a new
+      account. It helps if you have something to show, and it is not a requirement.</p>
+      <label for="ap-pitch">Why you <span class="lg-optional">optional</span></label>
+      <textarea id="ap-pitch" rows="3" maxlength="500" placeholder="one or two sentences"></textarea>
       <p class="lg-note" style="margin-top:14px">The League leaderboard shows your name, handle
       and earnings to other approved members: that's the game. Nothing else about your account
       is ever visible to anyone.</p>
@@ -381,10 +383,24 @@ function renderApply(): void {
     const user = await currentUser();
     if (!user) return renderGate();
     const client = await getSupabaseClient();
+    // Optional, and the floor is gone rather than lowered.
+    //
+    // This asked for two to three links, which is a fair bar for an
+    // established creator and an impossible one for somebody opening a fresh
+    // account to make TrueMax content. They have nothing to link to yet, and
+    // the only thing the form could say to them was no.
+    //
+    // The ceiling stays, and so does the shape check: anything typed still has
+    // to be a real https link, because a broken one is worse than none. It is
+    // just no longer required to be there at all.
     const links = (document.getElementById("ap-links") as HTMLTextAreaElement).value
-      .split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3);
-    if (links.length < 2 || links.some((link) => !httpsUrl(link))) {
-      err.textContent = "Add 2–3 full https:// links to your work.";
+      .split("\n").map((l) => l.trim()).filter(Boolean);
+    if (links.length > 3) {
+      err.textContent = "Add no more than three links.";
+      return;
+    }
+    if (links.some((link) => !httpsUrl(link))) {
+      err.textContent = "Those links need to be full https:// addresses, or leave the box empty.";
       return;
     }
     const adult = (document.getElementById("ap-adult") as HTMLInputElement).checked;
