@@ -19,6 +19,7 @@ import {
 import { anglePhases, angleLabelAt, arcRadius, interiorSweep } from "./measureOverlay.js";
 import { buildTimeline } from "../engine/rundownTimeline.js";
 import type { Beat } from "../engine/reelScript.js";
+import { verdictForPercentile } from "../engine/analysisMode.js";
 
 // A face occupying the middle half of a 1000x1000 photograph. Only the bounding
 // box matters to the crop maths, so four corners are a sufficient face.
@@ -397,17 +398,17 @@ test("the verdict is shrunk until it fits the frame", () => {
   const font = (px: number) => `300 ${px}px Fraunces, Georgia, serif`;
   const maxWidth = 720 - 48 * 2;
 
-  const words = [
-    "Mid",
-    "Chopped",
-    "Mogger",
-    "She-mogger",
-    "Good looking",
-    "Background character",
-    "Looksmaxxing final boss",
-    "Certified baddie",
-    "True Adam",
-  ];
+  // Enumerated from the ladder itself rather than typed out here. The previous
+  // version was a hand-copied list of the rungs as they stood, so it went stale
+  // the moment the vocabulary changed and would have kept passing while testing
+  // words the product no longer has.
+  const words = new Set<string>();
+  for (const tone of ["blunt", "kind", "polite"] as const) {
+    for (const sex of ["male", "female"] as const) {
+      for (let pct = 0; pct <= 100; pct += 0.5) words.add(verdictForPercentile(pct, sex, tone).word);
+    }
+  }
+  assert.ok(words.size > 20, `only ${words.size} rungs enumerated, the ladder did not load`);
   for (const word of words) {
     ctx.font = fitFont(ctx, word, maxWidth, 76, 44, font);
     assert.ok(

@@ -18,12 +18,12 @@ const report = (over: Partial<Report> = {}): Report =>
     ...over,
   }) as Report;
 
-test("the blunt ladder has a defined floor and nothing below it", () => {
+test("the descriptive ladder has a defined floor and nothing below it", () => {
   // The bottom of the scale is the one place this product could do real harm.
   for (const pct of [0, 1, 5, 11.9]) {
     assert.equal(
       verdictFor(report({ overallPercentile: pct }), "blunt").word,
-      "You're cooked",
+      "A lot to work on",
       `${pct}`,
     );
   }
@@ -46,32 +46,58 @@ test("no ladder has a rung below its own floor", () => {
 
 test("each rung starts exactly where it says it does", () => {
   const at = (pct: number) => verdictFor(report({ overallPercentile: pct }), "blunt").word;
-  assert.equal(at(11.9), "You're cooked");
+  assert.equal(at(11.9), "A lot to work on");
   // The bottom-fifth rung carries alternates now, like every rung above it, so
   // two friends who land in the same band do not read the same word. What this
   // test is about is the BOUNDARY, so both ends of the band assert the band.
-  assert.ok(["Chopped", "Undercooked", "Raw"].includes(at(12)));
-  assert.ok(["Chopped", "Undercooked", "Raw"].includes(at(25.9)));
-  assert.ok(["Mildly chopped", "Rough", "Half baked", "Unfinished"].includes(at(26)));
-  assert.ok(["Mid", "NPC", "Background character"].includes(at(40)));
-  assert.ok(["Aight", "Solid", "Not bad"].includes(at(52)));
-  assert.ok(["Good looking", "Attractive", "Sharp"].includes(at(65)));
-  assert.ok(["Mogger", "Cracked", "Built different"].includes(at(82)));
-  assert.equal(at(95), "Looksmaxxing final boss");
-  assert.equal(at(98.9), "Looksmaxxing final boss");
-  assert.equal(at(99), "True Adam");
-  assert.equal(at(100), "True Adam");
+  const BAND_12 = ["A long way to go", "Rough around the edges"];
+  assert.ok(BAND_12.includes(at(12)));
+  assert.ok(BAND_12.includes(at(25.9)));
+  assert.ok(["A bit below average", "Some way to go"].includes(at(26)));
+  assert.ok(["Average looking", "Ordinary looking", "Middle of the road"].includes(at(40)));
+  assert.ok(["A bit above average", "Fairly good looking"].includes(at(52)));
+  assert.ok(["Good looking", "Nice looking", "Sharp looking"].includes(at(65)));
+  assert.ok(["Very good looking", "Great looking", "Really good looking"].includes(at(82)));
+  assert.ok(["Model looks", "Outstanding looking"].includes(at(95)));
+  assert.ok(["Model looks", "Outstanding looking"].includes(at(98.9)));
+  assert.equal(at(99), "As good as it gets");
+  assert.equal(at(100), "As good as it gets");
 });
 
-test("the top rungs speak to the reference population", () => {
-  const at = (pct: number, sex: "male" | "female") =>
-    verdictFor(report({ overallPercentile: pct, sex }), "blunt").word;
-  assert.ok(["She-mogger", "Fine shyt"].includes(at(85, "female")));
-  assert.equal(at(97, "female"), "Certified baddie");
-  assert.equal(at(99.5, "female"), "True Eve");
-  // A woman must never be handed the men's word, and the reverse.
-  assert.ok(!["Mogger", "True Adam"].includes(at(85, "female")));
-  assert.ok(!["She-mogger", "Certified baddie", "True Eve"].includes(at(97, "male")));
+test("the verdict word does not change with the reference population", () => {
+  // The words used to be split by sex because they were jokes, and
+  // "she-mogger" was not a translation of "mogger". Plain English needs no
+  // such split: the same percentile is the same reading whoever is reading it,
+  // which is what the plain ladder has always said about itself.
+  const at = (pct: number, sex: "male" | "female", tone: VerdictTone) =>
+    verdictFor(report({ overallPercentile: pct, sex }), tone).word;
+  // The descriptive and plain ladders are shared word for word.
+  for (const tone of ["blunt", "polite"] as const) {
+    for (let pct = 0; pct <= 100; pct += 0.5) {
+      assert.equal(at(pct, "male", tone), at(pct, "female", tone), `${tone} at ${pct}`);
+    }
+  }
+  // The kind ladder keeps exactly one split, "Handsome" and "Lovely", and it
+  // stays: both are ordinary English, neither is slang, and this change was
+  // about words nobody could parse rather than about gendered ones. Asserted
+  // rather than left implicit so that a second split cannot appear unnoticed.
+  const splits = new Set<string>();
+  for (let pct = 0; pct <= 100; pct += 0.5) {
+    const m = at(pct, "male", "kind");
+    const f = at(pct, "female", "kind");
+    if (m !== f) splits.add(`${m}/${f}`);
+  }
+  assert.deepEqual([...splits], ["Handsome/Lovely"]);
+});
+
+test("the spoken descriptor still names the right person", () => {
+  // The word is shared; the descriptor is not, because it says "a male" or
+  // "a female" out loud and the wrong one is the most obvious error the video
+  // could make.
+  for (let pct = 0; pct <= 100; pct += 0.5) {
+    assert.match(verdictForPercentile(pct, "male").descriptor, /\bmale\b/);
+    assert.match(verdictForPercentile(pct, "female").descriptor, /\bfemale\b/);
+  }
 });
 
 test("one face always gets one verdict", () => {
@@ -137,7 +163,7 @@ test("every mode reads the same underlying score", () => {
   // Basic is the same 0-10 score. Percentile is metadata for the rarity line,
   // never a replacement score.
   const strong = report({ overall: 7.1, overallPercentile: 91, pillars: { Harmony: 9, Angularity: 9, Dimorphism: 9, Features: 9 } });
-  assert.ok(["Mogger", "Cracked", "Built different"].includes(verdictFor(strong, "blunt").word));
+  assert.ok(["Very good looking", "Great looking", "Really good looking"].includes(verdictFor(strong, "blunt").word));
   assert.equal(basicScores(strong)[0].value, 7.1);
   assert.equal(basicScores(strong)[0].percentile, 91);
 });
@@ -184,17 +210,40 @@ test("kind mode softens every band that stings", () => {
   }
 });
 
-test("kind mode never uses slang, at any height on the ladder", () => {
-  // The dialog promises "no slang, nothing designed to sting", and that promise
-  // does not stop being made once the result is good news. "Fine shyt" is a
-  // compliment and it is still slang; somebody who asked for plain English
-  // asked for it all the way up.
+test("NO register uses slang, at any height on any ladder", () => {
+  // This is the regression guard for the whole change. It used to apply to the
+  // kind ladder only, which is exactly how "Cracked" reached a published video:
+  // the register somebody had actually selected was the one register nothing
+  // checked.
+  //
+  // Every word below was on a shipped rung. They are barred by name rather
+  // than by a general rule because there is no general rule that catches
+  // "mogger" and spares "model looks"; a list somebody has to edit on purpose
+  // is the point.
   const banned =
-    /cooked|chopped|npc|rough|background character|mogger|shyt|baddie|final boss|true adam|true eve|aight/i;
-  for (const sex of ["male", "female"] as const) {
-    for (let pct = 0; pct <= 100; pct += 0.5) {
-      const word = verdictForPercentile(pct, sex, "kind").word;
-      assert.ok(!banned.test(word), `${sex} ${pct}: ${word}`);
+    /\bcooked\b|chopped|\bnpc\b|background character|mogger|shyt|baddie|final boss|true adam|true eve|\baight\b|cracked|built different|\bmid\b|\bbeige\b|stock photo|default settings|girl next door|half baked/i;
+  for (const tone of ["blunt", "kind", "polite"] as const) {
+    for (const sex of ["male", "female"] as const) {
+      for (let pct = 0; pct <= 100; pct += 0.5) {
+        const word = verdictForPercentile(pct, sex, tone).word;
+        assert.ok(!banned.test(word), `${tone}/${sex} ${pct}: ${word}`);
+      }
+    }
+  }
+});
+
+test("no verdict word carries censored profanity", () => {
+  // "Fine shyt" shipped. A deliberate misspelling is not a clean word: it is
+  // the same word wearing a hat, and a moderation classifier reads it that
+  // way, which is what put the videos carrying it at risk.
+  const banned = /sh[y1i\*]t|f[u\*]ck|b[i1\*]tch|\ba[s\$]{2}\b|d[a\*]mn/i;
+  for (const tone of ["blunt", "kind", "polite"] as const) {
+    for (const sex of ["male", "female"] as const) {
+      for (let pct = 0; pct <= 100; pct += 0.5) {
+        const v = verdictForPercentile(pct, sex, tone);
+        assert.ok(!banned.test(v.word), `${tone}/${sex} ${pct}: ${v.word}`);
+        assert.ok(!banned.test(v.descriptor), `${tone}/${sex} ${pct}: ${v.descriptor}`);
+      }
     }
   }
 });
