@@ -113,10 +113,14 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const form = root.querySelector(".acct-form") as HTMLFormElement;
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
-  syncSubmitState(form, submit, !isLink);
+  let formWorking = false;
+  const updateSubmit = syncSubmitState(form, submit, !isLink, () => formWorking);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    // A disabled submit button does not stop Enter from dispatching another
+    // submit event. Keep the request itself single-flight as well as the UI.
+    if (formWorking) return;
     const data = new FormData(form);
     const email = String(data.get("email") || "").trim();
     const password = String(data.get("password") || "");
@@ -129,13 +133,17 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       return;
     }
 
+    formWorking = true;
     setWorking(submit, true);
+    updateSubmit();
     const result = isLink
       ? await signInWithLink(email)
       : isSignup
         ? await signUp(email, password, String(data.get("name") || ""))
         : await signIn(email, password);
+    formWorking = false;
     setWorking(submit, false, isLink ? "Email me a sign-in link" : isSignup ? "Create free account" : "Sign in");
+    updateSubmit();
 
     if (!result.ok) {
       say(msg, result.message || "Something went wrong.", "err");
@@ -154,13 +162,17 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   for (const button of root.querySelectorAll<HTMLButtonElement>("[data-mode]")) {
     button.addEventListener("click", () => renderMode(root, button.dataset.mode as AuthMode, options));
   }
+  let socialWorking = false;
   for (const button of root.querySelectorAll<HTMLButtonElement>("[data-provider]")) {
     button.addEventListener("click", async () => {
+      if (socialWorking || button.dataset.available !== "true") return;
       const provider = button.dataset.provider as "google" | "apple";
+      socialWorking = true;
       disableSocial(root, true);
       button.textContent = "Opening…";
       const result = await signInWithProvider(provider);
       if (!result.ok) {
+        socialWorking = false;
         disableSocial(root, false);
         button.innerHTML = socialLabel(provider);
         say(msg, result.message || "Could not start social sign-in.", "err");
@@ -188,7 +200,10 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       }
       if (availability[provider]) {
         button.dataset.available = "true";
-        button.disabled = false;
+        // The settings read can resolve after an OAuth click. It may confirm
+        // availability, but it must not reopen either provider while that
+        // navigation request is still in flight.
+        button.disabled = socialWorking;
         button.title = "";
         button.removeAttribute("aria-label");
         button.innerHTML = socialLabel(provider);
@@ -204,17 +219,38 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   });
 }
 
-function syncSubmitState(form: HTMLFormElement, button: HTMLButtonElement, requiresPassword: boolean): void {
+export function authSubmitReady(
+  emailPresent: boolean,
+  emailValid: boolean,
+  passwordLength: number,
+  requiresPassword: boolean,
+  working: boolean,
+): boolean {
+  return !working && emailPresent && emailValid && (!requiresPassword || passwordLength >= 6);
+}
+
+function syncSubmitState(
+  form: HTMLFormElement,
+  button: HTMLButtonElement,
+  requiresPassword: boolean,
+  isWorking: () => boolean,
+): () => void {
   const update = () => {
     const email = form.querySelector<HTMLInputElement>('input[name="email"]');
     const password = form.querySelector<HTMLInputElement>('input[name="password"]');
-    const ready = Boolean(email?.value.trim() && email.validity.valid)
-      && (!requiresPassword || Boolean(password && password.value.length >= 6));
+    const ready = authSubmitReady(
+      Boolean(email?.value.trim()),
+      Boolean(email?.validity.valid),
+      password?.value.length ?? 0,
+      requiresPassword,
+      isWorking(),
+    );
     button.disabled = !ready;
     button.classList.toggle("ready", ready);
   };
   form.addEventListener("input", update);
   update();
+  return update;
 }
 
 function renderForgot(root: HTMLElement, options: AuthFormOptions): void {
@@ -235,12 +271,16 @@ function renderForgot(root: HTMLElement, options: AuthFormOptions): void {
   const form = root.querySelector("form") as HTMLFormElement;
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
+  let working = false;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (working) return;
     const email = String(new FormData(form).get("email") || "").trim();
     if (!email) return say(msg, "Enter your email.", "err");
+    working = true;
     setWorking(submit, true);
     const result = await requestPasswordReset(email);
+    working = false;
     setWorking(submit, false, "Send reset link");
     if (!result.ok) return say(msg, result.message || "Could not send the reset link.", "err");
     renderEmailSent(root, email, "reset your password");
@@ -267,15 +307,19 @@ function renderReset(root: HTMLElement, options: AuthFormOptions): void {
   const form = root.querySelector("form") as HTMLFormElement;
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
+  let working = false;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (working) return;
     const data = new FormData(form);
     const password = String(data.get("password") || "");
     const confirm = String(data.get("confirm") || "");
     if (password.length < 8) return say(msg, "Use at least 8 characters.", "err");
     if (password !== confirm) return say(msg, "The passwords do not match.", "err");
+    working = true;
     setWorking(submit, true);
     const result = await updatePassword(password);
+    working = false;
     setWorking(submit, false, "Update password");
     if (!result.ok) return say(msg, result.message || "Could not update the password.", "err");
     const user = await currentUser();

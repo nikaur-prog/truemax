@@ -1517,16 +1517,20 @@ let leaveGuard: LeaveGuard | null = null;
 let guardEntryPushed = false;
 let leavePromptOpen = false;
 
+function pushLeaveGuardEntry(): boolean {
+  try {
+    history.pushState({ tmReport: true }, "");
+    guardEntryPushed = true;
+    return true;
+  } catch {
+    guardEntryPushed = false;
+    return false;
+  }
+}
+
 function armLeaveGuard(kind: LeaveGuard): void {
   leaveGuard = kind;
-  if (!guardEntryPushed) {
-    try {
-      history.pushState({ tmReport: true }, "");
-      guardEntryPushed = true;
-    } catch {
-      /* history unavailable: beforeunload still covers refresh and close */
-    }
-  }
+  if (!guardEntryPushed) pushLeaveGuardEntry();
 }
 
 function disarmLeaveGuard(): void {
@@ -1546,21 +1550,21 @@ window.addEventListener("popstate", () => {
     guardEntryPushed = false;
     return;
   }
-  if (leavePromptOpen) return;
+  // This pop consumed the sentinel. Reinstall it even if the first leave
+  // question is still open: repeated iOS back-swipes otherwise walk behind
+  // the dialog and leave no guard for a later gesture.
+  guardEntryPushed = false;
+  if (leavePromptOpen) {
+    pushLeaveGuardEntry();
+    return;
+  }
   leavePromptOpen = true;
   const kind = leaveGuard;
   // Put the sentinel back before waiting for an asynchronous app dialog. A
   // second iOS back-swipe while the question is open must not leave the page
   // behind the dialog. Accepting then skips both the replacement sentinel and
   // this document's original entry.
-  let repushed = false;
-  try {
-    history.pushState({ tmReport: true }, "");
-    guardEntryPushed = true;
-    repushed = true;
-  } catch {
-    guardEntryPushed = false;
-  }
+  pushLeaveGuardEntry();
   void confirmScanAction({
     title: kind === "scan" ? "Leave this scan?" : "Leave this report?",
     copy: kind === "scan"
@@ -1574,19 +1578,14 @@ window.addEventListener("popstate", () => {
     // was open. A stale answer never rebuilds history for a different run.
     if (leaveGuard !== kind) return;
     if (leave) {
+      const sentinelPresent = guardEntryPushed;
       disarmLeaveGuard();
       guardEntryPushed = false;
-      if (repushed) history.go(-2);
+      if (sentinelPresent) history.go(-2);
       else history.back();
       return;
     }
-    if (repushed) return;
-    try {
-      history.pushState({ tmReport: true }, "");
-      guardEntryPushed = true;
-    } catch {
-      guardEntryPushed = false;
-    }
+    if (!guardEntryPushed) pushLeaveGuardEntry();
   });
 });
 
