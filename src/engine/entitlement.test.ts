@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasMaxAccess, hasPaidAccess, recoverMaxEntitlement, resolveBillingIdentity } from "./entitlement.js";
+import {
+  hasMaxAccess,
+  hasMaxOrStaffAccess,
+  hasPaidAccess,
+  recoverMaxEntitlement,
+  resolveBillingIdentity,
+} from "./entitlement.js";
 import type { Entitlement } from "./entitlement.js";
 
 // The gate between "measured your face for free" and "paid for the method".
@@ -45,6 +51,12 @@ test("a lapsed subscription locks, whatever tier it used to be", () => {
 test("free never has access", () => {
   assert.equal(hasMaxAccess(ent({ tier: "free", status: "none" })), false);
   assert.equal(hasPaidAccess(ent({ tier: "free", status: "none" })), false);
+});
+
+test("staff can use the Max surface without a customer subscription", () => {
+  const free = ent({ tier: "free", status: "none" });
+  assert.equal(hasMaxOrStaffAccess(free, true), true);
+  assert.equal(hasMaxOrStaffAccess(free, false), false);
 });
 
 test("an explicit Max entry repairs a stale entitlement and re-reads it", async () => {

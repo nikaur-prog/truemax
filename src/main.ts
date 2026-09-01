@@ -69,7 +69,7 @@ import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
   clearPurchaseResult,
   consumePurchaseResult,
-  hasMaxAccess,
+  hasMaxOrStaffAccess,
   consumeScanCreditForScan,
   loadEntitlement,
   loadIsAdmin,
@@ -241,7 +241,7 @@ async function refreshMaxAccess(): Promise<void> {
       if (owner !== activeScanOwner() || generation !== scanGeneration) return;
       currentPaidScan = use?.consumed === true;
     }
-    setMaxAccess(hasMaxAccess(entitlement) || admin);
+    setMaxAccess(hasMaxOrStaffAccess(entitlement, admin));
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     lastKnownTier = tierOf(entitlement);
@@ -1168,7 +1168,11 @@ async function refreshHomeBrand(user: User | null): Promise<MembershipBrand> {
   paintHomeBrand("member");
   let max = false;
   try {
-    max = hasMaxAccess(await loadEntitlement());
+    const [entitlement, admin] = await Promise.all([
+      loadEntitlement(),
+      loadIsAdmin().catch(() => false),
+    ]);
+    max = hasMaxOrStaffAccess(entitlement, admin);
   } catch {
     // A temporary entitlement read failure must never lock a real member out
     // of their device-local dashboard. It simply stays in the member state.
