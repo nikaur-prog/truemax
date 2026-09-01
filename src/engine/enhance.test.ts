@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyEnhance, edgeEnergy, LOOKS, lookFor, upscaleFor } from "./enhance.js";
+import {
+  applyEnhance,
+  edgeEnergy,
+  IMAGE_TARGET,
+  LOOKS,
+  lookFor,
+  MAX_UPSCALE,
+  upscaleFor,
+  upscalePlan,
+  VIDEO_TARGET,
+} from "./enhance.js";
 
 // A soft vertical edge: dark left half blending to bright right half over a
 // few columns — the shape compression smearing leaves behind.
@@ -70,9 +80,63 @@ test("lookFor scales the mask radius with the frame and never drops below 1px", 
   assert.equal(lookFor(LOOKS.subtle, 100).radius, 1);
 });
 
-test("upscaleFor targets 1920 on the long edge, caps at 2x, never downscales", () => {
-  assert.equal(upscaleFor(576, 1024), 1920 / 1024);
-  assert.equal(upscaleFor(480, 640), 2);
-  assert.equal(upscaleFor(1080, 1920), 1);
-  assert.equal(upscaleFor(2160, 3840), 1);
+// --- how big the output gets ------------------------------------------------
+
+test("the sizes people actually upload are upscaled, which is the whole bug", () => {
+  // The regression that started this. Every one of these came back at its
+  // input size under a button promising a 4K upscale, because the target was
+  // 1920 and all of them were already at or past it. A phone screen recording
+  // and a TikTok download are the two commonest inputs this tool has.
+  for (const [w, h] of [[1080, 1920], [1920, 1080], [1440, 2560]] as Array<[number, number]>) {
+    const plan = upscalePlan(w, h, IMAGE_TARGET);
+    assert.ok(plan.scale > 1, `${w}x${h} must actually be upscaled, got ${plan.scale}`);
+    assert.equal(plan.reason, "upscaled");
+  }
+  // And the headline case reaches true 4K rather than something near it.
+  assert.deepEqual(upscalePlan(1080, 1920, IMAGE_TARGET), { scale: 2, w: 2160, h: 3840, reason: "upscaled" });
+});
+
+test("a source already past the target is left alone, and says so", () => {
+  // A 12MP phone photo is 4032 on the long edge, which is past 4K. Leaving it
+  // is correct. Reporting it as an upscale would be a lie, and reporting
+  // nothing at all is what made the tool look broken.
+  const plan = upscalePlan(3024, 4032, IMAGE_TARGET);
+  assert.equal(plan.scale, 1);
+  assert.equal(plan.w, 3024);
+  assert.equal(plan.h, 4032);
+  assert.equal(plan.reason, "already-sharp");
+});
+
+test("nothing is ever downscaled and nothing is invented past 2x", () => {
+  // The ceiling is the honesty rule: this is a clean resample plus edge
+  // recovery, so past 2x it would be enlarging mush and calling it detail.
+  const small = upscalePlan(480, 640, IMAGE_TARGET);
+  assert.equal(small.scale, MAX_UPSCALE);
+  assert.equal(small.reason, "capped");
+  assert.deepEqual([small.w, small.h], [960, 1280]);
+  // Never below 1, whatever it is handed.
+  for (const [w, h] of [[8000, 6000], [3840, 2160], [4032, 3024]] as Array<[number, number]>) {
+    assert.equal(upscalePlan(w, h, IMAGE_TARGET).scale, 1);
+  }
+});
+
+test("images aim at 4K and video does not, and neither can inherit the other", () => {
+  // They were one hidden constant, which is how the image path ended up with
+  // video's ceiling. Every caller now names its target, and the two differ:
+  // a video frame is resampled and unsharp masked in plain JS on the person's
+  // own device, so 4x the pixels is 4x the slowest cost in the tool.
+  assert.equal(IMAGE_TARGET, 3840);
+  assert.equal(VIDEO_TARGET, 1920);
+  assert.equal(upscaleFor(1080, 1920, IMAGE_TARGET), 2);
+  assert.equal(upscaleFor(1080, 1920, VIDEO_TARGET), 1);
+});
+
+test("a degenerate size cannot produce a NaN scale or a zero-pixel canvas", () => {
+  // These reach the function straight off an <img> or <video> that has not
+  // loaded, where naturalWidth is 0. A NaN scale would take the canvas with it.
+  for (const [w, h] of [[0, 0], [0, 1080], [NaN, NaN], [-10, -10], [Infinity, 100]] as Array<[number, number]>) {
+    const plan = upscalePlan(w, h, IMAGE_TARGET);
+    assert.ok(Number.isFinite(plan.scale), `${w}x${h} gave a non-finite scale`);
+    assert.ok(plan.scale >= 1);
+  }
 });

@@ -148,15 +148,70 @@ export function edgeEnergy(px: Uint8ClampedArray, w: number, h: number): number 
   return count ? sum / count : 0;
 }
 
+// --- how big the output gets ------------------------------------------------
+//
+// This used to aim every source at a 1920 long edge, which meant the tool did
+// nothing at all to the files people actually feed it. A phone photo is 4032px
+// on the long edge and a screen recording is 1920: both were already at or
+// past the target, so both came back the same size they went in, silently,
+// under a button that promised a 4K upscale. The target was the bug.
+//
+// Images now aim at 4K. Video does not: every frame is resampled and unsharp
+// masked in plain JS on the person's own device, so quadrupling the pixel
+// count quadruples a cost that is already the slowest thing here. The two
+// targets are separate constants and every caller names the one it wants,
+// because a shared default is how they drifted apart in the first place.
+
+/** Long-edge targets, in pixels. */
+export const IMAGE_TARGET = 3840;
+export const VIDEO_TARGET = 1920;
+
 /**
- * The output scale for a source, aiming the long edge at 1920 (the platform
- * native) without inventing more than 2x of pixels — past that, upscaling
- * mush just produces bigger mush. Sources already at or above target keep
- * their size: this tool never downscales.
+ * The most pixels this will ever invent. Past 2x, a clean resample of a soft
+ * source is just a bigger soft source, and the sharpening cannot rescue detail
+ * the encoder already threw away.
  */
-export function upscaleFor(w: number, h: number): number {
+export const MAX_UPSCALE = 2;
+
+export type UpscaleReason = "upscaled" | "already-sharp" | "capped";
+
+export interface UpscalePlan {
+  scale: number;
+  /** The output size, even-rounded by the caller if it needs to be. */
+  w: number;
+  h: number;
+  reason: UpscaleReason;
+}
+
+/**
+ * What will happen to a source of this size, worked out BEFORE any pixels
+ * move so the panel can say it out loud.
+ *
+ * There are exactly three outcomes and they must be told apart. A real
+ * upscale; a source already at or above the target, which is left alone and
+ * only sharpened; and a source so small that the 2x ceiling binds before the
+ * target is reached. Reporting the second as though it were the first is what
+ * made this tool look broken, so the reason travels with the numbers.
+ */
+export function upscalePlan(w: number, h: number, target: number): UpscalePlan {
   const long = Math.max(w, h);
-  if (!long) return 1;
-  if (long >= 1920) return 1;
-  return Math.min(2, 1920 / long);
+  if (!Number.isFinite(long) || long <= 0) return { scale: 1, w, h, reason: "already-sharp" };
+  if (long >= target) return { scale: 1, w, h, reason: "already-sharp" };
+  const wanted = target / long;
+  const scale = Math.min(MAX_UPSCALE, wanted);
+  return {
+    scale,
+    w: Math.max(2, Math.round(w * scale)),
+    h: Math.max(2, Math.round(h * scale)),
+    reason: wanted > MAX_UPSCALE ? "capped" : "upscaled",
+  };
+}
+
+/**
+ * Just the scale. The target is required rather than defaulted: the whole
+ * defect this replaces was a single hidden number applying to two callers that
+ * wanted different things.
+ */
+export function upscaleFor(w: number, h: number, target: number): number {
+  return upscalePlan(w, h, target).scale;
 }

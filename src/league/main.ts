@@ -1213,7 +1213,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       },
       {
         id: "polisher", n: "03", name: "The Polisher",
-        body: "Clean up a soft clip on this device: sharpen, colour, and a 4K upscale for the ones worth it.",
+        body: "Sharpen, colour and a real 4K upscale for photos, all on this device. Clips are cleaned at their own size. Nothing is uploaded and no detail is invented.",
         needs: "Your clips or photos · nothing uploaded", href: "/league/tools#polisher",
       },
       {
