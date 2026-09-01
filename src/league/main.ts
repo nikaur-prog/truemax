@@ -1222,7 +1222,12 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
         needs: "No photos, a description, and one render slot a pair", href: "/league/tools#ai",
       },
       {
-        id: "clips", n: "05", name: "Clips Library",
+        id: "studio", n: "05", name: "Carousel Creator",
+        body: "Build a ranked photo carousel from generated characters, uploaded sources, or both. Every generated or morphed slide uses one Studio render.",
+        needs: "One theme · 2-7 slides · optional CTA", href: "/league/tools#carousel",
+      },
+      {
+        id: "clips", n: "06", name: "Clips Library",
         body: "Saved faces, celebrity references and demo exports to cut from, scored instantly, no rescan.",
         needs: "Nothing · it's all in the library", href: "/league/tools#clips",
       },
@@ -1247,7 +1252,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             : `<span class="lg-chip">NOT IN YOUR PLAN</span>`}
         </div></div>`).join("")}
       <div class="lg-card lg-tool off">
-        <div class="lg-tool-kicker">06</div>
+        <div class="lg-tool-kicker">07</div>
         <div class="lg-row" style="border:none;padding:0">
           <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
           the house palette, how every TrueMax video gets its look.</p>

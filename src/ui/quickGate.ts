@@ -44,11 +44,13 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 export interface QuickAccess {
   allowed: boolean;
   staff: boolean;
+  /** Identity-scopes device drafts so a shared browser cannot show another creator's work. */
+  userId: string | null;
   /** Pillar grants from the creator's row. Staff hold every grant. */
   grants: Record<string, boolean>;
 }
 
-const DENIED: QuickAccess = { allowed: false, staff: false, grants: {} };
+const DENIED: QuickAccess = { allowed: false, staff: false, userId: null, grants: {} };
 
 /**
  * Who is at the door, and which rooms they hold keys to.
@@ -56,9 +58,9 @@ const DENIED: QuickAccess = { allowed: false, staff: false, grants: {} };
  * Not just a boolean any more, because the page gates twice: once at the door
  * (allowed at all?) and once per pillar (the owner ticks grants at approval,
  * and a grant the interface ignores is a checkbox that lies). Staff see
- * everything; a creator sees the pillars they were granted, and the two
- * staff-only rooms — AI generation and Calibrate — are simply not rendered
- * for them, matching the endpoints behind them which still 404 non-staff.
+ * everything; a creator sees the pillars they were granted. Calibrate stays
+ * staff-only, while paid generation is controlled by the Studio grant and a
+ * server-side render reservation.
  */
 export async function quickAccessProfile(): Promise<QuickAccess> {
   const token = await currentAccessToken().catch(() => null);
@@ -69,7 +71,14 @@ export async function quickAccessProfile(): Promise<QuickAccess> {
   // end for everybody else.
   if (!token) return DENIED;
   if (await loadIsAdmin().catch(() => false)) {
-    return { allowed: true, staff: true, grants: { cta: true, clips: true, polisher: true, studio: true } };
+    const user = await currentUser().catch(() => null);
+    if (!user) return DENIED;
+    return {
+      allowed: true,
+      staff: true,
+      userId: user.id,
+      grants: { cta: true, clips: true, polisher: true, studio: true },
+    };
   }
   // The League door. Reads the caller's OWN league_creators row — the RLS
   // select policy is `auth.uid() = user_id or staff`, and the explicit eq
@@ -85,7 +94,7 @@ export async function quickAccessProfile(): Promise<QuickAccess> {
       .eq("user_id", user.id)
       .maybeSingle<{ status: string; pillar_grants: Record<string, boolean> | null }>();
     if (data?.status !== "approved") return DENIED;
-    return { allowed: true, staff: false, grants: data.pillar_grants ?? {} };
+    return { allowed: true, staff: false, userId: user.id, grants: data.pillar_grants ?? {} };
   } catch {
     return DENIED;
   }

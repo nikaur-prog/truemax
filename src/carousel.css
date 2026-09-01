@@ -1,0 +1,300 @@
+/* Carousel Creator has more controls than the filmed tools, so it uses the
+   available desktop width while retaining a one-column phone layout. */
+.quick.carousel-open .q-wrap {
+  width: min(100%, 1180px);
+  max-width: 1180px;
+}
+
+.carousel-shell {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 48px;
+}
+
+.carousel-intro {
+  max-width: 720px;
+}
+
+.carousel-intro h1 {
+  margin: 6px 0 8px;
+  font-family: var(--serif);
+  font-size: clamp(42px, 7vw, 78px);
+  font-weight: 400;
+  line-height: .95;
+  letter-spacing: -.035em;
+}
+
+.carousel-intro p,
+.carousel-theme-note,
+.carousel-privacy {
+  margin: 0;
+  color: var(--mut);
+  line-height: 1.55;
+}
+
+.carousel-settings {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 130px minmax(240px, 1fr);
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+}
+
+.carousel-settings label,
+.carousel-fields label {
+  display: grid;
+  gap: 7px;
+}
+
+.carousel-settings label > span,
+.carousel-fields label > span {
+  color: var(--mut);
+  font: 600 10px/1.2 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.carousel-settings select,
+.carousel-fields select,
+.carousel-fields textarea,
+.carousel-fields input[type="file"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.carousel-fields textarea {
+  min-height: 74px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.carousel-cta-check,
+.carousel-permission {
+  grid-template-columns: 22px 1fr !important;
+  align-items: center;
+  align-content: center;
+}
+
+.carousel-cta-check input,
+.carousel-permission input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--acc);
+}
+
+.carousel-cta-check span,
+.carousel-permission span {
+  color: var(--ink) !important;
+  font: 600 13px/1.35 var(--sans, sans-serif) !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.carousel-slides {
+  display: grid;
+  gap: 18px;
+}
+
+.carousel-slide-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: 0 16px 45px rgba(25, 31, 29, .06);
+}
+
+.carousel-slide-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.carousel-slide-card h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.carousel-order {
+  display: flex;
+  gap: 6px;
+}
+
+.carousel-order button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.carousel-order button:disabled {
+  opacity: .28;
+  cursor: default;
+}
+
+.carousel-slide-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 330px);
+  gap: 20px;
+  align-items: start;
+}
+
+.carousel-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.carousel-fields > label:has(textarea),
+.carousel-fields > .carousel-permission,
+.carousel-fields > .btn {
+  grid-column: 1 / -1;
+}
+
+.carousel-preview {
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--mut) 45%, transparent);
+  border-radius: 16px;
+  background: #0d0f0f;
+  color: rgba(255, 255, 255, .7);
+}
+
+.carousel-empty {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.carousel-empty span {
+  font-size: 13px;
+  opacity: .65;
+}
+
+.carousel-preview.ready {
+  position: relative;
+  border-style: solid;
+}
+
+.carousel-preview [data-zoom] {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: #000;
+  cursor: zoom-in;
+}
+
+.carousel-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.carousel-preview-actions {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+}
+
+.carousel-preview-actions .btn {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-color: rgba(255, 255, 255, .3);
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  backdrop-filter: blur(8px);
+}
+
+.carousel-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.carousel-footer-actions .btn {
+  min-width: 190px;
+}
+
+.carousel-privacy {
+  padding: 14px 16px;
+  border-left: 3px solid var(--acc);
+  background: color-mix(in srgb, var(--acc) 7%, transparent);
+  font-size: 13px;
+}
+
+.carousel-zoom {
+  position: fixed;
+  z-index: 10050;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, .9);
+  backdrop-filter: blur(12px);
+}
+
+.carousel-zoom > div {
+  position: relative;
+  height: min(90dvh, 960px);
+  max-width: 95vw;
+  aspect-ratio: 9 / 16;
+}
+
+.carousel-zoom img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  object-fit: contain;
+}
+
+.carousel-zoom button {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  right: 10px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  font-size: 28px;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .quick.carousel-open .q-wrap { width: 100%; padding-inline: 12px; }
+  .carousel-settings,
+  .carousel-slide-grid,
+  .carousel-fields { grid-template-columns: 1fr; }
+  .carousel-settings { padding: 14px; }
+  .carousel-fields > label:has(textarea),
+  .carousel-fields > .carousel-permission,
+  .carousel-fields > .btn { grid-column: auto; }
+  .carousel-slide-card { padding: 14px; }
+  .carousel-preview { width: min(100%, 340px); margin: 0 auto; }
+  .carousel-footer-actions { flex-direction: column; }
+  .carousel-footer-actions .btn { width: 100%; }
+}

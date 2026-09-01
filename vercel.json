@@ -2,6 +2,9 @@
   "functions": {
     "api/ai-image.ts": {
       "maxDuration": 300
+    },
+    "api/carousel-slide.ts": {
+      "maxDuration": 180
     }
   },
   "redirects": [
