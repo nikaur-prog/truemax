@@ -1,5 +1,4 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ageOnDate } from "../src/engine/age.js";
 import {
   MAX_DAILY_MESSAGES,
   MAX_OUTPUT_TOKENS,
@@ -8,6 +7,8 @@ import {
   sanitiseHistory,
 } from "./_maxPersona.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import { maxAccessForUser } from "./_maxAccess.js";
+import { conversationTitle, parsePlanMemoryCommand } from "./_maxConversation.js";
 
 // ---------------------------------------------------------------------------
 // Talking to Max.
@@ -44,12 +45,20 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 // measured rather than argued about.
 const DEFAULT_MODEL = "claude-sonnet-5";
 
-interface ProfileRow {
-  date_of_birth: string;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+interface ConversationRow {
+  id: string;
+  title: string;
 }
 
-interface EntitlementRow {
-  tier: string;
+interface StoredMessageRow {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface PlanItemRow {
+  title: string;
   status: string;
 }
 
@@ -74,38 +83,10 @@ export async function POST(request: Request): Promise<Response> {
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in to talk to Max." }, 401);
 
+    const access = await maxAccessForUser(user.id);
+    if (!access.ok) return json({ error: access.error, upgrade: access.upgrade }, access.status);
+    const age = access.age;
     const admin = getSupabaseAdmin();
-    const [profileResult, entitlementResult, staffResult] = await Promise.all([
-      admin.from("profiles").select("date_of_birth").eq("user_id", user.id).maybeSingle<ProfileRow>(),
-      admin.from("entitlements").select("tier,status").eq("user_id", user.id).maybeSingle<EntitlementRow>(),
-      admin.from("app_admins").select("user_id").eq("user_id", user.id).maybeSingle<{ user_id: string }>(),
-    ]);
-    const accessError = profileResult.error || entitlementResult.error || staffResult.error;
-    if (accessError) throw new Error(`Max access check failed: ${accessError.message}`);
-    const profile = profileResult.data;
-    const entitlement = entitlementResult.data;
-    const staff = staffResult.data;
-
-    // No date of birth means the pathway questions were never finished, and
-    // without an age there is no way to know which set of rules applies. Fail
-    // closed: the under-18 rules exist precisely for the case where you cannot
-    // tell, so refusing is the only safe answer.
-    if (!profile) return json({ error: "Finish your pathway questions before chatting to Max." }, 409);
-    const age = ageOnDate(profile.date_of_birth);
-    if (age === null) return json({ error: "Your date of birth needs fixing before Max can help." }, 409);
-
-    const isStaff = Boolean(staff);
-    const live = Boolean(entitlement && ["active", "trialing"].includes(entitlement.status));
-    const hasMax = isStaff || (live && entitlement?.tier === "max");
-    if (!hasMax) {
-      return json(
-        {
-          error: "Max coaching is part of the Max plan.",
-          upgrade: "max",
-        },
-        402,
-      );
-    }
 
     // Max the SUBSCRIPTION is 18+, which the checkout already enforces. So an
     // account reaching here under 18 is a staff account or a pre-existing
@@ -115,11 +96,12 @@ export async function POST(request: Request): Promise<Response> {
     const context = sanitiseContext(body?.context, age);
     if (!context) return json({ error: "Max could not read your scan." }, 400);
 
-    const history = sanitiseHistory(body?.messages);
-    if (!history.length) return json({ error: "Say something to Max first." }, 400);
-    if (history[history.length - 1].role !== "user") {
+    const incoming = sanitiseHistory(body?.messages);
+    if (!incoming.length) return json({ error: "Say something to Max first." }, 400);
+    if (incoming[incoming.length - 1].role !== "user") {
       return json({ error: "Max is already answering." }, 400);
     }
+    const latest = incoming[incoming.length - 1].content;
 
     // Claimed before the model is called, and the claim is the whole rate
     // limit: it increments and tests in one statement, so two requests racing
@@ -139,6 +121,130 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     claimedUserId = user.id;
+
+    // A conversation is created by the first real message, never by merely
+    // opening the panel. Empty abandoned chats therefore never pollute the
+    // history list. Existing ids are always re-scoped to the authenticated
+    // owner before a message is read or written.
+    const requestedConversationId = typeof body?.conversationId === "string" && UUID.test(body.conversationId)
+      ? body.conversationId
+      : null;
+    let conversation: ConversationRow | null = null;
+    if (requestedConversationId) {
+      const result = await admin
+        .from("max_conversations")
+        .select("id,title")
+        .eq("id", requestedConversationId)
+        .eq("user_id", user.id)
+        .is("archived_at", null)
+        .maybeSingle<ConversationRow>();
+      if (result.error) throw new Error(`Max conversation lookup failed: ${result.error.message}`);
+      if (!result.data) {
+        await releaseClaim();
+        return json({ error: "That Max chat could not be found." }, 404);
+      }
+      conversation = result.data;
+    } else {
+      const source = body?.source === "post_analysis" ? "post_analysis" : "dashboard";
+      const result = await admin
+        .from("max_conversations")
+        .insert({ user_id: user.id, source, title: conversationTitle(latest) })
+        .select("id,title")
+        .single<ConversationRow>();
+      if (result.error || !result.data) {
+        throw new Error(`Max conversation creation failed: ${result.error?.message ?? "no row returned"}`);
+      }
+      conversation = result.data;
+    }
+
+    const turnId = typeof body?.turnId === "string" && UUID.test(body.turnId)
+      ? body.turnId
+      : crypto.randomUUID();
+    const now = new Date().toISOString();
+    const userInsert = await admin.from("max_messages").insert({
+      conversation_id: conversation.id,
+      user_id: user.id,
+      role: "user",
+      content: latest,
+      client_turn_id: turnId,
+      created_at: now,
+    });
+    if (userInsert.error) throw new Error(`Max message could not be saved: ${userInsert.error.message}`);
+
+    let planChange: "added" | "not_working" | null = null;
+    const command = parsePlanMemoryCommand(latest);
+    if (command?.kind === "add") {
+      const result = await admin.from("max_plan_items").upsert({
+        user_id: user.id,
+        title: command.title,
+        normalized_title: command.normalizedTitle,
+        category: command.category,
+        status: "active",
+        source_conversation_id: conversation.id,
+        updated_at: now,
+      }, { onConflict: "user_id,normalized_title" });
+      if (result.error) throw new Error(`Max plan memory could not be updated: ${result.error.message}`);
+      planChange = "added";
+    } else if (command?.kind === "not_working") {
+      const existing = await admin.from("max_plan_items")
+        .update({
+          status: "not_working",
+          notes: "Member said this is not currently working.",
+          source_conversation_id: conversation.id,
+          updated_at: now,
+        })
+        .eq("user_id", user.id)
+        .eq("normalized_title", command.normalizedTitle)
+        .select("id");
+      if (existing.error) throw new Error(`Max plan memory could not be updated: ${existing.error.message}`);
+      if (!existing.data?.length) {
+        const inserted = await admin.from("max_plan_items").insert({
+          user_id: user.id,
+          title: command.title,
+          normalized_title: command.normalizedTitle,
+          category: "other",
+          status: "not_working",
+          notes: "Member said this is not currently working.",
+          source_conversation_id: conversation.id,
+          updated_at: now,
+        });
+        if (inserted.error) throw new Error(`Max plan memory could not be updated: ${inserted.error.message}`);
+      }
+      planChange = "not_working";
+    }
+
+    const conversationUpdate = await admin
+      .from("max_conversations")
+      .update({ updated_at: now, last_message_at: now })
+      .eq("id", conversation.id)
+      .eq("user_id", user.id);
+    if (conversationUpdate.error) throw new Error(`Max conversation could not be updated: ${conversationUpdate.error.message}`);
+
+    const [messageResult, planResult] = await Promise.all([
+      admin
+        .from("max_messages")
+        .select("role,content")
+        .eq("conversation_id", conversation.id)
+        .eq("user_id", user.id)
+        .order("id", { ascending: false })
+        .limit(24),
+      admin
+        .from("max_plan_items")
+        .select("title,status")
+        .eq("user_id", user.id)
+        .in("status", ["active", "paused", "not_working"])
+        .order("updated_at", { ascending: false })
+        .limit(16),
+    ]);
+    if (messageResult.error) throw new Error(`Max history could not be read: ${messageResult.error.message}`);
+    if (planResult.error) throw new Error(`Max plan memory could not be read: ${planResult.error.message}`);
+    const stored = [...((messageResult.data ?? []) as StoredMessageRow[])].reverse();
+    const history = sanitiseHistory(stored);
+    for (const item of (planResult.data ?? []) as PlanItemRow[]) {
+      const state = item.status === "not_working" ? "not working, needs an alternative" : item.status;
+      context.activePlan.push(`${item.title}: ${state}`);
+    }
+    context.activePlan = [...new Set(context.activePlan)].slice(0, 16);
 
     const { shared, scoped } = buildSystemBlocks(context);
     const stream = client().messages.stream({
@@ -161,12 +267,14 @@ export async function POST(request: Request): Promise<Response> {
     // somebody types the message that gets refused.
     const encoder = new TextEncoder();
     let deliveredText = false;
+    let assistantText = "";
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
           for await (const event of stream) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
               deliveredText = deliveredText || event.delta.text.length > 0;
+              assistantText += event.delta.text;
               controller.enqueue(encoder.encode(event.delta.text));
             }
           }
@@ -187,6 +295,22 @@ export async function POST(request: Request): Promise<Response> {
             });
           } else {
             claimedUserId = null;
+            const savedAt = new Date().toISOString();
+            const assistantInsert = await admin.from("max_messages").insert({
+              conversation_id: conversation.id,
+              user_id: user.id,
+              role: "assistant",
+              content: assistantText.trim().slice(0, 8000),
+              created_at: savedAt,
+            });
+            const updated = assistantInsert.error ? null : await admin
+              .from("max_conversations")
+              .update({ updated_at: savedAt, last_message_at: savedAt })
+              .eq("id", conversation.id)
+              .eq("user_id", user.id);
+            if (assistantInsert.error || updated?.error) {
+              console.error("max-chat persistence", assistantInsert.error?.message ?? updated?.error?.message);
+            }
           }
           controller.close();
         }
@@ -215,6 +339,8 @@ export async function POST(request: Request): Promise<Response> {
         "Cache-Control": "no-store, no-transform",
         "X-Accel-Buffering": "no",
         "X-Max-Remaining": String(typeof remaining === "number" ? remaining : MAX_DAILY_MESSAGES),
+        "X-Max-Conversation": conversation.id,
+        ...(planChange ? { "X-Max-Plan-Change": planChange } : {}),
       },
     });
   } catch (error) {

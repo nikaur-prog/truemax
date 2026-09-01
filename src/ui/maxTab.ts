@@ -1,10 +1,17 @@
-import { loadEntitlement, openBillingPortal, startMaxCheckout } from "../engine/entitlement.js";
+import { hasMaxAccess, openBillingPortal, recoverMaxEntitlement, startMaxCheckout } from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { openMaxChat } from "./maxChat.js";
 import { MAX_MONTHLY } from "./onboardingFunnel.js";
 import { readProtocols } from "../engine/protocol.js";
 import { mountProtocolCard } from "./protocolCard.js";
+import { announceMembershipBrand } from "./membershipBrand.js";
+import {
+  MAX_CONVERSATIONS_CHANGED,
+  listMaxConversations,
+  syncMaxPlanItems,
+} from "../engine/maxConversations.js";
+import type { MaxConversationSummary, MaxPlanItem } from "../engine/maxConversations.js";
 
 // ---------------------------------------------------------------------------
 // The Max tab on the dashboard.
@@ -72,18 +79,33 @@ function escapeHTML(value: string): string {
   })[char]!);
 }
 
-function performanceItems(): string {
+function performanceItems(memory: readonly MaxPlanItem[] = []): string {
   const active = readProtocols().filter((protocol) => protocol.status !== "declined" && protocol.status !== "judged");
-  if (!active.length) {
-    return `<p class="maxtab-tracker-empty">Nothing is being tracked yet. Choose an action from your TrueMax plan and it will appear here.</p>`;
-  }
-  return `<div class="maxtab-tracker-list">${active.map((protocol) => {
-    const state = protocol.status === "running"
+  const local = active.map((protocol) => ({
+    title: protocol.title,
+    state: protocol.status === "running"
       ? "In progress"
       : protocol.status === "committed"
         ? "Ready to start"
-        : "Waiting for your choice";
-    return `<div class="maxtab-tracker-row"><b>${escapeHTML(protocol.title)}</b><span>${state}</span></div>`;
+        : "Waiting for your choice",
+  }));
+  const seen = new Set(local.map((item) => item.title.trim().toLocaleLowerCase("en-US")));
+  const remote = memory
+    .filter((item) => !seen.has(item.title.trim().toLocaleLowerCase("en-US")))
+    .map((item) => ({
+      title: item.title,
+      state: item.status === "not_working"
+        ? "Needs an alternative"
+        : item.status === "paused"
+          ? "Paused"
+          : "In your plan",
+    }));
+  const items = [...local, ...remote];
+  if (!items.length) {
+    return `<p class="maxtab-tracker-empty">Nothing is being tracked yet. Choose an action from your TrueMax plan and it will appear here.</p>`;
+  }
+  return `<div class="maxtab-tracker-list">${items.map((item) => {
+    return `<div class="maxtab-tracker-row"><b>${escapeHTML(item.title)}</b><span>${item.state}</span></div>`;
   }).join("")}</div>`;
 }
 
@@ -94,6 +116,14 @@ function performanceTrackerMarkup(): string {
     <p>Check-ins and follow-ups live here, separate from the analysis of a new scan.</p>
     <div data-performance-due></div>
     <div data-performance-items>${performanceItems()}</div>
+  </section>`;
+}
+
+function conversationHistoryMarkup(): string {
+  return `<section class="maxtab-history" aria-labelledby="maxtab-history-title">
+    <header><div><span class="klabel">CONVERSATIONS</span><h3 id="maxtab-history-title">Your Max chats</h3></div>
+      <button type="button" class="linkish" data-max-new>New chat</button></header>
+    <div class="maxtab-history-list" data-max-history><p class="maxtab-history-empty">Loading your chats…</p></div>
   </section>`;
 }
 
@@ -111,6 +141,7 @@ export function maxTabMarkup(paid: boolean): string {
         <h2>Ask Coach Max anything</h2>
         <p>He has read every measurement in your scans. Plans, priorities, what moved and what did not: that is what he is for.</p>
       </div>
+      ${conversationHistoryMarkup()}
       ${performanceTrackerMarkup()}
       ${composer}
     </div>`;
@@ -164,13 +195,62 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
     // is a doorknob shaped like the door.
     const open = () => {
       input.blur();
-      openMaxChat(null, { greeting: TAB_GREETING });
+      openMaxChat(null, { greeting: TAB_GREETING, source: "dashboard" });
     };
     input.addEventListener("focus", open);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       open();
     });
+
+    root.querySelector<HTMLButtonElement>("[data-max-new]")?.addEventListener("click", open);
+    const history = root.querySelector<HTMLElement>("[data-max-history]");
+    const renderHistory = (conversations: readonly MaxConversationSummary[]): void => {
+      if (!history) return;
+      history.innerHTML = "";
+      if (!conversations.length) {
+        history.innerHTML = `<p class="maxtab-history-empty">No saved chats yet. Your first conversation will appear here automatically.</p>`;
+        return;
+      }
+      for (const conversation of conversations) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "maxtab-history-row";
+        const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
+          .format(new Date(conversation.last_message_at));
+        button.innerHTML = `<span><b>${escapeHTML(conversation.title)}</b><small>${conversation.source === "post_analysis" ? "Post-analysis" : "Coach"} · ${when}</small></span><i aria-hidden="true">›</i>`;
+        button.onclick = () => openMaxChat(null, {
+          conversationId: conversation.id,
+          source: conversation.source,
+          greeting: TAB_GREETING,
+        });
+        history.appendChild(button);
+      }
+    };
+    const refresh = (): void => {
+      void listMaxConversations()
+        .then((result) => {
+          if (!panel.isConnected) return;
+          renderHistory(result.conversations);
+          if (items) items.innerHTML = performanceItems(result.planItems);
+        })
+        .catch((error) => {
+          if (!history || !panel.isConnected) return;
+          history.innerHTML = `<p class="maxtab-history-empty">${escapeHTML(error instanceof Error ? error.message : "Your chats could not be loaded.")}</p>`;
+        });
+    };
+    const onChanged = (): void => {
+      if (!panel.isConnected) {
+        window.removeEventListener(MAX_CONVERSATIONS_CHANGED, onChanged);
+        return;
+      }
+      refresh();
+    };
+    window.addEventListener(MAX_CONVERSATIONS_CHANGED, onChanged);
+    const localPlan = readProtocols()
+      .filter((protocol) => protocol.status !== "declined" && protocol.status !== "judged")
+      .map((protocol) => ({ title: protocol.title }));
+    void syncMaxPlanItems(localPlan).catch(() => undefined).finally(refresh);
     return;
   }
 
@@ -230,17 +310,34 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
     input.blur();
     if (framed) return;
     framed = true;
-    applyFraming(false);
-    void loadEntitlement()
+    cta.disabled = true;
+    cta.textContent = "Checking your Max access…";
+    price.textContent = "Checking the subscription already attached to this account.";
+    status.textContent = "";
+    void recoverMaxEntitlement()
       .then((entitlement: Entitlement) => {
+        if (!panel.isConnected) return;
+        if (hasMaxAccess(entitlement)) {
+          const question = input.value.trim();
+          announceMembershipBrand("max");
+          panel.innerHTML = maxTabMarkup(true);
+          wireMaxTab(panel, { paid: true });
+          openMaxChat(null, { greeting: TAB_GREETING, initialQuestion: question || undefined, source: "dashboard" });
+          return;
+        }
         const upgrading =
           entitlement.tier === "starter" &&
           (entitlement.status === "active" || entitlement.status === "trialing");
-        // Not while a click is mid-flight: swapping the handler under a
-        // pressed button would send somebody down both billing paths.
-        if (upgrading && !cta.disabled) applyFraming(true);
+        applyFraming(upgrading);
+        cta.disabled = false;
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!panel.isConnected) return;
+        applyFraming(false);
+        cta.disabled = false;
+        status.textContent = "We could not confirm an existing Max subscription just now.";
+      })
+      .finally(() => undefined);
   };
 
   // Typing is the trigger; clicking into the field is not. Somebody may click

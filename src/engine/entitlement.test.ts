@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasMaxAccess, hasPaidAccess, resolveBillingIdentity } from "./entitlement.js";
+import { hasMaxAccess, hasPaidAccess, recoverMaxEntitlement, resolveBillingIdentity } from "./entitlement.js";
 import type { Entitlement } from "./entitlement.js";
 
 // The gate between "measured your face for free" and "paid for the method".
@@ -45,6 +45,39 @@ test("a lapsed subscription locks, whatever tier it used to be", () => {
 test("free never has access", () => {
   assert.equal(hasMaxAccess(ent({ tier: "free", status: "none" })), false);
   assert.equal(hasPaidAccess(ent({ tier: "free", status: "none" })), false);
+});
+
+test("an explicit Max entry repairs a stale entitlement and re-reads it", async () => {
+  const rows = [
+    ent({ tier: "free", status: "none" }),
+    ent({ tier: "max", status: "active" }),
+  ];
+  let repairs = 0;
+  const recovered = await recoverMaxEntitlement(
+    async () => rows.shift()!,
+    async () => {
+      repairs += 1;
+      return true;
+    },
+  );
+
+  assert.equal(repairs, 1);
+  assert.equal(hasMaxAccess(recovered), true);
+  assert.equal(rows.length, 0, "the repaired projection was not read again");
+});
+
+test("an already-live Max entitlement never calls Stripe reconciliation", async () => {
+  let repairs = 0;
+  const recovered = await recoverMaxEntitlement(
+    async () => ent(),
+    async () => {
+      repairs += 1;
+      return true;
+    },
+  );
+
+  assert.equal(hasMaxAccess(recovered), true);
+  assert.equal(repairs, 0);
 });
 
 test("cancel-at-period-end keeps access until the period actually ends", () => {

@@ -3,6 +3,10 @@ import { maxCharacterMarkup, reactMax, wireMaxInteractions } from "./maxCharacte
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 import { requestedActionPlan } from "./maxActionBridge.js";
+import {
+  announceMaxConversationChanged,
+  loadMaxConversation,
+} from "../engine/maxConversations.js";
 
 // ---------------------------------------------------------------------------
 // Talking to Max.
@@ -18,11 +22,10 @@ import { requestedActionPlan } from "./maxActionBridge.js";
 // steady rate: the text lands smoothly, the mouth has something continuous to
 // animate against, and if the network stalls mid-sentence the buffer covers it.
 //
-// Nothing is stored. The transcript lives in this module while the panel is
-// open and is gone when it closes, which matches every other thing this product
-// does with what it learns about somebody's face. Sending it back on each
-// request is what gives Max a memory of the conversation, and it costs nothing
-// to keep because there is nothing to keep.
+// The photographs and measurement payload still never leave the device. The
+// words in a Max conversation do: members explicitly asked for the same durable
+// thread history they expect from other assistants, so authenticated message
+// text is stored account-side and can be reopened from the Coach tab.
 // ---------------------------------------------------------------------------
 
 interface Turn {
@@ -87,11 +90,19 @@ function greeting(context: MaxChatContext | null): string {
 
 export function openMaxChat(
   context: MaxChatContext | null,
-  options: { greeting?: string; onOpenPlan?: () => void } = {},
+  options: {
+    greeting?: string;
+    onOpenPlan?: () => void;
+    initialQuestion?: string;
+    source?: "dashboard" | "post_analysis";
+    conversationId?: string;
+  } = {},
 ): void {
   if (host) return;
   const generation = ++chatGeneration;
   transcript = [];
+  let conversationId = options.conversationId ?? null;
+  let loadingConversation = Boolean(conversationId);
 
   host = document.createElement("div");
   host.className = "maxchat";
@@ -159,7 +170,7 @@ export function openMaxChat(
     action.appendChild(button);
   };
 
-  // He says hello, and no longer waves about it.
+  // He says hello in a new chat, and no longer waves about it.
   //
   // Opening the chat used to get a full big-wave entrance on the reasoning
   // that somebody had just decided to talk to him. In practice it fires on
@@ -180,11 +191,38 @@ export function openMaxChat(
     face.classList.add("mx-settle");
     window.setTimeout(() => face.classList.remove("mx-settle"), 600);
   }
-  face?.classList.add("speaking");
-  speakGreeting(log, options.greeting ?? greeting(context), () => {
-    face?.classList.remove("speaking");
-  });
-  renderChips(OPENING_SUGGESTIONS);
+  if (conversationId) {
+    form.classList.add("busy");
+    input.disabled = true;
+    void loadMaxConversation(conversationId)
+      .then((detail) => {
+        if (generation !== chatGeneration || !host) return;
+        transcript = detail.messages.map((message) => ({ role: message.role, content: message.content }));
+        log.innerHTML = "";
+        for (const turn of transcript) say(log, turn.content, turn.role === "user" ? "you" : "max");
+        renderChips(suggestFollowUps(
+          context,
+          transcript[transcript.length - 1]?.content ?? "",
+          askedThisSession,
+        ));
+      })
+      .catch((error) => {
+        if (generation !== chatGeneration || !host) return;
+        say(log, error instanceof Error ? error.message : "That chat could not be loaded.", "err");
+      })
+      .finally(() => {
+        if (generation !== chatGeneration || !host) return;
+        loadingConversation = false;
+        input.disabled = false;
+        form.classList.remove("busy");
+      });
+  } else {
+    face?.classList.add("speaking");
+    speakGreeting(log, options.greeting ?? greeting(context), () => {
+      face?.classList.remove("speaking");
+    });
+    renderChips(OPENING_SUGGESTIONS);
+  }
 
   host.querySelector<HTMLButtonElement>(".maxchat-close")!.onclick = closeMaxChat;
   host.addEventListener("click", (event) => {
@@ -200,17 +238,30 @@ export function openMaxChat(
   form.onsubmit = (event) => {
     event.preventDefault();
     const question = input.value.trim();
-    if (!question || inFlight) return;
+    if (!question || inFlight || loadingConversation) return;
     input.value = "";
     askedThisSession.push(question);
     renderPlanAction(false);
     renderChips([]);
-    void ask(log, form, question, context, generation).then((reply) => {
+    void ask(log, form, question, context, generation, {
+      conversationId,
+      source: options.source ?? (context ? "post_analysis" : "dashboard"),
+      onConversation: (id) => {
+        conversationId = id;
+      },
+    }).then((reply) => {
       if (generation !== chatGeneration || !host) return;
       renderPlanAction(Boolean(reply) && requestedActionPlan(question));
       renderChips(reply ? suggestFollowUps(context, reply, askedThisSession) : []);
     });
   };
+
+  if (options.initialQuestion?.trim()) {
+    input.value = options.initialQuestion.trim().slice(0, 600);
+    queueMicrotask(() => {
+      if (generation === chatGeneration && host) form.requestSubmit();
+    });
+  }
 
   // Not on touch: focusing an input pops the keyboard over the character the
   // person just tapped to meet, which is a poor hello.
@@ -291,6 +342,11 @@ async function ask(
   question: string,
   context: MaxChatContext | null,
   generation: number,
+  persistence: {
+    conversationId: string | null;
+    source: "dashboard" | "post_analysis";
+    onConversation: (id: string) => void;
+  },
 ): Promise<string | null> {
   say(log, question, "you");
   transcript.push({ role: "user", content: question });
@@ -348,7 +404,16 @@ async function ask(
     const response = await fetch("/api/max-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ context, messages: transcript }),
+      // An empty object is a valid "no scan yet" context. Sending null made
+      // the dashboard chat look available and then fail every first message at
+      // the server's malformed-client boundary.
+      body: JSON.stringify({
+        context: context ?? {},
+        messages: transcript,
+        conversationId: persistence.conversationId,
+        source: persistence.source,
+        turnId: crypto.randomUUID(),
+      }),
       signal: controller.signal,
     });
     if (generation !== chatGeneration) return null;
@@ -362,6 +427,12 @@ async function ask(
       // had already seen it.
       transcript.pop();
       return null;
+    }
+
+    const savedConversation = response.headers.get("X-Max-Conversation");
+    if (savedConversation) {
+      persistence.onConversation(savedConversation);
+      announceMaxConversationChanged();
     }
 
     const said = await drain(response.body, bubble, log, beginSpeaking);
