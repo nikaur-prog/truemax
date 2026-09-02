@@ -1,25 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { topPct } from "./scoreCard.js";
+import { scoreCardRank } from "./scoreCard.js";
 import { aggregateScoreToPercentile } from "../engine/scoring.js";
-import { statedPct } from "../engine/precision.js";
 
-test("the card never prints a precision the sample cannot support", () => {
-  // The whole reason this goes through statedPct. A card claiming "top 12.4%"
-  // is making a resolution claim about a reference population that does not
-  // support one, and it is the first thing a competitor would screenshot.
-  for (let p = 1; p <= 99; p++) {
-    const top = topPct(p);
-    assert.equal(top, Math.max(1, 100 - statedPct(p)), `p=${p}`);
-    assert.equal(top, Math.round(top), `p=${p} produced a fractional percentage`);
-  }
-});
-
-test("top-N never reads as zero", () => {
-  // "Top 0%" is nonsense and would appear for anyone the curve puts at the very
-  // end. One is the floor.
-  assert.ok(topPct(100) >= 1);
-  assert.ok(topPct(99.9) >= 1);
+test("the card names the correct side of the population", () => {
+  assert.equal(scoreCardRank(1), "Bottom 1%");
+  assert.equal(scoreCardRank(10), "Bottom 10%");
+  // 47 rounds to the honest five-point display precision. At 48/49 the
+  // displayed standing is exactly the median and therefore reads Top 50%.
+  assert.equal(scoreCardRank(47), "Bottom 45%");
+  assert.equal(scoreCardRank(50), "Top 50%");
+  assert.equal(scoreCardRank(80), "Top 20%");
+  assert.equal(scoreCardRank(95), "Top 5%");
+  assert.equal(scoreCardRank(100), "Top 1%");
 });
 
 test("a modest score gain is a large rank gain in the middle", () => {

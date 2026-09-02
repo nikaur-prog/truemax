@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Report } from "../engine/types.js";
 import { REGION_NAMES, aggregateScoreToPercentile } from "../engine/scoring.js";
-import { statedPct } from "../engine/precision.js";
+import { rankShort } from "./templates.js";
 
 // ---------------------------------------------------------------------------
 // The endcard.
@@ -69,10 +69,11 @@ export interface ScoreCardInput {
   previousOverall?: number;
 }
 
-/** The top-N% a percentile corresponds to, already rounded for print. */
-function topPct(percentile: number): number {
-  return Math.max(1, 100 - statedPct(percentile));
-}
+// Kept as a named export so the end card's exact wording can be asserted
+// without rasterising a canvas in a unit test. The shared formatter is the
+// important part: the results UI already says Bottom 10% below the median, and
+// the export must not turn that same reading into the praise-sounding Top 90%.
+export const scoreCardRank = rankShort;
 
 export function renderScoreCard(
   canvas: HTMLCanvasElement,
@@ -219,7 +220,7 @@ function drawHero(
   ctx.font = "600 34px Inter, Arial, sans-serif";
   ctx.letterSpacing = "0px";
   ctx.fillStyle = colour;
-  ctx.fillText(`Top ${topPct(percentile)}%`, x, y + 166);
+  ctx.fillText(scoreCardRank(percentile), x, y + 166);
 
   // The bar is positional, not decorative: it fills to the percentile, so the
   // two bars side by side show the rank gap as a length.
@@ -326,5 +327,3 @@ function roundRect(
 }
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
-
-export { topPct };
