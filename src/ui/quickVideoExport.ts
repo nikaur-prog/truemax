@@ -1,4 +1,3 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { ScoredMetric, Sex } from "../engine/types.js";
 import { rankShort } from "./templates.js";
@@ -461,20 +460,14 @@ function drawScanLine(ctx: CanvasRenderingContext2D, x: number, y: number, w: nu
   ctx.restore();
 }
 
-// The scan: a MESH, not a scatter of dots.
+// The scan: one sparse, connected measurement graph.
 //
-// This drew every other landmark as a 2.6px white dot, which is 234 unconnected
-// specks on a face. It reads as confetti, and — the part that actually costs
-// something — it is the ONE frame in the export that is supposed to say "this
-// is measuring you". The interactive product has drawn a proper tesselated mesh
-// since the beginning (see overlay.ts strokeMesh); the exported video, which is
-// the version thousands of people see, was the odd one out with the cheap
-// version of the same idea.
-//
-// Same tesselation the app uses, so the two cannot look like different
-// products. The dots stay, smaller and dimmer, sitting on the vertices — a mesh
-// with no points reads as a net thrown over a face, and the points are what
-// make it read as measurement.
+// MediaPipe supplies 478 vertices and thousands of tessellation edges. That is
+// useful model output, not a useful graphic: it turns a face into a wireframe
+// texture and leaves the important points indistinguishable from everything
+// around them. Only the landmarks the product actually talks about are shown
+// here, and every one belongs to the graph below. The same points and edges are
+// shared with the verdict constellation, so the two cuts cannot drift apart.
 //
 // Revealed BY POSITION rather than by index. Walking the landmark array in
 // order fills in whatever arbitrary sequence MediaPipe happens to store its
@@ -519,51 +512,76 @@ function drawLandmarks(
   // A little past the chin at full progress, so the last row is not left
   // permanently half drawn.
   const front = top + span * progress * 1.06;
-  const lit = (p: NormalizedLandmark) => p.y <= front;
+  const revealBand = span * 0.055;
+  const pointStrength = (p: NormalizedLandmark) => clamp01((front - p.y) / revealBand);
 
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Weight and alpha COPIED from overlay.ts, which draws this same tesselation
-  // over real faces in the live product every day. Inventing new numbers here
-  // would mean tuning a 2,600-triangle mesh against a synthetic fixture, and a
-  // fixture's landmarks are not anatomical — the tesselation indices connect
-  // points that are neighbours on a face and strangers on anything else, so it
-  // renders as a hairball no matter what the settings are. Borrowing the values
-  // that are already proven is the only honest calibration available here.
-  //
-  // Tinted rather than white: this is the scanning state, and the accent is
-  // what the rest of the product uses to mean "the machine is working".
-  ctx.strokeStyle = "rgba(143,243,224,0.20)";
-  ctx.lineWidth = Math.max(0.35, w / 1600);
-  ctx.beginPath();
-  for (const { start, end } of FaceLandmarker.FACE_LANDMARKS_TESSELATION) {
+  // Each connection gets a wide, low-opacity energy trace and a narrow core.
+  // The lower endpoint controls its reveal, so a segment grows into place with
+  // the scan rather than popping on as soon as one endpoint appears.
+  for (const [start, end] of MEASUREMENT_CONNECTIONS) {
     const a = landmarks[start];
     const b = landmarks[end];
-    // Both ends have to have been reached, or edges race ahead of the front and
-    // the mesh grows tendrils down the face before the points arrive.
-    if (!a || !b || !lit(a) || !lit(b)) continue;
+    if (!a || !b) continue;
+    const strength = Math.min(pointStrength(a), pointStrength(b));
+    if (strength <= 0) continue;
     const pa = project(a);
     const pb = project(b);
-    if (pa.x < x || pa.x > x + w || pb.x < x || pb.x > x + w) continue;
+    if (
+      pa.x < x || pa.x > x + w || pa.y < y || pa.y > y + h ||
+      pb.x < x || pb.x > x + w || pb.y < y || pb.y > y + h
+    ) continue;
+
+    const flare = Math.sin(strength * Math.PI);
+    ctx.globalAlpha = alpha * strength * (0.2 + flare * 0.22);
+    ctx.strokeStyle = "rgba(143,243,224,0.58)";
+    ctx.lineWidth = Math.max(3.2, w / 170);
+    ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
-  }
-  ctx.stroke();
+    ctx.stroke();
 
-  // The vertices, on top. Every other one — all 468 at this size is noise, and
-  // the mesh already carries the structure.
-  ctx.fillStyle = "rgba(255,255,255,0.62)";
-  const r = Math.max(0.8, w / 520);
-  for (let i = 0; i < landmarks.length; i += 2) {
-    const p = landmarks[i];
-    if (!p || !lit(p)) continue;
+    ctx.globalAlpha = alpha * strength * (0.72 + flare * 0.2);
+    ctx.strokeStyle = "rgba(201,255,242,0.82)";
+    ctx.lineWidth = Math.max(0.72, w / 760);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  }
+
+  // The anchors arrive just behind the reveal front: a short mint flare, then
+  // a small dark-rimmed core. The rim keeps them crisp on every skin tone and
+  // the settled size avoids turning the face into a field of LEDs.
+  const base = Math.max(1.45, w / 390);
+  for (const index of MEASUREMENT_LANDMARKS) {
+    const p = landmarks[index];
+    if (!p) continue;
+    const strength = pointStrength(p);
+    if (strength <= 0) continue;
     const q = project(p);
     if (q.x < x || q.x > x + w || q.y < y || q.y > y + h) continue;
+
+    const flare = Math.sin(strength * Math.PI);
+    ctx.globalAlpha = alpha * strength * (0.24 + flare * 0.5);
+    ctx.fillStyle = "rgba(143,243,224,0.34)";
     ctx.beginPath();
-    ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
+    ctx.arc(q.x, q.y, base * (2.4 + flare * 1.5), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = alpha * strength;
+    ctx.fillStyle = "rgba(5,12,10,0.82)";
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, base * (1.42 + flare * 0.18), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#8ff3e0";
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, base * (0.72 + flare * 0.12), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -656,7 +674,7 @@ export function fitVerdict(
 //
 // Points ignite in list order with a brief flare; a line lights only once both
 // of its stars exist. Pure function of progress — no clock, no randomness.
-const CONSTELLATION_POINTS = [
+export const MEASUREMENT_LANDMARKS = [
   10, 168, 1, 2, 13, 17, 152, // the midline chain, forehead to chin
   33, 133, 362, 263, // eye corners
   468, 473, // pupils
@@ -667,19 +685,26 @@ const CONSTELLATION_POINTS = [
   172, 136, 149, 148, 377, 378, 365, 397, // mandible run
   50, 280, // cheek mass
   199, // under-chin
-];
-const CONSTELLATION_LINES: Array<[number, number]> = [
+] as const;
+const MEASUREMENT_LANDMARK_ORDER = new Map<number, number>(
+  MEASUREMENT_LANDMARKS.map((index, order) => [index, order]),
+);
+export const MEASUREMENT_CONNECTIONS = [
   [10, 168], [168, 1], [1, 2], [2, 13], [13, 17], [17, 152], // midline
-  [33, 133], [362, 263], [133, 362], // eyes and the intercanthal bridge
-  [70, 105], [105, 107], [336, 334], [334, 300], // brows
+  [10, 70], [70, 105], [105, 107], [107, 168], // left brow into the centre
+  [10, 300], [300, 334], [334, 336], [336, 168], // right brow into the centre
+  [33, 468], [468, 133], [133, 362], [362, 473], [473, 263], // eyes and pupils
+  [33, 70], [133, 107], [362, 336], [263, 300], // eye-to-brow supports
+  [1, 98], [98, 2], [2, 327], [327, 1], // nasal construction
+  [133, 98], [362, 327], // inner canthi to nasal base
   [234, 454], // bizygomatic width
-  [98, 327], // nasal base
-  [61, 0], [0, 291], // lips
+  [70, 234], [234, 50], [50, 98], [50, 61], // left cheek plane
+  [300, 454], [454, 280], [280, 327], [280, 291], // right cheek plane
+  [61, 0], [0, 291], [61, 13], [13, 291], // lips into the midline
   [234, 172], [172, 136], [136, 149], [149, 148], [148, 152], // left mandible
   [454, 397], [397, 365], [365, 378], [378, 377], [377, 152], // right mandible
-  [50, 234], [280, 454], // cheeks out to the arch
-  [468, 133], [473, 362], // pupils to inner canthi
-];
+  [17, 199], [199, 152], // under-chin depth
+] as const satisfies ReadonlyArray<readonly [number, number]>;
 
 function drawConstellation(
   ctx: CanvasRenderingContext2D,
@@ -700,7 +725,7 @@ function drawConstellation(
   });
   // How far through its own ignition each star is: staggered down the list,
   // each taking a fixed slice of the reveal to flare and settle.
-  const n = CONSTELLATION_POINTS.length;
+  const n = MEASUREMENT_LANDMARKS.length;
   const lit = (i: number) => clamp01((progress * (n + 6) - i) / 6);
 
   ctx.save();
@@ -711,9 +736,9 @@ function drawConstellation(
   // dimmer endpoint, so the graph assembles joint by joint.
   ctx.strokeStyle = "rgba(143,243,224,0.55)";
   ctx.lineWidth = Math.max(0.8, w / 780);
-  for (const [a, b] of CONSTELLATION_LINES) {
-    const ia = CONSTELLATION_POINTS.indexOf(a);
-    const ib = CONSTELLATION_POINTS.indexOf(b);
+  for (const [a, b] of MEASUREMENT_CONNECTIONS) {
+    const ia = MEASUREMENT_LANDMARK_ORDER.get(a) ?? -1;
+    const ib = MEASUREMENT_LANDMARK_ORDER.get(b) ?? -1;
     const la = landmarks[a];
     const lb = landmarks[b];
     if (!la || !lb) continue;
@@ -733,7 +758,7 @@ function drawConstellation(
   // rather than fades in. Refined iris points may be absent on some models;
   // any missing index is simply skipped.
   for (let i = 0; i < n; i++) {
-    const p = landmarks[CONSTELLATION_POINTS[i]];
+    const p = landmarks[MEASUREMENT_LANDMARKS[i]];
     if (!p) continue;
     const s = lit(i);
     if (s <= 0) continue;
