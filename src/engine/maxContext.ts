@@ -141,3 +141,89 @@ export function buildMaxContext({ report, tone, scans, potential, movement, acti
     movement,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The dashboard's view of a scan.
+//
+// The Coach tab used to open the chat with no context at all and a greeting
+// that implied the opposite, so a paying member's first question on the
+// dashboard was answered by a model that had never seen their numbers. The
+// stored row cannot carry the metric table (see StoredScan for why), but it
+// carries the overall, the percentile, the pillars and the region standings,
+// and that is enough for Max to talk about the scan rather than around it.
+//
+// Same rule as buildMaxContext: nothing here computes a score. Every figure is
+// copied out of the row the results screen wrote.
+// ---------------------------------------------------------------------------
+
+export interface StoredScanView {
+  sex: "male" | "female";
+  date: string;
+  overall: number;
+  overallPercentile?: number;
+  pillars?: Partial<Record<string, number>>;
+  regionPercentiles?: Partial<Record<string, number>>;
+  potential?: number;
+}
+
+export interface StoredContextInput {
+  latest: StoredScanView;
+  previous?: StoredScanView | null;
+  tone: VerdictTone;
+  scans: number;
+  // See ContextInput.potential: only sent when the account can see it.
+  includePotential: boolean;
+  activePlan?: string[];
+  // Injected so a test can pin "days ago" without touching the clock.
+  now?: number;
+}
+
+// The plain movement line for a chat opened away from the results screen. The
+// results screen has the full delta reading and its copy; this has two rows
+// and a date, and says only what those support.
+export function storedMovement(latest: StoredScanView, previous: StoredScanView, now = Date.now()): string | undefined {
+  const delta = latest.overall - previous.overall;
+  const then = new Date(previous.date).getTime();
+  const at = new Date(latest.date).getTime();
+  if (!Number.isFinite(delta) || !Number.isFinite(then) || !Number.isFinite(at)) return undefined;
+  const daysBetween = Math.max(0, Math.round((at - then) / 86_400_000));
+  const daysSince = Math.max(0, Math.round((now - at) / 86_400_000));
+  const size = Math.abs(delta).toFixed(1);
+  const dir = delta >= 0 ? "up" : "down";
+  const reading = Math.abs(delta) < 0.6
+    ? "inside the spread two photographs of one face produce, so not a change"
+    : daysBetween < 4
+      ? "over too short a gap to be structural, so read as capture rather than change"
+      : "outside normal capture spread, worth noting";
+  return `${size} ${dir} between the last two scans (${daysBetween} days apart, the latest ${daysSince} days ago): ${reading}`;
+}
+
+export function contextFromStoredScan(input: StoredContextInput): MaxChatContext {
+  const { latest, previous, tone, scans, includePotential, activePlan, now } = input;
+  const regionNames = REGION_NAMES as Record<string, string>;
+  return {
+    sex: latest.sex,
+    tone,
+    overall: Math.round(latest.overall * 10) / 10,
+    percentile: Math.round(latest.overallPercentile ?? 50),
+    potential: includePotential && latest.potential !== undefined
+      ? Math.round(latest.potential * 10) / 10
+      : undefined,
+    pillars: Object.entries(latest.pillars ?? {})
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))
+      .map(([label, score]) => ({ label, score: Math.round(score * 10) / 10 })),
+    regions: Object.entries(latest.regionPercentiles ?? {})
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))
+      .map(([region, percentile]) => ({
+        label: regionNames[region] ?? region,
+        percentile: Math.round(percentile),
+      })),
+    // No metric table in the row, and no pretending: the server's context
+    // block says so to Max when both of these are empty.
+    measurements: [],
+    focus: [],
+    activePlan: activePlan?.slice(0, 8),
+    scans,
+    movement: previous ? storedMovement(latest, previous, now) : undefined,
+  };
+}

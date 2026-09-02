@@ -62,6 +62,15 @@ interface PlanItemRow {
   status: string;
 }
 
+
+// When the allowance day rolls over. claim_max_chat_turn keys usage on the UTC
+// date, so the answer is the next UTC midnight, sent as a stamp for the client
+// to render in the reader's own time zone (src/engine/maxAllowance.ts).
+function nextUtcMidnight(now = Date.now()): string {
+  const d = new Date(now);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)).toISOString();
+}
+
 function client(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing server environment variable: ANTHROPIC_API_KEY");
@@ -112,10 +121,14 @@ export async function POST(request: Request): Promise<Response> {
     });
     if (claimError) throw new Error(`Chat allowance is unavailable: ${claimError.message}`);
     if (typeof remaining === "number" && remaining < 0) {
+      // The stamp is what the client formats into the person's own clock;
+      // "tomorrow" on its own was a UTC day boundary quoted to somebody in
+      // Auckland at lunchtime.
       return json(
         {
           error: `That is ${MAX_DAILY_MESSAGES} messages today, which is the daily limit. Max is back tomorrow.`,
           retryAfter: "tomorrow",
+          resetsAt: nextUtcMidnight(),
         },
         429,
       );
@@ -339,6 +352,7 @@ export async function POST(request: Request): Promise<Response> {
         "Cache-Control": "no-store, no-transform",
         "X-Accel-Buffering": "no",
         "X-Max-Remaining": String(typeof remaining === "number" ? remaining : MAX_DAILY_MESSAGES),
+        "X-Max-Resets-At": nextUtcMidnight(),
         "X-Max-Conversation": conversation.id,
         ...(planChange ? { "X-Max-Plan-Change": planChange } : {}),
       },

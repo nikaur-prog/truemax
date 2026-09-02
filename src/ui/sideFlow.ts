@@ -1269,12 +1269,16 @@ function mountVerify(
    * form of the same protection than a second button press: it is a person
    * saying yes rather than a person clicking twice.
    */
+  // Resolves true when the scan went through to ctx.onDone, false when the
+  // placement was refused and the person is still on this screen with the
+  // points to fix. The automatic path reads the answer: it never mounted the
+  // review furniture, and a refusal is the moment it becomes needed.
   const confirmPlacement = async (opts: {
     auto?: boolean;
     verified?: boolean;
     consented?: boolean;
-  } = {}) => {
-    if (!verifier) return;
+  } = {}): Promise<boolean> => {
+    if (!verifier) return false;
     const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
     if (confirmButton) confirmButton.disabled = true;
     // The facing comes from the confirmed points, not from the detector that
@@ -1292,7 +1296,7 @@ function mountVerify(
         hint.textContent = first;
         hint.classList.add("show");
       }
-      return;
+      return false;
     }
     try {
       const correctedPoints = cloneSidePoints(verifier.points);
@@ -1352,7 +1356,7 @@ function mountVerify(
             : ""}</p>
           <p class="side-review-note">Storing it anyway would put a number in the calibration
           set that describes where a point landed, not the face.</p>`;
-        return;
+        return false;
       }
 
       // Confirming a seed nobody touched.
@@ -1376,7 +1380,7 @@ function mountVerify(
           <p class="side-review-note">If they are genuinely right, press Confirm as-is. If you
           have not looked yet, this is the moment: a side score built on a guessed jaw corner
           measures the guess.</p>`;
-        return;
+        return false;
       }
 
       // Consent, asked only when there is something to learn.
@@ -1415,6 +1419,7 @@ function mountVerify(
         // false, and only when it says so.
         verified: opts.verified ?? true,
       });
+      return true;
     } catch (err) {
       if (confirmButton) confirmButton.disabled = false;
       e.cap.textContent = "CHECK LANDMARKS";
@@ -1423,6 +1428,7 @@ function mountVerify(
         hint.textContent = err instanceof Error ? err.message : "Those points could not be measured";
         hint.classList.add("show");
       }
+      return false;
     }
   };
 
@@ -1463,13 +1469,20 @@ function mountVerify(
         + " so those are the ones that drift.",
       no: "No, they look off",
       yes: "Yes, they look right",
-      fine: "Either answer takes you straight to your analysis.",
+      fine: "Yes goes straight to your analysis. No lets you place them yourself first.",
     });
     if (right === null) return;
     if (right) {
       const consented = await askSideFeedbackConsent();
       if (!verifier) return;
-      await confirmPlacement({ auto: true, verified: true, consented });
+      // A refused confirm (a reading outside what a face can be, or a point
+      // pair that cannot both be right) leaves the person on this screen
+      // with the message and nothing to act on it with. The review
+      // furniture is mounted at that moment and not before.
+      if (!(await confirmPlacement({ auto: true, verified: true, consented })) && verifier) {
+        releaseFurniture();
+        showReviewActions();
+      }
       return;
     }
 
@@ -1490,13 +1503,26 @@ function mountVerify(
     if (edit) {
       // Into the walkthrough. Consent is asked at the end of it, on the review
       // screen, where there is a correction worth sharing.
+      releaseFurniture();
       showGuidedActions();
       return;
     }
 
     const consented = await askSideFeedbackConsent();
     if (!verifier) return;
-    await confirmPlacement({ auto: true, verified: false, consented });
+    if (!(await confirmPlacement({ auto: true, verified: false, consented })) && verifier) {
+      releaseFurniture();
+      showReviewActions();
+    }
+  };
+
+  // The photograph and its row are out of reach while a side dialog is up,
+  // and back in reach the moment somebody is meant to touch them. Called on
+  // every branch that hands the screen back to the person, and in the finally
+  // below so a cancelled dialog cannot leave the section inert.
+  const releaseFurniture = () => {
+    e.section.inert = false;
+    e.actions.classList.remove("mode-pending");
   };
 
   if (startInGuidedMode) {
@@ -1517,14 +1543,18 @@ function mountVerify(
     // them to do our job badly. So the seed is measured first, and a seed that
     // fails is not offered.
     const assessment = seedAssessment(seed.points, seed.faceDir, ctx.sex);
-    // The review state is put up first, so whichever answer comes back lands
-    // on a finished screen rather than building one underneath the person.
-    showReviewActions();
-    // ...and then hidden again while the question is up. It is the same two
-    // choices the dialog is offering, in the same order, four inches lower:
-    // leaving it live means a person can answer twice, and the two answers do
-    // not have to agree.
+    // Nothing is mounted under the question. The review furniture used to be
+    // put up first and hidden with a class, which kept its height but left
+    // Confirm, One by one and thirteen draggable rings in the accessibility
+    // tree beneath a dialog offering the same choices; a screen reader read
+    // both, and a stray touch on a phone moved a point through the backdrop.
+    // The row stays empty and hidden, the rings stay non-editable (mountVerifier
+    // starts them that way), and the whole section is inert until a branch
+    // hands the screen back: the walkthrough on "place them myself" or "yes,
+    // place them", the review screen on a refused confirm, or nothing at all
+    // when the scan goes straight through.
     e.actions.classList.add("mode-pending");
+    e.section.inert = true;
     void askPlacementMode(
       e.canvas,
       seed.points,
@@ -1532,15 +1562,20 @@ function mountVerify(
       assessment.hard,
       assessment.marginal,
     ).then(async (mode) => {
-      e.actions.classList.remove("mode-pending");
-      // Null is a cancelled dialog: the flow was closed or the identity changed
-      // underneath it, and there is nothing left for either branch to act on.
-      if (mode === null) return;
-      if (mode === "manual") {
-        showGuidedActions();
-        return;
+      try {
+        // Null is a cancelled dialog: the flow was closed or the identity
+        // changed underneath it, and there is nothing left for either branch
+        // to act on.
+        if (mode === null) return;
+        if (mode === "manual") {
+          releaseFurniture();
+          showGuidedActions();
+          return;
+        }
+        await afterAutomatic();
+      } finally {
+        releaseFurniture();
       }
-      await afterAutomatic();
     });
   } else showReviewActions();
 }
@@ -1617,7 +1652,7 @@ function askPlacementMode(
       </div>
       <p class="side-mode-fine">${blocked
         ? "It takes about thirty seconds. Each point is named and shown one at a time."
-        : "Placing them yourself gives a more accurate score. Taking these still lets you drag any point."}</p>
+        : "Placing them yourself gives a more accurate score. Taking these skips the walkthrough; you can still say they look off on the next screen."}</p>
     </section>`;
     document.body.appendChild(backdrop);
     const shot = backdrop.querySelector("canvas")!;

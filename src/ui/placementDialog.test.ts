@@ -53,26 +53,42 @@ test("a degenerate canvas gives an empty box rather than a NaN one", () => {
   assert.deepEqual(placementPreviewBox(0, 0), { w: 0, h: 0, scale: 1 });
 });
 
-// The review row below the frame offers the same two choices the dialog is
-// asking about, so it is hidden while the dialog is up. Hidden, not removed:
-// it keeps its height. The risk is not the hiding, it is the un-hiding — a
-// class added on one path and dropped on another leaves a person looking at a
-// photograph with no way to confirm it.
-test("the class that hides the review row is both added and removed", () => {
+// Nothing is mounted under the placement question. The review row used to be
+// built first and hidden with a class, which kept Confirm, One by one and the
+// thirteen draggable rings in the accessibility tree beneath a dialog offering
+// the same choices. Now the row stays empty and hidden and the whole section
+// is inert until a branch hands the screen back to the person.
+test("the review furniture is not mounted before the placement question", () => {
   const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
-  assert.ok(
-    src.includes('e.actions.classList.add("mode-pending")'),
-    "the review row should be hidden while the placement dialog is up",
-  );
-  assert.ok(
-    src.includes('e.actions.classList.remove("mode-pending")'),
-    "the review row must come back on every path out of the dialog",
-  );
-  // Including the cancelled path: the dialog resolves null when the flow is
-  // closed underneath it, and the removal has to sit before that early return.
-  const removedAt = src.indexOf('e.actions.classList.remove("mode-pending")');
-  const nullReturn = src.indexOf("if (mode === null) return;");
-  assert.ok(removedAt > 0 && nullReturn > removedAt, "restore the row before the null early-return");
+  const assessed = src.indexOf("const assessment = seedAssessment(seed.points, seed.faceDir, ctx.sex);");
+  const asked = src.indexOf("void askPlacementMode(", assessed);
+  assert.ok(assessed > 0 && asked > assessed);
+  const between = src.slice(assessed, asked);
+  assert.doesNotMatch(between, /showReviewActions\(\)/, "no review row under the dialog");
+  assert.ok(between.includes('e.actions.classList.add("mode-pending")'), "the empty row is hidden too");
+  assert.ok(between.includes("e.section.inert = true"), "the section is inert under the dialog");
+});
+
+test("every way out of the dialogs hands the section back", () => {
+  const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
+  const release = src.indexOf("const releaseFurniture = () => {");
+  assert.ok(release > 0);
+  const body = src.slice(release, src.indexOf("};", release));
+  assert.ok(body.includes("e.section.inert = false"));
+  assert.ok(body.includes('e.actions.classList.remove("mode-pending")'));
+  // The finally is what makes a cancelled dialog safe: whatever branch was
+  // running, the section comes back before the promise settles.
+  const then = src.indexOf(").then(async (mode) => {", src.indexOf("void askPlacementMode("));
+  const finallyAt = src.indexOf("} finally {", then);
+  assert.ok(finallyAt > then, "the placement branch releases in a finally");
+  assert.ok(src.slice(finallyAt, finallyAt + 120).includes("releaseFurniture();"));
+  // And the two branches that put a person to work release before they do.
+  for (const marker of ['if (mode === "manual") {', "if (edit) {"]) {
+    const at = src.indexOf(marker);
+    assert.ok(at > 0, marker);
+    const next = src.slice(at, at + 400);
+    assert.ok(next.indexOf("releaseFurniture();") < next.indexOf("showGuidedActions();"), `${marker} releases before the walkthrough`);
+  }
 });
 
 test("the stylesheet actually hides it", () => {

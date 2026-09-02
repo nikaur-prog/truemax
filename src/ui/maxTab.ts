@@ -18,6 +18,11 @@ import {
   syncMaxPlanItems,
 } from "../engine/maxConversations.js";
 import type { MaxConversationSummary, MaxPlanItem } from "../engine/maxConversations.js";
+import { MAX_DAILY_MESSAGES } from "../engine/maxAllowance.js";
+import { contextFromStoredScan } from "../engine/maxContext.js";
+import type { MaxChatContext } from "../engine/maxContext.js";
+import { ownScans, readAllHistory, readOwnComparableHistory } from "../engine/history.js";
+import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
 
 // ---------------------------------------------------------------------------
 // The Max tab on the dashboard.
@@ -73,7 +78,7 @@ const PREVIEW = [
 ];
 
 const BENEFITS = [
-  "Unlimited chats with Coach Max about your numbers",
+  `Up to ${MAX_DAILY_MESSAGES} messages a day with Coach Max about your numbers`,
   "Coach Max's written analysis on every scan",
   "Step-by-step plans, catered to you",
   "Scan up to 50 other people a week",
@@ -178,11 +183,41 @@ export function maxTabMarkup(paid: boolean): string {
   </div>`;
 }
 
-// The paid greeting is honest about what the dashboard chat can see: the full
-// measurement context is built on the results screen, so from here Max offers
-// the conversation rather than pretending to have the table open.
-const TAB_GREETING =
-  "Hey, I'm Max. Ask me anything: and open a scan if you want me talking through your exact numbers.";
+// What the dashboard chat can see: the owner's latest scan, from the stored
+// row. The tab used to open the chat with no context and a greeting that
+// hinted otherwise, so the first question a member asked here was answered by
+// a model that had never seen their numbers. Now the scores, pillars and
+// region standings travel with the chat; the metric table stays on the scan
+// itself, and the greeting says which scan is open rather than implying more.
+function dashboardContext(): { context: MaxChatContext | null; greeting: string } {
+  const own = readOwnComparableHistory()
+    .filter((scan) => Number.isFinite(new Date(scan.date).getTime()))
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const latest = own[0];
+  if (!latest) {
+    return {
+      context: null,
+      greeting: "Hey, I'm Max. Run a scan and I'll talk you through your exact numbers. Until then, ask me anything.",
+    };
+  }
+  const activePlan = readProtocols()
+    .filter((protocol) => protocol.status !== "declined" && protocol.status !== "judged")
+    .map((protocol) => `${protocol.title}: ${protocol.status}`);
+  const context = contextFromStoredScan({
+    latest,
+    previous: own[1] ?? null,
+    tone: loadVerdictTone() ?? DEFAULT_VERDICT_TONE,
+    scans: ownScans(readAllHistory()).length,
+    // The tab only reaches this function on the paid side of the gate.
+    includePotential: true,
+    activePlan,
+  });
+  const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(latest.date));
+  return {
+    context,
+    greeting: `Hey, I'm Max. I've got your scan from ${when} open. Ask me anything about it.`,
+  };
+}
 
 export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
   const root = panel.querySelector<HTMLElement>(".maxtab");
@@ -201,7 +236,8 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
     // is a doorknob shaped like the door.
     const open = () => {
       input.blur();
-      openMaxChat(null, { greeting: TAB_GREETING, source: "dashboard" });
+      const latest = dashboardContext();
+      openMaxChat(latest.context, { greeting: latest.greeting, source: "dashboard" });
     };
     input.addEventListener("focus", open);
     form.addEventListener("submit", (event) => {
@@ -225,11 +261,14 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
         const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
           .format(new Date(conversation.last_message_at));
         button.innerHTML = `<span><b>${escapeHTML(conversation.title)}</b><small>${conversation.source === "post_analysis" ? "Post-analysis" : "Coach"} · ${when}</small></span><i aria-hidden="true">›</i>`;
-        button.onclick = () => openMaxChat(null, {
-          conversationId: conversation.id,
-          source: conversation.source,
-          greeting: TAB_GREETING,
-        });
+        button.onclick = () => {
+          const latest = dashboardContext();
+          openMaxChat(latest.context, {
+            conversationId: conversation.id,
+            source: conversation.source,
+            greeting: latest.greeting,
+          });
+        };
         history.appendChild(button);
       }
     };
@@ -331,7 +370,8 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
           announceMembershipBrand("max");
           panel.innerHTML = maxTabMarkup(true);
           wireMaxTab(panel, { paid: true });
-          openMaxChat(null, { greeting: TAB_GREETING, initialQuestion: question || undefined, source: "dashboard" });
+          const latest = dashboardContext();
+          openMaxChat(latest.context, { greeting: latest.greeting, initialQuestion: question || undefined, source: "dashboard" });
           return;
         }
         const upgrading =

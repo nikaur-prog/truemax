@@ -178,24 +178,17 @@ function opener(trend: CoachTrend, name?: string): string {
   return `Let's get down to business${n}`;
 }
 
-// "top 15%" reads as a rank. "ahead of 85 in every 100 guys" reads as a room
-// you are standing in. Same fact; the second one is the one a coach says.
+// Where a reading sits, as a band of the reference set.
 //
-// "in every 100" rather than "out of 100" because the sentence has to survive
-// the number being 1: "only 1 out of 100 guys sit below you" is broken, and
-// "1 in every 100 guys is below you" is not.
-const peers = (sex: Sex) => (sex === "male" ? "guys" : "women");
-
-function aheadOf(pct: number, sex: Sex): string {
-  const beaten = Math.max(1, Math.min(99, Math.round(pct)));
-  return `ahead of ${beaten} in every 100 ${peers(sex)}`;
-}
-
-function behindYou(pct: number, sex: Sex): string {
-  const below = Math.max(1, Math.min(99, Math.round(pct)));
-  return below === 1
-    ? `only 1 ${sex === "male" ? "guy" : "woman"} in every 100 is below you there`
-    : `only ${below} in every 100 ${peers(sex)} are below you there`;
+// This replaced "ahead of 85 in every 100 guys" and "only 3 in every 100 guys
+// are below you there". Both were a count of people arranged around the
+// reader, which is the rarity-about-a-person sentence CLAUDE.md bars, and both
+// printed a raw percentile next to a chip that had just rounded the same
+// number to a band of five. One rule now: the band comes from standing(), the
+// same function the chip and the curve read, so the three cannot disagree.
+function bandOf(pct: number, sex: Sex): string {
+  const s = standing(pct);
+  return `${s.top ? "top" : "bottom"} ${s.pct}% of ${sexNoun(sex)} faces`;
 }
 
 export function regionSummary(
@@ -228,7 +221,7 @@ export function regionSummary(
   // What is good. Named, with the number, and with what it actually means —
   // praise that does not say what it is praising is worth nothing.
   const s1 = best.percentile >= 55
-    ? `${hi}. Your ${best.def.name.toLowerCase()} is carrying this one. ${fmt(best)} where the ${sexNoun(sex)} average is ${fmtMean(best, sex)}, which puts you ${aheadOf(best.percentile, sex)}. That's ${traitOf(best.def.id)}, and yours is genuinely good.`
+    ? `${hi}. Your ${best.def.name.toLowerCase()} is carrying this one. ${fmt(best)} where the ${sexNoun(sex)} average is ${fmtMean(best, sex)}, which puts it in the ${bandOf(best.percentile, sex)}. That's ${traitOf(best.def.id)}, and yours is genuinely good.`
     : `${hi}. I'm not going to pretend anything in your ${name} is doing heavy lifting. The best of it is ${best.def.name.toLowerCase()} at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which is about the middle of the room.`;
 
   // What to work on. Said outright, with the number, no cushioning — the warm
@@ -244,7 +237,7 @@ export function regionSummary(
   const s2 = !scored
     ? `I'm not going to point you at one of these to fix, either.`
     : worst.percentile < 45
-      ? `The one to go at is your ${worst.def.name.toLowerCase()}: ${fmt(worst)} against ${fmtMean(worst, sex)}, and ${behindYou(worst.percentile, sex)}. That one's ${traitOf(worst.def.id)}.`
+      ? `The one to go at is your ${worst.def.name.toLowerCase()}: ${fmt(worst)} against ${fmtMean(worst, sex)}, in the ${bandOf(worst.percentile, sex)}. That one's ${traitOf(worst.def.id)}.`
       : `Nothing here is really letting you down. Even your weakest number, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, is holding its own.`;
 
   // Where that leaves you.
@@ -484,7 +477,6 @@ export function coachRead(
   // innerHTML; the region summary path stays raw for textContent.
   const rawName = opts.guestName ?? opts.selfName;
   const hi = opener(trendOf(delta?.overall), rawName ? escapeForCopy(rawName) : undefined);
-  const peer = sex === "male" ? "guys" : "women";
 
   // What is noticeably standing out. Region-level, because that is the unit a
   // person recognises in a mirror.
@@ -498,7 +490,7 @@ export function coachRead(
   const good = !best
     ? `${hi}. Not much to go on from this scan.`
     : best.percentile >= 55
-      ? `${hi}. Your ${REGION_NAMES[best.region].toLowerCase()} is the standout on this scan, sitting ahead of ${Math.max(1, Math.min(99, Math.round(best.percentile)))} in every 100 ${peer}. That's the part of your face doing the most for you, so don't go changing it.`
+      ? `${hi}. Your ${REGION_NAMES[best.region].toLowerCase()} is the standout on this scan, sitting in the ${bandOf(best.percentile, sex)}. That's the part of your face doing the most for you, so don't go changing it.`
       : `${hi}. Straight answer: nothing on this scan is jumping out as a strength yet. Your best region is your ${REGION_NAMES[best.region].toLowerCase()} and even that lands mid-pack. That's not a write-off, it just means the wins here come from work rather than from something you were born with.`;
 
   // What is noticeably poor, restricted to things that can actually move. No

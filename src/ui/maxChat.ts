@@ -2,6 +2,7 @@ import { currentAccessToken } from "../engine/auth.js";
 import { maxCharacterMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
+import { allowanceLine } from "../engine/maxAllowance.js";
 import { requestedActionPlan } from "./maxActionBridge.js";
 import {
   announceMaxConversationChanged,
@@ -123,6 +124,7 @@ export function openMaxChat(
         <input type="text" name="q" autocomplete="off" placeholder="Ask Coach Max something" maxlength="600" />
         <button type="submit" aria-label="Send">Send</button>
       </form>
+      <p class="maxchat-allowance" aria-live="polite" hidden></p>
     </div>`;
   document.body.appendChild(host);
   wireMaxInteractions(host.querySelector(".maxchat-face"));
@@ -419,9 +421,13 @@ async function ask(
     if (generation !== chatGeneration) return null;
 
     if (!response.ok || !response.body) {
-      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+      const detail = (await response.json().catch(() => null)) as { error?: string; resetsAt?: string } | null;
       if (generation !== chatGeneration) return null;
-      fail(bubble, detail?.error || "I could not get through just then. Try me again?");
+      // The daily wall, said in the reader's own clock rather than the
+      // server's "tomorrow", which is a UTC day boundary.
+      const wall = response.status === 429 ? allowanceLine(0, detail?.resetsAt) : null;
+      if (wall) showAllowance(wall);
+      fail(bubble, wall ?? detail?.error ?? "I could not get through just then. Try me again?");
       // A refusal is not part of the conversation, and leaving the question in
       // the transcript would send it again on the next message as though Max
       // had already seen it.
@@ -434,6 +440,12 @@ async function ask(
       persistence.onConversation(savedConversation);
       announceMaxConversationChanged();
     }
+    // How many are left today, said only once it matters (see maxAllowance).
+    const remainingHeader = Number(response.headers.get("X-Max-Remaining"));
+    showAllowance(allowanceLine(
+      Number.isFinite(remainingHeader) ? remainingHeader : null,
+      response.headers.get("X-Max-Resets-At"),
+    ));
 
     const said = await drain(response.body, bubble, log, beginSpeaking);
     if (generation !== chatGeneration) return null;
@@ -472,6 +484,15 @@ async function ask(
     form.classList.remove("busy");
     if (inFlight === controller) inFlight = null;
   }
+}
+
+// The line under the composer. Null clears it: a count that was low
+// yesterday must not sit under a fresh day's first message.
+function showAllowance(line: string | null): void {
+  const slot = host?.querySelector<HTMLElement>(".maxchat-allowance");
+  if (!slot) return;
+  slot.textContent = line ?? "";
+  slot.hidden = !line;
 }
 
 function fail(bubble: HTMLElement, message: string): void {
