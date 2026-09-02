@@ -28,14 +28,21 @@ proposal touches one, it says so and leaves the call to the owner.
 - Every state of Max was rendered from the current code and frozen at two
   points in each animation, beside contact sheets of four Higgsfield mocap
   clips (boxing, knock-back, idle, confused) as the reference bar.
-- Fourteen surface readers ran under a rule that a finding must point at a
-  file and line they opened or a capture they looked at. The findings in
-  section 4 carry those references. A refute pass was planned behind the
-  readers; on this machine the workflow runs two agents at a time, so the
-  findings marked "reader" have not yet had an independent refuter over them
-  and should be spot-checked at the cited line before work starts. The ones
-  marked "confirmed" were reproduced in the browser or at the cited code by
-  the author of this document.
+- Fourteen surface reads were commissioned, each under a rule that a finding
+  must point at a file and line the reader opened or a capture they looked
+  at. Section 4 prints how many have landed; the P1 backlog in section 6 and
+  the cycles are generated from whatever has landed, so a late read cannot
+  strand a blocker. A refute pass was planned behind the readers; on this
+  machine the workflow runs two agents at a time, so findings marked "reader"
+  have not had an independent refuter over them and should be checked at the
+  cited line before work starts. Rows marked "confirmed" were reproduced in
+  the browser or at the cited code by the author of this document.
+- The readers worked on the dev branch tree (68b40e2 plus #226). Every file
+  and line citation in this document is validated by a script against the
+  branch the document sits on (main plus this file) before each push, and any
+  citation that drifted is relocated in the generator rather than left to
+  rot. The auth error-mapping row in 4.6 is one such relocation: #226 adds
+  lines to `auth.ts`, so the reader's line did not exist on main.
 
 ---
 
@@ -82,15 +89,71 @@ for scoring.
 
 | step | what | needs | expected effect |
 |---|---|---|---|
-| A | Use the person's own front scan as the prior for the ear cluster | code only, a few days | The front mesh is taken first on every scan and it knows where this head's ear junction and jaw corner sit relative to nasion and menton (mesh points 234/454 at the ear, 58/288 and 172/397 along the jaw). After levelling, those heights transfer straight onto the profile. Only the depth of the ear behind the profile line still comes from the template. This replaces "an average head" with "this head" for every first-time user, not just returning ones, and it costs nothing in data. |
-| B | Widen what the feedback loop can teach | copy and consent, a day | Task #57 already names the loop as gated too tight. The consent dialog fires after the person has decided the points look right, so the rows it collects are biased towards the easy cases. Ask for the consent before the placement is shown, keep the same 90-day retention, and record the accept-without-drag outcome even when the photo is not shared (it is one boolean and no image). That is the 80 percent number, measured on real users. |
-| C | Train a small keypoint model on our own thirteen points | 300 to 600 labelled synthetic profiles, plus the 56 real ones already in `.side-dataset/labels.json`; two to three weeks | A heatmap regressor on a light backbone at 256 pixels, exported for on-device inference (a few megabytes, well under 100 ms). It looks at the ear itself, which the segmentation mask fundamentally cannot: the mask has hair, face skin and body skin, and an ear is texture inside skin. Labelling is done with the Calibrate tool the app already has, at roughly a minute a face. Synthetic faces sidestep consent for training; the real labelled set and the consented rows are the evaluation set, so the synthetic-to-real gap is measured rather than assumed. |
+| A (experiment, gated) | Test whether the person's own front mesh carries any usable prior for the ear cluster | code only, a few days, plus paired front and side captures to judge it | The honest framing first: the front mesh has no ear landmarks. Points 234 and 454 are the widest point of the facial silhouette at cheekbone height (`src/engine/geometry.ts:106`), 58/288 and 172/397 sit along the jaw outline, and `sidePrior.ts` already records that tragion, condylion, gonion and cervicale cannot be recovered from that edge. So this is a hypothesis, not a promised improvement: that the vertical position of the silhouette's widest point and the jaw outline, after levelling, predicts the ear cluster's heights better than the population template does. It might; it might instead move the cluster with cheek fullness and crop. It earns a place in the seeder only by beating the template on a held-out set of paired front and side captures (the owner's own scans and consenting users' pairs, since the labelled side set has no fronts), by a margin agreed before the run. If it loses, it is dropped and the document says so. It does not enter cycle 1. |
+| B | Make every send-through calibrate the seeder, automatically and with a guard | a nightly protected job, a consent-text change, a few days | See "The loop that learns" below. Today a send-through lands in a private table and bucket and waits for a person; the job turns each one into a measured error against the current seed method, a durable photo-free calibration record, and, when the existing rule is met, a proposed offset in a pull request. |
+| C | Train a small keypoint model on our own thirteen points. This is the first step in the list that actually observes the ear. | 300 to 600 labelled synthetic profiles, plus the 56 real ones already in `.side-dataset/labels.json`; two to three weeks | A heatmap regressor on a light backbone at 256 pixels, exported for on-device inference (a few megabytes, well under 100 ms). It looks at the ear itself, which the segmentation mask fundamentally cannot: the mask has hair, face skin and body skin, and an ear is texture inside skin. Labelling is done with the Calibrate tool the app already has, at roughly a minute a face. Synthetic faces sidestep consent for training; the real labelled set and the consented rows are the evaluation set, so the synthetic-to-real gap is measured rather than assumed. |
 | D | Keep the segmentation seed as the fallback | already built | If the model's confidence is low, or it disagrees with the mask by more than a threshold, seed from the mask and template as today, and say so. |
 
-Do A and B this cycle. Start generating and labelling for C now because the
-labelling is calendar time. The ordering is deliberate: A gives a real
-improvement for free, B makes the target measurable, C is the only step that
-can reach the ear cluster properly.
+Do B this cycle and start generating and labelling for C now, because the
+labelling is calendar time. Run A as a gated experiment in the background;
+it costs a few days and either earns its place with a number or is dropped.
+The ordering is deliberate: B makes the target measurable, C is the only step
+that reaches the ear cluster by looking at it, and A is a cheap bet whose
+outcome is not known.
+
+**The loop that learns.** What happens today when somebody answers yes to
+"send this through to our team": the side photograph, the automatic points
+and the corrected points are written to `side_landmark_feedback` and a
+private bucket, owner-scoped, with a 90-day expiry
+(`SIDE_CORRECTION_FEEDBACK.md`). Nothing in the product reads them back.
+The one consumer is an offline script, `scripts/analyze-side-feedback.mjs`,
+which somebody runs by hand with the service credentials; it prints, per
+landmark, how many people moved it, the median correction in unit-face space
+and the spread, and applies a written rule for when a landmark has earned an
+offset (at least 25 movers with a median larger than half the interquartile
+range). It emits a JSON block to paste into a calibration table. The owner's
+own Calibrate exports go to `docs/calibration-incoming.json` and are
+reviewed by hand before anything reaches the corpus. So the honest answer to
+"does every user's send-through calibrate what is right and wrong" is no: it
+is stored, and it calibrates only when a person runs the script and pastes
+the result. Nobody has been receiving them automatically, including this
+session, which cannot reach the database at all.
+
+What to build so that every send-through does count:
+
+1. A protected nightly job (service role, same pattern as the cleanup cron)
+   that runs the script's analysis over all unexpired rows, grouped by the
+   `seed_method` each row already records, and writes two numbers per
+   method to a small metrics table: the accept-without-drag rate and the
+   per-landmark median error. That is the 80 percent figure, live.
+2. A durable, photo-free calibration record per consented row: the thirteen
+   automatic and thirteen corrected points in normalised unit-face space,
+   face direction, head-size features and the seed method version. Points
+   are not a photograph, but they are derived from one, so the consent text
+   says plainly that the coordinates are kept after the photo expires and
+   that "Revoke" removes both. Until that sentence ships, the record expires
+   with the photo.
+3. When the script's rule is met for a landmark, the job opens a pull request
+   with the proposed offset as a generated data file and the evidence
+   (n, median, spread, before and after error on the held-out rows). A person
+   merges it. Placement never changes in production without that step,
+   because a median estimated from a handful of rows moves the seed away
+   from the faces it currently gets right.
+4. Once the keypoint model in C exists, each consented pair joins its
+   training or evaluation split by subject, with the photo used inside its
+   90-day window and only the derived record kept after.
+
+**Consent timing, and why it matters for the number.** The consent question
+is asked after the person has already answered "Yes, they look right" or
+corrected the points. Two things follow. People who accept without looking
+rarely consent, so the rows over-represent people who corrected, and the
+accept rate computed from rows is biased. And the rate itself does not need
+a photograph: whether the placement was accepted, corrected or skipped is
+one event with no image in it, and it can be recorded for every side scan
+without consent. So: record that outcome for everyone, and ask the photo
+consent before the placement is shown (one sentence, same dialog family), so
+the set of people who say yes is not shaped by what they saw. That is all
+"consent timing" means.
 
 **What not to do.** Do not tune the current template harder against the same
 56 profiles; that is fitting to the target it already fits. Do not ask people
@@ -166,7 +229,37 @@ No, to both, and the code is honest about it.
   threshold, and no skin output ever touching the structural score. None of
   that data exists in the repo and buying it is a budget line, not a sprint.
 
-Recommendation: do not build either detector now. Do build the soft-tissue
+**Can detectors be built?** Yes, under three conditions, and the order of
+work is fixed by them.
+
+1. **Data with labels.** Synthetic faces are permitted for placement
+   geometry only and are useless as skin ground truth anyway, and the
+   labelled side set has no skin labels. The product already collects the
+   two halves of a weak label: the person's own declared concerns in the
+   quiz, and a consented photograph. Pairing them, under a new consent that
+   names skin analysis as the purpose, gives a self-labelled set at scale.
+   A dermatologist-labelled subset (a few hundred faces, bought or
+   commissioned, balanced across skin tones and age bands) is still needed
+   as the gate, because self-labels are wrong often enough to make a model
+   confidently wrong.
+2. **An on-device model, not a cloud one.** A small segmentation head that
+   marks regions of "visible inflamed spots", "visible redness pattern" and
+   "uneven pigment", run at scan time after the eligibility gate, giving a
+   region mask and a confidence per class. Outputs are patterns, never
+   conditions, in the wording the trial document fixes.
+3. **The trial document's gates before anything is shown.** Sensitivity and
+   precision per class on a subject-held-out set, repeat-photo agreement,
+   no subgroup more than a tenth below the whole, "unable to assess" below
+   threshold, and no effect on the structural score.
+
+Cost: the labelled subset is the long pole and is calendar time and money;
+the model is a few weeks once the data exists. The facial-fat side needs no
+detector at all: the soft-tissue measurement class (#56) is measurement from
+landmarks the engine already places, and it can ship first.
+
+Recommendation: build the soft-tissue measurement class now; start the
+consent and data collection for skin if the owner wants detection as a
+product line; do not ship a skin label before the gates pass. Do build the soft-tissue
 measurement class (#56) because it is measurement, and it is what most people
 asking about "facial fat" actually want to track. Surface the existing skin
 statistics with their confidence rather than hiding them, and keep the
@@ -206,31 +299,39 @@ one.
 The owner's call is the 3D redesign. Here is how it is done with the tools
 already connected, and what it costs.
 
-**Step 1, the character.** Start from the master, but change the body before
-generating: the head can stay a cloud-lobed cobalt shell with a dark screen
-face and the mint antenna (brand continuity, and the spec in
-`MAX_AVATAR_SPEC.md`), but the screen gets eyes with a sclera and a pupil so
-he can look at things, a mouth that opens, two full arms with an elbow and a
-mitt hand, and feet or a grounded base so he can stand, stretch, and be
-knocked back and land. Produce a turnaround sheet (front, three-quarter, side,
-back) with the character-sheet workflow so the 3D pass has consistent views.
-This is the one place the plan touches a written spec: the spec says
-"compact blue body with short rounded limbs"; the reader's finding is that
-limbs without joints cannot act. Owner's decision, recorded below.
+**Owner's decision (2 September).** The body stays. Max keeps the
+cloud-lobed cobalt shell, the dark screen face, the mint antenna, the stub
+arms and the hover shadow; he is not to be humanised, and the arms do not
+gain joints. Two things change: the screen eyes get pupils so he can look at
+the reader and at the number, and the whole character becomes a rendered
+3D object with volume, lighting and material, animated cleanly and crisply
+instead of by class swaps on a flat SVG. The reader's findings that the
+silhouette reads as a device and that every act is the same egg are recorded
+in section 4 as the reader's view; the owner's call overrides the fix they
+propose, and the table below marks them so.
+
+**Step 1, the character.** Start from the master in
+`public/brand/max-avatar.png` unchanged in silhouette, add pupils to the
+screen eyes, and produce a turnaround (front, three-quarter, side, back) with
+the character-sheet workflow so the 3D pass has consistent views. Nothing
+else on the sheet is new.
 
 **Step 2, the mesh and rig.** Higgsfield `generate_3d` (image to 3D, with
 rigging) turns the turnaround into a rigged GLB. Check the result at three
 sizes before accepting it: the 88 pixel Coach-tab stage, the 46 pixel chat
 face, and a 320 pixel hero.
 
-**Step 3, the moves.** `animation_actions` carries 678 mocap clips with GIF
-previews (idle, confused scratch, boxing practice, be-hit fly-up were the four
-sampled). Choose a small set a coach would do and nothing else: two idles,
-look around, think (hand to chin), stretch, a beckon or thumbs-up, celebrate,
-a nod, a shake, a concerned lean. No props, no skateboard, no push-ups, no
-fight. The pet and the fight were retired for a reason and `mountMaxPet` has
-no caller today; the dead states and their nine keyframes get deleted in the
-same cycle (section 2.4).
+**Step 3, the moves.** With no limbs and no feet, the move set is what a
+hovering body can do with weight and intent: a breathing bob with real mass
+(slow up, quicker settle), a lean toward the screen, a yaw turn to look at
+something, a head tilt, a nod, a shake, a small spin, a squash on landing and
+a stretch on lift, an antenna flick as a reaction, and the screen face doing
+the rest (pupils, brows, mouth). `animation_actions` clips are a reference
+for timing and weight, not a rig to retarget; the clips that need arms or
+legs are out. No props, no skateboard, no push-ups, no fight. The pet and the
+fight were retired for a reason and `mountMaxPet` has no caller today; the
+dead states and their nine keyframes get deleted in the same cycle
+(section 2.4).
 
 **Step 4, delivery, and the real choice.** Two ways to put a 3D Max on a
 web page:
@@ -257,7 +358,11 @@ is missed.
 
 ## 2.3 Does his design associate with self-improvement?
 
-Not yet, and the reader named it: the visor says "I display a status", the
+The owner's call is that the silhouette stays, so the answer has to come
+from motion and attention rather than from anatomy: eyes that look at the
+reader and at the number (the pupils), movement with mass and settle rather
+than bounce, small confident reactions, and no props. The reader's view, kept
+here for the record, was harsher: the visor says "I display a status", the
 light-bar eyes cannot make eye contact, the paddles cannot point or hold
 anything, and the egg on a hover shadow is a smart speaker with a face. A
 coach who cannot demonstrate a stretch undercuts the plan he sells. The
@@ -268,9 +373,11 @@ movements). The palette can stay. The register should move from "device" to
 "someone who is on your side", which is the whole reason a coach exists on the
 page.
 
-## 2.4 What to fix in the current Max this cycle, whatever the redesign timeline
+## 2.4 What to fix in the current Max now, whatever the render timeline
 
-These are real defects in the shipped drawing and each is a small change:
+These are real defects in the shipped drawing and each is a small change.
+The owner asked for them to be fixed immediately; they go in their own pull
+request ahead of the render work:
 
 | sev | defect | where | fix |
 |---|---:|---|---|
@@ -304,7 +411,11 @@ context-building fix, not a model fix.
 
 The second broken promise is the benefit line "Unlimited chats with Coach
 Max" against a server cap of 30 a day, reset on a UTC date, delivered as a
-refusal with no countdown (`maxTab.ts:76`, `_maxPersona.ts:33`).
+refusal with no countdown (`maxTab.ts:76`, `_maxPersona.ts:33`). The
+owner's call is that the cap stays at 30 to keep spam down, so the fix is
+the line, not the limit: "Up to 30 messages a day with Coach Max", a count
+under the composer once fewer than five remain, and a reset time in the
+person's own timezone instead of "tomorrow".
 
 ## 3.2 Memory: what Max remembers, and what he must never remember
 
@@ -532,12 +643,85 @@ in its own words.
 | hair-colour | Herbatint Permanent Haircolor Gel, 4N Chestnut, 170 ml single kit (colour gel 60 ml,… | 5111 | 2 | From the Herbatint label and manufacturer instructions. Sensitivity test 48 hours before every use, even if you have coloured before: put a small amount of the mixed product on a plaster on the inner forearm or behind the ear, leave 45 minutes, rinse, and do not use the product if itching, redness or swelling appears in or around the spot within the next 48 hours. Do not wash your hair for 24 hours before colouring. Apply to dry, unwashed hair. Wear the gloves. Apply a moisturiser along the hairline and face… | Rated 2 because it is an oxidative dye with diamminobenzenes and a hydrogen peroxide developer that can irritate the scalp and, in a sensitised person, cause a severe allergic reaction. Pair it with a plain, fragrance-free moisturiser (the label itself says… | The link is one shade, 4N Chestnut, a mid-dark neutral brown and the shade with the most ratings on iHerb. The person has to pick the N (natural) shade that sits at their own root colour or one level darker; the same listing family covers 1N Black through 10N Platinum Blonde. The owner's guide says go at or near natural and darker. Herbatint's own FAQ adds that when torn between two shades choose the lighter one,… |
 | silicone | HealFast, 100% Silicone Scar Strips, 5 Reusable Sheets | 154588 | 0 | From the maker's label (healfastproducts.com, Medical Grade Scar Sheeting: Strips): "1. Wash and dry both scar and hands. 2. Cut sheeting to desired size covering the scar area, remove the plastic film, and apply with the tacky side down to the affected area. 3. Wear sheets for 12 to 24 hours, remove daily to be cleaned. 4. Use consistently for at least 60-90 days." The label adds that for best results use is continued for 6 to 12 months, that softening may show within days and texture within 4 to 8 weeks (longer… | Rating 0, so no mandatory pairing. Nothing goes under the strip: the label says the skin must be washed and dried first, so no moisturiser, sunscreen or other product on the scar while the strip is on or it will not adhere. In the hours the strip is off, a… | Sheets suit raised or thickened scars (hypertrophic, keloid) on healed, closed skin. They do nothing for indented acne scars, and the label bars use on unhealed or irritated skin. On the face a strip is awkward and visible, so it is a night-time tool; the same maker's gel (HealFast Scar Gel, iHerb item 154585) is the daytime face format but was out of stock on www.iherb.com at research time. The gels and sheets… |
 
-14 products verified. The sweep covered every catalogue entry with a buy guide.
+14 products verified so far; the sweep continues over the rest of the catalogue and rows are appended as they land.
 
 Not added: minoxidil (not recommended: iHerb does not carry minoxidil in any strength or form, so no link can be added and the question of whether iHerb ships it to New Zealand or Australia does…); dermastamp; vitamin-e-scar.
 
 **Dropped at the owner's instruction:** vitamin E for scars and the
 dermastamp. Neither enters the catalogue or the shelf.
+
+## 3.7 The Goal Visualizer
+
+The owner's direction is a Goal Visualizer: from the person's saved front and
+side photographs, a realistic, natural rendering of the specific goals they
+have selected, bounded by target measurements, with a teaser before a goal or
+product is added. It is a product surface, separate from the creator carousel
+that #228 built for fictional identities. `NATURAL_GOAL_PREVIEW_PLAN.md`
+already holds the promise, the may-change and must-not-change lists, the
+motion language and the release gates, and all of that stands. What it lacks,
+and what this section adds, is the loop that makes a generated face honest:
+a contract, a render, a re-measurement, and a rejection path.
+
+**The measurement contract.** A goal is not a prompt; it is a set of bounded
+deltas on named measurements. Selecting "leaner lower face" produces, for
+example, a target band on the jaw-to-cheek ratio and the cervicomental angle
+of the profile, each capped at a plausible per-person change over the plan's
+horizon and each drawn from the same metric registry the report uses. Every
+measurement outside the contract carries a tolerance of zero: bone geometry,
+eye, nose, lip, chin and jaw shape, ethnicity, age and sex traits must
+re-measure as unchanged. The contract is written before any image exists and
+is stored with the preview spec (`GoalPreviewSpec` gains a `contract`
+field), so what the render was allowed to do is on record.
+
+**The render.** The front and side photographs go to the image provider with
+the contract expressed as bounded, non-anatomical instructions (presentation,
+grooming, skin surface, a modest leaner presentation where the contract
+permits it), never as free text a person typed. Both views are rendered so
+the profile cannot drift from the front. The output carries the synthetic
+label in the image and in the surrounding UI.
+
+**The re-measurement.** The rendered front and side go back through the same
+on-device engine that measured the originals: the same landmarker, the same
+side placement, the same metrics. This is the step that turns a picture into
+a claim the product can stand behind. The contract is then checked in both
+directions: did the targeted measurements move within their bands, and did
+every other measurement stay within noise of the original.
+
+**The rejection path.** A render that misses the contract is not shown. It
+is retried with the contract tightened (fewer goals, smaller deltas), and
+after a bounded number of attempts the person sees "We could not make an
+honest preview of that goal set" and the plan cards, never a face that failed
+the check. A render that passes is shown as current against goal with the
+divider, with the What-changed drawer listing exactly the contract lines
+that moved and by how much, in measurement terms, tied to the plan cards.
+
+**The teaser.** Before a goal or product is added, the person may see a
+single, low-cost teaser: the current face with the targeted region marked
+and the contract stated in words and numbers ("jaw definition, up to this
+much over twelve weeks"), not a generated face. The generated preview is the
+reward for committing to the goal and giving the consent below. That keeps
+generation cost behind intent and keeps the teaser from being a forecast.
+
+**The consent boundary.** This is the first time the product sends a person's
+own photographs off the device for rendering, and the side photograph is new
+even against the earlier preview plan. It needs its own consent, separate
+from the landmark-feedback consent: named provider, what is sent (the two
+photographs and the contract, nothing else), retention at the provider,
+deletion on revocation, exclusion from training and advertising, adults only,
+and never for a guest's scan. The privacy page names it. Revocation removes
+the provider artefacts and the stored preview reference, as the earlier plan
+already requires.
+
+**What it is not.** Not a forecast, not a procedure, not a measurement the
+person has reached, and not the creator carousel. Weekly tracking compares
+scans to scans; the preview is never the destination the tracker reports.
+
+**Sequence.** Contract model and re-measurement harness first, on synthetic
+faces, with no consent surface. Then provider evaluation against the harness.
+Then the consent surface, the staff-only route, and a small adult cohort.
+This slots after cycle 2 in section 6 because it depends on the plan object
+(3.5) for the contract and on Max's memory for the goal in the person's
+words.
 
 **Mechanism.** A `productLinks` table in code (rec id, store, url, verified
 date, harshness, directions, pairs), rendered as the primary link with the
@@ -594,8 +778,8 @@ Max is a well-reasoned appliance, not a coach. The behavioural layer is genuinel
 | sev | finding | where | fix | effort | status |
 |---|---|---|---|---|---|
 | P1 | One tap freezes Max for the rest of the session | `src/ui/maxCharacter.ts:481` | Remove `poked` on the hop's animationend, the same way greet() removes `waving` (lines 670-675), or time it out at 620ms. Also drop the rule's specificity to `.poked .mx-bob` so it can never outrank an act. Add a test in maxCharacter.test.ts that a poked drawing still has a running mx-bob one second later. | S | confirmed |
-| P1 | Silhouette reads as a smart device, not a coach | `src/ui/maxCharacter.ts:33` | Redesign the body, keep the palette thread. Head separate from torso with a neck pivot, two full arms with an elbow and a mitt hand, feet or a grounded base, eyes with sclera and pupil (gaze is a coach's main channel), a mouth that opens. Keep the blue and the mint antenna tip as brand continuity; turn the visor into a brow ridge or drop it. Aim at Duo and Kurzgesagt bodies, not EVE. Commission a turnaround sheet… | L | reader |
-| P1 | Every act is the same egg with a different sticker | `src/ui/maxCharacter.ts:236` | Build the acts on a rig with joints and a runtime that blends: a Rive state machine (inputs: mood, act, gaze x/y; blend transitions between states; additive breathing layer) or a Lottie rig driven by segments. Cut the repertoire to four body-led acts a coach would do (stretch, look around, think, a beckon or thumbs-up) and drop the prop gags. Keep maxIdle's scheduling rules and reactMax's API as the state machine's… | L | reader |
+| P1 | Silhouette reads as a smart device, not a coach | `src/ui/maxCharacter.ts:33` | Owner's call (2 Sep): the body stays. Pupils are added; volume and motion come from the 3D render, not from a new silhouette. | L | owner decided |
+| P1 | Every act is the same egg with a different sticker | `src/ui/maxCharacter.ts:236` | Owner's call (2 Sep): no joints. The move set is limited to what a limbless body can do and rendered in 3D; the prop acts go. | L | owner decided |
 | P2 | Every act starts and ends with a snap: the class-swap model cannot blend | `src/ui/maxIdle.ts:127` | Drive transitions with the Web Animations API instead of class swaps: keep the breath as a base animation and layer wind-up, act and settle with `composite: "add"` (or `accumulate`) so they ride on top of it; author each act's first and last keyframes to equal the wind-up's end and the settle's start. If the rig moves to Rive, its blend transitions solve this for free. | M | reader |
 | P2 | Hovering mid-act teleports the arm and vanishes the prop | `src/ui/maxIdle.ts:176` | On pointerenter set `hovered = true` so the next act is skipped, and let the running act complete (every act's keyframes already return to rest). If an act must be cut, add `mx-settle` and hide the prop with a 150ms opacity fade rather than removing the class in one frame. | S | reader |
 | P2 | The fight and the fall are dead code that still ships in every drawing | `src/ui/maxCharacter.ts:395` | Delete maxPet.ts, wireFight, the `fight` option, the mx-arms-block group, the nine dead keyframes and the .maxpet rules; keep a one-paragraph note in the header. If a knock-down ever returns it needs a ground plane, a parabolic arc, a centre-of-mass origin, limb lag and an impact squash, which means a rig, not a class. | S | reader |
@@ -699,7 +883,7 @@ The wall itself is the strongest part of this surface: the teaser shows the pers
 | sev | finding | where | fix | effort | status |
 |---|---|---|---|---|---|
 | P1 | Signup wall promises instant unlock, then locks the person in a six-step questionnaire ending on the paywall | `src/engine/onboarding.ts:154` | Keep one required card (first name and date of birth, which is all the plan gate needs) and make last name, mobile, discovery source and both essays optional with a visible Skip. Show the analysis first and run the remaining questions from the plan step or the Coach tab, where the answers change something the person can see. If the lock must stay, name the reason on the card: "One question so we know which plans we… | M | reader |
-| P2 | "Email not confirmed" and "email rate limit exceeded" both surface as "That does not look like a valid email." | `src/engine/auth.ts:535` | Add explicit branches ahead of the generic email test: "not confirmed" -> "Confirm your email first. Open the newest link we sent to you, then sign in."; move the rate-limit check above the email check. | S | reader |
+| P2 | "Email not confirmed" and "email rate limit exceeded" both surface as "That does not look like a valid email." | `src/engine/auth.ts:490` | Add explicit branches ahead of the generic email test: "not confirmed" -> "Confirm your email first. Open the newest link we sent to you, then sign in."; move the rate-limit check above the email check. | S | reader |
 | P2 | Sign-in mode inside the wall is headed "Create an account to see your analysis" | `src/ui/authForm.ts:40` | Vary the title by mode in the analysis context: signup "Create an account to see your analysis", password "Sign in to see your analysis", link "Email me a link to see my analysis". Keep the lede as it is. | S | reader |
 | P2 | Social buttons open as "CHECKING…", re-check on every mode switch, and on failure stay dead with a tooltip-only explanation | `src/ui/authForm.ts:189` | Memoise the availability promise at module scope so the check runs once per page, wrap the fetch in AbortSignal.timeout(4000), and on timeout or failure remove the social row (or render the buttons enabled and report the error in .acct-msg on click) instead of leaving disabled controls. Drop cursor: wait for the settled states. | S | reader |
 | P2 | Closing the offer with the X keeps your self-scan; answering "Not now" then "No thanks" loses it, and nothing says so | `src/ui/onboardingFunnel.ts:207` | Pick one rule and apply it to every exit: either route the X and Escape through the same confirmation, or make the decline stamp only follow an explicit "No thanks" and say on the sheet that closing without answering keeps the choice open. Rename the primary button to "Keep the free trial offer". | S | reader |
@@ -847,8 +1031,88 @@ Questions the reader could not settle from the sandbox:
 - Would a smaller or float16 variant of the multiclass segmenter be acceptable for the head-covering heuristic, which only feeds two ratio thresholds? The current float32 model is 15.1MB even gzipped.
 - All numbers here come from headless Chromium on the sandbox CPU with 4x throttling as a phone proxy and a zero-latency network. A run on a mid-range Android over 4G against production would set the true baseline and confirm Vercel serves the .wasm and .tflite compressed.
 
+## 4.12 User-facing copy and voice across the app
 
-Surfaces read so far: 11 of 14. The rest are appended as they land.
+Files: templates, results strings, onboarding funnel, tone prompt, verdict ladders, League tool cards, Enhance panel
+
+The copy system is unusually disciplined for a consumer app: the em dash detector runs clean, the plain verdict ladder matches CLAUDE.md word for word and is pinned by tests, the rarity sentence on the report is directional rather than a count, and the deterministic templates never print "undefined". The weakest area is exactly the class the brief named: sentences that promise more than the code delivers. "Unlimited chats" sits on the Max sell screen above a hard 30-message daily wall, the League tool card sells "a real 4K upscale" against a 2x cap and a metered "4K pass" that no meter records, a "coming soon" server tier is advertised inside a tool whose own source says it will not ship, and the lock card still quotes a measurement count typed thirty PRs ago. Two copy defects also break the product's own rules: Coach Max's region read can print the near-verbatim sentence CLAUDE.md bars, and the overview quotes 0.9 points of photo noise while every other surface says 0.6. Beneath those, the polish gaps are small and cheap: the population line breaks grammatically at the bottom of the scale and overclaims at the top, the em dash sweep left four colon-before-conjunction scars, and the plain ladder that is the product default cannot be chosen once a person has answered the tone prompt.
+
+| sev | finding | where | fix | effort | status |
+|---|---|---|---|---|---|
+| P1 | "Unlimited chats with Coach Max" sells past a 30-message daily wall | `src/ui/maxTab.ts:76` | Change the bullet to "Chat with Coach Max about your numbers, up to 30 messages a day" or drop the adjective entirely: "Chat with Coach Max about your numbers". In maxChat.ts read X-Max-Remaining and show a quiet line under the composer when five or fewer remain: "5 messages left today. Max is back tomorrow." | S | confirmed |
+| P1 | League Tools card promises "a real 4K upscale" and a metered "4K pass" the engine never performs | `src/league/main.ts:1229` | Card body: "Sharpen, colour and a clean upscale of up to 2x for photos, towards 4K where the source allows. Clips are cleaned at their own size. Nothing is uploaded and no detail is invented." Render sentence: "Renders are the calls that cost us money (a voiceover, a generated image), everything else is unmetered." | S | reader |
+| P1 | Coach Max's region read can print the sentence CLAUDE.md bars | `src/ui/templates.ts:194` | Replace both helpers with the directional form already used everywhere else: "About N% of guys measure higher there" built from scoreHigherText, and "ahead of most guys" or the plain percentile for the standout line. Rewrite the comment at 181-186 to quote CLAUDE.md rather than contradict it. | S | reader |
+| P2 | Population line is ungrammatical at the bottom of the scale and overclaims at the top | `src/ui/templates.ts:95` | Clamp inside populationLine by default (tailLimit 1 via statedPct) and phrase the tails without "About": "More than 99% of male faces score higher." and "Fewer than 1% of male faces score higher." Add both tails to rarityConsistency.test.ts. | S | reader |
+| P2 | Overview quotes 0.9 points of photo noise; every other surface says 0.6 | `src/ui/templates.ts:752` | Interpolate the constant: `Two photos of the same face differ by about ${DISPLAY_NOISE.toFixed(1)} points, so a single scan is one reading rather than a verdict.` The file already imports DISPLAY_NOISE. | S | reader |
+| P2 | The plain verdict ladder cannot be chosen, and settings misnames the default | `src/ui/tonePrompt.ts:57` | Add a third option to the prompt, "Plain reading. The words a person would say out loud: needs work, okay, decent, good." mapped to polite, and make settings name all three states: "plain", "describing the face", "kept civil". Reword the kind option to what it prints: "The same result, with the kinder word for each rung." | S | reader |
+| P2 | "Server pass · stronger, coming soon" advertises a tier the file says will not ship | `src/ui/enhancePanel.ts:94` | Remove the chip, or state the fact plainly: "Server pass: not offered. Every engine we tested changed faces, and this tool will not." | S | reader |
+| P2 | Lock card promises "all thirty-one measurements", a count typed at #53 | `src/ui/results.ts:2923` | Interpolate `${METRICS.length}` or drop the number: "This is the part underneath: every front measurement, what each one did to the number, and how far it can actually move." | S | reader |
+| P3 | Em dash sweep left four colon-before-conjunction scars | `src/ui/maxTab.ts:185` | Full stops. "Hey, I'm Max. Ask me anything. Open a scan if you want me talking through your exact numbers." / "Scan your face to see your first measurement. Every one after it lines up here so you can watch it move." / "...as it does between people, so it is shown and not scored." / "...than the brow's visible tail, so this number runs about 12° below..." | S | reader |
+| P3 | Lever copy promises a two-week result the tracker says takes four | `src/ui/templates.ts:598` | "Two weeks of lower sodium and alcohol is the earliest this number can move. Give it four before you read it." and "Consistent sleep and lower sodium bring the measured aperture back over a few weeks; judge it at four." | S | reader |
+| P3 | Coach Max still calls the reader "bro" and "girl" | `src/ui/templates.ts:418` | Use the name the opener already carries, or drop the vocative: "${size} up over ${days} days, and that's past what the camera can fake. That's the look of somebody who actually did the thing." | S | reader |
+| P3 | Voiced-example fallback invents a status and overstates the narration | `src/ui/results.ts:1561` | "The example clip could not be loaded. The format: your scan, your key measurements narrated in Coach Max's voice, about forty seconds." | S | reader |
+
+Questions the reader could not settle from the sandbox:
+
+- index.html:244-245 promises "Your score is free, and stays free... on every plan, forever", while the decline sheet (onboardingFunnel.ts:216-218) tells a free account that declines the trial "you will not be able to scan yourself again" (guestAllowance returns 1 guest scan, weeklyAllowance is 1 for every tier). Is "the score is free" meant to cover repeat self-scans, or only the first one? To a first-time reader the two surfaces contradict each other.
+- The blunt ladder still hands out "Very good looking", "Great looking" and "Model looks" (analysisMode.ts:344-368, 378-380), the same register as the "very attractive" the owner removed from the plain ladder. Is the blunt ladder deliberately exempt from that call, or should it converge on the plain reading now that no ladder carries slang?
+- Max's live chat replies are model output. The persona bars em dashes (api/_maxPersona.ts:230) but nothing post-processes the text, so the rule holds only as far as the model obeys it. Is a server-side replace of em dashes with a comma or full stop acceptable so the product rule holds at runtime?
+
+## 4.13 Creator League
+
+Files: /league
+
+The signed-out gate is the strongest part of this surface: the screenshot shows a clean dark page with a clear chip, a serif headline, honest terms copy and one auth form with explicit sign-in versus sign-up modes. The tools are a different story. The two flagship exports (the beat reel and the Polisher) still save through a bare anchor click that the product's own saveFile.ts documents as broken on iOS Safari, and both print "Saved." regardless. The Cast has three real state bugs: redoing a portrait silently wipes a filmed sixteen-render scene set, leaving the mode mid-film keeps spending quota in a hidden panel, and every landed shot repaints the grid and throws away anything typed into the change boxes. Long renders (up to 260 seconds server side for a pair) show one static sentence with no elapsed time, counter or cancel. Naming is half-migrated: the League doors say The Cut, The Cast, The Polisher and The Rundown, but every room still says Make a TikTok, AI Model Reel, Enhance and Full Analysis, and the Clips Library door promises celebrity references and demo exports that the on-device library does not contain.
+
+| sev | finding | where | fix | effort | status |
+|---|---|---|---|---|---|
+| P1 | Reel and Polisher exports use a bare anchor download, which saveFile.ts says fails on iOS | `src/ui/beatReelPanel.ts:1654` | Route both through saveFile(blob, exportName("reel", ext), "reel") and saveFile(..., "card"/"reel") for the Polisher, and print outcomeMessage(outcome) instead of "Saved.". Keep the render busy flag until the save resolves so the fresh-tap dialog cannot be dismissed by a panel close. | S | reader |
+| P1 | Redoing a portrait rebuilds the whole preview and destroys the filmed scene set | `src/quick.ts:3629` | Hold the scene set in module state keyed to the run, and on a portrait redo swap only the changed <img src> and its sources entry instead of re-rendering host.innerHTML. If a full re-render is kept, re-attach the existing grid and status node, and if the after full-length anchor changed, say so with a confirm before discarding shots. | M | reader |
+| P1 | Leaving The Cast mid-film keeps spending quota into a hidden panel with no way to stop | `src/quick.ts:3458` | Add a Stop filming button next to the status line, an AbortController passed into filmOne, and a run counter checked before every iteration; leaveMode and enterMode("ai") bump the counter. Add a beforeunload warning while a set or a pair is in flight, matching the carousel. | S | reader |
+| P1 | Clips Library door promises content that does not exist and Open does nothing on a fresh device | `src/league/main.ts:1243` | Either seed the strip with the AI demo faces the product already ships (public/demo, which are permitted) and drop the word celebrity, or rewrite the card to "Faces you have saved on this device, scored instantly, no rescan" and make #clips land on a visible empty state ("Nothing saved yet. Scan a face, then Save to library.") rather than silently staying on the pillars. | S | reader |
+| P2 | Every landed shot repaints the whole scene grid and wipes text typed into the change boxes | `src/quick.ts:3371` | Patch only the figure that changed (append a figure per landed shot, replace one img on redo) instead of rewriting innerHTML. Disable the Redo and Film again buttons while any filmOne is in flight, and give makeSceneSet a run token so a superseded run stops painting. | M | reader |
+| P2 | A pair generation can take four minutes and shows one frozen sentence with no timer, counter or cancel | `src/quick.ts:3180` | Split the pair into per-frame requests the way scene mode already does (filmOne), so the after lands in about a minute and the grid fills frame by frame with a 1 of 4 counter. Failing that, add an elapsed timer and a line such as "Usually two to four minutes. The after arrives first." and a Cancel that aborts the fetch. | M | reader |
+| P2 | League door names do not match the room names they open | `src/league/main.ts:1216` | Carry the four House names into quick.html pillar labels, the modebar names, the enhance and reel dialog headings, and replace CREATOR STUDIO with THE CAST or CAROUSEL CREATOR. Derive the slide range on the League card from CAROUSEL_MIN_SLIDES and CAROUSEL_MAX_SLIDES so it cannot drift again. | S | reader |
+| P2 | Saved characters are a promise with no library behind it | `quick.html:130` | Render a small "Your characters" chip row above the form from the stored list (name, sex, first line of description); tapping one fills the fields and chips. Store the approved after data URL alongside so the reroll anchor survives too. Until that ships, change the helper to something true, such as "Give them a name for the file names." | M | reader |
+| P2 | Pair redo uses window.prompt while the scene grid uses an inline box with opposite semantics | `src/quick.ts:3583` | Put the same inline change box under each pair frame, with blank meaning reroll, and keep one Redo handler shape. Mirror the busy state on the status line the way the scene redo does. | S | reader |
+| P2 | Lightbox is hard to close on a phone, unlabelled, unlocked, and has no actions inside it | `src/quick.ts:3287` | Close on tap of the image as well as the backdrop, add role=dialog aria-modal and move focus to the close button then back to the opener, lock body scroll while open, dedupe the wrap, and add Save and Redo buttons plus previous and next arrows inside the lightbox so the set can be reviewed in one pass. | M | reader |
+| P2 | Sixteen scene shots need sixteen taps and sixteen share sheets, and each Save gives no outcome | `src/quick.ts:3435` | Add Save all and Save the afters buttons that build one stored ZIP via buildStoredZip with scene-side file names, and switch each per-shot Save to show outcomeMessage on the button for two seconds like the pair buttons do. | S | reader |
+| P2 | Em dash in the low-confidence tempo message | `src/ui/beatReelPanel.ts:1372` | Replace with: "Read with low confidence (0.42). Check that the ticks line up with the spikes below before rendering." Add this file to the em dash detector's scope so the reel panel is covered. | S | reader |
+
+Questions the reader could not settle from the sandbox:
+
+- Were the beat reel and Polisher exports deliberately left on the bare anchor path (for example because of blob size through navigator.share), or did they simply predate the #135 phone export work and never get migrated?
+- Is the Clips Library card meant to become a seeded library of celebrity references and demo exports, or should its copy describe the on-device saved-faces strip that exists today?
+- When a creator stops The Cast mid-set, should the in-flight scene still bill one slot, or should the client hold a cancel token the server honours so the reservation is released?
+
+## 4.14 Landing page and public pages: index.html, src/main.ts
+
+Files: landing parts
+
+The landing is a considered, honest page: a strong serif headline, a demo card that earns its number with visible work, a proof band that refuses fake social proof, and fine print that carries the AI-face disclosure exactly as the standing decision requires. The public guides read in the same plain, factual voice, their meta, canonical and JSON-LD are complete, every internal link resolves through vercel.json, and no em dashes appear in any user-facing text. What undercuts the premium bar is the first five seconds: on the 1280x633 viewport that was actually captured the two capture buttons sit below the fold because the desktop grid rule out-specifies the viewport-height cap, the header shows a dimmed disabled brand mark beside a 9px "V1" build chip at 1.8:1 contrast, and the page ships roughly 320 KB gzipped of application JavaScript (auth client, sex-inference tables, settings) before anyone taps anything. On the public pages the wordmark renders as an underlined hyperlink and the header CTA carries seven different labels across nine pages. Everything found is small to fix apart from splitting the landing bundle.
+
+| sev | finding | where | fix | effort | status |
+|---|---|---|---|---|---|
+| P1 | Capture buttons fall below the fold on short desktop viewports | `src/style.css:244` | Carry the viewport-height cap into the desktop rule so specificity cannot drop it: `body:not(.cam-takeover) #capture-stage { width: min(100%, 460px, 56svh); }`. At 633px that yields a 354px card whose shutter row ends near 600px; at 900px it is still the full 460px. Re-check that the reel's absolute-pixel furniture (pillar row, callouts) still reads at 354px. | S | confirmed |
+| P2 | Signed-out header shows a dimmed disabled brand mark next to a 9px "V1" build chip | `index.html:87` | Render the wordmark in full ink for guests (keep it inert or scroll-to-top; a grey disabled control is the wrong signal), drop the `title` and `disabled` attributes, and remove the "FRONT + SIDE · V1" chip from the header. If a build label is wanted, it already has a home in the footer next to `#build-stamp`. If a chip must stay, set it to var(--mut) at 11px so it clears 4.5:1. | S | reader |
+| P2 | Landing ships about 320 KB gzipped of application JavaScript before any interaction | `index.html:471` | Give the landing its own entry (src/landing.ts) that imports only the reel, headline and capture bootstrap, and dynamic-import the scoring, auth and settings graph from `warmEngine()` and from the first Sign in / Sign up click, the same intent pattern already used for the model. Put the two header pills in index.html as static markup (hidden until auth resolves) so the header never pops. Target under 100 KB gz… | M | reader |
+| P2 | Brand wordmark renders as an underlined hyperlink on every public page | `src/style.css:3589` | Move the reset to the base rule: `.wordmark, .wordmark:hover { text-decoration: none; }` at style.css:150, and delete the `.auth-page` special case. | S | reader |
+| P2 | Opening "What gets measured" jumps the headline upward | `src/style.css:229` | Take the open paragraph out of the centering maths: render it as an absolutely positioned popover under the summary (fade in, no height change), or reserve the space by giving `.sub-more` a `min-height` equal to its open height. Either keeps the h1 and the card fixed while the text appears. | S | reader |
+| P3 | Seven different labels for the same header CTA across the public pages | `methodology.html:57` | Use one header label everywhere, "Scan your face", and one closing CTA, "Get your free face score", and style the header link as the same pill the landing uses for Sign up. | S | reader |
+| P3 | Headline swaps to a different sentence after load on return visits | `src/main.ts:615` | Decide the headline before first paint: a ten-line inline script in the head reads `truemax:landing-visits` and writes the chosen lead, em and tail into the h1, and main.ts only repaints when a signed-in name arrives. Alternatively set `data-visit` on `<html>` inline and keep the three lines in CSS `content`. | S | reader |
+| P3 | Journey step 3 carries an internal project caveat on the marketing page | `index.html:285` | Keep the claim inside what the sample supports and drop the project status: "We compare rescans conservatively: a small movement between two photographs is reported as likely capture noise, not as change." | S | reader |
+| P3 | Dead demo-score shim would substitute community ratings for engine output if re-keyed | `src/ui/demoReelShim.ts:35` | Delete src/ui/demoReelShim.ts, the `applyShim` import and the `?real=1` switch at demoReel.ts:6-8, and rewrite the comments at demoReel.ts:14-20 and main.ts:501 to say the card shows the engine's measured output on the synthetic cast. | S | reader |
+| P3 | Demo card and disabled wordmark are noise for assistive technology | `index.html:119` | Put `aria-hidden="true"` on `#oval-idle` and add a visually hidden sentence before the stage, "Product demo: a photograph being scanned and scored." (no caption on the card itself, per the standing decision). Fix the wordmark as in the header finding so the first announced element is the h1. | S | reader |
+| P3 | Guide articles have no main landmark | `face-score.html:60` | Wrap each article in `<main class="legal-shell guide-shell">` (or `<main><article>`) on the four guide pages so every public page exposes the same landmarks. | S | reader |
+
+Questions the reader could not settle from the sandbox:
+
+- Phone landing: from the CSS a 375x667 phone puts the capture buttons about 60px below the fold (sticky topbar, three-line headline, disclosure, a 404px-tall card from `min(420px, 100%, 52svh)`), while a 390x844 phone fits. Can a phone capture confirm this before it is treated as a finding?
+- Is the "FRONT + SIDE · V1" header chip meant to be visible to the public, or is it a leftover from the internal build that can go?
+- The guide pages carry no script, so a signed-in member who follows the footer to /guides sees a signed-out header with "Scan your face" and no account pill. Is that acceptable for the static pages, or should they carry the account state?
+
+
+All fourteen surface reads are in.
 
 
 # 5. Confirmed in the browser this session
@@ -874,15 +1138,54 @@ says "owner".
 
 | cycle | contents | why this order |
 |---|---|---|
-| 1. Promises | The Coach-tab context fix, the "unlimited" benefit line, the barred rarity sentence on the region tabs, the two percentiles under one curve, the review furniture under the side dialogs, the retake that re-asks gender, the silent engine wait, the poked-Max freeze | Every one of these is a sentence or a screen the product says and then contradicts. They are all S or M. |
+| 1. Blockers | Every P1 in the backlog below, generated from all landed reads and the confirmed rows, deduplicated | Each is a sentence or a screen the product says and then contradicts, or a stall on a paid path. |
 | 2. Max's mind | Memory facts table and settings list, plan reconciliation, quiz profile in context, verdict ladder and rarity bar in the prompt, em dash scrub on the stream, truncation guard, parser loosening, the chat edge states, delete and archive | One PR because they share the API files and the tests. |
-| 3. Max's body | Character sheet, rigged mesh, move set, pre-rendered loops, the 88 px gate, teardown of the fight and the pet, the sleep and reduced-motion fixes | Owner in the loop on the sheet before any rendering. |
+| 3. Max's body | The same character rendered in 3D with pupils, the limbless move set, pre-rendered loops, the 88 px gate | The eight defects in 2.4 ship ahead of this on their own PR; the owner sees the turnaround before any rendering. |
 | 4. The Coach tab and plans | The tab layout, the check-in as a Max card, plan rows as controls, the plan object and its renderer, the product shelf with the verified links | Depends on 2 for the plan object and on the sweep finishing for the shelf. |
 | 5. Side placement and scores | 1.1 A and B; 1.2's construction fixes on the front; the side norm refit once real profiles arrive | C runs in parallel as labelling time and lands when the model beats the mask on the held-out set. |
 
-The remaining P2 and P3 rows in section 4 are folded into whichever cycle
-touches their file. Nothing in section 4 is a release blocker on its own; the
-P1s are, and they are all in cycle 1.
+The Goal Visualizer (3.7) slots after cycle 2. The remaining P2 and P3 rows
+in section 4 are folded into whichever cycle touches their file.
+
+## The P1 backlog, generated
+
+This list is produced by the same generator as section 4 from every read
+that has landed plus the confirmed rows in section 5, with duplicates across
+surfaces merged. Cycle 1 is this list; there is no other list of blockers.
+
+| # | blocker | where | fix | effort | seen in | status |
+|---|---|---|---|---|---|---|
+| 1 | Coach tab chats run without the scan the tab says he has read | `src/ui/maxTab.ts:204` | Build the context on the dashboard from the owner's latest stored scan (the same recipe as results.ts chatContext: report, tone, scans, movement, activePlan; task #138 already reopens a stored scan as a full report). Pass it from both openMaxChat calls in maxTab.ts. Replace TAB_GREETING with a… | M | 4.1, 4.3 | confirmed |
+| 2 | Plan rows are inert: "Ready to start" looks like a control and does nothing | `src/ui/maxTab.ts:113` | Make each row a button that opens a small sheet: "I've started" (moves to running), "Not doing this" (declined), "Ask Max about it" (opens the chat with the item as initialQuestion). Show the next step under the state: "Max checks in on 12 Sep" from startBy, or "Waiting on your date" when startBy… | M | 4.1 | reader |
+| 3 | One tap freezes Max for the rest of the session | `src/ui/maxCharacter.ts:481` | Remove `poked` on the hop's animationend, the same way greet() removes `waving` (lines 670-675), or time it out at 620ms. Also drop the rule's specificity to `.poked .mx-bob` so it can never outrank an act. Add a test in maxCharacter.test.ts that a poked drawing still has a running mx-bob one… | S | 4.2 | confirmed |
+| 4 | Silhouette reads as a smart device, not a coach | `src/ui/maxCharacter.ts:33` | Owner's call (2 Sep): the body stays. Pupils are added; volume and motion come from the 3D render, not from a new silhouette. | L | 4.2 | owner decided |
+| 5 | Every act is the same egg with a different sticker | `src/ui/maxCharacter.ts:236` | Owner's call (2 Sep): no joints. The move set is limited to what a limbless body can do and rendered in 3D; the prop acts go. | L | 4.2 | owner decided |
+| 6 | Paywall sells unlimited chats, server caps at 30 a day | `src/ui/maxTab.ts:76` | Change the benefit line to a true one ("Up to 30 messages a day with Coach Max") or raise or remove the cap. Have the client read X-Max-Remaining and show "N left today" under the composer once it drops below 5. Return a resetsAt ISO timestamp with the 429 instead of "tomorrow" and format it in… | S | 4.3, 4.12 | confirmed |
+| 7 | Retake photo re-asks gender and re-offers the tutorial inside the same scan | `src/main.ts:2011` | Give the retake its own path that keeps the scan's answers: on decline, call openCamera() directly for the camera method and el.fileInput.click() directly for upload, skipping ensureScanAllowed, ensureSex and the tutorial offer. If the allowance gate must still be honoured, pass a `retake` flag… | S | 4.4 | confirmed |
+| 8 | Upload path goes silent while the engine downloads, and every error lands in an all-caps mono line below the fold | `src/main.ts:1745` | Paint the scan stage the instant a file is chosen: show the photo, add the scanning class, and set the narration line to "Loading the analysis engine" while ensureEngine resolves, then "Finding the face". Report decode failures and engine failures in a dialog next to the stage (confirmScanAction… | S | 4.4 | reader |
+| 9 | First scan stalls on a 16 MB segmentation model with a blank narration line and the bar at zero | `src/engine/headCovering.ts:10` | Warm segmenter() inside warmEngine alongside initLandmarker; it shares the same wasm fileset. Narrate the wait: "Checking for hats and hoods" in el.status while it runs. Race detectHeadCovering against a bounded timeout (four to six seconds) that resolves to available:false, so a slow connection… | M | 4.4, 4.11 | confirmed |
+| 10 | Region tabs print the barred count-rarity sentence, in coach voice, to everyone | `src/ui/templates.ts:189` | Rewrite regionSummary in the plain register the rest of the report uses and route every figure through standing()/statedPct. For example: "Your {best} is the strongest reading here: {value} against a {sex} average of {mean}, {rankShort}. The one to work on is {worst}: {value} against {mean},… | S | 4.5 | confirmed |
+| 11 | Signup wall promises instant unlock, then locks the person in a six-step questionnaire ending on the paywall | `src/engine/onboarding.ts:154` | Keep one required card (first name and date of birth, which is all the plan gate needs) and make last name, mobile, discovery source and both essays optional with a visible Skip. Show the analysis first and run the remaining questions from the plan step or the Coach tab, where the answers change… | M | 4.6 | reader |
+| 12 | Review row and thirteen point handles stay live under the question and consent dialogs | `src/ui/sideFlow.ts:1535` | Keep mode-pending until afterAutomatic settles: remove it only on the manual branch and after the awaits (or in a finally), and call showReviewActions lazily on the edit branches instead of before the dialog. Set e.section.inert = true while any side dialog is open and clear it in each settle().… | S | 4.7, 5 | confirmed |
+| 13 | Dialog preview rings are invisible at inspection size | `src/ui/sideFlow.ts:1784` | Scale the ring with the drawn box in the expanded view (for example radius = max(2.5, w / 160), stroke 1.25 px) and draw a 1 px dark halo under the teal, as the live .vpoint does with its inset shadow; raise connector alpha to about 0.7 when expanded. Keep the thumbnail constants and change the… | S | 4.7 | reader |
+| 14 | Both dialogs' fine print promises something the flow does not do | `src/ui/sideFlow.ts:1620` | Line 1620: "Placing them yourself gives a more accurate score. Taking these skips the walkthrough; you can still say they look off on the next screen." Line 1466: "Yes goes straight to your analysis. No lets you place them yourself first." | S | 4.7 | reader |
+| 15 | Home scan rows both navigate to Scans and expand in place on one tap | `src/ui/dashboard.ts:272` | Pick one behaviour. Recommended: delete lines 271-273 and keep the in-place expand, then add an "Open this scan" link inside .dash-scan-pop-in that calls openScanRecall(scan, previous) so the full report is still one tap away. If navigation is the intended behaviour, delete the popover markup,… | S | 4.8 | confirmed |
+| 16 | The "scan is due" sentence never renders for anyone who has a streak | `src/ui/dashboard.ts:428` | Render subline(ctx) under the hello in the populated hero as a .dash-hero-sub line. When streak.daysLeft is non-null, also surface it beside the New scan control (for example a small "by Sunday" under the pill, or "Scan by Sunday" as the pill label) so the action carries its own deadline. | S | 4.8 | reader |
+| 17 | Global reduced-motion rule turns infinite loops into per-frame strobes | `src/style.css:133` | Replace line 133 with the standard pattern: `* { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important; }`. Then give the spinner a… | S | 4.9 | reader |
+| 18 | Member and Max wordmark states are neon on cream at 1.3 to 2.1:1 | `src/style.css:178` | Keep the base .wordmark colours (TRUE in --ink, MAX in --acc, 5.25:1 on card) for every state on the light theme, and drop the text-shadow glows there. If member and Max states must be visible, express them as a small chip beside the wordmark ("MEMBER", "MAX") using --acc on --acc-soft, and move… | S | 4.10 | reader |
+| 19 | League page renders in fallback fonts because it never loads Fraunces or Inter | `src/league/league.css:33` | Add the two self-hosted imports at the top of league.css: @import "@fontsource-variable/fraunces/opsz.css"; @import "@fontsource-variable/inter/wght.css"; (both are already in the bundle, latin subsets only), delete the local() @font-face, and set font-variation-settings: "opsz" 96, "wght" 300 on… | S | 4.10 | reader |
+| 20 | Landmark detection runs five full-size passes per photo synchronously on the main thread | `src/engine/consensus.ts:39` | Move FaceLandmarker into a Web Worker (tasks-vision supports workers; vercel.json already allows worker-src 'self' blob:) and pass ImageBitmaps, keeping IMAGE mode determinism. As a same-day step, await nextFrame() between burst-frame detections and between variants so the page repaints.… | M | 4.11 | reader |
+| 21 | League Tools card promises "a real 4K upscale" and a metered "4K pass" the engine never performs | `src/league/main.ts:1229` | Card body: "Sharpen, colour and a clean upscale of up to 2x for photos, towards 4K where the source allows. Clips are cleaned at their own size. Nothing is uploaded and no detail is invented." Render sentence: "Renders are the calls that cost us money (a voiceover, a generated image), everything… | S | 4.12 | reader |
+| 22 | Coach Max's region read can print the sentence CLAUDE.md bars | `src/ui/templates.ts:194` | Replace both helpers with the directional form already used everywhere else: "About N% of guys measure higher there" built from scoreHigherText, and "ahead of most guys" or the plain percentile for the standout line. Rewrite the comment at 181-186 to quote CLAUDE.md rather than contradict it. | S | 4.12 | reader |
+| 23 | Reel and Polisher exports use a bare anchor download, which saveFile.ts says fails on iOS | `src/ui/beatReelPanel.ts:1654` | Route both through saveFile(blob, exportName("reel", ext), "reel") and saveFile(..., "card"/"reel") for the Polisher, and print outcomeMessage(outcome) instead of "Saved.". Keep the render busy flag until the save resolves so the fresh-tap dialog cannot be dismissed by a panel close. | S | 4.13 | reader |
+| 24 | Redoing a portrait rebuilds the whole preview and destroys the filmed scene set | `src/quick.ts:3629` | Hold the scene set in module state keyed to the run, and on a portrait redo swap only the changed <img src> and its sources entry instead of re-rendering host.innerHTML. If a full re-render is kept, re-attach the existing grid and status node, and if the after full-length anchor changed, say so… | M | 4.13 | reader |
+| 25 | Leaving The Cast mid-film keeps spending quota into a hidden panel with no way to stop | `src/quick.ts:3458` | Add a Stop filming button next to the status line, an AbortController passed into filmOne, and a run counter checked before every iteration; leaveMode and enterMode("ai") bump the counter. Add a beforeunload warning while a set or a pair is in flight, matching the carousel. | S | 4.13 | reader |
+| 26 | Clips Library door promises content that does not exist and Open does nothing on a fresh device | `src/league/main.ts:1243` | Either seed the strip with the AI demo faces the product already ships (public/demo, which are permitted) and drop the word celebrity, or rewrite the card to "Faces you have saved on this device, scored instantly, no rescan" and make #clips land on a visible empty state ("Nothing saved yet. Scan a… | S | 4.13 | reader |
+| 27 | Capture buttons fall below the fold on short desktop viewports | `src/style.css:244` | Carry the viewport-height cap into the desktop rule so specificity cannot drop it: `body:not(.cam-takeover) #capture-stage { width: min(100%, 460px, 56svh); }`. At 633px that yields a 354px card whose shutter row ends near 600px; at 900px it is still the full 460px. Re-check that the reel's… | S | 4.14 | confirmed |
+| 28 | Automatic side placement lands visibly wrong on the reference profile | `src/engine/sideMask.ts:1` | Section 1.1, steps B and C | L | 5 | confirmed |
+| 29 | A second count-rarity sentence in Max's read on the results page | `src/ui/templates.ts:501` | Rewrite to the plain standing through statedPct; test every template for "in every 100" | S | 5 | confirmed |
+
+29 blockers from 14 landed reads plus the browser session; 4 duplicate rows merged.
 
 # 7. What is deliberately not being built
 
@@ -893,25 +1196,31 @@ P1s are, and they are all in cycle 1.
 - Cloud landmarking of any photograph.
 - A general chatbot. Max answers about the goal and turns back to the plan.
 - Vitamin E for scars and the dermastamp, out at the owner's instruction.
-- A simulated "after" face, for the reason the side plan already gives: a
-  generated face presented as a preview of yourself is a promise the engine
-  cannot keep.
+- A generated face that skips the re-measurement check in 3.7. The Goal
+  Visualizer is being built; a preview that has not passed its contract is
+  not shown, and no preview is ever described as a forecast.
 
 # 8. Decisions this plan needs from the owner
 
-1. **Max's body.** The spec locks "short rounded limbs" and a screen face.
-   The plan keeps the head and the screen and adds jointed arms with hands,
-   feet, and screen eyes with pupils. Yes, or keep the spec as written?
+1. **Max's body.** Decided 2 September: the silhouette stays, no joints,
+   pupils added, motion and material get the 3D treatment. Section 2.2
+   records it.
 2. **Real-time or pre-rendered first.** The plan says pre-rendered first.
    If gaze follow matters from day one, it is real-time and another week.
-3. **The 30-a-day cap.** Change the benefit line, or raise the cap. The plan
-   assumes the line changes and the count is shown.
+3. **The 30-a-day cap.** Decided 2 September: the cap stays. The benefit
+   line changes and the count is shown.
 4. **The typed region paragraph.** Is it Coach Max's read (then it is gated
    and labelled) or the plain instrument (then it is rewritten in the plain
    register)? The plan assumes plain, because it is unlabelled on screen.
-5. **Consent timing for the side loop.** Asking before the placement is
-   shown collects the honest acceptance rate. It is one more sentence before
-   the dialog.
+5. **Consent timing for the side loop.** Explained under "The loop that
+   learns" in 1.1: record the accept, correct or skip outcome for everyone
+   (no photo, no consent needed) and ask the photo consent before the
+   placement is shown so the yes-set is not biased by the outcome. Yes, or
+   leave the question where it is?
 6. **Real profiles for the side norms.** Eight to ten people, thirteen
    coordinate pairs each from the Calibrate export. Nothing in 1.2 moves
    without them.
+7. **The Goal Visualizer's provider and consent copy.** Which image provider
+   receives the two photographs, its retention terms, and the wording of the
+   consent. The contract-and-re-measure loop is built provider-agnostic, but
+   the consent names one.
