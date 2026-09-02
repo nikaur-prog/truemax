@@ -548,7 +548,7 @@ function startReelPreview(): void {
   paintPreviewButton();
 }
 
-export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
+export function openBeatReelPanel(analysis?: BeatAnalysisSource, initialFiles: File[] = []): void {
   closeBeatReelPanel();
   // Creator edits are production copy, not a second measurement pass. Keep a
   // private copy so changing a reel score never mutates the saved scan behind
@@ -688,6 +688,7 @@ export function openBeatReelPanel(analysis?: BeatAnalysisSource): void {
 
   document.body.appendChild(el);
   wire(el);
+  if (initialFiles.length) void appendClipFiles(initialFiles);
 
   // The transport, on the keyboard. Space pauses and resumes IN PLACE —
   // never back to the start marker — and the arrow keys step the position a
@@ -742,11 +743,7 @@ function wire(el: HTMLElement): void {
   clipInput.onchange = async () => {
     const files = [...(clipInput.files ?? [])];
     clipInput.value = "";
-    for (const file of files) {
-      const loaded = await loadClip(file);
-      if (loaded) clips.push(loaded);
-      paint();
-    }
+    await appendClipFiles(files);
   };
 
   const songInput = el.querySelector<HTMLInputElement>("#brp-song-input")!;
@@ -922,6 +919,14 @@ async function loadClip(file: File): Promise<PanelClip | null> {
     return null;
   }
   return { video, url, name: file.name, startAt: 0, bias: 0, beats: null };
+}
+
+async function appendClipFiles(files: File[]): Promise<void> {
+  for (const file of files) {
+    const loaded = await loadClip(file);
+    if (loaded) clips.push(loaded);
+    paint();
+  }
 }
 
 async function loadSong(file: File): Promise<Song | null> {

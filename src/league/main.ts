@@ -46,6 +46,9 @@ interface CreatorRow {
   /** True only for the in-memory founder row used when staff has not applied
    * to the League. It is never read from or written to Supabase. */
   synthetic_staff?: true;
+  /** In-memory access flags. Neither value is written to league_creators. */
+  staff?: boolean;
+  owner?: boolean;
 }
 
 interface SprintRow {
@@ -453,6 +456,7 @@ function renderStatus(row: CreatorRow): void {
 type Page = "overview" | "tiktok" | "submit" | "mine" | "ranks" | "money" | "offers" | "tools" | "admin";
 
 async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
+  const actor: CreatorRow = { ...me, staff };
   const pages: Array<[Page, string]> = [
     ["overview", "Overview"],
     ["tiktok", "TikTok"],
@@ -465,7 +469,7 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
   ];
   if (staff) pages.push(["admin", "Admin"]);
 
-  root.innerHTML = `${topBarHTML(`<span class="lg-chip ok">${esc(me.handle)}</span>`)}
+  root.innerHTML = `${topBarHTML(`<span class="lg-chip ok">${esc(actor.handle)}</span>`)}
   <div class="lg-shell">
     <nav class="lg-nav">${pages.map(([id, label]) => `<button data-page="${id}">${label}</button>`).join("")}</nav>
     <main class="lg-main" id="lg-page"></main>
@@ -489,7 +493,7 @@ async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
     // and the first one written without the check would bring the bug back.
     const pane = document.createElement("div");
     host.replaceChildren(pane);
-    void PAGES[page](pane, me);
+    void PAGES[page](pane, actor);
   };
   for (const b of nav) b.onclick = () => go(b.dataset.page as Page);
   const initial = (location.hash.slice(1) || "overview") as Page;
@@ -1397,7 +1401,7 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
   },
 
   async tools(mount, me) {
-    const granted = (id: string) => me.pillar_grants?.[id] === true;
+    const granted = (id: string) => me.staff === true || me.pillar_grants?.[id] === true;
     // The pillars, in the order a member meets them. Each granted card is a
     // real door: the hash tells /quick which room to open on arrival.
     // The Rundown was buried inside "CTA Generator", which nobody decodes —
@@ -1446,8 +1450,8 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       },
       {
         id: "clips", n: "06", name: "Clips Library",
-        body: "Saved faces, celebrity references and demo exports to cut from, scored instantly, no rescan.",
-        needs: "Nothing · it's all in the library", href: "/league/tools#clips",
+        body: "A previewable shelf for your reusable clips, source photos, saved faces and TrueMax demo exports.",
+        needs: "Files stay on this browser · send them straight into a TikTok cut", href: "/league/tools#clips",
       },
     ];
     mount.innerHTML = `<h1 class="lg-h">Tools</h1>
@@ -1469,14 +1473,22 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
             ? `<a class="lg-btn pri" href="${t.href}">Open</a>`
             : `<span class="lg-chip">NOT IN YOUR PLAN</span>`}
         </div></div>`).join("")}
-      <div class="lg-card lg-tool off">
+      <div class="lg-card lg-tool ${me.owner ? "" : "off"}">
         <div class="lg-tool-kicker">07</div>
         <div class="lg-row" style="border:none;padding:0">
-          <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Logos, marks and
-          the house palette, how every TrueMax video gets its look.</p>
-          <p class="lg-note" style="margin:0">Owner-run · assets land in your pillars automatically</p></div>
-          <span class="lg-chip">OWNER ONLY</span>
+          <div><h3>Brand Engine</h3><p class="lg-sub" style="margin:4px 0 6px">Approved logos,
+          exact house colours and the visual contract behind every TrueMax export.</p>
+          <p class="lg-note" style="margin:0">Owner-run · download the current asset pack and inspect the master rules</p></div>
+          ${me.owner ? `<a class="lg-btn pri" href="/league/tools#brand">Open</a>` : `<span class="lg-chip">OWNER ONLY</span>`}
         </div></div>
+      ${me.owner ? `<div class="lg-card lg-tool">
+        <div class="lg-tool-kicker">08</div>
+        <div class="lg-row" style="border:none;padding:0">
+          <div><h3>Calibration</h3><p class="lg-sub" style="margin:4px 0 6px">Rate a face before
+          seeing the engine result, then audit the disagreement and corpus coverage.</p>
+          <p class="lg-note" style="margin:0">Owner only · this changes how future scoring is validated</p></div>
+          <a class="lg-btn pri" href="/league/tools#calibrate">Open</a>
+        </div></div>` : ""}
       </div>`;
     // Own usage, via the render_log RLS (a creator reads their own rows).
     // Loaded after paint so a slow count never blocks the cards.
@@ -2055,23 +2067,24 @@ async function boot(): Promise<void> {
   const client = await getSupabaseClient();
   const [{ data: me }, { data: staffRow }] = await Promise.all([
     client.from("league_creators").select("*").eq("user_id", user.id).maybeSingle(),
-    client.from("app_admins").select("user_id").maybeSingle(),
+    client.from("app_admins").select("user_id,note").maybeSingle<{ user_id: string; note: string | null }>(),
   ]);
   const staff = Boolean(staffRow);
+  const owner = staffRow?.note?.trim().toLowerCase() === "owner";
   const row = me as CreatorRow | null;
   if (!row) {
     // Staff without a creator row still gets the dashboard — the founder needs
     // Admin without applying to their own league.
     if (staff) {
       return renderDash(
-        { user_id: user.id, handle: "founder", display_name: "Founder", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999, synthetic_staff: true },
+        { user_id: user.id, handle: owner ? "owner" : "staff", display_name: owner ? "Owner" : "Staff", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999, synthetic_staff: true, owner },
         true,
       );
     }
     return renderApply();
   }
   if (row.status !== "approved") return renderStatus(row);
-  return renderDash(row, staff);
+  return renderDash({ ...row, owner }, staff);
 }
 
 void boot();
