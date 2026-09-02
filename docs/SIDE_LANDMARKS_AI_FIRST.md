@@ -15,11 +15,11 @@ it ships as the first pass or only on refusal.
 
 | piece | file | state |
 |---|---|---|
-| The pass | `api/_sideLandmarks.ts` | built. Prompt, tool schema, strict parser, facing from the points, version stamp `vision-1`. |
-| The endpoint | `api/side-landmarks.ts` | built. `POST` multipart `photo` (JPEG, PNG, WebP, under 2 MB) plus optional `width`, `height`. Signed in, origin-checked, twelve passes a day per account, claim released if the model call fails. Returns fractions, pixels when a frame was given, per-point confidence, facing, model, version, remaining. Nothing stored. |
-| The allowance | `supabase/migrations/20260902120000_side_landmark_usage.sql` | written, **not applied**. Apply in the Supabase SQL editor before the endpoint is called. |
-| The harness | `scripts/eval-vision-landmarks.ts` | built. Model versus seeder on the labelled synthetic set, per landmark, in head widths. |
-| Tests | `api/_sideLandmarks.test.ts` | schema, prompt, parser, facing, pixels, version. |
+| The pass | `api/_sideLandmarks.ts` | built, version stamp `vision-2`. Image preparation (upright, resize, labelled pixel grid), whole-frame pass in pixel coordinates, enlarged second look at the ear and chin clusters, strict parser, facing from the points, vertical anchoring helper. Section 2b says what changed from `vision-1` and why. |
+| The endpoint | `api/side-landmarks.ts` | built. `POST` multipart `photo` (JPEG, PNG, WebP, under 2 MB) plus optional `width`, `height`. Signed in, origin-checked, twelve passes a day per account, claim released if the model call fails. Returns fractions, pixels when a frame was given, per-point confidence, facing, model, version, which points came from a zoom pass, remaining. Nothing stored. |
+| The allowance | `supabase/migrations/20260902120000_side_landmark_usage.sql` | applied. |
+| The harness | `scripts/eval-vision-landmarks.ts` | built. Model versus seeder on the labelled synthetic set, per landmark, in head widths, with the bias table and both anchored fits. |
+| Tests | `api/_sideLandmarks.test.ts` | schema, prompts, parser, facing, pixels, zoom window and mapping, grid, image preparation, anchoring, version. |
 
 The endpoint and the harness call the same function, so the benchmark number
 describes production.
@@ -32,7 +32,7 @@ ANTHROPIC_API_KEY=... npx tsx scripts/eval-vision-landmarks.ts
 
 Runs the model on the 53 usable labelled profiles (three out-of-spec faces
 excluded, partial labels skipped, same as `tools/side-fit.mjs`), caches the
-predictions in `.side-dataset/vision-<model>.json`, and prints per landmark:
+predictions in `.side-dataset/vision-<model>-<version>.json`, and prints per landmark:
 model median and p90 error, seeder median and p90 error, and the same two on
 the points the labeller actually moved, which is where the seeder was wrong.
 Errors are in head widths (labelled nose tip to ear notch).
@@ -47,8 +47,14 @@ seeder's overall error is a lower bound. The "moved" columns are the honest
 comparison.
 
 The harness needs the key. It lives in Vercel and nowhere in the repo, so the
-owner runs this locally, or the environment does. About 1,500 input tokens per
-photo at the provider's resize; the whole set is a few cents.
+owner runs this locally, or the environment does. `vision-2` makes three model
+calls per photograph (frame, ear crop, chin crop), roughly 5,000 input tokens;
+the whole set is well under a dollar at the mid-size model.
+
+Flags: `--model <id>` to sweep models (each gets its own cache file),
+`--no-zoom` for the single-call variant so the zoom's own contribution can be
+read off by comparison, `--ids s000,s001` and `--limit N` to spend less,
+`--no-cache` to spend again.
 
 ## 2a. The result, 3 September 2026: NO-GO on AI-first
 
@@ -106,6 +112,64 @@ The route to accurate side points remains C2 in
 our own thirteen points, fed by the consented correction loop. A general vision
 model can help label that corpus offline, where a human checks it. It cannot
 place the points in production.
+
+## 2b. vision-2: what changed, and why it might pass
+
+Written 3 September 2026, before the run. The result goes here when the owner
+has run it; the verdict in 2a stands until then.
+
+Section 2a's three findings each point at a fix, and `vision-2` is those
+fixes and nothing else, so the next table can be read against this one.
+
+**Finding: a constant vertical stretch (implied y scale 0.797, spread
+0.055).** The model was asked for fractions of an image whose size it was
+never told, and it guessed a frame. `vision-2` draws a labelled grid on the
+photograph (a line every 100 pixels, the coordinate written on each line) and
+states the width and height in the prompt. The model answers in whole pixels
+it can read off the grid. The tool schema's bounds are the frame's pixel
+size. This removes the thing the model had to imagine.
+
+**Finding: the outline is read well, the ear is not (anchored front 0.055,
+ear cluster 0.39).** Two responses.
+
+- The ear cluster (ear notch, jaw hinge, jaw corner) and the chin cluster
+  (chin front, chin bottom, neck point) each get a second model call on an
+  enlarged crop cut around where the first pass put them, at least 1.2 head
+  widths square, upscaled to 1024 pixels with its own grid. A tragus that is
+  a dozen pixels wide in the frame is a hundred wide in the crop, and the
+  prompt for the crop says what to find first ("the ear should be the largest
+  feature in it"). A crop pass that fails leaves the first pass's placement
+  in place; it never fails the photograph.
+- Anchoring. Re-analysing the `vision-1` cache with a **vertical-only** fit
+  (scale and offset in y, fitted on the seeder's eight front points, x left
+  alone) instead of the similarity fit gave: ear cluster 0.378 to 0.191, all
+  thirteen 0.425 to 0.143, back points where the seeder was wrong 0.394 to
+  0.189 (ratio 2.38 against the seeder's 0.080; still NO-GO on its own). The
+  similarity fit had made the ear worse, because eight points lying close to
+  a vertical line pin the horizontal scale badly and the model's x was never
+  the problem. `anchorVertical` in `api/_sideLandmarks.ts` is that
+  correction, exported so the client can apply it to a live pass with the
+  seeder's front points, and the harness prints both fits and the go rule
+  with the vertical fit applied.
+
+**What is being tested by the next run.** Whether the grid removes the
+stretch (the implied y scale should come to 1.0), whether the enlarged crop
+finds the ear (tragion and condylion under 0.1 after anchoring is the bar the
+seeder sets), and whether a larger model does either better. The run:
+
+```
+npx tsx scripts/eval-vision-landmarks.ts
+npx tsx scripts/eval-vision-landmarks.ts --no-zoom
+npx tsx scripts/eval-vision-landmarks.ts --model claude-opus-5
+npx tsx scripts/eval-vision-landmarks.ts --model claude-fable-5-1
+```
+
+Each line caches separately, so the four tables can be set side by side.
+
+**Cost of the change to production.** Three calls per photograph instead of
+one, roughly three times the latency (a few seconds more) and the tokens.
+The daily allowance counts photographs, not calls, so nothing about the
+ceiling moves.
 
 ## 3. The flow Codex wires (held, pending a model that passes section 2a)
 

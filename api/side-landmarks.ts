@@ -5,6 +5,7 @@ import {
   MAX_LANDMARK_IMAGE_BYTES,
   landmarksToPixels,
   placeSideLandmarks,
+  prepareLandmarkImage,
 } from "./_sideLandmarks.js";
 import type { LandmarkMediaType } from "./_sideLandmarks.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
@@ -16,7 +17,8 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 // product where a photograph leaves the device before the person has answered
 // a consent question, which is why the client must ask before calling it (see
 // docs/SIDE_LANDMARKS_AI_FIRST.md) and why this handler does exactly one thing
-// with the bytes: forwards them to the model in a single request and drops
+// with the bytes: uprights and resizes them in memory, forwards them to the
+// model (the whole frame, then an enlarged ear crop and chin crop) and drops
 // them. No bucket, no row, no log line with image data. The feedback record
 // that keeps a photograph is a different endpoint behind its own consent.
 //
@@ -100,10 +102,12 @@ export async function POST(request: Request): Promise<Response> {
     }
     claimedUserId = user.id;
 
-    const data = Buffer.from(await photo.arrayBuffer()).toString("base64");
     let pass;
     try {
-      pass = await placeSideLandmarks(client(), { data, mediaType: photo.type as LandmarkMediaType });
+      const prepared = await prepareLandmarkImage(Buffer.from(await photo.arrayBuffer()));
+      pass = await placeSideLandmarks(client(), prepared, {
+        onZoomError: (cluster, error) => console.error(`side-landmarks zoom ${cluster}`, safeMessage(error)),
+      });
     } catch (error) {
       // A pass that produced nothing costs nothing: give the claim back, and
       // tell the client plainly so it falls through to the seeder.
@@ -122,6 +126,7 @@ export async function POST(request: Request): Promise<Response> {
       faceDir: pass.result.faceDir,
       model: pass.model,
       version: pass.version,
+      zoomed: pass.zoomed,
       remaining: typeof remaining === "number" ? remaining : null,
     });
   } catch (error) {
