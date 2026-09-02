@@ -14,3 +14,10 @@ test("a staff TikTok link is authorized and can satisfy its foreign key", () => 
   assert.match(migration, /foreign key \(user_id\) references auth\.users \(id\) on delete cascade/i);
   assert.doesNotMatch(migration, /references public\.league_creators/i);
 });
+
+test("the creator dashboard stays inside the already-approved display scopes", () => {
+  assert.match(route, /fields=open_id,display_name,avatar_url/);
+  assert.match(route, /const SCOPES = "user\.info\.basic,video\.list"/);
+  assert.match(route, /listOwnTikTokVideos\(access, 20, undefined, true\)/);
+  assert.match(route, /syncedAt: new Date\(\)\.toISOString\(\)/);
+});

@@ -171,6 +171,7 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
   margin: 14px 0;
 }
 .lg-card h3 { margin: 0 0 6px; font-size: 17px; }
+.lg-page-intro .lg-h { margin-top: 12px; margin-bottom: 8px; }
 .lg-row {
   display: flex;
   align-items: center;
@@ -194,6 +195,148 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
 }
 .lg-chip.ok { color: var(--lg-mint-bright); border-color: rgba(121, 232, 210, 0.35); }
 .lg-chip.warn { color: var(--lg-danger); border-color: rgba(217, 138, 122, 0.4); }
+
+/* ---- TikTok creator library ------------------------------------------------
+   Covers first, player second. Twenty iframes on load would make the League
+   feel slower for the sake of videos the creator may never open, so the grid
+   stays image-only until a card is selected. */
+.lg-tt-compact-actions,
+.lg-tt-account-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.lg-tt-dashboard-card { padding: 22px; overflow: hidden; }
+.lg-tt-account { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.lg-tt-account h3 { margin: 2px 0 0; font-size: 19px; overflow-wrap: anywhere; }
+.lg-tt-avatar {
+  width: 52px; height: 52px; flex: 0 0 52px; border-radius: 50%; overflow: hidden;
+  display: grid; place-items: center; color: var(--lg-mint-bright); font-size: 22px;
+  background: radial-gradient(circle at 35% 25%, #24352f, #0c0f10 68%);
+  border: 1px solid rgba(121, 232, 210, .32);
+  box-shadow: 0 0 20px rgba(47, 158, 115, .13);
+}
+.lg-tt-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.lg-tt-live {
+  display: flex; align-items: center; gap: 7px; color: var(--lg-mint-bright);
+  font: 650 10px/1 var(--mono); letter-spacing: .1em;
+}
+.lg-tt-live i {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--lg-mint-bright);
+  box-shadow: 0 0 9px rgba(121, 232, 210, .85);
+}
+.lg-tt-summary {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px;
+  margin: 20px 0 18px;
+}
+.lg-tt-summary > div {
+  min-width: 0; padding: 12px 13px; border-radius: 11px;
+  background: linear-gradient(145deg, rgba(121, 232, 210, .075), rgba(23, 27, 33, .45));
+  border: 1px solid var(--lg-line);
+}
+.lg-tt-summary span { display: block; color: var(--lg-mut); font-size: 11px; letter-spacing: .04em; }
+.lg-tt-summary b {
+  display: block; margin-top: 4px; color: var(--lg-ink);
+  font: 500 23px/1.1 "Fraunces Variable", Fraunces, Georgia, serif;
+  font-variant-numeric: tabular-nums;
+}
+.lg-tt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 13px; }
+.lg-tt-video {
+  min-width: 0; overflow: hidden; border-radius: 13px; background: #0e1113;
+  border: 1px solid var(--lg-line); transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.lg-tt-video:hover {
+  transform: translateY(-2px); border-color: rgba(121, 232, 210, .36);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .24);
+}
+.lg-tt-cover {
+  position: relative; display: block; width: 100%; aspect-ratio: 9 / 16; padding: 0;
+  overflow: hidden; border: 0; border-radius: 0; background: #080a0b; color: white;
+}
+.lg-tt-cover::after {
+  content: ""; position: absolute; inset: auto 0 0; height: 42%; pointer-events: none;
+  background: linear-gradient(transparent, rgba(4, 7, 8, .64));
+}
+.lg-tt-cover img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .24s ease; }
+.lg-tt-video:hover .lg-tt-cover img { transform: scale(1.025); }
+.lg-tt-cover.no-cover {
+  background:
+    radial-gradient(circle at 50% 38%, rgba(121, 232, 210, .15), transparent 28%),
+    linear-gradient(150deg, #17201e, #080a0b 64%);
+}
+.lg-tt-cover.no-cover::before {
+  content: "♪"; position: absolute; inset: 0; display: grid; place-items: center;
+  color: rgba(121, 232, 210, .52); font: 500 36px/1 "Fraunces Variable", Georgia, serif;
+}
+.lg-tt-play {
+  position: absolute; z-index: 2; left: 50%; top: 50%; width: 46px; height: 46px;
+  display: grid; place-items: center; border-radius: 50%; transform: translate(-50%, -50%);
+  color: #07110e; padding-left: 3px; background: rgba(238, 241, 238, .9);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, .3); transition: transform .16s ease, background .16s ease;
+}
+.lg-tt-cover:hover .lg-tt-play { transform: translate(-50%, -50%) scale(1.06); background: var(--lg-mint-bright); }
+.lg-tt-duration,
+.lg-tt-tracked {
+  position: absolute; z-index: 2; bottom: 8px; padding: 5px 7px; border-radius: 7px;
+  font: 700 10px/1 var(--mono); letter-spacing: .04em; backdrop-filter: blur(8px);
+}
+.lg-tt-duration { right: 8px; color: white; background: rgba(0, 0, 0, .66); }
+.lg-tt-tracked { left: 8px; color: #071712; background: rgba(121, 232, 210, .88); }
+.lg-tt-video-copy { padding: 11px 11px 12px; }
+.lg-tt-video-copy h4 {
+  display: -webkit-box; min-height: 2.65em; margin: 0 0 7px; overflow: hidden;
+  color: var(--lg-ink); font-size: 12.5px; line-height: 1.32; font-weight: 650;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.lg-tt-video-copy p { margin: 0 0 8px; color: var(--lg-mut); font-size: 10.5px; line-height: 1.4; }
+.lg-tt-video-copy a { font-size: 11.5px; font-weight: 650; }
+.lg-tt-skeleton {
+  aspect-ratio: 9 / 16; border-radius: 13px; border: 1px solid var(--lg-line);
+  background: linear-gradient(105deg, #11151a 35%, #1b2226 48%, #11151a 61%);
+  background-size: 240% 100%; animation: lg-tt-shimmer 1.35s linear infinite;
+}
+@keyframes lg-tt-shimmer { to { background-position-x: -240%; } }
+.lg-tt-empty {
+  grid-column: 1 / -1; min-height: 210px; display: grid; place-content: center; gap: 6px;
+  text-align: center; border: 1px dashed #2b333a; border-radius: 13px; color: var(--lg-mut);
+}
+.lg-tt-empty b { color: var(--lg-ink); }
+
+.lg-tt-preview {
+  width: min(460px, calc(100vw - 28px)); max-height: calc(100vh - 28px); padding: 0;
+  color: var(--lg-ink); border: 1px solid #303940; border-radius: 18px;
+  background: #0b0e10; box-shadow: 0 30px 90px rgba(0, 0, 0, .7); overflow: auto;
+}
+.lg-tt-preview::backdrop { background: rgba(2, 4, 5, .8); backdrop-filter: blur(8px); }
+.lg-tt-preview-shell { padding: 15px; }
+.lg-tt-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.lg-tt-preview-head h2 {
+  max-width: 34ch; margin: 8px 0 0; font-size: 15px; line-height: 1.35; font-weight: 650;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lg-tt-preview-close {
+  width: 36px; height: 36px; flex: 0 0 36px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--lg-line); background: var(--lg-panel-2); color: var(--lg-ink); font-size: 24px;
+}
+.lg-tt-player-wrap {
+  width: min(100%, 360px); aspect-ratio: 9 / 16; margin: 0 auto; overflow: hidden;
+  border-radius: 13px; background: #000; border: 1px solid var(--lg-line);
+}
+.lg-tt-player-wrap iframe { width: 100%; height: 100%; display: block; border: 0; }
+.lg-tt-preview-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 13px; color: var(--lg-mut); font-size: 11.5px;
+}
+.lg-tt-preview-foot .lg-btn { flex: 0 0 auto; padding: 10px 15px; font-size: 12px; }
+
+@media (max-width: 640px) {
+  .lg-tt-dashboard-card { margin-left: -4px; margin-right: -4px; padding: 16px; }
+  .lg-tt-dashboard-card > .lg-row { align-items: flex-start; }
+  .lg-tt-account-actions { flex-direction: column; }
+  .lg-tt-account-actions .lg-btn { width: 100%; padding: 9px 13px; }
+  .lg-tt-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lg-tt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .lg-tt-compact-actions { width: 100%; justify-content: flex-start; }
+  .lg-tt-preview { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .lg-tt-preview-foot { align-items: stretch; flex-direction: column; }
+  .lg-tt-preview-foot .lg-btn { width: 100%; }
+}
 
 /* Budget / progress bars. */
 .lg-bar { height: 6px; border-radius: 99px; background: var(--lg-line); overflow: hidden; margin: 10px 0 4px; }
@@ -310,6 +453,8 @@ h1.lg-h { font: 600 26px/1.2 Inter, sans-serif; margin: 4px 0 18px; letter-spaci
 @media (prefers-reduced-motion: reduce) {
   .lg-btn { transition: none; }
   .lg-btn.lg-cta { animation: none; }
+  .lg-tt-skeleton { animation: none; }
+  .lg-tt-video, .lg-tt-cover img, .lg-tt-play { transition: none; }
 }
 
 /* ---------------------------------------------------------------------------
