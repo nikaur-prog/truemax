@@ -461,20 +461,14 @@ function drawScanLine(ctx: CanvasRenderingContext2D, x: number, y: number, w: nu
   ctx.restore();
 }
 
-// The scan: a MESH, not a scatter of dots.
+// The scan: a quiet mesh with a deliberately sparse measurement layer.
 //
-// This drew every other landmark as a 2.6px white dot, which is 234 unconnected
-// specks on a face. It reads as confetti, and — the part that actually costs
-// something — it is the ONE frame in the export that is supposed to say "this
-// is measuring you". The interactive product has drawn a proper tesselated mesh
-// since the beginning (see overlay.ts strokeMesh); the exported video, which is
-// the version thousands of people see, was the odd one out with the cheap
-// version of the same idea.
-//
-// Same tesselation the app uses, so the two cannot look like different
-// products. The dots stay, smaller and dimmer, sitting on the vertices — a mesh
-// with no points reads as a net thrown over a face, and the points are what
-// make it read as measurement.
+// MediaPipe supplies 478 vertices. Drawing half of them as white dots still
+// puts roughly 240 identical marks on a face, which reads as noise rather than
+// precision. The mesh can carry the captured surface; only the landmarks the
+// product actually talks about get a visible anchor. Those anchors are shared
+// with the verdict constellation below, so the two cuts cannot disagree about
+// which points matter.
 //
 // Revealed BY POSITION rather than by index. Walking the landmark array in
 // order fills in whatever arbitrary sequence MediaPipe happens to store its
@@ -526,18 +520,11 @@ function drawLandmarks(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Weight and alpha COPIED from overlay.ts, which draws this same tesselation
-  // over real faces in the live product every day. Inventing new numbers here
-  // would mean tuning a 2,600-triangle mesh against a synthetic fixture, and a
-  // fixture's landmarks are not anatomical — the tesselation indices connect
-  // points that are neighbours on a face and strangers on anything else, so it
-  // renders as a hairball no matter what the settings are. Borrowing the values
-  // that are already proven is the only honest calibration available here.
-  //
-  // Tinted rather than white: this is the scanning state, and the accent is
-  // what the rest of the product uses to mean "the machine is working".
-  ctx.strokeStyle = "rgba(143,243,224,0.20)";
-  ctx.lineWidth = Math.max(0.35, w / 1600);
+  // The full surface is supporting detail, not the subject. Keeping it mint
+  // makes the state recognisably TrueMax; lowering its contrast leaves room
+  // for the semantic anchors to read at phone size and after TikTok compression.
+  ctx.strokeStyle = "rgba(143,243,224,0.13)";
+  ctx.lineWidth = Math.max(0.35, w / 1800);
   ctx.beginPath();
   for (const { start, end } of FaceLandmarker.FACE_LANDMARKS_TESSELATION) {
     const a = landmarks[start];
@@ -553,17 +540,35 @@ function drawLandmarks(
   }
   ctx.stroke();
 
-  // The vertices, on top. Every other one — all 468 at this size is noise, and
-  // the mesh already carries the structure.
-  ctx.fillStyle = "rgba(255,255,255,0.62)";
-  const r = Math.max(0.8, w / 520);
-  for (let i = 0; i < landmarks.length; i += 2) {
-    const p = landmarks[i];
-    if (!p || !lit(p)) continue;
+  // The anchors arrive just behind the reveal front: a short mint flare, then
+  // a small dark-rimmed core. The rim keeps them crisp on every skin tone and
+  // the settled size avoids turning the face into a field of LEDs.
+  const base = Math.max(1.45, w / 390);
+  const revealBand = span * 0.055;
+  for (const index of MEASUREMENT_LANDMARKS) {
+    const p = landmarks[index];
+    if (!p) continue;
+    const strength = clamp01((front - p.y) / revealBand);
+    if (strength <= 0) continue;
     const q = project(p);
     if (q.x < x || q.x > x + w || q.y < y || q.y > y + h) continue;
+
+    const flare = Math.sin(strength * Math.PI);
+    ctx.globalAlpha = alpha * strength * (0.24 + flare * 0.5);
+    ctx.fillStyle = "rgba(143,243,224,0.34)";
     ctx.beginPath();
-    ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
+    ctx.arc(q.x, q.y, base * (2.4 + flare * 1.5), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = alpha * strength;
+    ctx.fillStyle = "rgba(5,12,10,0.82)";
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, base * (1.42 + flare * 0.18), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#8ff3e0";
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, base * (0.72 + flare * 0.12), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -656,7 +661,7 @@ export function fitVerdict(
 //
 // Points ignite in list order with a brief flare; a line lights only once both
 // of its stars exist. Pure function of progress — no clock, no randomness.
-const CONSTELLATION_POINTS = [
+export const MEASUREMENT_LANDMARKS = [
   10, 168, 1, 2, 13, 17, 152, // the midline chain, forehead to chin
   33, 133, 362, 263, // eye corners
   468, 473, // pupils
@@ -667,7 +672,10 @@ const CONSTELLATION_POINTS = [
   172, 136, 149, 148, 377, 378, 365, 397, // mandible run
   50, 280, // cheek mass
   199, // under-chin
-];
+] as const;
+const MEASUREMENT_LANDMARK_ORDER = new Map<number, number>(
+  MEASUREMENT_LANDMARKS.map((index, order) => [index, order]),
+);
 const CONSTELLATION_LINES: Array<[number, number]> = [
   [10, 168], [168, 1], [1, 2], [2, 13], [13, 17], [17, 152], // midline
   [33, 133], [362, 263], [133, 362], // eyes and the intercanthal bridge
@@ -700,7 +708,7 @@ function drawConstellation(
   });
   // How far through its own ignition each star is: staggered down the list,
   // each taking a fixed slice of the reveal to flare and settle.
-  const n = CONSTELLATION_POINTS.length;
+  const n = MEASUREMENT_LANDMARKS.length;
   const lit = (i: number) => clamp01((progress * (n + 6) - i) / 6);
 
   ctx.save();
@@ -712,8 +720,8 @@ function drawConstellation(
   ctx.strokeStyle = "rgba(143,243,224,0.55)";
   ctx.lineWidth = Math.max(0.8, w / 780);
   for (const [a, b] of CONSTELLATION_LINES) {
-    const ia = CONSTELLATION_POINTS.indexOf(a);
-    const ib = CONSTELLATION_POINTS.indexOf(b);
+    const ia = MEASUREMENT_LANDMARK_ORDER.get(a) ?? -1;
+    const ib = MEASUREMENT_LANDMARK_ORDER.get(b) ?? -1;
     const la = landmarks[a];
     const lb = landmarks[b];
     if (!la || !lb) continue;
@@ -733,7 +741,7 @@ function drawConstellation(
   // rather than fades in. Refined iris points may be absent on some models;
   // any missing index is simply skipped.
   for (let i = 0; i < n; i++) {
-    const p = landmarks[CONSTELLATION_POINTS[i]];
+    const p = landmarks[MEASUREMENT_LANDMARKS[i]];
     if (!p) continue;
     const s = lit(i);
     if (s <= 0) continue;
