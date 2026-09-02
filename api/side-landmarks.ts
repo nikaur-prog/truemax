@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { anthropicKey } from "./_anthropicKey.js";
 import {
   LANDMARK_PASSES_PER_DAY,
   MAX_LANDMARK_IMAGE_BYTES,
@@ -44,9 +45,7 @@ function nextUtcMidnight(now = Date.now()): string {
 }
 
 function client(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("Missing server environment variable: ANTHROPIC_API_KEY");
-  return new Anthropic({ apiKey });
+  return new Anthropic({ apiKey: anthropicKey() });
 }
 
 function frameSize(value: FormDataEntryValue | null): number | null {
