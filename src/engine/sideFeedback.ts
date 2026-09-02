@@ -128,6 +128,7 @@ export async function submitSideCorrectionFeedback(
     width: photo.width,
     height: photo.height,
     seedMethod: intent.seedMethod,
+    seedVersion: intent.seedVersion,
     automaticPoints: intent.automaticPoints,
     correctedPoints,
   };

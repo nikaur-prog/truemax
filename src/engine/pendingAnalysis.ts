@@ -44,6 +44,7 @@ export interface PendingAnalysis {
     photo?: string;
     automaticPoints?: SidePoints;
     seedMethod?: SideSeedMethod;
+    seedVersion?: string;
     feedback?: SideFeedbackIntent;
   };
 }
@@ -84,6 +85,7 @@ export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
         photo: sidePhoto ?? undefined,
         automaticPoints: input.side.automaticPoints,
         seedMethod: input.side.seedMethod,
+        seedVersion: input.side.seedVersion,
         feedback: input.side.feedback,
       },
     };
@@ -235,6 +237,7 @@ function valid(value: Partial<PendingAnalysis>): value is PendingAnalysis {
       !!side.photo
       && !!side.automaticPoints
       && side.seedMethod === side.feedback.seedMethod
+      && side.seedVersion === side.feedback.seedVersion
       && sideFeedbackIntentIssues(side.feedback, side.width, side.height).length === 0
     ));
 }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Privacy Policy · TrueMax</title>
-    <meta name="description" content="How TrueMax handles your photographs and your data. Analysis runs on your device; photographs are not uploaded unless you separately choose to send one." />
+    <meta name="description" content="How TrueMax handles front photographs, optional cloud side-point placement and separately consented landmark feedback." />
     <link rel="canonical" href="https://www.truemax.app/privacy" />
     <meta name="theme-color" content="#141518" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -32,16 +32,15 @@
       <div class="legal-summary">
         <h2>The short version</h2>
         <p>
-          <b>Your photographs are analysed on your own device.</b> The face
+          <b>Your front photograph is analysed on your own device.</b> The face
           measurement engine runs entirely inside your browser. Your front photo
-          is never uploaded to us, under any circumstance.
+          is never uploaded to us.
         </p>
         <p>
-          <b>There is exactly one exception, and you have to opt into it.</b>
-          After a side-profile scan, we ask separately whether you will send that
-          one side photograph and its landmark positions to help us improve the
-          automatic placement. Saying no is a single tap, changes nothing about
-          your score or your account, and results in no upload at all.
+          <b>A side profile has two separate choices.</b> You can allow one cloud
+          request to place its thirteen points, or place them on-device yourself.
+          After review, a different optional consent can share that side photo and
+          its point positions for up to 90 days to improve future placement.
         </p>
       </div>
 
@@ -55,10 +54,10 @@
 
       <h2>What happens to your photographs</h2>
       <p>
-        When you take or upload a photo, it is decoded in your browser and
+        When you take or upload a front photo, it is decoded in your browser and
         measured there. The 478-point face mesh, every measurement derived from
-        it, and your score are all computed on your device. No photograph is sent
-        to a server as part of producing your result.
+        it, and your score are all computed on your device. The front photograph
+        is not sent to a server as part of producing your result.
       </p>
       <p>
         Photographs you have scanned are kept in your browser's own storage
@@ -66,7 +65,27 @@
         that device and that browser. Clearing your browser data removes it.
       </p>
 
-      <h3>The one exception: side-profile landmark feedback</h3>
+      <h3>Optional cloud placement for a side profile</h3>
+      <p>
+        Before the first side-profile upload, we ask whether you want a cloud
+        pass to place its thirteen points. If you agree, the reduced side image
+        is sent through our server to Anthropic for one API request. TrueMax does
+        not write the image to storage and uses the returned coordinates only to
+        seed the review screen. Anthropic states that commercial API inputs are
+        not used for model training by default and that inputs and outputs are
+        normally deleted from its backend within 30 days, unless different
+        retention terms apply or retention is required for safety or legal
+        reasons. See
+        <a href="https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">Anthropic's commercial data-retention information</a>.
+      </p>
+      <p>
+        If you decline, are signed out, reach the daily cloud limit, or the
+        request fails or takes longer than five seconds, an on-device placement
+        is used instead. Your choice is remembered in this browser and can be
+        changed from the side-profile capture screen.
+      </p>
+
+      <h3>Separate side-profile landmark feedback</h3>
       <p>
         The thirteen points on a side profile are placed automatically and then
         shown to you for review, because automatic placement is the hardest part

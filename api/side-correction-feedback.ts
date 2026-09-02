@@ -320,6 +320,7 @@ export async function POST(request: Request): Promise<Response> {
       image_height: metadata.height,
       face_dir: metadata.faceDir,
       seed_method: metadata.seedMethod,
+      seed_version: metadata.seedVersion ?? null,
       automatic_points: normalizedSidePoints(
         metadata.automaticPoints,
         metadata.width,

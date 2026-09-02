@@ -4,9 +4,9 @@ import type { SidePointId, SidePoints } from "./sideMetrics.js";
 export const SIDE_FEEDBACK_CONSENT_VERSION = "side-landmark-feedback-v1";
 export const SIDE_FEEDBACK_RETENTION_DAYS = 90;
 
-export type SideSeedMethod = "mesh" | "silhouette" | "segmentation" | "existing";
+export type SideSeedMethod = "mesh" | "silhouette" | "segmentation" | "vision" | "existing";
 
-const SEED_METHODS: ReadonlySet<string> = new Set(["mesh", "silhouette", "segmentation", "existing"]);
+const SEED_METHODS: ReadonlySet<string> = new Set(["mesh", "silhouette", "segmentation", "vision", "existing"]);
 
 export interface SideFeedbackIntent {
   scanId: string;
@@ -14,6 +14,7 @@ export interface SideFeedbackIntent {
   consentVersion: typeof SIDE_FEEDBACK_CONSENT_VERSION;
   automaticPoints: SidePoints;
   seedMethod: SideSeedMethod;
+  seedVersion?: string;
 }
 
 export interface SideFeedbackMetadata {
@@ -24,6 +25,7 @@ export interface SideFeedbackMetadata {
   width: number;
   height: number;
   seedMethod: SideSeedMethod;
+  seedVersion?: string;
   automaticPoints: SidePoints;
   correctedPoints: SidePoints;
 }
@@ -43,6 +45,7 @@ export function createSideFeedbackIntent(
   submissionId: string,
   automaticPoints: SidePoints,
   seedMethod: SideSeedMethod,
+  seedVersion?: string,
 ): SideFeedbackIntent | null {
   if (!consented) return null;
   return {
@@ -51,6 +54,7 @@ export function createSideFeedbackIntent(
     consentVersion: SIDE_FEEDBACK_CONSENT_VERSION,
     automaticPoints: cloneSidePoints(automaticPoints),
     seedMethod,
+    seedVersion: validSeedVersion(seedVersion) ? seedVersion : undefined,
   };
 }
 
@@ -66,6 +70,7 @@ export function sideFeedbackMetadataIssues(value: unknown): string[] {
   if (typeof m.seedMethod !== "string" || !SEED_METHODS.has(m.seedMethod)) {
     issues.push("Seed method is invalid");
   }
+  if (m.seedVersion !== undefined && !validSeedVersion(m.seedVersion)) issues.push("Seed version is invalid");
   if (dimension(m.width) && dimension(m.height)) {
     issues.push(...pointIssues(m.automaticPoints, m.width, m.height, "Automatic"));
     issues.push(...pointIssues(m.correctedPoints, m.width, m.height, "Corrected"));
@@ -83,6 +88,7 @@ export function sideFeedbackIntentIssues(value: unknown, width: number, height: 
   if (typeof intent.seedMethod !== "string" || !SEED_METHODS.has(intent.seedMethod)) {
     issues.push("Seed method is invalid");
   }
+  if (intent.seedVersion !== undefined && !validSeedVersion(intent.seedVersion)) issues.push("Seed version is invalid");
   issues.push(...pointIssues(intent.automaticPoints, width, height, "Automatic"));
   return issues.slice(0, 6);
 }
@@ -140,6 +146,10 @@ function dimension(value: unknown): value is number {
 
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function validSeedVersion(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 80 && /^[a-z0-9._-]+$/i.test(value);
 }
 
 function uuid(value: unknown): value is string {

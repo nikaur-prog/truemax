@@ -50,7 +50,7 @@ const MIN_N = 25;
 
 const response = await fetch(
   `${url.replace(/\/$/, "")}/rest/v1/side_landmark_feedback` +
-    `?select=face_dir,seed_method,automatic_points,corrected_points,moved_point_ids,created_at&order=created_at.asc`,
+    `?select=face_dir,seed_method,seed_version,automatic_points,corrected_points,moved_point_ids,created_at&order=created_at.asc`,
   { headers: { apikey: key, Authorization: `Bearer ${key}` } },
 );
 if (!response.ok) {
@@ -62,47 +62,15 @@ console.log(`${rows.length} submissions on record.\n`);
 if (!rows.length) process.exit(0);
 
 const bySeed = {};
-for (const row of rows) bySeed[row.seed_method] = (bySeed[row.seed_method] ?? 0) + 1;
+for (const row of rows) {
+  const key = `${row.seed_method}:${row.seed_version || "unversioned"}`;
+  bySeed[key] = (bySeed[key] ?? 0) + 1;
+}
 console.log(
-  "By seed method:",
+  "By seed method and version:",
   Object.entries(bySeed).map(([k, v]) => `${k} ${v}`).join(", "),
   "\n",
 );
-
-// offsets[pointId] = array of {dx, dy} in canonical unit-face space
-const offsets = Object.fromEntries(POINT_IDS.map((id) => [id, []]));
-let unusable = 0;
-
-for (const row of rows) {
-  const auto = row.automatic_points;
-  const fixed = row.corrected_points;
-  if (!auto || !fixed) {
-    unusable++;
-    continue;
-  }
-  // Unit of distance: the corrected face height. Point coordinates are stored
-  // normalised by IMAGE dimensions, which vary with framing; the face height
-  // does not.
-  const faceH = Math.abs((fixed.menton?.y ?? 0) - (fixed.trichion?.y ?? 0));
-  if (!Number.isFinite(faceH) || faceH < 0.05) {
-    unusable++;
-    continue;
-  }
-  for (const id of POINT_IDS) {
-    const a = auto[id];
-    const c = fixed[id];
-    if (!a || !c) continue;
-    const rawDx = (c.x - a.x) / faceH;
-    const dy = (c.y - a.y) / faceH;
-    // Mirror into faceDir=+1 space so "forward" means the same thing in
-    // every submission regardless of which way the person was facing.
-    const dx = row.face_dir === -1 ? -rawDx : rawDx;
-    // Zero-movement points still count as evidence the seeder was RIGHT —
-    // they go in as zeros and pull the median toward no correction.
-    offsets[id].push({ dx, dy });
-  }
-}
-if (unusable) console.log(`${unusable} rows skipped (malformed points or degenerate face box).\n`);
 
 function median(xs) {
   const s = [...xs].sort((a, b) => a - b);
@@ -115,52 +83,93 @@ function iqr(xs) {
   return q(0.75) - q(0.25);
 }
 
-const qualified = {};
-console.log(
-  "landmark".padEnd(17),
-  "n".padStart(5),
-  "moved%".padStart(7),
-  "med dx".padStart(9),
-  "med dy".padStart(9),
-  "IQR dx".padStart(9),
-  "IQR dy".padStart(9),
-  "  verdict",
-);
-for (const id of POINT_IDS) {
-  const all = offsets[id];
-  if (!all.length) continue;
-  const movedShare = all.filter((o) => Math.hypot(o.dx, o.dy) > 0.002).length / all.length;
-  const dxs = all.map((o) => o.dx);
-  const dys = all.map((o) => o.dy);
-  const mdx = median(dxs);
-  const mdy = median(dys);
-  const ix = iqr(dxs);
-  const iy = iqr(dys);
-  const biased =
-    all.length >= MIN_N &&
-    (Math.abs(mdx) > Math.max(0.004, ix / 2) || Math.abs(mdy) > Math.max(0.004, iy / 2));
-  if (biased) qualified[id] = { dx: +mdx.toFixed(4), dy: +mdy.toFixed(4) };
-  console.log(
-    id.padEnd(17),
-    String(all.length).padStart(5),
-    `${Math.round(movedShare * 100)}%`.padStart(7),
-    mdx.toFixed(4).padStart(9),
-    mdy.toFixed(4).padStart(9),
-    ix.toFixed(4).padStart(9),
-    iy.toFixed(4).padStart(9),
-    biased ? "  BIASED — offset earned" : "  noise / fine",
-  );
-}
-
 console.log(`
 Reading the verdicts: an offset is only earned at n >= ${MIN_N} with a median
 larger than half the spread — a consistent lean, not scatter. Units are
 fractions of face height in faceDir=+1 space (positive dx = toward the face).
 `);
 
-if (Object.keys(qualified).length) {
-  console.log("Calibration block (paste into the seeder's offset table, mirrored by faceDir):");
-  console.log(JSON.stringify(qualified, null, 2));
-} else {
-  console.log("No landmark has earned a calibration offset yet. Keep collecting.");
+// Never mix generations of a placement pass. A prompt or provider change can
+// move a point in the opposite direction; combining both would average a real
+// bias away and emit a correction that describes neither version.
+const groupedRows = {};
+for (const row of rows) {
+  const key = `${row.seed_method}:${row.seed_version || "unversioned"}`;
+  (groupedRows[key] ??= []).push(row);
+}
+
+for (const [seedKey, seedRows] of Object.entries(groupedRows)) {
+  console.log(`\n${seedKey} (${seedRows.length} rows)`);
+  const offsets = Object.fromEntries(POINT_IDS.map((id) => [id, []]));
+  let unusable = 0;
+  for (const row of seedRows) {
+    const auto = row.automatic_points;
+    const fixed = row.corrected_points;
+    if (!auto || !fixed) {
+      unusable++;
+      continue;
+    }
+    // Unit of distance: corrected face height. Stored coordinates are
+    // normalised by image dimensions, which vary with framing.
+    const faceH = Math.abs((fixed.menton?.y ?? 0) - (fixed.trichion?.y ?? 0));
+    if (!Number.isFinite(faceH) || faceH < 0.05) {
+      unusable++;
+      continue;
+    }
+    for (const id of POINT_IDS) {
+      const a = auto[id];
+      const c = fixed[id];
+      if (!a || !c) continue;
+      const rawDx = (c.x - a.x) / faceH;
+      const dy = (c.y - a.y) / faceH;
+      const dx = row.face_dir === -1 ? -rawDx : rawDx;
+      // Zeroes are evidence that the seed was right and must count.
+      offsets[id].push({ dx, dy });
+    }
+  }
+  if (unusable) console.log(`${unusable} rows skipped (malformed points or degenerate face box).`);
+
+  const qualified = {};
+  console.log(
+    "landmark".padEnd(17),
+    "n".padStart(5),
+    "moved%".padStart(7),
+    "med dx".padStart(9),
+    "med dy".padStart(9),
+    "IQR dx".padStart(9),
+    "IQR dy".padStart(9),
+    "  verdict",
+  );
+  for (const id of POINT_IDS) {
+    const all = offsets[id];
+    if (!all.length) continue;
+    const movedShare = all.filter((o) => Math.hypot(o.dx, o.dy) > 0.002).length / all.length;
+    const dxs = all.map((o) => o.dx);
+    const dys = all.map((o) => o.dy);
+    const mdx = median(dxs);
+    const mdy = median(dys);
+    const ix = iqr(dxs);
+    const iy = iqr(dys);
+    const biased =
+      all.length >= MIN_N &&
+      (Math.abs(mdx) > Math.max(0.004, ix / 2) || Math.abs(mdy) > Math.max(0.004, iy / 2));
+    if (biased) qualified[id] = { dx: +mdx.toFixed(4), dy: +mdy.toFixed(4) };
+    console.log(
+      id.padEnd(17),
+      String(all.length).padStart(5),
+      `${Math.round(movedShare * 100)}%`.padStart(7),
+      mdx.toFixed(4).padStart(9),
+      mdy.toFixed(4).padStart(9),
+      ix.toFixed(4).padStart(9),
+      iy.toFixed(4).padStart(9),
+      biased ? "  BIASED — offset earned" : "  noise / fine",
+    );
+  }
+
+  if (Object.keys(qualified).length) {
+    console.log(`Calibration block for ${seedKey} (mirrored by faceDir):`);
+    console.log(JSON.stringify(qualified, null, 2));
+  } else {
+    console.log(`No ${seedKey} landmark has earned a calibration offset yet.`);
+  }
 }

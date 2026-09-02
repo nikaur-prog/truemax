@@ -108,7 +108,7 @@ import { soundChapter } from "./ui/scanSounds.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
 import { headCoveringRejection } from "./engine/photoEligibility.js";
-import { detectHeadCovering } from "./engine/headCovering.js";
+import { detectHeadCovering, warmHeadCovering } from "./engine/headCovering.js";
 import { REGION_LANDMARKS } from "./ui/regions.js";
 import {
   claimPendingAnalysis,
@@ -132,6 +132,7 @@ import { closeSettings, openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
 import { markPlatform } from "./engine/platform.js";
 import { beginAnalysisHandoff } from "./ui/analysisHandoff.js";
+import type { AnalysisHandoffRun } from "./ui/analysisHandoff.js";
 
 // Ingest cap, and it is an EXPORT setting as much as a detection one.
 //
@@ -979,6 +980,7 @@ function ensureEngine(): Promise<void> {
 // an error anybody asked for, and the real attempt will report it properly.
 function warmEngine(): void {
   void ensureEngine().catch(() => {});
+  void warmHeadCovering().catch(() => {});
 }
 
 for (const target of [el.btnCamera, el.btnUpload]) {
@@ -2084,6 +2086,7 @@ interface PendingFront {
   extraFrames: CaptureFrame[];
 }
 let pending: PendingFront | null = null;
+let analysisHandoff: AnalysisHandoffRun | null = null;
 // The verified side points, kept so a change of reference population can
 // re-score the profile too rather than only the front.
 interface LastSide {
@@ -2092,6 +2095,7 @@ interface LastSide {
   photo?: HTMLCanvasElement;
   automaticPoints?: SidePoints;
   seedMethod?: SideSeedMethod;
+  seedVersion?: string;
   feedback?: SideFeedbackIntent;
   feedbackSubmitted?: boolean;
   /**
@@ -2293,6 +2297,8 @@ async function playMeasurePass(
   const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
   const sideShot = lastSide?.photo;
   const plan = buildPassPlan(front, sideReport);
+  const progressStart = analysisHandoff?.finish() ?? 0;
+  analysisHandoff = null;
   const pass = runMeasurePass(
     {
       zoomable: el.zoomable,
@@ -2315,6 +2321,7 @@ async function playMeasurePass(
       // The front photograph is already painted and the reveal owns the
       // overlay; repainting would blank it on the pass's first frame.
       startPainted: "front",
+      progressStart,
     },
   );
   await pass.done;
@@ -2627,6 +2634,7 @@ async function runFullAnalysis(
         faceDir: lastSide.faceDir,
         automaticPoints: lastSide.automaticPoints,
         method: lastSide.seedMethod,
+        seedVersion: lastSide.seedVersion,
       }, {
         scanId: token.scanId,
         sex: selectedSex,
@@ -2648,6 +2656,7 @@ async function runFullAnalysis(
             photo: review.photo ?? lastSide?.photo,
             automaticPoints: review.automaticPoints,
             seedMethod: review.seedMethod,
+            seedVersion: review.seedVersion,
             feedback: review.feedback ?? undefined,
             verified: review.verified,
           };
@@ -2721,7 +2730,8 @@ async function gateAnalysis(
   // read and took five seconds on a real iPhone; closeSide() had already
   // removed the profile screen, so waiting to restore #v-main left only the
   // header and footer. The existing scan animation now owns that entire wait.
-  beginAnalysisHandoff(
+  analysisHandoff?.finish();
+  analysisHandoff = beginAnalysisHandoff(
     {
       upload: el.upload,
       main: el.main,
@@ -2742,7 +2752,11 @@ async function gateAnalysis(
   // present the account gate, which remains usable as the fallback screen even
   // if the modal itself cannot open.
   const user = await currentUser().catch(() => null);
-  if (!scanIsCurrent(token, generation) || !pending) return;
+  if (!scanIsCurrent(token, generation) || !pending) {
+    analysisHandoff?.finish();
+    analysisHandoff = null;
+    return;
+  }
   if (!isAuthAvailable() || user || DEV_OPEN_REPORT) {
     if (DEV_OPEN_REPORT && !user) {
       activateScanOwner(null);
@@ -2778,6 +2792,7 @@ async function gateAnalysis(
           canvas: lastSide.photo,
           automaticPoints: lastSide.automaticPoints,
           seedMethod: lastSide.seedMethod,
+          seedVersion: lastSide.seedVersion,
           feedback: lastSide.feedback,
         },
       })
@@ -2827,6 +2842,10 @@ async function gateAnalysis(
     // An analysis that cannot be computed skips the film and falls through to
     // the wall, which is exactly what this screen did before the film existed.
     front = null;
+  }
+  if (!front) {
+    analysisHandoff?.finish();
+    analysisHandoff = null;
   }
   if (front && !(await playMeasurePass(front, sideReport, token, generation))) return;
   if (!scanIsCurrent(token, generation) || !pending) return;
@@ -3072,6 +3091,7 @@ async function resumePendingAfterAuth(): Promise<void> {
     photo: sidePhoto,
     automaticPoints: saved.side.automaticPoints,
     seedMethod: saved.side.seedMethod,
+    seedVersion: saved.side.seedVersion,
     feedback: saved.side.feedback,
   };
   closeSide();
@@ -3179,6 +3199,7 @@ function startSide(): void {
         photo,
         automaticPoints: review.automaticPoints,
         seedMethod: review.seedMethod,
+        seedVersion: review.seedVersion,
         feedback: review.feedback ?? undefined,
         verified: review.verified,
       };
