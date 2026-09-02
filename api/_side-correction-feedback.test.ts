@@ -69,6 +69,23 @@ test("feedback parser accepts the full labelled pair and identifies only moved p
   assert.deepEqual(movedSidePointIds(automatic, corrected), ["tragion"]);
 });
 
+test("feedback parser keeps the cloud seed version for comparable calibration", () => {
+  const parsed = parseSideFeedbackMetadata(JSON.stringify({
+    scanId: SCAN_ID,
+    submissionId: SUBMISSION_ID,
+    consentVersion: SIDE_FEEDBACK_CONSENT_VERSION,
+    faceDir: 1,
+    width: 400,
+    height: 500,
+    seedMethod: "vision",
+    seedVersion: "pass-v2",
+    automaticPoints: points(),
+    correctedPoints: points(),
+  }));
+  assert.equal(parsed.seedMethod, "vision");
+  assert.equal(parsed.seedVersion, "pass-v2");
+});
+
 test("feedback parser rejects missing landmarks and files must have JPEG boundaries", () => {
   const automatic = points();
   delete (automatic as Partial<SidePoints>).nasion;

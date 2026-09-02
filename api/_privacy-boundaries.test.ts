@@ -146,15 +146,16 @@ test("feedback caps and uniqueness are decided atomically", () => {
   assert.match(side, /rpc\("claim_side_feedback_upload"[\s\S]*?storagePath/);
 });
 
-test("feedback schema precedes its hardening functions and accepts segmentation seeds", () => {
+test("feedback schema precedes its hardening functions and accepts every current seed", () => {
   const tableAt = migrations.indexOf("create table if not exists public.self_score_feedback");
   const functionAt = migrations.indexOf("create or replace function public.submit_self_score_feedback");
   assert.ok(tableAt >= 0, "self_score_feedback table migration is missing");
   assert.ok(functionAt > tableAt, "self-score hardening runs before its table exists");
   assert.match(
     migrations,
-    /add constraint side_feedback_seed_method[\s\S]*?check \(seed_method in \('mesh', 'silhouette', 'segmentation', 'existing'\)\)/i,
+    /add constraint side_feedback_seed_method[\s\S]*?check \(seed_method in \('mesh', 'silhouette', 'segmentation', 'vision', 'existing'\)\)/i,
   );
+  assert.match(migrations, /add column if not exists seed_version text/i);
 });
 
 test("Creator League links, sprint writes and settlement are bounded in SQL", () => {

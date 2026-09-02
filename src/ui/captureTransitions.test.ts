@@ -78,7 +78,8 @@ test("the profile is visibly read BEFORE the question about it is asked", () => 
   // A floor on the beat, because a state that sometimes flashes past in three
   // frames and sometimes holds for two seconds reads as a glitch in the fast
   // case. Raced, not added: when the seeding is slower this costs nothing.
-  assert.match(body, /Promise\.all\(\[\s*seedSidePointsSmart/);
+  assert.match(body, /const localSeed = seedSidePointsSmart/);
+  assert.match(body, /Promise\.all\(\[\s*localSeed,\s*cloudSeed,\s*wait\(READ_BEAT_MS\)/);
   assert.match(side, /wait\(READ_BEAT_MS\)/);
 });
 

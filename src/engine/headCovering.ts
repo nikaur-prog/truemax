@@ -31,6 +31,18 @@ function segmenter(): Promise<ImageSegmenter> {
   })());
 }
 
+/**
+ * Start the optional covering detector before a captured frame needs it.
+ *
+ * The model is substantially larger than the face landmarker. Warming both on
+ * the person's first capture intent lets the network and WASM setup overlap
+ * the camera/upload interaction instead of presenting that cost as a frozen
+ * "Preparing analysis" state after the photograph is already accepted.
+ */
+export async function warmHeadCovering(): Promise<void> {
+  await segmenter();
+}
+
 interface Box {
   x0: number;
   y0: number;

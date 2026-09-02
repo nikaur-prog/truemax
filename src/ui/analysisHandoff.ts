@@ -20,7 +20,16 @@ export interface AnalysisHandoffView {
   barFill: HTMLElement;
 }
 
-export function beginAnalysisHandoff(view: AnalysisHandoffView, paint: () => void): void {
+export interface AnalysisHandoffRun {
+  /** Stop the bridge animation and return the exact progress already shown. */
+  finish(): number;
+}
+
+const START = 0.08;
+const CEILING = 0.28;
+const TRAVEL_MS = 5_000;
+
+export function beginAnalysisHandoff(view: AnalysisHandoffView, paint: () => void): AnalysisHandoffRun {
   view.upload.classList.add("hidden");
   view.main.classList.remove("hidden");
   paint();
@@ -31,5 +40,32 @@ export function beginAnalysisHandoff(view: AnalysisHandoffView, paint: () => voi
   view.status.classList.remove("swapping");
   view.status.innerHTML = `<b>Bringing both views together</b><span class="scan-ellipsis" aria-label="working"><i>.</i><i>.</i><i>.</i></span>`;
   view.barFill.parentElement?.classList.remove("spent");
-  view.barFill.style.width = "8%";
+  view.barFill.style.width = `${START * 100}%`;
+
+  // Authentication and entitlement reads can take several seconds on a real
+  // mobile connection. A bar frozen at 8% during that wait reads as a hang, so
+  // let it travel slowly through the first quarter. It never approaches the
+  // end: the measurement pass still owns the work that follows and resumes
+  // from the exact number returned by finish().
+  const started = performance.now();
+  let progress = START;
+  let raf = 0;
+  let done = false;
+  const tick = (now: number) => {
+    if (done) return;
+    progress = START + (CEILING - START) * Math.min(1, (now - started) / TRAVEL_MS);
+    view.barFill.style.width = `${(progress * 100).toFixed(2)}%`;
+    if (progress < CEILING) raf = requestAnimationFrame(tick);
+  };
+  if (typeof requestAnimationFrame === "function") raf = requestAnimationFrame(tick);
+
+  return {
+    finish: () => {
+      if (!done) {
+        done = true;
+        if (raf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
+      }
+      return progress;
+    },
+  };
 }

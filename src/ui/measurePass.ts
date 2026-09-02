@@ -359,6 +359,8 @@ export interface PassOptions {
    * (and blank) a canvas the caller has just set up.
    */
   startPainted?: "front" | "side";
+  /** Progress already shown by the authentication handoff. */
+  progressStart?: number;
 }
 
 /** Run the pass. */
@@ -370,6 +372,7 @@ export function runMeasurePass(
 ): PassRun {
   const signal = { cancelled: false };
   const total = passDurationMs(plan);
+  const progressStart = Math.max(0, Math.min(0.9, opts.progressStart ?? 0));
   let raf = 0;
 
   // The bar is a plain function of elapsed time against the pass's own known
@@ -380,7 +383,8 @@ export function runMeasurePass(
   const tick = (now: number) => {
     if (signal.cancelled) return;
     const p = Math.min(1, (now - t0) / total);
-    host.barFill.style.width = `${((1 - Math.pow(1 - p, 1.6)) * 100).toFixed(2)}%`;
+    const eased = 1 - Math.pow(1 - p, 1.6);
+    host.barFill.style.width = `${((progressStart + (1 - progressStart) * eased) * 100).toFixed(2)}%`;
     if (p < 1) raf = requestAnimationFrame(tick);
   };
   host.barFill.classList.add("driven");
@@ -539,4 +543,3 @@ export function runMeasurePass(
     },
   };
 }
-
