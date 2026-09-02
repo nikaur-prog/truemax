@@ -5,6 +5,7 @@ export const CAROUSEL_MAX_INSTRUCTION = 320;
 export const CAROUSEL_MAX_SERIES_DIRECTION = 320;
 
 export type CarouselThemeId =
+  | "jawline-strength"
   | "puffiness"
   | "skin-quality"
   | "fatigue"
@@ -20,6 +21,7 @@ export interface CarouselTheme {
   note: string;
   levels: readonly string[];
   direction: string;
+  framing?: string;
 }
 
 export interface CarouselGenerationSpec {
@@ -47,6 +49,15 @@ export interface CarouselOverlayCopy {
 }
 
 export const CAROUSEL_THEMES: readonly CarouselTheme[] = [
+  {
+    id: "jawline-strength",
+    label: "Jawline strength · profile",
+    title: "JAWLINE STRENGTH",
+    note: "A creative profile progression, not a measured score.",
+    levels: ["VERY WEAK", "WEAK", "AVERAGE", "STRONG", "VERY STRONG", "ELITE"],
+    direction: "progressively improve naturally attainable jawline definition and the visible separation between the jaw and neck while preserving the same craniofacial structure; use realistic changes in body-composition cues, posture, grooming and presentation only, never surgical or skeletal alteration",
+    framing: "Use the exact same strict 90-degree side profile in every slide, facing image-left, with the full forehead, nose, lips, chin, jaw corner and base of neck visible.",
+  },
   {
     id: "puffiness",
     label: "Facial puffiness",
@@ -100,6 +111,10 @@ export function carouselLevelLabel(themeId: CarouselThemeId, level: number): str
   if (!theme) return "";
   const index = Math.max(1, Math.min(theme.levels.length, Math.round(level))) - 1;
   return theme.levels[index] ?? theme.levels[0];
+}
+
+export function carouselLevelCount(themeId: CarouselThemeId): number {
+  return THEME_BY_ID.get(themeId)?.levels.length ?? 5;
 }
 
 export function carouselOverlayCopy(
@@ -209,7 +224,9 @@ export function carouselProviderPrompt(spec: CarouselGenerationSpec): string {
     `Create a clean editorial portrait for slide ${spec.position} of ${spec.total} in a consistent comparison series.`,
     `This is progression stage ${spec.position} of ${spec.total}: stage one shows the strongest requested issue and the final stage is the most polished, attractive presentation of the same adult identity.`,
     `Theme: ${theme.title}. Requested visual band: ${label}. Across the series, ${theme.direction}.`,
-    "Head and upper shoulders, front-facing unless the operator specifically asks for a side view, neutral expression, simple studio background, even lighting, natural skin texture, no text, no logos, no watermark, no frame, no UI.",
+    theme.framing
+      ?? "Head and upper shoulders, front-facing unless the operator specifically asks for a side view, neutral expression, simple studio background, even lighting, natural skin texture, no text, no logos, no watermark, no frame, no UI.",
+    "Keep camera angle, crop, expression, hair, clothing, background, lighting and apparent age identical between stages. Change only the requested progression. Preserve natural skin texture; no beauty-filter plasticity.",
     "Do not infer ethnicity, health, stress, hormones or personality from the face. Do not change standards based on ethnicity or skin tone. Do not turn the visual concept into a diagnosis or factual biological claim.",
     "Keep the forehead, chin and both sides of the face inside the image. Do not crop through the head.",
     series,

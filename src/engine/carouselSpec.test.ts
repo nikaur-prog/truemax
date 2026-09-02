@@ -25,13 +25,34 @@ test("creator series are deliberately limited to three through six stages", () =
   }
 });
 
-test("carousel themes have five unique levels and honest notes", () => {
+test("carousel themes have unique progression levels and honest notes", () => {
   assert.equal(new Set(CAROUSEL_THEMES.map((theme) => theme.id)).size, CAROUSEL_THEMES.length);
   for (const theme of CAROUSEL_THEMES) {
-    assert.equal(theme.levels.length, 5);
-    assert.equal(new Set(theme.levels).size, 5);
+    assert.ok(theme.levels.length >= 5 && theme.levels.length <= 6);
+    assert.equal(new Set(theme.levels).size, theme.levels.length);
     assert.ok(theme.note.length > 10);
   }
+});
+
+test("jawline carousel is a six-stage locked profile progression", () => {
+  const theme = CAROUSEL_THEMES.find((candidate) => candidate.id === "jawline-strength");
+  assert.deepEqual(theme?.levels, ["VERY WEAK", "WEAK", "AVERAGE", "STRONG", "VERY STRONG", "ELITE"]);
+  const parsed = parseCarouselGeneration({
+    theme: "jawline-strength",
+    position: 6,
+    level: 6,
+    total: 6,
+    sourceMode: "morph",
+    description: "",
+    sourceDataUrl: "data:image/jpeg;base64,YQ==",
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const prompt = carouselProviderPrompt(parsed.value.spec);
+  assert.match(prompt, /strict 90-degree side profile/i);
+  assert.match(prompt, /realistic changes in body-composition cues/i);
+  assert.match(prompt, /never surgical or skeletal alteration/i);
+  assert.match(prompt, /Change only the requested progression/i);
 });
 
 test("overlay copy is deterministic and rejects invalid positions", () => {

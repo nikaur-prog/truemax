@@ -6,7 +6,7 @@ import { FACE_FLAWS } from "./engine/faceFlawCatalog.js";
 import { detect, initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
-import { analyze } from "./engine/scoring.js";
+import { analyze, analyzeSide } from "./engine/scoring.js";
 import { aggregateScoreToPercentile } from "./engine/scoring.js";
 import { REGION_NAMES, REGION_RELIABLE_MIN } from "./engine/scoring.js";
 import { moveLabel, regionMoves } from "./engine/comparison.js";
@@ -26,6 +26,12 @@ import type { PillarId, Report, ScoredMetric, Sex } from "./engine/types.js";
 import { calibrateSupportingScores } from "./engine/manualRatingCalibration.js";
 import { hasSideOverlay } from "./ui/sideMeasureOverlay.js";
 import { downloadCtaOutro, downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
+import {
+  downloadQuickProfileVideo,
+  drawQuickProfileLandmarks,
+  renderProfileScoreCard,
+} from "./ui/quickProfileExport.js";
+import type { QuickProfileAssets } from "./ui/quickProfileExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, RundownCancelled, downloadRundownVideo } from "./ui/rundownExport.js";
@@ -64,8 +70,8 @@ import { decodeImageDataUrl } from "./ui/dataUrl.js";
 // The quick breakdown.
 //
 // A second, unlisted entry point built for filming rather than for using. One
-// photo, front only, straight to a full multi-score card that fits in a phone
-// screen recording.
+// photo, front or profile, straight to a full multi-score card that fits in a
+// phone screen recording.
 //
 // It shares the engine with the main app rather than approximating it — same
 // detect, same analyze, same percentile tables — so a number read out on camera
@@ -74,11 +80,10 @@ import { decodeImageDataUrl } from "./ui/dataUrl.js";
 // built for someone sitting with the thing, and none of them survive being
 // filmed. This is the same data, laid out to be read at arm's length.
 //
-// Front only, deliberately. The full flow requires a profile and merges the two
-// views, which is the right call for a real scan and the wrong one for a
-// fifteen-second clip: the side view needs thirteen points dragged into place
-// by hand. So the score here is the front-only score, and the page says so
-// rather than presenting it as the same number.
+// Front and profile stay separate here deliberately. A profile needs thirteen
+// checked points and produces profile-only measurements; silently merging it
+// into a front creator score would make a one-photo TikTok look like a two-view
+// product scan. The operator chooses the view and the result says what it is.
 // ---------------------------------------------------------------------------
 
 // Ingest cap. This was 1280, which quietly capped every EXPORT: the analysis
@@ -559,6 +564,7 @@ async function run(
   // later control may fall back to the previous person's photo, landmarks, or
   // creator attachments.
   last = null;
+  lastProfile = null;
   shown = null;
   clearRundownMedia();
   if (!isReady()) return;
@@ -595,6 +601,20 @@ async function run(
 // The last analysed photo, kept so switching reference population re-scores it
 // rather than making someone shoot again.
 let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
+
+interface QuickProfileScan {
+  report: Report;
+  photo: HTMLCanvasElement;
+  points: SidePoints;
+  faceDir: number;
+  verified: boolean;
+}
+
+// A profile cannot live in `last`: its thirteen reviewed points are a different
+// coordinate system from the front mesh. Keeping the states separate prevents
+// a profile export from accidentally reusing the previous front face.
+let lastProfile: QuickProfileScan | null = null;
+let creatorView: "front" | "profile" = "front";
 
 // The report the result screen is currently showing.
 //
@@ -678,19 +698,80 @@ function openReelKindChoice(): void {
       if (reelKind === "single") reelStage = "after";
       updateModeStep();
       sheet.remove();
+      if (reelKind === "single") openScanViewChoice();
     };
   }
+}
+
+function openScanViewChoice(): void {
+  document.querySelector(".q-kindpick")?.remove();
+  const sheet = document.createElement("div");
+  sheet.className = "q-kindpick";
+  sheet.innerHTML = `
+    <div class="q-kindpick-card" role="dialog" aria-modal="true" aria-label="Choose a photo angle">
+      <b>Which view are we analysing?</b>
+      <button type="button" class="q-kind" data-view="front">
+        <span>Front</span>
+        <em>Automatic face mesh, front score and front-region breakdown.</em>
+      </button>
+      <button type="button" class="q-kind" data-view="profile">
+        <span>Side profile</span>
+        <em>Check 13 profile points, then rank the jaw, chin, nose, lips and proportions.</em>
+      </button>
+    </div>`;
+  document.body.appendChild(sheet);
+  for (const button of sheet.querySelectorAll<HTMLButtonElement>("[data-view]")) {
+    button.onclick = () => {
+      creatorView = button.dataset.view === "profile" ? "profile" : "front";
+      updateModeStep();
+      sheet.remove();
+      if (creatorView === "profile") beginQuickProfileCapture();
+    };
+  }
+}
+
+function beginQuickProfileCapture(): void {
+  withSex(() => {
+    stopCamera();
+    el.capture.classList.add("hidden");
+    openSideCapture({
+      scanId: crypto.randomUUID(),
+      sex: storedSex() ?? "male",
+      standalone: true,
+      onDone: (report, points, faceDir, review) => {
+        closeSideFlow();
+        last = null;
+        lastProfile = {
+          report,
+          points,
+          faceDir,
+          photo: review.photo,
+          verified: review.verified,
+        };
+        resetSexAsk();
+        track("quick-scan-done");
+        renderProfile(report, true);
+      },
+      onBack: () => {
+        closeSideFlow();
+        el.capture.classList.remove("hidden");
+        openScanViewChoice();
+      },
+    });
+  });
 }
 
 function enterMode(next: QuickMode): void {
   quickScanGeneration += 1;
   last = null;
+  lastProfile = null;
   shown = null;
   clearRundownMedia();
   mode = next;
   beforeScan = null;
   reelStage = "before";
   reelKind = "pair";
+  creatorView = "front";
   el.pillars.classList.add("hidden");
   // The reel's first question is not a photograph, it is what KIND of video
   // this is — one photo, or the before/after pair. Everything downstream
@@ -745,16 +826,21 @@ function enterMode(next: QuickMode): void {
 
   el.cal.classList.add("hidden");
   el.capture.classList.remove("hidden");
+  if (next === "analysis") openScanViewChoice();
 }
 
 function updateModeStep(): void {
   if (mode !== "reel") {
     el.modeStep.textContent =
-      mode === "analysis" ? "One photo" : mode === "calibrate" ? "One photo · then your rating" : "";
+      mode === "analysis"
+        ? creatorView === "profile" ? "One profile · 13 checked points" : "One front photo"
+        : mode === "calibrate" ? "One photo · then your rating" : "";
     return;
   }
   if (reelKind === "single") {
-    el.modeStep.textContent = "One photo · then your clips and a song";
+    el.modeStep.textContent = creatorView === "profile"
+      ? "One profile · 13 checked points"
+      : "One front photo · then your clips and a song";
     return;
   }
   el.modeStep.textContent =
@@ -764,6 +850,7 @@ function updateModeStep(): void {
 function leaveMode(): void {
   quickScanGeneration += 1;
   last = null;
+  lastProfile = null;
   shown = null;
   clearRundownMedia();
   mode = null;
@@ -1588,6 +1675,204 @@ function renderCalibrationSet(): void {
 }
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function profileAssets(r: Report): QuickProfileAssets | null {
+  if (!lastProfile) return null;
+  const edited = editedReport(r);
+  const scores = editedExportScores(r);
+  return {
+    photo: lastProfile.photo,
+    points: lastProfile.points,
+    metrics: edited.metrics,
+    sex: edited.sex,
+    scores: {
+      overall: scores.overall,
+      percentile: scores.percentile,
+      potential: edited.potential,
+      regions: scores.regions,
+    },
+  };
+}
+
+async function playProfileSequence(): Promise<void> {
+  const scan = lastProfile;
+  if (!scan) return;
+  el.stage.classList.remove("open");
+  el.stage.classList.add("scanning");
+  await wait(SWEEP_MS);
+  el.stage.classList.remove("scanning");
+  drawQuickProfileLandmarks(el.dots, scan.points, scan.photo.width, scan.photo.height);
+  await wait(DOTS_HOLD_MS);
+  el.stage.classList.add("open");
+  await wait(180);
+  settleNumbers(true);
+}
+
+function renderProfile(r: Report, animate = false): void {
+  const scan = lastProfile;
+  if (!scan) return;
+  creatorView = "profile";
+  el.capture.classList.add("hidden");
+  el.result.classList.remove("hidden");
+  shown = r;
+  scan.report = r;
+
+  el.shot.width = scan.photo.width;
+  el.shot.height = scan.photo.height;
+  el.shot.getContext("2d")!.drawImage(scan.photo, 0, 0);
+  el.dots.width = scan.photo.width;
+  el.dots.height = scan.photo.height;
+  el.dots.getContext("2d")?.clearRect(0, 0, el.dots.width, el.dots.height);
+
+  const regions = [...r.regions].sort((a, b) => b.score - a.score);
+  const metrics = r.metrics.filter((metric) => !metric.implausible);
+  const num = (target: number, cls = "") =>
+    `<b class="q-num ${cls}" data-target="${target.toFixed(1)}" contenteditable="true"
+      inputmode="decimal" spellcheck="false">0.0</b>`;
+  const measured = scan.verified
+    ? "13 profile landmarks checked"
+    : "Estimated profile · points not confirmed";
+
+  el.cards.innerHTML = `
+    <div class="q-profile-meta">
+      <span>PROFILE ANALYSIS</span>
+      <b class="${scan.verified ? "" : "warn"}">${measured}</b>
+    </div>
+    <div class="q-hero q-profile-hero">
+      <div class="q-headline">
+        <button class="q-klabel q-switch" id="q-sex" type="button"
+          title="Switch the reference population">VS ${r.sex === "male" ? "MEN" : "WOMEN"} ⇄</button>
+        <div class="q-score"><span class="q-num q-score-num" data-target="${r.overall.toFixed(1)}"
+          contenteditable="true" inputmode="decimal" spellcheck="false">0.0</span><small>/10</small></div>
+        <span class="q-rank">${rankShort(r.overallPercentile)}</span>
+      </div>
+      <div class="q-potential">
+        <span class="q-klabel">NATURAL POTENTIAL</span>
+        <b>${r.potential.toFixed(1)}<small>/10</small></b>
+        <em>Profile-only estimate</em>
+      </div>
+    </div>
+    <div class="q-grid q-profile-grid">
+      ${regions.map((region) => `<div class="q-cell${region.reliability < REGION_RELIABLE_MIN ? " q-cell-weak" : ""}">
+        <span>${REGION_NAMES[region.region]}</span>
+        ${num(region.score)}
+        <div class="q-bar"><i data-w="${Math.max(2, Math.min(100, region.score * 10))}" style="width:0%"></i></div>
+        ${region.reliability < REGION_RELIABLE_MIN ? `<em class="q-cell-note">indicative</em>` : ""}
+      </div>`).join("")}
+    </div>
+    <section class="q-profile-measurements" aria-label="Profile measurements">
+      <div class="q-profile-measure-head">
+        <span>PROFILE MEASUREMENTS</span>
+        <b>${metrics.length} measured</b>
+      </div>
+      ${metrics.map((metric) => `<div class="q-profile-measure">
+        <div><b>${metric.def.name}</b><small>${REGION_NAMES[metric.def.region]}</small></div>
+        <span>${metric.value.toFixed(metric.def.decimals)}${metric.def.unit}</span>
+        <strong>${metric.score.toFixed(1)}</strong>
+      </div>`).join("")}
+    </section>
+    <p class="q-profile-note">This is a profile-only rank from the measurements visible in a side view. It is not merged with a front score.</p>
+    <div class="q-actions">
+      <button class="btn pri" id="q-profile-video">Profile TikTok MP4</button>
+      <button class="btn gho" id="q-profile-card">Profile score card PNG</button>
+      <button class="btn gho" id="q-profile-diagnostics">Copy diagnostics</button>
+      <button class="btn gho" id="q-again">New profile</button>
+    </div>
+    <label class="q-direct">
+      <input type="checkbox" id="q-direct" ${savesDirectly() ? "checked" : ""} />
+      <span>Download files straight away, no share sheet</span>
+    </label>
+    <p class="q-direct hidden" id="q-folder-row">
+      <span id="q-folder-state">Exports go to Downloads.</span>
+      <button type="button" class="btn gho q-folder-btn" id="q-folder-pick">Choose a folder</button>
+      <button type="button" class="btn gho q-folder-btn hidden" id="q-folder-clear">Use Downloads</button>
+    </p>`;
+
+  [...el.cards.children].forEach((child, index) =>
+    (child as HTMLElement).style.setProperty("--i", String(index)));
+  wireEditing();
+  if (animate) void playProfileSequence();
+  else {
+    drawQuickProfileLandmarks(el.dots, scan.points, scan.photo.width, scan.photo.height);
+    el.stage.classList.add("open");
+    settleNumbers(false);
+  }
+
+  document.getElementById("q-sex")!.onclick = () => {
+    const sex = r.sex === "male" ? "female" : "male";
+    storeSex(sex);
+    renderProfile(analyzeSide(scan.points, scan.faceDir, sex));
+  };
+
+  const direct = document.getElementById("q-direct") as HTMLInputElement | null;
+  if (direct) direct.onchange = () => setSavesDirectly(direct.checked);
+  void wireSaveFolder();
+
+  document.getElementById("q-profile-video")!.onclick = async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const assets = profileAssets(r);
+    if (!assets) return;
+    button.disabled = true;
+    try {
+      const outcome = await downloadQuickProfileVideo(
+        assets,
+        (progress) => (button.textContent = `Rendering · ${Math.round(progress * 100)}%`),
+      );
+      button.textContent = outcome === "cancelled" ? "Not saved, tap to retry" : outcomeMessage(outcome);
+    } catch {
+      button.textContent = "Export failed, tap to retry";
+    } finally {
+      button.disabled = false;
+      window.setTimeout(() => {
+        if (button.isConnected) button.textContent = "Profile TikTok MP4";
+      }, 3000);
+    }
+  };
+
+  document.getElementById("q-profile-card")!.onclick = async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const assets = profileAssets(r);
+    if (!assets) return;
+    button.disabled = true;
+    try {
+      const canvas = document.createElement("canvas");
+      renderProfileScoreCard(canvas, assets);
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((value) => value ? resolve(value) : reject(new Error("PNG export failed")), "image/png"));
+      const outcome = await saveFile(blob, exportName("card", "png", "profile-score"), "card");
+      button.textContent = outcome === "cancelled" ? "Not saved, tap to retry" : outcomeMessage(outcome);
+    } catch {
+      button.textContent = "Export failed, tap to retry";
+    } finally {
+      button.disabled = false;
+      window.setTimeout(() => {
+        if (button.isConnected) button.textContent = "Profile score card PNG";
+      }, 3000);
+    }
+  };
+
+  document.getElementById("q-profile-diagnostics")!.onclick = async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const copied = await copyDiagnostics(editedReport(r), "Profile creator");
+    button.textContent = copied ? "Copied, paste it back" : "Copy from the box";
+    window.setTimeout(() => {
+      if (button.isConnected) button.textContent = "Copy diagnostics";
+    }, 2600);
+  };
+
+  document.getElementById("q-again")!.onclick = () => {
+    quickScanGeneration += 1;
+    lastProfile = null;
+    shown = null;
+    clearRundownMedia();
+    resetSexAsk();
+    el.stage.classList.remove("open", "scanning");
+    el.dots.getContext("2d")?.clearRect(0, 0, el.dots.width, el.dots.height);
+    el.result.classList.add("hidden");
+    el.capture.classList.remove("hidden");
+    beginQuickProfileCapture();
+  };
+}
 
 function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   // Calibrate: the rating comes FIRST, and the engine's number is not on screen
