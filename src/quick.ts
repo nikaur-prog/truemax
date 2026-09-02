@@ -22,7 +22,8 @@ import { openSideCapture, close as closeSideFlow } from "./ui/sideFlow.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
 import { askVerdictTone } from "./ui/tonePrompt.js";
 import { drawLandmarksAnimated } from "./ui/overlay.js";
-import type { Report, ScoredMetric, Sex } from "./engine/types.js";
+import type { PillarId, Report, ScoredMetric, Sex } from "./engine/types.js";
+import { calibrateSupportingScores } from "./engine/manualRatingCalibration.js";
 import { hasSideOverlay } from "./ui/sideMeasureOverlay.js";
 import { downloadCtaOutro, downloadQuickVideo, renderQuickVideoFrame } from "./ui/quickVideoExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
@@ -87,6 +88,7 @@ import { decodeImageDataUrl } from "./ui/dataUrl.js";
 // 2160 is native at 1080 output with headroom, and detection cost is
 // unchanged (MediaPipe resizes internally); only the one-off skin pass pays.
 const MAX_DIM = 2160;
+const PILLAR_IDS: readonly PillarId[] = ["Harmony", "Angularity", "Dimorphism", "Features"];
 
 const el = {
   pillars: document.getElementById("q-pillars")!,
@@ -1661,11 +1663,11 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
   // one hand.
   const verdict = verdictForPercentile(r.overallPercentile, r.sex, loadVerdictTone() ?? DEFAULT_VERDICT_TONE);
   const dimorphism = r.sex === "female" ? "FEMININITY" : "MASCULINITY";
-  const micro: Array<[string, number]> = [
-    ["FACE", r.overall],
-    ["ANGULARITY", r.pillars.Angularity ?? 5],
-    [dimorphism, r.pillars.Dimorphism ?? 5],
-    ["HARMONY", r.pillars.Harmony ?? 5],
+  const micro: Array<["overall" | PillarId, string, number]> = [
+    ["overall", "FACE", r.overall],
+    ["Angularity", "ANGULARITY", r.pillars.Angularity ?? 5],
+    ["Dimorphism", dimorphism, r.pillars.Dimorphism ?? 5],
+    ["Harmony", "HARMONY", r.pillars.Harmony ?? 5],
   ];
 
   el.cards.innerHTML = `
@@ -1692,10 +1694,10 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <div class="q-units">
         ${micro
           .map(
-            ([label, value]) => `<div class="q-unit">
+            ([key, label, value]) => `<div class="q-unit" data-pillar="${key}">
               <span>${label}</span>
               <div class="q-unit-bar"><i data-w="${Math.max(0, Math.min(100, value * 10))}" style="width:0%"></i></div>
-              <b>${value.toFixed(1)}<small>/10</small></b>
+              <b><span class="q-unit-value">${value.toFixed(1)}</span><small>/10</small></b>
             </div>`,
           )
           .join("")}
@@ -2132,8 +2134,13 @@ function wireEditing(): void {
         // not, so a face nudged from 8.1 to 7.2 kept the word it was given at
         // 8.1 and the video went out saying "Handsome" over a 7.2.
         //
-        // The measurements do not move, and must not: this is a correction to
-        // the aggregate, not a claim that the canthal tilt was mismeasured.
+        // Raw measurements and landmarks do not move: this is a correction to
+        // the presentation score, not a claim that the canthal tilt changed.
+        // The supporting region and pillar summaries DO move, because leaving
+        // them centred four points away produced internally impossible export
+        // cards. Their ordering and relative spread are preserved by the pure
+        // calibration helper.
+        calibrateVisibleSupportingScores(v);
         const pct = aggregateScoreToPercentile(v);
         const rank = el.cards.querySelector<HTMLElement>(".q-rank");
         if (rank) rank.textContent = rankShort(pct);
@@ -2141,6 +2148,75 @@ function wireEditing(): void {
       }
     });
   }
+}
+
+/**
+ * Keep the editable result internally consistent after a headline correction.
+ *
+ * The DOM is the editor state on this screen: a creator may already have
+ * corrected an individual region, so recalibrating the values currently shown
+ * preserves that judgement rather than resetting it to the engine report.
+ */
+function calibrateVisibleSupportingScores(primary: number): void {
+  const regionNodes = [...el.cards.querySelectorAll<HTMLElement>(".q-cell .q-num")];
+  const regionValues = regionNodes.map((node) => scoreFromNode(node, primary));
+  applyCalibratedRegionScores(regionNodes, calibrateSupportingScores(regionValues, primary));
+
+  // All four pillars are exported even though the compact verdict strip has
+  // room to show only three beside FACE. Calibrating only the visible three
+  // would leave Features stale in the rundown and full report, so the complete
+  // record is derived and held on the editor root.
+  const pillarSource = PILLAR_IDS.map((pillar) => shown?.pillars[pillar] ?? primary);
+  const pillarValues = calibrateSupportingScores(pillarSource, primary);
+  const calibratedPillars = Object.fromEntries(
+    PILLAR_IDS.map((pillar, index) => [pillar, pillarValues[index]]),
+  ) as Record<PillarId, number>;
+  el.cards.dataset.pillarScores = JSON.stringify(calibratedPillars);
+
+  const pillarNodes = [...el.cards.querySelectorAll<HTMLElement>('.q-unit[data-pillar]:not([data-pillar="overall"])')];
+  pillarNodes.forEach((node) => {
+    const key = node.dataset.pillar as PillarId;
+    const value = calibratedPillars[key];
+    const number = node.querySelector<HTMLElement>(".q-unit-value");
+    const bar = node.querySelector<HTMLElement>(".q-unit-bar i");
+    if (number) number.textContent = value.toFixed(1);
+    if (bar) {
+      const width = Math.max(0, Math.min(100, value * 10));
+      bar.dataset.w = String(width);
+      bar.style.width = `${width}%`;
+    }
+  });
+
+  // FACE is the headline repeated inside the verdict view, so it follows the
+  // primary exactly rather than being treated as one more supporting pillar.
+  const face = el.cards.querySelector<HTMLElement>('.q-unit[data-pillar="overall"]');
+  const faceNumber = face?.querySelector<HTMLElement>(".q-unit-value");
+  const faceBar = face?.querySelector<HTMLElement>(".q-unit-bar i");
+  if (faceNumber) faceNumber.textContent = primary.toFixed(1);
+  if (faceBar) {
+    const width = Math.max(0, Math.min(100, primary * 10));
+    faceBar.dataset.w = String(width);
+    faceBar.style.width = `${width}%`;
+  }
+}
+
+function scoreFromNode(node: HTMLElement | null, fallback: number): number {
+  const parsed = parseFloat(node?.textContent ?? "");
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(10, parsed)) : fallback;
+}
+
+function applyCalibratedRegionScores(nodes: readonly HTMLElement[], scores: readonly number[]): void {
+  nodes.forEach((node, index) => {
+    const value = scores[index];
+    node.textContent = value.toFixed(1);
+    node.dataset.target = value.toFixed(1);
+    const bar = node.parentElement?.querySelector<HTMLElement>(".q-bar i");
+    if (bar) {
+      const width = Math.max(2, Math.min(100, value * 10));
+      bar.dataset.w = String(width);
+      bar.style.width = `${width}%`;
+    }
+  });
 }
 
 /**
@@ -2164,9 +2240,9 @@ function refreshVerdictWord(percentile: number): void {
  * The report as the operator has corrected it.
  *
  * The headline number on screen wins over the one the engine produced, and the
- * percentile is re-derived from it. Everything else — every measurement, every
- * region, the ceiling — is untouched, because an edit to the aggregate is a
- * correction to the summary and not a claim about the geometry.
+ * percentile is re-derived from it. Raw measurements and geometry stay
+ * untouched; region and pillar presentation scores are read from the editor,
+ * where a headline correction has calibrated them as one coherent set.
  */
 function editedReport(r: Report): Report {
   const scores = editedExportScores(r);
@@ -2177,26 +2253,48 @@ function editedReport(r: Report): Report {
     return { ...region, score, percentile: aggregateScoreToPercentile(score) };
   });
   const changedRegion = regions.some((region, index) => region !== r.regions[index]);
-  if (scores.overall === r.overall && !changedRegion) return r;
+  const changedPillar = (Object.keys(r.pillars) as PillarId[]).some(
+    (pillar) => scores.pillars[pillar] !== r.pillars[pillar],
+  );
+  if (scores.overall === r.overall && !changedRegion && !changedPillar) return r;
   return {
     ...r,
     overall: scores.overall,
     overallPercentile: scores.percentile,
     // A manually raised score cannot export with a lower "potential" ceiling.
     potential: Math.max(scores.overall, r.potential),
+    pillars: scores.pillars,
     regions,
   };
 }
 
-function editedExportScores(r: Report): { overall: number; percentile: number; regions: Array<{ name: string; score: number }> } {
+function editedExportScores(r: Report): {
+  overall: number;
+  percentile: number;
+  pillars: Record<PillarId, number>;
+  regions: Array<{ name: string; score: number }>;
+} {
   const parsedOverall = parseFloat(el.cards.querySelector<HTMLElement>(".q-score-num")?.textContent ?? "");
   // Zero is a valid canonical 0–10 edit. `parsed || original` silently turned
   // that one value back into the engine score while every other edit exported.
   const overall = Number.isFinite(parsedOverall) ? Math.max(0, Math.min(10, parsedOverall)) : r.overall;
   const cells = [...el.cards.querySelectorAll<HTMLElement>(".q-cell")];
+  const pillars = { ...r.pillars };
+  try {
+    const calibrated = JSON.parse(el.cards.dataset.pillarScores ?? "null") as Partial<Record<PillarId, unknown>> | null;
+    for (const pillar of PILLAR_IDS) {
+      const value = calibrated?.[pillar];
+      if (typeof value === "number" && Number.isFinite(value)) pillars[pillar] = Math.max(0, Math.min(10, value));
+    }
+  } catch {
+    // A malformed data attribute is not allowed to break an export. It is
+    // internal state rather than user input, so the original report is the
+    // correct conservative fallback.
+  }
   return {
     overall,
     percentile: overall === r.overall ? r.overallPercentile : aggregateScoreToPercentile(overall),
+    pillars,
     regions: cells.map((cell) => ({
       name: cell.querySelector("span")?.textContent ?? "Feature",
       score: parseFloat(cell.querySelector<HTMLElement>(".q-num")?.textContent ?? "") || 0,
@@ -2764,6 +2862,7 @@ function beforeSource(): ExportSource | null {
     scores: {
       overall: r.overall,
       percentile: r.overallPercentile,
+      pillars: { ...r.pillars },
       // Same order the grid uses, so the two files lay out identically and can
       // be cut against each other without the rows dancing.
       regions: [...r.regions]
