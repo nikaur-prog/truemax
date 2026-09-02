@@ -27,7 +27,7 @@ test("Max has one Profile surface and no floating results pet", () => {
   assert.doesNotMatch(results, /mk\("Overview", "side"\)/);
   assert.doesNotMatch(results, /\bmountMaxPet\(/);
   assert.doesNotMatch(results, /\barmMaxPetReveal\(/);
-  assert.match(results, /unmountMaxPet\(\)/);
+  assert.doesNotMatch(results, /maxPet/);
 });
 
 test("the first mobile detail layer is scored primary measurements", () => {

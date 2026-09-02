@@ -47,7 +47,6 @@ import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import { ownScans, readAllHistory } from "../engine/history.js";
 import { renderScoreStrip } from "./scoreStrip.js";
-import { unmountMaxPet } from "./maxPet.js";
 import { openMaxChat } from "./maxChat.js";
 import { ceilingCtaMarkup, paintCeilingCta } from "./ceilingCta.js";
 import { openSelfScoreDialog, selfScoreSent } from "./selfScore.js";
@@ -198,11 +197,8 @@ export function renderResults(c: Ctx): void {
   // must not take the headline number off the screen.
   renderScoreStrip(c.report);
 
-  // Max now lives in one deliberate place: the Profile tab. The floating pet
-  // competed with the report, covered controls on phones and duplicated that
-  // same character without adding another job, so every results mount removes
-  // it instead of conditionally bringing it back.
-  unmountMaxPet();
+  // Max lives in one deliberate place: the Profile tab. The floating pet that
+  // once competed with the report is gone from the codebase.
   // A new scan starts from the calm whole-face state. Without this the first
   // tab change after re-scanning would animate out of the PREVIOUS photo's
   // region, which is a transition from somewhere the user never was.
@@ -2801,7 +2797,6 @@ export function clearResultsIdentityState(): void {
   pathway = "build";
   depth = "rating";
   scansLeft = 0;
-  unmountMaxPet();
 }
 
 export function setMaxAccess(value: boolean): void {
@@ -2857,7 +2852,6 @@ function goPathway(): void {
 // label decision had already been taken with the flag still false.
 function syncMaxSurfaces(): void {
   if (!ctx) return;
-  unmountMaxPet();
   // Entitlement can add the Profile tab to either the front or side row. Rebuild
   // the row and restore its selection so the decorative region icon survives;
   // replacing button.textContent used to erase it.
@@ -2983,9 +2977,9 @@ let askLine = 0;
 function askMaxCard(): string {
   // 18+ only, in any form: this is the standing rule for every Max surface.
   if (!adultUser) return "";
-  // Plan holders do not get an advertisement — they get Max himself, peeking
-  // from the edge of the screen (see maxPet.ts). The card is for the person
-  // who has not bought yet: the character IS the pitch.
+  // Plan holders do not get an advertisement: they have Max on the Profile
+  // tab and in the chat. The card is for the person who has not bought yet,
+  // and the character IS the pitch.
   if (maxAccess) return "";
   return `<button type="button" class="askmax askmax-cta" id="btn-askmax">
     <span class="askmax-bubble" id="askmax-bubble" aria-hidden="true"></span>

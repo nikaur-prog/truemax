@@ -130,7 +130,11 @@ body {
 .dash-scans h2 { font-variation-settings: "opsz" 60, "wght" 300; }
 .pillar b { font-variation-settings: "opsz" 36, "wght" 400; }
 .celeb .ava { font-variation-settings: "opsz" 20, "wght" 400; }
-@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+/* Iteration count is the important half: a 0.01ms INFINITE animation is a
+   per-frame strobe, not stillness, and every looping rule on the page (Max's
+   breathing, the reading band, the pulses) had escaped this line for want of
+   it. */
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; transition-delay: 0ms !important; } }
 
 .hidden { display: none !important; }
 
@@ -927,32 +931,26 @@ body.funnel-open { overflow: hidden; }
    expression, spins, and morphs away, and the next one is already waiting on
    its own delay. --i is the face's index and --n the number of faces, so the
    markup can add a fifth mood without touching a keyframe. */
-.mx-load { position: relative; display: block; width: 86px; height: 90px; }
-.mx-load-face {
-  position: absolute; inset: 0; display: block; opacity: 0;
-  animation: mx-load-turn calc(var(--n) * 1.15s) cubic-bezier(.5,0,.5,1) infinite;
-  animation-delay: calc(var(--i) * 1.15s);
-}
-.mx-load-face .mx-svg { width: 100%; height: 100%; }
+.mx-load { position: relative; display: block; width: 86px; height: 90px; animation: mx-load-in .4s cubic-bezier(.3,1.4,.45,1) both; }
+.mx-load .mx-svg { display: block; width: 100%; height: 100%; animation: mx-load-turn 2.6s cubic-bezier(.5,0,.5,1) infinite; transform-origin: center; }
+/* One drawing, two faces. The star eyes fade in over the light bars on a
+   stepped keyframe timed to the middle of each spin, so the face changes
+   while he is edge-on. Opacity rather than display so it is all keyframes and
+   keeps going while the main thread is busy, which is when a loader is seen. */
+.mx-load .mx-eye-stars { display: block; animation: mx-load-stars 2.6s steps(1, end) infinite; }
+.mx-load .mx-pupils, .mx-load .mx-lid { animation: mx-load-bars 2.6s steps(1, end) infinite; }
+@keyframes mx-load-in { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: scale(1); } }
 @keyframes mx-load-turn {
-  /* Percentages are of the WHOLE cycle, so one face is visible for 1/n of it
-     and invisible for the rest. These are written for the FOUR faces in
-     LOADER_MOODS (maxCharacter.ts) — 100/4 = the 25% handoff below. Changing the
-     number of moods without changing these leaves a gap of empty box between
-     two faces; maxCharacter.ts has a type-level check that fails the build
-     rather than letting that ship. */
-  0%   { opacity: 0; transform: scale(.55) rotateY(-90deg); }
-  7%   { opacity: 1; transform: scale(1) rotateY(0deg); }
-  14%  { opacity: 1; transform: scale(1) rotateY(0deg); }
-  22%  { opacity: 1; transform: scale(.92) rotateY(300deg); }
-  25%  { opacity: 0; transform: scale(.5) rotateY(360deg); }
-  100% { opacity: 0; transform: scale(.5) rotateY(360deg); }
+  0%, 36% { transform: rotateY(0deg); }
+  50% { transform: rotateY(360deg) scale(.96); }
+  50.01%, 86% { transform: rotateY(0deg); }
+  100% { transform: rotateY(360deg) scale(.96); }
 }
+@keyframes mx-load-stars { 0%, 42.9% { opacity: 0; } 43%, 92.9% { opacity: 1; } 93%, 100% { opacity: 0; } }
+@keyframes mx-load-bars { 0%, 42.9% { opacity: 1; } 43%, 92.9% { opacity: 0; } 93%, 100% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  /* One still Max, held. Nothing moves, but the loader is still Max rather
-     than an empty box. */
-  .mx-load-face { animation: none; opacity: 0; }
-  .mx-load-face:first-child { opacity: 1; }
+  .mx-load, .mx-load .mx-svg, .mx-load .mx-eye-stars, .mx-load .mx-pupils, .mx-load .mx-lid { animation: none; }
+  .mx-load .mx-eye-stars { display: none; }
 }
 
 .trial-loader { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--acc); border-radius: 50%; animation: trial-spin .8s linear infinite; }
@@ -4317,9 +4315,12 @@ body.auth-modal-open { overflow: hidden; }
 .mx-mood-thinking .mx-pupils { animation: mx-ponder 4s ease-in-out infinite; }
 @keyframes mx-ponder { 0%, 100% { transform: translate(-2px, -2.4px); } 50% { transform: translate(-3px, -1px); } }
 
-/* Poke. A hop with real squash-and-stretch, plus a flash of the sparks — the
-   cheapest aliveness there is, and the reason people tap the bird. */
-.mx-svg.poked .mx-bob { animation: mx-hop .62s cubic-bezier(.28,1.5,.4,1); }
+/* Poke. A hop with real squash-and-stretch, plus a flash of the sparks, the
+   cheapest aliveness there is, and the reason people tap the bird. Kept at
+   two-class specificity on purpose: at .mx-svg.poked it outranked every act's
+   body motion, and since the class also never came off, one tap froze him for
+   the session. wireMaxInteractions removes the class when the hop ends. */
+.poked .mx-bob { animation: mx-hop .62s cubic-bezier(.28,1.5,.4,1); }
 .max-sticker.poked { animation: mx-sticker-pop .5s cubic-bezier(.3,1.6,.45,1); }
 .max-sticker.poked .mx-spark { animation: mx-twinkle .5s ease-in-out; }
 @keyframes mx-hop {
@@ -4415,9 +4416,11 @@ body.auth-modal-open { overflow: hidden; }
  * there instead of snapping back to the first keyframe when he scrolls into
  * view. */
 .mx-svg.mx-asleep,
-.mx-asleep .mx-svg { animation-play-state: paused; }
+.mx-asleep .mx-svg { animation-play-state: paused !important; }
+/* Important, because the mood rules for the star blink and the thinking dots
+   sit later and higher and were still ticking under a sleeping Max. */
 .mx-svg.mx-asleep *,
-.mx-asleep .mx-svg * { animation-play-state: paused; }
+.mx-asleep .mx-svg * { animation-play-state: paused !important; }
 /* The whole character breathes and leans — and squashes a touch at the bottom
    of the cycle, because a rigid body that only translates reads as a sticker
    being moved rather than as something alive. */
@@ -4763,61 +4766,6 @@ body.auth-modal-open { overflow: hidden; }
   66% { transform: translateX(-3px) rotate(-2deg); }
   84% { transform: translateX(2px) rotate(1deg); }
 }
-/* --------------------------------------------------------------------------
-   The fight club (ui/maxCharacter.ts wireFight): the pet's tap escalation.
-   Each stage is one class for its own duration; everything is on .mx-bob or
-   .mx-arm so it composes with the resting breath and never touches layout.
-   -------------------------------------------------------------------------- */
-.mx-svg.mx-fight-shove .mx-bob { animation: mx-shoved .62s cubic-bezier(.2,.9,.3,1.35); }
-@keyframes mx-shoved {
-  0% { transform: translateX(0) scale(1); }
-  18% { transform: translateX(9px) scale(.92, 1.06) rotate(4deg); }
-  55% { transform: translateX(4px) scale(1.05, .95) rotate(1deg); }
-  100% { transform: translateX(0) scale(1); }
-}
-/* The confused beat borrows the confused act's own "?" and tilt. */
-.mx-fight-huh .mx-prop-question {
-  display: block;
-  animation: mx-prop-in .3s ease-out both, mx-q-float 1.1s ease-in-out .3s 1;
-  transform-box: fill-box; transform-origin: center bottom;
-}
-.mx-svg.mx-fight-huh .mx-bob { animation: mx-huh-tilt 1.5s ease-in-out; }
-@keyframes mx-huh-tilt {
-  0%, 100% { transform: rotate(0); }
-  30%, 70% { transform: rotate(-6deg) translateY(-1px); }
-}
-/* The dodge: your tap whiffs. Fast out, spring back. */
-.mx-svg.mx-fight-dodge .mx-bob { animation: mx-dodge .42s cubic-bezier(.25,.8,.3,1.2); }
-@keyframes mx-dodge {
-  0% { transform: translateX(0) rotate(0); }
-  40% { transform: translateX(-13px) rotate(-10deg) scale(.97, 1.03); }
-  100% { transform: translateX(0) rotate(0); }
-}
-/* The combo: bouncing on his feet while the arm throws jabs at the screen. */
-.mx-svg.mx-fight-combo .mx-bob { animation: mx-stance .38s ease-in-out 5; }
-.mx-svg.mx-fight-combo .mx-arm { animation: mx-jab .31s cubic-bezier(.3,.7,.4,1) 6; }
-@keyframes mx-stance {
-  0%, 100% { transform: translateY(0) rotate(-2deg); }
-  50% { transform: translateY(2px) rotate(2deg) scale(1.02, .98); }
-}
-@keyframes mx-jab {
-  0%, 100% { transform: rotate(0); }
-  45% { transform: translate(-14px, -22px) rotate(-76deg); }
-}
-/* The block: crossed forearms up, hanging arms hidden, a firm head shake.
-   "No." */
-.mx-fight-block .mx-arms-block { display: block; animation: mx-prop-in .16s ease-out both; }
-.mx-fight-block .mx-arm,
-.mx-fight-block .mx-arm-rest { display: none; }
-.mx-svg.mx-fight-block .mx-bob { animation: mx-block-shake 1.4s ease-in-out; }
-@keyframes mx-block-shake {
-  0%, 18%, 100% { transform: translateX(0); }
-  30% { transform: translateX(-3px) rotate(-2deg); }
-  45% { transform: translateX(3px) rotate(2deg); }
-  60% { transform: translateX(-2px) rotate(-1.5deg); }
-  75% { transform: translateX(2px) rotate(1.5deg); }
-}
-
 /* The cheer borrows the excited face without touching the mood classes, so
    whatever the surface set resumes untouched when the reaction ends. Placed
    after the mood rules, so at equal specificity these win while present. */
@@ -4836,6 +4784,9 @@ body.auth-modal-open { overflow: hidden; }
 .mx-lid { transform-box: fill-box; transform-origin: center top; transform: scaleY(0); animation: mx-blink 5.2s ease-in-out infinite; }
 .mx-lid:nth-of-type(2) { animation-delay: .04s; }
 .mx-pupils { animation: mx-glance 7.5s ease-in-out infinite; }
+/* The pointer-follow gaze lives on a wrapper so the keyframes on .mx-pupils
+   keep composing with it (wireMaxInteractions sets the two variables). */
+.mx-gaze { transform: translate(var(--mx-gaze-x, 0px), var(--mx-gaze-y, 0px)); }
 .mx-antenna { transform-origin: 75px 24px; animation: mx-antenna 3.4s ease-in-out infinite; }
 .mx-pulse { animation: mx-pulse 2.2s ease-in-out infinite; }
 .mx-shadow { transform-box: fill-box; transform-origin: center; animation: mx-shadow 3.4s ease-in-out infinite; }
@@ -4869,9 +4820,6 @@ body.auth-modal-open { overflow: hidden; }
   84% { transform: translate(1px, -4px) rotate(-120deg); }
   100% { transform: translate(0, 0) rotate(0); }
 }
-/* Long rest, one small twitch: the idle version, and nothing like a full wave.
-   An arm that lifts to shoulder height every six seconds unprompted is a tic. */
-@keyframes mx-wave-idle { 0%, 88%, 100% { transform: rotate(0); } 93% { transform: rotate(-14deg); } }
 /* He blinks in the excited expression too.
    The star eyes replace the light bars, and the eyelids are hidden with them —
    so in the one mood he wears most often on a results screen he was a face
@@ -4917,9 +4865,16 @@ body.auth-modal-open { overflow: hidden; }
 .max-say b { color: var(--acc); }
 @keyframes mx-say { to { opacity: 1; transform: translateY(0) scale(1); } }
 
+/* Important throughout, and the .mx-svg prefix on every part: the mood rules
+   (.mx-mood-excited .mx-bob and friends) are two classes deep and later in
+   the file, so a single-class list here lost to them and left excited Max
+   frozen seven pixels above a shrunken shadow. */
 @media (prefers-reduced-motion: reduce) {
-  .max-sticker, .mx-bob, .mx-arm, .mx-lid, .mx-pupils, .mx-antenna, .mx-pulse,
-  .mx-shadow, .mx-spark, .max-say.show, .max-stage.up .max-pop { animation: none; }
+  .max-sticker, .mx-svg, .mx-svg .mx-bob, .mx-svg .mx-arm, .mx-svg .mx-lid, .mx-svg .mx-pupils,
+  .mx-svg .mx-antenna, .mx-svg .mx-pulse, .mx-svg .mx-shadow, .mx-svg .mx-eye-stars,
+  .mx-svg .mx-antenna-glint, .mx-svg .mx-thought .mx-dot, .mx-svg .mx-talk-shape,
+  .mx-spark, .max-say.show, .max-stage.up .max-pop { animation: none !important; }
+  .mx-svg .mx-bob, .mx-svg .mx-shadow { transform: none !important; opacity: 1; }
   .mx-lid { transform: scaleY(0); }
   .max-say { opacity: 1; transform: none; }
   .max-pop { transform: none; }
@@ -5555,48 +5510,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .askmax-bubble.show { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .askmax-bubble { transition: opacity .16s ease; transform: none; } }
 
-/* ---------------------------------------------------------------------------
-   Max the pet.
-
-   For accounts that hold the plan there is no card: Max himself peeks out of
-   the right edge of the screen, leaning in like he is checking whether you
-   are done reading. Tapping him opens the chat; while it is open he slips
-   away (.out) so he is not standing beside his own dialog.
-   --------------------------------------------------------------------------- */
-.maxpet {
-  position: fixed; right: 0; bottom: 112px; z-index: 80;
-  /* A decent presence on a desktop; the phone override below keeps him from
-     standing on the numbers. */
-  width: 96px; padding: 0; margin: 0; border: none; background: none;
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, .16));
-  transform: translateX(105%);
-  transition: transform .5s cubic-bezier(.3, 1.3, .4, 1), opacity .4s ease;
-}
-@media (max-width: 700px) { .maxpet { width: 64px; } }
-/* Before armMaxPetReveal + ten seconds: he does not exist yet, whatever spot
-   he was left in. Opacity as well as the edge transform, because a loose
-   spot stands in open page space where the edge cannot hide him. */
-.maxpet.unrevealed { opacity: 0; pointer-events: none; }
-/* The entrance: fingers over the edge, an effort wobble, then the haul out —
-   overshooting past the peek and settling back into it. The keyframes end on
-   the exact peek transform so the class swap at animationend cannot jump. */
-.maxpet.hauling { animation: pet-haul 1.7s cubic-bezier(.3, 1, .4, 1) both; }
-@keyframes pet-haul {
-  0% { transform: translateX(105%) rotate(0); }
-  20% { transform: translateX(86%) rotate(-4deg); }
-  32% { transform: translateX(88%) rotate(3deg); }
-  44% { transform: translateX(83%) rotate(-6deg); }
-  76% { transform: translateX(36%) rotate(-20deg); }
-  100% { transform: translateX(50%) rotate(-16deg); }
-}
-/* Half in, half out, with a lean: the hide-and-seek pose. Hover and he leans
-   further out to meet you. */
-.maxpet.peeking { transform: translateX(50%) rotate(-16deg); }
-.maxpet.peeking:hover, .maxpet.peeking:focus-visible { transform: translateX(26%) rotate(-7deg); }
-.maxpet.out, .maxpet.out:hover { transform: translateX(105%); }
-.maxpet:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 50%; }
-@media (prefers-reduced-motion: reduce) { .maxpet { transition: none; } .maxpet.hauling { animation: none; transform: translateX(50%) rotate(-16deg); } }
 
 /* ---------------------------------------------------------------------------
    Max's analysis, at the top of the overview, for accounts that hold him.
@@ -6083,42 +5996,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .ceil-shine { display: none; }
 }
 
-/* ---------------------------------------------------------------------------
-   Knocking Max over.
-
-   He is a flying bot with no legs, so once he is tipped he cannot right
-   himself: he lies there until the next tap flies him back up. The shock
-   comes first — eyes stretched wide, a small o of a mouth — because a fall
-   with no reaction before it reads as a rendering bug, not slapstick.
-   --------------------------------------------------------------------------- */
-.mx-svg.mx-shock { animation: mx-jolt .42s ease-in-out; }
-@keyframes mx-jolt {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-3px) rotate(-2deg); }
-  45% { transform: translateX(3px) rotate(2deg); }
-  70% { transform: translateX(-2px) rotate(-1deg); }
-}
-.mx-svg.mx-shock .mx-eyes { transform: scale(1.06, 1.22); transform-box: fill-box; transform-origin: center; }
-.mx-svg.mx-shock .mx-mouth-open,
-.mx-svg.mx-shock .mx-mouth-flat,
-.mx-svg.mx-shock .mx-mouth-down { display: none; }
-.mx-svg.mx-shock .mx-mouth-talk { display: block; }
-.mx-svg.mx-shock .mx-talk-shape { animation: none; transform: scale(.7); }
-
-.mx-svg.mx-down { transform: rotate(98deg) translateY(4px); transition: transform .5s cubic-bezier(.4, 1.6, .6, 1); }
-/* His idle life pauses while he is down: a knocked-over robot that keeps
-   breathing and glancing around undermines the bit. */
-.mx-svg.mx-down .mx-bob { animation-play-state: paused; }
-.mx-svg.mx-down .mx-shadow { opacity: 0; }
-.mx-svg.mx-down .mx-lid { animation-play-state: paused; }
-
-.mx-svg.mx-rise { animation: mx-flyup .65s cubic-bezier(.3, 1.4, .45, 1); }
-@keyframes mx-flyup {
-  0% { transform: rotate(98deg) translateY(4px); }
-  55% { transform: rotate(-8deg) translateY(-12px); }
-  80% { transform: rotate(3deg) translateY(-2px); }
-  100% { transform: rotate(0) translateY(0); }
-}
 /* The celebration: he jumps, throws the arm to the sky, spins around his own
    axis while airborne — a 2D character spins by passing scaleX through zero —
    and lands. One class, self-contained; celebrateMax() in maxCharacter.ts
@@ -6144,10 +6021,8 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .mx-svg.celebrating .mx-shadow { animation: mx-shadow-far 1.5s ease-in-out 1; }
 
 @media (prefers-reduced-motion: reduce) {
-  .mx-svg.mx-shock, .mx-svg.mx-rise, .mx-svg.celebrating .mx-bob,
-  .mx-svg.celebrating .mx-arm, .mx-svg.celebrating .mx-shadow,
+  .mx-svg.celebrating .mx-bob, .mx-svg.celebrating .mx-arm, .mx-svg.celebrating .mx-shadow,
   .mx-thought .mx-dot { animation: none; }
-  .mx-svg.mx-down { transform: none; transition: none; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -6297,30 +6172,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .scalenote-card h2 { font-size: 23px; }
 }
 
-/* Max, picked up and put down ------------------------------------------------
-   The peek is a transform, and a transform fights the absolute positioning a
-   drag needs — left alone he jumps half his own width the moment you grab him.
-   So dragging strips the pose, and the resting states put it back on the side
-   he was actually left on. */
-.maxpet.dragging {
-  transform: none;
-  transition: none;
-  cursor: grabbing;
-  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .26));
-}
-/* Tucked into the LEFT edge: the same hide-and-seek pose, mirrored. Without
-   the flip he peeks out backwards, facing off the screen. */
-.maxpet.left { transform: translateX(-105%) scaleX(-1); }
-.maxpet.left.peeking { transform: translateX(-50%) scaleX(-1) rotate(16deg); }
-.maxpet.left.peeking:hover, .maxpet.left.peeking:focus-visible {
-  transform: translateX(-26%) scaleX(-1) rotate(7deg);
-}
-.maxpet.left.out, .maxpet.left.out:hover { transform: translateX(-105%) scaleX(-1); }
-/* Standing in open space: all of him, no peek, no lean. He is not hiding any
-   more, so the hiding pose would be a lie about where he is. */
-.maxpet.loose, .maxpet.loose:hover, .maxpet.loose.peeking { transform: none; }
-.maxpet.loose.out { transform: scale(.6); opacity: 0; pointer-events: none; }
-
 /* The Front/Side toggle, when its natural home has scrolled away.
    
    It sits in the photo pane, and on a phone the panes stack — so reading the
@@ -6437,31 +6288,6 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .maxan-ask > b { padding: 8px 14px; }
 }
 
-/* Max asking whether he is welcome. Shown once, seven seconds after he arrives,
-   anchored to his own corner so it never covers the character it is about. */
-.maxpet-tip {
-  position: fixed; z-index: 60; max-width: 268px;
-  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
-  padding: 14px 15px 12px; box-shadow: 0 10px 34px rgba(0, 0, 0, .17);
-  animation: mxt-in .22s ease-out;
-}
-.maxpet-tip p { margin: 0 0 11px; font-size: 13.5px; line-height: 1.45; color: var(--ink); }
-.maxpet-tip-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.maxpet-tip-actions button {
-  font: inherit; font-size: 12.5px; cursor: pointer; padding: 7px 14px;
-  border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--mut);
-  transition: border-color .16s, color .16s;
-}
-.maxpet-tip-actions button:hover { border-color: var(--acc); color: var(--ink); }
-/* "Keep him" is the affirmative, so it carries the weight — but "Hide Max" is a
-   real button beside it, not a link in the corner. A dismissal that only offers
-   the polite option is not offering anything. */
-.maxpet-tip-actions button.on {
-  background: var(--acc); border-color: var(--acc); color: #fff; font-weight: 600;
-}
-.maxpet-tip-actions button.on:hover { filter: brightness(1.07); color: #fff; }
-
-@keyframes mxt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 /* The side chosen last time, on a screen that asks every scan. A hint about
    where the last answer went, not a default — the reason it is being asked
