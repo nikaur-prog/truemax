@@ -235,7 +235,7 @@ const TEMPLATE = `Write ONE recommendation as the schema asks. Requirements:
 - effortMinutes: honest, from the asset (a Cast rundown is 20, a screen recording 30, a CTA cut 15).
 - why: two sentences on why this, now, in plain register.`
 
-const recPrompt = (kind) => `You are writing the "${kind}" recommendation of the TrueMax daily brief for ${DATE}.
+const recPrompt = (kind, avoid) => `You are writing the "${kind}" recommendation of the TrueMax daily brief for ${DATE}.
 TrueMax measures a face from two photographs on the person's own device, compares the measurements to a reference set and shows the arithmetic. Its content lane is the receipt: a claim, then the measurement that settles it.
 ${RULES}
 ${ASSETS}
@@ -246,12 +246,17 @@ KIND "${kind}" means:
 - copy: the strongest format cluster in the outliers (two or more rows sharing a format). Our version of that exact format with a TrueMax measurement in the payoff.
 - iterate: our own best recent post from audience.recentPosts (highest views over medianViews). A follow-up that keeps its hook shape and changes the measurement. If recentPosts is empty, write a second copy-the-format play from a DIFFERENT cluster than the strongest one and say in why that there is no own post to iterate on yet.
 - trend: the freshest outlier (newest publishedAt) or a sound from sounds.tracks with a format that fits it. Something to post within 48 hours.
+${avoid ? `ALREADY TAKEN by the "copy" recommendation, so this one must use a DIFFERENT payoff measurement, a different hook and a different asset: measurement "${avoid.measurement}", hook "${avoid.hook}", asset "${avoid.asset}". Three recommendations that say the same thing are one recommendation.` : ''}
 ${TEMPLATE}`
 
-const drafts = await parallel(['copy', 'iterate', 'trend'].map((kind) => () =>
-  agent(recPrompt(kind), { label: `recommend:${kind}`, phase: 'Recommend', schema: REC_SCHEMA })))
+// The copy play goes first, alone, because it is the one that claims the
+// week's strongest format; the other two are written against it so the
+// brief does not hand the owner the same video three times with three names.
+const copyDraft = await agent(recPrompt('copy'), { label: 'recommend:copy', phase: 'Recommend', schema: REC_SCHEMA })
+const others = await parallel(['iterate', 'trend'].map((kind) => () =>
+  agent(recPrompt(kind, kind === 'trend' ? copyDraft : null), { label: `recommend:${kind}`, phase: 'Recommend', schema: REC_SCHEMA })))
 
-let recs = drafts.filter(Boolean)
+let recs = [copyDraft, ...others].filter(Boolean)
 log(`${recs.length} of 3 drafts written`)
 
 // ---------------------------------------------------------------------------
