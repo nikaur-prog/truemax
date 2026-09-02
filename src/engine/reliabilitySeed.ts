@@ -21,6 +21,12 @@
 // ---------------------------------------------------------------------------
 
 export const RELIABILITY_SEED: Record<string, number> = {
+  // The soft-tissue group's one new measurement (softTissue.ts): two
+  // silhouette pairs, so the same favourable construction as cheekFullness,
+  // and set BELOW RELIABLE_MIN on purpose: nothing has checked it against the
+  // same face photographed twice, so it wears the indicative flag until the
+  // repeat corpus includes it and the generator writes a real figure.
+  lowerFaceWidthRatio: 0.1,
   // Built from three silhouette landmarks per side and averaged across both,
   // which is a favourable construction — no small differences, no left-right
   // subtraction, and the two sides cancel most of a head turn. The comparable

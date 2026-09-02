@@ -35,6 +35,8 @@ import type { Rec } from "../engine/recommendations.js";
 import { loadVoiceCredits, startScanCreditCheckout, startVoiceCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
+import { softTissueRows, softTissueSentence } from "../engine/softTissue.js";
+import { SKIN_PATTERN_LABELS, SKIN_ZONE_LABELS } from "../engine/skinPatterns.js";
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
@@ -636,6 +638,74 @@ function primaryMeasurements(report: Report): string {
         <span class="primary-reading"><b>${fmt(metric)}</b><em>${metric.score.toFixed(1)}</em></span>
       </button>`).join("")}
     </div>
+  </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Two blocks that sit BESIDE the score. Neither changes a number above them.
+//
+// Soft tissue answers "is my face fat" the only way a photograph honestly
+// can: the measurements fat, fluid and muscle move, tracked scan to scan, in
+// their own units. Visible skin patterns is the trial detector from
+// skinPatterns.ts, shown behind a flag until its classes pass the gates in
+// SKIN_ANALYSIS_TRIAL.md; the words are the catalogue's, never a condition.
+// ---------------------------------------------------------------------------
+function softTissueBlock(r: Report, delta: ScanDelta | null): string {
+  const rows = softTissueRows(r, delta?.previousSoftTissue ?? null);
+  if (!rows.length) return "";
+  const sentence = softTissueSentence(rows, delta?.daysAgo);
+  const fmtRow = (v: number, decimals: number, unit: string) => `${v.toFixed(decimals)}${unit}`;
+  const deltaCell = (row: (typeof rows)[number]) => {
+    if (row.delta === undefined) return `<em class="st-delta none">first reading</em>`;
+    if (!row.moved) return `<em class="st-delta flat">within variance</em>`;
+    const sign = row.delta > 0 ? "+" : "";
+    return `<em class="st-delta ${row.delta > 0 ? "up" : "down"}">${sign}${row.delta.toFixed(row.decimals)}${row.unit}</em>`;
+  };
+  return `<section class="soft-tissue panel" aria-labelledby="soft-tissue-title">
+    <h4 id="soft-tissue-title">SOFT TISSUE</h4>
+    <p class="st-lede">The measurements that fat, fluid and muscle move. Tracked scan to scan in their own units, never a percentage, and none of them changes the score above.</p>
+    <div class="st-list">
+      ${rows.map((row) => `<div class="st-row${row.indicative ? " indicative" : ""}">
+        <span><b>${row.name}${row.indicative ? `<i class="ind-tag" title="Not yet checked against the same face photographed twice">indicative</i>` : ""}</b><small>${row.what}</small></span>
+        <span class="st-reading"><b>${fmtRow(row.value, row.decimals, row.unit)}</b>${deltaCell(row)}</span>
+      </div>`).join("")}
+    </div>
+    ${sentence ? `<p class="st-sentence">${sentence}</p>` : ""}
+  </section>`;
+}
+
+/** The trial flag: the owner and staff see the block first. */
+function skinTrialEnabled(): boolean {
+  try {
+    if (new URLSearchParams(location.search).get("skin") === "1") return true;
+    return localStorage.getItem("truemax.skinTrial") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function skinPatternsBlock(r: Report): string {
+  if (!skinTrialEnabled()) return "";
+  const s = r.skinPatterns;
+  const head = `<h4 id="skin-patterns-title">VISIBLE SKIN PATTERNS <i class="trial-chip" title="Shown while the detector is being checked against labelled photographs">trial</i></h4>`;
+  if (!s) {
+    return `<section class="skin-patterns panel" aria-labelledby="skin-patterns-title">${head}
+      <p class="sp-lede">Unable to assess from this photograph. That is not the same as clear skin.</p>
+    </section>`;
+  }
+  const presenceWord = { light: "light", moderate: "moderate", marked: "marked" } as const;
+  const rows = s.patterns.map((p) => {
+    const zones = p.zones
+      .slice(0, 3)
+      .map((z) => `${SKIN_ZONE_LABELS[z.zone]}${z.count !== undefined ? ` (${z.count})` : ""}`)
+      .join(", ");
+    return `<div class="sp-row"><span><b>${SKIN_PATTERN_LABELS[p.id]}</b><small>${zones || "across the face"}</small></span><em class="sp-presence ${p.presence}">${presenceWord[p.presence]}</em></div>`;
+  }).join("");
+  const confidence = Math.round(s.confidence * 100);
+  return `<section class="skin-patterns panel" aria-labelledby="skin-patterns-title">${head}
+    <p class="sp-lede">What the photograph shows on the surface of the skin, measured against your own skin around it. A pattern is not a condition, and nothing here changes the score above.</p>
+    ${rows ? `<div class="sp-list">${rows}</div>` : `<p class="sp-none">No visible pattern above the threshold in this photograph. Absence of a pattern is not proof of clear skin.</p>`}
+    <p class="sp-foot">Confidence ${confidence}%.${s.caveat ? ` ${s.caveat}` : ""}</p>
   </section>`;
 }
 
@@ -1392,6 +1462,8 @@ function showOverall(): void {
       </div>
       ${populationBlock(r)}
       ${primaryMeasurements(r)}
+      ${softTissueBlock(r, delta)}
+      ${skinPatternsBlock(r)}
       ${resultActions(Boolean(merged), ctx)}
       ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}

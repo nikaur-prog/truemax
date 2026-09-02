@@ -154,4 +154,44 @@ export interface Report {
   // Unrounded aggregate z per key ("overall", "pillar:X", "region:Y").
   // The calibration pipeline reads these to derive AGG_NORM.
   zScores: Record<string, number>;
+  /**
+   * Measurements and observations that sit BESIDE the score rather than in it.
+   * Both are optional because they need the photograph and landmarks, which
+   * a report rebuilt from a stored row does not have, and both are attached
+   * after the report is built (main.ts) so nothing in scoring depends on
+   * them. See softTissue.ts and skinPatterns.ts.
+   */
+  softTissue?: { lowerFaceWidthRatio: number };
+  skinPatterns?: SkinPatterns;
+}
+
+/** A visible skin pattern, in the catalogue's words. Never a condition. */
+export type SkinPatternId =
+  | "inflamed-spot-pattern"
+  | "post-blemish-mark-pattern"
+  | "redness-pattern"
+  | "uneven-pigment-pattern";
+
+export type SkinZoneId = "forehead" | "nose" | "cheekL" | "cheekR" | "chin";
+
+export type SkinPresence = "light" | "moderate" | "marked";
+
+export interface SkinPatternReading {
+  id: SkinPatternId;
+  presence: SkinPresence;
+  /** Where it was seen. Counts for spot patterns, area fractions for the rest. */
+  zones: Array<{ zone: SkinZoneId; count?: number; areaPct?: number }>;
+}
+
+export interface SkinPatterns {
+  /** Only patterns above threshold. An empty list is "nothing above threshold", never "clear". */
+  patterns: SkinPatternReading[];
+  /** 0 to 1. Falls with low coverage, softness, blown exposure and colour cast. */
+  confidence: number;
+  /** The reason confidence fell, in plain words, or null. */
+  caveat: string | null;
+  /** Fraction of the sample that was usable skin. */
+  coverage: number;
+  /** Always "trial" until a class passes its gate; see SKIN_ANALYSIS_TRIAL.md. */
+  tier: "trial";
 }

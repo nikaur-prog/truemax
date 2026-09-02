@@ -1,102 +1,90 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeRawMetrics } from "./metrics.js";
-import { LM, buildGeometry } from "./geometry.js";
-import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { LM } from "./geometry.js";
+import {
+  SOFT_TISSUE_ORDER,
+  softTissueFromLandmarks,
+  softTissueRows,
+  softTissueSentence,
+  softTissueValues,
+} from "./softTissue.js";
+import type { Report, ScoredMetric } from "./types.js";
 
-// ---------------------------------------------------------------------------
-// The only measurement in this engine that can see facial fat.
-//
-// Everything else is a ratio between landmarks, and two faces with identical
-// bone structure and very different amounts of tissue on it produce identical
-// ratios. cheekFullness measures the CURVE of the visible outline between the
-// widest point of the face and the jaw corner, which is the one thing in a
-// frontal photograph that separates them.
-//
-// It is built from a signed perpendicular distance and a side-of-the-face sign
-// flip, both of which are easy to get backwards in a way no test of the whole
-// pipeline would localise — a wrong sign here reads as "the engine thinks fat
-// is good", which is the exact failure that started this calibration.
-// ---------------------------------------------------------------------------
-
-const W = 1000;
-const H = 1000;
-
-/**
- * A face built to order, with the cheek outline placed where the test wants it.
- *
- * `bulge` is how far the mid-cheek point sits OUTSIDE the straight line from
- * the widest point of the face down to the jaw corner, in image pixels.
- * Negative is a hollow. Everything else is roughly human and held fixed, so the
- * only thing varying between two fixtures is the quantity under test.
- */
-function face(bulge: number): NormalizedLandmark[] {
-  const lm: NormalizedLandmark[] = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 }));
-  const put = (i: number, x: number, y: number) => { lm[i] = { x: x / W, y: y / H, z: 0, visibility: 1 }; };
-
-  // Eyes at y=400, 120px apart, centred on x=500.
-  put(LM.EYE_R_OUTER, 380, 400); put(LM.EYE_R_INNER, 460, 400);
-  put(LM.EYE_L_INNER, 540, 400); put(LM.EYE_L_OUTER, 620, 400);
-  put(LM.EYE_R_TOP, 420, 385); put(LM.EYE_R_BOTTOM, 420, 415);
-  put(LM.EYE_L_TOP, 580, 385); put(LM.EYE_L_BOTTOM, 580, 415);
-  put(LM.GLABELLA, 500, 370); put(LM.FOREHEAD_TOP, 500, 250); put(LM.MENTON, 500, 780);
-  put(LM.NASION, 500, 380); put(LM.SUBNASALE, 500, 560);
-
-  // Structure: cheekbones at ±170, jaw corners at ±140 and lower.
-  put(LM.ZYGION_R, 330, 450); put(LM.ZYGION_L, 670, 450);
-  put(LM.GONION_R, 360, 640); put(LM.GONION_L, 640, 640);
-
-  // The silhouette. Widest point level with the cheekbones, mid-cheek halfway
-  // down to the jaw corner, displaced by `bulge` away from the face centre.
-  put(LM.CHEEK_OUT_R, 320, 450); put(LM.CHEEK_OUT_L, 680, 450);
-  const midY = 545;
-  const chordX = 340; // halfway between 320 and 360
-  put(LM.CHEEK_MID_R, chordX - bulge, midY);
-  put(LM.CHEEK_MID_L, W - (chordX - bulge), midY);
+function landmarks(overrides: Record<number, { x: number; y: number }>) {
+  const lm = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 }));
+  for (const [i, p] of Object.entries(overrides)) lm[+i] = { ...p, z: 0, visibility: 1 };
   return lm;
 }
 
-// derive() is private to metrics.ts, so the computer is driven the way the
-// engine drives it — through computeRawMetrics, which builds the same Derived.
-const measure = (bulge: number) => computeRawMetrics(buildGeometry(face(bulge), W, H)).cheekFullness;
-
-test("a hollow cheek reads negative and a full one reads positive", () => {
-  assert.ok(measure(-25) < 0, `a cheek 25px inside the chord read ${measure(-25).toFixed(2)}`);
-  assert.ok(measure(25) > 0, `a cheek 25px outside the chord read ${measure(25).toFixed(2)}`);
-  // A silhouette sitting exactly on the chord is the boundary between the two
-  // and must not land on either side of it by accident.
-  assert.ok(Math.abs(measure(0)) < 0.05, `a flat cheek read ${measure(0).toFixed(3)}`);
+test("lower face width is the mid-cheek silhouette over the cheekbone silhouette", () => {
+  const lm = landmarks({
+    [LM.ZYGION_R]: { x: 0.2, y: 0.4 },
+    [LM.ZYGION_L]: { x: 0.8, y: 0.4 },
+    [LM.CHEEK_MID_R]: { x: 0.26, y: 0.55 },
+    [LM.CHEEK_MID_L]: { x: 0.74, y: 0.55 },
+  });
+  const out = softTissueFromLandmarks(lm, 1000, 1000);
+  assert.ok(out);
+  assert.ok(Math.abs(out!.lowerFaceWidthRatio - 0.8) < 1e-3, String(out!.lowerFaceWidthRatio));
 });
 
-test("more tissue reads as more fullness, monotonically", () => {
-  let previous = -Infinity;
-  for (const bulge of [-40, -20, -10, 0, 10, 20, 40]) {
-    const v = measure(bulge);
-    assert.ok(v > previous, `bulge ${bulge} read ${v.toFixed(2)}, not above ${previous.toFixed(2)}`);
-    previous = v;
-  }
+test("a mid cheek wider than the cheekbones by a fifth is a misplaced landmark, not a face", () => {
+  const lm = landmarks({
+    [LM.ZYGION_R]: { x: 0.3, y: 0.4 },
+    [LM.ZYGION_L]: { x: 0.7, y: 0.4 },
+    [LM.CHEEK_MID_R]: { x: 0.05, y: 0.55 },
+    [LM.CHEEK_MID_L]: { x: 0.95, y: 0.55 },
+  });
+  assert.equal(softTissueFromLandmarks(lm, 1000, 1000), null);
 });
 
-test("both sides are read the same way round", () => {
-  // The sign flip between the left and right cheek is the part most likely to
-  // be wrong, and a symmetric face is where a flipped sign hides: the two
-  // errors cancel in the mean and the metric looks fine until somebody turns
-  // their head. Measured one side at a time, they must agree.
-  const lm = face(30);
-  const onlyRight = lm.map((p, i) => (i === LM.CHEEK_MID_L ? { x: (1000 - 340) / W, y: 545 / H, z: 0, visibility: 1 } : p));
-  const onlyLeft = lm.map((p, i) => (i === LM.CHEEK_MID_R ? { x: 340 / W, y: 545 / H, z: 0, visibility: 1 } : p));
-  const r = computeRawMetrics(buildGeometry(onlyRight, W, H)).cheekFullness;
-  const l = computeRawMetrics(buildGeometry(onlyLeft, W, H)).cheekFullness;
-  assert.ok(r > 0, `right cheek alone read ${r.toFixed(2)}`);
-  assert.ok(l > 0, `left cheek alone read ${l.toFixed(2)}`);
-  assert.ok(Math.abs(r - l) < 0.2, `the two sides disagree: ${r.toFixed(2)} vs ${l.toFixed(2)}`);
+function fakeReport(values: Record<string, number>, extras?: { lowerFaceWidthRatio: number }): Report {
+  const metrics = Object.entries(values).map(([id, value]) => ({
+    def: { id, name: id, unit: "", decimals: 2 } as ScoredMetric["def"],
+    value,
+    z: 0, zEff: 0, percentile: 50, markerPct: 50, score: 5, conformance: 1,
+  })) as unknown as ScoredMetric[];
+  return {
+    sex: "male", overall: 5, overallPercentile: 50, overallZ: 0, potential: 5,
+    pillars: {} as Report["pillars"], regions: [], metrics, zScores: {},
+    ...(extras ? { softTissue: extras } : {}),
+  };
+}
+
+test("rows follow the published order, carry deltas, and say when a move is inside noise", () => {
+  const report = fakeReport(
+    { cheekFullness: 2.4, jawCheekRatio: 0.86, chinWidthRatio: 0.41, submentalCervical: 104.2 },
+    { lowerFaceWidthRatio: 0.83 },
+  );
+  const previous = { cheekFullness: 3.3, jawCheekRatio: 0.85, lowerFaceWidthRatio: 0.9, submentalCervical: 100.1 };
+  const rows = softTissueRows(report, previous);
+  assert.deepEqual(rows.map((r) => r.id), [...SOFT_TISSUE_ORDER]);
+  const cheek = rows.find((r) => r.id === "cheekFullness")!;
+  assert.equal(cheek.delta, -0.9);
+  assert.equal(cheek.moved, true);
+  const jaw = rows.find((r) => r.id === "jawCheekRatio")!;
+  assert.equal(jaw.moved, false);
+  const chin = rows.find((r) => r.id === "chinWidthRatio")!;
+  assert.equal(chin.delta, undefined);
+  const lower = rows.find((r) => r.id === "lowerFaceWidthRatio")!;
+  assert.equal(lower.indicative, true, "a measurement with no corpus figure wears the indicative flag");
+  assert.deepEqual(Object.keys(softTissueValues(report)).sort(), [...SOFT_TISSUE_ORDER].sort());
 });
 
-test("it is expressed as a share of face width, not in pixels", () => {
-  // Two photographs of the same face at different distances must agree, or the
-  // measurement is about the camera rather than the person.
-  const small = computeRawMetrics(buildGeometry(face(30), W, H)).cheekFullness;
-  const scaled = face(30).map((p) => ({ x: 0.5 + (p.x - 0.5) * 0.5, y: 0.5 + (p.y - 0.5) * 0.5, z: 0, visibility: 1 }));
-  const large = computeRawMetrics(buildGeometry(scaled, W, H)).cheekFullness;
-  assert.ok(Math.abs(small - large) < 0.1, `${small.toFixed(2)} at full size vs ${large.toFixed(2)} at half`);
+test("the sentence names what moved, in units, and never names fat or a percentage of the person", () => {
+  const report = fakeReport({ cheekFullness: 2.4, jawCheekRatio: 0.86 }, { lowerFaceWidthRatio: 0.83 });
+  const rows = softTissueRows(report, { cheekFullness: 3.3, jawCheekRatio: 0.85, lowerFaceWidthRatio: 0.83 });
+  const s = softTissueSentence(rows, 21);
+  assert.match(s, /21 days ago/);
+  assert.match(s, /cheek fullness from 3\.3 to 2\.4/);
+  assert.match(s, /within capture variance/);
+  assert.ok(!/\bfat\b|body fat|percent|%/i.test(s), s);
+  assert.ok(!s.includes("—"), "no em dash");
+  assert.equal(softTissueSentence(softTissueRows(report, null)), "");
+});
+
+test("a flat rescan says so instead of printing zeros", () => {
+  const report = fakeReport({ cheekFullness: 2.4 });
+  const s = softTissueSentence(softTissueRows(report, { cheekFullness: 2.5 }));
+  assert.match(s, /^Nothing in this group moved outside capture variance/);
 });

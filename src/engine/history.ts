@@ -1,3 +1,4 @@
+import { softTissueValues } from "./softTissue.js";
 import type { RegionId, Report, Sex } from "./types.js";
 import { scopedStorageKey } from "./scanScope.js";
 import { createScanId, isScanId } from "./scanSession.js";
@@ -59,6 +60,12 @@ export interface StoredScan {
    * row, never an identity, never uploaded, and never matched against anything.
    */
   subject?: { name: string };
+  /**
+   * The soft-tissue group's values (softTissue.ts), a handful of numbers, so
+   * the next scan can print what moved. Absent on rows written before the
+   * group existed and on rows whose report carried none of them.
+   */
+  softTissue?: Record<string, number>;
 }
 
 /** Scans of the account holder's own face — the only ones progress may read. */
@@ -78,6 +85,8 @@ export interface ScanDelta {
   averageOf: number;
   regions: Array<{ region: RegionId; delta: number }>;
   reading: DeltaReading;
+  /** The previous own scan's soft-tissue values, for the group's own deltas. */
+  previousSoftTissue?: Record<string, number>;
 }
 
 // How many scans to keep per sex. Enough for a long trend without letting
@@ -216,6 +225,7 @@ export function compareAndStore(
   // scans, for the same reason in the other direction.
   const comparable = subject ? [] : ownScans(comparableScans(priorLog));
   const prev = comparable.length ? comparable[comparable.length - 1] : null;
+  const softValues = softTissueValues(report);
 
   const current: StoredScan = {
     scanId,
@@ -231,6 +241,7 @@ export function compareAndStore(
     // Re-scoring an existing row must not silently promote a guest's scan to
     // the owner's, or demote the owner's to a guest's.
     ...(subject ?? existing?.subject ? { subject: subject ?? existing?.subject } : {}),
+    ...(Object.keys(softValues).length ? { softTissue: softValues } : {}),
   };
   // Average is taken over PRIOR scans, before this one is appended, so a fresh
   // scan is compared to where the face usually lands rather than to itself.
@@ -256,6 +267,7 @@ export function compareAndStore(
     vsAverage: priorMean == null ? null : Math.round((report.overall - priorMean) * 10) / 10,
     averageOf: comparable.length,
     reading: readDelta(overall, daysAgo),
+    ...(prev.softTissue ? { previousSoftTissue: prev.softTissue } : {}),
     regions: report.regions
       .filter((r) => prev.regions[r.region] !== undefined)
       .map((r) => ({

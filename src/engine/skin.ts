@@ -99,6 +99,9 @@ function rings() {
   });
 }
 
+/** The mesh rings the mask is built from, for skinPatterns.ts, which samples the face the same way. */
+export const faceRings = rings;
+
 type Pt = { x: number; y: number };
 
 // Grow a polygon about its own centroid, so an exclusion zone covers the soft
