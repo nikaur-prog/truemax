@@ -24,9 +24,14 @@
 //   repeats now and then, and a repeat reads as a stuck loop rather than as a
 //   choice. Drawing from everything-but-the-last makes it impossible.
 //
-//   Only when he can be seen. Off screen, in a hidden tab, or under a pointer
-//   he stops — animating a character nobody is looking at is pure battery, and
-//   performing UNDER somebody's cursor fights the poke they came for.
+//   Only when he can be seen. Off screen or in a hidden tab he stops, since
+//   animating a character nobody is looking at is pure battery. Under a
+//   pointer he does not START anything new, because performing under
+//   somebody's cursor fights the poke they came for; but an act already
+//   running is allowed to finish. Cutting it dead on pointerenter stripped
+//   the act's class in one frame, which threw the arm from mid-swing to rest
+//   and blinked the skateboard out of existence at the exact moment the
+//   person had moved the mouse over to watch.
 //
 //   Asleep when unseen, not merely idle. The acts were always gated on
 //   visibility; the dozen resting animations underneath them — bob, blink,
@@ -174,8 +179,9 @@ export function mountMaxIdle(stage: HTMLElement | null): IdleHandle | null {
   io?.observe(svg);
 
   const onEnter = (): void => {
+    // Skip the NEXT act; let the current one complete. Every act's keyframes
+    // return to rest on their own, so finishing is the clean way out.
     hovered = true;
-    stopAct();
   };
   const onLeave = (): void => {
     hovered = false;

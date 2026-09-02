@@ -31,7 +31,6 @@ import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
 import { landPhoto } from "./ui/photoLanding.js";
 import { clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
-import { unmountMaxPet } from "./ui/maxPet.js";
 import { closeMaxChat } from "./ui/maxChat.js";
 import {
   closeScanGate,
@@ -1725,11 +1724,9 @@ function resetToUpload(): void {
   delete (window as unknown as Record<string, unknown>).__truemaxSide;
   delete (window as unknown as Record<string, unknown>).__truemaxSidePoints;
   // Takes the scroll listener with it. A strip left behind would keep
-  // shrinking a photo pane that no longer holds a photograph. The pet goes
-  // with it: he belongs to a result, not to the upload screen.
+  // shrinking a photo pane that no longer holds a photograph.
   clearScoreStrip();
   clearResultPhotoRecovery();
-  unmountMaxPet();
   closeMaxChat();
 }
 

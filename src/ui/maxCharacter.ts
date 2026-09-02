@@ -134,12 +134,12 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
       <path d="M44 52 q14 -6 30 -4" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="3.4" stroke-linecap="round"/>
       <!-- eyes: two soft light bars -->
       <g class="mx-eyes">
-        <g class="mx-pupils">
+        <g class="mx-gaze"><g class="mx-pupils">
           <rect x="53" y="57" width="11.5" height="22" rx="5.75" fill="url(#mxg-eye)"/>
           <rect x="85.5" y="57" width="11.5" height="22" rx="5.75" fill="url(#mxg-eye)"/>
           <circle cx="56.4" cy="61.4" r="1.7" fill="#ffffff"/>
           <circle cx="88.9" cy="61.4" r="1.7" fill="#ffffff"/>
-        </g>
+        </g></g>
         <!-- excited: the bars give way to stars -->
         <g class="mx-alt mx-eye-stars">
           <path d="${star(58.8, 68, 8)}" fill="${LIGHT}"/>
@@ -216,22 +216,6 @@ export function maxCharacterMarkup(options: { waving?: boolean; mood?: MaxMood }
            an arm left in the air. -->
       <g class="mx-arm${options.waving ? " waving" : ""}">
         <path d="M116 92 C128 94 137 104 135 118 C133.5 127 124 129.5 119 122 C114 115 114 102 116 92 Z" fill="url(#mxg-limb)"/>
-      </g>
-      <!-- Crossed forearms for the fight-club block (wireMaxFight): two limb
-           slabs crossing in an X over the lower body, each ending in a fist.
-           The front arm wears a deep-body stroke so the two read as two,
-           without it the pair merges into one hatch-like bar. Hidden until
-           the block; while it shows, the hanging arms are hidden so he does
-           not grow extras. -->
-      <g class="mx-alt mx-arms-block">
-        <g transform="rotate(-12 75 114)">
-          <rect x="41" y="107" width="66" height="15" rx="7.5" fill="url(#mxg-limb)"/>
-          <ellipse cx="107" cy="114.5" rx="9" ry="8.2" fill="url(#mxg-limb)"/>
-        </g>
-        <g transform="rotate(12 75 114)">
-          <rect x="43" y="107" width="66" height="15" rx="7.5" fill="url(#mxg-limb)" stroke="${BODY_DEEP}" stroke-width="1.7"/>
-          <ellipse cx="43" cy="114.5" rx="9" ry="8.2" fill="url(#mxg-limb)" stroke="${BODY_DEEP}" stroke-width="1.7"/>
-        </g>
       </g>
       <!-- Props for the idle acts (ui/maxIdle.ts). All hidden by default and
            shown one at a time by the act's class, so a character standing
@@ -335,35 +319,21 @@ export function maxStickerMarkup(): string {
 // puts the character in front of people during the only moments the product has
 // nothing else to show them.
 //
-// The cycle: he pops in, holds an expression, spins, and morphs out — then the
-// next repeat comes back wearing a different face. The moods are stacked as
-// separate copies with staggered animation delays rather than being swapped by
-// a timer, so the whole thing is CSS and survives a busy main thread, which is
-// exactly the condition a loader exists for.
+// ONE drawing. It used to be four stacked copies of him, each with its own
+// mood, handed over by staggered delays, which was thirty-four running
+// animations during the one moment the phone is also busy measuring a face.
+// Now there is one Max; the cycle (hold, spin, hold, spin) is a keyframe on the
+// SVG and the second face is the star eyes fading in over the light bars on a
+// stepped keyframe of their own. Still all CSS, for the same reason as before:
+// a loader has to keep moving while the main thread does not.
 //
 // Under prefers-reduced-motion the CSS holds a single still Max instead. A
 // spinner is the one place where "no animation at all" would be worse than a
 // static mark, and a face that is simply there reads as patient rather than
-// broken.
-// Happy and excited only. A loader is not a status report: a worried or
-// thinking face while you wait suggests something has gone wrong, or that the
-// software is struggling, when neither is true. He is pleased to be here and
-// pleased about what is coming, and nothing else.
-//
-// FOUR of them, and that number is load-bearing. The keyframes in style.css
-// hand each face over at 25% of the cycle, which is 1/4 exactly; a fifth mood
-// here without a matching keyframe edit would leave a gap of empty box between
-// two of the faces. The check below fails the build's type pass rather than
-// leaving that to be noticed on a slow connection.
-const LOADER_MOODS = ["happy", "excited", "happy", "excited"] as const satisfies readonly MaxMood[];
-const LOADER_FACES: 4 = LOADER_MOODS.length;
-
+// broken. Happy and excited only: a loader is not a status report, and a
+// worried face while you wait suggests something has gone wrong.
 export function maxLoaderMarkup(label = "Loading"): string {
-  const faces = LOADER_MOODS.map(
-    (mood, i) =>
-      `<span class="mx-load-face" style="--i:${i}; --n:${LOADER_FACES}">${maxCharacterMarkup({ mood })}</span>`,
-  ).join("");
-  return `<span class="mx-load" role="status" aria-live="polite" aria-label="${label}">${faces}</span>`;
+  return `<span class="mx-load" role="status" aria-live="polite" aria-label="${label}">${maxCharacterMarkup({ mood: "happy" })}</span>`;
 }
 
 // The ecstatic moment: jump, arm to the sky, a full spin, land. Triggered by
@@ -384,61 +354,103 @@ export function celebrateMax(stage: HTMLElement | null): void {
 // The interactions that cannot be keyframes, because they answer the person
 // rather than the clock:
 //
-//   - the pupils follow the pointer (fine pointers only — on touch there is
-//     no hover, and pupils snapping to old tap positions read as a glitch);
+//   - the pupils follow the pointer (fine pointers only, since on touch there
+//     is no hover, and pupils snapping to old tap positions read as a glitch).
+//     The gaze is two CSS variables on the root, consumed by a transform on
+//     the .mx-gaze wrapper AROUND the pupils, never an inline style on the
+//     pupils themselves. An inline `animation: none` there once switched off
+//     the glance, the ponder and the lookout eyes for good on the first mouse
+//     move of the session;
 //   - poking him gets a happy hop and a wave. A character you can poke and
-//     who reacts is the cheapest aliveness there is, and Duolingo has been
-//     dining on it for a decade.
+//     who reacts is the cheapest aliveness there is. The `poked` class comes
+//     OFF when the hop ends (or after its duration if animationend never
+//     fires), because a class that stays outranked the breathing and the body
+//     half of every act: one tap used to leave him rigid for the rest of the
+//     session, a paddle waving beside a still egg.
 //
-// There WAS a third: on the offer screen a poke tipped him over and left him
-// there until the next tap. It is gone at the owner's call, and the reason is
-// worth keeping. `.mx-down` is a single `transform: rotate(98deg)` on a
-// transition — no arc, no overshoot, no secondary motion on the antenna or
-// the arm — so he did not fall, he pivoted, like a layout bug. And because
-// the fall had to hold, the stage opted OUT of the idle repertoire, which is
-// why the one screen asking for money was also the one screen where he stood
-// perfectly still. Removing the knock returns his idle life to it.
-//
-// (The pet's fight sequence still uses mx-shock/mx-down/mx-rise on its second
-// tap. That one reads, because it is one beat of a scripted escalation and he
-// picks himself up 750ms later without being asked.)
+// There WAS a knock-over, and a fight sequence on the old floating pet, and
+// both are gone. The lesson is worth keeping: `.mx-down` was a single
+// `transform: rotate(98deg)` on a thing that hovers, so he did not fall, he
+// pivoted, like a layout bug. A fall needs a ground plane, an arc, a centre of
+// mass to rotate about, limbs that lag and a squash on impact, which is a rig
+// and a blending runtime rather than a class swap. Until he has those he does
+// not fall over.
 //
 // Listeners hang off the stage element and self-disarm once it leaves the
 // document, so a dismissed offer screen cannot leak a document-level handler.
-export function wireMaxInteractions(
-  stage: HTMLElement | null,
-  options: { fight?: boolean } = {},
-): void {
+// The idle handle is kept on the drawing and destroyed the moment the drawing
+// leaves the document (installMaxSleep), rather than waiting for the idle
+// loop's next tick to notice.
+
+/** Below this rendered width he breathes, blinks and glances, and does nothing else. */
+const IDLE_MIN_PX = 88;
+/** The hop's duration, as a fallback for a browser that never fires animationend. */
+const POKE_MS = 700;
+
+export interface MaxWireOptions {
+  /**
+   * Whether the idle repertoire runs. "auto" measures him and runs it from
+   * IDLE_MIN_PX up; a surface that knows its own size can say so outright.
+   */
+  repertoire?: "auto" | "full" | "quiet";
+}
+
+type WiredSvg = SVGSVGElement & { __mxWired?: boolean; __mxIdle?: { destroy(): void } | null };
+
+export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireOptions = {}): void {
   if (!stage) return;
-  const svg = stage.querySelector<SVGSVGElement>(".mx-svg");
-  if (!svg || (svg as unknown as { __mxWired?: boolean } & SVGSVGElement).__mxWired) return;
-  (svg as unknown as { __mxWired?: boolean } & SVGSVGElement).__mxWired = true;
+  const svg = stage.querySelector<SVGSVGElement>(".mx-svg") as WiredSvg | null;
+  if (!svg || svg.__mxWired) return;
+  svg.__mxWired = true;
+  installMaxSleep();
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // A deterministic results pose can be `thinking`. Keep that rotation — it
-  // gives the report some character — while making it a bounded beat. The
+  // A deterministic results pose can be `thinking`. Keep that rotation, since
+  // it gives the report some character, while making it a bounded beat. The
   // idle controller below still has its own five-second thinking ACT later;
-  // both paths now cleanly return to the happy resting face.
+  // both paths cleanly return to the happy resting face.
   if (svg.classList.contains("mx-mood-thinking")) {
     releaseThinkingPose(svg, reduced ? 0 : THINKING_POSE_MS);
   }
 
-  // The idle repertoire, on every surface where he is big enough to be
-  // watched — which now includes the offer screen, see the note above. Not
-  // below about forty pixels, where he is a face beside a paragraph and a
-  // skateboard would be three grey pixels moving. Measured after a frame,
-  // because a stage mounted this tick has not been laid out yet and reports
-  // zero.
-  requestAnimationFrame(() => {
-    if (!svg.isConnected) return;
-    if (svg.getBoundingClientRect().width < 40) return;
+  // The idle repertoire, only where he is big enough to be watched. Five of
+  // the six surfaces that draw him are under sixty pixels, and at that size a
+  // skateboard is three grey pixels twitching beside a paragraph, which reads
+  // as a rendering fault rather than personality. Measured after a frame,
+  // because a stage mounted this tick has not been laid out yet; and a width
+  // of ZERO means "not laid out" (a hidden tab), not "small", so that case is
+  // measured again the first time he is actually on screen.
+  const mountIdle = (): void => {
+    if (!svg.isConnected || svg.__mxIdle) return;
     void import("./maxIdle.js").then((m) => {
-      if (svg.isConnected) m.mountMaxIdle(stage);
+      if (!svg.isConnected || svg.__mxIdle) return;
+      svg.__mxIdle = m.mountMaxIdle(stage);
     });
-  });
+  };
+  const repertoire = options.repertoire ?? "auto";
+  if (repertoire === "full") {
+    mountIdle();
+  } else if (repertoire === "auto") {
+    requestAnimationFrame(() => {
+      if (!svg.isConnected) return;
+      const width = svg.getBoundingClientRect().width;
+      if (width >= IDLE_MIN_PX) {
+        mountIdle();
+        return;
+      }
+      if (width === 0 && typeof IntersectionObserver !== "undefined") {
+        const once = new IntersectionObserver((entries) => {
+          if (!entries.some((e) => e.isIntersecting)) return;
+          once.disconnect();
+          if (svg.isConnected && svg.getBoundingClientRect().width >= IDLE_MIN_PX) mountIdle();
+        });
+        once.observe(svg);
+      }
+    });
+  }
 
-  const pupils = svg.querySelector<SVGGElement>(".mx-pupils");
-  if (pupils && !reduced && window.matchMedia("(pointer: fine)").matches) {
+  const gaze = svg.querySelector<SVGGElement>(".mx-gaze");
+  if (gaze && !reduced && window.matchMedia("(pointer: fine)").matches) {
     const onMove = (event: PointerEvent) => {
       if (!stage.isConnected) {
         document.removeEventListener("pointermove", onMove);
@@ -452,39 +464,37 @@ export function wireMaxInteractions(
       // Clamp to the white of the eye. Beyond ~3px the pupil crosses the iris
       // outline and he stops looking attentive and starts looking unwell.
       const r = Math.min(3, reach / 40);
-      pupils.style.animation = "none";
-      pupils.style.transform = `translate(${((dx / reach) * r).toFixed(2)}px, ${((dy / reach) * r).toFixed(2)}px)`;
+      svg.style.setProperty("--mx-gaze-x", `${((dx / reach) * r).toFixed(2)}px`);
+      svg.style.setProperty("--mx-gaze-y", `${((dy / reach) * r).toFixed(2)}px`);
     };
     document.addEventListener("pointermove", onMove, { passive: true });
   }
 
-  // The fight club (the pet). Taps escalate instead of poking — see
-  // wireFight. The default poke-and-greet handler below would double-fire on
-  // the same click, so a fighting stage skips it entirely.
-  if (options.fight) {
-    wireFight(stage, svg);
-    stage.addEventListener("pointerenter", (e) => {
-      if (reduced || (e as PointerEvent).pointerType === "touch") return;
-      greet(svg);
-    });
-    return;
-  }
-
+  const sticker = stage.querySelector(".max-sticker");
+  const poked = sticker ? [svg, sticker] : [svg];
+  let pokeTimer: number | null = null;
+  const unpoke = (): void => {
+    if (pokeTimer !== null) window.clearTimeout(pokeTimer);
+    pokeTimer = null;
+    for (const el of poked) el.classList.remove("poked");
+  };
+  svg.querySelector(".mx-bob")?.addEventListener("animationend", (e) => {
+    if ((e as AnimationEvent).animationName === "mx-hop") unpoke();
+  });
   stage.addEventListener("click", () => {
     if (reduced) return;
-
-    const sticker = stage.querySelector(".max-sticker") ?? stage;
-    for (const el of [svg, sticker]) {
-      el.classList.remove("poked");
+    unpoke();
+    for (const el of poked) {
       // Reflow, or re-adding the class in the same frame does nothing.
       void (el as HTMLElement).offsetWidth;
       el.classList.add("poked");
     }
+    pokeTimer = window.setTimeout(unpoke, POKE_MS);
     greet(svg);
   });
 
   // Hovering him is the other way to say hello, and it used to be a CSS
-  // `:hover` rule — which is what made the hand snap. A hover animation is
+  // `:hover` rule, which is what made the hand snap. A hover animation is
   // CANCELLED the moment the pointer leaves, and a cancelled transform jumps,
   // so leaving the box mid-wave threw his arm from shoulder height to his side
   // in a single frame. Driven from here the wave always finishes and the
@@ -496,97 +506,83 @@ export function wireMaxInteractions(
 }
 
 // ---------------------------------------------------------------------------
-// The fight club: what happens when you keep poking the pet.
+// Asleep when unseen, for EVERY drawing of him.
 //
-// One tap is an accident, four is a bit, and he plays along with escalating
-// commitment:
+// The idle module pauses a drawing it has been asked to animate; it never saw
+// the ones nobody asked about, and half of them were never asked: the small
+// faces in the chat header, the ask-Max card and the Coach tab ticked their
+// eight resting animations forever, on screen or not. One observer for all of
+// them, registered at mount by watching the document rather than by asking
+// every surface to remember, and one visibilitychange listener on top so a
+// background tab sleeps too.
 //
-//   1. shoved back — a recoil slide, then the confused tilt and the "?"
-//   2. shoved OVER — the shock, the fall, getting up by himself, and a few
-//      seconds of the ticked-off face
-//   3. he's ready this time: DODGES the tap, squares up mad, and throws a
-//      jab combo at the screen
-//   4+ he's done playing: crossed-arms block, a head shake, back to idle
-//
-// The counter forgets after thirty seconds so the gag replays on the next
-// visit instead of being a once-per-lifetime easter egg. Wired on click (not
-// pointerdown) so picking him up to drag never starts a fight — the drag
-// code already swallows the click that ends a drag.
+// The same observer is the deterministic teardown: when a drawing leaves the
+// document its idle handle is destroyed at once, instead of the idle loop
+// noticing on its next tick up to ten seconds later.
 // ---------------------------------------------------------------------------
+let sleepInstalled = false;
 
-const FIGHT_RESET_MS = 30_000;
+export function installMaxSleep(): void {
+  if (sleepInstalled) return;
+  if (typeof document === "undefined" || typeof IntersectionObserver === "undefined" || typeof MutationObserver === "undefined") return;
+  sleepInstalled = true;
 
-function wireFight(stage: HTMLElement, svg: SVGSVGElement): void {
-  let count = 0;
-  let lastTap = 0;
-  let busy = false;
-
-  const hold = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
-  const drop = (...classes: string[]) => svg.classList.remove(...classes);
-  // The pet's resting mood is happy; a stage borrows a face and gives it back.
-  const face = (mood: "concerned" | "mad" | "happy") => {
-    svg.classList.remove("mx-mood-happy", "mx-mood-concerned", "mx-mood-mad");
-    svg.classList.add(`mx-mood-${mood}`);
+  const watched = new Set<Element>();
+  const offscreen = new WeakSet<Element>();
+  const apply = (svg: Element): void => {
+    svg.classList.toggle("mx-asleep", offscreen.has(svg) || document.hidden);
   };
-  // A tap mid-act would stack a fight transform on a skateboard transform.
-  const stopIdle = () => {
-    svg.classList.remove("mx-windup", "mx-settle");
-    for (const cls of [...svg.classList]) if (cls.startsWith("mx-act-")) svg.classList.remove(cls);
-  };
-
-  const run = async (): Promise<void> => {
-    if (busy) return;
-    const now = Date.now();
-    if (now - lastTap > FIGHT_RESET_MS) count = 0;
-    lastTap = now;
-    count += 1;
-    busy = true;
-    stopIdle();
-    try {
-      if (count === 1) {
-        svg.classList.add("mx-fight-shove");
-        await hold(620);
-        drop("mx-fight-shove");
-        svg.classList.add("mx-fight-huh");
-        await hold(1500);
-        drop("mx-fight-huh");
-      } else if (count === 2) {
-        svg.classList.add("mx-shock");
-        await hold(420);
-        drop("mx-shock");
-        svg.classList.add("mx-down");
-        await hold(750);
-        drop("mx-down");
-        svg.classList.add("mx-rise");
-        await hold(700);
-        drop("mx-rise");
-        face("concerned");
-        await hold(2400);
-        face("happy");
-      } else if (count === 3) {
-        svg.classList.add("mx-fight-dodge");
-        await hold(420);
-        drop("mx-fight-dodge");
-        face("mad");
-        svg.classList.add("mx-fight-combo");
-        await hold(1900);
-        drop("mx-fight-combo");
-        face("happy");
-      } else {
-        svg.classList.add("mx-fight-block");
-        await hold(1400);
-        drop("mx-fight-block");
+  const io = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) offscreen.delete(entry.target);
+        else offscreen.add(entry.target);
+        apply(entry.target);
       }
-    } finally {
-      busy = false;
+    },
+    { threshold: 0.2 },
+  );
+  const drawingsIn = (root: Element | Document): Element[] => {
+    const list: Element[] = [];
+    if (root instanceof Element && root.matches(".mx-svg")) list.push(root);
+    list.push(...root.querySelectorAll(".mx-svg"));
+    return list;
+  };
+  const watch = (root: Element | Document): void => {
+    for (const svg of drawingsIn(root)) {
+      if (watched.has(svg)) continue;
+      watched.add(svg);
+      io.observe(svg);
     }
   };
-
-  stage.addEventListener("click", () => {
-    if (!svg.isConnected) return;
-    void run();
+  const release = (root: Element): void => {
+    for (const svg of drawingsIn(root)) {
+      io.unobserve(svg);
+      watched.delete(svg);
+      offscreen.delete(svg);
+      // Woken on the way out: the markup is often reused, and a drawing that
+      // comes back frozen mid-blink is worse than one that idles for a frame.
+      svg.classList.remove("mx-asleep");
+      const idle = (svg as WiredSvg).__mxIdle;
+      if (idle) {
+        idle.destroy();
+        (svg as WiredSvg).__mxIdle = null;
+      }
+    }
+  };
+  watch(document);
+  new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) if (node instanceof Element) watch(node);
+      for (const node of record.removedNodes) if (node instanceof Element && !node.isConnected) release(node);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener("visibilitychange", () => {
+    for (const svg of watched) apply(svg);
   });
 }
+
+if (typeof document !== "undefined") installMaxSleep();
 
 // ---------------------------------------------------------------------------
 // Reactions: Max responding to what just happened, not performing to himself.
