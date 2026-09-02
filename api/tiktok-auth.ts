@@ -24,8 +24,21 @@ import { freshTikTokAccess, listOwnTikTokVideos, tiktokClientKey, tiktokClientSe
 // ---------------------------------------------------------------------------
 
 const AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/";
-const USERINFO_URL = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name";
+const USERINFO_URL = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url";
 const SCOPES = "user.info.basic,video.list";
+
+interface TikTokUserInfo {
+  open_id?: string;
+  display_name?: string;
+  avatar_url?: string;
+}
+
+async function tiktokUserInfo(access: string): Promise<TikTokUserInfo | null> {
+  const response = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${access}` } });
+  if (!response.ok) return null;
+  const payload = (await response.json().catch(() => ({}))) as { data?: { user?: TikTokUserInfo } };
+  return payload.data?.user ?? null;
+}
 
 function redirectUri(): string {
   // Must byte-match the URI registered in the TikTok app's Login Kit config.
@@ -83,15 +96,11 @@ export async function POST(request: Request): Promise<Response> {
         console.error("TikTok exchange refused", token.error, token.error_description);
         return json({ error: "TikTok did not accept that sign-in. Try connecting again." }, 502);
       }
-      const infoResponse = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${token.access_token}` } });
-      if (!infoResponse.ok) {
-        console.error("TikTok user info refused", infoResponse.status);
+      const tiktokUser = await tiktokUserInfo(token.access_token);
+      if (!tiktokUser) {
+        console.error("TikTok user info refused");
         return json({ error: "TikTok account details could not be verified. Try connecting again." }, 502);
       }
-      const info = (await infoResponse.json().catch(() => ({}))) as {
-        data?: { user?: { open_id?: string; display_name?: string } };
-      };
-      const tiktokUser = info.data?.user;
       const openId = tiktokUser?.open_id?.trim() || token.open_id?.trim();
       if (!openId) {
         return json({ error: "TikTok account details could not be verified. Try connecting again." }, 502);
@@ -111,9 +120,9 @@ export async function POST(request: Request): Promise<Response> {
     if (body?.action === "videos") {
       const { data: row, error: rowError } = await admin
         .from("league_tiktok_accounts")
-        .select("access_token, refresh_token, expires_at")
+        .select("access_token, refresh_token, expires_at, display_name")
         .eq("user_id", user.id)
-        .maybeSingle<{ access_token: string; refresh_token: string; expires_at: string }>();
+        .maybeSingle<{ access_token: string; refresh_token: string; expires_at: string; display_name: string | null }>();
       if (rowError) throw new Error(rowError.message);
       if (!row) return json({ error: "No TikTok account is linked." }, 400);
 
@@ -122,11 +131,25 @@ export async function POST(request: Request): Promise<Response> {
       const access = await freshTikTokAccess(user.id, row);
       if (!access) return json({ error: "The TikTok link has expired. Connect it again." }, 401);
 
-      const videos = await listOwnTikTokVideos(access, 10);
+      // Covers are intentionally fetched at view time. TikTok signs those CDN
+      // URLs for only a few hours, so persisting them would create a gallery of
+      // broken images. The player itself is also returned only as an embed URL;
+      // TrueMax never downloads or re-hosts the creator's videos.
+      const [videos, profile] = await Promise.all([
+        listOwnTikTokVideos(access, 20, undefined, true),
+        tiktokUserInfo(access),
+      ]);
       if (!videos) {
         return json({ error: "TikTok would not list videos just now. Try again shortly." }, 502);
       }
-      return json({ videos });
+      return json({
+        videos,
+        profile: {
+          displayName: profile?.display_name ?? row.display_name,
+          avatarUrl: profile?.avatar_url ?? null,
+        },
+        syncedAt: new Date().toISOString(),
+      });
     }
 
     if (body?.action === "disconnect") {

@@ -450,11 +450,12 @@ function renderStatus(row: CreatorRow): void {
 
 // --- the dashboard -----------------------------------------------------------
 
-type Page = "overview" | "submit" | "mine" | "ranks" | "money" | "offers" | "tools" | "admin";
+type Page = "overview" | "tiktok" | "submit" | "mine" | "ranks" | "money" | "offers" | "tools" | "admin";
 
 async function renderDash(me: CreatorRow, staff: boolean): Promise<void> {
   const pages: Array<[Page, string]> = [
     ["overview", "Overview"],
+    ["tiktok", "TikTok"],
     ["submit", "Submit"],
     ["mine", "Submissions"],
     ["ranks", "Ranks"],
@@ -564,14 +565,103 @@ async function apiTikTok<T = Record<string, unknown>>(
   return (await response.json().catch(() => null)) as (T & { error?: string }) | null;
 }
 
+interface TikTokDashboardVideo {
+  id: string;
+  title: string;
+  description: string;
+  duration: number;
+  coverImageUrl: string;
+  embedLink: string;
+  createdAt: number;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  url: string;
+}
+
+interface TikTokDashboardResponse {
+  videos: TikTokDashboardVideo[];
+  profile: { displayName: string | null; avatarUrl: string | null };
+  syncedAt: string;
+}
+
+function tiktokPostUrl(value: string): URL | null {
+  return platformUrl(value, "tiktok");
+}
+
+function tiktokEmbedUrl(video: TikTokDashboardVideo): URL | null {
+  const supplied = tiktokPostUrl(video.embedLink);
+  if (supplied) return supplied;
+  return /^\d{6,}$/.test(video.id) ? new URL(`https://www.tiktok.com/player/v1/${video.id}`) : null;
+}
+
+function shortVideoTitle(video: TikTokDashboardVideo): string {
+  return video.title.trim() || video.description.trim() || "Untitled video";
+}
+
+function videoAge(epochSeconds: number): string {
+  if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) return "";
+  return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" })
+    .format(new Date(epochSeconds * 1000));
+}
+
+function videoDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+function openTikTokPreview(video: TikTokDashboardVideo): void {
+  const embed = tiktokEmbedUrl(video);
+  const live = tiktokPostUrl(video.url);
+  if (!embed && live) {
+    window.open(live.href, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (!embed) return;
+
+  document.querySelector<HTMLDialogElement>("#lg-tt-preview")?.remove();
+  const dialog = document.createElement("dialog");
+  dialog.id = "lg-tt-preview";
+  dialog.className = "lg-tt-preview";
+  const title = shortVideoTitle(video);
+  dialog.innerHTML = `<div class="lg-tt-preview-shell">
+    <div class="lg-tt-preview-head">
+      <div><span class="lg-chip ok">TIKTOK PREVIEW</span><h2>${esc(title)}</h2></div>
+      <button class="lg-tt-preview-close" type="button" aria-label="Close preview">×</button>
+    </div>
+    <div class="lg-tt-player-wrap">
+      <iframe title="${esc(title)}" src="${esc(embed.href)}" allow="encrypted-media; fullscreen; picture-in-picture"
+        allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+    </div>
+    <div class="lg-tt-preview-foot">
+      <span>${fmtCount(video.views)} views · ${fmtCount(video.likes)} likes · ${fmtCount(video.comments)} comments</span>
+      ${live ? `<a class="lg-btn pri" href="${esc(live.href)}" target="_blank" rel="noopener noreferrer">Open on TikTok ↗</a>` : ""}
+    </div>
+  </div>`;
+  document.body.append(dialog);
+
+  const close = () => {
+    const frame = dialog.querySelector<HTMLIFrameElement>("iframe");
+    if (frame) frame.src = "about:blank";
+    dialog.close();
+  };
+  dialog.querySelector<HTMLButtonElement>(".lg-tt-preview-close")!.onclick = close;
+  dialog.onclick = (event) => {
+    if (event.target === dialog) close();
+  };
+  dialog.addEventListener("close", () => dialog.remove(), { once: true });
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+}
+
 /**
- * The link card on the Overview: connect, or show what is connected.
- *
- * The tokens never reach this code — the table's column grants stop even the
- * owner's browser reading them — so everything here is display state plus
- * calls to the server, which is the only party that talks to TikTok.
+ * The Overview gets a compact connection card; TikTok gets the complete
+ * visual library. Tokens never reach either. The browser sees only fresh,
+ * display-safe fields returned by our server.
  */
-async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> {
+async function renderTikTokCard(el: HTMLElement, me: CreatorRow, mode: "compact" | "dashboard" = "compact"): Promise<void> {
   const client = await getSupabaseClient();
   const { data } = await client
     .from("league_tiktok_accounts")
@@ -608,37 +698,144 @@ async function renderTikTokCard(el: HTMLElement, me: CreatorRow): Promise<void> 
     return;
   }
 
+  if (mode === "compact") {
+    el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
+      <div><h3>TikTok</h3><p class="lg-sub" style="margin:4px 0 0">Linked as
+      <b>${esc(data.display_name ?? "your TikTok account")}</b>. Your covers, live metrics and
+      playable posts are ready in the creator dashboard.</p></div>
+      <span class="lg-tt-compact-actions">
+        <button class="lg-btn pri" id="lg-tt-open">Open dashboard</button>
+        <button class="lg-btn danger" id="lg-tt-off">Disconnect</button>
+      </span></div><p class="lg-error" id="lg-tt-err"></p>`;
+    if (oauthError) el.querySelector("#lg-tt-err")!.textContent = oauthError;
+    el.querySelector<HTMLButtonElement>("#lg-tt-open")!.onclick = () => {
+      root.querySelector<HTMLButtonElement>('[data-page="tiktok"]')?.click();
+    };
+    el.querySelector<HTMLButtonElement>("#lg-tt-off")!.onclick = async () => {
+      if (!window.confirm("Disconnect this TikTok account from Creator League tracking?")) return;
+      const result = await apiTikTok("disconnect");
+      if (result?.error) {
+        el.querySelector("#lg-tt-err")!.textContent = result.error;
+        return;
+      }
+      void renderTikTokCard(el, me, mode);
+    };
+    return;
+  }
+
+  el.classList.add("lg-tt-dashboard-card");
   el.innerHTML = `<div class="lg-row" style="border:none;padding:0">
-    <div><h3>TikTok</h3><p class="lg-sub" style="margin:4px 0 0">Linked as
-    <b>${esc(data.display_name ?? "your TikTok account")}</b>. Counts on your submitted videos
-    are read from here.</p></div>
-    <span style="display:flex;gap:8px">
-      <button class="lg-btn" id="lg-tt-videos">My videos</button>
+    <div class="lg-tt-account">
+      <div class="lg-tt-avatar" id="lg-tt-avatar" aria-hidden="true">♪</div>
+      <div><div class="lg-tt-live"><i></i> LIVE CONNECTION</div><h3 id="lg-tt-name">${esc(data.display_name ?? "Your TikTok")}</h3>
+      <p class="lg-sub" id="lg-tt-sync">Loading fresh covers and metrics…</p></div>
+    </div>
+    <span class="lg-tt-account-actions">
+      <button class="lg-btn" id="lg-tt-refresh">Refresh</button>
       <button class="lg-btn danger" id="lg-tt-off">Disconnect</button>
     </span></div>
-    <div id="lg-tt-list"></div>
+    <div class="lg-tt-summary" id="lg-tt-summary" aria-live="polite"></div>
+    <div class="lg-tt-grid" id="lg-tt-list" aria-live="polite"></div>
     <p class="lg-error" id="lg-tt-err"></p>`;
   if (oauthError) {
     el.querySelector("#lg-tt-err")!.textContent = oauthError;
   }
-  el.querySelector<HTMLButtonElement>("#lg-tt-videos")!.onclick = async () => {
+
+  const load = async () => {
     const list = el.querySelector<HTMLElement>("#lg-tt-list")!;
-    list.innerHTML = `<p class="lg-sub">Loading…</p>`;
-    const res = await apiTikTok<{ videos: Array<{ title: string; views: number; comments: number; url: string }> }>("videos");
+    const refresh = el.querySelector<HTMLButtonElement>("#lg-tt-refresh")!;
+    const error = el.querySelector<HTMLElement>("#lg-tt-err")!;
+    refresh.disabled = true;
+    refresh.textContent = "Refreshing…";
+    error.textContent = "";
+    list.innerHTML = Array.from({ length: 8 }, () => `<div class="lg-tt-skeleton" aria-hidden="true"></div>`).join("");
+    const [res, submissionResult] = await Promise.all([
+      apiTikTok<TikTokDashboardResponse>("videos"),
+      client.from("league_submissions").select("tiktok_video_id,status")
+        .eq("creator_id", me.user_id)
+        .not("tiktok_video_id", "is", null),
+    ]);
     if (!res?.videos) {
       list.innerHTML = "";
-      el.querySelector("#lg-tt-err")!.textContent = res?.error ?? "TikTok didn't answer just now.";
+      error.textContent = res?.error ?? "TikTok didn't answer just now.";
+      refresh.disabled = false;
+      refresh.textContent = "Try again";
       return;
     }
-    list.innerHTML = res.videos.map((v) => `<div class="lg-row">
-      <span>${v.url ? externalLink(v.url, v.title || "Untitled video") : esc(v.title || "Untitled video")}</span>
-      <b class="lg-num">${fmtCount(v.views)} views · ${fmtCount(v.comments)} comments</b>
-    </div>`).join("") || `<p class="lg-sub">No videos on the account yet.</p>`;
+    const tracked = new Map<string, string>();
+    for (const row of (submissionResult.data ?? []) as Array<{ tiktok_video_id: string; status: string }>) {
+      if (row.tiktok_video_id) tracked.set(row.tiktok_video_id, row.status);
+    }
+    const totals = res.videos.reduce((sum, video) => ({
+      views: sum.views + video.views,
+      likes: sum.likes + video.likes,
+      comments: sum.comments + video.comments,
+    }), { views: 0, likes: 0, comments: 0 });
+    el.querySelector<HTMLElement>("#lg-tt-summary")!.innerHTML = `
+      <div><span>Recent videos</span><b>${fmtCount(res.videos.length)}</b></div>
+      <div><span>Recent views</span><b>${fmtCount(totals.views)}</b></div>
+      <div><span>Likes</span><b>${fmtCount(totals.likes)}</b></div>
+      <div><span>Comments</span><b>${fmtCount(totals.comments)}</b></div>`;
+
+    const profileName = res.profile?.displayName?.trim();
+    if (profileName) el.querySelector("#lg-tt-name")!.textContent = profileName;
+    const avatar = httpsUrl(res.profile?.avatarUrl ?? "");
+    if (avatar) {
+      const avatarHost = el.querySelector<HTMLElement>("#lg-tt-avatar")!;
+      avatarHost.innerHTML = `<img src="${esc(avatar.href)}" alt="" referrerpolicy="no-referrer" />`;
+      avatarHost.querySelector("img")!.addEventListener("error", () => {
+        avatarHost.textContent = "♪";
+      }, { once: true });
+    }
+    const synced = Date.parse(res.syncedAt);
+    el.querySelector("#lg-tt-sync")!.textContent = Number.isFinite(synced)
+      ? `Updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(synced)} · ${res.videos.length} most recent public videos`
+      : `${res.videos.length} most recent public videos`;
+
+    list.innerHTML = res.videos.map((video, index) => {
+      const cover = httpsUrl(video.coverImageUrl);
+      const live = tiktokPostUrl(video.url);
+      const title = shortVideoTitle(video);
+      const status = tracked.get(video.id);
+      return `<article class="lg-tt-video">
+        <button class="lg-tt-cover${cover ? "" : " no-cover"}" type="button" data-tt-preview="${index}"
+          aria-label="Preview ${esc(title)}">
+          ${cover ? `<img src="${esc(cover.href)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ""}
+          <span class="lg-tt-play" aria-hidden="true">▶</span>
+          ${videoDuration(video.duration) ? `<span class="lg-tt-duration">${videoDuration(video.duration)}</span>` : ""}
+          ${status ? `<span class="lg-tt-tracked">${esc(status === "approved" || status === "earning" || status === "paid_out" ? "TRACKED" : "SUBMITTED")}</span>` : ""}
+        </button>
+        <div class="lg-tt-video-copy">
+          <h4>${esc(title)}</h4>
+          <p>${fmtCount(video.views)} views · ${fmtCount(video.comments)} comments${videoAge(video.createdAt) ? ` · ${videoAge(video.createdAt)}` : ""}</p>
+          ${live ? `<a href="${esc(live.href)}" target="_blank" rel="noopener noreferrer">Open on TikTok ↗</a>` : ""}
+        </div>
+      </article>`;
+    }).join("") || `<div class="lg-tt-empty"><b>No public videos yet</b><span>Your latest TikToks will appear here after you post.</span></div>`;
+    list.querySelectorAll<HTMLButtonElement>("[data-tt-preview]").forEach((button) => {
+      button.onclick = () => openTikTokPreview(res.videos[Number(button.dataset.ttPreview)]!);
+    });
+    list.querySelectorAll<HTMLImageElement>(".lg-tt-cover img").forEach((image) => {
+      image.addEventListener("error", () => {
+        image.hidden = true;
+        image.parentElement?.classList.add("no-cover");
+      }, { once: true });
+    });
+    refresh.disabled = false;
+    refresh.textContent = "Refresh";
   };
+
+  el.querySelector<HTMLButtonElement>("#lg-tt-refresh")!.onclick = load;
   el.querySelector<HTMLButtonElement>("#lg-tt-off")!.onclick = async () => {
-    await apiTikTok("disconnect");
-    void renderTikTokCard(el, me);
+    if (!window.confirm("Disconnect this TikTok account from Creator League tracking?")) return;
+    const result = await apiTikTok("disconnect");
+    if (result?.error) {
+      el.querySelector("#lg-tt-err")!.textContent = result.error;
+      return;
+    }
+    void renderTikTokCard(el, me, mode);
   };
+  void load();
 }
 
 async function leaguePost<T>(path: string, body: Record<string, unknown>): Promise<{
@@ -792,6 +989,14 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
     mount.innerHTML = `<h1 class="lg-h">Overview</h1>${cards.join("")}
       <div class="lg-card" id="lg-tt"><p class="lg-sub">Loading…</p></div>${explainer}`;
     void renderTikTokCard(mount.querySelector<HTMLElement>("#lg-tt")!, me);
+  },
+
+  async tiktok(mount, me) {
+    mount.innerHTML = `<div class="lg-page-intro">
+      <div><span class="lg-chip ok">CREATOR LIBRARY</span><h1 class="lg-h">My TikTok dashboard</h1>
+      <p class="lg-sub">Preview every recent post, check its live numbers and jump straight to the public TikTok.</p></div>
+    </div><div class="lg-card" id="lg-tt"><p class="lg-sub">Loading TikTok…</p></div>`;
+    await renderTikTokCard(mount.querySelector<HTMLElement>("#lg-tt")!, me, "dashboard");
   },
 
   async submit(mount, me) {

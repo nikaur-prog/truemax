@@ -19,8 +19,11 @@ export const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 // Trimming here fixes every paste of that shape at once.
 export const tiktokClientKey = (): string => (process.env.TIKTOK_CLIENT_KEY || "").trim();
 export const tiktokClientSecret = (): string => (process.env.TIKTOK_CLIENT_SECRET || "").trim();
-const VIDEOS_URL =
-  "https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,view_count,like_count,comment_count,share_count,create_time,share_url";
+const TRACKING_VIDEO_FIELDS =
+  "id,title,video_description,view_count,like_count,comment_count,share_count,create_time,share_url";
+const DISPLAY_VIDEO_FIELDS = `${TRACKING_VIDEO_FIELDS},duration,cover_image_url,embed_link`;
+const videosUrl = (includeDisplay: boolean): string =>
+  `https://open.tiktokapis.com/v2/video/list/?fields=${includeDisplay ? DISPLAY_VIDEO_FIELDS : TRACKING_VIDEO_FIELDS}`;
 
 export interface TikTokTokenPayload {
   access_token?: string;
@@ -89,6 +92,10 @@ export interface TikTokVideo {
   id: string;
   title: string;
   description: string;
+  duration: number;
+  coverImageUrl: string;
+  embedLink: string;
+  createdAt: number;
   views: number;
   likes: number;
   comments: number;
@@ -106,12 +113,13 @@ export async function listOwnTikTokVideos(
   access: string,
   max = 40,
   wantedIds?: ReadonlySet<string>,
+  includeDisplay = false,
 ): Promise<TikTokVideo[] | null> {
   const out: TikTokVideo[] = [];
   const seen = new Set<string>();
   let cursor: number | undefined;
   for (let page = 0; page < Math.ceil(max / 20); page++) {
-    const response = await fetch(VIDEOS_URL, {
+    const response = await fetch(videosUrl(includeDisplay), {
         method: "POST",
         headers: { Authorization: `Bearer ${access}`, "content-type": "application/json" },
         body: JSON.stringify({ max_count: 20, ...(cursor !== undefined ? { cursor } : {}) }),
@@ -119,7 +127,20 @@ export async function listOwnTikTokVideos(
     if (!response.ok) return page === 0 ? null : out;
     const listing = (await response.json().catch(() => ({}))) as {
       data?: {
-        videos?: Array<{ id?: string; title?: string; video_description?: string; view_count?: number; like_count?: number; comment_count?: number; share_count?: number; share_url?: string }>;
+        videos?: Array<{
+          id?: string;
+          title?: string;
+          video_description?: string;
+          duration?: number;
+          cover_image_url?: string;
+          embed_link?: string;
+          create_time?: number;
+          view_count?: number;
+          like_count?: number;
+          comment_count?: number;
+          share_count?: number;
+          share_url?: string;
+        }>;
         cursor?: number;
         has_more?: boolean;
       };
@@ -134,6 +155,10 @@ export async function listOwnTikTokVideos(
         id: v.id,
         title: v.title ?? "",
         description: v.video_description ?? "",
+        duration: typeof v.duration === "number" && Number.isFinite(v.duration) ? Math.max(0, v.duration) : 0,
+        coverImageUrl: v.cover_image_url ?? "",
+        embedLink: v.embed_link ?? "",
+        createdAt: typeof v.create_time === "number" && Number.isFinite(v.create_time) ? Math.max(0, v.create_time) : 0,
         views: v.view_count ?? 0,
         likes: v.like_count ?? 0,
         comments: v.comment_count ?? 0,
