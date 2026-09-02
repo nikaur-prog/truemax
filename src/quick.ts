@@ -1715,7 +1715,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
         .join("")}
     </div>
 
-    <!-- The rundown opens on "How attractive is X?", so it cannot be built
+    <!-- The rundown names the subject in its opening, so it cannot be built
          without a name. Asked for here rather than in a prompt() at click time:
          a modal that appears after you have committed to a sixty-second render
          is a modal you dismiss by accident. -->
@@ -1740,8 +1740,8 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <label class="q-namefield q-openfield">
         <span>Opening line <i>(optional)</i></span>
         <input id="q-rundown-opening" class="q-input" type="text" maxlength="120"
-               placeholder="How attractive is {name}?" autocomplete="off" />
-        <small>{name} becomes the full name. Empty opens with the default question.</small>
+               placeholder="A facial-proportion breakdown of {name}." autocomplete="off" />
+        <small>{name} becomes the full name. Risky rating bait or insults fall back to the neutral opening.</small>
       </label>
       <label class="q-namefield">
         <span>Call them <i>(optional)</i></span>
@@ -1795,7 +1795,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
       <span>Anything the measurement misses <i>(optional)</i></span>
       <textarea id="q-rundown-note" class="q-input" rows="2" maxlength="320"
                 placeholder="He's a singer with a stadium career, and that moves how he's seen far more than a jaw measurement does."></textarea>
-      <small id="q-rundown-note-len">Read out verbatim just before the call to action.</small>
+      <small id="q-rundown-note-len">Read out verbatim when it passes the public-copy safety check.</small>
     </label>
 
     <!-- The one beat whose length is known BEFORE the render, and therefore the

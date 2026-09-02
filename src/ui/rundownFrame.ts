@@ -1478,14 +1478,14 @@ function drawCard(
   ctx.fillText(card.verdict, W / 2, top + 74);
 
   // The three figures, in a row. Score first because it is the one they came
-  // for; ceiling next because it is the one that sells a subscription; rarity
+  // for; potential next because it is the one that sells a subscription; rarity
   // last because it is the one nobody else in this niche can actually compute.
   // The two scores count from zero; the rarity holds still. Counting a
   // "top X%" upward reads as the rank getting worse in front of the viewer,
   // which is the wrong feeling for the frame that gets screenshotted.
   const stats: Array<[string, string]> = [
     ["SCORE", (card.overall * countUp).toFixed(1)],
-    ["CEILING", (card.potential * countUp).toFixed(1)],
+    ["POTENTIAL", (card.potential * countUp).toFixed(1)],
     ["TOP", `${Math.max(1, Math.round(100 - card.percentile))}%`],
   ];
   const statW = W / 3;

@@ -1,3 +1,5 @@
+import { screenPublicLine } from "./publicContentSafety.js";
+
 // ---------------------------------------------------------------------------
 // The caption, written the same way the verdicts are: from templates, not a
 // model. Same inputs, same words, every time — a caption generator that
@@ -23,8 +25,8 @@ export type Platform = "tiktok" | "instagram";
 // to stop; the verdict cut is one word on screen and a caption longer than the
 // video is a caption arguing with its own edit.
 //
-// "reel" is the default and is what every caller produced before this existed,
-// so an omitted kind keeps the old wording exactly.
+// "reel" is the default so a caller that does not name a cut still gets the
+// generic visual-analysis framing.
 export type CaptionKind = "reel" | "rundown" | "breakdown" | "verdict" | "beforeAfter";
 
 export interface CaptionInput {
@@ -32,22 +34,24 @@ export interface CaptionInput {
   // "me", "", or a first name. Anything that is not "me"/"" is treated as a
   // name and used exactly as typed.
   who: string;
-  // One optional line from the person, e.g. "8 weeks of mewing". Collapsed to
-  // a single line and capped, never invented.
+  // One optional line from the person. Collapsed to a single line, capped and
+  // omitted if it contains a known public-risk phrase.
   description: string;
   overall: number;
   percentile: number;
-  /** Which cut this is under. Defaults to the original generic wording. */
+  /** Which cut this is under. Defaults to the generic visual-analysis wording. */
   kind?: CaptionKind;
   /** The earlier score, when this is a before/after. */
   from?: number;
-  /** The ceiling, when the video showed one. */
+  /** The potential estimate, when the video showed one. Kept out of captions. */
   potential?: number;
 }
 
 export interface CaptionResult {
   caption: string;
   hashtags: string[];
+  /** True when optional creator copy was omitted by the public-copy screen. */
+  descriptionOmitted: boolean;
   // Caption and hashtags in one paste-ready block.
   full: string;
 }
@@ -57,15 +61,15 @@ export interface CaptionResult {
 // reasons neither could see. TikTok rewards a short list; Instagram tolerates
 // a longer one.
 const TAGS: Record<Platform, string[]> = {
-  tiktok: ["#truemax", "#faceanalysis", "#glowup", "#looksmaxxing", "#fyp"],
+  tiktok: ["#truemax", "#facialanalysis", "#grooming", "#styleanalysis", "#selfcare"],
   instagram: [
     "#truemax",
-    "#faceanalysis",
-    "#facialsymmetry",
-    "#glowup",
+    "#facialanalysis",
+    "#facialproportions",
+    "#grooming",
+    "#styleanalysis",
+    "#selfcare",
     "#selfimprovement",
-    "#looksmaxxing",
-    "#aesthetics",
     "#reels",
   ],
 };
@@ -104,52 +108,54 @@ export function buildCaption(input: CaptionInput): CaptionResult {
       const delta = input.from === undefined ? null : input.overall - input.from;
       opening =
         delta === null
-          ? `${score}${standing} after.`
+          ? `A second one-photo analysis: ${score}${standing}.`
           : delta >= 0.05
-            ? `${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. Same face, same measurements, both times.`
+            ? `Two scans: ${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. Compare the measurements, not just the number.`
             : delta <= -0.05
-              ? `${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. It went down, and that's worth posting too.`
-              : `${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. Barely moved, and that's the honest read.`;
+              ? `Two scans: ${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. Compare the measurements, not just the number.`
+              : `Two scans: ${input.from!.toFixed(1)} → ${input.overall.toFixed(1)} out of 10. The difference is within normal photo-to-photo movement.`;
       break;
     }
     case "rundown":
       opening = firstPerson
-        ? `Every measurement on my face, read out. ${score}${standing}.`
-        : `Every measurement on ${name}'s face, read out. ${score}${standing}.`;
+        ? `A measured facial-proportion breakdown of my scan. ${score}${standing}.`
+        : `A measured facial-proportion breakdown of ${name}. ${score}${standing}.`;
       break;
     case "breakdown":
-      opening = `${subject === "I" ? "Every region of my face scored" : `Every region of ${name}'s face scored`}. ${score}${standing}.`;
+      opening = `${subject === "I" ? "My one-photo facial-proportion analysis" : `${name}'s one-photo facial-proportion analysis`}: ${score}${standing}.`;
       break;
     case "verdict":
-      // One word on screen, so one line here.
-      opening = `${score}${standing}.`;
+      opening = `One-photo facial-proportion result: ${score}${standing}.`;
       break;
     default:
       opening = firstPerson
-        ? `I let the math rate my face. ${score}${standing}.`
-        : `${name} let the math rate their face. ${score}${standing}.`;
+        ? `A visual facial-proportion breakdown of my scan. ${score}${standing}.`
+        : `A visual facial-proportion breakdown of ${name}. ${score}${standing}.`;
   }
 
-  const desc = oneLine(input.description);
+  // Hashtags stay in the fixed tag block. Allowing them through this field
+  // defeats the safety pass and makes the exact public copy unpredictable.
+  const screened = /#[\p{L}\d_]+/u.test(input.description)
+    ? { text: "", blocked: true }
+    : screenPublicLine(input.description);
+  const desc = screened.text;
   const lines = [opening];
   if (desc) lines.push(desc);
-  // The ceiling, when the cut showed one. It is the only forward-looking line
-  // available and it is the reason somebody scans their own face rather than
-  // watching another stranger's.
-  if (input.potential !== undefined && input.potential > input.overall + 0.05) {
-    lines.push(`Ceiling: ${input.potential.toFixed(1)} with everything soft fixed.`);
-  }
-  // Ends on a question, on the cuts long enough to have earned one. Every
-  // breakdown that collects comments closes by asking for the next subject, and
-  // it costs one line.
+  // Potential estimates stay inside the analysis. Putting a best-case number
+  // into the public caption turns an estimate into a transformation promise.
   if (input.kind === "rundown" || input.kind === "breakdown") {
-    lines.push(firstPerson ? "Rate it honestly." : `Who should we measure after ${name}?`);
+    lines.push(firstPerson ? "What should I compare on the next scan?" : `Which public figure should we analyse after ${name}?`);
   } else if (input.kind === "beforeAfter") {
-    lines.push(`What should ${firstPerson ? "I" : "they"} fix next?`);
+    lines.push("Which measurement should the next comparison focus on?");
   }
-  lines.push("Measured on-device, nothing uploaded → truemax.app");
+  lines.push("One-photo estimate; lighting and angle can change the result. Explore the analysis → truemax.app");
 
   const caption = lines.join("\n");
   const hashtags = TAGS[input.platform];
-  return { caption, hashtags, full: `${caption}\n\n${hashtags.join(" ")}` };
+  return {
+    caption,
+    hashtags,
+    descriptionOmitted: screened.blocked,
+    full: `${caption}\n\n${hashtags.join(" ")}`,
+  };
 }
