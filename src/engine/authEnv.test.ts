@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { authStorageKey } from "./auth.js";
 
 // The URL guard, tested directly.
 //
@@ -86,4 +87,65 @@ test("a blank or truncated key falls back instead of overriding", () => {
   for (const bad of ["", "   ", "your-anon-key", "sb_publishable_", "eyJhbGci"]) {
     assert.equal(resolveKey(bad), DEFAULT_KEY, JSON.stringify(bad));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Where the session is stored.
+//
+// supabase-js derives this from the URL's hostname when you do not pass one, so
+// the storage key silently moves with the address. That makes the branded-domain
+// cutover a mass sign-out: every session sits under a key the new client never
+// looks at. These call the real function rather than describing it.
+// ---------------------------------------------------------------------------
+
+/** What supabase-js itself would build, copied from the installed package. */
+const derived = (url: string) => `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;
+
+test("the key does not move when the branded Auth domain is switched on", () => {
+  // The whole point. Deriving it would give "sb-auth-auth-token" here and sign
+  // out every logged-in person the moment VITE_SUPABASE_URL was set.
+  assert.equal(authStorageKey("https://auth.truemax.app"), authStorageKey(DEFAULT_URL));
+  assert.notEqual(authStorageKey("https://auth.truemax.app"), derived("https://auth.truemax.app"));
+});
+
+test("today's users are not signed out by pinning it", () => {
+  // The pinned value must equal what supabase-js has been deriving all along,
+  // or shipping this change would itself be the outage it prevents.
+  assert.equal(authStorageKey(DEFAULT_URL), derived(DEFAULT_URL));
+  assert.equal(authStorageKey(DEFAULT_URL), "sb-ruvgkrlfmixfnmnzqgap-auth-token");
+});
+
+test("the runtime fallback from branded to project keeps the same key", () => {
+  // resolvedAuthEnv can swap the branded domain for the project URL mid-session
+  // when the domain fails its reachability check. Derived, that would sign
+  // somebody out while they were using the app rather than at deploy time.
+  for (const url of ["https://auth.truemax.app", DEFAULT_URL]) {
+    assert.equal(authStorageKey(url), "sb-ruvgkrlfmixfnmnzqgap-auth-token", url);
+  }
+});
+
+test("a genuinely different project never shares the built-in project's key", () => {
+  // The alias rule is for the branded domain only. Two tenants under one key
+  // would hand one project's stored session to the other, which is worse than
+  // a sign-out.
+  const other = authStorageKey("https://someotherref.supabase.co");
+  assert.equal(other, "sb-someotherref-auth-token");
+  assert.notEqual(other, authStorageKey(DEFAULT_URL));
+});
+
+test("an unparseable URL falls back to the built-in key rather than throwing", () => {
+  // authEnv validates before this is reached, so this is belt and braces: a
+  // throw inside client construction surfaces as an unhandled rejection in a
+  // click handler, which is the failure mode this file already carries a long
+  // comment about.
+  for (const bad of ["", "not a url", "ruvgkrlfmixfnmnzqgap"]) {
+    assert.equal(authStorageKey(bad), "sb-ruvgkrlfmixfnmnzqgap-auth-token", JSON.stringify(bad));
+  }
+});
+
+test("the client actually passes the key, rather than only exporting one", () => {
+  // A helper nothing calls is the same as no helper. Asserted against the
+  // source because createClient needs a browser to run.
+  const src = readFileSync(new URL("./auth.ts", import.meta.url), "utf8");
+  assert.match(src, /storageKey: authStorageKey\(env\.url\)/);
 });
