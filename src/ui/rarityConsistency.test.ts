@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { percentileLine, populationLine, rankShort, rarityText, scoreHigherText, topPctText } from "./templates.js";
 import { oneInN, rarityPhrase } from "../engine/rarity.js";
 import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
@@ -188,4 +191,30 @@ test("the three standing phrasings cannot drift apart", () => {
       `percentileLine(${pct}) = "${line}" does not open with "${rankShort(pct)}"`,
     );
   }
+});
+
+// The count-rarity sentence, in any voice, on any surface.
+//
+// "ahead of 85 in every 100 guys" and "only 3 in every 100 guys are below you"
+// shipped in the region read and in Max's read after the "1 in N" work had
+// removed the same claim from the scale note: a rarity about a person, stated
+// as a count of people arranged around them. This walks every template file in
+// the product, not just the one the sentence was found in, so it cannot come
+// back somewhere else under a different function name.
+test("no template counts the people around a person", () => {
+  const roots = ["../ui", "../engine", "../../api"].map((rel) => fileURLToPath(new URL(rel, import.meta.url)));
+  const offenders: string[] = [];
+  for (const root of roots) {
+    for (const name of readdirSync(root)) {
+      if (!name.endsWith(".ts") || name.endsWith(".test.ts")) continue;
+      const src = readFileSync(join(root, name), "utf8");
+      // Comments explaining the rule are allowed to quote it; code that prints
+      // it is not. Strip line comments before looking.
+      const code = src.replace(/^\s*\/\/.*$/gm, "");
+      if (/in every 100|in every \$\{|out of every 100|out of 100 (?:guys|men|women|faces|people)/i.test(code)) {
+        offenders.push(name);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
 });

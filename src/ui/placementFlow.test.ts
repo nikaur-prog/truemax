@@ -21,9 +21,18 @@ test("taking the automatic placement never reaches a confirm screen", () => {
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: true, consented \}\)/);
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented \}\)/);
   // And the only path back to the review row is the one where a person chose
-  // to edit, where the row is the tool they asked for.
+  // to edit, where the row is the tool they asked for...
   assert.match(auto, /if \(edit\) \{[\s\S]*?showGuidedActions\(\);/);
-  assert.doesNotMatch(auto, /showReviewActions\(\)/);
+  // ...or a confirm the engine refused. The furniture is never mounted under
+  // the dialogs, so a refusal (a reading outside what a face can be) has to
+  // put the editor up itself. Every showReviewActions here follows a
+  // confirmPlacement that returned false, and nothing else.
+  const mounts = [...auto.matchAll(/showReviewActions\(\)/g)].map((m) => m.index ?? -1);
+  assert.equal(mounts.length, 2);
+  for (const at of mounts) {
+    const before = auto.slice(Math.max(0, at - 220), at);
+    assert.match(before, /if \(!\(await confirmPlacement\(\{ auto: true/, "review row only after a refused confirm");
+  }
 });
 
 test("the accuracy question is asked once, as a dialog, not in the panel", () => {

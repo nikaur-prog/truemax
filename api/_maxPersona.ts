@@ -295,6 +295,11 @@ function contextBlock(context: MaxContext): string {
   }
   if (!context.overall && !context.measurements.length) {
     lines.push("This person has not completed a scan yet. Do not guess at numbers. Encourage them to run one.");
+  } else if (!context.measurements.length) {
+    // The dashboard chat: the stored row carries the scores, the pillars and
+    // the region standings but not the metric table, and a model handed a
+    // partial view will fill the rest in unless told the table is elsewhere.
+    lines.push("The individual measurements are not in this view: the chat was opened from the dashboard, and the figures above are what the stored scan carries. If asked about one specific measurement, say the number is on the scan itself and that opening the scan puts it in front of you. Do not estimate it.");
   }
   return lines.join("\n");
 }

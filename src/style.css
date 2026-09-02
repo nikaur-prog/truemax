@@ -5265,6 +5265,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   background: var(--ink); color: #fff; font: 600 14px var(--sans); cursor: pointer;
 }
 .maxchat-composer.busy button, .maxchat-composer.busy input { opacity: .5; pointer-events: none; }
+/* The allowance, under the composer, once it is low. Quiet by design: it is
+   information, not a warning, and it only appears when there is something to say. */
+.maxchat-allowance { margin: 6px 16px 10px; font-size: 12px; line-height: 1.4; color: var(--mut); }
 
 @media (prefers-reduced-motion: reduce) {
   .maxchat, .maxchat-sheet { animation: none; }

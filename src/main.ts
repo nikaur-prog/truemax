@@ -1677,6 +1677,44 @@ async function reopenArchivedScan(scan: StoredScan): Promise<void> {
 
 setScanReopen((scan) => void reopenArchivedScan(scan));
 
+// Another go at the front photograph, inside the same scan.
+//
+// A retake used to be a reset followed by a press of the capture button, and
+// the capture button is the front door: it runs the allowance gate, asks whose
+// face this is and which reference population, and offers the tutorial. All
+// of that had been answered a minute earlier by the person now pressing
+// "Retake photo", and asking again read as the app forgetting. The upload
+// path was worse: it reset to the landing card and did nothing at all.
+//
+// So the answers survive the reset and the capture reopens directly: the
+// viewfinder when the front came from the camera, the file picker when it was
+// uploaded. The allowance gate is not re-run because this is the SAME scan,
+// which is what ensureScanAllowed's own resume path already treats it as; the
+// rest of the reset (canvases, pending state, the privacy boundary between two
+// people's photographs) still happens, because a retake is still a new capture.
+function retakeFront(method: "camera" | "upload" | null): void {
+  const kept = {
+    sex: selectedSex,
+    sexChosen,
+    subject: scanSubject,
+    subjectAsked,
+  };
+  resetToUpload();
+  selectedSex = kept.sex;
+  sexChosen = kept.sexChosen;
+  scanSubject = kept.subject;
+  subjectAsked = kept.subjectAsked;
+  setSidePriorSuspended(scanSubject !== null);
+  if (method === "camera") {
+    void openCamera();
+    return;
+  }
+  if (method === "upload") {
+    filePickerGeneration = scanGeneration;
+    el.fileInput.click();
+  }
+}
+
 function resetToUpload(): void {
   closeScanConfirm();
   disarmLeaveGuard();
@@ -2007,8 +2045,7 @@ async function handleCanvas(
   });
   if (!scanIsCurrent(token, generation)) return;
   if (!accepted) {
-    resetToUpload();
-    if (method === "camera") el.btnCamera.click();
+    retakeFront(method);
     return;
   }
   track("scan-front-done");
@@ -3100,10 +3137,7 @@ function showFrontReview(): void {
   // the whole reason somebody backs out here — they want another go at the
   // front, not the chooser. Read before resetToUpload(), which clears it.
   const method = captureMethod;
-  document.getElementById("front-redo")?.addEventListener("click", () => {
-    resetToUpload();
-    if (method === "camera") el.btnCamera.click();
-  });
+  document.getElementById("front-redo")?.addEventListener("click", () => retakeFront(method));
   document.getElementById("front-quit")?.addEventListener("click", () => resetToUpload());
   el.frame.scrollIntoView({ behavior: "smooth", block: "start" });
 }
