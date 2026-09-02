@@ -100,6 +100,8 @@ import { stillFrameStats } from "./engine/captureGuide.js";
 import type { FrameCheck } from "./engine/captureGuide.js";
 import { estimateGaze } from "./engine/gaze.js";
 import { analyzeSkin } from "./engine/skin.js";
+import { detectSkinPatterns } from "./engine/skinPatterns.js";
+import { softTissueFromLandmarks } from "./engine/softTissue.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
 import { offerBothTutorials, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
 import { soundChapter } from "./ui/scanSounds.js";
@@ -2318,6 +2320,18 @@ async function runFullAnalysis(
   // results screen's own front-only branch (OVERALL · FRONT ONLY, with an
   // "Add side profile" nudge) does the rest.
   const report = sideReport ? mergeReports(front, sideReport) : front;
+  // Beside the score, never in it. The soft-tissue group and the visible skin
+  // patterns need the photograph and the landmarks, so they are attached here
+  // rather than computed in scoring, and an observation that throws must
+  // never cost somebody their scan.
+  try {
+    const soft = softTissueFromLandmarks(landmarks, width, height);
+    if (soft) report.softTissue = soft;
+    const patterns = detectSkinPatterns(frontShot, landmarks, width, height);
+    if (patterns) report.skinPatterns = patterns;
+  } catch {
+    // Observations are optional by design.
+  }
 
   // The film may already have played, in front of the account wall rather than
   // behind it — see playMeasurePass. Playing it twice for one capture is the
