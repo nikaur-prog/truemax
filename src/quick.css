@@ -277,7 +277,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   The three pillars.
+   The tool picker.
 
    Deliberately large and deliberately only three. This is the first thing a
    hired clipper sees, and the job of the screen is to make the choice obvious
@@ -334,6 +334,105 @@
   .q-pillar-grid { grid-template-columns: 1fr; gap: 11px; }
   .q-pillar { min-height: 0; padding: 18px 18px 16px; }
   .q-pillars-lede { font-size: 23px; margin-bottom: 15px; }
+}
+
+/* Clips Library and Brand Engine are workspaces rather than 9:16 filming
+   stages. They borrow the centered phone-width shell for navigation, then
+   widen only their own contents so real video previews are large enough to
+   judge on desktop. */
+#q-clips, #q-brand {
+  width: min(1040px, calc(100vw - 32px));
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+.q-library-head {
+  display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 24px;
+  padding: 24px 26px; border: 1px solid #293330; border-radius: 22px;
+  background: linear-gradient(135deg, #101715 0%, #16241f 100%); color: #f7faf8;
+}
+.q-library-head h1, .q-brand-hero h1 {
+  margin: 3px 0 8px; font: 400 34px/1.05 var(--serif, Georgia, serif); letter-spacing: -0.5px;
+}
+.q-library-head p, .q-brand-hero p { margin: 0; max-width: 610px; color: #aebbb6; line-height: 1.55; }
+.q-library-status { min-height: 18px; margin: 10px 2px 0; color: var(--acc); font-size: 12.5px; }
+.q-library-section, .q-brand-section { margin-top: 26px; }
+.q-library-title { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
+.q-library-title > div { display: flex; flex-direction: column; gap: 3px; }
+.q-library-title span { font: 600 10px var(--mono); letter-spacing: .18em; color: var(--ink); }
+.q-library-title small { color: var(--mut); font-size: 12px; }
+.q-library-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.q-library-card {
+  min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--card); box-shadow: 0 5px 18px rgba(12, 20, 18, .04);
+}
+.q-library-card > video, .q-library-card > img {
+  display: block; width: 100%; aspect-ratio: 9 / 13; object-fit: cover; background: #0d1110;
+}
+.q-library-faces .q-library-card > img { aspect-ratio: 1 / 1; }
+.q-library-meta { display: flex; flex-direction: column; gap: 3px; padding: 11px 11px 8px; }
+.q-library-meta b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.q-library-meta small { color: var(--mut); font-size: 10.5px; }
+.q-library-actions { display: flex; gap: 7px; align-items: center; padding: 0 11px 11px; }
+.q-library-actions button, .q-library-actions a {
+  border: 0; padding: 0; background: transparent; color: var(--acc); cursor: pointer;
+  font: 600 10.5px/1.4 var(--sans, system-ui); text-decoration: none;
+}
+.q-library-actions .danger { margin-left: auto; color: #b46251; }
+.q-library-empty {
+  grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px;
+  padding: 25px; border: 1px dashed var(--line); border-radius: 16px; color: var(--mut);
+}
+.q-library-empty b { color: var(--ink); font-size: 14px; }
+.q-library-empty span { font-size: 12px; }
+
+.q-owner-chip {
+  border: 1px solid var(--acc); border-radius: 999px; padding: 4px 8px;
+  color: var(--acc); font: 600 9px var(--mono); letter-spacing: .14em;
+}
+.q-brand-hero {
+  padding: 30px; border-radius: 22px; color: white;
+  background: radial-gradient(circle at 86% 15%, rgba(143, 243, 224, .18), transparent 34%), #0d1311;
+}
+.q-brand-hero .q-klabel { color: #8ff3e0; }
+.q-brand-hero .btn { display: inline-flex; margin-top: 20px; text-decoration: none; width: auto; }
+.q-brand-lockups { display: grid; grid-template-columns: 1fr 1fr .7fr; gap: 12px; }
+.q-brand-lockups article {
+  min-height: 180px; display: grid; place-items: center; position: relative;
+  border: 1px solid var(--line); border-radius: 18px; padding: 24px; background: white;
+}
+.q-brand-lockups article.dark { background: #0d0f11; }
+.q-brand-lockups article.glyph { background: #e7f4ef; }
+.q-brand-lockups img { display: block; width: min(230px, 82%); max-height: 80px; object-fit: contain; }
+.q-brand-lockups .glyph img { width: 72px; height: 72px; }
+.q-brand-lockups a { position: absolute; right: 12px; bottom: 10px; color: var(--acc); font-size: 10px; font-weight: 700; }
+.q-brand-palette { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
+.q-brand-palette button {
+  display: grid; grid-template-columns: 30px 1fr; grid-template-rows: auto auto; column-gap: 9px;
+  align-items: center; text-align: left; border: 1px solid var(--line); border-radius: 13px;
+  padding: 10px; background: var(--card); color: var(--ink); cursor: pointer;
+}
+.q-brand-palette i { grid-row: 1 / 3; width: 30px; height: 38px; border-radius: 8px; border: 1px solid rgba(0,0,0,.09); }
+.q-brand-palette b { font-size: 11.5px; }
+.q-brand-palette span { color: var(--mut); font: 10px var(--mono); }
+.q-brand-rules { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.q-brand-rules .q-library-title { grid-column: 1 / -1; }
+.q-brand-rules > div:not(.q-library-title) {
+  display: flex; flex-direction: column; gap: 5px; padding: 16px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+}
+.q-brand-rules b { font-size: 12px; }
+.q-brand-rules span { color: var(--mut); font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 760px) {
+  #q-clips, #q-brand { width: 100%; margin-left: 0; transform: none; }
+  .q-library-head { grid-template-columns: 1fr; padding: 21px; }
+  .q-library-head .btn { width: 100%; }
+  .q-library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .q-brand-lockups, .q-brand-rules { grid-template-columns: 1fr; }
+  .q-brand-rules .q-library-title { grid-column: auto; }
+  .q-brand-palette { grid-template-columns: 1fr 1fr; }
+  .q-brand-lockups article { min-height: 145px; }
 }
 
 /* AI Model Reel — character setup. */
@@ -564,7 +663,7 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
 /* ---------------------------------------------------------------------------
    Calibrate.
 
-   Deliberately plainer than the other three pillars. Those are filmed; this one
+   Deliberately plainer than the filming pillars. Those are filmed; this one
    is a workbench, used for an hour at a time by one person, and every gram of
    decoration on it is something between them and the next face.
    --------------------------------------------------------------------------- */

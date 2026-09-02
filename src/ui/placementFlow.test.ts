@@ -201,12 +201,12 @@ const gateSrc = readFileSync(new URL("./quickGate.ts", import.meta.url), "utf8")
 
 test("the AI room is a grant, not a staff key", () => {
   assert.match(quickSrc, /ai: "studio"/);
-  assert.doesNotMatch(quickSrc, /STAFF_ONLY_MODES = \["ai"/);
+  assert.doesNotMatch(quickSrc, /OWNER_ONLY_MODES = \["ai"/);
   // Locked rather than removed, matching every other granted pillar: somebody
   // who can see what exists knows what to ask the owner for.
-  assert.match(quickSrc, /const STAFF_ONLY_MODES = \["calibrate"\]/);
-  // Staff hold every key, including the new one.
-  assert.match(gateSrc, /grants: \{ cta: true, clips: true, polisher: true, studio: true \}/);
+  assert.match(quickSrc, /const OWNER_ONLY_MODES = \["brand", "calibrate"\]/);
+  // Grants and ownership come from one server-side decision.
+  assert.match(gateSrc, /fetch\("\/api\/quick-access"/);
 });
 
 test("the League card's link opens the room rather than the menu", () => {

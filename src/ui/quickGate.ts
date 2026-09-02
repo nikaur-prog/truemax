@@ -1,5 +1,4 @@
-import { currentAccessToken, currentUser, getSupabaseClient } from "../engine/auth.js";
-import { loadIsAdmin } from "../engine/entitlement.js";
+import { currentAccessToken } from "../engine/auth.js";
 
 // ---------------------------------------------------------------------------
 // Who may open /quick.
@@ -30,11 +29,9 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 //   - the tables already exist, /api/tts already gates on the same pair, and
 //     the RLS policies already scope a read to its own owner
 //
-// Honest about what this is: a CLIENT-side gate on a client-side tool. The
-// scanning runs in the browser, so somebody determined who already knows the
-// URL could read the logic out of the bundle. What it actually prevents is
-// casual discovery and forwarded links, which is the real exposure — the part
-// that costs money is /api/tts, and that is gated server-side where it counts.
+// The role and grants are resolved server-side. Scanning still runs in the
+// browser, but a visitor cannot grant themselves a room by altering local
+// storage or changing a DOM attribute.
 //
 // The refusal says "Not found", matching /api/tts returning 404 rather than
 // 403. A page that announces it is a staff tool has told a stranger there is
@@ -44,13 +41,15 @@ import { loadIsAdmin } from "../engine/entitlement.js";
 export interface QuickAccess {
   allowed: boolean;
   staff: boolean;
+  /** True only for an app_admins row whose note is exactly "owner". */
+  owner: boolean;
   /** Identity-scopes device drafts so a shared browser cannot show another creator's work. */
   userId: string | null;
-  /** Pillar grants from the creator's row. Staff hold every grant. */
+  /** Pillar grants from the creator's row. Staff hold every creator grant. */
   grants: Record<string, boolean>;
 }
 
-const DENIED: QuickAccess = { allowed: false, staff: false, userId: null, grants: {} };
+const DENIED: QuickAccess = { allowed: false, staff: false, owner: false, userId: null, grants: {} };
 
 /**
  * Who is at the door, and which rooms they hold keys to.
@@ -60,7 +59,8 @@ const DENIED: QuickAccess = { allowed: false, staff: false, userId: null, grants
  * and a grant the interface ignores is a checkbox that lies). Staff see
  * everything; a creator sees the pillars they were granted. Calibrate stays
  * staff-only, while paid generation is controlled by the `studio` grant and a
- * server-side render reservation.
+ * server-side render reservation. Brand Engine and Calibration are resolved
+ * separately from the explicit owner role returned by the server.
  */
 export async function quickAccessProfile(): Promise<QuickAccess> {
   const token = await currentAccessToken().catch(() => null);
@@ -70,31 +70,21 @@ export async function quickAccessProfile(): Promise<QuickAccess> {
   // session, which is one step for the handful of people who need it and a dead
   // end for everybody else.
   if (!token) return DENIED;
-  if (await loadIsAdmin().catch(() => false)) {
-    const user = await currentUser().catch(() => null);
-    if (!user) return DENIED;
+  try {
+    const response = await fetch("/api/quick-access", {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return DENIED;
+    const data = await response.json() as Partial<QuickAccess>;
+    if (data.allowed !== true || typeof data.userId !== "string") return DENIED;
     return {
       allowed: true,
-      staff: true,
-      userId: user.id,
-      grants: { cta: true, clips: true, polisher: true, studio: true },
+      staff: data.staff === true,
+      owner: data.owner === true,
+      userId: data.userId,
+      grants: data.grants && typeof data.grants === "object" ? data.grants : {},
     };
-  }
-  // The League door. Reads the caller's OWN league_creators row — the RLS
-  // select policy is `auth.uid() = user_id or staff`, and the explicit eq
-  // keeps this a single-row read even if that policy is ever widened. Any
-  // error is a refusal: a gate that fails open is not a gate.
-  try {
-    const user = await currentUser();
-    if (!user) return DENIED;
-    const client = await getSupabaseClient();
-    const { data } = await client
-      .from("league_creators")
-      .select("status, pillar_grants")
-      .eq("user_id", user.id)
-      .maybeSingle<{ status: string; pillar_grants: Record<string, boolean> | null }>();
-    if (data?.status !== "approved") return DENIED;
-    return { allowed: true, staff: false, userId: user.id, grants: data.pillar_grants ?? {} };
   } catch {
     return DENIED;
   }

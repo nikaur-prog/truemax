@@ -33,6 +33,7 @@ import {
 } from "./ui/quickProfileExport.js";
 import type { QuickProfileAssets } from "./ui/quickProfileExport.js";
 import { clearFaces, deleteFace, faceToCanvas, listFaces, saveFace } from "./engine/faceLibrary.js";
+import type { SavedFace } from "./engine/faceLibrary.js";
 import type { QuickVariant } from "./ui/quickVideoExport.js";
 import { RundownBlocked, RundownCancelled, downloadRundownVideo } from "./ui/rundownExport.js";
 import { NarrationFailed } from "./ui/rundownAudio.js";
@@ -98,6 +99,8 @@ const PILLAR_IDS: readonly PillarId[] = ["Harmony", "Angularity", "Dimorphism", 
 const el = {
   pillars: document.getElementById("q-pillars")!,
   carousel: document.getElementById("q-carousel")!,
+  clips: document.getElementById("q-clips")!,
+  brand: document.getElementById("q-brand")!,
   ai: document.getElementById("q-ai")!,
   cal: document.getElementById("q-cal")!,
   calBody: document.getElementById("q-cal-body")!,
@@ -189,7 +192,7 @@ void quickAccessProfile().then((access) => {
   }).catch(() => denyQuickAccess());
 });
 
-// Which pillar buttons each grant unlocks, and which rooms only staff see.
+// Which pillar buttons each grant unlocks, and which rooms only the owner sees.
 //
 // The grant keys are the League's ("cta", "polisher", "clips", "studio"),
 // ticked by the owner at approval; the buttons are this page's modes. CTA
@@ -202,26 +205,27 @@ void quickAccessProfile().then((access) => {
 // League already has one. A grant plus a reserved quota slot lets somebody run
 // the room without holding the keys to the whole product.
 //
-// Calibrate stays staff-only and is REMOVED rather than locked, because it
-// feeds the rating corpus the scoring is fitted against: it is not a tool
-// somebody is missing from their plan, it is not a tool at all.
+// Brand and Calibrate stay owner-only and are REMOVED rather than locked,
+// because they control the visual system and rating corpus. They are not
+// creator-plan upgrades.
 const PILLAR_GRANT: Record<string, string> = {
   reel: "cta",
   analysis: "cta",
   enhance: "polisher",
   ai: "studio",
   carousel: "studio",
+  clips: "clips",
 };
-const STAFF_ONLY_MODES = ["calibrate"];
+const OWNER_ONLY_MODES = ["brand", "calibrate"];
 
-function applyPillarGrants(access: { staff: boolean; grants: Record<string, boolean> }): void {
-  if (access.staff) return;
+function applyPillarGrants(access: { staff: boolean; owner: boolean; grants: Record<string, boolean> }): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>(".q-pillar")) {
     const mode = button.dataset.mode ?? "";
-    if (STAFF_ONLY_MODES.includes(mode)) {
+    if (OWNER_ONLY_MODES.includes(mode) && !access.owner) {
       button.remove();
       continue;
     }
+    if (access.staff) continue;
     const grant = PILLAR_GRANT[mode];
     if (grant && access.grants[grant] !== true) {
       // Locked, not removed: the League Tools page shows the same card with
@@ -259,6 +263,9 @@ function openFromHash(): void {
     ai: "ai",
     studio: "ai",
     carousel: "carousel",
+    clips: "clips",
+    brand: "brand",
+    calibrate: "calibrate",
   }[location.hash.slice(1).toLowerCase()];
   if (target) {
     const button = document.querySelector<HTMLButtonElement>(`.q-pillar[data-mode="${target}"]`);
@@ -291,13 +298,15 @@ function openFromHashInner(): void {
     return;
   }
   if (hash === "clips") {
-    // The saved-face strip is the clips library. It renders async and only
-    // when it has faces, so the scroll waits a beat and lands wherever the
-    // strip is — or stays on the pillars when the library is empty.
-    window.setTimeout(() => {
-      const lib = document.getElementById("q-lib");
-      if (lib && !lib.classList.contains("hidden")) lib.scrollIntoView({ behavior: "smooth" });
-    }, 600);
+    enterMode("clips");
+    return;
+  }
+  if (hash === "brand") {
+    enterMode("brand");
+    return;
+  }
+  if (hash === "calibrate") {
+    enterMode("calibrate");
   }
 }
 
@@ -649,13 +658,15 @@ let shown: Report | null = null;
 //              page the person doing that work already has open, and because a
 //              calibration tool nobody opens calibrates nothing.
 // ---------------------------------------------------------------------------
-type QuickMode = "reel" | "analysis" | "ai" | "carousel" | "calibrate";
+type QuickMode = "reel" | "analysis" | "ai" | "carousel" | "clips" | "brand" | "calibrate";
 
 const MODE_NAMES: Record<QuickMode, string> = {
   reel: "Reel Creator",
   analysis: "Full Analysis",
   ai: "AI Model Reel",
   carousel: "Carousel Creator",
+  clips: "Clips Library",
+  brand: "Brand Engine",
   calibrate: "Calibrate",
 };
 
@@ -773,6 +784,8 @@ function enterMode(next: QuickMode): void {
   reelKind = "pair";
   creatorView = "front";
   el.pillars.classList.add("hidden");
+  el.clips.classList.add("hidden");
+  el.brand.classList.add("hidden");
   // The reel's first question is not a photograph, it is what KIND of video
   // this is — one photo, or the before/after pair. Everything downstream
   // (how many scans, what the analysis segment plays) follows from it.
@@ -805,6 +818,36 @@ function enterMode(next: QuickMode): void {
     return;
   }
 
+  if (next === "clips") {
+    el.ai.classList.add("hidden");
+    el.capture.classList.add("hidden");
+    el.cal.classList.add("hidden");
+    el.carousel.classList.add("hidden");
+    el.brand.classList.add("hidden");
+    el.clips.classList.remove("hidden");
+    void import("./ui/clipsLibrary.js").then((library) => library.openClipsLibrary(el.clips, {
+      onBack: leaveMode,
+      onUseFiles: (files) => {
+        void import("./ui/beatReelPanel.js").then((panel) => panel.openBeatReelPanel(undefined, files));
+      },
+      onUseFace: (face) => void openSavedFaceFromLibrary(face),
+    }));
+    track("quick-visit");
+    return;
+  }
+
+  if (next === "brand") {
+    el.ai.classList.add("hidden");
+    el.capture.classList.add("hidden");
+    el.cal.classList.add("hidden");
+    el.carousel.classList.add("hidden");
+    el.clips.classList.add("hidden");
+    el.brand.classList.remove("hidden");
+    void import("./ui/brandEngine.js").then((brand) => brand.openBrandEngine(el.brand, { onBack: leaveMode }));
+    track("quick-visit");
+    return;
+  }
+
   el.carousel.classList.add("hidden");
   el.ai.classList.add("hidden");
   closeCarouselCreator();
@@ -827,6 +870,24 @@ function enterMode(next: QuickMode): void {
   el.cal.classList.add("hidden");
   el.capture.classList.remove("hidden");
   if (next === "analysis") openScanViewChoice();
+}
+
+async function openSavedFaceFromLibrary(face: SavedFace): Promise<void> {
+  const canvas = await faceToCanvas(face);
+  if (!canvas) {
+    await deleteFace(face.id);
+    return;
+  }
+  const library = await import("./ui/clipsLibrary.js");
+  library.closeClipsLibrary();
+  mode = "analysis";
+  creatorView = "front";
+  el.clips.classList.add("hidden");
+  el.capture.classList.add("hidden");
+  el.modeName.textContent = MODE_NAMES.analysis;
+  el.modeStep.textContent = "Saved front photo";
+  last = { lm: face.landmarks, w: face.width, h: face.height, photo: canvas };
+  show(storedSex() ?? "male", true);
 }
 
 function updateModeStep(): void {
@@ -862,7 +923,10 @@ function leaveMode(): void {
   el.ai.classList.add("hidden");
   el.cal.classList.add("hidden");
   el.carousel.classList.add("hidden");
+  el.clips.classList.add("hidden");
+  el.brand.classList.add("hidden");
   closeCarouselCreator();
+  void import("./ui/clipsLibrary.js").then((library) => library.closeClipsLibrary());
   el.pillars.classList.remove("hidden");
 }
 
