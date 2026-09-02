@@ -152,6 +152,48 @@ async function displayFrame(id: string): Promise<{ w: number; h: number }> {
 }
 
 const dist = (a: LandmarkPoint, b: LandmarkPoint) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// The least-squares similarity (uniform scale, rotation, translation) that maps
+// one point set onto another.
+//
+// This is what turns "the model is bad" into "the model is bad AT WHAT". A
+// distance table alone cannot tell a model that misreads the face from a model
+// that reads it correctly and frames it wrongly, and those need opposite
+// responses. Anchoring the model's own points onto the eight front points the
+// seeder already gets right removes framing entirely and leaves only shape,
+// and it is a transform production could genuinely apply, because in the app
+// the seeder's front points are sitting right there.
+function similarity(
+  src: readonly LandmarkPoint[],
+  dst: readonly LandmarkPoint[],
+): ((p: LandmarkPoint) => LandmarkPoint) | null {
+  const n = src.length;
+  if (!n || n !== dst.length) return null;
+  const msx = src.reduce((t, p) => t + p.x, 0) / n;
+  const msy = src.reduce((t, p) => t + p.y, 0) / n;
+  const mdx = dst.reduce((t, p) => t + p.x, 0) / n;
+  const mdy = dst.reduce((t, p) => t + p.y, 0) / n;
+  let sa = 0;
+  let sb = 0;
+  let sxx = 0;
+  for (let i = 0; i < n; i++) {
+    const ax = src[i].x - msx;
+    const ay = src[i].y - msy;
+    const bx = dst[i].x - mdx;
+    const by = dst[i].y - mdy;
+    sa += ax * bx + ay * by;
+    sb += ax * by - ay * bx;
+    sxx += ax * ax + ay * ay;
+  }
+  if (!sxx) return null;
+  const a = sa / sxx;
+  const b = sb / sxx;
+  return (p) => {
+    const x = p.x - msx;
+    const y = p.y - msy;
+    return { x: a * x - b * y + mdx, y: b * x + a * y + mdy };
+  };
+}
 const median = (xs: number[]) => {
   if (!xs.length) return NaN;
   const s = [...xs].sort((p, q) => p - q);
@@ -169,10 +211,19 @@ interface Bucket {
   seed: number[];
   modelMoved: number[];
   seedMoved: number[];
+  /** The model's points after anchoring their shape onto the seeder's front points. */
+  anchored: number[];
+  /** Signed offset, so a systematic bias is distinguishable from scatter. */
+  dx: number[];
+  dy: number[];
 }
 const perPoint: Record<SideLandmarkId, Bucket> = Object.fromEntries(
-  SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [] }]),
+  SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [], anchored: [], dx: [], dy: [] }]),
 ) as Record<SideLandmarkId, Bucket>;
+const FRONT_LANDMARK_IDS = SIDE_LANDMARK_IDS.filter((id) => !BACK_LANDMARK_IDS.includes(id));
+// The y scale each face implies, model against truth. A value that is not 1
+// and barely varies is a framing bug somewhere, not the model guessing.
+const impliedYScale: number[] = [];
 
 let scored = 0;
 let tokensIn = 0;
@@ -196,12 +247,32 @@ for (const id of ids) {
   tokensIn += cached.usage.inputTokens;
   tokensOut += cached.usage.outputTokens;
   scored += 1;
+  const px = (pid: SideLandmarkId) => ({ x: cached.result.points[pid].x * w, y: cached.result.points[pid].y * h });
+  // The y scale this face implies. Reported because a value that is not 1 and
+  // barely moves across faces is a framing bug, and a framing bug is fixable
+  // where imprecision is not.
+  const usable = SIDE_LANDMARK_IDS.filter((pid) => !partial.has(pid));
+  const den = usable.reduce((t, pid) => t + px(pid).y ** 2, 0);
+  if (den) impliedYScale.push(usable.reduce((t, pid) => t + px(pid).y * truth[pid].y, 0) / den);
+  // The model's own shape, anchored onto the seeder's front points. This is the
+  // best correction production could actually apply, so it is the fair ceiling
+  // on what the model is worth here.
+  const anchors = FRONT_LANDMARK_IDS.filter((pid) => !partial.has(pid) && seed?.[pid]);
+  const fit = seed && anchors.length >= 3
+    ? similarity(anchors.map(px), anchors.map((pid) => seed[pid]))
+    : null;
+  // Facing, so a left-facing and a right-facing profile do not cancel each other
+  // out in the signed table below.
+  const facing = truth.pronasale.x > truth.tragion.x ? 1 : -1;
   for (const pid of SIDE_LANDMARK_IDS) {
     if (partial.has(pid)) continue;
     const t = truth[pid];
-    const m = { x: cached.result.points[pid].x * w, y: cached.result.points[pid].y * h };
+    const m = px(pid);
     const mErr = dist(m, t) / unit;
     perPoint[pid].model.push(mErr);
+    perPoint[pid].dx.push((facing * (m.x - t.x)) / unit);
+    perPoint[pid].dy.push((m.y - t.y) / unit);
+    if (fit) perPoint[pid].anchored.push(dist(fit(m), t) / unit);
     if (seed?.[pid]) {
       const sErr = dist(seed[pid], t) / unit;
       perPoint[pid].seed.push(sErr);
@@ -217,6 +288,8 @@ for (const id of ids) {
 const fmt = (x: number) => (Number.isFinite(x) ? x.toFixed(3) : "  n/a");
 const line = (label: string, b: Bucket) =>
   `${label.padEnd(16)} ${String(b.model.length).padStart(3)}  ${fmt(median(b.model))}  ${fmt(p90(b.model))}   ${fmt(median(b.seed))}  ${fmt(p90(b.seed))}   ${String(b.seedMoved.length).padStart(3)}  ${fmt(median(b.modelMoved))}  ${fmt(median(b.seedMoved))}`;
+const biasLine = (label: string, b: Bucket) =>
+  `${label.padEnd(16)} ${String(b.dx.length).padStart(3)}  ${fmt(median(b.dx))}  ${fmt(median(b.dy))}   ${fmt(median(b.anchored))}`;
 
 console.log(`\nVision pass ${model} (${LANDMARK_VERSION}) against ${scored} labelled profiles; error in head widths (nose tip to ear notch).`);
 if (skipped.length) console.log(`Skipped: ${skipped.join(", ")}`);
@@ -235,6 +308,23 @@ console.log("");
 console.log(line("FRONT (8)", merge(front)));
 console.log(line("BACK (5)", merge(BACK_LANDMARK_IDS)));
 console.log(line("ALL (13)", merge(SIDE_LANDMARK_IDS)));
+
+// The two diagnostics that say WHY, not just how much.
+console.log("");
+console.log("Signed offset and the anchored fit. dx>0 = model too far forward, dy>0 = model too low.");
+console.log("A large offset that barely varies is a framing bug. Scatter around zero is imprecision.");
+console.log("");
+console.log("landmark           n  median dx  median dy   anchored");
+for (const pid of SIDE_LANDMARK_IDS) console.log(biasLine(pid, perPoint[pid]));
+console.log("");
+console.log(biasLine("FRONT (8)", merge(front)));
+console.log(biasLine("BACK (5)", merge(BACK_LANDMARK_IDS)));
+console.log("");
+console.log(
+  `y scale each face implies (1.000 = correctly framed): median ${fmt(median(impliedYScale))}, spread ${
+    fmt(Math.sqrt(impliedYScale.reduce((t, v) => t + (v - median(impliedYScale)) ** 2, 0) / Math.max(1, impliedYScale.length)))
+  } over ${impliedYScale.length} faces.`,
+);
 
 const back = merge(BACK_LANDMARK_IDS);
 const ratio = median(back.modelMoved) / median(back.seedMoved);
