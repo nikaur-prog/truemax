@@ -31,7 +31,9 @@ const RULES = `RULES (every draft is rejected if it breaks one):
 6. No procedures, no supplements, nothing that comes in a bottle. Never "scientifically proven". "Measured" and "compared to a reference set" are the allowed claims.
 7. Ethnicity is never inferred from a photograph and never appears in a hook, caption or comparison.
 8. The measurement fwhr is never shown.
-9. Nothing that needs another person's scan data.`
+9. Nothing that needs another person's scan data.
+10. No typed numbers. A beat never states a measurement value, a reference average, a score or a percentage that the writer made up. Write the placeholder in square brackets, "[value the scan prints]", "[band the card prints]", and say the number is read off the screen at production time. The only figures a draft may state are the evidence rows' own views and multiples. Never quote a sentence as the app's unless it is in the MEASUREMENTS list or the ASSETS list.
+11. The lower face width ratio is indicative: it appears with its value and the word "indicative", never with a band, a percentile or a verdict word.`
 
 const ASSETS = `ASSETS a recommendation may point at (name one per recommendation, exactly as written):
 - The Cast (/quick): rundown video of a celebrity from the saved-face library, measurement lines, voice, score card, 15 to 40 s, MP4 download.
@@ -228,7 +230,7 @@ const TEMPLATE = `Write ONE recommendation as the schema asks. Requirements:
 - asset: one from ASSETS, named exactly.
 - platform and slot: pick the platform the evidence came from and the best hour for it from audience.bestTimes, written as "Thursday 21:00 NZT" with the value in brackets; if bestTimes is empty say "no audience data yet, default 19:00 NZT".
 - titles: three, each under 60 characters.
-- caption: one caption, ending with "get yours at truemax.app" and, when a demo face is used, the line "Demo faces are AI-generated".
+- caption: one caption, ending with "get yours at truemax.app" exactly once and, when a demo face is used, the line "Demo faces are AI-generated" exactly once.
 - sound: one of sounds.tracks by title if available, else "none, sounds not connected".
 - effortMinutes: honest, from the asset (a Cast rundown is 20, a screen recording 30, a CTA cut 15).
 - why: two sentences on why this, now, in plain register.`
@@ -257,7 +259,7 @@ log(`${recs.length} of 3 drafts written`)
 // ---------------------------------------------------------------------------
 phase('Check')
 
-const checkPrompt = `You are the checker for the TrueMax daily brief. Read each recommendation against the RULES and reject any that breaks one. Also reject: a headline or hook that names a real person with a verdict word; a caption missing "Demo faces are AI-generated" when the asset is the demo cast, the CTA series or the voiced example; an evidence list with fewer than two rows on a "copy" play unless why says it is a lead; any em dash character; any "in every 100" or "1 in N" about a person; a slot that names a day other than a real weekday.
+const checkPrompt = `You are the checker for the TrueMax daily brief. Read each recommendation against the RULES and reject any that breaks one. Also reject: a headline or hook that names a real person with a verdict word; a caption missing "Demo faces are AI-generated" when the asset is the demo cast, the CTA series or the voiced example; an evidence list with fewer than two rows on a "copy" play unless why says it is a lead; any em dash character; any "in every 100" or "1 in N" about a person; a slot that names a day other than a real weekday; any typed measurement value, reference average, score or percentage in a beat, caption or title that is not a placeholder in square brackets (rule 10); "get yours at truemax.app" or "Demo faces are AI-generated" appearing twice in one caption.
 ${RULES}
 RECOMMENDATIONS (index is the array position):
 ${JSON.stringify(recs, null, 1)}
