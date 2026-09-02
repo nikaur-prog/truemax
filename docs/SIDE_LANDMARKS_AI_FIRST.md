@@ -50,7 +50,64 @@ The harness needs the key. It lives in Vercel and nowhere in the repo, so the
 owner runs this locally, or the environment does. About 1,500 input tokens per
 photo at the provider's resize; the whole set is a few cents.
 
-## 3. The flow Codex wires
+## 2a. The result, 3 September 2026: NO-GO on AI-first
+
+Run on 28 of the 56 labelled profiles with `claude-sonnet-5`, `vision-1`.
+Errors in head widths (labelled nose tip to ear notch); the seeder figure is
+taken over the points the labeller actually moved, which is the only place the
+seeder is genuinely wrong.
+
+| | model | seeder |
+|---|---|---|
+| front 8 | 0.409 | 0.000 (untouched by construction) |
+| back 5 | 0.485 | 0.080 |
+| all 13 | 0.425 | 0.075 |
+
+Five times worse where it was needed. The harness prints the go rule and it
+came back NO-GO. Three things were checked before accepting that, because a
+number this bad is as likely to be a harness bug as a model failure.
+
+**1. The error is systematic, not scatter.** Signed offsets grow monotonically
+down the face: glabella +0.245 head widths, pronasale +0.346, menton +0.644,
+cervicale +0.701, with sideways offset near zero at the nose. Each face implies
+a y scale of 0.797 with a spread of 0.055. That is a framing error, not a model
+guessing.
+
+**2. The most favourable reframing does not save it.** Scoring the model's y
+against the image width rather than its height (the shape the bias suggests)
+halves the error to 0.203 overall. Still two and a half times the seeder.
+
+**3. Anchoring the model's shape onto the seeder's accurate front points, which
+is the best correction production could actually apply, is decisive.** With
+framing removed entirely the front eight land at 0.055, so the model reads the
+face outline well. The five back points stay at 0.254, and the ear cluster is
+the worst of all: condylion 0.386 and tragion 0.393 against the seeder's 0.064
+and 0.067. Six times worse.
+
+So the model reads a profile and cannot locate an ear. That is exactly the
+landmark the seeder needs help with (task #144, the ear-region research spike),
+and it is the one the model is least able to give.
+
+**A confound this test cannot resolve.** All 56 profiles in the labelled set
+are 1536x2048, one aspect ratio. So "the model normalises y by the image width"
+and "the model has a downward bias" cannot be told apart from this data. The
+decisive follow-up is cheap: run six of the same faces square-cropped or
+letterboxed and see whether the reported y moves with the frame. Six model
+calls. It would not change the verdict, because conclusion 3 removes framing
+altogether and the ear is still lost, but it would say whether the prompt
+should state the pixel dimensions.
+
+**What this changes.** AI-first placement does not ship. The endpoint,
+allowance and harness stay: they are the apparatus for testing the next
+candidate, and the harness now prints the bias table and the anchored fit so
+the next model is judged on the same three questions rather than one number.
+The route to accurate side points remains C2 in
+`BUILD_PLAN_DETECTORS_CALIBRATION_AND_SWEEP.md`: a keypoint model trained on
+our own thirteen points, fed by the consented correction loop. A general vision
+model can help label that corpus offline, where a human checks it. It cannot
+place the points in production.
+
+## 3. The flow Codex wires (held, pending a model that passes section 2a)
 
 ```
 side photo taken
