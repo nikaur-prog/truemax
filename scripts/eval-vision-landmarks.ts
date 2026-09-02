@@ -31,6 +31,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
+import { anthropicKey } from "../api/_anthropicKey.js";
 import {
   BACK_LANDMARK_IDS,
   LANDMARK_MODEL_DEFAULT,
@@ -97,7 +98,12 @@ if (!ids.length) {
   process.exit(1);
 }
 
-const apiKey = process.env.ANTHROPIC_API_KEY;
+let apiKey: string | null = null;
+try {
+  apiKey = anthropicKey();
+} catch {
+  apiKey = null;
+}
 const pending = ids.filter((id) => !(cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION));
 if (pending.length && !apiKey) {
   console.error(`${pending.length} profile(s) need a model call and ANTHROPIC_API_KEY is not set.`);
