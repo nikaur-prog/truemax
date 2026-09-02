@@ -32,7 +32,8 @@ test("ownership alone cannot make an unrelated creator post payable", () => {
   assert.match(migration, /and tiktok_video_id is null[\s\S]*?and cta_verified_at is null/i);
   assert.doesNotMatch(leagueClient, /from\("league_submissions"\)\.update\(\{ status: "approved"/);
   assert.match(leagueClient, /rpc\("review_league_submission"/);
-  assert.match(tiktokClient, /fields=[^"\n]*video_description/);
+  assert.match(tiktokClient, /TRACKING_VIDEO_FIELDS[\s\S]{0,120}?video_description/);
+  assert.match(tiktokClient, /videosUrl[\s\S]{0,240}?TRACKING_VIDEO_FIELDS/);
   assert.match(leagueTracker, /captionIncludesCampaignTag\(video\.description/);
   assert.match(leagueTracker, /submissionCanAccrue\([\s\S]*?league_stat_snapshots/i);
 });
