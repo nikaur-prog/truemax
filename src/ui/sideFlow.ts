@@ -84,6 +84,8 @@ interface SideCtx {
   // profile camera straight away; "upload" offers only the file drop; undefined
   // shows both choices.
   method?: "camera" | "upload";
+  /** Standalone profile result rather than the second view of a main scan. */
+  standalone?: boolean;
   onDone: (
     report: Report,
     points: SidePoints,
@@ -172,12 +174,12 @@ const el = () => ({
   swap: document.getElementById("side-swap") as HTMLButtonElement,
 });
 
-function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"]): void {
+function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"], standalone = false): void {
   const captureHelp = method === "upload"
     ? "Choose a clear side-profile photo with your whole forehead and chin visible. Landscape and portrait photos are both accepted."
     : sideCaptureInstruction();
   copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
-    <p class="side-sub">Second of two. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
+    <p class="side-sub">${standalone ? "This is a profile-only scan" : "Second of two"}. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
     <p class="side-sub">${captureHelp}</p>
     <p class="side-sub">Afterwards, TrueMax places thirteen points for you to review. If any missed, choose edit and drag only those points before confirming.</p>`;
 }
@@ -258,7 +260,7 @@ export function openSideCapture(ctx: SideCtx): void {
   // by mountVerify; nothing else may show it, or it sits under a real face.
   e.frame.classList.add("awaiting");
   e.lines.replaceChildren();
-  renderSideCaptureCopy(e.panelCopy, ctx.method);
+  renderSideCaptureCopy(e.panelCopy, ctx.method, ctx.standalone);
 
   // The side matches how the front was taken. Shot the front on camera → open
   // the profile camera straight away; uploaded it → offer only the file drop.

@@ -6,6 +6,7 @@ import {
   CAROUSEL_MAX_SLIDES,
   CAROUSEL_MIN_SLIDES,
   CAROUSEL_THEMES,
+  carouselLevelCount,
   carouselLevelLabel,
   carouselOverlayCopy,
   carouselTheme,
@@ -76,14 +77,15 @@ function freshSlide(level: number): CarouselSlideDraft {
   };
 }
 
-function progressionLevel(index: number, total: number): number {
+function progressionLevel(index: number, total: number, levelCount = 5): number {
   if (total <= 1) return 3;
-  return Math.max(1, Math.min(5, 1 + Math.round((index * 4) / (total - 1))));
+  return Math.max(1, Math.min(levelCount, 1 + Math.round((index * (levelCount - 1)) / (total - 1))));
 }
 
-function rebalanceProgression(slides: CarouselSlideDraft[]): void {
+function rebalanceProgression(slides: CarouselSlideDraft[], theme: CarouselThemeId): void {
+  const levelCount = carouselLevelCount(theme);
   slides.forEach((slide, index) => {
-    slide.level = progressionLevel(index, slides.length);
+    slide.level = progressionLevel(index, slides.length, levelCount);
     invalidateGenerated(slide);
   });
 }
@@ -164,17 +166,19 @@ function normalizeDraft(value: unknown): CarouselDraft | null {
   const theme = carouselTheme(saved.theme);
   if ((saved.version !== 1 && saved.version !== 2) || !theme || !Array.isArray(saved.slides)
     || saved.slides.length < CAROUSEL_MIN_SLIDES || saved.slides.length > CAROUSEL_MAX_SLIDES) return null;
+  const savedSlides = saved.slides;
   const seen = new Set<string>();
-  const slides = saved.slides.map((candidate, index): CarouselSlideDraft => {
+  const slides = savedSlides.map((candidate, index): CarouselSlideDraft => {
     const raw = candidate && typeof candidate === "object" ? candidate as Record<string, unknown> : {};
     const savedId = typeof raw.id === "string" && /^[A-Za-z0-9-]{1,80}$/.test(raw.id) ? raw.id : "";
     const id = savedId && !seen.has(savedId) ? savedId : slideId();
     seen.add(id);
     const source = raw.source === "upload" ? "upload" : "synthetic";
     const uploadAction = raw.uploadAction === "morph" ? "morph" : "as-is";
-    const level = typeof raw.level === "number" && Number.isInteger(raw.level) && raw.level >= 1 && raw.level <= 5
+    const levelCount = theme.levels.length;
+    const level = typeof raw.level === "number" && Number.isInteger(raw.level) && raw.level >= 1 && raw.level <= levelCount
       ? raw.level
-      : Math.min(5, index + 1);
+      : progressionLevel(index, savedSlides.length, levelCount);
     return {
       id,
       source,
@@ -300,7 +304,7 @@ function slideHtml(active: CarouselSession, slide: CarouselSlideDraft, index: nu
         <label class="${slide.source === "upload" ? "" : "hidden"}"><span>Use the photo</span><select data-field="uploadAction" ${fieldLock}><option value="as-is">As-is, on device</option><option value="morph">Morph this photo</option></select></label>
         <label class="${slide.source === "synthetic" && !active.draft.identityLock ? "" : "hidden"}"><span>Stage-specific avatar override</span><textarea rows="3" maxlength="500" data-field="description" placeholder="Leave the default avatar unchanged or override it for this stage" ${fieldLock}></textarea></label>
         <label class="${usesProvider ? "" : "hidden"}"><span>${slide.source === "synthetic" ? "Extra direction" : "Morph instruction"}</span><textarea rows="2" maxlength="320" data-field="instruction" placeholder="What should this level show?" ${fieldLock}></textarea></label>
-        <label><span>Band</span><select data-field="level" ${fieldLock}>${Array.from({ length: 5 }, (_, levelIndex) => {
+        <label><span>Band</span><select data-field="level" ${fieldLock}>${Array.from({ length: carouselLevelCount(active.draft.theme) }, (_, levelIndex) => {
           const value = levelIndex + 1;
           return `<option value="${value}">${value}. ${carouselLevelLabel(active.draft.theme, value)}</option>`;
         }).join("")}</select></label>
@@ -656,7 +660,7 @@ function bindCard(active: CarouselSession, card: HTMLElement, slide: CarouselSli
   card.querySelector("[data-remove]")?.addEventListener("click", () => {
     if (active.busy.size > 0 || active.draft.slides.length <= CAROUSEL_MIN_SLIDES) return;
     active.draft.slides = active.draft.slides.filter((candidate) => candidate.id !== slide.id);
-    rebalanceProgression(active.draft.slides);
+    rebalanceProgression(active.draft.slides, active.draft.theme);
     scheduleDraftSave(active);
     renderSlides(active);
   });
@@ -869,7 +873,16 @@ function bindShell(active: CarouselSession): void {
       const next = carouselTheme(theme.value);
       if (!next) return;
       active.draft.theme = next.id;
-      for (const slide of active.draft.slides) invalidateGenerated(slide);
+      // The profile preset is authored as a complete six-step ladder. Start
+      // with all six visible so the exported sequence cannot silently skip an
+      // intermediate band; the operator can still choose 3–5 afterwards.
+      if (next.id === "jawline-strength") {
+        while (active.draft.slides.length < CAROUSEL_MAX_SLIDES) {
+          active.draft.slides.push(freshSlide(CAROUSEL_MAX_SLIDES));
+        }
+        active.host.querySelector<HTMLSelectElement>("[data-carousel-count]")!.value = String(active.draft.slides.length);
+      }
+      rebalanceProgression(active.draft.slides, active.draft.theme);
       scheduleDraftSave(active);
       updateThemeNote(active);
       renderSlides(active);
@@ -883,7 +896,7 @@ function bindShell(active: CarouselSession): void {
       const desired = Number(count.value);
       while (active.draft.slides.length < desired) active.draft.slides.push(freshSlide(5));
       if (active.draft.slides.length > desired) active.draft.slides.splice(desired);
-      rebalanceProgression(active.draft.slides);
+      rebalanceProgression(active.draft.slides, active.draft.theme);
       scheduleDraftSave(active);
       renderSlides(active);
     });
@@ -965,7 +978,7 @@ function bindShell(active: CarouselSession): void {
   active.host.querySelector("[data-carousel-add]")?.addEventListener("click", () => {
     if (active.busy.size > 0 || active.draft.slides.length >= CAROUSEL_MAX_SLIDES) return;
     active.draft.slides.push(freshSlide(5));
-    rebalanceProgression(active.draft.slides);
+    rebalanceProgression(active.draft.slides, active.draft.theme);
     scheduleDraftSave(active);
     renderSlides(active);
   });
