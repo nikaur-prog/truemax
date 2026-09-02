@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildReelScript, narrationFrom, reelBlockers, spokenSeconds } from "./reelScript.js";
 import type { Report, ScoredMetric } from "./types.js";
+import { containsPublicRiskLanguage } from "./publicContentSafety.js";
 
 // A metric stub with only the fields the script generator reads. Building a
 // real Report would mean running the landmarker, which this module never
@@ -110,9 +111,7 @@ test("strengths run together, then one clean turn into the flaws", () => {
   // direction rather than left to work it out from the adjectives.
   const turn = metrics.find((b, i) => i > 0 && !b.positive && metrics[i - 1].positive);
   assert.ok(turn, "no turn from strengths into flaws");
-  // "The flaws." rather than the older "Now the flaws." — same audible pivot,
-  // one connective shorter, matching the verdict-first copy pass.
-  assert.match(turn.line, /^The flaws\./);
+  assert.match(turn.line, /^The lower-scoring measurements\./);
 });
 
 test("an impossible measurement never gets a sentence", () => {
@@ -203,8 +202,9 @@ test("the video ends by showing the address, then asking for the next face", () 
 test("the hook and the call to action bookend it", () => {
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "LeBron James" });
   assert.equal(beats[0].kind, "hook");
-  assert.match(beats[0].line, /How attractive is LeBron James\?/);
+  assert.equal(beats[0].line, "A facial-proportion breakdown of LeBron James.");
   assert.equal(beats[beats.length - 1].kind, "cta");
+  assert.equal(beats[beats.length - 1].line, "Who should we analyse next?");
 });
 
 test("the context beat says what the face is not measuring", () => {
@@ -364,14 +364,15 @@ test("a measurement that was taken and is impossible still blocks", () => {
 // ---------------------------------------------------------------------------
 // The full name once, the first name after.
 //
-// How the format is actually read: "How attractive is Timothée Chalamet?" to
+// How the format is actually read: the full name in the hook, then the short
+// form for the rest of the rundown.
 // open, and then "Timothée" for the next ninety seconds. Eight repetitions of a
 // full name stops sounding like somebody talking about a person and starts
 // sounding like a record being read out.
 // ---------------------------------------------------------------------------
 test("the full name is said once, and only in the hook", () => {
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Timothée Chalamet" });
-  assert.match(beats[0].line, /How attractive is Timothée Chalamet\?/);
+  assert.equal(beats[0].line, "A facial-proportion breakdown of Timothée Chalamet.");
 
   const rest = beats.slice(1).map((b) => b.line).join(" ");
   assert.doesNotMatch(rest, /Chalamet/, `surname repeated after the hook: ${rest}`);
@@ -385,7 +386,7 @@ test("a name that is one word survives being shortened", () => {
   // curve marker is worse than a repeated name.
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Zendaya" });
   const said = beats.map((b) => b.line).join(" ");
-  assert.match(said, /How attractive is Zendaya\?/);
+  assert.match(said, /A facial-proportion breakdown of Zendaya\./);
   assert.match(said, /Zendaya has/);
 });
 
@@ -397,7 +398,7 @@ test("the short name can be overridden", () => {
     name: "Cristiano Ronaldo",
     shortName: "Ronaldo",
   });
-  assert.match(beats[0].line, /How attractive is Cristiano Ronaldo\?/);
+  assert.equal(beats[0].line, "A facial-proportion breakdown of Cristiano Ronaldo.");
   const rest = beats.slice(1).map((b) => b.line).join(" ");
   assert.match(rest, /Ronaldo has/);
   assert.doesNotMatch(rest, /Cristiano/);
@@ -411,28 +412,34 @@ test("the short name can be overridden", () => {
 // judgement about a subject and an audience, so it is an input.
 // ---------------------------------------------------------------------------
 
-test("the default opening asks the default question", () => {
+test("the default opening uses neutral analysis framing", () => {
   const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ethan Garcia" });
   assert.equal(beats[0].kind, "hook");
-  assert.equal(beats[0].line, "How attractive is Ethan Garcia?");
+  assert.equal(beats[0].line, "A facial-proportion breakdown of Ethan Garcia.");
 });
 
-test("an override replaces the question and keeps the name", () => {
+test("an unsafe override falls back to the neutral opening", () => {
   const beats = buildReelScript(report(SPREAD_OF_METRICS), {
     name: "Ethan Garcia",
     opening: "How UNATTRACTIVE is {name}?",
   });
-  assert.equal(beats[0].line, "How UNATTRACTIVE is Ethan Garcia?");
+  assert.equal(beats[0].line, "A facial-proportion breakdown of Ethan Garcia.");
 });
 
-test("an opening with no placeholder is used verbatim", () => {
-  // Some hooks do not want the name in them — "Bro fell off" opens on the face
-  // rather than on a question, and forcing a name into it would break the line.
+test("rage-bait without a placeholder also falls back", () => {
   const beats = buildReelScript(report(SPREAD_OF_METRICS), {
     name: "Ethan Garcia",
     opening: "Bro really fell off.",
   });
-  assert.equal(beats[0].line, "Bro really fell off.");
+  assert.equal(beats[0].line, "A facial-proportion breakdown of Ethan Garcia.");
+});
+
+test("a safe custom opening is preserved", () => {
+  const beats = buildReelScript(report(SPREAD_OF_METRICS), {
+    name: "Ethan Garcia",
+    opening: "Breaking down the measurements behind {name}.",
+  });
+  assert.equal(beats[0].line, "Breaking down the measurements behind Ethan Garcia.");
 });
 
 test("an empty opening falls back rather than shipping a blank first beat", () => {
@@ -441,7 +448,7 @@ test("an empty opening falls back rather than shipping a blank first beat", () =
   // left alone as far as the person typing is concerned.
   for (const opening of ["", "   ", "\t"]) {
     const beats = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ethan Garcia", opening });
-    assert.equal(beats[0].line, "How attractive is Ethan Garcia?", JSON.stringify(opening));
+    assert.equal(beats[0].line, "A facial-proportion breakdown of Ethan Garcia.", JSON.stringify(opening));
   }
 });
 
@@ -456,6 +463,25 @@ test("the name still appears only once, however the opening is written", () => {
   assert.equal(beats[0].line, "Ethan Garcia. Is Ethan Garcia actually good looking?");
   const rest = beats.slice(1).map((b) => b.line).join(" ");
   assert.ok(!rest.includes("Ethan Garcia"), "the full name leaked past the hook");
+});
+
+test("risky creator context is omitted while safe context remains verbatim", () => {
+  const safe = "He is a singer with a stadium career, which this analysis does not measure.";
+  assert.ok(buildReelScript(report(SPREAD_OF_METRICS), { name: "Ari", note: safe }).some((b) => b.line === safe));
+
+  for (const note of ["Eight weeks of mewing", "Try this extreme fat loss challenge", "He is completely cracked"]) {
+    const lines = buildReelScript(report(SPREAD_OF_METRICS), { name: "Ari", note }).map((b) => b.line);
+    assert.ok(!lines.includes(note), note);
+  }
+});
+
+test("default rundown public copy avoids known moderation-risk framing", () => {
+  const lines = buildReelScript(report(SPREAD_OF_METRICS), { name: "Jordan", cut: "short" })
+    .map((beat) => beat.line)
+    .join(" ");
+  assert.equal(containsPublicRiskLanguage(lines), false, lines);
+  assert.doesNotMatch(lines, /before the rating|the verdict|ceiling|soft fixed|get your rating/i);
+  assert.match(lines, /Potential range: up to/);
 });
 
 // ---------------------------------------------------------------------------

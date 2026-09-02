@@ -5145,6 +5145,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 .prod-caption { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line); }
 .prod-caption h2 { font: 400 21px var(--serif); margin: 0 0 16px; }
 .prod-caption .prod-opt { margin-bottom: 14px; }
+.prod-cap-note { display: block; margin: -6px 0 14px; color: #a14f3c; font: 500 12px/1.45 var(--sans); }
+.prod-cap-safety { margin: 14px 0 0; color: var(--mut); font: 400 12px/1.55 var(--sans); }
+.prod-cap-safety b { color: var(--ink); font-weight: 650; }
 .prod-input {
   display: block; width: 100%; max-width: 420px; margin: 0 0 12px; padding: 11px 13px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: inherit;

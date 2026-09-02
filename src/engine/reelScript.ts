@@ -9,6 +9,7 @@ import { SPREAD, spreadLine } from "./rarity.js";
 import { PHRASES, SHORT_PHRASES, figureOf, hasPhrase } from "./reelPhrases.js";
 import { eyeShapeFrom } from "./traits.js";
 import { ordinal } from "./ordinal.js";
+import { screenPublicLine } from "./publicContentSafety.js";
 
 // ---------------------------------------------------------------------------
 // The celebrity breakdown, as an ordered list of beats.
@@ -414,8 +415,8 @@ function listOf(parts: string[]): string {
 
 type GroupKind = "positive" | "negative" | "side" | "side-negative";
 
-// The openers carry the STRUCTURE of the read: strengths, then a turn, then the
-// flaws, with the profile as its own act. The turn is the thing the old
+// The openers carry the STRUCTURE of the read: strengths, then a turn into the
+// lower-scoring measurements, with the profile as its own act. The turn is the thing the old
 // one-metric-per-beat shape had no room for — alternating good and bad by
 // magnitude means a viewer is never waiting for anything, because there is
 // nothing left to arrive.
@@ -436,7 +437,7 @@ const OPENERS: Record<GroupKind, (subject: string, pronoun: string) => string[]>
     `And ${p} has`,
   ],
   negative: (_s, p) => [
-    `The flaws. ${capitalize(p)} has`,
+    `The lower-scoring measurements. ${capitalize(p)} has`,
     `${capitalize(p)} also has`,
     `And ${p} has`,
   ],
@@ -444,7 +445,7 @@ const OPENERS: Record<GroupKind, (subject: string, pronoun: string) => string[]>
   // The first opener used to hardcode "He has", which printed a masculine
   // pronoun over any woman whose profile carried a flaw.
   "side-negative": (_s, p) => [
-    `The profile isn't perfect. ${capitalize(p)} has`,
+    `The profile's lower-scoring measurements. ${capitalize(p)} has`,
     `${capitalize(p)} also has`,
     `And ${p} has`,
   ],
@@ -485,7 +486,7 @@ function groupedBeats(
   const beats: Beat[] = [];
   for (let i = 0, n = 0; i < ms.length; i += CLAUSES_PER_SENTENCE, n++) {
     const chunk = ms.slice(i, i + CLAUSES_PER_SENTENCE);
-    // The first opener is the one that names the section — "Now the flaws", the
+    // The first opener is the one that names the section, or the
     // subject's own name — so it is never reused; the rest cycle behind it.
     // Cycling rather than clamping, because clamping to the last entry is what
     // produced three consecutive sentences opening "There is also".
@@ -509,8 +510,8 @@ function groupedBeats(
 
 const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
-/** The default opening question. Exported so the field can show it as a hint. */
-export const DEFAULT_OPENING = "How attractive is {name}?";
+/** The neutral default opening. Exported so the field can show it as a hint. */
+export const DEFAULT_OPENING = "A facial-proportion breakdown of {name}.";
 
 /**
  * The hook, with the name substituted in.
@@ -522,7 +523,8 @@ export const DEFAULT_OPENING = "How attractive is {name}?";
 export function openingLine(opening: string | undefined, name: string): string {
   const raw = opening?.trim();
   if (!raw) return DEFAULT_OPENING.replace(/\{name\}/g, name);
-  return raw.replace(/\{name\}/g, name);
+  const screened = screenPublicLine(raw, 120);
+  return (screened.text || DEFAULT_OPENING).replace(/\{name\}/g, name);
 }
 
 // The scorecard, assembled here rather than read out of the Report by the
@@ -655,7 +657,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // are deliberately not the same beat.
     {
       kind: "cta",
-      line: options.cta ?? "Before the rating, go get yours at truemax.app.",
+      line: screenPublicLine(options.cta ?? "", 120).text || "Before the result, explore your own analysis at truemax.app.",
     },
     // THE CARD. The face shrinks to the top of the frame and the whole
     // breakdown arrives under it.
@@ -681,19 +683,19 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
       ? ([
           {
             kind: "card",
-            line: `The verdict: ${verdict.word}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
+            line: `Overall result: ${verdict.word}. ${shortName} measures ${report.overall.toFixed(1)} out of 10.`,
             card: cardData(report, options.tone),
           },
           {
             kind: "card",
-            line: `Ceiling: ${report.potential.toFixed(1)}, with everything soft fixed.`,
+            line: `Potential range: up to ${report.potential.toFixed(1)}, based on changeable factors.`,
             card: cardData(report, options.tone),
           },
         ] satisfies Beat[])
       : ([
     {
       kind: "card",
-      line: `The verdict: ${verdict.word}. ${capitalize(verdict.descriptor)}.`,
+      line: `Overall result: ${verdict.word}. ${capitalize(verdict.descriptor)}.`,
       card: cardData(report, options.tone),
     },
     // The number is its OWN beat rather than a third sentence on the verdict's.
@@ -720,7 +722,7 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
     // somebody else's name on it.
     {
       kind: "card",
-      line: `Ceiling: ${report.potential.toFixed(1)}. That's the same bone structure with everything soft fixed.`,
+      line: `Potential range: up to ${report.potential.toFixed(1)}. It keeps the measured bone structure and estimates changeable factors only.`,
       card: cardData(report, options.tone),
     },
         ] satisfies Beat[])),
@@ -781,7 +783,8 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   }
 
   if (options.note?.trim()) {
-    beats.push({ kind: "context", line: options.note.trim() });
+    const note = screenPublicLine(options.note, 320);
+    if (note.text) beats.push({ kind: "context", line: note.text });
   }
 
   // The address, typed into a search bar on screen.
@@ -791,11 +794,11 @@ export function buildReelScript(report: Report, options: ReelScriptOptions): Bea
   // is the one piece of the video with a job outside the video. It lands the
   // beat after the curve, which is the moment the viewer has just been shown
   // where a stranger stands and has not yet been shown where they stand.
-  beats.push({ kind: "search", line: "Want yours analysed? truemax.app." });
+  beats.push({ kind: "search", line: "Explore your own analysis at truemax.app." });
 
   // Ends on a question rather than a statement. The rundowns that collect
   // comments all close by asking for the next subject, and it costs one line.
-  beats.push({ kind: "cta", line: "Who should we measure next?" });
+  beats.push({ kind: "cta", line: "Who should we analyse next?" });
 
   return beats;
 }

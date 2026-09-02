@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCaption } from "./caption.js";
 import type { CaptionInput } from "./caption.js";
+import { containsPublicRiskLanguage } from "./publicContentSafety.js";
 
 const base: CaptionInput = {
   platform: "tiktok",
@@ -17,14 +18,14 @@ test("same inputs, same caption, every time", () => {
 });
 
 test("first person for 'me' and for an empty answer", () => {
-  assert.match(buildCaption(base).caption, /^I let the math/);
-  assert.match(buildCaption({ ...base, who: "" }).caption, /^I let the math/);
-  assert.match(buildCaption({ ...base, who: " ME " }).caption, /^I let the math/);
+  assert.match(buildCaption(base).caption, /^A visual facial-proportion breakdown of my scan/);
+  assert.match(buildCaption({ ...base, who: "" }).caption, /^A visual facial-proportion breakdown of my scan/);
+  assert.match(buildCaption({ ...base, who: " ME " }).caption, /^A visual facial-proportion breakdown of my scan/);
 });
 
 test("a named subject is used as typed, with they/them", () => {
   const r = buildCaption({ ...base, who: "Jordan" });
-  assert.match(r.caption, /^Jordan let the math rate their face/);
+  assert.match(r.caption, /^A visual facial-proportion breakdown of Jordan/);
 });
 
 test("standing is claimed only above the median band", () => {
@@ -37,10 +38,24 @@ test("standing is claimed only above the median band", () => {
   assert.match(low, /4\.1\/10/);
 });
 
-test("the description rides along as one line, never invented", () => {
-  const r = buildCaption({ ...base, description: "  8 weeks\nof mewing  " });
-  assert.match(r.caption, /8 weeks of mewing/);
+test("a safe description rides along as one line, never invented", () => {
+  const r = buildCaption({ ...base, description: "  8 weeks\nof consistent training  " });
+  assert.match(r.caption, /8 weeks of consistent training/);
+  assert.equal(r.descriptionOmitted, false);
   assert.ok(!buildCaption(base).caption.includes("undefined"));
+});
+
+test("risky descriptions and injected hashtags are omitted instead of rewritten", () => {
+  for (const description of [
+    "8 weeks of mewing",
+    "Try this extreme fat loss challenge",
+    "Get your rating #looksmaxxing #makemeviral",
+  ]) {
+    const r = buildCaption({ ...base, description });
+    assert.equal(r.descriptionOmitted, true, description);
+    assert.ok(!r.caption.includes(description), description);
+    assert.equal(containsPublicRiskLanguage(r.full), false, r.full);
+  }
 });
 
 test("a runaway description is capped, not pasted whole", () => {
@@ -57,6 +72,7 @@ test("platform picks the tag list; both carry the brand tag", () => {
   assert.ok(ig.hashtags.length > tk.hashtags.length);
   assert.ok(tk.hashtags.includes("#truemax"));
   assert.ok(ig.hashtags.includes("#truemax"));
+  assert.doesNotMatch([...tk.hashtags, ...ig.hashtags].join(" "), /looksmax|glowup|#fyp/i);
 });
 
 test("the full block is caption plus tags, paste-ready", () => {
@@ -65,14 +81,15 @@ test("the full block is caption plus tags, paste-ready", () => {
   assert.match(r.full, /truemax\.app/);
 });
 
-test("nothing demeaning can come out of it", () => {
+test("nothing demeaning or high-risk can come out of fixed copy", () => {
   // The caption is the most public sentence the app writes. Walk the whole
   // score range and check the standing words never go below neutral.
   for (let pct = 1; pct <= 99; pct += 7) {
     const words = buildCaption({ ...base, percentile: pct, overall: pct / 10 }).full.toLowerCase();
-    for (const banned of ["subhuman", "incel", "ugly", "hopeless", "bottom"]) {
+    for (const banned of ["subhuman", "incel", "ugly", "hopeless", "bottom", "cracked", "looksmaxxing", "mewing"]) {
       assert.ok(!words.includes(banned), `"${banned}" at percentile ${pct}`);
     }
+    assert.equal(containsPublicRiskLanguage(words), false, words);
   }
 });
 
@@ -85,11 +102,9 @@ test("nothing demeaning can come out of it", () => {
 // ---------------------------------------------------------------------------
 const BASE = { platform: "tiktok" as const, who: "me", description: "", overall: 7.6, percentile: 92 };
 
-test("an omitted cut produces exactly what it always did", () => {
-  // Every existing caller passes no kind. If this drifts, captions already
-  // copied and posted stop matching the ones the app now generates.
+test("an omitted cut produces the generic visual-analysis caption", () => {
   assert.equal(buildCaption(BASE).full, buildCaption({ ...BASE, kind: "reel" }).full);
-  assert.match(buildCaption(BASE).caption, /^I let the math rate my face\./);
+  assert.match(buildCaption(BASE).caption, /^A visual facial-proportion breakdown of my scan\./);
 });
 
 test("a before/after leads with the change, not the number", () => {
@@ -97,13 +112,13 @@ test("a before/after leads with the change, not the number", () => {
   // the video exists.
   const up = buildCaption({ ...BASE, kind: "beforeAfter", from: 6.1 });
   assert.match(up.caption, /6\.1 → 7\.6/);
-  assert.match(up.caption, /What should I fix next\?/);
+  assert.match(up.caption, /Which measurement should the next comparison focus on\?/);
 
   // And a drop is stated, not hidden. A generator that only knows how to
   // report improvement is a generator nobody should believe about improvement.
   const down = buildCaption({ ...BASE, kind: "beforeAfter", overall: 5.4, percentile: 40, from: 6.1 });
   assert.match(down.caption, /6\.1 → 5\.4/);
-  assert.match(down.caption, /went down/);
+  assert.match(down.caption, /Compare the measurements, not just the number/);
 });
 
 test("the verdict WORD never reaches a caption, on any cut", () => {
@@ -130,11 +145,26 @@ test("a below-median score is stated plainly and never dressed up", () => {
   }
 });
 
-test("the ceiling appears only when it is above the score", () => {
-  assert.match(buildCaption({ ...BASE, kind: "rundown", potential: 8.4 }).caption, /Ceiling: 8\.4/);
-  // A ceiling equal to the score is not a target, it is a full stop, and
-  // printing it reads as the product admitting it has nothing to sell.
-  assert.doesNotMatch(buildCaption({ ...BASE, kind: "rundown", potential: 7.6 }).caption, /Ceiling/);
+test("potential estimates stay out of public captions", () => {
+  for (const potential of [7.6, 8.4]) {
+    const caption = buildCaption({ ...BASE, kind: "rundown", potential }).caption;
+    assert.doesNotMatch(caption, /ceiling|potential|guarantee/i);
+  }
+});
+
+test("every caption kind uses neutral public framing", () => {
+  for (const kind of ["reel", "rundown", "breakdown", "verdict", "beforeAfter"] as const) {
+    const out = buildCaption({
+      ...BASE,
+      kind,
+      who: "Jordan",
+      description: "A measured comparison",
+      from: 6.1,
+      potential: 9.3,
+    });
+    assert.equal(containsPublicRiskLanguage(out.full), false, `${kind}: ${out.full}`);
+    assert.doesNotMatch(out.full, /rate (?:my|your|their) face|get your rating|ceiling|soft fixed/i, kind);
+  }
 });
 
 test("every cut still carries the address and the hashtags", () => {

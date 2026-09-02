@@ -24,7 +24,7 @@ export interface CaptionStepOptions {
   kind: CaptionKind;
   overall: number;
   percentile: number;
-  /** The ceiling, when the cut showed one. */
+  /** The potential estimate, when the cut showed one. */
   potential?: number;
   /** The earlier score, for a before/after. */
   from?: number;
@@ -58,20 +58,25 @@ export function showCaptionStep(host: HTMLElement, options: CaptionStepOptions):
     <input class="prod-input${preset ? "" : " hidden"}" id="prod-who-name"
       placeholder="Their first name" maxlength="40" value="${escapeAttr(preset)}">
     <input class="prod-input" id="prod-desc" placeholder="One line about it (optional), e.g. 8 weeks of training" maxlength="140">
+    <small class="prod-cap-note hidden" id="prod-desc-note" role="status"></small>
     <div class="prod-cap-out">
       <pre id="prod-cap-text"></pre>
       <button type="button" class="btn pri" id="prod-copy">Copy caption + hashtags</button>
-    </div>`;
+    </div>
+    <p class="prod-cap-safety"><b>Before posting:</b> for promotional TikToks, turn on
+      Content disclosure → Your brand. If realistic AI media appears, also turn on
+      AI-generated content, and use a commercially cleared sound.</p>`;
 
   let platform: Platform = "tiktok";
   let whoMode = preset ? "name" : "me";
   const nameInput = host.querySelector<HTMLInputElement>("#prod-who-name")!;
   const descInput = host.querySelector<HTMLInputElement>("#prod-desc")!;
   const out = host.querySelector<HTMLElement>("#prod-cap-text")!;
+  const descNote = host.querySelector<HTMLElement>("#prod-desc-note")!;
 
   const regenerate = () => {
     const who = whoMode === "me" ? "me" : nameInput.value;
-    out.textContent = buildCaption({
+    const result = buildCaption({
       platform,
       who,
       description: descInput.value,
@@ -80,7 +85,12 @@ export function showCaptionStep(host: HTMLElement, options: CaptionStepOptions):
       percentile: options.percentile,
       potential: options.potential,
       from: options.from,
-    }).full;
+    });
+    out.textContent = result.full;
+    descNote.classList.toggle("hidden", !result.descriptionOmitted);
+    descNote.textContent = result.descriptionOmitted
+      ? "That optional line was left out because it contains wording or hashtags that can be misread by platform safety systems."
+      : "";
   };
 
   for (const seg of host.querySelectorAll<HTMLElement>(".prod-seg")) {
