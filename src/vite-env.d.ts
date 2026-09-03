@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
+  /** Enables the checked image-rendering step after its server route is live. */
+  readonly VITE_MORPH_PREVIEW?: string;
 }
 
 interface ImportMeta {

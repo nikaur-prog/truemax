@@ -26,3 +26,9 @@ test("a repeated back-swipe reinstalls the report sentinel while the dialog is o
   assert.match(handler, /guardEntryPushed = false;\s*if \(leavePromptOpen\) \{\s*pushLeaveGuardEntry\(\);/);
   assert.match(handler, /const sentinelPresent = guardEntryPushed;/);
 });
+
+test("a past-due account is never described as an unrenewed Free plan", () => {
+  const source = readFileSync(new URL("./authModal.ts", import.meta.url), "utf8");
+  assert.match(source, /Stripe could not renew your subscription\./);
+  assert.doesNotMatch(source, /Stripe could not renew \$\{planName\}/);
+});

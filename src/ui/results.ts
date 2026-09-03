@@ -56,6 +56,8 @@ import { SIDE_TAIL_LIMIT_PCT } from "../engine/precision.js";
 import { confirmScanAction } from "./scanConfirm.js";
 import { mountCanvasRecovery } from "./canvasRecovery.js";
 import type { CanvasRecoveryHandle } from "./canvasRecovery.js";
+import { morphBlueprints } from "../engine/morphPlan.js";
+import { morphPreviewHTML, wireMorphPreview } from "./morphPreview.js";
 
 interface Ctx {
   report: Report;
@@ -1438,7 +1440,7 @@ function showOverall(): void {
       ${viewCards(r)}
       ${
         merged
-          ? `<p class="viewnote done">Projection, chin and jaw angle can only be seen in profile. The front view carries 75% of the overall number and the side 25%. The side is capped because thirteen points placed by hand is the one input you can get wrong by mis-dragging.</p>`
+          ? `<p class="viewnote done">Projection, chin and jaw angle can only be seen in profile. The front view carries 75% of the overall number and the side 25%. The profile contribution is capped because its thirteen landmarks are the least reliable input and may still need a manual correction.</p>`
           : ctx.onSideProfile
             ? `<p class="viewnote">Measured from the front only. <button class="linkish" id="side-nudge">Add a side profile</button> to include chin projection, jaw angle and facial convexity.</p>`
             : ""
@@ -2568,6 +2570,8 @@ function showImprove(): void {
   const { report: r, delta } = ctx;
   setZoom(null);
   const profile = loadProfile();
+  const morph = morphBlueprints(r, profile, Boolean(ctx.sidePhoto));
+  const morphRenderEnabled = import.meta.env.VITE_MORPH_PREVIEW === "1" && maxAccess && adultUser;
 
   // The plan is where someone's answers have to actually bite. Regions they
   // asked us to leave alone are dropped from the WRITTEN plan — their scores
@@ -2617,6 +2621,7 @@ function showImprove(): void {
         <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
+      ${morphPreviewHTML({ selected: morph.selected, maxVision: morph.maxVision, renderEnabled: morphRenderEnabled })}
       ${quietNote}
       ${progress}
       ${fixables
@@ -2691,6 +2696,15 @@ function showImprove(): void {
   // painted from the cached front capture rather than re-read from the live
   // canvas, which by now may be showing the side profile.
   paintCeilingCta(body(), frontPhoto);
+  if (!gated) {
+    wireMorphPreview(body(), {
+      selected: morph.selected,
+      maxVision: morph.maxVision,
+      frontPhoto,
+      sidePhoto: ctx.sidePhoto ?? null,
+      renderEnabled: morphRenderEnabled,
+    });
+  }
 
   // Only the live copy. A gated plan renders the same markup twice, once behind
   // the blur, and wiring the blurred one would put a working form inside a lock
