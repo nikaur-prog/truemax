@@ -4,9 +4,9 @@ import type { SidePointId, SidePoints } from "./sideMetrics.js";
 export const SIDE_FEEDBACK_CONSENT_VERSION = "side-landmark-feedback-v1";
 export const SIDE_FEEDBACK_RETENTION_DAYS = 90;
 
-export type SideSeedMethod = "mesh" | "silhouette" | "segmentation" | "vision" | "existing";
+export type SideSeedMethod = "mesh" | "silhouette" | "segmentation" | "vision" | "fused" | "existing";
 
-const SEED_METHODS: ReadonlySet<string> = new Set(["mesh", "silhouette", "segmentation", "vision", "existing"]);
+const SEED_METHODS: ReadonlySet<string> = new Set(["mesh", "silhouette", "segmentation", "vision", "fused", "existing"]);
 
 export interface SideFeedbackIntent {
   scanId: string;

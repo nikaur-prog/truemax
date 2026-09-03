@@ -68,6 +68,7 @@ import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
   clearPurchaseResult,
   consumePurchaseResult,
+  hasMaxAccess,
   hasMaxOrStaffAccess,
   consumeScanCreditForScan,
   loadEntitlement,
@@ -118,6 +119,7 @@ import {
   savePendingAnalysis,
 } from "./engine/pendingAnalysis.js";
 import { activateScanOwner, activeScanOwner } from "./engine/scanScope.js";
+import { isIntentionalNavigation } from "./engine/navigationIntent.js";
 import { ScanSession } from "./engine/scanSession.js";
 import type { ScanSource, ScanToken } from "./engine/scanSession.js";
 import {
@@ -133,6 +135,8 @@ import { track } from "./engine/track.js";
 import { markPlatform } from "./engine/platform.js";
 import { beginAnalysisHandoff } from "./ui/analysisHandoff.js";
 import type { AnalysisHandoffRun } from "./ui/analysisHandoff.js";
+import { readBody } from "./engine/bodyProfile.js";
+import { openBodyProfileDialog } from "./ui/bodyProfileDialog.js";
 
 // Ingest cap, and it is an EXPORT setting as much as a detection one.
 //
@@ -202,6 +206,10 @@ async function refreshPathwayState(): Promise<void> {
 // tell Starter's three a week from Max's fifty. Defaults to "free", so a read
 // that has not landed yet offers no guest scans rather than fifty.
 let lastKnownTier: EntitlementTier = "free";
+// Staff may inspect Max surfaces, but only an actual paid Max entitlement
+// triggers the mandatory body-details setup. Access and purchase are different
+// facts, and a staff flag must never masquerade as a subscription.
+let lastKnownPaidMax = false;
 
 
 async function refreshMaxAccess(): Promise<void> {
@@ -244,6 +252,7 @@ async function refreshMaxAccess(): Promise<void> {
       currentPaidScan = use?.consumed === true;
     }
     setMaxAccess(hasMaxOrStaffAccess(entitlement, admin));
+    lastKnownPaidMax = hasMaxAccess(entitlement);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     lastKnownTier = tierOf(entitlement);
@@ -264,6 +273,7 @@ async function refreshMaxAccess(): Promise<void> {
     // retry — where the paid product handed to everybody during an outage is
     // not.
     setMaxAccess(false);
+    lastKnownPaidMax = false;
     // The standard price, for the same reason: quoting the member price to
     // somebody we could not confirm is a member sets up a charge that does not
     // match what they were shown.
@@ -1110,6 +1120,22 @@ async function ensureOnboarded(user: User): Promise<void> {
   await openTrialFunnel(user, undefined, { required: true });
 }
 
+async function requirePaidMaxBodyProfile(user: User): Promise<void> {
+  if (!lastKnownPaidMax || readBody()) return;
+  const generation = scanGeneration;
+  let profile;
+  try {
+    profile = await loadOnboardingProfile(user);
+  } catch {
+    return;
+  }
+  if (generation !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
+  // Missing or under-18 dates fail closed. Body and diet planning are never
+  // opened by a client-side flag, and an unfinished signup keeps its own gate.
+  if (!onboardingComplete(profile) || !profileIsAdult(profile)) return;
+  await openBodyProfileDialog({ required: true });
+}
+
 document.getElementById("logo-home")?.addEventListener("click", async () => {
   const generation = scanGeneration;
   const user = await currentUser();
@@ -1546,7 +1572,7 @@ function disarmLeaveGuard(): void {
 }
 
 window.addEventListener("beforeunload", (event) => {
-  if (!leaveGuard) return;
+  if (!leaveGuard || isIntentionalNavigation()) return;
   event.preventDefault();
   // Ignored by modern browsers in favour of their own wording; required by
   // older ones for the dialog to appear at all.
@@ -2993,13 +3019,23 @@ async function continueAuthenticatedAnalysis(
 }
 
 let resumePendingStarted = false;
-async function resumePendingAfterAuth(): Promise<void> {
-  if (resumePendingStarted) return;
+let pendingResumeFlight: Promise<boolean> | null = null;
+
+async function resumePendingAfterAuth(): Promise<boolean> {
+  if (resumePendingStarted) return false;
+  if (pendingResumeFlight) return pendingResumeFlight;
+  pendingResumeFlight = runPendingResume().finally(() => {
+    pendingResumeFlight = null;
+  });
+  return pendingResumeFlight;
+}
+
+async function runPendingResume(): Promise<boolean> {
   const generation = scanGeneration;
   const user = await currentUser();
-  if (generation !== scanGeneration || !user) return;
+  if (generation !== scanGeneration || !user) return false;
   const saved = claimPendingAnalysis(user.id);
-  if (!saved) return;
+  if (!saved) return false;
 
   // Claim the redirect continuation before its first network read. Supabase
   // may emit INITIAL_SESSION and SIGNED_IN for the same navigation; without
@@ -3011,7 +3047,7 @@ async function resumePendingAfterAuth(): Promise<void> {
   await refreshMaxAccess();
   if (generation !== scanGeneration) {
     resumePendingStarted = false;
-    return;
+    return false;
   }
 
   // The weekly gate is asked HERE, because this is the first point where there
@@ -3026,11 +3062,11 @@ async function resumePendingAfterAuth(): Promise<void> {
   // also the payment.
   if (!(await ensureScanAllowed(() => undefined))) {
     resumePendingStarted = false;
-    return;
+    return false;
   }
   if (generation !== scanGeneration) {
     resumePendingStarted = false;
-    return;
+    return false;
   }
 
   const token = scanSession.resume(`user:${user.id}`, saved.scanId);
@@ -3046,11 +3082,11 @@ async function resumePendingAfterAuth(): Promise<void> {
     saved.front.width,
     saved.front.height,
   );
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) return false;
   if (!frontOk) {
     resumePendingStarted = false;
-    resetToUpload();
-    return;
+    el.status.innerHTML = "<b>Your saved scan is still here.</b> This browser could not reopen the photo. Refresh once to retry.";
+    return false;
   }
   el.photoCanvas.width = frontShot.width;
   el.photoCanvas.height = frontShot.height;
@@ -3065,7 +3101,7 @@ async function resumePendingAfterAuth(): Promise<void> {
       saved.side.width,
       saved.side.height,
     );
-    if (!scanIsCurrent(token, generation)) return;
+    if (!scanIsCurrent(token, generation)) return false;
     if (!sideOk) sidePhoto = undefined;
   }
 
@@ -3100,14 +3136,15 @@ async function resumePendingAfterAuth(): Promise<void> {
   // A resumed scan crossed a redirect, so whatever the subject chooser knew is
   // gone with the page it was answered on — and this scan may have been
   // captured before sign-in ever happened. Ask before attributing.
-  if (!(await askLateSubject())) return;
-  if (!scanIsCurrent(token, generation)) return;
+  if (!(await askLateSubject())) return false;
+  if (!scanIsCurrent(token, generation)) return false;
   // Remember the population only once it is known to be the OWNER's answer —
   // a resumed scan can turn out to be a guest's, and the global key seeds the
   // owner's next preselect.
   if (!scanSubject) storeSex(saved.sex);
   startConsentedSideFeedback();
   await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex), token);
+  return true;
 }
 
 // One step back from the side capture, rather than out of the scan.
@@ -3379,10 +3416,6 @@ if (isAuthAvailable()) {
     // is the visit-0 line, so there is no flash of a wrong headline.
     syncLandingHeadline(user ? displayName(user) : null);
     void refreshHomeBrand(user);
-    // A new account has answered nothing yet. Asking here — rather than at the
-    // first moment the app needs a name or an age — means the questions arrive
-    // as part of signing up instead of interrupting a scan.
-    if (user) void ensureOnboarded(user);
     // Signing in or out while a report is on screen changes what its lead
     // button should offer. Without this the label stays whatever it was when
     // the report rendered, which is how somebody who signed in mid-session
@@ -3392,9 +3425,22 @@ if (isAuthAvailable()) {
     // full-resolution canvases. OAuth and email-confirmation returns have no
     // in-page callback, so the saved scan resumes on the next navigation.
     if (user) {
-      void refreshMaxAccess();
-      void reconcileReturnedPurchase();
-      setTimeout(() => void resumePendingAfterAuth(), 0);
+      // Reward a person who made an account from the scan wall with the result
+      // first. Onboarding used to race this continuation on a fresh OAuth
+      // document, which is why phones could land back on the capture screen.
+      // The delay still gives the in-page password callback first use of its
+      // full-resolution canvases.
+      setTimeout(() => {
+        void (async () => {
+          await refreshMaxAccess();
+          await reconcileReturnedPurchase();
+          const resumed = await resumePendingAfterAuth();
+          if (!resumed && !resumePendingStarted) {
+            await ensureOnboarded(user);
+            await requirePaidMaxBodyProfile(user);
+          }
+        })();
+      }, 0);
     } else if (returnedPurchase?.status === "success") {
       showPurchaseNotice("Sign in to confirm the payment and add it to this account.");
     }

@@ -47,7 +47,7 @@ export function createAutoCapture(opts: Opts): AutoCapture {
   // same — beep, beep, click — whether the wait is 1.5 seconds or three.
   const STEPS = 2;
   const stepMs = total / STEPS;
-  let startedAt = 0;
+  let startedAt: number | null = null;
   let raf = 0;
   let lastBeep = -1;
   let fired = false;
@@ -59,11 +59,19 @@ export function createAutoCapture(opts: Opts): AutoCapture {
   const stop = () => {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
-    startedAt = 0;
+    startedAt = null;
     lastBeep = -1;
   };
 
+  const schedule = () => {
+    if (!raf) raf = requestAnimationFrame(frame);
+  };
+
   const frame = (now: number) => {
+    // The callback identified by `raf` is the callback running now. Clear it
+    // before doing any work so a readiness update arriving during this frame
+    // can schedule exactly one successor, never a parallel countdown loop.
+    raf = 0;
     // PAUSED MEANS PAUSED, even for a callback already in flight.
     //
     // cancelAnimationFrame is asked for below, and belt-and-braces is right
@@ -74,7 +82,7 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     // rejected — the same outcome the grace period used to produce, arriving
     // by a different route.
     if (pausedAt) return;
-    if (!startedAt || fired) return;
+    if (startedAt === null || fired) return;
     const elapsed = now - startedAt;
     const remaining = Math.max(0, total - elapsed);
     // Steps remaining, not seconds remaining. Both the beep and the number on
@@ -100,7 +108,7 @@ export function createAutoCapture(opts: Opts): AutoCapture {
       fired = false;
       return;
     }
-    raf = requestAnimationFrame(frame);
+    schedule();
   };
 
   // IT PAUSES. IT DOES NOT START AGAIN.
@@ -150,22 +158,33 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     update(ready: boolean) {
       if (ready) {
         badSince = 0;
-        if (pausedAt) {
+        if (pausedAt && startedAt !== null) {
           // Resume where it stopped: push the start forward by exactly the
           // time spent paused, so the remaining count is unchanged.
           startedAt += performance.now() - pausedAt;
           pausedAt = 0;
-          raf = requestAnimationFrame(frame);
+          // iOS can starve animation frames while its camera and landmark
+          // work are busy. A fresh readiness result is still a reliable clock
+          // opportunity, so advance immediately as well as requesting paint.
+          frame(performance.now());
           return;
         }
-        if (!startedAt) {
+        if (startedAt === null) {
           startedAt = performance.now();
-          raf = requestAnimationFrame(frame);
+          frame(startedAt);
+          return;
         }
+        // Do not make the visible count depend solely on paint frames. Camera
+        // analysis continues to deliver readiness updates on devices where
+        // requestAnimationFrame is temporarily throttled, and both paths use
+        // this same monotonic start time.
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
+        frame(performance.now());
         return;
       }
 
-      if (!startedAt) return;
+      if (startedAt === null) return;
       const now = performance.now();
       if (!badSince) badSince = now;
       // Gone long enough that this is no longer a wobble. Forget the progress.
@@ -190,7 +209,7 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     },
     // Paused still counts as armed: the count is held, not discarded, and a
     // caller asking "is a capture under way" should hear yes.
-    armed: () => startedAt !== 0,
+    armed: () => startedAt !== null,
   };
 }
 

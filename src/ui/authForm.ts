@@ -9,6 +9,7 @@ import {
   socialAvailability,
   updatePassword,
 } from "../engine/auth.js";
+import { beginIntentionalNavigation } from "../engine/navigationIntent.js";
 
 export type AuthMode = "link" | "password" | "signup" | "forgot" | "reset";
 
@@ -114,6 +115,9 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
   let formWorking = false;
+  root.querySelector<HTMLAnchorElement>(".acct-portal-link")?.addEventListener("click", () => {
+    beginIntentionalNavigation();
+  });
   const updateSubmit = syncSubmitState(form, submit, !isLink, () => formWorking);
 
   form.addEventListener("submit", async (event) => {

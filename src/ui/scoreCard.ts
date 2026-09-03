@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { Report } from "../engine/types.js";
+import type { RegionId, RegionScore, Report } from "../engine/types.js";
 import { REGION_NAMES, aggregateScoreToPercentile } from "../engine/scoring.js";
 import { rankShort } from "./templates.js";
 
@@ -45,6 +45,45 @@ const H = 1920;
 // showing all eight is a table, and a table is not a thing anybody screenshots.
 const TILE_COUNT = 4;
 
+// A comparison has to compare like with like. Picking each photograph's four
+// highest regions independently made a before card show one set of labels and
+// its after card show another, even though both came from the same workflow.
+// These fixed sets keep the visual contract stable while leaving enough room
+// for the scores to stay readable on a phone.
+const FRONT_TILE_ORDER: RegionId[] = ["proportions", "eyes", "midface", "jaw"];
+const SIDE_TILE_ORDER: RegionId[] = ["jaw", "chin", "nose", "lips"];
+const TILE_FALLBACK_ORDER: RegionId[] = [
+  "proportions",
+  "eyes",
+  "midface",
+  "jaw",
+  "chin",
+  "nose",
+  "lips",
+  "symmetry",
+];
+
+export function scoreCardTileRegions(
+  report: Pick<Report, "metrics" | "regions">,
+): RegionScore[] {
+  const hasFront = report.metrics.some((metric) => metric.def.view === "front");
+  const hasSide = report.metrics.some((metric) => metric.def.view === "side");
+  const primaryOrder = hasSide && !hasFront ? SIDE_TILE_ORDER : FRONT_TILE_ORDER;
+  const byId = new Map(
+    report.regions
+      .filter((region) => Number.isFinite(region.score))
+      .map((region) => [region.region, region] as const),
+  );
+  const picked: RegionScore[] = [];
+  for (const id of [...primaryOrder, ...TILE_FALLBACK_ORDER]) {
+    const region = byId.get(id);
+    if (!region || picked.some((entry) => entry.region === id)) continue;
+    picked.push(region);
+    if (picked.length === TILE_COUNT) break;
+  }
+  return picked;
+}
+
 export interface ScoreCardInput {
   report: Report;
   /** Optional label above the photo — a name, a week number, "AFTER". */
@@ -75,12 +114,23 @@ export interface ScoreCardInput {
 // the export must not turn that same reading into the praise-sounding Top 90%.
 export const scoreCardRank = rankShort;
 
-export function renderScoreCard(
+export async function renderScoreCard(
   canvas: HTMLCanvasElement,
   photo: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
   input: ScoreCardInput,
-): void {
+): Promise<void> {
+  // Canvas does not initiate or await web-font loading. Asking for the exact
+  // bundled variable family before the first draw prevents an intermittent
+  // Georgia/Arial fallback from becoming permanent pixels in the exported PNG.
+  // A failed font request must not turn a share action into a dead button.
+  // The bundled faces normally resolve here; allSettled preserves export as a
+  // last-resort system-font card if a browser refuses the FontFaceSet promise.
+  await Promise.allSettled([
+    document.fonts.load('300 118px "Fraunces Variable"'),
+    document.fonts.load('600 34px "Inter Variable"'),
+    document.fonts.ready,
+  ]);
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
@@ -100,7 +150,7 @@ export function renderScoreCard(
 
   if (input.caption) {
     ctx.save();
-    ctx.font = "500 26px Inter, Arial, sans-serif";
+    ctx.font = '500 26px "Inter Variable", Inter, Arial, sans-serif';
     ctx.letterSpacing = "6px";
     ctx.fillStyle = "#7f8682";
     ctx.textAlign = "center";
@@ -198,18 +248,18 @@ function drawHero(
   ctx.save();
   ctx.textAlign = "left";
 
-  ctx.font = "500 24px Inter, Arial, sans-serif";
+  ctx.font = '500 24px "Inter Variable", Inter, Arial, sans-serif';
   ctx.letterSpacing = "5px";
   ctx.fillStyle = "#7f8682";
   ctx.fillText(label, x, y);
 
-  ctx.font = "300 118px Fraunces, Georgia, serif";
+  ctx.font = '300 118px "Fraunces Variable", Fraunces, Georgia, serif';
   ctx.letterSpacing = "-4px";
   ctx.fillStyle = colour;
   const shown = score.toFixed(1);
   ctx.fillText(shown, x, y + 116);
   const scoreWidth = ctx.measureText(shown).width;
-  ctx.font = "300 38px Fraunces, Georgia, serif";
+  ctx.font = '300 38px "Fraunces Variable", Fraunces, Georgia, serif';
   ctx.letterSpacing = "0px";
   ctx.fillStyle = "#5f6663";
   ctx.fillText("/10", x + scoreWidth + 10, y + 116);
@@ -217,7 +267,7 @@ function drawHero(
   // The rank. Set larger and brighter than the label above it because this is
   // the line the whole card exists to deliver — the score is context for it,
   // not the other way round.
-  ctx.font = "600 34px Inter, Arial, sans-serif";
+  ctx.font = '600 34px "Inter Variable", Inter, Arial, sans-serif';
   ctx.letterSpacing = "0px";
   ctx.fillStyle = colour;
   ctx.fillText(scoreCardRank(percentile), x, y + 166);
@@ -241,11 +291,7 @@ function drawTiles(
   y: number,
   width: number,
 ): void {
-  // Strongest first. The card is a hook, and a hook opens on the best thing.
-  const regions = [...report.regions]
-    .filter((region) => Number.isFinite(region.score))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, TILE_COUNT);
+  const regions = scoreCardTileRegions(report);
   if (!regions.length) return;
 
   const gap = 28;
@@ -266,12 +312,12 @@ function drawTiles(
 
     ctx.save();
     ctx.textAlign = "left";
-    ctx.font = "500 22px Inter, Arial, sans-serif";
+    ctx.font = '500 22px "Inter Variable", Inter, Arial, sans-serif';
     ctx.letterSpacing = "3px";
     ctx.fillStyle = "#808783";
     ctx.fillText((REGION_NAMES[region.region] ?? region.region).toUpperCase(), tx + 32, ty + 52);
 
-    ctx.font = "300 66px Fraunces, Georgia, serif";
+    ctx.font = '300 66px "Fraunces Variable", Fraunces, Georgia, serif';
     ctx.letterSpacing = "-2px";
     ctx.fillStyle = "#f3f4ef";
     ctx.fillText(region.score.toFixed(1), tx + 32, ty + 126);
@@ -288,7 +334,7 @@ function drawTiles(
 
 function drawWatermark(ctx: CanvasRenderingContext2D): void {
   ctx.save();
-  ctx.font = "500 30px Inter, Arial, sans-serif";
+  ctx.font = '500 30px "Inter Variable", Inter, Arial, sans-serif';
   ctx.letterSpacing = "4px";
   ctx.textAlign = "left";
   const name = "truemax";
@@ -306,7 +352,7 @@ function drawWatermark(ctx: CanvasRenderingContext2D): void {
   // they are measured against is exactly the artefact this product exists to
   // argue with, and it costs one line to not be that.
   ctx.globalAlpha = 0.5;
-  ctx.font = "500 21px Inter, Arial, sans-serif";
+  ctx.font = '500 21px "Inter Variable", Inter, Arial, sans-serif';
   ctx.letterSpacing = "2px";
   ctx.textAlign = "center";
   ctx.fillStyle = "#6d746f";

@@ -61,6 +61,19 @@ test("a clean run fires after the full countdown", () => {
   assert.equal(h.fired(), 1);
 });
 
+test("readiness frames advance the count when animation frames are starved", () => {
+  const h = harness(1.5);
+  h.auto.update(true);
+  // Simulate the iPhone camera/landmarker monopolising paint callbacks while
+  // it continues to produce usable readiness measurements.
+  now += 800;
+  h.auto.update(true);
+  assert.equal(h.ticks[h.ticks.length - 1], 1);
+  now += 800;
+  h.auto.update(true);
+  assert.equal(h.fired(), 1);
+});
+
 test("a wobble costs the wobble, not the whole countdown", () => {
   const h = harness(1.5);
   h.auto.update(true);

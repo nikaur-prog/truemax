@@ -3332,7 +3332,7 @@ async function downloadScoreCard(
     // them is the one the pair is about; it shows now versus ceiling, which is
     // the opening card of a glow-up video and exactly what the before is for.
     const previousOverall = from ? undefined : (typed ?? beforeScan?.report.overall);
-    renderScoreCard(canvas, from?.photo ?? last!.photo, from?.lm ?? last!.lm, {
+    await renderScoreCard(canvas, from?.photo ?? last!.photo, from?.lm ?? last!.lm, {
       report: from?.report ?? r,
       caption: caption || undefined,
       previousOverall,

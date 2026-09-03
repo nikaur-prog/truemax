@@ -16,6 +16,12 @@ import {
 } from "../engine/sideFeedback.js";
 import type { SharedSideFeedback } from "../engine/sideFeedback.js";
 import { askVerdictTone } from "./tonePrompt.js";
+import { currentAccessToken } from "../engine/auth.js";
+import {
+  readGoalPreviewConsent,
+  revokeGoalPreviewConsent,
+  type GoalPreviewConsentState,
+} from "../engine/goalPreviewConsent.js";
 
 // ---------------------------------------------------------------------------
 // Everything the quiz asked, afterwards.
@@ -130,6 +136,23 @@ export async function openSettings(user: User): Promise<void> {
   let feedbackLoadFailed = false;
   let feedbackRequest = 0;
   const revokingFeedback = new Set<string>();
+  let previewConsent: GoalPreviewConsentState | null = null;
+  let previewConsentLoaded = false;
+  let previewConsentMessage = "";
+  let previewConsentBusy = false;
+
+  const previewConsentMarkup = (): string => {
+    if (!previewConsentLoaded) {
+      return `<div class="set-feedback-state"><span class="trial-loader" aria-hidden="true"></span><span>Loading Goal preview permission...</span></div>`;
+    }
+    if (!previewConsent?.granted) {
+      return `<div class="set-feedback-empty">Goal preview is off. The first render will ask before either scan photograph leaves this device.</div>`;
+    }
+    return `<div class="set-consent-state">
+      <div><b>Goal preview is on</b><span>TrueMax may create a visual target from a scan only when you press the render button.</span></div>
+      <button type="button" class="set-feedback-revoke" id="set-preview-revoke"${previewConsentBusy ? " disabled" : ""}>${previewConsentBusy ? "Revoking..." : "Revoke and delete previews"}</button>
+    </div>`;
+  };
 
   const feedbackMarkup = (): string => {
     if (feedbackItems === null) {
@@ -230,6 +253,13 @@ export async function openSettings(user: User): Promise<void> {
             ? `<button type="button" class="linkish" id="set-feedback-retry">Try loading again</button>`
             : ""}
         </section>
+
+        <section class="set-group" aria-labelledby="set-preview-consent-title">
+          <h3 id="set-preview-consent-title">Goal preview permission</h3>
+          <p class="set-hint">This permission is separate from side-point placement and correction feedback. Revoking it deletes every generated preview TrueMax stores and prevents another render until you choose it again.</p>
+          ${previewConsentMarkup()}
+          <p class="set-feedback-message" role="status">${esc(previewConsentMessage)}</p>
+        </section>
       </main>
       <p class="trial-status" role="status"></p>
       <footer class="trial-actions">
@@ -282,6 +312,7 @@ export async function openSettings(user: User): Promise<void> {
     }
 
     activeHost.querySelector("#set-save")?.addEventListener("click", () => void save());
+    activeHost.querySelector("#set-preview-revoke")?.addEventListener("click", () => void revokePreviewConsent());
 
     // The profile picture. Choices are the person's OWN scans only — a guest's
     // face is not offered, for the same reason it is never auto-adopted.
@@ -420,6 +451,47 @@ export async function openSettings(user: User): Promise<void> {
     draw();
   };
 
+  const loadPreviewConsent = async () => {
+    const accessToken = await currentAccessToken();
+    if (host !== activeHost || !activeHost.isConnected) return;
+    if (!accessToken) {
+      previewConsentLoaded = true;
+      previewConsentMessage = "Sign in again to read this permission.";
+      draw();
+      return;
+    }
+    const result = await readGoalPreviewConsent(accessToken);
+    if (host !== activeHost || !activeHost.isConnected) return;
+    readInputs();
+    previewConsentLoaded = true;
+    previewConsent = result.state ?? null;
+    previewConsentMessage = result.ok ? "" : (result.error || "Goal preview permission could not be read.");
+    draw();
+  };
+
+  const revokePreviewConsent = async () => {
+    if (previewConsentBusy) return;
+    readInputs();
+    previewConsentBusy = true;
+    previewConsentMessage = "";
+    draw();
+    const accessToken = await currentAccessToken();
+    const result = accessToken
+      ? await revokeGoalPreviewConsent(accessToken)
+      : { ok: false, error: "Sign in again to revoke Goal preview." };
+    if (host !== activeHost || !activeHost.isConnected) return;
+    readInputs();
+    previewConsentBusy = false;
+    if (result.ok) {
+      previewConsent = result.state ?? null;
+      previewConsentMessage = "Goal preview revoked. Stored previews were deleted or queued for deletion.";
+    } else {
+      previewConsentMessage = result.error || "Goal preview could not be revoked.";
+    }
+    draw();
+  };
+
   draw();
   void loadFeedback();
+  void loadPreviewConsent();
 }
