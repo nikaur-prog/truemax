@@ -8,6 +8,9 @@
     },
     "api/side-landmarks.ts": {
       "maxDuration": 60
+    },
+    "api/goal-preview.ts": {
+      "maxDuration": 300
     }
   },
   "redirects": [
@@ -46,6 +49,7 @@
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" },
+    { "path": "/api/cleanup-goal-previews", "schedule": "30 3 * * *" },
     { "path": "/api/league-track", "schedule": "15 * * * *" }
   ],
   "headers": [

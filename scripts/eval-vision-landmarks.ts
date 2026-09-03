@@ -23,7 +23,7 @@
 // describes production, not a benchmark copy of it.
 //
 //   ANTHROPIC_API_KEY=... npx tsx scripts/eval-vision-landmarks.ts [--limit 10] [--ids s000,s001]
-//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom] [--seed] [--repeat 3]
+//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom] [--seed] [--repeat 3] [--samples 3]
 //
 // Predictions are cached in .side-dataset/vision-<model>-<version>[-seed|-nozoom].json
 // so a re-run of the table costs nothing; delete the file or pass --no-cache
@@ -45,7 +45,7 @@ import {
   placeSideLandmarks,
   prepareLandmarkImage,
 } from "../api/_sideLandmarks.js";
-import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult, StageName } from "../api/_sideLandmarks.js";
+import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult, StageName, WindowName } from "../api/_sideLandmarks.js";
 import { fuseSideSeeds } from "../src/engine/sideSeedFusion.js";
 import type { ConfidenceBand } from "../src/engine/sideSeedFusion.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
@@ -81,6 +81,8 @@ interface Cached {
   gonionDisagreement?: number | null;
   mentonRetried?: boolean;
   seeded?: boolean;
+  windows?: Partial<Record<WindowName, { left: number; top: number; size: number }>>;
+  spread?: Partial<Record<SideLandmarkId, number>>;
   /** Further runs of the same pass, for the repeatability block. */
   runs?: Array<{ result: SideLandmarkResult; stages?: Cached["stages"] }>;
 }
@@ -103,7 +105,12 @@ const useSeed = flag("seed");
 // whether an error is a stable misreading (fix the definition) or a wobble
 // (vote). Extra runs are kept in the cache entry beside the first.
 const repeat = Math.max(1, Number(arg("repeat") || 1));
-const cachePath = `${DATA}/vision-${model.replace(/[^a-z0-9.-]/gi, "_")}-${LANDMARK_VERSION}${zoom ? "" : "-nozoom"}${useSeed ? "-seed" : ""}.json`;
+// --samples N takes N jittered reads of the fine ear crop and settles on
+// their median; the pass reports the spread, which is a confidence the
+// model did not have to state. Production stays at one until the run says
+// the spread predicts the error and the median lowers it.
+const samples = Math.max(1, Math.min(5, Number(arg("samples") || 1)));
+const cachePath = `${DATA}/vision-${model.replace(/[^a-z0-9.-]/gi, "_")}-${LANDMARK_VERSION}${zoom ? "" : "-nozoom"}${useSeed ? "-seed" : ""}${samples > 1 ? `-s${samples}` : ""}.json`;
 
 const labels = JSON.parse(readFileSync(`${DATA}/labels.json`, "utf8")) as Record<string, Labelled>;
 const seeds = JSON.parse(readFileSync(`${DATA}/seeds.json`, "utf8")) as Record<string, Labelled>;
@@ -157,6 +164,7 @@ async function predict(id: string): Promise<void> {
     model,
     zoom,
     hint,
+    samples,
     onZoomError: (stage, error) => console.error(`${id}: ${stage} failed, ${error instanceof Error ? error.message : String(error)}`),
   });
   const have = cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION ? cache[id] : null;
@@ -165,6 +173,7 @@ async function predict(id: string): Promise<void> {
     cache[id] = {
       model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms,
       stages: pass.stages, gonion: pass.gonion, gonionDisagreement: pass.gonionDisagreement, mentonRetried: pass.mentonRetried, seeded: pass.seeded,
+      windows: pass.windows, spread: pass.spread,
     };
   }
   while ((cache[id].runs?.length ?? 0) + 1 < repeat) {
@@ -320,6 +329,23 @@ type Reader = "seeder" | "model" | "fused";
 const perFace: Array<{ id: string; moved: Set<SideLandmarkId>; err: Record<Reader, Partial<Record<SideLandmarkId, number>>>; highWrong: number; highCount: number }> = [];
 // Run-to-run scatter, per landmark and stage, from --repeat.
 const scatter: Record<string, number[]> = {};
+// Coverage: did the labelled points a crop was cut for fall inside it?
+const WINDOW_POINTS: Record<WindowName, SideLandmarkId[]> = {
+  coarseEar: ["tragion", "condylion"],
+  coarseChin: ["pogonion", "menton", "cervicale", "gonion"],
+  fineEar: ["tragion", "condylion"],
+  fineJaw: ["gonion"],
+  fineChin: ["pogonion", "menton", "cervicale"],
+};
+const coverage: Record<WindowName, { inside: number; total: number; edge: number[] }> = {
+  coarseEar: { inside: 0, total: 0, edge: [] },
+  coarseChin: { inside: 0, total: 0, edge: [] },
+  fineEar: { inside: 0, total: 0, edge: [] },
+  fineJaw: { inside: 0, total: 0, edge: [] },
+  fineChin: { inside: 0, total: 0, edge: [] },
+};
+// Does the spread between jittered reads predict the error? Per ear point.
+const spreadPairs: Record<string, Array<{ spread: number; err: number }>> = { tragion: [], condylion: [] };
 const skipped: string[] = [];
 for (const id of ids) {
   const cached = cache[id];
@@ -368,6 +394,23 @@ for (const id of ids) {
   if (fused) overallBands[fused.overall] += 1;
   const face: (typeof perFace)[number] = { id, moved: new Set(), err: { seeder: {}, model: {}, fused: {} }, highWrong: 0, highCount: 0 };
   perFace.push(face);
+  // Coverage of each crop over the labelled points it was cut for.
+  if (cached.windows) {
+    for (const [name, box] of Object.entries(cached.windows) as Array<[WindowName, { left: number; top: number; size: number }]>) {
+      const left = box.left * w;
+      const top = box.top * h;
+      const size = box.size * w;
+      for (const pid of WINDOW_POINTS[name]) {
+        if (partial.has(pid)) continue;
+        const t = truth[pid];
+        const inside = t.x >= left && t.x <= left + size && t.y >= top && t.y <= top + size;
+        coverage[name].total += 1;
+        if (inside) coverage[name].inside += 1;
+        const edge = Math.min(t.x - left, left + size - t.x, t.y - top, top + size - t.y) / unit;
+        coverage[name].edge.push(edge);
+      }
+    }
+  }
   // Repeatability: distance between runs of the same pass, per stage.
   if (cached.runs?.length) {
     const all = [cached, ...cached.runs];
@@ -416,6 +459,9 @@ for (const id of ids) {
     const t = truth[pid];
     const m = px(pid);
     const mErr = dist(m, t) / unit;
+    if ((pid === "tragion" || pid === "condylion") && typeof cached.spread?.[pid] === "number") {
+      spreadPairs[pid].push({ spread: cached.spread[pid]!, err: mErr });
+    }
     if (BACK_LANDMARK_IDS.includes(pid)) {
       const ox = (m.x - t.x) / unit;
       const oy = (m.y - t.y) / unit;
@@ -697,6 +743,22 @@ if (cleanAt("fused", 0.1) < 0.7) holds.push(`clean-profile rate at 0.10 is ${(10
 if (highCount && highWrong / highCount > 0.1) holds.push(`high band wrong on ${((100 * highWrong) / highCount).toFixed(0)}% of points, over 10%`);
 console.log(holds.length ? `HOLD the fused seed as AI-first: ${holds.join("; ")}.` : "SHIP: the fused seed is no worse than the seeder on every back point, misses less, and its high band means what it says.");
 console.log("(A head width is about 335 px on the 640 px review canvas and about 200 px on a phone, so 0.10 is 20 phone pixels.)");
+
+if (Object.values(coverage).some((c) => c.total)) {
+  console.log("");
+  console.log("Crop coverage: the share of labelled points each crop was cut for that fell inside it, and the median distance to the nearest edge (head widths; negative = outside):");
+  for (const [name, c] of Object.entries(coverage) as Array<[WindowName, (typeof coverage)[WindowName]]>) {
+    if (!c.total) continue;
+    console.log(`  ${name.padEnd(11)} ${String(Math.round((100 * c.inside) / c.total)).padStart(3)}% of ${String(c.total).padStart(3)}   edge ${fmt(median(c.edge))}`);
+  }
+}
+if (spreadPairs.tragion.length) {
+  console.log("");
+  for (const pid of ["tragion", "condylion"]) {
+    const rows = spreadPairs[pid];
+    console.log(`Spread between jittered reads on ${pid}: median ${fmt(median(rows.map((r) => r.spread)))}, rho(spread, error) ${fmt(spearman(rows.map((r) => r.spread), rows.map((r) => r.err)))} over ${rows.length} faces.`);
+  }
+}
 
 if (Object.keys(scatter).length) {
   console.log("");
