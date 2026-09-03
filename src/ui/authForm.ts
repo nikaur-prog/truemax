@@ -1,3 +1,5 @@
+import { BODY_BOUNDS, bodyMetricUsable, toMetric } from "../engine/bodyUnits.js";
+import type { UnitSystem } from "../engine/bodyUnits.js";
 import type { User } from "@supabase/supabase-js";
 import {
   currentUser,
@@ -78,6 +80,34 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
         <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
       </label>
       ${
+        // Signup only, and optional in the plainest sense: the fields can be
+        // left blank and the button does not care. They are here because the
+        // calculator on Max needs them and asking at the start beats an
+        // interruption later; a database trigger stores what is entered and
+        // drops anything out of bounds. Free and Starter signups are never
+        // blocked by them. Whether they are asked again is decided by the
+        // server's required flag (api/body-profile.ts), never by this form.
+        isSignup && !isLink
+          ? `<fieldset class="acct-field acct-body">
+              <legend><span>Height and weight <em>optional, for your daily plan</em></span></legend>
+              <div class="acct-units" role="group" aria-label="Units">
+                <button type="button" data-acct-unit="metric" aria-pressed="true">Metric</button>
+                <button type="button" data-acct-unit="imperial" aria-pressed="false">Imperial</button>
+              </div>
+              <div class="acct-body-fields" data-acct-body="metric">
+                <input type="number" name="heightCm" inputmode="decimal" min="${BODY_BOUNDS.heightCm.min}" max="${BODY_BOUNDS.heightCm.max}" step="0.1" placeholder="Height, cm" aria-label="Height in centimetres" />
+                <input type="number" name="weightKg" inputmode="decimal" min="${BODY_BOUNDS.weightKg.min}" max="${BODY_BOUNDS.weightKg.max}" step="0.1" placeholder="Weight, kg" aria-label="Weight in kilograms" />
+              </div>
+              <div class="acct-body-fields" data-acct-body="imperial" hidden>
+                <input type="number" name="feet" inputmode="numeric" min="3" max="7" step="1" placeholder="ft" aria-label="Height, feet" />
+                <input type="number" name="inches" inputmode="decimal" min="0" max="11.9" step="0.1" placeholder="in" aria-label="Height, inches" />
+                <input type="number" name="pounds" inputmode="decimal" min="77" max="661" step="0.1" placeholder="Weight, lb" aria-label="Weight in pounds" />
+              </div>
+              <small class="acct-body-note">Never used for your face score. You can add or change these later.</small>
+            </fieldset>`
+          : ""
+      }
+      ${
         isLink
           ? ""
           : `<label class="acct-field">
@@ -115,6 +145,18 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
   let formWorking = false;
+  let bodyUnit: UnitSystem = "metric";
+  for (const button of root.querySelectorAll<HTMLButtonElement>("[data-acct-unit]")) {
+    button.addEventListener("click", () => {
+      bodyUnit = button.dataset.acctUnit === "imperial" ? "imperial" : "metric";
+      for (const b of root.querySelectorAll<HTMLButtonElement>("[data-acct-unit]")) {
+        b.setAttribute("aria-pressed", String(b.dataset.acctUnit === bodyUnit));
+      }
+      for (const group of root.querySelectorAll<HTMLElement>("[data-acct-body]")) {
+        group.hidden = group.dataset.acctBody !== bodyUnit;
+      }
+    });
+  }
   root.querySelector<HTMLAnchorElement>(".acct-portal-link")?.addEventListener("click", () => {
     beginIntentionalNavigation();
   });
@@ -140,10 +182,17 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     formWorking = true;
     setWorking(submit, true);
     updateSubmit();
+    // Optional means optional: blank fields are not sent, a partly filled
+    // or out-of-bounds pair is dropped with a note rather than a refusal,
+    // and the account is created either way.
+    const body = isSignup ? signupBody(data, bodyUnit) : null;
+    if (isSignup && body === "invalid") {
+      say(msg, "Height and weight were left out: enter both, within a plausible range, or leave both blank. Creating your account without them.", "info");
+    }
     const result = isLink
       ? await signInWithLink(email)
       : isSignup
-        ? await signUp(email, password, String(data.get("name") || ""))
+        ? await signUp(email, password, String(data.get("name") || ""), body === "invalid" ? null : body)
         : await signIn(email, password);
     formWorking = false;
     setWorking(submit, false, isLink ? "Email me a sign-in link" : isSignup ? "Create free account" : "Sign in");
@@ -221,6 +270,28 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       button.innerHTML = `${socialLabel(provider)}<small>Coming soon</small>`;
     }
   });
+}
+
+/**
+ * The optional body from the signup form: null when both fields are blank,
+ * "invalid" when something was typed that cannot be used, otherwise the
+ * canonical pair. Exported for its test; the form never blocks on it.
+ */
+export function signupBody(
+  data: FormData,
+  unit: UnitSystem,
+): { heightCm: number; weightKg: number; unit: UnitSystem } | null | "invalid" {
+  const field = (name: string) => String(data.get(name) ?? "").trim();
+  const filled = unit === "metric"
+    ? [field("heightCm"), field("weightKg")]
+    : [field("feet"), field("pounds")];
+  if (filled.every((v) => v === "")) return null;
+  if (filled.some((v) => v === "")) return "invalid";
+  const metric = toMetric(unit === "metric"
+    ? { unit, heightCm: Number(field("heightCm")), weightKg: Number(field("weightKg")) }
+    : { unit, feet: Number(field("feet")), inches: Number(field("inches") || 0), pounds: Number(field("pounds")) });
+  if (!bodyMetricUsable(metric)) return "invalid";
+  return { ...metric, unit };
 }
 
 export function authSubmitReady(
@@ -349,7 +420,7 @@ function disableSocial(root: HTMLElement, disabled: boolean): void {
   }
 }
 
-function say(node: HTMLElement, text: string, kind: "err" | "ok"): void {
+function say(node: HTMLElement, text: string, kind: "err" | "ok" | "info"): void {
   node.textContent = text;
   node.className = `acct-msg ${kind}`;
 }

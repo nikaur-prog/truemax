@@ -104,6 +104,25 @@ export async function POST(request: Request): Promise<Response> {
     const context = sanitiseContext(body?.context, age);
     if (!context) return json({ error: "Max could not read your scan." }, 400);
 
+    // The body profile comes from the account row, never from the payload:
+    // an adult on Max without one gets the no-diet-plan line in the prompt,
+    // a minor gets nothing here because the under-18 rules already bar it,
+    // and staff reading the chat without a subscription are simply shown
+    // what they entered, if anything.
+    if (age >= 18) {
+      const { data: bodyRow, error: bodyError } = await admin
+        .from("body_profiles")
+        .select("height_cm,weight_kg")
+        .eq("user_id", user.id)
+        .maybeSingle<{ height_cm: number | string | null; weight_kg: number | string | null }>();
+      if (bodyError) throw new Error(`Body profile could not be read: ${bodyError.message}`);
+      const h = bodyRow?.height_cm == null ? null : Number(bodyRow.height_cm);
+      const w = bodyRow?.weight_kg == null ? null : Number(bodyRow.weight_kg);
+      context.bodyProfile = h !== null && w !== null && Number.isFinite(h) && Number.isFinite(w)
+        ? { heightCm: h, weightKg: w }
+        : access.staff ? undefined : "missing";
+    }
+
     const incoming = sanitiseHistory(body?.messages);
     if (!incoming.length) return json({ error: "Say something to Max first." }, 400);
     if (incoming[incoming.length - 1].role !== "user") {

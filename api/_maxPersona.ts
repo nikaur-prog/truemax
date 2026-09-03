@@ -64,6 +64,13 @@ export interface MaxContext {
   measurements: MaxMeasurement[];
   scans: number;
   movement?: string;
+  /**
+   * Set by the server from the account's body_profiles row, never from the
+   * browser payload: sanitiseContext does not read it. `missing` means an
+   * adult on Max has not given the two figures, and the block below tells
+   * Max not to build a diet, macro or body-composition plan until they do.
+   */
+  bodyProfile?: { heightCm: number; weightKg: number } | "missing";
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +299,13 @@ function contextBlock(context: MaxContext): string {
   if (context.activePlan.length) {
     lines.push("Actions already in their performance tracker:");
     for (const item of context.activePlan) lines.push(`  ${item}`);
+  }
+  if (context.bodyProfile === "missing") {
+    lines.push(
+      "Body profile: not provided. They have not entered their height and weight. Do not build or estimate a diet, macro, calorie or body-composition plan, and do not guess either figure; say plainly that adding height and weight in Settings unlocks that part, then continue with everything else on the list.",
+    );
+  } else if (context.bodyProfile) {
+    lines.push(`Body profile, entered by them: height ${context.bodyProfile.heightCm} cm, weight ${context.bodyProfile.weightKg} kg. Planning context only; it says nothing about the face.`);
   }
   if (!context.overall && !context.measurements.length) {
     lines.push("This person has not completed a scan yet. Do not guess at numbers. Encourage them to run one.");
