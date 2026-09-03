@@ -8,7 +8,7 @@ const shareCard = readFileSync(new URL("./shareCard.ts", import.meta.url), "utf8
 const photoLifecycle = readFileSync(new URL("./scoreStrip.ts", import.meta.url), "utf8");
 
 test("mobile results start with one complete score summary before navigation", () => {
-  assert.match(results, /c\.analysis\.appendChild\(mobileSummary\);\s+c\.analysis\.appendChild\(rail\)/);
+  assert.match(results, /c\.analysis\.appendChild\(mobileSummary\);[\s\S]*c\.analysis\.appendChild\(railSentinel\);\s+c\.analysis\.appendChild\(rail\)/);
   assert.match(results, /data-summary-view="\$\{card\.view\}"/);
   assert.match(results, /class="mobile-pillars"/);
   assert.match(styles, /\.mobile-score-summary \{ display: grid/);
@@ -44,23 +44,22 @@ test("the exported share card carries overall, front, side and pillars", () => {
 });
 
 test("mobile report scrolling compacts chrome without building a hidden score card", () => {
-  assert.match(photoLifecycle, /pane\.classList\.add\("results-ready"\)/);
+  assert.match(photoLifecycle, /pane\.classList\.add\("results-ready", "report-photo-pinned"\)/);
   assert.match(photoLifecycle, /detach = watchReportScroll\(pane\)/);
   assert.doesNotMatch(photoLifecycle, /createElement|countUp|typeInto|renderShareCard|setInterval/);
   assert.match(photoLifecycle, /const startY = window\.scrollY/);
   assert.match(photoLifecycle, /classList\.toggle\("report-compact", compact\)/);
   assert.doesNotMatch(photoLifecycle, /classList\.(?:add|remove)\("shrunk"/);
-  assert.match(styles, /\.pane-photo \{\s+position: static/);
+  assert.match(styles, /\.pane-photo\.results-ready\.report-photo-pinned \{\s+position: sticky/);
   assert.match(styles, /\.rtabs-rail \{ top: var\(--report-header-h, 38px\); \}/);
 });
 
-test("the pinned category rail preserves photo context and a cheap return path", () => {
-  assert.match(results, /className = "rtabs-face-back"/);
-  assert.match(results, /face\.scrollIntoView\(\{ behavior: reduced \? "auto" : "smooth", block: "start" \}\)/);
+test("the photograph hands the sticky slot directly to the category rail", () => {
+  assert.match(results, /className = "rtabs-sentinel"/);
   assert.match(results, /requestAnimationFrame\(sync\)/);
-  assert.match(results, /classList\.toggle\("photo-away", faceBottom <= stickyTop \+ 2\)/);
-  assert.match(results, /const label = onSide \? "PROFILE" : "FRONT"/);
-  assert.match(styles, /\.rtabs-rail\.photo-away \.rtabs-face-back/);
+  assert.match(results, /const railHasTakenOver = naturalTop <= stickyTop \+ 1/);
+  assert.match(results, /"report-photo-pinned",\s+!railHasTakenOver/);
+  assert.doesNotMatch(results, /rtabs-face-back/);
   assert.match(styles, /\.rtabs-rail\.is-stuck/);
 });
 

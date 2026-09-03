@@ -4,6 +4,7 @@ import { track } from "./track.js";
 import { activateScanOwner } from "./scanScope.js";
 import { settleAttributionForAuth } from "./attribution.js";
 import { pendingAnalysisRedirect } from "./pendingAnalysis.js";
+import { beginIntentionalNavigation, cancelIntentionalNavigation } from "./navigationIntent.js";
 
 // ---------------------------------------------------------------------------
 // Accounts, on Supabase.
@@ -380,7 +381,13 @@ export async function signInWithProvider(provider: SocialProvider): Promise<Auth
       console.error("[auth] provider returned no safe authorize URL", provider);
       return { ok: false, message: "That sign-in option could not be opened. Try email instead." };
     }
-    window.location.assign(target);
+    beginIntentionalNavigation();
+    try {
+      window.location.assign(target);
+    } catch (error) {
+      cancelIntentionalNavigation();
+      throw error;
+    }
     return { ok: true, redirecting: true };
   } catch (error) {
     console.error("[auth] signInWithOAuth threw", provider, error);

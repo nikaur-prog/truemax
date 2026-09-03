@@ -7,6 +7,7 @@ export interface MorphRenderSource {
 
 export interface MorphRenderRequest {
   version: 1;
+  scanId: string;
   variant: MorphBlueprint["variant"];
   source: MorphRenderSource;
   blueprint: MorphBlueprint;
@@ -26,6 +27,11 @@ export interface MorphRenderValidation {
 
 export type MorphRenderState =
   | { status: "accepted" | "processing"; jobId: string }
+  | {
+      status: "validation_pending";
+      jobId: string;
+      images: MorphRenderSource;
+    }
   | {
       status: "ready";
       jobId: string;
@@ -50,15 +56,20 @@ function jobId(value: unknown): string | null {
 }
 
 export function createMorphRenderRequest(
+  scanId: string,
   blueprint: MorphBlueprint,
   source: MorphRenderSource,
 ): MorphRenderRequest {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(scanId)) {
+    throw new Error("The scan could not be identified safely.");
+  }
   if (!safeImage(source.front)) throw new Error("The front photograph could not be prepared safely.");
   if (blueprint.hasSide && !safeImage(source.side)) {
     throw new Error("The profile photograph could not be prepared safely.");
   }
   return {
     version: 1,
+    scanId,
     variant: blueprint.variant,
     source: { front: source.front, ...(source.side ? { side: source.side } : {}) },
     blueprint,
@@ -99,15 +110,34 @@ export function parseMorphRenderState(value: unknown, expectSide: boolean): Morp
   const front = value.images.front;
   const side = value.images.side;
   const validation = value.validation;
-  const passed =
-    validation.identityPreserved === true &&
+  const serverPassed =
     validation.naturalOnly === true &&
-    validation.targetAligned === true &&
     validation.crossViewConsistent === true &&
     validation.moderationPassed === true;
+  const clientPassed =
+    validation.identityPreserved === true &&
+    validation.targetAligned === true;
 
-  if (!id || !safeImage(front) || (expectSide && !safeImage(side)) || !passed) {
+  if (!id || !safeImage(front) || (expectSide && !safeImage(side)) || !serverPassed) {
     return { status: "failed", error: "The preview did not pass TrueMax validation." };
+  }
+
+  if (!clientPassed) {
+    const pending = Array.isArray(value.pending)
+      ? value.pending.filter((gate): gate is string => typeof gate === "string")
+      : [];
+    const waitingForDevice =
+      validation.identityPreserved === false &&
+      validation.targetAligned === false &&
+      pending.includes("identityPreserved") &&
+      pending.includes("targetAligned");
+    return waitingForDevice
+      ? {
+          status: "validation_pending",
+          jobId: id,
+          images: { front, ...(safeImage(side) ? { side } : {}) },
+        }
+      : { status: "failed", error: "The preview did not pass TrueMax validation." };
   }
 
   return {
@@ -121,6 +151,34 @@ export function parseMorphRenderState(value: unknown, expectSide: boolean): Morp
       crossViewConsistent: true,
       moderationPassed: true,
     },
+  };
+}
+
+export async function submitMorphValidation(
+  jobIdValue: string,
+  passed: boolean,
+  accessToken: string,
+  signal?: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<{ ok: boolean; error?: string }> {
+  const id = jobId(jobIdValue);
+  if (!id || !accessToken.trim()) return { ok: false, error: "The preview validation request was invalid." };
+  const response = await fetcher(`/api/goal-preview?id=${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ validation: { passed } }),
+    signal,
+  });
+  const payload = await response.json().catch(() => null);
+  if (response.ok) return { ok: true };
+  return {
+    ok: false,
+    error: isRecord(payload) && typeof payload.error === "string"
+      ? payload.error.slice(0, 240)
+      : "The preview validation could not be recorded.",
   };
 }
 

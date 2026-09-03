@@ -153,7 +153,7 @@ test("feedback schema precedes its hardening functions and accepts every current
   assert.ok(functionAt > tableAt, "self-score hardening runs before its table exists");
   assert.match(
     migrations,
-    /add constraint side_feedback_seed_method[\s\S]*?check \(seed_method in \('mesh', 'silhouette', 'segmentation', 'vision', 'existing'\)\)/i,
+    /add constraint side_feedback_seed_method[\s\S]*?check \(seed_method in \('mesh', 'silhouette', 'segmentation', 'vision', 'fused', 'existing'\)\)/i,
   );
   assert.match(migrations, /add column if not exists seed_version text/i);
 });

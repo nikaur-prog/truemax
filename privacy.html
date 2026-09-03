@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Privacy Policy · TrueMax</title>
-    <meta name="description" content="How TrueMax handles front photographs, optional cloud side-point placement and separately consented landmark feedback." />
+    <meta name="description" content="How TrueMax handles front photographs, optional cloud side-point placement, Goal previews and separately consented landmark feedback." />
     <link rel="canonical" href="https://www.truemax.app/privacy" />
     <meta name="theme-color" content="#141518" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -33,8 +33,9 @@
         <h2>The short version</h2>
         <p>
           <b>Your front photograph is analysed on your own device.</b> The face
-          measurement engine runs entirely inside your browser. Your front photo
-          is never uploaded to us.
+          measurement engine runs entirely inside your browser. Your photos stay
+          on your phone unless you separately choose a Goal preview, which sends
+          the selected scan once to create it.
         </p>
         <p>
           <b>A side profile has two separate choices.</b> You can allow one cloud
@@ -63,6 +64,28 @@
         Photographs you have scanned are kept in your browser's own storage
         (IndexedDB) so you can see your previous scans. That storage is local to
         that device and that browser. Clearing your browser data removes it.
+      </p>
+
+      <h3>Optional Goal preview</h3>
+      <p>
+        Goal preview is available only to signed-in adult Max members. Before its
+        first render, a separate consent explains the request and names the
+        provider. If you agree, TrueMax sends the front photograph and, when the
+        scan has one, the side photograph through our server to Higgsfield or
+        OpenAI together with a bounded list of selected presentation goals. We do
+        not send your name, chat history or measurements outside that goal recipe,
+        and we do not store the source photographs for this request.
+      </p>
+      <p>
+        TrueMax keeps only the generated previews for up to 30 days, or for up to
+        one year if you explicitly keep one. Generated previews are not used for
+        training or advertising. OpenAI states that API data is not used for
+        training by default and may retain abuse-monitoring data for up to 30
+        days. Higgsfield receives the uploaded references under its
+        <a href="https://higgsfield.ai/privacy-policy">commercial privacy terms</a>;
+        its current integration does not give TrueMax a way to delete the
+        provider upload. You can revoke Goal preview in Settings, which deletes
+        every preview stored by TrueMax.
       </p>
 
       <h3>Optional cloud placement for a side profile</h3>
@@ -150,6 +173,14 @@
             <td>Your browser, and Supabase when supplied through onboarding</td>
           </tr>
           <tr>
+            <td>Optional Goal preview source photographs, selected goal recipe
+              and generated previews</td>
+            <td>To generate the visual direction you explicitly request</td>
+            <td>Source photographs are passed in memory to Higgsfield or OpenAI
+              and are not stored by TrueMax. Generated previews are stored
+              privately in Supabase for up to 30 days, or up to one year when kept</td>
+          </tr>
+          <tr>
             <td>Optional self-score feedback: your measured score, the score
               you chose, sex reference, scan ID and account ID</td>
             <td>To review calibration. It never changes your score</td>
@@ -201,7 +232,10 @@
           identity, bank and payout handling for approved Creator League members.</li>
         <li><b>Anthropic</b>: Coach Max replies, only when you use Max.</li>
         <li><b>ElevenLabs and OpenAI</b>: generated narration, with OpenAI used
-          as a fallback. OpenAI also generates staff-only fictional model images.</li>
+          as a fallback. OpenAI also generates staff-only fictional model images
+          and may create a Goal preview only after its separate consent.</li>
+        <li><b>Higgsfield</b>: may create a Goal preview only after its separate
+          consent.</li>
         <li><b>TikTok</b>: two separate things. Account linking and post
           statistics, only for Creator League participants who connect TikTok.
           And, if you reached us by clicking a TikTok advert, a record that a

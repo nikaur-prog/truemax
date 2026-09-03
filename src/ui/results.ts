@@ -239,24 +239,6 @@ export function renderResults(c: Ctx): void {
   rail.appendChild(track);
   mountTabScrollbar(tabs, track);
 
-  // Once the photograph has left a phone viewport, the category rail is the
-  // only pinned surface. Keep a tiny piece of visual context in that rail and
-  // make it the way back to the evidence: FRONT / PROFILE plus an up-arrow.
-  // It is deliberately absent while the photograph is still visible, and on
-  // desktop where the photograph already stays beside the report.
-  const returnToFace = document.createElement("button");
-  returnToFace.type = "button";
-  returnToFace.className = "rtabs-face-back";
-  returnToFace.innerHTML = `<span class="rtabs-face-label">FRONT</span><b aria-hidden="true">↑</b>`;
-  returnToFace.setAttribute("aria-label", "Return to front photograph");
-  returnToFace.onclick = () => {
-    const face = document.querySelector<HTMLElement>(".pane-photo .face-frame");
-    if (!face) return;
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    face.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
-  };
-  rail.appendChild(returnToFace);
-
   // The Side tab is gone from this row: it is not a ninth region, it is the
   // other half of the scan, and burying it among eight regions made a quarter
   // of the score and fifteen measurements read as a footnote. It is now the
@@ -281,11 +263,18 @@ export function renderResults(c: Ctx): void {
   mobileSummary.setAttribute("aria-label", "Full score summary");
   mobileSummary.innerHTML = mobileScoreSummary(c.report);
   c.analysis.appendChild(mobileSummary);
+  // Unlike a sticky element, this marker keeps reporting the rail's natural
+  // document position after the rail pins. It makes the handoff from photo to
+  // category controls deterministic and avoids a second "back to photo" UI.
+  const railSentinel = document.createElement("div");
+  railSentinel.className = "rtabs-sentinel";
+  railSentinel.setAttribute("aria-hidden", "true");
+  c.analysis.appendChild(railSentinel);
   c.analysis.appendChild(rail);
   const body = document.createElement("div");
   body.id = "body";
   c.analysis.appendChild(body);
-  detachReportRail = mountReportRailState(rail);
+  detachReportRail = mountReportRailState(rail, railSentinel);
   placeQualityChips();
   tabView = "front";
   buildTabs("front");
@@ -349,21 +338,24 @@ function mountTabScrollbar(tabs: HTMLElement, track: HTMLElement): void {
  * One passive listener, coalesced to one animation frame, keeps long reports
  * cheap on iOS Safari.
  */
-function mountReportRailState(rail: HTMLElement): () => void {
+function mountReportRailState(rail: HTMLElement, sentinel: HTMLElement): () => void {
   let frame = 0;
   const sync = (): void => {
     frame = 0;
     const mobile = window.matchMedia?.("(max-width: 850px)").matches ?? window.innerWidth <= 850;
     if (!mobile) {
-      rail.classList.remove("is-stuck", "photo-away");
+      rail.classList.remove("is-stuck");
+      document.querySelector(".pane-photo")?.classList.remove("report-photo-pinned");
       return;
     }
     const stickyTop = Number.parseFloat(getComputedStyle(rail).top) || 0;
-    const railTop = rail.getBoundingClientRect().top;
-    const face = document.querySelector<HTMLElement>(".pane-photo .face-frame");
-    const faceBottom = face?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY;
-    rail.classList.toggle("is-stuck", railTop <= stickyTop + 1 && window.scrollY > 0);
-    rail.classList.toggle("photo-away", faceBottom <= stickyTop + 2);
+    const naturalTop = sentinel.getBoundingClientRect().top;
+    const railHasTakenOver = naturalTop <= stickyTop + 1 && window.scrollY > 0;
+    rail.classList.toggle("is-stuck", railHasTakenOver);
+    document.querySelector(".pane-photo")?.classList.toggle(
+      "report-photo-pinned",
+      !railHasTakenOver,
+    );
   };
   const schedule = (): void => {
     if (!frame) frame = requestAnimationFrame(sync);
@@ -375,6 +367,7 @@ function mountReportRailState(rail: HTMLElement): () => void {
     window.removeEventListener("scroll", schedule);
     window.removeEventListener("resize", schedule);
     if (frame) cancelAnimationFrame(frame);
+    document.querySelector(".pane-photo")?.classList.remove("report-photo-pinned");
   };
 }
 
@@ -433,8 +426,8 @@ function buildTabs(view: "front" | "side"): void {
 
 function mobileScoreSummary(r: Report): string {
   const views = r.views;
-  const cards: Array<{ label: string; score: number; percentile: number; view?: "front" | "side" }> = [
-    { label: "OVERALL", score: r.overall, percentile: r.overallPercentile },
+  const cards: Array<{ label: string; score: number; percentile: number; view: "overall" | "front" | "side" }> = [
+    { label: "OVERALL", score: r.overall, percentile: r.overallPercentile, view: "overall" },
     ...(views
       ? [
           { label: "FRONT", score: views.front.score, percentile: views.front.percentile, view: "front" as const },
@@ -446,9 +439,7 @@ function mobileScoreSummary(r: Report): string {
     const content = `<span class="vc-label">${card.label}</span>
       <span class="vc-rank">${rankShort(card.percentile, card.view === "side" ? SIDE_TAIL_LIMIT_PCT : undefined)}</span>
       <b class="vc-score ${scoreTone(card.score)}">${card.score.toFixed(1)}<small>/10</small></b>`;
-    return card.view
-      ? `<button type="button" class="viewcard" data-summary-view="${card.view}" aria-pressed="false">${content}</button>`
-      : `<div class="viewcard lead">${content}</div>`;
+    return `<button type="button" class="viewcard${card.view === "overall" ? " lead" : ""}" data-summary-view="${card.view}" aria-pressed="false" aria-label="Open ${card.label.toLowerCase()} analysis">${content}</button>`;
   }).join("");
   const pillars = (Object.entries(r.pillars) as [PillarId, number][]).map(([pillar, score]) => {
     const open = pillarDeck(r, pillar).length > 0;
@@ -465,7 +456,8 @@ function mobileScoreSummary(r: Report): string {
 function wireMobileSummary(): void {
   if (!ctx) return;
   for (const button of ctx.analysis.querySelectorAll<HTMLButtonElement>("[data-summary-view]")) {
-    const view = button.dataset.summaryView === "side" ? "side" : "front";
+    const summary = button.dataset.summaryView;
+    const view = summary === "side" ? "side" : "front";
     button.onclick = () => select(view === "side" ? "side" : "overall", view);
   }
   paintMobileViewState();
@@ -507,11 +499,12 @@ function viewCards(r: Report): string {
   return `<div class="viewcards">${cards
     .map(([label, score, pct, tailLimit]) => {
       const tone = scoreTone(score);
-      return `<div class="viewcard${label === "OVERALL" ? " lead" : ""}">
+      const view = label === "SIDE" ? "side" : label === "FRONT" ? "front" : "overall";
+      return `<button type="button" class="viewcard${label === "OVERALL" ? " lead" : ""}" data-summary-view="${view}" aria-label="Open ${label.toLowerCase()} analysis">
         <span class="vc-label">${label}</span>
         <span class="vc-rank">${rankShort(pct, tailLimit)}</span>
         <b class="vc-score ${tone}"><span data-count="${score}" data-decimals="1">0.0</span><small>/10</small></b>
-      </div>`;
+      </button>`;
     })
     .join("")}</div>${
     // When they genuinely coincide, say so. Silence there reads as a bug.
@@ -790,13 +783,6 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
   }
   for (const b of ctx.analysis.querySelectorAll<HTMLButtonElement>(".rtab")) {
     b.classList.toggle("sel", b.dataset.id === id);
-  }
-  const faceBack = ctx.analysis.querySelector<HTMLButtonElement>(".rtabs-face-back");
-  const faceLabel = faceBack?.querySelector<HTMLElement>(".rtabs-face-label");
-  if (faceBack && faceLabel) {
-    const label = onSide ? "PROFILE" : "FRONT";
-    faceLabel.textContent = label;
-    faceBack.setAttribute("aria-label", `Return to ${label.toLowerCase()} photograph`);
   }
   const isRegion = id.startsWith("side:") || (!viewNeutral && id !== "side");
   document.querySelector(".pane-photo")?.classList.toggle("region-focus", isRegion);
@@ -1476,6 +1462,7 @@ function showOverall(): void {
   if (overview) animateOverview(overview);
   wirePillarCards(r);
   wirePrimaryMeasurements();
+  wireMobileSummary();
   document.getElementById("btn-history")?.addEventListener("click", () => openHistory());
   // Correcting the reference population where its effect is visible. Every
   // percentile on this screen comes from it, and it moves the overall score by
@@ -2571,7 +2558,7 @@ function showImprove(): void {
   setZoom(null);
   const profile = loadProfile();
   const morph = morphBlueprints(r, profile, Boolean(ctx.sidePhoto));
-  const morphRenderEnabled = import.meta.env.VITE_MORPH_PREVIEW === "1" && maxAccess && adultUser;
+  const morphRenderEnabled = import.meta.env.VITE_MORPH_PREVIEW === "1" && maxAccess && adultUser && Boolean(ctx.capture?.scanId);
 
   // The plan is where someone's answers have to actually bite. Regions they
   // asked us to leave alone are dropped from the WRITTEN plan — their scores
@@ -2698,8 +2685,10 @@ function showImprove(): void {
   paintCeilingCta(body(), frontPhoto);
   if (!gated) {
     wireMorphPreview(body(), {
+      scanId: ctx.capture?.scanId ?? "",
       selected: morph.selected,
       maxVision: morph.maxVision,
+      frontLandmarks: ctx.landmarks,
       frontPhoto,
       sidePhoto: ctx.sidePhoto ?? null,
       renderEnabled: morphRenderEnabled,

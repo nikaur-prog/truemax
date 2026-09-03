@@ -5,10 +5,9 @@ import type { Report } from "../engine/types.js";
 // becomes a compact header once somebody starts reading, and stays compact
 // until they return to the actual top of the report.
 //
-// The photograph no longer shrinks or remains pinned. It is the evidence for
-// the report, so it keeps a generous size and scrolls away naturally. When the
-// facial-category rail reaches the compact header it becomes the only sticky
-// control inside the results themselves.
+// The photograph never shrinks. On a phone it remains pinned at a useful size
+// while the report summary starts moving; results.ts hands that sticky slot to
+// the facial-category rail when the rail reaches the compact app header.
 //
 // The old implementation also built, animated and wired a score card here.
 // That card is superseded by the complete overall/front/side summary at the
@@ -24,7 +23,7 @@ export function clearScoreStrip(): void {
   detach?.();
   detach = null;
   const pane = document.querySelector(".pane-photo");
-  pane?.classList.remove("region-focus", "results-ready");
+  pane?.classList.remove("region-focus", "results-ready", "report-photo-pinned");
   document.querySelector(".topbar")?.classList.remove("report-compact");
   document.querySelector<HTMLElement>("#v-main")?.style.removeProperty("--report-header-h");
 }
@@ -33,7 +32,7 @@ export function renderScoreStrip(_report: Report): void {
   clearScoreStrip();
   const pane = document.querySelector<HTMLElement>(".pane-photo");
   if (!pane) return;
-  pane.classList.add("results-ready");
+  pane.classList.add("results-ready", "report-photo-pinned");
   detach = watchReportScroll(pane);
 }
 

@@ -36,7 +36,8 @@ enroll for it). The shipped answer here is the **Spotify model**:
 2. Open `ios/App` in Xcode. Set the team, bundle id `app.truemax`.
 3. `Info.plist` additions:
    - `NSCameraUsageDescription`: "TrueMax uses your camera to measure your
-     face. Photos are processed on your device and are never uploaded."
+     face on your device. A photo is sent only when you separately choose a
+     cloud feature such as side-point placement or Goal preview."
 4. Icons/splash: drag `resources/` PNGs into the asset catalog.
 5. **Sign in with Apple**: required because Google login is offered.
    - Enable the capability in Xcode.

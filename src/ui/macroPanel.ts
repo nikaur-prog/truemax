@@ -21,6 +21,7 @@ import { isStale, readBody, writeBody } from "../engine/bodyProfile.js";
 import { ageOnDate } from "../engine/age.js";
 import type { StoredBody } from "../engine/bodyProfile.js";
 import type { Sex } from "../engine/types.js";
+import { openBodyProfileDialog } from "./bodyProfileDialog.js";
 
 export interface MacroPanelCtx {
   sex: Sex;
@@ -97,13 +98,8 @@ function shell(inner: string, cls = ""): string {
 }
 
 function askHTML(): string {
-  return `<p class="mac-note">Two numbers and the calculator runs itself from here. They stay on this device and are never sent anywhere.</p>
-  <div class="mac-fields">
-    <label class="mac-field"><span>Height</span><input type="number" id="mac-h" inputmode="numeric" min="120" max="230" step="1" placeholder="cm"></label>
-    <label class="mac-field"><span>Weight</span><input type="number" id="mac-w" inputmode="numeric" min="35" max="300" step="1" placeholder="kg"></label>
-  </div>
-  <p class="mac-err" id="mac-err" hidden></p>
-  <button type="button" class="btn pri" id="mac-go">Work out my day</button>`;
+  return `<p class="mac-note">Your calculator needs the height and weight from your Max setup before it can write this day.</p>
+  <button type="button" class="btn pri" id="mac-add-body">Add height and weight</button>`;
 }
 
 function planHTML(plan: MacroPlan, body: StoredBody): string {
@@ -194,24 +190,9 @@ export function wireMacroPanel(host: HTMLElement, ctx: MacroPanelCtx, now = new 
     wireMacroPanel(next, ctx, now);
   };
 
-  const go = host.querySelector<HTMLButtonElement>("#mac-go");
-  if (go) {
-    go.onclick = () => {
-      const h = Number(host.querySelector<HTMLInputElement>("#mac-h")?.value);
-      const w = Number(host.querySelector<HTMLInputElement>("#mac-w")?.value);
-      const err = host.querySelector<HTMLElement>("#mac-err");
-      // writeBody applies the calculator's own plausibility bounds, so the
-      // check and the storage cannot disagree about what a usable body is.
-      if (!writeBody({ heightCm: h, weightKg: w, activity: "moderate", goal: "hold" })) {
-        if (err) {
-          err.textContent = "Height in centimetres and weight in kilograms, both of a real adult.";
-          err.hidden = false;
-        }
-        return;
-      }
-      rerender();
-    };
-  }
+  host.querySelector<HTMLButtonElement>("#mac-add-body")?.addEventListener("click", () => {
+    void openBodyProfileDialog().then((saved) => { if (saved) rerender(); });
+  });
 
   const body = readBody();
   const goal = host.querySelector<HTMLSelectElement>("#mac-goal");
@@ -234,20 +215,7 @@ export function wireMacroPanel(host: HTMLElement, ctx: MacroPanelCtx, now = new 
   const edit = host.querySelector<HTMLButtonElement>("#mac-edit");
   if (edit && body) {
     edit.onclick = () => {
-      // Re-ask rather than clear: an unusable pair leaves the stored one alone,
-      // so a mistyped weight cannot lose a height that was already right.
-      const nextH = window.prompt("Height in centimetres", String(body.heightCm));
-      if (nextH === null) return;
-      const nextW = window.prompt("Weight in kilograms", String(body.weightKg));
-      if (nextW === null) return;
-      writeBody({
-        heightCm: Number(nextH),
-        weightKg: Number(nextW),
-        bodyFat: body.bodyFat,
-        goal: body.goal,
-        activity: body.activity,
-      });
-      rerender();
+      void openBodyProfileDialog().then((saved) => { if (saved) rerender(); });
     };
   }
 }

@@ -48,6 +48,7 @@ import {
   storeSidePlacementChoice,
 } from "./sideCloudPlacement.js";
 import type { SidePlacementChoice } from "./sideCloudPlacement.js";
+import { fuseSideSeeds } from "../engine/sideSeedFusion.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -769,13 +770,28 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
     cloudSeed,
     wait(READ_BEAT_MS),
   ]);
-  // AI-first when the person allowed the one-request cloud pass. Every
-  // unavailable path, including sign-out, refusal, rate limit, endpoint error
-  // and the five-second deadline, lands on the on-device seed already running
-  // beside it. The remainder of the flow is deliberately identical.
-  let seed: SidePlacementSeed = cloudResult
-    ? { ...cloudResult, method: "vision" }
-    : localResult;
+  // The cloud is a second reader, not a replacement for the device seed. The
+  // benchmark policy decides which reader to trust per landmark, while their
+  // disagreement becomes the confidence shown on each ring. If the request is
+  // refused, unavailable or late, fusion returns the untouched device seed.
+  const fused = fuseSideSeeds(
+    localResult.points,
+    cloudResult?.points ?? null,
+    cloudResult?.confidenceByPoint,
+  );
+  const bandOpacity = { high: 1, mid: 0.68, low: 0.32 } as const;
+  const confidenceByPoint = Object.fromEntries(
+    Object.entries(fused.band).map(([id, band]) => [id, bandOpacity[band]]),
+  ) as Record<SidePointId, number>;
+  const overallConfidence = bandOpacity[fused.overall];
+  let seed: SidePlacementSeed = {
+    ...localResult,
+    points: fused.points,
+    method: cloudResult ? "fused" : localResult.method,
+    confidence: overallConfidence,
+    confidenceByPoint,
+    seedVersion: cloudResult?.seedVersion,
+  };
   stopThinking();
   e.frame.classList.remove("scanning");
   e.cap.textContent = "VERIFY LANDMARKS";
@@ -1256,7 +1272,7 @@ function mountVerify(
       };
     }
     const low = (seed.confidence ?? 1) < 0.7;
-    const cloud = seedMethod === "vision";
+    const cloud = seedMethod === "vision" || seedMethod === "fused";
     e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
       <p class="side-sub">${low
         ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names: the hollow centre shows the pixel underneath."
@@ -1432,7 +1448,7 @@ function mountVerify(
           confirmButton.disabled = false;
           confirmButton.textContent = "Confirm as-is";
         }
-        const untouchedCopy = seedMethod === "vision"
+        const untouchedCopy = seedMethod === "vision" || seedMethod === "fused"
           ? "These are the positions placed from this photograph. If they are genuinely right, press Confirm as-is."
           : "These are the automatic positions exactly as they were estimated. The five behind the face, jaw corner, ear and the neck point, are inferred from an average head rather than found in the photo, so they are the ones that drift.";
         e.panelCopy.innerHTML = `<h2 class="side-title">Nothing was moved</h2>
@@ -1522,7 +1538,7 @@ function mountVerify(
    * is scored, and the report says what it is built on.
    */
   const afterAutomatic = async () => {
-    const cloud = seedMethod === "vision";
+    const cloud = seedMethod === "vision" || seedMethod === "fused";
     const right = await askSideQuestion({
       klabel: "ONE QUESTION",
       title: "Do these points look right?",

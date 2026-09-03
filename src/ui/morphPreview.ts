@@ -3,17 +3,23 @@ import {
   createMorphRenderRequest,
   pollMorphRender,
   requestMorphRender,
+  submitMorphValidation,
   type MorphRenderSource,
 } from "../engine/morphContract.js";
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type {
   MorphBlueprint,
   MorphEffectId,
   MorphMetricTarget,
 } from "../engine/morphPlan.js";
+import { ensureGoalPreviewConsent } from "./goalPreviewConsent.js";
+import { validateMorphImages } from "./morphValidation.js";
 
 export interface MorphPreviewInput {
+  scanId: string;
   selected: MorphBlueprint;
   maxVision: MorphBlueprint;
+  frontLandmarks: NormalizedLandmark[];
   frontPhoto: HTMLCanvasElement | null;
   sidePhoto: HTMLCanvasElement | null;
   renderEnabled: boolean;
@@ -255,10 +261,30 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
       try {
         const accessToken = await currentAccessToken();
         if (!accessToken) throw new Error("Sign in again to create this preview.");
-        const request = createMorphRenderRequest(blueprint, source);
+        const consented = await ensureGoalPreviewConsent();
+        if (!consented) {
+          if (status) status.textContent = "Goal preview was not enabled. You can choose it whenever you are ready.";
+          return;
+        }
+        const request = createMorphRenderRequest(input.scanId, blueprint, source);
         let state = await requestMorphRender(request, accessToken, controller.signal);
         for (let attempt = 0; shell.isConnected && (state.status === "accepted" || state.status === "processing") && attempt < 90; attempt++) {
           await delay(2500, controller.signal);
+          state = await pollMorphRender(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+        }
+        if (state.status === "validation_pending") {
+          if (status) status.textContent = "Checking that the result kept your identity and reached the measured target...";
+          const validation = await validateMorphImages({
+            blueprint,
+            originalFrontLandmarks: input.frontLandmarks,
+            images: state.images,
+          });
+          const submitted = await submitMorphValidation(state.jobId, validation.passed, accessToken, controller.signal);
+          if (!submitted.ok) throw new Error(submitted.error || "The validation result could not be recorded.");
+          if (!validation.passed) {
+            if (status) status.textContent = validation.reason || "The generated face did not pass the identity and target checks, so it was withheld.";
+            return;
+          }
           state = await pollMorphRender(state.jobId, blueprint.hasSide, accessToken, controller.signal);
         }
         if (state.status === "ready") {
