@@ -171,6 +171,67 @@ one, roughly three times the latency (a few seconds more) and the tokens.
 The daily allowance counts photographs, not calls, so nothing about the
 ceiling moves.
 
+## 2c. vision-3: the ear at five times the resolution, the jaw corner constructed
+
+Written 3 September 2026 from the vision-2 table above, before the run.
+
+What the vision-2 numbers say, point by point. The ear notch and the hinge
+have signed offsets near zero and medians of 0.10 to 0.14: that is scatter,
+and the reason is arithmetic. A 1.2 head-width crop enlarged to 1024 px is
+1.4x, so a 100 px grid cell in the crop is 0.12 head widths in the frame,
+larger than the go bar itself (half the seeder's 0.090, so 0.045). The jaw
+corner is different: up and back on every face (dx -0.169, dy -0.201) and
+the offset survives every fit, so the model is naming a different point, the
+lobe or the ramus, not misreading a grid. The chin bottom is placed low and
+back (dy +0.142), which is the underside of the jaw or the neck, again a
+definition.
+
+So vision-3 is four changes, each aimed at one of those:
+
+1. **Two zoom stages.** A coarse crop of 0.8 head widths per cluster finds
+   it; then three fine crops, 0.35 head widths around the ear notch pair,
+   0.45 around the jaw corner, 0.5 around the chin, each enlarged to 1024
+   px (about five times the frame) with a 50 px grid. The fine call also
+   sees the coarse crop with the fine window outlined, so a close crop of
+   an ear cannot be mistaken for a close crop of a lobe. Six calls in three
+   rounds, run in parallel within a round.
+2. **The seed skips the first pass.** When the client sends the device
+   points, the whole-frame call is not made: the front eight are the mesh's
+   (exact) and the crops are cut around the seed's clusters. Five calls,
+   two rounds.
+3. **The jaw corner is constructed**, as a cephalometric tracing does it.
+   The fine jaw call asks for two points the model reads well, one on the
+   lower border forward of the corner and one on the back edge below the
+   lobe, and the corner is where the line from the chin bottom through the
+   first meets the line from the hinge through the second. The construction
+   is taken whenever it is a corner a jaw can have (below the hinge, not
+   below the chin, between them horizontally, tangents at a real angle);
+   otherwise the model's guess is kept and marked doubtful. The model's
+   guess never vetoes a sound construction, because the guess is the thing
+   that was wrong.
+4. **The chin bottom is defined as the chin's own curve**, and a placement
+   below the neck point or behind the chin is refused and asked once more
+   with the placement drawn on the crop.
+
+The harness prints, on top of the vision-2 tables: the back points after
+each stage (a stage that lowers nothing is a call to drop), how the jaw
+corner was settled and how far the construction sat from the guess, the
+chin re-ask count, and a leave-one-out bias table per back point. If the
+corrected column of that table is clearly lower, the offset is a property
+of the model and belongs in a versioned table in the module; if not, it is
+not a bias.
+
+The run:
+
+```
+npx tsx scripts/eval-vision-landmarks.ts --seed
+npx tsx scripts/eval-vision-landmarks.ts
+npx tsx scripts/eval-vision-landmarks.ts --seed --model claude-opus-5
+```
+
+The first is what the app will do. The second says what the seed buys. The
+third says what a larger model buys. Attach the three cache files.
+
 ## 3. The flow, as built and as it changes now
 
 Codex wired the cloud pass into `src/ui/sideFlow.ts` on 2 September: the

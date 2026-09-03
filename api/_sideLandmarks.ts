@@ -29,6 +29,26 @@ import sharp from "sharp";
 //      own grid. A landmark that is a dozen pixels wide in the full frame is
 //      a hundred wide in the crop.
 //
+// vision-3 answers what vision-2 left (section 2b of the doc): the ear pair
+// was scatter at the limit of a 1.4x crop, and the jaw corner and chin
+// bottom were the model naming a different point. So:
+//
+//   3. Two zoom stages instead of one. A coarse crop of 0.8 head widths finds
+//      the cluster; a fine crop of 0.35 to 0.5 head widths, five times the
+//      frame's resolution with a 50 px grid, places it. The fine call also
+//      sees the coarse crop with the fine window outlined, so a close crop
+//      of an ear cannot be mistaken for a close crop of a lobe.
+//   4. When the client sends the device seed, the whole-frame pass is
+//      skipped: the front eight come from the mesh, and the crops are cut
+//      around the seed's clusters. One fewer call, and the front is exact.
+//   5. The jaw corner is CONSTRUCTED, as a cephalometric tracing does it:
+//      the model marks two points on the jaw outline it reads well, and the
+//      corner is where the lower-border line meets the back-edge line. The
+//      model's own corner is kept only when it agrees with the construction.
+//   6. The chin bottom is defined as the chin's own curve, never the
+//      underside of the jaw or the neck, and a placement below the neck
+//      point is refused and asked again with the placement drawn.
+//
 // Two rules the endpoint and the evaluation harness both go through here, so
 // production and the benchmark cannot drift apart:
 //
@@ -74,7 +94,7 @@ export const ZOOM_CLUSTERS: ReadonlyArray<{ name: "ear" | "chin"; ids: readonly 
 // Bumped whenever the prompt, the schema, the passes or the default model
 // change. Stored beside every seed the pass produces so later analysis can
 // tell them apart.
-export const LANDMARK_VERSION = "vision-2";
+export const LANDMARK_VERSION = "vision-3";
 
 // Same margin call as Coach Max: the mid-size model, overridable from the
 // environment so a week on the larger one can be measured rather than argued.
@@ -96,8 +116,21 @@ export const LANDMARK_PASSES_PER_DAY = 12;
 export const LANDMARK_MAX_SIDE = 1568;
 // A crop is enlarged to this before its grid goes on.
 export const LANDMARK_ZOOM_SIDE = 1024;
-// Grid pitch in pixels of the image the model sees.
+// Grid pitch in pixels of the image the model sees; the fine crops use half.
 export const LANDMARK_GRID_STEP = 100;
+export const LANDMARK_FINE_GRID_STEP = 50;
+// Crop sizes in head widths (nose tip to ear notch), per stage.
+export const ZOOM_SIZES = {
+  coarse: 0.8,
+  fineEar: 0.35,
+  fineJaw: 0.45,
+  fineChin: 0.5,
+} as const;
+/** The extra outline points the jaw-corner construction asks for. */
+export const JAW_OUTLINE_IDS = ["jawLower", "jawBack"] as const;
+export type JawOutlineId = (typeof JAW_OUTLINE_IDS)[number];
+/** Any id a tool call may return: a landmark, or one of the construction points. */
+export type PlacedId = SideLandmarkId | JawOutlineId;
 // Decoding guard, same figure as the carousel slide.
 const MAX_INPUT_PIXELS = 40_000_000;
 
@@ -129,9 +162,9 @@ const DEFINITIONS: Record<SideLandmarkId, string> = {
   labialeSuperius: "Upper lip: the most forward point of the upper lip's vermilion.",
   labialeInferius: "Lower lip: the most forward point of the lower lip's vermilion.",
   pogonion: "Chin front: the most forward point of the soft-tissue chin.",
-  menton: "Chin bottom: the lowest point of the chin's underside.",
+  menton: "Chin bottom: the lowest point of the chin itself, roughly straight below the chin front, on the chin's own curve before the underside turns back toward the neck. Not the lowest point of the underside of the jaw, and not on the neck.",
   cervicale: "Neck point: where the underside of the chin turns into the front of the neck, the deepest point of that angle.",
-  gonion: "Jaw corner: the point on the skin over the angle of the mandible, where the lower border of the jaw turns upward into the vertical ramus.",
+  gonion: "Jaw corner: the corner of the jaw's skin outline, where the lower border of the jaw, running back from the chin, turns upward into the back edge of the jaw. It sits below and in front of the ear lobe by at least a finger width, on the jaw outline, never on the ear.",
   condylion: "Jaw hinge: the joint the jaw pivots on, on the skin immediately in front of the ear canal and level with it. Not on the temple.",
   tragion: "Ear notch: the notch at the front of the ear, just above the tragus, at the opening of the ear canal.",
 };
@@ -148,6 +181,25 @@ const ZOOM_CONTEXT: Record<"ear" | "chin", string> = {
     "This is an enlarged crop of the chin and upper neck of that photograph. Find the underside of the chin first. " +
     "The chin front (pogonion) is the most forward point of the soft chin. The chin bottom (menton) is its lowest point. " +
     "The neck point (cervicale) is where the underside of the chin turns into the front of the neck, at the deepest point of that angle.",
+};
+
+const OUTLINE_DEFINITIONS: Record<JawOutlineId, string> = {
+  jawLower: "A point on the lower border of the jaw's skin outline, forward of the corner toward the chin, as far forward as this crop shows.",
+  jawBack: "A point on the back edge of the jaw's skin outline, above the corner toward the ear lobe, as far up as this crop shows but below the lobe.",
+};
+
+const FINE_CONTEXT: Record<"ear" | "jaw" | "chin", string> = {
+  ear:
+    "This is a close crop around the ear notch of that photograph; the first image shows the wider ear region with this crop outlined. " +
+    "The tragus is the small flap of skin in front of the ear canal opening. The ear notch (tragion) is the notch on the FRONT edge of the ear just above that flap. " +
+    "The jaw hinge (condylion) is on the cheek skin directly in front of the notch, about one finger-width toward the face, level with it.",
+  jaw:
+    "This is a close crop around the corner of the jaw below the ear; the first image shows the wider region with this crop outlined. " +
+    "Follow the skin outline of the jaw: it runs back from the chin along the lower border, turns the corner, and rises up the back edge toward the ear lobe. " +
+    "The corner is on that skin outline, below and in front of the ear lobe, never on the ear itself.",
+  chin:
+    "This is a close crop of the chin and the start of the neck; the first image shows the wider region with this crop outlined. " +
+    "Follow the outline from the chin front down around the chin's own curve to its lowest point, then back along the underside to where it meets the neck.",
 };
 
 export interface GridFrame {
@@ -183,9 +235,13 @@ export function landmarkPrompt(frame: GridFrame): string {
   ].join("\n");
 }
 
-/** The prompt for a second look at one cluster, on its enlarged crop. */
-export function zoomPrompt(cluster: "ear" | "chin", ids: readonly SideLandmarkId[], frame: GridFrame, faceDir: 1 | -1): string {
-  const lines = ids.map((id) => `- ${id}: ${DEFINITIONS[id]}`);
+function definitionOf(id: PlacedId): string {
+  return (DEFINITIONS as Record<string, string>)[id] ?? OUTLINE_DEFINITIONS[id as JawOutlineId];
+}
+
+/** The prompt for a coarse second look at one cluster, on its enlarged crop. */
+export function zoomPrompt(cluster: "ear" | "chin", ids: readonly PlacedId[], frame: GridFrame, faceDir: 1 | -1): string {
+  const lines = ids.map((id) => `- ${id}: ${definitionOf(id)}`);
   return [
     `A side-profile photograph of one person's head was taken with the face pointing to the ${faceDir > 0 ? "right" : "left"} of the frame.`,
     ZOOM_CONTEXT[cluster],
@@ -200,7 +256,24 @@ export function zoomPrompt(cluster: "ear" | "chin", ids: readonly SideLandmarkId
 }
 
 /** The tool for a given set of points in a frame of a given pixel size. */
-export function landmarkTool(ids: readonly SideLandmarkId[], frame: { width: number; height: number }): Anthropic.Messages.Tool {
+/** The prompt for the fine look: a close crop, with the coarse crop shown first for context. */
+export function finePrompt(region: "ear" | "jaw" | "chin", ids: readonly PlacedId[], frame: GridFrame, faceDir: 1 | -1, redo?: string): string {
+  const lines = ids.map((id) => `- ${id}: ${definitionOf(id)}`);
+  return [
+    `A side-profile photograph of one person's head was taken with the face pointing to the ${faceDir > 0 ? "right" : "left"} of the frame.`,
+    FINE_CONTEXT[region],
+    "",
+    `Read coordinates from the SECOND image only. ${gridSentence(frame)}`,
+    ...(redo ? ["", redo] : []),
+    "",
+    "Give each point a confidence between 0 and 1. Do not omit a point. Place only positions. Do not describe the person.",
+    "",
+    "Points:",
+    ...lines,
+  ].join("\n");
+}
+
+export function landmarkTool(ids: readonly PlacedId[], frame: { width: number; height: number }): Anthropic.Messages.Tool {
   const pointSchema = {
     type: "object",
     properties: {
@@ -245,14 +318,14 @@ export interface PixelPlacement {
  * because the caller's fallback is the seeder and a half-answer would be
  * worse than either.
  */
-export function parsePixelToolInput(
+export function parsePixelToolInput<Id extends string>(
   input: unknown,
-  ids: readonly SideLandmarkId[],
+  ids: readonly Id[],
   frame: { width: number; height: number },
-): Partial<Record<SideLandmarkId, PixelPlacement>> {
+): Partial<Record<Id, PixelPlacement>> {
   if (!input || typeof input !== "object") throw new Error("Landmark result is not an object");
   const raw = input as Record<string, unknown>;
-  const out: Partial<Record<SideLandmarkId, PixelPlacement>> = {};
+  const out: Partial<Record<Id, PixelPlacement>> = {};
   for (const id of ids) {
     const entry = raw[id];
     if (!entry || typeof entry !== "object") throw new Error(`Landmark ${id} is missing`);
@@ -447,6 +520,30 @@ export async function withGrid(image: Buffer, frame: GridFrame): Promise<string>
   return out.toString("base64");
 }
 
+/** A rectangle outlined on a frame: the fine window drawn on the coarse crop. */
+export function outlineOverlaySvg(frame: { width: number; height: number }, box: { left: number; top: number; size: number }): string {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${frame.width}" height="${frame.height}" viewBox="0 0 ${frame.width} ${frame.height}">` +
+    `<rect x="${box.left}" y="${box.top}" width="${box.size}" height="${box.size}" fill="none" stroke="#ff3366" stroke-width="4"/>` +
+    `</svg>`
+  );
+}
+
+/** Labelled markers drawn on a frame: a placement shown back to the model. */
+export function markerOverlaySvg(frame: { width: number; height: number }, marks: ReadonlyArray<{ x: number; y: number; label: string }>): string {
+  const font = Math.max(14, Math.round(Math.min(frame.width, frame.height) / 50));
+  const parts = marks.map((m) => {
+    const w = Math.round(m.label.length * font * 0.62 + 8);
+    return (
+      `<circle cx="${m.x}" cy="${m.y}" r="9" fill="none" stroke="#ff3366" stroke-width="3"/>` +
+      `<line x1="${m.x}" y1="${m.y}" x2="${m.x + 14}" y2="${m.y - 14}" stroke="#ff3366" stroke-width="2"/>` +
+      `<rect x="${m.x + 14}" y="${m.y - 14 - font - 4}" width="${w}" height="${font + 4}" rx="2" fill="rgba(0,0,0,0.7)"/>` +
+      `<text x="${m.x + 18}" y="${m.y - 18}" font-family="Arial, Helvetica, sans-serif" font-size="${font}" font-weight="bold" fill="#ff3366">${m.label}</text>`
+    );
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${frame.width}" height="${frame.height}" viewBox="0 0 ${frame.width} ${frame.height}">${parts.join("")}</svg>`;
+}
+
 export interface ZoomWindow {
   left: number;
   top: number;
@@ -480,20 +577,131 @@ export function zoomWindow(
   return { left, top, size };
 }
 
+/** A square of a given side, in frame pixels, centred on a point and kept inside the image. */
+export function squareWindow(
+  centre: { x: number; y: number },
+  size: number,
+  frame: { width: number; height: number },
+): ZoomWindow {
+  let s = Math.round(Math.max(64, size));
+  s = Math.min(s, frame.width, frame.height);
+  const left = Math.max(0, Math.min(Math.round(centre.x - s / 2), frame.width - s));
+  const top = Math.max(0, Math.min(Math.round(centre.y - s / 2), frame.height - s));
+  return { left, top, size: s };
+}
+
 /** A crop of the plain frame, enlarged to `side` pixels, with its own grid. */
 export async function zoomCrop(
   image: Buffer,
   window: ZoomWindow,
   side = LANDMARK_ZOOM_SIDE,
-): Promise<{ data: string; frame: GridFrame; scale: number }> {
+  step = LANDMARK_GRID_STEP,
+  overlay?: string,
+): Promise<{ data: string; frame: GridFrame; scale: number; plain: Buffer }> {
   const scale = side / window.size;
-  const crop = await sharp(image)
+  const plain = await sharp(image)
     .extract({ left: window.left, top: window.top, width: window.size, height: window.size })
     .resize({ width: side, height: side, kernel: "lanczos3" })
     .jpeg({ quality: 92 })
     .toBuffer();
-  const frame = { width: side, height: side, step: LANDMARK_GRID_STEP };
-  return { data: await withGrid(crop, frame), frame, scale };
+  const frame = { width: side, height: side, step };
+  const layers = [{ input: Buffer.from(gridOverlaySvg(frame)), top: 0, left: 0 }];
+  if (overlay) layers.push({ input: Buffer.from(overlay), top: 0, left: 0 });
+  const data = (await sharp(plain).composite(layers).jpeg({ quality: 92 }).toBuffer()).toString("base64");
+  return { data, frame, scale, plain };
+}
+
+/** A crop drawn with an overlay and no grid: context for a fine call, or a placement shown back. */
+export async function annotatedCrop(plainCrop: Buffer, overlay: string): Promise<string> {
+  return (await sharp(plainCrop).composite([{ input: Buffer.from(overlay), top: 0, left: 0 }]).jpeg({ quality: 88 }).toBuffer()).toString("base64");
+}
+
+/** A point of the full frame, in the pixels of an enlarged crop. */
+export function toZoom(p: { x: number; y: number }, window: ZoomWindow, scale: number): { x: number; y: number } {
+  return { x: (p.x - window.left) * scale, y: (p.y - window.top) * scale };
+}
+
+// ---------------------------------------------------------------------------
+// The constructed jaw corner. Orthodontic tracings do not read gonion off the
+// skin by eye: they draw the mandibular-plane tangent (here menton through a
+// point on the lower border) and the ramus tangent (here condylion through a
+// point on the back edge) and take the intersection. The model reads
+// outline points far better than it names the corner, so it supplies the
+// two tangent points and the corner is arithmetic.
+// ---------------------------------------------------------------------------
+
+function intersect(
+  a1: { x: number; y: number },
+  a2: { x: number; y: number },
+  b1: { x: number; y: number },
+  b2: { x: number; y: number },
+): { x: number; y: number } | null {
+  const d = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
+  if (Math.abs(d) < 1e-9) return null;
+  const t = ((a1.x - b1.x) * (b1.y - b2.y) - (a1.y - b1.y) * (b1.x - b2.x)) / d;
+  return { x: a1.x + t * (a2.x - a1.x), y: a1.y + t * (a2.y - a1.y) };
+}
+
+export interface ConstructedGonion {
+  point: PixelPlacement;
+  /** How the final point was chosen. */
+  method: "construction" | "snapped" | "guess";
+  /** Distance between the construction and the model's own corner, in head widths. */
+  disagreement: number | null;
+}
+
+/**
+ * The jaw corner from the two tangents, checked against the rest of the
+ * jaw. The construction is taken whenever it is a corner a jaw can have:
+ * the tangents meet at a real angle, the point sits below the hinge, no
+ * lower than a little under the chin bottom, and between the hinge and the
+ * chin horizontally. Otherwise (a very round jaw, a tangent point the model
+ * put somewhere odd) the model's own corner is kept and marked doubtful.
+ * The model's guess never vetoes a sound construction: the guess is the
+ * thing that was systematically wrong.
+ */
+export function constructGonion(
+  guess: PixelPlacement,
+  menton: { x: number; y: number },
+  jawLower: { x: number; y: number },
+  condylion: { x: number; y: number },
+  jawBack: { x: number; y: number },
+  unit: number,
+): ConstructedGonion {
+  const built = intersect(menton, jawLower, condylion, jawBack);
+  if (!built || !(unit > 0)) return { point: guess, method: "guess", disagreement: null };
+  const disagreement = Math.hypot(built.x - guess.x, built.y - guess.y) / unit;
+  // The angle between the two tangents.
+  const a = Math.atan2(jawLower.y - menton.y, jawLower.x - menton.x);
+  const b = Math.atan2(jawBack.y - condylion.y, jawBack.x - condylion.x);
+  let angle = Math.abs(a - b) % Math.PI;
+  if (angle > Math.PI / 2) angle = Math.PI - angle;
+  const sound =
+    angle >= (35 * Math.PI) / 180 &&
+    built.y > condylion.y + 0.1 * unit &&
+    built.y <= menton.y + 0.15 * unit &&
+    built.x >= Math.min(condylion.x, menton.x) - 0.15 * unit &&
+    built.x <= Math.max(condylion.x, menton.x) + 0.15 * unit;
+  if (!sound) return { point: { ...guess, confidence: Math.min(guess.confidence, 0.3) }, method: "guess", disagreement };
+  const confidence = disagreement <= 0.05 ? Math.max(guess.confidence, 0.8) : 0.6;
+  return { point: { x: built.x, y: built.y, confidence }, method: disagreement <= 0.05 ? "snapped" : "construction", disagreement };
+}
+
+/**
+ * A chin bottom that is not on the chin: below the neck point, or behind the
+ * midpoint of chin front and neck point. Either means the model marked the
+ * underside of the jaw or the neck, and the fine call is asked again with
+ * its placement drawn.
+ */
+export function mentonLooksWrong(
+  menton: { x: number; y: number },
+  pogonion: { x: number; y: number },
+  cervicale: { x: number; y: number },
+  faceDir: 1 | -1,
+): boolean {
+  if (menton.y > cervicale.y) return true;
+  const midX = (pogonion.x + cervicale.x) / 2;
+  return faceDir > 0 ? menton.x < midX : menton.x > midX;
 }
 
 /** A placement read in an enlarged crop, back in the full frame. */
@@ -510,40 +718,53 @@ export interface LandmarkPassUsage {
   outputTokens: number;
 }
 
+export type StageName = "first" | "coarse" | "fine";
+
 export interface LandmarkPass {
   result: SideLandmarkResult;
   model: string;
   version: string;
   usage: LandmarkPassUsage;
-  /** Model calls made: one for the frame plus one per cluster that zoomed. */
+  /** Model calls made. */
   calls: number;
-  /** The points whose final position came from an enlarged second look. */
+  /** The points whose final position came from an enlarged look. */
   zoomed: SideLandmarkId[];
   /** Wall-clock milliseconds for the whole pass, image preparation excluded. */
   ms: number;
+  /** Where the back points stood after each stage, as fractions, so the harness can score each. */
+  stages: Partial<Record<StageName, Partial<Record<SideLandmarkId, LandmarkPoint>>>>;
+  /** How the jaw corner was settled, and how far the construction sat from the model's guess. */
+  gonion: ConstructedGonion["method"] | null;
+  gonionDisagreement: number | null;
+  /** Whether the chin bottom had to be asked again. */
+  mentonRetried: boolean;
+  /** Whether the front eight came from the device seed rather than a model call. */
+  seeded: boolean;
+}
+
+interface ImageBlock {
+  data: string;
 }
 
 async function callTool(
   client: Anthropic,
   model: string,
-  data: string,
+  images: ImageBlock[],
   prompt: string,
   tool: Anthropic.Messages.Tool,
 ): Promise<{ input: unknown; usage: LandmarkPassUsage }> {
+  const content: Anthropic.Messages.ContentBlockParam[] = [];
+  images.forEach((image, i) => {
+    if (images.length > 1) content.push({ type: "text", text: `Image ${i + 1}:` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image.data } });
+  });
+  content.push({ type: "text", text: prompt });
   const response = await client.messages.create({
     model,
     max_tokens: 900,
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name },
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data } },
-          { type: "text", text: prompt },
-        ],
-      },
-    ],
+    messages: [{ role: "user", content }],
   });
   const block = response.content.find((b) => b.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new Error("The model returned no landmark tool call");
@@ -553,23 +774,51 @@ async function callTool(
   };
 }
 
-/**
- * One photograph, one to three model calls. The photograph goes to the
- * provider as part of these requests and nowhere else: this function keeps
- * no copy, writes no file and logs no bytes.
- *
- * A zoom pass that fails, or that answers with a point outside its crop,
- * leaves the first pass's placement for that cluster in place; it never
- * fails the photograph.
- */
 export interface PlaceOptions {
   model?: string;
+  /** False runs the whole-frame pass only. */
   zoom?: boolean;
   /** The device seed as fractions, when the client sent one. Advisory; see parseSeedHint. */
   hint?: Record<SideLandmarkId, LandmarkPoint> | null;
-  onZoomError?: (cluster: string, error: unknown) => void;
+  /** Cut the crops around the hint and skip the whole-frame pass. Needs a hint. Default true. */
+  seeded?: boolean;
+  onZoomError?: (stage: string, error: unknown) => void;
 }
 
+const EAR_IDS: readonly SideLandmarkId[] = ["tragion", "condylion", "gonion"];
+const CHIN_IDS: readonly SideLandmarkId[] = ["pogonion", "menton", "cervicale"];
+
+function centroid(placed: Record<string, { x: number; y: number }>, ids: readonly string[]): { x: number; y: number } {
+  const n = ids.length;
+  return {
+    x: ids.reduce((t, id) => t + placed[id].x, 0) / n,
+    y: ids.reduce((t, id) => t + placed[id].y, 0) / n,
+  };
+}
+
+function snapshot(placed: Record<SideLandmarkId, PixelPlacement>, ids: readonly SideLandmarkId[], frame: { width: number; height: number }) {
+  const out: Partial<Record<SideLandmarkId, LandmarkPoint>> = {};
+  for (const id of ids) out[id] = { x: placed[id].x / frame.width, y: placed[id].y / frame.height };
+  return out;
+}
+
+/**
+ * One photograph, up to six model calls in three rounds. The photograph
+ * goes to the provider as part of these requests and nowhere else: this
+ * function keeps no copy, writes no file and logs no bytes.
+ *
+ *   first   the whole frame with its grid, all thirteen points; skipped
+ *           when the device seed is given, which then supplies the front
+ *           eight and the facing
+ *   coarse  the ear region and the chin region, 0.8 head widths each, in
+ *           parallel
+ *   fine    the ear notch pair, the jaw corner with its two tangent points,
+ *           and the chin, in parallel, each on a close crop with the coarse
+ *           crop shown first for context
+ *
+ * A crop pass that fails leaves the previous stage's placement for its
+ * points; it never fails the photograph.
+ */
 export async function placeSideLandmarks(
   client: Anthropic,
   image: PreparedImage,
@@ -579,51 +828,165 @@ export async function placeSideLandmarks(
   const zoom = options.zoom ?? true;
   const frame: GridFrame = { width: image.width, height: image.height, step: LANDMARK_GRID_STEP };
   const usage: LandmarkPassUsage = { inputTokens: 0, outputTokens: 0 };
+  const stages: LandmarkPass["stages"] = {};
   let calls = 0;
   const started = Date.now();
+  const spend = (u: LandmarkPassUsage) => {
+    calls += 1;
+    usage.inputTokens += u.inputTokens;
+    usage.outputTokens += u.outputTokens;
+  };
 
-  const first = await callTool(client, model, await withGrid(image.plain, frame), landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame));
-  calls += 1;
-  usage.inputTokens += first.usage.inputTokens;
-  usage.outputTokens += first.usage.outputTokens;
-  const placed = parsePixelToolInput(first.input, SIDE_LANDMARK_IDS, frame) as Record<SideLandmarkId, PixelPlacement>;
-  // Facing and the profile check on the first pass, before any crop is cut
-  // from its points.
+  // ---- first: the whole frame, or the seed.
+  const seeded = !!options.hint && (options.seeded ?? true) && zoom;
+  let placed: Record<SideLandmarkId, PixelPlacement>;
+  if (seeded) {
+    placed = {} as Record<SideLandmarkId, PixelPlacement>;
+    for (const id of SIDE_LANDMARK_IDS) {
+      placed[id] = { x: options.hint![id].x * frame.width, y: options.hint![id].y * frame.height, confidence: 0.5 };
+    }
+  } else {
+    const first = await callTool(client, model, [{ data: await withGrid(image.plain, frame) }], landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame));
+    spend(first.usage);
+    placed = parsePixelToolInput(first.input, SIDE_LANDMARK_IDS, frame) as Record<SideLandmarkId, PixelPlacement>;
+    stages.first = snapshot(placed, SIDE_LANDMARK_IDS, frame);
+  }
+  // Facing and the profile check before any crop is cut from these points.
   const faceDir = resultFromPixels(placed, frame).faceDir;
+  const unit = Math.hypot(placed.pronasale.x - placed.tragion.x, placed.pronasale.y - placed.tragion.y);
 
   const zoomed: SideLandmarkId[] = [];
+  let gonion: ConstructedGonion["method"] | null = null;
+  let gonionDisagreement: number | null = null;
+  let mentonRetried = false;
+
   if (zoom) {
-    // The two crops depend only on the first pass, so they go to the model
-    // together: the client waits a few seconds, not a few seconds per cluster.
-    // Each cluster's window is cut from the first pass's points before either
-    // result lands, so the parallel writes touch disjoint ids.
-    const windows = ZOOM_CLUSTERS.map((cluster) => zoomWindow(placed, cluster.ids, frame));
+    // ---- coarse: the two clusters, in parallel.
+    const coarseWindows = {
+      ear: squareWindow(centroid(placed, EAR_IDS), unit * ZOOM_SIZES.coarse, frame),
+      chin: squareWindow(centroid(placed, CHIN_IDS), unit * ZOOM_SIZES.coarse, frame),
+    };
+    const coarseCrops: Partial<Record<"ear" | "chin", Awaited<ReturnType<typeof zoomCrop>>>> = {};
     await Promise.all(
-      ZOOM_CLUSTERS.map(async (cluster, i) => {
+      (["ear", "chin"] as const).map(async (cluster) => {
+        const ids = cluster === "ear" ? EAR_IDS : CHIN_IDS;
         try {
-          const window = windows[i];
+          const window = coarseWindows[cluster];
           const crop = await zoomCrop(image.plain, window);
-          const second = await callTool(
-            client,
-            model,
-            crop.data,
-            zoomPrompt(cluster.name, cluster.ids, crop.frame, faceDir),
-            landmarkTool(cluster.ids, crop.frame),
-          );
-          calls += 1;
-          usage.inputTokens += second.usage.inputTokens;
-          usage.outputTokens += second.usage.outputTokens;
-          const read = parsePixelToolInput(second.input, cluster.ids, crop.frame);
-          for (const id of cluster.ids) {
+          coarseCrops[cluster] = crop;
+          const answer = await callTool(client, model, [{ data: crop.data }], zoomPrompt(cluster, ids, crop.frame, faceDir), landmarkTool(ids, crop.frame));
+          spend(answer.usage);
+          const read = parsePixelToolInput(answer.input, ids, crop.frame);
+          for (const id of ids) {
             placed[id] = fromZoom(read[id]!, window, crop.scale);
-            zoomed.push(id);
+            if (!zoomed.includes(id)) zoomed.push(id);
           }
         } catch (error) {
-          options.onZoomError?.(cluster.name, error);
+          options.onZoomError?.(`coarse ${cluster}`, error);
         }
       }),
     );
+    stages.coarse = snapshot(placed, [...EAR_IDS, ...CHIN_IDS], frame);
+
+    // ---- fine: three close crops, in parallel, each with its coarse crop for context.
+    const fineWindows = {
+      ear: squareWindow(centroid(placed, ["tragion", "condylion"]), unit * ZOOM_SIZES.fineEar, frame),
+      jaw: squareWindow(placed.gonion, unit * ZOOM_SIZES.fineJaw, frame),
+      chin: squareWindow(centroid(placed, CHIN_IDS), unit * ZOOM_SIZES.fineChin, frame),
+    };
+    const contextFor = async (region: "ear" | "jaw" | "chin"): Promise<ImageBlock | null> => {
+      const coarse = coarseCrops[region === "chin" ? "chin" : "ear"];
+      if (!coarse) return null;
+      const cw = coarseWindows[region === "chin" ? "chin" : "ear"];
+      const box = toZoom({ x: fineWindows[region].left, y: fineWindows[region].top }, cw, coarse.scale);
+      const size = fineWindows[region].size * coarse.scale;
+      return { data: await annotatedCrop(coarse.plain, outlineOverlaySvg(coarse.frame, { left: box.x, top: box.y, size })) };
+    };
+    const fineCall = async <Id extends PlacedId>(
+      region: "ear" | "jaw" | "chin",
+      ids: readonly Id[],
+      redo?: { marks: ReadonlyArray<{ x: number; y: number; label: string }>; instruction: string },
+    ): Promise<Partial<Record<Id, PixelPlacement>>> => {
+      const window = fineWindows[region];
+      const crop = await zoomCrop(
+        image.plain,
+        window,
+        LANDMARK_ZOOM_SIDE,
+        LANDMARK_FINE_GRID_STEP,
+        redo ? markerOverlaySvg({ width: LANDMARK_ZOOM_SIDE, height: LANDMARK_ZOOM_SIDE }, redo.marks.map((m) => ({ ...toZoom(m, window, LANDMARK_ZOOM_SIDE / window.size), label: m.label }))) : undefined,
+      );
+      const context = await contextFor(region);
+      const images = context ? [context, { data: crop.data }] : [{ data: crop.data }];
+      const answer = await callTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction), landmarkTool(ids, crop.frame));
+      spend(answer.usage);
+      const read = parsePixelToolInput(answer.input, ids, crop.frame);
+      const out: Partial<Record<Id, PixelPlacement>> = {};
+      for (const id of ids) out[id] = fromZoom(read[id]!, window, crop.scale);
+      return out;
+    };
+
+    let jawRead: Partial<Record<"gonion" | JawOutlineId, PixelPlacement>> | null = null;
+    await Promise.all([
+      (async () => {
+        try {
+          const read = await fineCall("ear", ["tragion", "condylion"] as const);
+          placed.tragion = read.tragion!;
+          placed.condylion = read.condylion!;
+        } catch (error) {
+          options.onZoomError?.("fine ear", error);
+        }
+      })(),
+      (async () => {
+        try {
+          jawRead = await fineCall("jaw", ["gonion", ...JAW_OUTLINE_IDS] as const);
+        } catch (error) {
+          options.onZoomError?.("fine jaw", error);
+        }
+      })(),
+      (async () => {
+        try {
+          let read = await fineCall("chin", CHIN_IDS);
+          if (mentonLooksWrong(read.menton!, read.pogonion!, read.cervicale!, faceDir)) {
+            mentonRetried = true;
+            read = await fineCall("chin", CHIN_IDS, {
+              marks: [
+                { ...read.pogonion!, label: "chin front" },
+                { ...read.menton!, label: "chin bottom?" },
+                { ...read.cervicale!, label: "neck point" },
+              ],
+              instruction:
+                "The markers show a previous placement. The chin bottom marked there is not on the chin: it is below the neck point or behind the chin's curve. " +
+                "Place the chin bottom on the chin's own curve, above and forward of the neck point, and place the other two afresh.",
+            });
+          }
+          for (const id of CHIN_IDS) placed[id] = read[id]!;
+        } catch (error) {
+          options.onZoomError?.("fine chin", error);
+        }
+      })(),
+    ]);
+    if (jawRead) {
+      const jr = jawRead as Partial<Record<"gonion" | JawOutlineId, PixelPlacement>>;
+      const built = constructGonion(jr.gonion!, placed.menton, jr.jawLower!, placed.condylion, jr.jawBack!, unit);
+      placed.gonion = built.point;
+      gonion = built.method;
+      gonionDisagreement = built.disagreement;
+    }
+    stages.fine = snapshot(placed, [...EAR_IDS, ...CHIN_IDS], frame);
   }
 
-  return { result: resultFromPixels(placed, frame), model, version: LANDMARK_VERSION, usage, calls, zoomed, ms: Date.now() - started };
+  return {
+    result: resultFromPixels(placed, frame),
+    model,
+    version: LANDMARK_VERSION,
+    usage,
+    calls,
+    zoomed,
+    ms: Date.now() - started,
+    stages,
+    gonion,
+    gonionDisagreement,
+    mentonRetried,
+    seeded,
+  };
 }

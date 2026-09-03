@@ -23,13 +23,14 @@
 // describes production, not a benchmark copy of it.
 //
 //   ANTHROPIC_API_KEY=... npx tsx scripts/eval-vision-landmarks.ts [--limit 10] [--ids s000,s001]
-//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom]
+//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom] [--seed]
 //
-// Predictions are cached in .side-dataset/vision-<model>-<version>.json so a
-// re-run of the table costs nothing; delete the file or pass --no-cache to
-// spend again. --no-zoom skips the enlarged second look at the ear and chin
-// clusters (one model call per photo instead of three), which is how the
-// zoom's own contribution is measured: run both and compare.
+// Predictions are cached in .side-dataset/vision-<model>-<version>[-seed|-nozoom].json
+// so a re-run of the table costs nothing; delete the file or pass --no-cache
+// to spend again. --no-zoom runs the whole-frame call only. --seed sends the
+// device seeder's points as the hint, which is what the app does: the
+// whole-frame call is skipped, the front eight are the mesh's, and the crops
+// are cut around the seed. Run with and without to see what the seed buys.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
@@ -44,7 +45,7 @@ import {
   placeSideLandmarks,
   prepareLandmarkImage,
 } from "../api/_sideLandmarks.js";
-import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult } from "../api/_sideLandmarks.js";
+import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult, StageName } from "../api/_sideLandmarks.js";
 import { fuseSideSeeds } from "../src/engine/sideSeedFusion.js";
 import type { ConfidenceBand } from "../src/engine/sideSeedFusion.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
@@ -75,6 +76,11 @@ interface Cached {
   calls?: number;
   zoomed?: SideLandmarkId[];
   ms?: number;
+  stages?: Partial<Record<StageName, Partial<Record<SideLandmarkId, LandmarkPoint>>>>;
+  gonion?: string | null;
+  gonionDisagreement?: number | null;
+  mentonRetried?: boolean;
+  seeded?: boolean;
 }
 
 function arg(name: string): string | undefined {
@@ -89,7 +95,8 @@ const onlyIds = arg("ids")?.split(",").map((s) => s.trim()).filter(Boolean);
 const concurrency = Math.max(1, Number(arg("concurrency") || 2));
 const useCache = !flag("no-cache");
 const zoom = !flag("no-zoom");
-const cachePath = `${DATA}/vision-${model.replace(/[^a-z0-9.-]/gi, "_")}-${LANDMARK_VERSION}${zoom ? "" : "-nozoom"}.json`;
+const useSeed = flag("seed");
+const cachePath = `${DATA}/vision-${model.replace(/[^a-z0-9.-]/gi, "_")}-${LANDMARK_VERSION}${zoom ? "" : "-nozoom"}${useSeed ? "-seed" : ""}.json`;
 
 const labels = JSON.parse(readFileSync(`${DATA}/labels.json`, "utf8")) as Record<string, Labelled>;
 const seeds = JSON.parse(readFileSync(`${DATA}/seeds.json`, "utf8")) as Record<string, Labelled>;
@@ -120,17 +127,37 @@ if (pending.length && !apiKey) {
 }
 const client = apiKey ? new Anthropic({ apiKey }) : null;
 
+async function displayFrame(id: string): Promise<{ w: number; h: number }> {
+  const file = files.find((f) => f.startsWith(`${id}.`))!;
+  const meta = await sharp(readFileSync(`${DATA}/raw/${file}`)).rotate().metadata();
+  const w = meta.width || 1;
+  const h = meta.height || 1;
+  return { w: DISPLAY_W, h: (h * DISPLAY_W) / w };
+}
+
 async function predict(id: string): Promise<void> {
   const file = files.find((f) => f.startsWith(`${id}.`))!;
   const prepared = await prepareLandmarkImage(readFileSync(`${DATA}/raw/${file}`));
+  // The seed as the app would send it: fractions of the same photograph.
+  // seeds.json is in display pixels, 640 wide, of the upright image.
+  let hint: Record<SideLandmarkId, LandmarkPoint> | null = null;
+  if (useSeed && seeds[id]) {
+    const { w, h } = await displayFrame(id);
+    hint = {} as Record<SideLandmarkId, LandmarkPoint>;
+    for (const pid of SIDE_LANDMARK_IDS) hint[pid] = { x: seeds[id].points[pid].x / w, y: seeds[id].points[pid].y / h };
+  }
   const pass = await placeSideLandmarks(client!, prepared, {
     model,
     zoom,
-    onZoomError: (cluster, error) => console.error(`${id}: ${cluster} zoom failed, ${error instanceof Error ? error.message : String(error)}`),
+    hint,
+    onZoomError: (stage, error) => console.error(`${id}: ${stage} failed, ${error instanceof Error ? error.message : String(error)}`),
   });
-  cache[id] = { model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms };
+  cache[id] = {
+    model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms,
+    stages: pass.stages, gonion: pass.gonion, gonionDisagreement: pass.gonionDisagreement, mentonRetried: pass.mentonRetried, seeded: pass.seeded,
+  };
   if (useCache) writeFileSync(cachePath, JSON.stringify(cache, null, 1));
-  console.error(`${id}: placed in ${pass.calls} call(s), ${pass.zoomed.length} points zoomed, ${(pass.ms / 1000).toFixed(1)}s (${pass.usage.inputTokens} in, ${pass.usage.outputTokens} out)`);
+  console.error(`${id}: ${pass.calls} call(s), ${(pass.ms / 1000).toFixed(1)}s, jaw corner ${pass.gonion ?? "first pass"}${pass.mentonRetried ? ", chin re-asked" : ""} (${pass.usage.inputTokens} in, ${pass.usage.outputTokens} out)`);
 }
 
 // A small worker pool; the provider is the bottleneck, not the disk.
@@ -151,13 +178,6 @@ await Promise.all(
 // ---------------------------------------------------------------------------
 // Scoring, all in the label frame (display pixels, DISPLAY_W wide).
 // ---------------------------------------------------------------------------
-async function displayFrame(id: string): Promise<{ w: number; h: number }> {
-  const file = files.find((f) => f.startsWith(`${id}.`))!;
-  const meta = await sharp(readFileSync(`${DATA}/raw/${file}`)).rotate().metadata();
-  const w = meta.width || 1;
-  const h = meta.height || 1;
-  return { w: DISPLAY_W, h: (h * DISPLAY_W) / w };
-}
 
 const dist = (a: LandmarkPoint, b: LandmarkPoint) => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -248,6 +268,20 @@ let tokensOut = 0;
 let calls = 0;
 let zoomedPoints = 0;
 const latencies: number[] = [];
+// Where each back point stood after each stage, so a stage that buys nothing is visible.
+const byStage: Record<StageName, Record<SideLandmarkId, number[]>> = {
+  first: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
+  coarse: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
+  fine: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
+};
+const gonionMethods: Record<string, number> = {};
+const gonionDisagreements: number[] = [];
+let mentonRetries = 0;
+let seededCount = 0;
+// Per face, per back point: the model's signed offset along the nose-to-ear
+// axis and across it, in head widths, for the leave-one-out bias table.
+const biasSamples: Record<SideLandmarkId, Array<{ along: number; across: number; err: number; m: LandmarkPoint; t: LandmarkPoint; axis: LandmarkPoint; unit: number }>> =
+  Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as never;
 // Does the model know when it is wrong? Error by the confidence it reported.
 const byConfidence: Record<string, number[]> = { "0.8 to 1": [], "0.5 to 0.8": [], "under 0.5": [] };
 // Does the fused band mean what it says? Error of the fused point by band.
@@ -274,6 +308,10 @@ for (const id of ids) {
   calls += cached.calls ?? 1;
   zoomedPoints += cached.zoomed?.length ?? 0;
   if (typeof cached.ms === "number") latencies.push(cached.ms);
+  if (cached.gonion) gonionMethods[cached.gonion] = (gonionMethods[cached.gonion] ?? 0) + 1;
+  if (typeof cached.gonionDisagreement === "number") gonionDisagreements.push(cached.gonionDisagreement);
+  if (cached.mentonRetried) mentonRetries += 1;
+  if (cached.seeded) seededCount += 1;
   scored += 1;
   const px = (pid: SideLandmarkId) => ({ x: cached.result.points[pid].x * w, y: cached.result.points[pid].y * h });
   // The y scale this face implies. Reported because a value that is not 1 and
@@ -298,11 +336,27 @@ for (const id of ids) {
   // Facing, so a left-facing and a right-facing profile do not cancel each other
   // out in the signed table below.
   const facing = truth.pronasale.x > truth.tragion.x ? 1 : -1;
+  // The nose-to-ear axis of this face, for the bias table.
+  const axis = { x: (truth.pronasale.x - truth.tragion.x) / unit, y: (truth.pronasale.y - truth.tragion.y) / unit };
+  for (const stage of ["first", "coarse", "fine"] as const) {
+    const st = cached.stages?.[stage];
+    if (!st) continue;
+    for (const pid of SIDE_LANDMARK_IDS) {
+      const sp = st[pid];
+      if (!sp || partial.has(pid)) continue;
+      byStage[stage][pid].push(dist({ x: sp.x * w, y: sp.y * h }, truth[pid]) / unit);
+    }
+  }
   for (const pid of SIDE_LANDMARK_IDS) {
     if (partial.has(pid)) continue;
     const t = truth[pid];
     const m = px(pid);
     const mErr = dist(m, t) / unit;
+    if (BACK_LANDMARK_IDS.includes(pid)) {
+      const ox = (m.x - t.x) / unit;
+      const oy = (m.y - t.y) / unit;
+      biasSamples[pid].push({ along: ox * axis.x + oy * axis.y, across: -ox * axis.y + oy * axis.x, err: mErr, m, t, axis, unit });
+    }
     perPoint[pid].model.push(mErr);
     perPoint[pid].dx.push((facing * (m.x - t.x)) / unit);
     perPoint[pid].dy.push((m.y - t.y) / unit);
@@ -375,6 +429,59 @@ console.log(
     fmt(Math.sqrt(impliedYScale.reduce((t, v) => t + (v - median(impliedYScale)) ** 2, 0) / Math.max(1, impliedYScale.length)))
   } over ${impliedYScale.length} faces.`,
 );
+
+// Each stage on its own. A stage that does not lower the median of the
+// points it touches is a call the app should not make.
+const stagesSeen = (["first", "coarse", "fine"] as const).filter((st) => BACK_LANDMARK_IDS.some((id) => byStage[st][id].length));
+if (stagesSeen.length) {
+  console.log("");
+  console.log(`Back points after each stage (median error), ${seededCount} of ${scored} profiles seeded from the device points:`);
+  console.log(`landmark          ${stagesSeen.map((st) => st.padStart(7)).join("")}`);
+  for (const pid of BACK_LANDMARK_IDS) {
+    console.log(`${pid.padEnd(16)}  ${stagesSeen.map((st) => fmt(median(byStage[st][pid])).padStart(7)).join("")}`);
+  }
+  console.log(`${"BACK (5)".padEnd(16)}  ${stagesSeen.map((st) => fmt(median(BACK_LANDMARK_IDS.flatMap((id) => byStage[st][id]))).padStart(7)).join("")}`);
+}
+if (Object.keys(gonionMethods).length) {
+  console.log("");
+  console.log(
+    `Jaw corner: ${Object.entries(gonionMethods).map(([k, v]) => `${v} ${k}`).join(", ")}; construction versus guess median ${fmt(median(gonionDisagreements))} head widths. Chin re-asked on ${mentonRetries} profile(s).`,
+  );
+}
+
+// The bias table, leave-one-out: each face's correction is the median offset
+// of every OTHER face, along and across the nose-to-ear axis, so a face
+// never corrects itself. If the corrected error drops, the offset is a
+// property of the model and the versioned table in the module can carry it;
+// if it does not, the offset varies face to face and is not a bias at all.
+console.log("");
+console.log("Per-landmark bias, leave-one-out (head widths along the nose-to-ear axis, then across it; corrected = raw offset removed):");
+console.log("landmark           n   along  across   raw med   corrected med  p90");
+const looRows: string[] = [];
+for (const pid of BACK_LANDMARK_IDS) {
+  const samples = biasSamples[pid];
+  if (samples.length < 4) continue;
+  const corrected: number[] = [];
+  for (let i = 0; i < samples.length; i++) {
+    const others = samples.filter((_, j) => j !== i);
+    const along = median(others.map((o) => o.along));
+    const across = median(others.map((o) => o.across));
+    const sm = samples[i];
+    // Remove the offset in the face's own axis frame.
+    const dx = along * sm.axis.x - across * sm.axis.y;
+    const dy = along * sm.axis.y + across * sm.axis.x;
+    const fixed = { x: sm.m.x - dx * sm.unit, y: sm.m.y - dy * sm.unit };
+    corrected.push(dist(fixed, sm.t) / sm.unit);
+  }
+  const along = median(samples.map((o) => o.along));
+  const across = median(samples.map((o) => o.across));
+  console.log(`${pid.padEnd(16)} ${String(samples.length).padStart(3)}  ${fmt(along)}  ${fmt(across)}   ${fmt(median(samples.map((o) => o.err)))}     ${fmt(median(corrected))}  ${fmt(p90(corrected))}`);
+  looRows.push(`  ${pid}: { along: ${along.toFixed(3)}, across: ${across.toFixed(3)} },`);
+}
+if (looRows.length) {
+  console.log("Paste-ready table (only if the corrected column is clearly lower):");
+  console.log(looRows.join("\n"));
+}
 
 // Whether the model's confidence and the fused band carry information. A
 // band whose median error does not rise from high to low is decoration.
