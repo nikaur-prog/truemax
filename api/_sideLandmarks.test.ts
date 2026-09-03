@@ -11,6 +11,7 @@ import {
   ZOOM_SIZES,
   anchorVertical,
   constructGonion,
+  expectedGonion,
   finePrompt,
   fromZoom,
   gridOverlaySvg,
@@ -89,17 +90,19 @@ test("the prompt names every landmark, states the frame and the grid, asks for p
   assert.match(ear, /pointing to the right/);
   assert.match(ear, /Find the ear first/);
   assert.ok(ear.includes("- tragion:") && ear.includes("- gonion:") && !ear.includes("- pronasale:"));
+  const cued = finePrompt("jaw", ["gonion", "jawLower", "jawBack"], { width: 1024, height: 1024, step: 50 }, 1, undefined, "From a first look, the ear notch is near (12, 34).");
+  assert.match(cued, /ear notch is near \(12, 34\)/);
   const chin = zoomPrompt("chin", ["pogonion", "menton", "cervicale"], { width: 1024, height: 1024, step: 100 }, -1);
   assert.match(chin, /pointing to the left/);
   const jaw = finePrompt("jaw", ["gonion", "jawLower", "jawBack"], { width: 1024, height: 1024, step: 50 }, 1);
   assert.match(jaw, /SECOND image only/);
   assert.match(jaw, /every 50 pixels/);
-  assert.ok(jaw.includes("- jawLower:") && jaw.includes("- jawBack:") && jaw.includes("never on the ear"));
+  assert.ok(jaw.includes("- jawLower:") && jaw.includes("- jawBack:") && jaw.includes("never on or under the ear lobe"));
   const redo = finePrompt("chin", ["pogonion", "menton", "cervicale"], { width: 1024, height: 1024, step: 50 }, 1, "The markers show a previous placement.");
   assert.match(redo, /markers show a previous placement/);
   // The two definitions the model got wrong say what the point is NOT.
-  assert.match(prompt, /menton: .*not on the neck/i);
-  assert.match(prompt, /gonion: .*never on the ear/i);
+  assert.match(prompt, /menton: .*is not the chin bottom/i);
+  assert.match(prompt, /gonion: .*never on or under the ear lobe/i);
   for (const text of [prompt, ear, chin, jaw, redo]) {
     assert.doesNotMatch(text, /—/, "no em dash");
     for (const word of ["attractive", "ethnic", "race", "age", "gender"]) {
@@ -317,4 +320,18 @@ test("a fine crop can carry an overlay and a finer grid", async () => {
   assert.equal(crop.frame.step, 50);
   assert.equal((await sharp(crop.plain).metadata()).width, 800);
   assert.equal((await sharp(Buffer.from(crop.data, "base64")).metadata()).width, 800);
+});
+
+test("the expected jaw corner sits about half a head width below the notch and level with the chin bottom", () => {
+  const tragion = { x: 220, y: 615 };
+  const pronasale = { x: 550, y: 630 };
+  // A label-shaped face: the chin bottom about half a head width below the notch.
+  const menton = { x: 450, y: 790 };
+  const unit = Math.hypot(330, 15);
+  const g = expectedGonion(tragion, pronasale, menton, unit);
+  // Forward of the notch by about a fifth of the way to the nose.
+  assert.ok(g.x > tragion.x + 0.1 * unit && g.x < tragion.x + 0.3 * unit, String(g.x));
+  // Well below the notch, near the chin bottom's height, never up at the lobe.
+  assert.ok(g.y > tragion.y + 0.35 * unit, String(g.y));
+  assert.ok(Math.abs(g.y - menton.y) < 0.2 * unit, String(g.y));
 });

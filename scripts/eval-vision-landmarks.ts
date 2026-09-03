@@ -275,6 +275,13 @@ const byStage: Record<StageName, Record<SideLandmarkId, number[]>> = {
   fine: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
 };
 const gonionMethods: Record<string, number> = {};
+// Per back point: the two readers' errors and their disagreement, for the
+// oracle table (the better of the two per point is the ceiling any selector
+// can reach) and for whether disagreement predicts the fused error.
+const pairs: Record<SideLandmarkId, Array<{ d: number; seed: number; model: number; blend: number; fused: number; conf: number }>> =
+  Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as never;
+// Relations the labels fix and the model kept breaking, in head widths.
+const relations = { gonionBelowNotch: [] as number[], gonionAboveMenton: [] as number[], mentonBelowPogonion: [] as number[], condylionAheadOfNotch: [] as number[] };
 const gonionDisagreements: number[] = [];
 let mentonRetries = 0;
 let seededCount = 0;
@@ -338,6 +345,15 @@ for (const id of ids) {
   const facing = truth.pronasale.x > truth.tragion.x ? 1 : -1;
   // The nose-to-ear axis of this face, for the bias table.
   const axis = { x: (truth.pronasale.x - truth.tragion.x) / unit, y: (truth.pronasale.y - truth.tragion.y) / unit };
+  // The model's own relations, to set beside the labels' (gonion 0.46 below
+  // the notch and 0.07 above the chin bottom; menton 0.067 below the chin
+  // front; condylion 0.02 ahead of the notch).
+  if (!partial.has("gonion") && !partial.has("tragion") && !partial.has("menton")) {
+    relations.gonionBelowNotch.push((px("gonion").y - px("tragion").y) / unit);
+    relations.gonionAboveMenton.push((px("menton").y - px("gonion").y) / unit);
+  }
+  if (!partial.has("menton")) relations.mentonBelowPogonion.push((px("menton").y - px("pogonion").y) / unit);
+  if (!partial.has("condylion") && !partial.has("tragion")) relations.condylionAheadOfNotch.push((facing * (px("condylion").x - px("tragion").x)) / unit);
   for (const stage of ["first", "coarse", "fine"] as const) {
     const st = cached.stages?.[stage];
     if (!st) continue;
@@ -368,6 +384,11 @@ for (const id of ids) {
       const fErr = dist(fused.points[pid], t) / unit;
       perPoint[pid].fused.push(fErr);
       byBand[fused.band[pid]].push(fErr);
+      if (seed?.[pid] && BACK_LANDMARK_IDS.includes(pid)) {
+        const sErr = dist(seed[pid], t) / unit;
+        const blend = dist({ x: (seed[pid].x + m.x) / 2, y: (seed[pid].y + m.y) / 2 }, t) / unit;
+        pairs[pid].push({ d: fused.agreement[pid] ?? 0, seed: sErr, model: mErr, blend, fused: fErr, conf });
+      }
     }
     if (seed?.[pid]) {
       const sErr = dist(seed[pid], t) / unit;
@@ -446,6 +467,57 @@ if (Object.keys(gonionMethods).length) {
   console.log("");
   console.log(
     `Jaw corner: ${Object.entries(gonionMethods).map(([k, v]) => `${v} ${k}`).join(", ")}; construction versus guess median ${fmt(median(gonionDisagreements))} head widths. Chin re-asked on ${mentonRetries} profile(s).`,
+  );
+}
+
+// Where the model puts each point relative to the others, beside the labels.
+console.log("");
+console.log("The model's own relations (median, head widths) beside the labels':");
+console.log(`  jaw corner below the ear notch     ${fmt(median(relations.gonionBelowNotch))}   labels 0.46`);
+console.log(`  jaw corner above the chin bottom   ${fmt(median(relations.gonionAboveMenton))}   labels 0.07`);
+console.log(`  chin bottom below the chin front   ${fmt(median(relations.mentonBelowPogonion))}   labels 0.067`);
+console.log(`  hinge ahead of the ear notch       ${fmt(median(relations.condylionAheadOfNotch))}   labels 0.02`);
+
+// The disagreement table: per back point, by how far the two readers sat
+// apart, the error of each, of their average, of the policy's choice, and
+// of the better of the two (the oracle, the ceiling any selector can reach).
+const spearman = (xs: number[], ys: number[]): number => {
+  const n = xs.length;
+  if (n < 3) return NaN;
+  const rank = (v: number[]) => {
+    const order = v.map((x, i) => [x, i] as const).sort((a, b) => a[0] - b[0]);
+    const r = new Array<number>(n);
+    order.forEach(([, i], k) => (r[i] = k));
+    return r;
+  };
+  const rx = rank(xs);
+  const ry = rank(ys);
+  const mx = (n - 1) / 2;
+  let num = 0;
+  let dx2 = 0;
+  let dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    num += (rx[i] - mx) * (ry[i] - mx);
+    dx2 += (rx[i] - mx) ** 2;
+    dy2 += (ry[i] - mx) ** 2;
+  }
+  return num / Math.sqrt(dx2 * dy2);
+};
+const BINS: Array<[string, number, number]> = [["<= 0.06", 0, 0.06], ["0.06-0.15", 0.06, 0.15], ["0.15-0.30", 0.15, 0.3], ["> 0.30", 0.3, Infinity]];
+console.log("");
+console.log("Disagreement between the readers, per back point (median errors; oracle = the better of the two per point):");
+console.log("landmark   bin          n   seeder   model   blend   fused  oracle");
+for (const pid of BACK_LANDMARK_IDS) {
+  const all = pairs[pid];
+  if (!all.length) continue;
+  for (const [label, lo, hi] of BINS) {
+    const rows = all.filter((r) => r.d > lo && r.d <= hi || (lo === 0 && r.d <= hi));
+    if (!rows.length) continue;
+    const oracle = rows.map((r) => Math.min(r.seed, r.model));
+    console.log(`${pid.padEnd(10)} ${label.padEnd(10)} ${String(rows.length).padStart(3)}   ${fmt(median(rows.map((r) => r.seed)))}   ${fmt(median(rows.map((r) => r.model)))}   ${fmt(median(rows.map((r) => r.blend)))}   ${fmt(median(rows.map((r) => r.fused)))}   ${fmt(median(oracle))}`);
+  }
+  console.log(
+    `${"".padEnd(10)} rho(disagreement, fused error) ${fmt(spearman(all.map((r) => r.d), all.map((r) => r.fused)))}   rho(model confidence, model error) ${fmt(spearman(all.map((r) => r.conf), all.map((r) => r.model)))}`,
   );
 }
 

@@ -80,13 +80,18 @@ test("a jaw corner a third of a head apart keeps the device point and reads low"
   assert.equal(fused.band.tragion, "high");
 });
 
-test("an ear notch the readers disagree on is not averaged", () => {
+test("an ear notch the readers disagree on goes to the cloud, because the seeder is the one that usually missed", () => {
   const d = device();
   const unit = headWidth(d);
   const c = shifted(d, { tragion: { dx: 0.25 * unit, dy: 0 } });
   const fused = fuseSideSeeds(d, c);
-  assert.equal(fused.source.tragion, "device");
+  assert.equal(fused.source.tragion, "cloud");
+  assert.deepEqual(fused.points.tragion, c.tragion);
   assert.equal(fused.band.tragion, "low");
+  // The same distance on the jaw corner stays with the device: the model's
+  // jaw corner is the one that was systematically wrong.
+  const jaw = fuseSideSeeds(d, shifted(d, { gonion: { dx: 0.25 * unit, dy: 0 } }));
+  assert.equal(jaw.source.gonion, "device");
 });
 
 test("a moderate disagreement is mid, and the model's own doubt caps a blended point at mid", () => {
@@ -104,14 +109,18 @@ test("a moderate disagreement is mid, and the model's own doubt caps a blended p
   assert.equal(doubtedDevice.band.menton, "mid");
 });
 
-test("a policy that prefers the cloud on a point takes the cloud point when they disagree", () => {
+test("a policy without rules falls back to the preferred reader, and rules apply in order", () => {
   const d = device();
   const unit = headWidth(d);
-  const c = shifted(d, { tragion: { dx: 0.25 * unit, dy: 0 } });
-  const policy = { ...DEFAULT_SEED_FUSION_POLICY, prefer: { ...DEFAULT_SEED_FUSION_POLICY.prefer, tragion: "cloud" as const } };
-  const fused = fuseSideSeeds(d, c, undefined, policy);
-  assert.deepEqual(fused.points.tragion, c.tragion);
-  assert.equal(fused.source.tragion, "cloud");
+  const c = shifted(d, { tragion: { dx: 0.25 * unit, dy: 0 }, gonion: { dx: 0.1 * unit, dy: 0 } });
+  const noRules = { ...DEFAULT_SEED_FUSION_POLICY, rules: {} };
+  assert.equal(fuseSideSeeds(d, c, undefined, noRules).source.tragion, "device");
+  const preferCloud = { ...noRules, prefer: { ...DEFAULT_SEED_FUSION_POLICY.prefer, gonion: "cloud" as const } };
+  const fused = fuseSideSeeds(d, c, undefined, preferCloud);
+  assert.deepEqual(fused.points.gonion, c.gonion);
+  assert.equal(fused.source.gonion, "cloud");
+  const ruled = { ...noRules, rules: { gonion: [{ upTo: 0.05, take: "device" as const }, { upTo: 0.2, take: "blend" as const }] } };
+  assert.equal(fuseSideSeeds(d, c, undefined, ruled).source.gonion, "blend");
 });
 
 test("a degenerate device seed falls back to the cloud's head width, and to no fusion when both are degenerate", () => {

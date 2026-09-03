@@ -33,9 +33,17 @@ export const FRONT_SIDE_POINT_IDS: readonly SidePointId[] = SIDE_POINTS
 export type SeedSource = "device" | "cloud" | "blend";
 export type ConfidenceBand = "high" | "mid" | "low";
 
+export interface DisagreementRule {
+  /** Applies while the two readers are at most this far apart, in head widths. */
+  upTo: number;
+  take: SeedSource;
+}
+
 export interface SeedFusionPolicy {
-  /** The reader a landmark takes when the two disagree. */
+  /** The reader a landmark takes when no rule below applies. */
   prefer: Record<SidePointId, "device" | "cloud">;
+  /** Per landmark, what to take at each disagreement, first match wins; falls back to `prefer`. */
+  rules: Partial<Record<SidePointId, readonly DisagreementRule[]>>;
   /** Landmarks whose two readings are averaged when they agree to within `blendWithin`. */
   blend: readonly SidePointId[];
   blendWithin: number;
@@ -47,14 +55,22 @@ export interface SeedFusionPolicy {
 }
 
 // vision-2 on the labelled synthetic set, 55 profiles: the seeder wins on the
-// jaw corner (0.066 vs 0.347 where the seeder was wrong), the chin bottom
-// (0.077 vs 0.159) and the hinge (0.107 vs 0.137); the two tie on the ear
-// notch (0.107 vs 0.099), the neck point and the chin front. The front eight
-// are the mesh's. So the seeder is preferred everywhere, and the ear pair is
-// averaged when the readers agree, which is where two similar, independent
-// errors cancel. Revisit from the harness's fused column, never by feel.
+// jaw corner (0.066 vs 0.347 where the seeder was wrong) and the chin bottom
+// (0.077 vs 0.159), and its worst case on either is under 0.17, so the model
+// is never taken there. On the ear pair the two tie on the median (tragion
+// 0.107 vs 0.099) but not on the tail: the seeder's notch is more than 0.15
+// head widths off on 17 of 54 faces, up to 0.96, while the model's p90 is
+// 0.195 with no bias. So a small disagreement on the ear is averaged (two
+// similar independent errors cancel) and a large one goes to the model,
+// because at that distance it is the seeder that is usually the one that
+// missed. The front eight are the mesh's. Revisit from the harness's
+// disagreement table and fused column, never by feel.
 export const DEFAULT_SEED_FUSION_POLICY: SeedFusionPolicy = {
   prefer: Object.fromEntries(SIDE_POINTS.map((p) => [p.id, "device"])) as Record<SidePointId, "device" | "cloud">,
+  rules: {
+    tragion: [{ upTo: 0.15, take: "blend" }, { upTo: Infinity, take: "cloud" }],
+    condylion: [{ upTo: 0.15, take: "blend" }, { upTo: Infinity, take: "cloud" }],
+  },
   blend: ["tragion", "condylion"],
   blendWithin: 0.15,
   highWithin: 0.06,
@@ -128,10 +144,16 @@ export function fuseSideSeeds(
     const c = cloud![id];
     const distance = Math.hypot(d.x - c.x, d.y - c.y) / unit;
     agreement[id] = distance;
-    if (policy.blend.includes(id) && distance <= policy.blendWithin) {
+    const rule = policy.rules[id]?.find((r) => distance <= r.upTo);
+    const take: SeedSource = rule
+      ? rule.take
+      : policy.blend.includes(id) && distance <= policy.blendWithin
+        ? "blend"
+        : policy.prefer[id];
+    if (take === "blend") {
       points[id] = { x: (d.x + c.x) / 2, y: (d.y + c.y) / 2 };
       source[id] = "blend";
-    } else if (policy.prefer[id] === "cloud") {
+    } else if (take === "cloud") {
       points[id] = { x: c.x, y: c.y };
       source[id] = "cloud";
     } else {

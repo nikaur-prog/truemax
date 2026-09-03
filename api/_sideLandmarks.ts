@@ -122,6 +122,7 @@ export const LANDMARK_FINE_GRID_STEP = 50;
 // Crop sizes in head widths (nose tip to ear notch), per stage.
 export const ZOOM_SIZES = {
   coarse: 0.8,
+  coarseLower: 0.9,
   fineEar: 0.35,
   fineJaw: 0.45,
   fineChin: 0.5,
@@ -162,25 +163,25 @@ const DEFINITIONS: Record<SideLandmarkId, string> = {
   labialeSuperius: "Upper lip: the most forward point of the upper lip's vermilion.",
   labialeInferius: "Lower lip: the most forward point of the lower lip's vermilion.",
   pogonion: "Chin front: the most forward point of the soft-tissue chin.",
-  menton: "Chin bottom: the lowest point of the chin itself, roughly straight below the chin front, on the chin's own curve before the underside turns back toward the neck. Not the lowest point of the underside of the jaw, and not on the neck.",
-  cervicale: "Neck point: where the underside of the chin turns into the front of the neck, the deepest point of that angle.",
-  gonion: "Jaw corner: the corner of the jaw's skin outline, where the lower border of the jaw, running back from the chin, turns upward into the back edge of the jaw. It sits below and in front of the ear lobe by at least a finger width, on the jaw outline, never on the ear.",
-  condylion: "Jaw hinge: the joint the jaw pivots on, on the skin immediately in front of the ear canal and level with it. Not on the temple.",
-  tragion: "Ear notch: the notch at the front of the ear, just above the tragus, at the opening of the ear canal.",
+  menton: "Chin bottom: the lowest point of the chin itself, where the front curve of the chin turns under. It is directly below the chin front or slightly behind it, and only a little lower: about one fifteenth of the nose-to-ear distance below the chin front. Stop there. The skin under the jaw often keeps sloping down and back toward the neck; that lower skin is not the chin bottom.",
+  cervicale: "Neck point: where the underside of the jaw meets the front of the neck, the deepest point of the angle between them. It is about a third of the nose-to-ear distance behind the chin bottom and level with it or slightly lower.",
+  gonion: "Jaw corner: the back corner of the jaw, where the lower edge of the jaw stops running back from the chin and turns upward toward the ear. It sits far below the ear: about half the nose-to-ear distance below the ear notch, a little in front of it, and almost level with the chin bottom, usually a little above it. It is on the skin of the jaw line, never on or under the ear lobe. Follow the jaw line back from the chin bottom until it turns up; that turn is the point.",
+  condylion: "Jaw hinge: the joint the jaw pivots on. On the skin it is essentially at the ear notch: a few pixels in front of the ear notch, about one fiftieth of the nose-to-ear distance, and at the same height. Never on the cheek in front of the ear and never above the notch.",
+  tragion: "Ear notch: the notch at the front of the ear where the ear's rim curves down and meets the top of the small flap (the tragus) that covers the ear canal. It is at the height of the top of the canal opening, and the dark opening is directly below and behind it. It is not the higher point where the rim first leaves the head.",
 };
 
 // What the enlarged crop shows and how the three points sit in it. Written
 // so the model looks for the ear before it looks for the numbers.
 const ZOOM_CONTEXT: Record<"ear" | "chin", string> = {
   ear:
-    "This is an enlarged crop of the ear region of that photograph. The ear should be the largest feature in it. Find the ear first. " +
-    "The ear notch (tragion) is the small notch on the FRONT edge of the ear, just above the tragus flap, at the opening of the ear canal. " +
-    "The jaw hinge (condylion) is on the skin directly in front of that notch, about one finger-width toward the face and level with it. " +
-    "The jaw corner (gonion) is below, where the lower border of the jaw turns the corner from running forward to running up toward the ear.",
+    "This is an enlarged crop of the ear region of that photograph. Find the ear first, then its front edge. " +
+    "The ear notch (tragion) is where the ear's rim comes down and meets the top of the tragus, the small flap over the canal, at the height of the top of the canal opening. " +
+    "The jaw hinge (condylion) sits essentially on that notch, a few pixels in front of it and at the same height.",
   chin:
-    "This is an enlarged crop of the chin and upper neck of that photograph. Find the underside of the chin first. " +
-    "The chin front (pogonion) is the most forward point of the soft chin. The chin bottom (menton) is its lowest point. " +
-    "The neck point (cervicale) is where the underside of the chin turns into the front of the neck, at the deepest point of that angle.",
+    "This is an enlarged crop of the lower face of that photograph: the chin, the underside of the jaw, the start of the neck and the back corner of the jaw. " +
+    "The chin front (pogonion) is the most forward point of the soft chin. The chin bottom (menton) is just under it, where the chin's front curve turns under; stop there, the skin below that is the underside of the jaw. " +
+    "The neck point (cervicale) is where the underside of the jaw meets the front of the neck. " +
+    "The jaw corner (gonion) is at the back, level with the chin bottom, where the lower edge of the jaw turns upward toward the ear; it is on the jaw line, never on the ear lobe above it.",
 };
 
 const OUTLINE_DEFINITIONS: Record<JawOutlineId, string> = {
@@ -194,9 +195,9 @@ const FINE_CONTEXT: Record<"ear" | "jaw" | "chin", string> = {
     "The tragus is the small flap of skin in front of the ear canal opening. The ear notch (tragion) is the notch on the FRONT edge of the ear just above that flap. " +
     "The jaw hinge (condylion) is on the cheek skin directly in front of the notch, about one finger-width toward the face, level with it.",
   jaw:
-    "This is a close crop around the corner of the jaw below the ear; the first image shows the wider region with this crop outlined. " +
-    "Follow the skin outline of the jaw: it runs back from the chin along the lower border, turns the corner, and rises up the back edge toward the ear lobe. " +
-    "The corner is on that skin outline, below and in front of the ear lobe, never on the ear itself.",
+    "This is a close crop centred on the back half of the jaw, well below the ear; the first image shows the wider region with this crop outlined. " +
+    "The bottom of the ear lobe is near the top of this crop and the chin is toward the front edge. " +
+    "Find the lower edge of the jaw coming from the chin side and follow it back until it turns upward; that turn is the jaw corner. It is on the jaw line, not on the ear lobe above it.",
   chin:
     "This is a close crop of the chin and the start of the neck; the first image shows the wider region with this crop outlined. " +
     "Follow the outline from the chin front down around the chin's own curve to its lowest point, then back along the underside to where it meets the neck.",
@@ -257,13 +258,21 @@ export function zoomPrompt(cluster: "ear" | "chin", ids: readonly PlacedId[], fr
 
 /** The tool for a given set of points in a frame of a given pixel size. */
 /** The prompt for the fine look: a close crop, with the coarse crop shown first for context. */
-export function finePrompt(region: "ear" | "jaw" | "chin", ids: readonly PlacedId[], frame: GridFrame, faceDir: 1 | -1, redo?: string): string {
+export function finePrompt(
+  region: "ear" | "jaw" | "chin",
+  ids: readonly PlacedId[],
+  frame: GridFrame,
+  faceDir: 1 | -1,
+  redo?: string,
+  cues?: string,
+): string {
   const lines = ids.map((id) => `- ${id}: ${definitionOf(id)}`);
   return [
     `A side-profile photograph of one person's head was taken with the face pointing to the ${faceDir > 0 ? "right" : "left"} of the frame.`,
     FINE_CONTEXT[region],
     "",
     `Read coordinates from the SECOND image only. ${gridSentence(frame)}`,
+    ...(cues ? ["", cues] : []),
     ...(redo ? ["", redo] : []),
     "",
     "Give each point a confidence between 0 and 1. Do not omit a point. Place only positions. Do not describe the person.",
@@ -642,6 +651,28 @@ function intersect(
   return { x: a1.x + t * (a2.x - a1.x), y: a1.y + t * (a2.y - a1.y) };
 }
 
+/**
+ * Where the labelled set puts the jaw corner relative to two points the
+ * model reads well: 0.46 head widths below the ear notch, 0.19 of the
+ * nose-to-ear distance in front of it, and level with the chin bottom.
+ * Used to centre the fine jaw crop and to phrase the cue, never returned as
+ * a placement.
+ */
+export function expectedGonion(
+  tragion: { x: number; y: number },
+  pronasale: { x: number; y: number },
+  menton: { x: number; y: number },
+  unit: number,
+): { x: number; y: number } {
+  const ax = (pronasale.x - tragion.x) / unit;
+  const ay = (pronasale.y - tragion.y) / unit;
+  // 0.19 along the nose axis, then 0.46 down across it, blended toward the chin bottom's height.
+  const alongX = tragion.x + 0.19 * unit * ax;
+  const alongY = tragion.y + 0.19 * unit * ay;
+  const downY = alongY + 0.46 * unit;
+  return { x: alongX, y: (downY + (menton.y - 0.07 * unit)) / 2 };
+}
+
 export interface ConstructedGonion {
   point: PixelPlacement;
   /** How the final point was chosen. */
@@ -785,8 +816,9 @@ export interface PlaceOptions {
   onZoomError?: (stage: string, error: unknown) => void;
 }
 
-const EAR_IDS: readonly SideLandmarkId[] = ["tragion", "condylion", "gonion"];
+const EAR_IDS: readonly SideLandmarkId[] = ["tragion", "condylion"];
 const CHIN_IDS: readonly SideLandmarkId[] = ["pogonion", "menton", "cervicale"];
+const LOWER_IDS: readonly SideLandmarkId[] = ["pogonion", "menton", "cervicale", "gonion"];
 
 function centroid(placed: Record<string, { x: number; y: number }>, ids: readonly string[]): { x: number; y: number } {
   const n = ids.length;
@@ -862,14 +894,17 @@ export async function placeSideLandmarks(
 
   if (zoom) {
     // ---- coarse: the two clusters, in parallel.
+    // The ear crop holds the notch pair only; the jaw corner is looked for in
+    // the lower-face crop, beside the chin bottom it is level with, so no
+    // crop centred on the ear can pull it up to the lobe.
     const coarseWindows = {
       ear: squareWindow(centroid(placed, EAR_IDS), unit * ZOOM_SIZES.coarse, frame),
-      chin: squareWindow(centroid(placed, CHIN_IDS), unit * ZOOM_SIZES.coarse, frame),
+      chin: squareWindow(centroid({ ...placed, gonion: expectedGonion(placed.tragion, placed.pronasale, placed.menton, unit) }, LOWER_IDS), unit * ZOOM_SIZES.coarseLower, frame),
     };
     const coarseCrops: Partial<Record<"ear" | "chin", Awaited<ReturnType<typeof zoomCrop>>>> = {};
     await Promise.all(
       (["ear", "chin"] as const).map(async (cluster) => {
-        const ids = cluster === "ear" ? EAR_IDS : CHIN_IDS;
+        const ids = cluster === "ear" ? EAR_IDS : LOWER_IDS;
         try {
           const window = coarseWindows[cluster];
           const crop = await zoomCrop(image.plain, window);
@@ -886,13 +921,41 @@ export async function placeSideLandmarks(
         }
       }),
     );
-    stages.coarse = snapshot(placed, [...EAR_IDS, ...CHIN_IDS], frame);
+    stages.coarse = snapshot(placed, [...EAR_IDS, ...LOWER_IDS], frame);
 
     // ---- fine: three close crops, in parallel, each with its coarse crop for context.
+    // The jaw crop is centred where the corner should be from the notch and
+    // the chin bottom, moved halfway toward the coarse corner when the two
+    // are close, so a coarse corner that sat on the lobe cannot drag the
+    // crop up with it.
+    const expectedCorner = expectedGonion(placed.tragion, placed.pronasale, placed.menton, unit);
+    const cornerGap = Math.hypot(placed.gonion.x - expectedCorner.x, placed.gonion.y - expectedCorner.y) / unit;
+    const jawCentre = cornerGap <= 0.2
+      ? { x: (placed.gonion.x + expectedCorner.x) / 2, y: (placed.gonion.y + expectedCorner.y) / 2 }
+      : expectedCorner;
     const fineWindows = {
       ear: squareWindow(centroid(placed, ["tragion", "condylion"]), unit * ZOOM_SIZES.fineEar, frame),
-      jaw: squareWindow(placed.gonion, unit * ZOOM_SIZES.fineJaw, frame),
+      jaw: squareWindow(jawCentre, unit * ZOOM_SIZES.fineJaw, frame),
       chin: squareWindow(centroid(placed, CHIN_IDS), unit * ZOOM_SIZES.fineChin, frame),
+    };
+    // Where to look, in each crop's own pixels, from the labelled relations.
+    const cueFor = (region: "ear" | "jaw" | "chin"): string => {
+      const window = fineWindows[region];
+      const scale = LANDMARK_ZOOM_SIDE / window.size;
+      const at = (p: { x: number; y: number }) => {
+        const z = toZoom(p, window, scale);
+        return `(${Math.round(z.x)}, ${Math.round(z.y)})`;
+      };
+      const px = (hw: number) => Math.round(hw * unit * scale);
+      if (region === "jaw") {
+        return `From a first look, the ear notch is near ${at(placed.tragion)} and the chin bottom near ${at(placed.menton)} in this crop's coordinates, even if outside it. ` +
+          `On most faces the jaw corner is about ${px(0.46)} pixels below the ear notch and within ${px(0.16)} pixels of the chin bottom's height. Use that as the place to look, then put each point on the visible feature.`;
+      }
+      if (region === "chin") {
+        return `From a first look, the chin front is near ${at(placed.pogonion)} in this crop's coordinates. ` +
+          `On most faces the chin bottom is ${px(0.048)} to ${px(0.094)} pixels below the chin front, and the neck point about ${px(0.33)} pixels behind the chin bottom, level with it or slightly lower.`;
+      }
+      return `From a first look, the ear notch is near ${at(placed.tragion)} in this crop's coordinates. The jaw hinge is within about ${px(0.04)} pixels of it, in front and at the same height.`;
     };
     const contextFor = async (region: "ear" | "jaw" | "chin"): Promise<ImageBlock | null> => {
       const coarse = coarseCrops[region === "chin" ? "chin" : "ear"];
@@ -917,7 +980,7 @@ export async function placeSideLandmarks(
       );
       const context = await contextFor(region);
       const images = context ? [context, { data: crop.data }] : [{ data: crop.data }];
-      const answer = await callTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction), landmarkTool(ids, crop.frame));
+      const answer = await callTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction, cueFor(region)), landmarkTool(ids, crop.frame));
       spend(answer.usage);
       const read = parsePixelToolInput(answer.input, ids, crop.frame);
       const out: Partial<Record<Id, PixelPlacement>> = {};
@@ -972,7 +1035,7 @@ export async function placeSideLandmarks(
       gonion = built.method;
       gonionDisagreement = built.disagreement;
     }
-    stages.fine = snapshot(placed, [...EAR_IDS, ...CHIN_IDS], frame);
+    stages.fine = snapshot(placed, [...EAR_IDS, ...LOWER_IDS], frame);
   }
 
   return {
