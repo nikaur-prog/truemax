@@ -7,6 +7,7 @@ import { previewInstructions, previewProvider } from "./_previewProvider.js";
 import { GOAL_PREVIEW_CONSENT_VERSION, captioned, parseSpec } from "./goal-preview.js";
 
 const route = readFileSync(new URL("./goal-preview.ts", import.meta.url), "utf8");
+const consentRoute = readFileSync(new URL("./goal-preview-consent.ts", import.meta.url), "utf8");
 const cron = readFileSync(new URL("./cleanup-goal-previews.ts", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/migrations/20260903120000_goal_previews.sql", import.meta.url), "utf8");
 const vercel = readFileSync(new URL("../vercel.json", import.meta.url), "utf8");
@@ -37,7 +38,9 @@ test("no signed URL is ever issued, nothing logs a photo, and every stored image
   assert.doesNotMatch(route, /console\.(log|error)\([^)]*(front|side|photo)\b/i);
   const post = route.slice(route.indexOf("export async function POST"), route.indexOf("function previewIdFrom"));
   assert.ok(post.indexOf("captioned(rendered.front)") < post.indexOf("storage.upload("), "captioned before stored");
-  assert.match(route, /GOAL_PREVIEW_CAPTION = "A synthetic visual direction based on your selected goals, not a forecast\."/);
+  const shared = readFileSync(new URL("../src/engine/goalPreviewConsent.ts", import.meta.url), "utf8");
+  assert.match(shared, /GOAL_PREVIEW_CAPTION = "A synthetic visual direction based on your selected goals, not a forecast\."/);
+  assert.match(shared, /GOAL_PREVIEW_CONSENT_VERSION = "goal-preview-v1"/);
 });
 
 test("the caption lands in the pixels and the output stays under the response ceiling", async () => {
@@ -88,6 +91,42 @@ test("the provider is a deployment setting: none configured means none", () => {
   assert.equal(previewProvider({ HF_CREDENTIALS: "key:secret" }), null, "an endpoint is required as well");
   assert.equal(previewProvider({ HF_CREDENTIALS: "key:secret", HIGGSFIELD_PREVIEW_ENDPOINT: "x/y" })?.name, "higgsfield");
   assert.equal(previewProvider({ OPENAI_API_KEY: "sk-test" })?.name, "openai");
+});
+
+test("consent is granted and revoked only through the route, behind the same gates, with a trail that fails closed", () => {
+  for (const method of ["GET", "PUT", "DELETE"]) assert.match(consentRoute, new RegExp(`export async function ${method}\\(`), method);
+  const gate = consentRoute.slice(consentRoute.indexOf("async function gate"), consentRoute.indexOf("export async function GET"));
+  assert.ok(gate.indexOf("requestOrigin(request)") < gate.indexOf("authenticatedUser(request)"));
+  assert.ok(gate.indexOf("authenticatedUser(request)") < gate.indexOf("maxAccessForUser(user.id)"));
+  assert.ok(gate.indexOf("maxAccessForUser(user.id)") < gate.indexOf("access.age < 18"));
+  const put = consentRoute.slice(consentRoute.indexOf("export async function PUT"), consentRoute.indexOf("export async function DELETE"));
+  assert.match(put, /body\.version !== GOAL_PREVIEW_CONSENT_VERSION/, "a stale dialog is refused");
+  assert.match(put, /event_type: "granted"/);
+  assert.match(put, /if \(auditError\) \{[\s\S]*?\.delete\(\)\.eq\("user_id", gated\.userId\)/, "a grant without a trail is rolled back");
+  const del = consentRoute.slice(consentRoute.indexOf("export async function DELETE"));
+  assert.ok(del.indexOf('from("goal_previews")') < del.indexOf('from("goal_preview_consents")'), "previews go before the consent flips");
+  assert.match(del, /event_type: "revoked"/);
+  // The trail never carries the user id.
+  assert.doesNotMatch(consentRoute, /subject_id: gated\.userId/);
+  // The browser cannot write consent directly: no RPC for it in the migration.
+  assert.doesNotMatch(migration, /revoke_goal_preview_consent|grant_goal_preview_consent/);
+  assert.match(migration, /revoke all on table public\.goal_preview_consents from public, anon, authenticated/);
+});
+
+test("a rejected verdict leaves a trail, and a render killed mid-flight is swept to failed", () => {
+  const patch = route.slice(route.indexOf("export async function PATCH"), route.indexOf("export async function DELETE"));
+  assert.match(patch, /event_type: "rejected"/);
+  assert.match(cron, /\.eq\("status", "generating"\)\s*\.lte\("created_at", stale\)/);
+  assert.match(cron, /15 \* 60_000/);
+  assert.doesNotMatch(route, /deleted_at/, "no soft-delete column: a deleted preview is deleted");
+  assert.doesNotMatch(migration, /deleted_at|'revoked'\)/);
+});
+
+test("the two inline images together stay under the response cap", () => {
+  const m = route.match(/MAX_RESPONSE_JPEG_BYTES = ([0-9_]+)/);
+  assert.ok(m);
+  const each = Number(m![1].replace(/_/g, ""));
+  assert.ok(2 * each * 1.37 < 4_500_000, `two images of ${each} bytes encoded exceed the cap`);
 });
 
 test("the migration keeps every table under RLS, service-only writes, a private bucket and a retention trail", () => {

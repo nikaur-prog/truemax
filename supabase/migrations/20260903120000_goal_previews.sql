@@ -89,9 +89,8 @@ create table if not exists public.goal_previews (
   created_at         timestamptz not null default now(),
   expires_at         timestamptz not null default (now() + interval '30 days'),
   kept_until         timestamptz,
-  deleted_at         timestamptz,
   constraint goal_preview_status
-    check (status in ('generating', 'ready', 'rejected', 'failed', 'revoked')),
+    check (status in ('generating', 'ready', 'rejected', 'failed')),
   constraint goal_preview_spec_object check (jsonb_typeof(spec) = 'object'),
   constraint goal_preview_validation_object
     check (validation is null or jsonb_typeof(validation) = 'object'),
@@ -120,11 +119,14 @@ create policy "read own goal previews"
   on public.goal_previews for select
   to authenticated
   using ((select auth.uid()) = user_id);
-grant select (id, scan_id, status, catalogue_version, consent_version, created_at, expires_at, kept_until, deleted_at)
+grant select (id, scan_id, status, catalogue_version, consent_version, created_at, expires_at, kept_until)
   on table public.goal_previews to authenticated;
 
 create index if not exists goal_previews_expires_idx
-  on public.goal_previews (expires_at) where deleted_at is null;
+  on public.goal_previews (expires_at);
+-- A render killed mid-flight leaves a 'generating' row; the sweep finds them.
+create index if not exists goal_previews_generating_idx
+  on public.goal_previews (created_at) where status = 'generating';
 create index if not exists goal_previews_user_idx
   on public.goal_previews (user_id, created_at desc);
 
@@ -303,31 +305,7 @@ create policy "delete own goal previews"
   to authenticated
   using ((select auth.uid()) = user_id);
 
--- Revoking consent removes every preview and records the event.
-create or replace function public.revoke_goal_preview_consent()
-returns integer
-language plpgsql
-security invoker
-set search_path = public
-as $$
-declare
-  affected integer;
-begin
-  delete from public.goal_previews where user_id = (select auth.uid());
-  get diagnostics affected = row_count;
-  update public.goal_preview_consents
-    set revoked_at = now(), updated_at = now()
-    where user_id = (select auth.uid()) and revoked_at is null;
-  return affected;
-end;
-$$;
-
-revoke all on function public.revoke_goal_preview_consent() from public, anon;
-grant execute on function public.revoke_goal_preview_consent() to authenticated, service_role;
-grant update (revoked_at, updated_at) on table public.goal_preview_consents to authenticated;
-drop policy if exists "revoke own goal preview consent" on public.goal_preview_consents;
-create policy "revoke own goal preview consent"
-  on public.goal_preview_consents for update
-  to authenticated
-  using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
+-- Granting and revoking consent go through the route (api/goal-preview-consent.ts),
+-- which runs as the service role and can write the pseudonymous trail the
+-- browser cannot. The browser keeps read access to its own row so Settings
+-- can show the state.

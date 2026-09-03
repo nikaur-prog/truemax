@@ -16,6 +16,15 @@ import { downloadRemoteImage } from "./_remoteImage.js";
 // is a deployment setting and not a code change. A later in-house renderer
 // implements the same three-line interface.
 //
+// A retention fact the consent copy has to carry: the Higgsfield path
+// uploads the two prepared photographs to the provider to reference them,
+// and the installed client offers no call to delete an upload. The upload
+// references are returned as providerRef and stored on the preview row so
+// a deletion can be made the day the provider exposes one; until then the
+// dialog states the provider's own retention terms and links them, as the
+// cloud-pass consent does. The OpenAI path sends the bytes in the request
+// and stores no reference.
+//
 // What a prompt may say is fixed here and nowhere else. Every render carries
 // the identity clauses (same person, same bone structure, same age and sex
 // presentation, same skin tone as photographed), and only the phrases for
@@ -99,7 +108,7 @@ function remaining(deadline: number): number {
 }
 
 function higgsfield(credentials: Credentials, endpoint: string): PreviewProvider {
-  const renderOne = async (image: Buffer, instructions: string, deadline: number): Promise<Buffer | PreviewRenderFailure> => {
+  const renderOne = async (image: Buffer, instructions: string, deadline: number, refs: string[]): Promise<Buffer | PreviewRenderFailure> => {
     if (remaining(deadline) <= 1_000) return { error: "The image service did not respond in time.", status: 504 };
     const uploader = new HiggsfieldClient({
       apiKey: credentials.key,
@@ -113,6 +122,7 @@ function higgsfield(credentials: Credentials, endpoint: string): PreviewProvider
     } finally {
       uploader.close();
     }
+    refs.push(reference);
     if (remaining(deadline) <= 1_000) return { error: "The image service did not respond in time.", status: 504 };
     const client = createHiggsfieldClient({
       credentials: credentials.joined,
@@ -145,13 +155,14 @@ function higgsfield(credentials: Credentials, endpoint: string): PreviewProvider
     name: "higgsfield",
     async render(input) {
       // Both views together: the budget is shared and the calls are independent.
+      const refs: string[] = [];
       const [front, side] = await Promise.all([
-        renderOne(input.front, input.instructions, input.deadline),
-        renderOne(input.side, `${input.instructions} This is the side profile of the same person.`, input.deadline),
+        renderOne(input.front, input.instructions, input.deadline, refs),
+        renderOne(input.side, `${input.instructions} This is the side profile of the same person.`, input.deadline, refs),
       ]);
       if (!Buffer.isBuffer(front)) return front;
       if (!Buffer.isBuffer(side)) return side;
-      return { front, side, providerRef: null };
+      return { front, side, providerRef: refs.length ? refs.join(" ") : null };
     },
   };
 }

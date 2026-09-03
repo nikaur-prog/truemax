@@ -38,6 +38,11 @@ const CHECKED = [
   "TRUEMAX_APP_URL",
   "CRON_SECRET",
   "ANTHROPIC_API_KEY",
+  // The Goal preview's image provider. Optional in the same sense as the
+  // yearly price: absent, the route falls back to OPENAI_API_KEY and, with
+  // neither, answers 503 "not configured", so this reports false without
+  // failing the check.
+  "HIGGSFIELD_PREVIEW_ENDPOINT",
 ] as const;
 
 export function GET(request: Request): Response {

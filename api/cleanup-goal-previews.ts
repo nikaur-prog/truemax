@@ -32,6 +32,16 @@ export async function GET(request: Request): Promise<Response> {
       .limit(100);
     if (keptError) throw new Error(`Kept preview lookup failed: ${keptError.message}`);
     const ids = [...(expired ?? []), ...(kept ?? [])].map((r) => (r as { id: string }).id);
+    // A render killed at the function ceiling never reaches its own catch:
+    // the row stays 'generating' with the claim spent. Fifteen minutes is
+    // three times the render budget, so nothing still running is caught.
+    const stale = new Date(Date.now() - 15 * 60_000).toISOString();
+    const { count: staleCount, error: staleError } = await admin
+      .from("goal_previews")
+      .update({ status: "failed" }, { count: "exact" })
+      .eq("status", "generating")
+      .lte("created_at", stale);
+    if (staleError) throw new Error(`Stale preview sweep failed: ${staleError.message}`);
     if (ids.length) {
       const { error: deleteError } = await admin.from("goal_previews").delete().in("id", ids);
       if (deleteError) throw new Error(`Expired preview deletion failed: ${deleteError.message}`);
@@ -59,7 +69,7 @@ export async function GET(request: Request): Promise<Response> {
       .lte("retain_until", now);
     if (auditError) throw new Error(`Consent audit cleanup failed: ${auditError.message}`);
 
-    return json({ expired: ids.length, removed, auditsPurged: auditsPurged ?? 0 });
+    return json({ expired: ids.length, removed, stale: staleCount ?? 0, auditsPurged: auditsPurged ?? 0 });
   } catch (error) {
     console.error("cleanup-goal-previews", safeMessage(error));
     return json({ error: "Cleanup failed." }, 500);

@@ -284,17 +284,28 @@ the beta, as `catalogue-2`, with the change recorded in this document.
 | The catalogue | `src/engine/goalCatalogue.ts` | built, `catalogue-1`, with `specAllowed` as the gate the route uses; evidence grades are for review before the beta |
 | Consent, previews, usage, cleanup queue, bucket, RPCs | `supabase/migrations/20260903120000_goal_previews.sql` | written, **not applied**; apply in the Supabase SQL editor before the route is called |
 | The provider interface | `api/_previewProvider.ts` | built; Higgsfield when `HF_CREDENTIALS` and `HIGGSFIELD_PREVIEW_ENDPOINT` are set, else the OpenAI edit endpoint when `OPENAI_API_KEY` is set, else the route answers 503 |
-| The route | `api/goal-preview.ts` | built: `POST` render, `GET` fetch, `PATCH` verdict or keep, `DELETE` revoke; three renders a day; caption in the pixels |
-| The sweep | `api/cleanup-goal-previews.ts` and the cron in `vercel.json` | built, daily at 03:30 UTC with `CRON_SECRET` |
+| The route | `api/goal-preview.ts` | built: `POST` render, `GET` fetch, `PATCH` verdict or keep, `DELETE` revoke; three renders a day; caption in the pixels; two images bounded together under the response cap |
+| The consent route | `api/goal-preview-consent.ts` | built: `GET` state, `PUT` grant (refuses a stale wording), `DELETE` revoke (every preview deleted, objects removed, trail written); the shared version string lives in `src/engine/goalPreviewConsent.ts` |
+| The sweep | `api/cleanup-goal-previews.ts` and the cron in `vercel.json` | built, daily at 03:30 UTC with `CRON_SECRET`; also marks a render killed mid-flight as failed after fifteen minutes |
 | Tests | `api/_goal-preview.test.ts`, `src/engine/goalCatalogue.test.ts` | gate order, no signed URLs, caption, spec parsing, instructions, provider selection, migration and cron pins |
 
 Not yet in this cycle, and required before any person can call the route:
-the consent dialog and Settings section (Codex, PR 6), the published-promise
-amendments in section 5a (Claude, with the consent dialog's PR), and a
-render meter on the shared ledger if the daily allowance proves too coarse.
-The route's consent check reads `goal_preview_consents`, which nothing
-writes until the dialog ships, so the route refuses everyone today by
+the consent dialog and Settings section calling the consent route (Codex,
+PR 6), the published-promise amendments in section 5a (Claude, with the
+consent dialog's PR), and a render meter on the shared ledger if the daily
+allowance proves too coarse. Nothing calls the consent route's `PUT` until
+the dialog ships, so the render route refuses everyone today by
 construction.
+
+**A retention fact the consent copy must carry.** The Higgsfield path
+uploads the two prepared photographs to the provider to reference them,
+and the installed client offers no call to delete an upload. The upload
+references are stored on the preview row so a deletion can be made the day
+the provider exposes one. Until then the release gate "revocation removes
+provider artefacts" is met for TrueMax's own storage and not for the
+provider's, and the dialog says so in the provider's own words with a link,
+as the cloud-pass consent does. The OpenAI path sends the bytes in the
+request and stores no reference.
 
 ## 10. The rules that bind every part
 

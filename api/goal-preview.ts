@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { GOAL_CATALOGUE_VERSION, RENDER_LAYERS, specAllowed } from "../src/engine/goalCatalogue.js";
+import { GOAL_PREVIEW_CAPTION, GOAL_PREVIEW_CONSENT_VERSION } from "../src/engine/goalPreviewConsent.js";
 import { GOALS } from "../src/engine/goals.js";
+import { isScanId } from "../src/engine/scanSession.js";
 import { maxAccessForUser } from "./_maxAccess.js";
 import { previewInstructions, previewProvider } from "./_previewProvider.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
@@ -31,15 +33,16 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 // can be audited if it ever appears.
 // ---------------------------------------------------------------------------
 
-export const GOAL_PREVIEW_CONSENT_VERSION = "goal-preview-v1";
+export { GOAL_PREVIEW_CAPTION, GOAL_PREVIEW_CONSENT_VERSION };
 export const GOAL_PREVIEW_RENDERS_PER_DAY = 3;
-export const GOAL_PREVIEW_CAPTION = "A synthetic visual direction based on your selected goals, not a forecast.";
 
 const BUCKET = "goal-previews";
 const MAX_PHOTO_BYTES = 2_000_000;
 const MAX_BODY_BYTES = 2 * MAX_PHOTO_BYTES + 60_000;
 const MAX_INPUT_PIXELS = 40_000_000;
-const MAX_RESPONSE_JPEG_BYTES = 1_800_000;
+// Two images travel inline as base64 in one JSON response under Vercel's
+// 4.5 MB cap: 1.4 MB each is 2.8 MB of JPEG and about 3.8 MB encoded.
+const MAX_RESPONSE_JPEG_BYTES = 1_400_000;
 // Under the function's 300 second ceiling (vercel.json), so a slow provider
 // gets a response and a refund rather than a killed invocation.
 const TOTAL_BUDGET_MS = 250_000;
@@ -64,7 +67,7 @@ export function parseSpec(value: unknown): GoalPreviewSpecInput | null {
   }
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
-  if (typeof raw.sourceScanId !== "string" || !UUID.test(raw.sourceScanId)) return null;
+  if (!isScanId(raw.sourceScanId)) return null;
   if (!Array.isArray(raw.goalIds) || raw.goalIds.length > GOALS.length) return null;
   if (!Array.isArray(raw.layers) || raw.layers.length > RENDER_LAYERS.length) return null;
   const goalIds = raw.goalIds.filter((g): g is string => typeof g === "string" && GOALS.some((d) => d.id === g));
@@ -241,7 +244,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const { error: readyError } = await admin
       .from("goal_previews")
-      .update({ status: "ready", front_path: frontPath, side_path: sidePath, provider_job_ref: rendered.providerRef })
+      .update({ status: "ready", front_path: frontPath, side_path: sidePath, provider_job_ref: rendered.providerRef?.slice(0, 400) ?? null })
       .eq("id", previewId);
     if (readyError) throw new Error(`Preview row update failed: ${readyError.message}`);
     await admin
@@ -286,7 +289,6 @@ export async function GET(request: Request): Promise<Response> {
       .select("id,status,front_path,side_path,expires_at,kept_until,validation,spec")
       .eq("id", id)
       .eq("user_id", user.id)
-      .is("deleted_at", null)
       .maybeSingle<{ id: string; status: string; front_path: string | null; side_path: string | null; expires_at: string; kept_until: string | null; validation: unknown; spec: unknown }>();
     if (error) throw new Error(error.message);
     if (!data || data.status !== "ready" || !data.front_path || !data.side_path) return json({ error: "Not found." }, 404);
@@ -323,23 +325,35 @@ export async function PATCH(request: Request): Promise<Response> {
     const body = (await request.json().catch(() => null)) as { validation?: unknown; keep?: unknown } | null;
     if (!body || typeof body !== "object") return json({ error: "Nothing to update." }, 400);
     const patch: Record<string, unknown> = {};
+    let rejected = false;
     if (body.validation && typeof body.validation === "object") {
       const v = body.validation as { passed?: unknown };
       patch.validation = body.validation;
-      if (v.passed === false) patch.status = "rejected";
+      if (v.passed === false) {
+        patch.status = "rejected";
+        rejected = true;
+      }
     }
     if (body.keep === true) patch.kept_until = new Date(Date.now() + 365 * 86_400_000).toISOString();
     if (!Object.keys(patch).length) return json({ error: "Nothing to update." }, 400);
-    const { data, error } = await getSupabaseAdmin()
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin
       .from("goal_previews")
       .update(patch)
       .eq("id", id)
       .eq("user_id", user.id)
-      .is("deleted_at", null)
       .select("id")
       .maybeSingle<{ id: string }>();
     if (error) throw new Error(error.message);
     if (!data) return json({ error: "Not found." }, 404);
+    if (rejected) {
+      await admin
+        .from("goal_preview_consent_events")
+        .insert({ subject_id: id, event_type: "rejected", consent_version: GOAL_PREVIEW_CONSENT_VERSION, details: {} })
+        .then(({ error: auditError }) => {
+          if (auditError) console.error("goal-preview audit", auditError.message);
+        });
+    }
     return json({ ok: true });
   } catch (error) {
     console.error("goal-preview patch", safeMessage(error));
