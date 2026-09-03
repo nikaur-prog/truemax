@@ -288,6 +288,7 @@ the beta, as `catalogue-2`, with the change recorded in this document.
 | The route in the client's contract | `api/morph-preview.ts` | built: Codex's `POST /api/morph-preview` and `GET ?job=` over the same machinery; the blueprint's effects map to catalogue layers; the server asserts three gates and leaves the two pixel gates to the device's verdict (see `MORPH_PREVIEW_CONTRACT.md`) |
 | The consent route | `api/goal-preview-consent.ts` | built: `GET` state, `PUT` grant (refuses a stale wording), `DELETE` revoke (every preview deleted, objects removed, trail written); the shared version string lives in `src/engine/goalPreviewConsent.ts` |
 | The sweep | `api/cleanup-goal-previews.ts` and the cron in `vercel.json` | built, daily at 03:30 UTC with `CRON_SECRET`; also marks a render killed mid-flight as failed after fifteen minutes |
+| A local look | `scripts/render-goal-preview.ts` | built: the same provider interface and instruction builder on two photographs from disk, output captioned into the gitignored `.preview-out/`, so the owner can see a real render before the app can show one |
 | Tests | `api/_goal-preview.test.ts`, `src/engine/goalCatalogue.test.ts` | gate order, no signed URLs, caption, spec parsing, instructions, provider selection, migration and cron pins |
 
 Not yet in this cycle, and required before any person can call the route:
