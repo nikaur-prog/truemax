@@ -63,3 +63,14 @@ test("the pinned category rail preserves photo context and a cheap return path",
   assert.match(styles, /\.rtabs-rail\.photo-away \.rtabs-face-back/);
   assert.match(styles, /\.rtabs-rail\.is-stuck/);
 });
+
+test("profile weighting copy matches automatic placement and manual correction", () => {
+  assert.match(results, /thirteen landmarks are the least reliable input and may still need a manual correction/);
+  assert.doesNotMatch(results, /thirteen points placed by hand is the one input/);
+});
+
+test("the plan contains the measured visual target surface", () => {
+  assert.match(results, /morphBlueprints\(r, profile, Boolean\(ctx\.sidePhoto\)\)/);
+  assert.match(results, /morphPreviewHTML/);
+  assert.match(results, /wireMorphPreview/);
+});

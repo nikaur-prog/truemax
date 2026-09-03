@@ -2532,12 +2532,227 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 .goal-edit { margin-top: 12px; font-size: 12px; color: var(--acc); background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--sans); text-decoration: underline; text-underline-offset: 3px; }
 .imp .because { display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--acc); margin-top: 9px; }
 
+/* The visual target is a plan surface first and an image surface second. The
+   target map remains useful when rendering is unavailable, while generated
+   pixels stay hidden until every identity and natural-change check passes. */
+.morph-preview {
+  --morph-ink: #f2f5f3;
+  --morph-muted: #96a29e;
+  margin: 16px 0 18px;
+  padding: 20px;
+  border: 1px solid rgba(89, 238, 199, .2);
+  border-radius: 22px;
+  color: var(--morph-ink);
+  background:
+    radial-gradient(circle at 86% 0%, rgba(64, 224, 181, .13), transparent 34%),
+    linear-gradient(145deg, #0b1512, #07100e 58%, #050b09);
+  box-shadow: 0 18px 45px rgba(11, 22, 18, .15);
+  overflow: hidden;
+}
+.morph-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.morph-head > div > span,
+.morph-measures h5 {
+  display: block;
+  color: #66e6c5;
+  font: 600 9px var(--mono);
+  letter-spacing: .17em;
+}
+.morph-head h4 {
+  margin-top: 6px;
+  color: var(--morph-ink);
+  font: 400 25px/1.08 var(--serif);
+}
+.morph-points {
+  flex: none;
+  padding: 6px 9px;
+  border: 1px solid rgba(102, 230, 197, .25);
+  border-radius: 99px;
+  color: #9bf2dc;
+  font: 500 9px var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.morph-intro {
+  max-width: 620px;
+  margin: 11px 0 15px;
+  color: var(--morph-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.morph-switch,
+.morph-views {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 99px;
+  background: rgba(255, 255, 255, .04);
+}
+.morph-switch { margin-bottom: 10px; }
+.morph-views { float: right; }
+.morph-switch button,
+.morph-views button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 99px;
+  color: var(--morph-muted);
+  background: transparent;
+  font: 600 10px var(--sans);
+  cursor: pointer;
+}
+.morph-switch button.active,
+.morph-views button.active {
+  color: #06100d;
+  background: #8befd5;
+  box-shadow: 0 5px 15px rgba(69, 221, 180, .16);
+}
+.morph-stage {
+  clear: both;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 14px;
+}
+.morph-stage[hidden], .morph-plan[hidden] { display: none; }
+.morph-stage figure { min-width: 0; margin: 0; }
+.morph-stage figure > img,
+.morph-map-placeholder {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border: 1px solid rgba(255, 255, 255, .11);
+  border-radius: 15px;
+  background: #101a17;
+  object-fit: cover;
+}
+.morph-stage figure > img[hidden], .morph-map-placeholder[hidden] { display: none; }
+.morph-stage figcaption {
+  margin-top: 6px;
+  color: var(--morph-muted);
+  font: 500 8.5px var(--mono);
+  letter-spacing: .14em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.morph-arrow { color: #69e6c5; font-size: 17px; text-align: center; }
+.morph-map-placeholder {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(118, 242, 208, .16), transparent 28%),
+    repeating-linear-gradient(0deg, transparent 0 17px, rgba(118, 242, 208, .035) 18px),
+    #0a1210;
+}
+.morph-map-placeholder::after {
+  content: "";
+  position: absolute;
+  inset: 14% 25%;
+  border: 1px solid rgba(126, 242, 211, .35);
+  border-radius: 48% 48% 44% 44%;
+  box-shadow: 0 0 28px rgba(90, 229, 192, .12);
+}
+.morph-map-placeholder i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #87efd4;
+  box-shadow: 0 -28px 0 -2px rgba(135, 239, 212, .8), 0 28px 0 -2px rgba(135, 239, 212, .8), -20px 2px 0 -2px rgba(135, 239, 212, .8), 20px 2px 0 -2px rgba(135, 239, 212, .8);
+}
+.morph-map-placeholder span {
+  position: absolute;
+  bottom: 12px;
+  color: rgba(202, 235, 226, .68);
+  font: 500 8px var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.morph-change-map { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.morph-effect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 99px;
+  color: #d7dfdc;
+  background: rgba(255, 255, 255, .04);
+  font-size: 10px;
+}
+.morph-effect i {
+  color: #78e9cb;
+  font: 500 7.5px var(--mono);
+  font-style: normal;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.morph-empty, .morph-goal-empty, .morph-measure-empty {
+  color: var(--morph-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.morph-goals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.morph-goal {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .035);
+}
+.morph-goal > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.morph-goal b { color: var(--morph-ink); font-size: 12px; }
+.morph-goal > div span { color: #79e6c8; font: 500 8px var(--mono); text-transform: uppercase; }
+.morph-goal p { margin: 6px 0; color: #b2bcb8; font-size: 10.5px; line-height: 1.45; }
+.morph-goal small { color: var(--morph-muted); font-size: 9px; line-height: 1.35; }
+.morph-measures {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+}
+.morph-measures h5 { margin-bottom: 8px; }
+.morph-measure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .055);
+}
+.morph-measure > span { color: #c9d1ce; font-size: 10.5px; }
+.morph-measure b { color: var(--morph-ink); font: 500 10.5px var(--mono); }
+.morph-measure b i { margin: 0 3px; color: var(--morph-muted); font-style: normal; }
+.morph-measure small { grid-column: 1 / -1; color: var(--morph-muted); font-size: 9px; line-height: 1.4; }
+.morph-create {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 12px;
+  color: #06100d;
+  background: #82ebcf;
+  font: 700 12px var(--sans);
+  cursor: pointer;
+}
+.morph-create:disabled { cursor: default; opacity: .48; }
+.morph-create.working { color: transparent; background: linear-gradient(100deg, #4fcaa9, #a2f4de, #4fcaa9); background-size: 200% 100%; animation: morph-working 1.4s linear infinite; }
+@keyframes morph-working { to { background-position: -200% 0; } }
+.morph-status { margin: 9px 2px 0; color: var(--morph-muted); font-size: 9.5px; line-height: 1.45; }
+@media (prefers-reduced-motion: reduce) {
+  .morph-create.working { animation: none; }
+}
+
 @media (max-width: 560px) {
   .q-grid, .q-grid.two { grid-template-columns: 1fr; }
   .q-grid.five { grid-template-columns: repeat(3, 1fr); }
   .q-body { padding: 20px 20px 4px; }
   .q-actions { padding: 14px 20px 18px; }
   .q-namerow { padding: 12px 20px 0; }
+  .morph-preview { margin-inline: -2px; padding: 16px; border-radius: 19px; }
+  .morph-head h4 { font-size: 22px; }
+  .morph-views { float: none; margin: 0 0 8px 6px; }
+  .morph-stage { grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); gap: 6px; }
+  .morph-goals { grid-template-columns: 1fr; }
+  .morph-effect { font-size: 9px; }
 }
 
 /* Disclosure for the long "what we measure" copy */

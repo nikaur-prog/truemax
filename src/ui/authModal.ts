@@ -450,7 +450,7 @@ async function renderMembership(
           ? `${planName} is active. Your current billing period ends ${period}.`
           : `${planName} is active on this account.`
       : billingProblem
-        ? `Stripe could not renew ${planName}. Update your payment method to restore access.`
+        ? "Stripe could not renew your subscription. Update your payment method to restore access."
         : waitForWebhook
           ? "Stripe has not confirmed the subscription yet. Reopen your account in a moment."
           : "Free includes scanning, results and device-local progress.";
