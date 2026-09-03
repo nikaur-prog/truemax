@@ -16,6 +16,7 @@ import {
   landmarksToPixels,
   parseLandmarkToolInput,
   parsePixelToolInput,
+  parseSeedHint,
   prepareLandmarkImage,
   zoomCrop,
   zoomPrompt,
@@ -211,4 +212,18 @@ test("anchoring fits only the vertical scale and offset, from the front points, 
   }
   // Fewer than two anchors: nothing happens.
   assert.deepEqual(anchorVertical(stretched, { pronasale: truth.pronasale }), stretched);
+});
+
+test("a seed hint is all thirteen fractions or nothing", () => {
+  const full = Object.fromEntries(Object.entries(facingRight()).map(([id, p]) => [id, { x: p.x / FRAME.width, y: p.y / FRAME.height }]));
+  const parsed = parseSeedHint(JSON.stringify(full));
+  assert.ok(parsed);
+  assert.equal(parsed!.pronasale.x, 0.55);
+  assert.deepEqual(parseSeedHint(full), parsed, "an object is accepted as well as JSON text");
+  const partial = { ...full } as Record<string, unknown>;
+  delete partial.gonion;
+  assert.equal(parseSeedHint(partial), null);
+  assert.equal(parseSeedHint({ ...full, tragion: { x: 1.4, y: 0.4 } }), null);
+  assert.equal(parseSeedHint("not json"), null);
+  assert.equal(parseSeedHint(null), null);
 });

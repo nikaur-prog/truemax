@@ -294,6 +294,35 @@ export function parseLandmarkToolInput(input: unknown, frame: { width: number; h
   return resultFromPixels(placed, frame);
 }
 
+/**
+ * The device seed, sent by the client as fractions of the same photograph.
+ * Optional and advisory: a hint is never returned as an answer, and a
+ * malformed hint is dropped rather than failing the pass. Returns null unless
+ * all thirteen points are present and inside the image.
+ */
+export function parseSeedHint(value: unknown): Record<SideLandmarkId, LandmarkPoint> | null {
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const out = {} as Record<SideLandmarkId, LandmarkPoint>;
+  for (const id of SIDE_LANDMARK_IDS) {
+    const entry = raw[id];
+    if (!entry || typeof entry !== "object") return null;
+    const e = entry as Record<string, unknown>;
+    const x = finiteIn(e.x, 1);
+    const y = finiteIn(e.y, 1);
+    if (x === null || y === null) return null;
+    out[id] = { x, y };
+  }
+  return out;
+}
+
 /** The same result in pixels of a given frame, for callers that draw. */
 export function landmarksToPixels(
   result: SideLandmarkResult,
@@ -490,6 +519,8 @@ export interface LandmarkPass {
   calls: number;
   /** The points whose final position came from an enlarged second look. */
   zoomed: SideLandmarkId[];
+  /** Wall-clock milliseconds for the whole pass, image preparation excluded. */
+  ms: number;
 }
 
 async function callTool(
@@ -531,16 +562,25 @@ async function callTool(
  * leaves the first pass's placement for that cluster in place; it never
  * fails the photograph.
  */
+export interface PlaceOptions {
+  model?: string;
+  zoom?: boolean;
+  /** The device seed as fractions, when the client sent one. Advisory; see parseSeedHint. */
+  hint?: Record<SideLandmarkId, LandmarkPoint> | null;
+  onZoomError?: (cluster: string, error: unknown) => void;
+}
+
 export async function placeSideLandmarks(
   client: Anthropic,
   image: PreparedImage,
-  options: { model?: string; zoom?: boolean; onZoomError?: (cluster: string, error: unknown) => void } = {},
+  options: PlaceOptions = {},
 ): Promise<LandmarkPass> {
   const model = options.model || process.env.SIDE_LANDMARK_MODEL || LANDMARK_MODEL_DEFAULT;
   const zoom = options.zoom ?? true;
   const frame: GridFrame = { width: image.width, height: image.height, step: LANDMARK_GRID_STEP };
   const usage: LandmarkPassUsage = { inputTokens: 0, outputTokens: 0 };
   let calls = 0;
+  const started = Date.now();
 
   const first = await callTool(client, model, await withGrid(image.plain, frame), landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame));
   calls += 1;
@@ -553,30 +593,37 @@ export async function placeSideLandmarks(
 
   const zoomed: SideLandmarkId[] = [];
   if (zoom) {
-    for (const cluster of ZOOM_CLUSTERS) {
-      try {
-        const window = zoomWindow(placed, cluster.ids, frame);
-        const crop = await zoomCrop(image.plain, window);
-        const second = await callTool(
-          client,
-          model,
-          crop.data,
-          zoomPrompt(cluster.name, cluster.ids, crop.frame, faceDir),
-          landmarkTool(cluster.ids, crop.frame),
-        );
-        calls += 1;
-        usage.inputTokens += second.usage.inputTokens;
-        usage.outputTokens += second.usage.outputTokens;
-        const read = parsePixelToolInput(second.input, cluster.ids, crop.frame);
-        for (const id of cluster.ids) {
-          placed[id] = fromZoom(read[id]!, window, crop.scale);
-          zoomed.push(id);
+    // The two crops depend only on the first pass, so they go to the model
+    // together: the client waits a few seconds, not a few seconds per cluster.
+    // Each cluster's window is cut from the first pass's points before either
+    // result lands, so the parallel writes touch disjoint ids.
+    const windows = ZOOM_CLUSTERS.map((cluster) => zoomWindow(placed, cluster.ids, frame));
+    await Promise.all(
+      ZOOM_CLUSTERS.map(async (cluster, i) => {
+        try {
+          const window = windows[i];
+          const crop = await zoomCrop(image.plain, window);
+          const second = await callTool(
+            client,
+            model,
+            crop.data,
+            zoomPrompt(cluster.name, cluster.ids, crop.frame, faceDir),
+            landmarkTool(cluster.ids, crop.frame),
+          );
+          calls += 1;
+          usage.inputTokens += second.usage.inputTokens;
+          usage.outputTokens += second.usage.outputTokens;
+          const read = parsePixelToolInput(second.input, cluster.ids, crop.frame);
+          for (const id of cluster.ids) {
+            placed[id] = fromZoom(read[id]!, window, crop.scale);
+            zoomed.push(id);
+          }
+        } catch (error) {
+          options.onZoomError?.(cluster.name, error);
         }
-      } catch (error) {
-        options.onZoomError?.(cluster.name, error);
-      }
-    }
+      }),
+    );
   }
 
-  return { result: resultFromPixels(placed, frame), model, version: LANDMARK_VERSION, usage, calls, zoomed };
+  return { result: resultFromPixels(placed, frame), model, version: LANDMARK_VERSION, usage, calls, zoomed, ms: Date.now() - started };
 }

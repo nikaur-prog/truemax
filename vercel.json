@@ -5,6 +5,9 @@
     },
     "api/carousel-slide.ts": {
       "maxDuration": 180
+    },
+    "api/side-landmarks.ts": {
+      "maxDuration": 60
     }
   },
   "redirects": [

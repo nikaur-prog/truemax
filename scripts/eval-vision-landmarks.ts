@@ -45,6 +45,9 @@ import {
   prepareLandmarkImage,
 } from "../api/_sideLandmarks.js";
 import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult } from "../api/_sideLandmarks.js";
+import { fuseSideSeeds } from "../src/engine/sideSeedFusion.js";
+import type { ConfidenceBand } from "../src/engine/sideSeedFusion.js";
+import type { SidePoints } from "../src/engine/sideMetrics.js";
 
 const APP_DIR = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const DATA = `${APP_DIR}/.side-dataset`;
@@ -71,6 +74,7 @@ interface Cached {
   usage: { inputTokens: number; outputTokens: number };
   calls?: number;
   zoomed?: SideLandmarkId[];
+  ms?: number;
 }
 
 function arg(name: string): string | undefined {
@@ -124,9 +128,9 @@ async function predict(id: string): Promise<void> {
     zoom,
     onZoomError: (cluster, error) => console.error(`${id}: ${cluster} zoom failed, ${error instanceof Error ? error.message : String(error)}`),
   });
-  cache[id] = { model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed };
+  cache[id] = { model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms };
   if (useCache) writeFileSync(cachePath, JSON.stringify(cache, null, 1));
-  console.error(`${id}: placed in ${pass.calls} call(s), ${pass.zoomed.length} points zoomed (${pass.usage.inputTokens} in, ${pass.usage.outputTokens} out)`);
+  console.error(`${id}: placed in ${pass.calls} call(s), ${pass.zoomed.length} points zoomed, ${(pass.ms / 1000).toFixed(1)}s (${pass.usage.inputTokens} in, ${pass.usage.outputTokens} out)`);
 }
 
 // A small worker pool; the provider is the bottleneck, not the disk.
@@ -227,9 +231,11 @@ interface Bucket {
   /** Signed offset, so a systematic bias is distinguishable from scatter. */
   dx: number[];
   dy: number[];
+  /** The seed the app would actually use: device and model fused by policy. */
+  fused: number[];
 }
 const perPoint: Record<SideLandmarkId, Bucket> = Object.fromEntries(
-  SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [], anchoredY: [], anchored: [], dx: [], dy: [] }]),
+  SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [], anchoredY: [], anchored: [], dx: [], dy: [], fused: [] }]),
 ) as Record<SideLandmarkId, Bucket>;
 const FRONT_LANDMARK_IDS = SIDE_LANDMARK_IDS.filter((id) => !BACK_LANDMARK_IDS.includes(id));
 // The y scale each face implies, model against truth. A value that is not 1
@@ -241,6 +247,12 @@ let tokensIn = 0;
 let tokensOut = 0;
 let calls = 0;
 let zoomedPoints = 0;
+const latencies: number[] = [];
+// Does the model know when it is wrong? Error by the confidence it reported.
+const byConfidence: Record<string, number[]> = { "0.8 to 1": [], "0.5 to 0.8": [], "under 0.5": [] };
+// Does the fused band mean what it says? Error of the fused point by band.
+const byBand: Record<ConfidenceBand, number[]> = { high: [], mid: [], low: [] };
+const overallBands: Record<ConfidenceBand, number> = { high: 0, mid: 0, low: 0 };
 const skipped: string[] = [];
 for (const id of ids) {
   const cached = cache[id];
@@ -261,6 +273,7 @@ for (const id of ids) {
   tokensOut += cached.usage.outputTokens;
   calls += cached.calls ?? 1;
   zoomedPoints += cached.zoomed?.length ?? 0;
+  if (typeof cached.ms === "number") latencies.push(cached.ms);
   scored += 1;
   const px = (pid: SideLandmarkId) => ({ x: cached.result.points[pid].x * w, y: cached.result.points[pid].y * h });
   // The y scale this face implies. Reported because a value that is not 1 and
@@ -278,6 +291,10 @@ for (const id of ids) {
     : null;
   const modelPx = Object.fromEntries(SIDE_LANDMARK_IDS.map((pid) => [pid, px(pid)])) as Frame;
   const fitY = seed && anchors.length >= 2 ? anchorVertical(modelPx, seed, anchors) : null;
+  // The seed the app would use: the device seed and the model fused by the
+  // production policy, in the same display frame as the labels.
+  const fused = seed ? fuseSideSeeds(seed as SidePoints, modelPx as SidePoints, cached.result.confidence) : null;
+  if (fused) overallBands[fused.overall] += 1;
   // Facing, so a left-facing and a right-facing profile do not cancel each other
   // out in the signed table below.
   const facing = truth.pronasale.x > truth.tragion.x ? 1 : -1;
@@ -291,6 +308,13 @@ for (const id of ids) {
     perPoint[pid].dy.push((m.y - t.y) / unit);
     if (fit) perPoint[pid].anchored.push(dist(fit(m), t) / unit);
     if (fitY) perPoint[pid].anchoredY.push(dist(fitY[pid], t) / unit);
+    const conf = cached.result.confidence[pid];
+    byConfidence[conf >= 0.8 ? "0.8 to 1" : conf >= 0.5 ? "0.5 to 0.8" : "under 0.5"].push(mErr);
+    if (fused) {
+      const fErr = dist(fused.points[pid], t) / unit;
+      perPoint[pid].fused.push(fErr);
+      byBand[fused.band[pid]].push(fErr);
+    }
     if (seed?.[pid]) {
       const sErr = dist(seed[pid], t) / unit;
       perPoint[pid].seed.push(sErr);
@@ -305,14 +329,14 @@ for (const id of ids) {
 
 const fmt = (x: number) => (Number.isFinite(x) ? x.toFixed(3) : "  n/a");
 const line = (label: string, b: Bucket) =>
-  `${label.padEnd(16)} ${String(b.model.length).padStart(3)}  ${fmt(median(b.model))}  ${fmt(p90(b.model))}   ${fmt(median(b.seed))}  ${fmt(p90(b.seed))}   ${String(b.seedMoved.length).padStart(3)}  ${fmt(median(b.modelMoved))}  ${fmt(median(b.seedMoved))}`;
+  `${label.padEnd(16)} ${String(b.model.length).padStart(3)}  ${fmt(median(b.model))}  ${fmt(p90(b.model))}   ${fmt(median(b.seed))}  ${fmt(p90(b.seed))}   ${String(b.seedMoved.length).padStart(3)}  ${fmt(median(b.modelMoved))}  ${fmt(median(b.seedMoved))}   ${fmt(median(b.fused))}  ${fmt(p90(b.fused))}`;
 const biasLine = (label: string, b: Bucket) =>
   `${label.padEnd(16)} ${String(b.dx.length).padStart(3)}  ${fmt(median(b.dx))}  ${fmt(median(b.dy))}   ${fmt(median(b.anchoredY))}  ${fmt(p90(b.anchoredY))}   ${fmt(median(b.anchored))}`;
 
 console.log(`\nVision pass ${model} (${LANDMARK_VERSION}) against ${scored} labelled profiles; error in head widths (nose tip to ear notch).`);
 if (skipped.length) console.log(`Skipped: ${skipped.join(", ")}`);
 console.log("");
-console.log("landmark           n   model med  p90    seeder med  p90    moved  model@moved seeder@moved");
+console.log("landmark           n   model med  p90    seeder med  p90    moved  model@moved seeder@moved   fused med  p90");
 for (const pid of SIDE_LANDMARK_IDS) console.log(line(pid, perPoint[pid]));
 
 const merge = (idsToMerge: readonly SideLandmarkId[]): Bucket => ({
@@ -324,6 +348,7 @@ const merge = (idsToMerge: readonly SideLandmarkId[]): Bucket => ({
   anchored: idsToMerge.flatMap((id) => perPoint[id].anchored),
   dx: idsToMerge.flatMap((id) => perPoint[id].dx),
   dy: idsToMerge.flatMap((id) => perPoint[id].dy),
+  fused: idsToMerge.flatMap((id) => perPoint[id].fused),
 });
 const front = SIDE_LANDMARK_IDS.filter((id) => !BACK_LANDMARK_IDS.includes(id));
 console.log("");
@@ -351,10 +376,24 @@ console.log(
   } over ${impliedYScale.length} faces.`,
 );
 
+// Whether the model's confidence and the fused band carry information. A
+// band whose median error does not rise from high to low is decoration.
+console.log("");
+console.log("Model error by the confidence it reported (all points):");
+for (const [bin, errs] of Object.entries(byConfidence)) {
+  console.log(`  ${bin.padEnd(12)} n ${String(errs.length).padStart(4)}  median ${fmt(median(errs))}  p90 ${fmt(p90(errs))}`);
+}
+console.log("Fused-seed error by the band the app would show (all points):");
+for (const b of ["high", "mid", "low"] as const) {
+  console.log(`  ${b.padEnd(12)} n ${String(byBand[b].length).padStart(4)}  median ${fmt(median(byBand[b]))}  p90 ${fmt(p90(byBand[b]))}`);
+}
+console.log(`Overall band per profile: ${overallBands.high} high, ${overallBands.mid} mid, ${overallBands.low} low.`);
+
 const back = merge(BACK_LANDMARK_IDS);
 const ratio = median(back.modelMoved) / median(back.seedMoved);
 console.log("");
 console.log(`Tokens: ${tokensIn} in, ${tokensOut} out across ${scored} profiles, ${calls} model calls, ${zoomedPoints} points from a zoom pass.`);
+if (latencies.length) console.log(`Latency per photo: median ${(median(latencies) / 1000).toFixed(1)}s, p90 ${(p90(latencies) / 1000).toFixed(1)}s (client deadline is what the app sets).`);
 if (Number.isFinite(ratio)) {
   console.log(
     `Back points where the seeder was wrong: model median ${fmt(median(back.modelMoved))} vs seeder ${fmt(median(back.seedMoved))} (ratio ${ratio.toFixed(2)}). ` +
