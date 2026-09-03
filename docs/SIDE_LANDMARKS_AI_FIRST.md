@@ -171,35 +171,153 @@ one, roughly three times the latency (a few seconds more) and the tokens.
 The daily allowance counts photographs, not calls, so nothing about the
 ceiling moves.
 
-## 3. The flow Codex wires (held, pending a model that passes section 2a)
+## 2c. vision-3: the ear at five times the resolution, the jaw corner constructed
+
+Written 3 September 2026 from the vision-2 table above, before the run.
+
+What the vision-2 numbers say, point by point. The ear notch and the hinge
+have signed offsets near zero and medians of 0.10 to 0.14: that is scatter,
+and the reason is arithmetic. A 1.2 head-width crop enlarged to 1024 px is
+1.4x, so a 100 px grid cell in the crop is 0.12 head widths in the frame,
+larger than the go bar itself (half the seeder's 0.090, so 0.045). The jaw
+corner is different: up and back on every face (dx -0.169, dy -0.201) and
+the offset survives every fit, so the model is naming a different point, the
+lobe or the ramus, not misreading a grid. The chin bottom is placed low and
+back (dy +0.142), which is the underside of the jaw or the neck, again a
+definition.
+
+So vision-3 is four changes, each aimed at one of those:
+
+1. **Two zoom stages.** A coarse crop of 0.8 head widths per cluster finds
+   it; then three fine crops, 0.35 head widths around the ear notch pair,
+   0.45 around the jaw corner, 0.5 around the chin, each enlarged to 1024
+   px (about five times the frame) with a 50 px grid. The fine call also
+   sees the coarse crop with the fine window outlined, so a close crop of
+   an ear cannot be mistaken for a close crop of a lobe. Six calls in three
+   rounds, run in parallel within a round.
+2. **The seed skips the first pass.** When the client sends the device
+   points, the whole-frame call is not made: the front eight are the mesh's
+   (exact) and the crops are cut around the seed's clusters. Five calls,
+   two rounds.
+3. **The jaw corner is constructed**, as a cephalometric tracing does it.
+   The fine jaw call asks for two points the model reads well, one on the
+   lower border forward of the corner and one on the back edge below the
+   lobe, and the corner is where the line from the chin bottom through the
+   first meets the line from the hinge through the second. The construction
+   is taken whenever it is a corner a jaw can have (below the hinge, not
+   below the chin, between them horizontally, tangents at a real angle);
+   otherwise the model's guess is kept and marked doubtful. The model's
+   guess never vetoes a sound construction, because the guess is the thing
+   that was wrong.
+4. **The chin bottom is defined as the chin's own curve**, and a placement
+   below the neck point or behind the chin is refused and asked once more
+   with the placement drawn on the crop.
+
+The harness prints, on top of the vision-2 tables: the back points after
+each stage (a stage that lowers nothing is a call to drop), how the jaw
+corner was settled and how far the construction sat from the guess, the
+chin re-ask count, and a leave-one-out bias table per back point. If the
+corrected column of that table is clearly lower, the offset is a property
+of the model and belongs in a versioned table in the module; if not, it is
+not a bias.
+
+The run:
 
 ```
-side photo taken
-  -> loading screen (the pass runs; seeder runs in parallel as the fallback)
-  -> "We placed the points for you"
-       Place them myself  -> walkthrough -> review -> confirm -> help us improve
-       Use these points   -> "Do these points look right?"
-            Yes, they look right -> help us improve -> analysis
-            No, they look off    -> "Would you like to place them yourself?"
-                 Yes, place them       -> walkthrough -> review -> confirm -> help us improve
-                 No, score it as it is -> help us improve -> analysis, side marked unverified
+npx tsx scripts/eval-vision-landmarks.ts --seed
+npx tsx scripts/eval-vision-landmarks.ts
+npx tsx scripts/eval-vision-landmarks.ts --seed --model claude-opus-5
 ```
 
-Rules the client keeps:
+The first is what the app will do. The second says what the seed buys. The
+third says what a larger model buys. Attach the three cache files.
 
-- The pass is called only after the consent in section 4 has been answered
-  yes, once, and remembered. Declined, signed out, over the daily limit, a
-  502, or a five-second timeout: the seeder's points are used and the flow is
-  identical from "We placed the points for you" onward.
-- `classifySidePlacement` runs on the model's points exactly as it runs on the
-  seed today. A hard failure is not offered; the dialog says which reading
-  broke, as it does now.
-- The feedback record (`api/side-correction-feedback.ts`) gains `seed_method:
-  "vision"` and the `version` from the response, so the calibration export can
-  split rows by pass. This is the field the learning loop keys on.
-- The five back points carry their confidence into the review screen as the
-  ring's opacity, so a low-confidence ear reads as a guess before anybody
-  measures from it. Optional in the first cut.
+## 3. The flow, as built and as it changes now
+
+Codex wired the cloud pass into `src/ui/sideFlow.ts` on 2 September: the
+consent dialog (`askCloudPlacementConsent`), the pass running beside the
+device seeder (`cloudPlacementFor`, five-second deadline), and the two
+questions after an automatic placement. Two facts from the vision-2 run
+change what that flow should do with the result, and the owner's run-through
+adds four screens. This section is the handoff.
+
+### 3a. The result does not replace the seed. It is fused with it.
+
+`src/engine/sideSeedFusion.ts` (`fuseSideSeeds`) takes the device seed and
+the cloud reading in the same pixel frame and returns one seed plus, per
+point, which reader it came from, how far apart the two readers were in head
+widths, and a band: high, mid or low. The policy is the benchmark's: the
+device seed is preferred on every point, the ear notch and the jaw hinge are
+averaged when the readers agree within 0.15 head widths, and the band is the
+agreement (high within 0.06, mid within 0.15, low beyond). The five back
+points decide the scan's overall band. The harness prints the fused column
+and the error by band, so the policy is changed there, never by feel.
+
+The one-line change in `loadCanvas`:
+
+```
+// before
+let seed = cloudResult ? { ...cloudResult, method: "vision" } : localResult;
+// after
+const fused = fuseSideSeeds(localResult.points, cloudResult?.points ?? null, cloudResult?.confidenceByPoint);
+let seed = { ...localResult, points: fused.points, method: cloudResult ? "fused" : localResult.method,
+             band: fused.band, overall: fused.overall, secondOpinion: fused.secondOpinion };
+```
+
+`SidePlacementSeed` gains `band`, `overall` and `secondOpinion`; the rings
+draw from `band` (high full, mid fainter, low faintest, as the confidence
+rings do today); the feedback record's `seed_method` becomes `fused` when a
+second reader took part, and carries the cloud `version`.
+
+### 3b. The client deadline
+
+vision-2 makes three model calls. The two crop passes now run in parallel, so
+a pass is roughly two model round trips; the harness prints the median and
+p90 latency per photo from the owner's run. Set the client deadline from
+that figure plus two seconds, not from the old five, and keep the reading
+screen up for the whole wait (3c). The function's own limit is sixty seconds
+(`vercel.json`).
+
+### 3c. The four screens the owner asked for
+
+1. **Confirm the side photo.** After the side capture, the same dialog as
+   the front: "Happy with this side photo?", "Use a clear profile you are
+   happy to be measured from. Retake it now if it is blurry, turned toward
+   the camera, or not the photo you want rated.", buttons "Use this photo"
+   and "Retake photo". `confirmScanAction` in `src/main.ts` already does this
+   for the front; the side calls it before `loadCanvas`.
+2. **The reading screen.** From "Use this photo" until the question, the
+   capture row is gone: no camera button, no upload button, no cancel. The
+   caption reads READING PROFILE, the frame carries the scanning treatment,
+   and a measurement-line sweep runs over the photo (the same lines the
+   report draws, travelling top to bottom and back). The owner's words: the
+   buttons staying put made people think the photo was never taken. The
+   sweep runs for the whole cloud wait, and a device-only read still holds
+   the READ_BEAT floor.
+3. **The confidence label on every question.** The preview inside "Do these
+   points look right?" and inside "Would you like to place them yourself?"
+   shows the placement with its rings AND a one-line label under it:
+   `CONFIDENCE_BAND_LABEL[overall]` ("High confidence", "Medium confidence",
+   "Low confidence"), with "Two readers agree" or "One reader" after it
+   depending on `secondOpinion`. Low confidence names the points that read
+   low: "Jaw corner and chin bottom read low."
+4. **The second question keeps the preview and gains the note.** "Would you
+   like to place them yourself?" shows the same preview, and its fine print
+   reads: "Side scores are usually more accurate when you place the points
+   yourself. Scoring as it is keeps these points and marks the side
+   unverified." Buttons stay "Yes, place them" and "No, score it as it is".
+   A scan scored as it is keeps its points; nothing is re-estimated.
+
+The order of questions, the walkthrough, the feedback consent and the
+unverified mark are unchanged from what Codex built.
+
+### 3d. What the client sends
+
+Nothing new is required. Optionally, the device seed's thirteen points as
+fractions in a `seed` form field: the endpoint accepts them, so a later pass
+can show the model where the device put a point and ask it to correct
+rather than place. The harness decides whether that helps before any client
+sends it.
 
 ## 4. The privacy change, for the owner to approve
 

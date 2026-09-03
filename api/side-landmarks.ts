@@ -4,6 +4,7 @@ import {
   LANDMARK_PASSES_PER_DAY,
   MAX_LANDMARK_IMAGE_BYTES,
   landmarksToPixels,
+  parseSeedHint,
   placeSideLandmarks,
   prepareLandmarkImage,
 } from "./_sideLandmarks.js";
@@ -33,9 +34,11 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 // right the first time. The daily ceiling is what keeps that from becoming an
 // image API for the world.
 //
-// Request: multipart form with `photo` (JPEG, PNG or WebP, at most 2 MB) and
+// Request: multipart form with `photo` (JPEG, PNG or WebP, at most 2 MB),
 // optional `width` and `height` of the frame the client draws in, so the
-// response can carry pixels as well as fractions.
+// response can carry pixels as well as fractions, and optional `seed`, the
+// device seeder's thirteen points as fractions of the same photo (JSON), which
+// the pass may use as a hint and never returns as an answer.
 // ---------------------------------------------------------------------------
 
 const MAX_BODY_BYTES = MAX_LANDMARK_IMAGE_BYTES + 20_000;
@@ -82,6 +85,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     const width = frameSize(form.get("width"));
     const height = frameSize(form.get("height"));
+    const hint = parseSeedHint(form.get("seed"));
 
     // Claimed before the model is called, as one statement, so two requests
     // racing cannot both pass the ceiling (same shape as the chat allowance).
@@ -106,6 +110,7 @@ export async function POST(request: Request): Promise<Response> {
     try {
       const prepared = await prepareLandmarkImage(Buffer.from(await photo.arrayBuffer()));
       pass = await placeSideLandmarks(client(), prepared, {
+        hint,
         onZoomError: (cluster, error) => console.error(`side-landmarks zoom ${cluster}`, safeMessage(error)),
       });
     } catch (error) {
