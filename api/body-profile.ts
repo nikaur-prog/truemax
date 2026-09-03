@@ -16,9 +16,10 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 //
 // PUT accepts metric or imperial and stores canonical centimetres and
 // kilograms, bounded by the same numbers the calculator and the table
-// enforce. A request marked as a device migration writes only when the row
-// has nothing yet, so a value that lived on one phone cannot overwrite a
-// value typed on another. DELETE clears the two values and keeps the row.
+// enforce. A request marked as a device migration goes through one
+// conditional statement that writes only when the row holds neither
+// figure, so a value that lived on one phone cannot overwrite a value
+// typed on another. DELETE clears the two values and keeps the row.
 //
 // Nothing here reaches facial scoring, and a test pins that the scoring
 // modules never read these columns.
@@ -123,17 +124,17 @@ export async function PUT(request: Request): Promise<Response> {
     }
     const admin = getSupabaseAdmin();
     if (parsed.source === "device_migration") {
-      // Once, and only into an empty row: a phone's cache never beats a
-      // value the person typed elsewhere.
-      const { data: existing, error: readError } = await admin
-        .from("body_profiles")
-        .select("height_cm,weight_kg")
-        .eq("user_id", user.id)
-        .maybeSingle<{ height_cm: number | string | null; weight_kg: number | string | null }>();
-      if (readError) throw new Error(readError.message);
-      if (existing && num(existing.height_cm) !== null && num(existing.weight_kg) !== null) {
-        return json(await state(user.id));
-      }
+      // Once, and only into a row holding neither figure. One conditional
+      // statement in the database, so two devices racing cannot both win
+      // and a phone's cache never lands on a value typed elsewhere.
+      const { error } = await admin.rpc("migrate_body_profile", {
+        p_user_id: user.id,
+        p_height_cm: metric.heightCm,
+        p_weight_kg: metric.weightKg,
+        p_unit: parsed.entry.unit,
+      });
+      if (error) throw new Error(`migrate_body_profile failed: ${error.message}`);
+      return json(await state(user.id));
     }
     const { error } = await admin.from("body_profiles").upsert(
       { user_id: user.id, height_cm: metric.heightCm, weight_kg: metric.weightKg, unit_preference: parsed.entry.unit, source: parsed.source },

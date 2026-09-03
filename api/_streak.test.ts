@@ -29,10 +29,20 @@ test("every streak method checks the origin, then the session, and the payload c
   assert.doesNotMatch(route, /raw\.userId|body\.userId|p_user_id: (?!user\.id)/);
 });
 
-test("points are awarded only on a newly counted day, with the day base and the week bonus, and the funnel learns counts only", () => {
+test("the count and both awards are one database transaction, and the funnel learns counts only", () => {
   const post = route.match(/export async function POST[\s\S]*?\n}\n/)?.[0] ?? "";
-  assert.match(post, /if \(result\.counted\) \{[\s\S]*?award_consistency[\s\S]*?p_reason: "day"[\s\S]*?p_base: CONSISTENCY_POINTS_PER_DAY[\s\S]*?if \(result\.weekLanded\)[\s\S]*?p_reason: "week"[\s\S]*?p_base: STREAK_WEEK_BONUS[\s\S]*?bump_funnel_event[\s\S]*?"streak-day-counted"[\s\S]*?"streak-ended"/);
+  assert.match(post, /rpc\("count_streak_day", \{[\s\S]*?p_day_base: CONSISTENCY_POINTS_PER_DAY,[\s\S]*?p_week_base: STREAK_WEEK_BONUS,/);
+  assert.doesNotMatch(post, /rpc\("award_consistency"/, "the route never awards on its own; the function does, inside the count");
+  assert.match(post, /if \(result\.counted\) \{[\s\S]*?bump_funnel_event[\s\S]*?"streak-day-counted"[\s\S]*?"streak-ended"/);
   assert.doesNotMatch(route, /award_progress/, "verified progress is never awarded by the streak route");
+  const fn = migration.match(/create or replace function public\.count_streak_day[\s\S]*?\$\$;/)?.[0] ?? "";
+  assert.match(fn, /update public\.daily_streaks[\s\S]*?day_points := public\.award_consistency\(p_user_id, 'day', p_day, p_day_base\);[\s\S]*?if week_landed then[\s\S]*?week_points := public\.award_consistency\(p_user_id, 'week', p_day, p_week_base\);/);
+  assert.match(fn, /'awarded', day_points \+ week_points/);
+});
+
+test("verified progress pays once per goal, ever, by a database invariant", () => {
+  assert.match(migration, /create unique index if not exists points_events_progress_once\s+on public\.points_events \(user_id, reason\)\s+where ledger = 'progress'/);
+  assert.match(migration, /award_progress[\s\S]*?on conflict \(user_id, reason\) where ledger = 'progress' do nothing/);
 });
 
 test("the streak and points tables are owner-readable, service-written, and the ledger is append-only", () => {
@@ -46,14 +56,14 @@ test("the streak and points tables are owner-readable, service-written, and the 
   assert.match(migration, /unique \(user_id, ledger, reason, day\)/);
   assert.match(migration, /create or replace view public\.points_balances\s+with \(security_invoker = true\)/);
   assert.match(migration, /grace_banked between 0 and 2/);
-  for (const signature of ["streak_multiplier\\(integer\\)", "count_streak_day\\(uuid, date\\)", "award_consistency\\(uuid, text, date, integer\\)", "award_progress\\(uuid, text, date, integer\\)"]) {
+  for (const signature of ["streak_multiplier\\(integer\\)", "count_streak_day\\(uuid, date, integer, integer\\)", "award_consistency\\(uuid, text, date, integer\\)", "award_progress\\(uuid, text, date, integer\\)"]) {
     assert.match(
       migration,
       new RegExp(`revoke all on function public\\.${signature} from public, anon, authenticated;\\s+grant execute on function public\\.${signature} to service_role`),
       `${signature} is not service-only`,
     );
   }
-  assert.match(migration, /on conflict \(user_id, ledger, reason, day\) do nothing/);
+  assert.match(migration, /award_consistency[\s\S]*?on conflict \(user_id, ledger, reason, day\) do nothing/);
   assert.match(migration, /award_progress[\s\S]*?'progress', p_reason, p_day, p_points, 1\.00, p_points/, "progress is never multiplied");
 });
 

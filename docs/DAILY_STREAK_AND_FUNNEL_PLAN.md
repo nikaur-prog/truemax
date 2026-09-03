@@ -221,9 +221,16 @@ changes in section 1 stood.
   `award_progress`, all service-only. Apply it in the SQL editor before the
   route is used.
 - `api/streak.ts`: GET (row, today's reading, both balances), POST (count a
-  day; the day must be within one day of the server's UTC date; points only
-  when the day was newly counted; funnel bumps for `streak-day-counted` and
-  `streak-ended`), PATCH (the Settings switch).
+  day; the day must be within one day of the server's UTC date; the count
+  and the awards are one database transaction inside `count_streak_day`,
+  paying only when the day was newly counted; funnel bumps for
+  `streak-day-counted` and `streak-ended`), PATCH (the Settings switch).
+- Verified progress pays once per goal, ever: a partial unique index on
+  (user, reason) where the ledger is progress, with the goal id as the
+  reason.
+- The funnel chain's side stage is two branches, side done or side skipped,
+  so a front-only completion (PR #257) is a person who went on, not a
+  drop-off.
 - `src/engine/dailyStreak.ts`: the tier table the SQL is tested against,
   the multiplier and glow from a count, the local day string, the same grace
   arithmetic as the function for an optimistic render (`nextStreak`), the

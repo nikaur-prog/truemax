@@ -86,3 +86,13 @@ test("facial scoring never reads height, weight or BMI", () => {
   assert.ok(scoring.length > 1000, "the scoring modules were read");
   assert.doesNotMatch(scoring, /heightCm|weightKg|body_profiles|\bbmi\b/i);
 });
+
+test("the device migration is one conditional statement that writes only into a row holding neither figure", () => {
+  const rpcMigration = readFileSync(new URL("../supabase/migrations/20260904100000_body_profile_device_migration.sql", import.meta.url), "utf8");
+  const route = readFileSync(new URL("./body-profile.ts", import.meta.url), "utf8");
+  assert.match(rpcMigration, /on conflict \(user_id\) do update[\s\S]*?where public\.body_profiles\.height_cm is null\s+and public\.body_profiles\.weight_kg is null/);
+  assert.match(rpcMigration, /revoke all on function public\.migrate_body_profile\(uuid, numeric, numeric, text\) from public, anon, authenticated;\s+grant execute on function public\.migrate_body_profile\(uuid, numeric, numeric, text\) to service_role/);
+  const put = route.match(/export async function PUT[\s\S]*?\n}\n/)?.[0] ?? "";
+  assert.match(put, /if \(parsed\.source === "device_migration"\) \{[\s\S]*?rpc\("migrate_body_profile"[\s\S]*?return json\(await state\(user\.id\)\);/);
+  assert.doesNotMatch(put, /select\("height_cm,weight_kg"\)/, "no read-then-write in the migration path");
+});

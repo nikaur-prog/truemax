@@ -15,15 +15,32 @@ export interface FunnelRow {
   count: number;
 }
 
-/** The main path, in order. Each step's share is of the one before it. */
-export const FUNNEL_CHAIN: readonly string[] = [
-  "visit",
-  "scan-front-done",
-  "scan-side-done",
-  "results-shown",
-  "account-created",
-  "checkout-started",
+export interface ChainStage {
+  /** What the row is called in the report. */
+  label: string;
+  /** The events that together mean this stage was reached. Usually one; the side stage is two branches. */
+  events: readonly string[];
+}
+
+/**
+ * The main path, in order. Each stage's share is of the one before it.
+ *
+ * The side photo is optional after a completed front capture, so the side
+ * stage is reached either way: a side done or a side skipped is a person
+ * who went on to results. Counting only the done branch would report every
+ * front-only completion as a drop-off.
+ */
+export const FUNNEL_CHAIN: readonly ChainStage[] = [
+  { label: "visit", events: ["visit"] },
+  { label: "scan-front-done", events: ["scan-front-done"] },
+  { label: "side done or skipped", events: ["scan-side-done", "scan-side-skipped"] },
+  { label: "results-shown", events: ["results-shown"] },
+  { label: "account-created", events: ["account-created"] },
+  { label: "checkout-started", events: ["checkout-started"] },
 ];
+
+/** Every event any chain stage counts. */
+export const FUNNEL_CHAIN_EVENTS: readonly string[] = FUNNEL_CHAIN.flatMap((stage) => stage.events);
 
 /** The guest-recovery pair: the hotfix's effect as a number. */
 export const SIGNUP_RETURN_PAIR: readonly [string, string] = ["signup-return-analysis", "signup-return-lost"];
@@ -31,9 +48,11 @@ export const SIGNUP_RETURN_PAIR: readonly [string, string] = ["signup-return-ana
 export const REPORT_DAYS = 14;
 
 export interface ChainStep {
-  event: string;
+  label: string;
   count: number;
-  /** Share of the previous step, 0..1; null on the first step or when the previous is zero. */
+  /** Per event within the stage, so a two-branch stage shows its split. */
+  parts: Record<string, number>;
+  /** Share of the previous stage, 0..1; null on the first stage or when the previous is zero. */
   share: number | null;
 }
 
@@ -62,13 +81,18 @@ export function windowDays(count: number = REPORT_DAYS, now: Date = new Date()):
   return days;
 }
 
-export function buildChain(totals: Record<string, number>, chain: readonly string[] = FUNNEL_CHAIN): ChainStep[] {
+export function buildChain(totals: Record<string, number>, chain: readonly ChainStage[] = FUNNEL_CHAIN): ChainStep[] {
   const steps: ChainStep[] = [];
   let previous: number | null = null;
-  for (const event of chain) {
-    const count = totals[event] ?? 0;
+  for (const stage of chain) {
+    const parts: Record<string, number> = {};
+    let count = 0;
+    for (const event of stage.events) {
+      parts[event] = totals[event] ?? 0;
+      count += parts[event];
+    }
     const share = previous === null || previous === 0 ? null : count / previous;
-    steps.push({ event, count, share });
+    steps.push({ label: stage.label, count, parts, share });
     previous = count;
   }
   return steps;
@@ -118,13 +142,17 @@ export function formatFunnelReport(summary: FunnelSummary): string {
   const lines: string[] = [];
   lines.push(`Funnel, ${summary.days[0]} to ${summary.days[summary.days.length - 1]} (UTC days)`);
   lines.push("");
-  lines.push("step                  count   of previous");
+  lines.push("stage                 count   of previous");
   for (const step of summary.chain) {
-    lines.push(`${step.event.padEnd(22)}${String(step.count).padStart(5)}   ${pct(step.share)}`);
+    lines.push(`${step.label.padEnd(22)}${String(step.count).padStart(5)}   ${pct(step.share)}`);
+    const events = Object.keys(step.parts);
+    if (events.length > 1) {
+      for (const event of events) lines.push(`  ${event.padEnd(20)}${String(step.parts[event]).padStart(5)}`);
+    }
   }
   if (summary.biggestDrop) {
     lines.push("");
-    lines.push(`Biggest drop: ${summary.biggestDrop.event} keeps ${pct(summary.biggestDrop.share).trim()} of the step before.`);
+    lines.push(`Biggest drop: ${summary.biggestDrop.label} keeps ${pct(summary.biggestDrop.share).trim()} of the stage before.`);
   } else {
     lines.push("");
     lines.push("Nothing flowed through the chain in this window.");
@@ -137,7 +165,7 @@ export function formatFunnelReport(summary: FunnelSummary): string {
       : `Guest signup return: ${sr.analysis} landed on their analysis, ${sr.lost} landed elsewhere (${(sr.recovered * 100).toFixed(0)}% recovered).`,
   );
   const others = Object.keys(summary.totals)
-    .filter((e) => !FUNNEL_CHAIN.includes(e))
+    .filter((e) => !FUNNEL_CHAIN_EVENTS.includes(e))
     .sort();
   if (others.length) {
     lines.push("");
@@ -146,7 +174,7 @@ export function formatFunnelReport(summary: FunnelSummary): string {
   }
   lines.push("");
   lines.push("per day               " + summary.days.map((d) => d.slice(5)).join(" "));
-  for (const event of FUNNEL_CHAIN) {
+  for (const event of FUNNEL_CHAIN_EVENTS) {
     const cells = summary.days.map((d) => String(summary.byDay[event]?.[d] ?? 0).padStart(5));
     lines.push(`${event.padEnd(22)}${cells.join(" ")}`);
   }

@@ -64,9 +64,17 @@ create table if not exists public.points_events (
 );
 
 comment on table public.points_events is
-  'Append-only points awards. Consistency may carry the streak multiplier (capped 1.50); progress never does.';
+  'Append-only points awards. Consistency may carry the streak multiplier (capped 1.50) and is keyed per day; progress never does and is keyed once per goal.';
 
 create index if not exists points_events_user_ledger_idx on public.points_events (user_id, ledger);
+
+-- Verified progress pays once per goal, ever. The reason on a progress
+-- event is the goal id, and this index is the invariant: a second award
+-- for the same goal on any later day is refused by the database, not by
+-- the caller remembering to check.
+create unique index if not exists points_events_progress_once
+  on public.points_events (user_id, reason)
+  where ledger = 'progress';
 
 alter table public.points_events enable row level security;
 
@@ -122,89 +130,10 @@ revoke all on function public.streak_multiplier(integer) from public, anon, auth
 grant execute on function public.streak_multiplier(integer) to service_role;
 
 -- ---------------------------------------------------------------------------
--- Count a day. Idempotent per day, spends grace, keeps the best.
---
--- The route has already checked the day is within one day of its own UTC
--- date, so a clock cannot be walked forward. A day at or before the last
--- counted day changes nothing and reports counted=false. A gap of one is
--- the next day. A larger gap spends the missed days from banked grace when
--- it can; otherwise the run ends and a new one starts today at one. Every
--- seven consecutive counted days bank one grace day, to a maximum of two.
--- ---------------------------------------------------------------------------
-
-create or replace function public.count_streak_day(p_user_id uuid, p_day date)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  s public.daily_streaks%rowtype;
-  gap integer;
-  missed integer;
-  counted boolean := false;
-  ended boolean := false;
-  previous_best integer;
-begin
-  insert into public.daily_streaks (user_id) values (p_user_id)
-  on conflict (user_id) do nothing;
-
-  select * into s from public.daily_streaks where user_id = p_user_id for update;
-  previous_best := s.best;
-
-  if s.last_counted_day is null then
-    s.current := 1;
-    counted := true;
-  elsif p_day > s.last_counted_day then
-    gap := p_day - s.last_counted_day;
-    missed := gap - 1;
-    if missed <= s.grace_banked then
-      s.grace_banked := s.grace_banked - missed;
-      s.current := s.current + 1;
-    else
-      ended := s.current > 0;
-      s.current := 1;
-      s.grace_banked := 0;
-    end if;
-    counted := true;
-  end if;
-
-  if counted then
-    s.last_counted_day := p_day;
-    if s.current % 7 = 0 then
-      s.grace_banked := least(2, s.grace_banked + 1);
-    end if;
-    s.best := greatest(s.best, s.current);
-    update public.daily_streaks
-      set current = s.current,
-          best = s.best,
-          last_counted_day = s.last_counted_day,
-          grace_banked = s.grace_banked,
-          updated_at = now()
-      where user_id = p_user_id;
-  end if;
-
-  return jsonb_build_object(
-    'counted', counted,
-    'ended', ended,
-    'weekLanded', counted and s.current % 7 = 0,
-    'current', s.current,
-    'best', s.best,
-    'previousBest', previous_best,
-    'graceBanked', s.grace_banked,
-    'lastCountedDay', s.last_counted_day,
-    'enabled', s.enabled
-  );
-end;
-$$;
-
-revoke all on function public.count_streak_day(uuid, date) from public, anon, authenticated;
-grant execute on function public.count_streak_day(uuid, date) to service_role;
-
--- ---------------------------------------------------------------------------
--- Award consistency points: read the tier and write the multiplied event in
--- one statement. Returns the points written, or 0 when the (user, reason,
--- day) key already exists.
+-- Award consistency points: read the tier and write the multiplied event.
+-- Returns the points written, or 0 when the (user, reason, day) key already
+-- exists. Called by count_streak_day inside its transaction; exposed to the
+-- service role for nothing else today.
 -- ---------------------------------------------------------------------------
 
 create or replace function public.award_consistency(p_user_id uuid, p_reason text, p_day date, p_base integer)
@@ -237,8 +166,105 @@ $$;
 revoke all on function public.award_consistency(uuid, text, date, integer) from public, anon, authenticated;
 grant execute on function public.award_consistency(uuid, text, date, integer) to service_role;
 
--- Verified progress: flat, multiplier fixed at 1.00, once per (reason, day).
--- The reason is the goal id, so a goal pays once.
+-- ---------------------------------------------------------------------------
+-- Count a day and pay for it, in one transaction.
+--
+-- Idempotent per day, spends grace, keeps the best, and writes the day
+-- award (and the week award when seven land) before returning, so a
+-- counted day can never be left unpaid by a failure between two calls.
+--
+-- The route has already checked the day is within one day of its own UTC
+-- date, so a clock cannot be walked forward. A day at or before the last
+-- counted day changes nothing and reports counted=false. A gap of one is
+-- the next day. A larger gap spends the missed days from banked grace when
+-- it can; otherwise the run ends and a new one starts today at one. Every
+-- seven consecutive counted days bank one grace day, to a maximum of two.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.count_streak_day(p_user_id uuid, p_day date, p_day_base integer, p_week_base integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  s public.daily_streaks%rowtype;
+  gap integer;
+  missed integer;
+  counted boolean := false;
+  ended boolean := false;
+  week_landed boolean := false;
+  previous_best integer;
+  day_points integer := 0;
+  week_points integer := 0;
+begin
+  insert into public.daily_streaks (user_id) values (p_user_id)
+  on conflict (user_id) do nothing;
+
+  select * into s from public.daily_streaks where user_id = p_user_id for update;
+  previous_best := s.best;
+
+  if s.last_counted_day is null then
+    s.current := 1;
+    counted := true;
+  elsif p_day > s.last_counted_day then
+    gap := p_day - s.last_counted_day;
+    missed := gap - 1;
+    if missed <= s.grace_banked then
+      s.grace_banked := s.grace_banked - missed;
+      s.current := s.current + 1;
+    else
+      ended := s.current > 0;
+      s.current := 1;
+      s.grace_banked := 0;
+    end if;
+    counted := true;
+  end if;
+
+  if counted then
+    s.last_counted_day := p_day;
+    if s.current % 7 = 0 then
+      s.grace_banked := least(2, s.grace_banked + 1);
+    end if;
+    s.best := greatest(s.best, s.current);
+    week_landed := s.current % 7 = 0;
+    update public.daily_streaks
+      set current = s.current,
+          best = s.best,
+          last_counted_day = s.last_counted_day,
+          grace_banked = s.grace_banked,
+          updated_at = now()
+      where user_id = p_user_id;
+    -- The awards read the run as it now stands, so the day that reaches a
+    -- tier earns at that tier. Same transaction as the count: either the
+    -- day is counted and paid, or neither happened.
+    day_points := public.award_consistency(p_user_id, 'day', p_day, p_day_base);
+    if week_landed then
+      week_points := public.award_consistency(p_user_id, 'week', p_day, p_week_base);
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'counted', counted,
+    'ended', ended,
+    'weekLanded', week_landed,
+    'awarded', day_points + week_points,
+    'current', s.current,
+    'best', s.best,
+    'previousBest', previous_best,
+    'graceBanked', s.grace_banked,
+    'lastCountedDay', s.last_counted_day,
+    'enabled', s.enabled
+  );
+end;
+$$;
+
+revoke all on function public.count_streak_day(uuid, date, integer, integer) from public, anon, authenticated;
+grant execute on function public.count_streak_day(uuid, date, integer, integer) to service_role;
+
+-- Verified progress: flat, multiplier fixed at 1.00, once per goal ever.
+-- The reason is the goal id; the partial unique index above is what makes
+-- a second award for the same goal on a later day a no-op.
 create or replace function public.award_progress(p_user_id uuid, p_reason text, p_day date, p_points integer)
 returns integer
 language plpgsql
@@ -251,7 +277,7 @@ begin
   end if;
   insert into public.points_events (user_id, ledger, reason, day, base, multiplier, points)
   values (p_user_id, 'progress', p_reason, p_day, p_points, 1.00, p_points)
-  on conflict (user_id, ledger, reason, day) do nothing;
+  on conflict (user_id, reason) where ledger = 'progress' do nothing;
   if not found then
     return 0;
   end if;

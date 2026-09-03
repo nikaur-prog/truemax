@@ -14,10 +14,11 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 //
 // GET   the row, today's reading, and the two balances.
 // POST  count a day. The client says which day it counted and why; the
-//       server accepts the day only within one day of its own UTC date,
-//       hands it to count_streak_day, and awards consistency points only
-//       when the day was newly counted. The action kind is not part of the
-//       ledger key: a routine and a scan on the same day are one day.
+//       server accepts the day only within one day of its own UTC date and
+//       hands it to count_streak_day, which counts and pays in one
+//       transaction, paying only when the day was newly counted. The action
+//       kind is not part of the ledger key: a routine and a scan on the
+//       same day are one day.
 // PATCH the Settings switch. Off hides; the record keeps counting.
 //
 // A guest scan never reaches here: the client counts only on the person's
@@ -41,6 +42,7 @@ interface CountedRow {
   counted: boolean;
   ended: boolean;
   weekLanded: boolean;
+  awarded: number;
   current: number;
   best: number;
   graceBanked: number;
@@ -115,36 +117,29 @@ export async function POST(request: Request): Promise<Response> {
     if ("error" in parsed) return json({ error: parsed.error }, 400);
 
     const admin = getSupabaseAdmin();
-    const counted = await admin.rpc("count_streak_day", { p_user_id: user.id, p_day: parsed.day });
+    // One transaction: the count, the day award and the week award land
+    // together or not at all, so a retry can never find a counted day
+    // that was left unpaid.
+    const counted = await admin.rpc("count_streak_day", {
+      p_user_id: user.id,
+      p_day: parsed.day,
+      p_day_base: CONSISTENCY_POINTS_PER_DAY,
+      p_week_base: STREAK_WEEK_BONUS,
+    });
     if (counted.error) throw new Error(`count_streak_day failed: ${counted.error.message}`);
     const result = counted.data as CountedRow;
+    const awarded = Number(result.awarded) || 0;
 
-    let awarded = 0;
     if (result.counted) {
-      // The multiplier is read inside the function from the run as it now
-      // stands, so the day that reaches a tier earns at that tier.
-      const day = await admin.rpc("award_consistency", {
-        p_user_id: user.id,
-        p_reason: "day",
-        p_day: parsed.day,
-        p_base: CONSISTENCY_POINTS_PER_DAY,
-      });
-      if (day.error) throw new Error(`award_consistency failed: ${day.error.message}`);
-      awarded += Number(day.data) || 0;
-      if (result.weekLanded) {
-        const week = await admin.rpc("award_consistency", {
-          p_user_id: user.id,
-          p_reason: "week",
-          p_day: parsed.day,
-          p_base: STREAK_WEEK_BONUS,
-        });
-        if (week.error) throw new Error(`award_consistency (week) failed: ${week.error.message}`);
-        awarded += Number(week.data) || 0;
-      }
       // Counts, not people: the funnel learns that a day was counted and
-      // that a run ended, nothing about whose.
-      await admin.rpc("bump_funnel_event", { p_event: "streak-day-counted" });
-      if (result.ended) await admin.rpc("bump_funnel_event", { p_event: "streak-ended" });
+      // that a run ended, nothing about whose. A counter that fails to
+      // move never undoes a day that was counted.
+      try {
+        await admin.rpc("bump_funnel_event", { p_event: "streak-day-counted" });
+        if (result.ended) await admin.rpc("bump_funnel_event", { p_event: "streak-ended" });
+      } catch (error) {
+        console.error("streak funnel", safeMessage(error));
+      }
     }
 
     const snap = await snapshot(user.id, utcToday());
