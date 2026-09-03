@@ -1679,10 +1679,6 @@ body.body-profile-open { overflow: hidden; }
   border-color: rgba(143, 243, 224, 0.88);
   box-shadow: 0 0 5px rgba(120, 235, 210, 0.52), inset 0 0 0 1px rgba(6, 20, 17, 0.9);
 }
-.verify-layer.point-confidence .vpoint i {
-  opacity: var(--point-confidence, 1);
-}
-
 .side-placement-pref {
   display: flex;
   align-items: center;
@@ -7215,6 +7211,15 @@ body.is-member .journey { display: none; }
   display: flex; justify-content: center; align-items: stretch;
   transition: opacity .15s ease;
 }
+.mdx-stage::after {
+  content: ""; position: absolute; inset: auto 0 0; height: 34%; z-index: 2;
+  pointer-events: none; opacity: .56;
+  background: linear-gradient(to top, color-mix(in srgb, var(--mdx-tone, transparent) 50%, transparent), transparent);
+  transition: background .22s ease, opacity .22s ease;
+}
+.mdx-stage.tone-hi { --mdx-tone: #3fd4b5; }
+.mdx-stage.tone-mid { --mdx-tone: #d6b25f; }
+.mdx-stage.tone-lo { --mdx-tone: #cc7258; }
 .mdx-stage.swap { opacity: 0; }
 .mdx-zoom {
   position: relative;
@@ -7226,6 +7231,7 @@ body.is-member .journey { display: none; }
 .mdx-zoom canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .mdx-step {
   position: absolute; top: 50%; transform: translateY(-50%);
+  z-index: 3;
   width: 38px; height: 38px; display: grid; place-items: center;
   border: 1px solid rgba(255,255,255,.28); border-radius: 50%;
   background: rgba(12,20,18,.55); backdrop-filter: blur(6px);
@@ -7264,7 +7270,14 @@ body.is-member .journey { display: none; }
   padding: 5px 10px; border-radius: 99px; align-self: center;
 }
 .mdx-score { background: var(--acc-soft); color: var(--acc); }
+.mdx-score.tone-hi { background: rgba(63, 212, 181, .12); color: #147f69; }
+.mdx-score.tone-mid { background: rgba(214, 178, 95, .16); color: #8a681b; }
+.mdx-score.tone-lo { background: rgba(204, 114, 88, .13); color: #a24d38; }
 .mdx-rank { border: 1px solid var(--line); color: var(--mut); }
+.mdx-grade {
+  margin: 8px 0 0; color: var(--ink); font: 600 12px/1.35 var(--sans);
+  letter-spacing: .01em;
+}
 .mdx-bar { margin: 16px 2px 4px; }
 
 .mdx-tabs { display: flex; gap: 6px; margin: 18px 0 12px; border-bottom: 1px solid var(--line); }

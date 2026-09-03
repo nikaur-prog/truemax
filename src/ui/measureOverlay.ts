@@ -308,6 +308,29 @@ export interface OverlayFade {
 
 const FADE_MS = 170;
 
+// Hovering between measurements used to allocate two full-resolution canvases
+// for every pointer movement. Safari makes those allocations visible as a
+// hitch and retains their backing stores long enough to create memory churn.
+// One reusable pair per visible overlay keeps the same cross-fade with no hot
+// path allocation.
+const transitionBuffers = new WeakMap<
+  HTMLCanvasElement,
+  { from: HTMLCanvasElement; to: HTMLCanvasElement }
+>();
+
+function transitionBufferPair(canvas: HTMLCanvasElement, width: number, height: number) {
+  let pair = transitionBuffers.get(canvas);
+  if (!pair) {
+    pair = { from: document.createElement("canvas"), to: document.createElement("canvas") };
+    transitionBuffers.set(canvas, pair);
+  }
+  for (const buffer of [pair.from, pair.to]) {
+    if (buffer.width !== width) buffer.width = width;
+    if (buffer.height !== height) buffer.height = height;
+  }
+  return pair;
+}
+
 export function transitionMeasurement(
   canvas: HTMLCanvasElement,
   paintNext: (target: HTMLCanvasElement) => void,
@@ -315,14 +338,10 @@ export function transitionMeasurement(
   const w = canvas.width || 1;
   const h = canvas.height || 1;
 
-  const from = document.createElement("canvas");
-  from.width = w;
-  from.height = h;
+  const { from, to } = transitionBufferPair(canvas, w, h);
+  from.getContext("2d")!.clearRect(0, 0, w, h);
   if (canvas.width && canvas.height) from.getContext("2d")!.drawImage(canvas, 0, 0);
-
-  const to = document.createElement("canvas");
-  to.width = w;
-  to.height = h;
+  to.getContext("2d")!.clearRect(0, 0, w, h);
   paintNext(to);
 
   const ctx = canvas.getContext("2d")!;
@@ -376,6 +395,8 @@ export function drawMeasurement(
    */
   opts: {
     labels?: boolean;
+    /** Neutral white is reserved for the pre-result reading pass. */
+    tone?: "score" | "neutral";
     /**
      * Stroke weight multiplier. 1 is the report's hairline; the video
      * renderer passes ~1.35 so the line survives a platform re-encode and
@@ -399,7 +420,7 @@ export function drawMeasurement(
 
   const recipe = RECIPES[metric.def.id];
   if (!recipe) {
-    drawRegionFallback(ctx, landmarks, width, height, metric);
+    drawRegionFallback(ctx, landmarks, width, height, metric, opts.tone === "neutral" ? ACCENT : undefined);
     return true;
   }
 
@@ -441,7 +462,7 @@ export function drawMeasurement(
   // resolved here to the same hue at half strength rather than to a fixed
   // white — so a construction is one instrument in one colour, never a
   // coloured line with a white one beside it.
-  const band = bandColour(metric.score);
+  const band = opts.tone === "neutral" ? ACCENT : bandColour(metric.score);
   for (const [segIndex, seg] of segs.entries()) {
     const u = ease(at(segIndex));
     if (u <= 0) continue;
@@ -812,6 +833,7 @@ function drawRegionFallback(
   width: number,
   height: number,
   metric: ScoredMetric,
+  colour?: string,
 ): void {
   const ids = (REGION_FALLBACK[metric.def.region] ?? []).filter((i) => landmarks[i]);
   if (!ids.length) return;
@@ -826,7 +848,7 @@ function drawRegionFallback(
   cy /= ids.length;
 
   const r = Math.max(3, width / 150);
-  const band = bandColour(metric.score);
+  const band = colour ?? bandColour(metric.score);
   ctx.save();
   ctx.shadowColor = band;
   ctx.shadowBlur = width / 90;

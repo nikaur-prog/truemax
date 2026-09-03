@@ -83,7 +83,7 @@ test("every way out of the dialogs hands the section back", () => {
   assert.ok(finallyAt > then, "the placement branch releases in a finally");
   assert.ok(src.slice(finallyAt, finallyAt + 120).includes("releaseFurniture();"));
   // And the two branches that put a person to work release before they do.
-  for (const marker of ['if (mode === "manual") {', "if (edit) {"]) {
+  for (const marker of ['if (mode === "manual") {', "if (!useAnyway) {"]) {
     const at = src.indexOf(marker);
     assert.ok(at > 0, marker);
     const next = src.slice(at, at + 400);

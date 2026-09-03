@@ -22,7 +22,7 @@ const MAX_STORED_CHARS = 4_500_000;
 const PHOTO_LONG_EDGE = 720;
 
 export interface PendingAnalysis {
-  version: 2;
+  version: 2 | 3;
   scanId: string;
   claimToken: string;
   claimedByUserId?: string;
@@ -36,7 +36,7 @@ export interface PendingAnalysis {
     autoNote: string;
     photo: string;
   };
-  side: {
+  side?: {
     points: SidePoints;
     faceDir: number;
     width: number;
@@ -53,7 +53,7 @@ export interface PendingAnalysisInput {
   scanId: string;
   sex: Sex;
   front: Omit<PendingAnalysis["front"], "photo"> & { canvas: HTMLCanvasElement };
-  side: Omit<PendingAnalysis["side"], "photo" | "width" | "height"> & { canvas?: HTMLCanvasElement };
+  side?: Omit<NonNullable<PendingAnalysis["side"]>, "photo" | "width" | "height"> & { canvas?: HTMLCanvasElement };
 }
 
 export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
@@ -61,10 +61,10 @@ export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
     if (!isScanId(input.scanId)) return false;
     const frontPhoto = reducedJpeg(input.front.canvas);
     if (!frontPhoto) return false;
-    const sidePhoto = input.side.canvas ? reducedJpeg(input.side.canvas) : null;
+    const sidePhoto = input.side?.canvas ? reducedJpeg(input.side.canvas) : null;
     const claimToken = crypto.randomUUID();
     const value: PendingAnalysis = {
-      version: 2,
+      version: 3,
       scanId: input.scanId,
       claimToken,
       createdAt: Date.now(),
@@ -77,7 +77,7 @@ export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
         autoNote: input.front.autoNote,
         photo: frontPhoto,
       },
-      side: {
+      side: input.side ? {
         points: input.side.points,
         faceDir: input.side.faceDir,
         width: input.side.canvas?.width ?? 1,
@@ -87,7 +87,7 @@ export function savePendingAnalysis(input: PendingAnalysisInput): boolean {
         seedMethod: input.side.seedMethod,
         seedVersion: input.side.seedVersion,
         feedback: input.side.feedback,
-      },
+      } : undefined,
     };
     const serialized = JSON.stringify(value);
     if (serialized.length > MAX_STORED_CHARS) return false;
@@ -215,7 +215,21 @@ function reducedJpeg(source: HTMLCanvasElement): string | null {
 function valid(value: Partial<PendingAnalysis>): value is PendingAnalysis {
   const front = value.front;
   const side = value.side;
-  return value.version === 2
+  const supportedVersion = value.version === 2 || value.version === 3;
+  const sideValid = !side
+    ? value.version === 3
+    : (side.faceDir === 1 || side.faceDir === -1)
+      && finiteSize(side.width, side.height)
+      && !!side.points
+      && (!side.photo || jpeg(side.photo))
+      && (!side.feedback || (
+        !!side.photo
+        && !!side.automaticPoints
+        && side.seedMethod === side.feedback.seedMethod
+        && side.seedVersion === side.feedback.seedVersion
+        && sideFeedbackIntentIssues(side.feedback, side.width, side.height).length === 0
+      ));
+  return supportedVersion
     && isScanId(value.scanId)
     && uuid(value.claimToken)
     && (value.claimedByUserId === undefined || uuid(value.claimedByUserId))
@@ -228,18 +242,7 @@ function valid(value: Partial<PendingAnalysis>): value is PendingAnalysis {
     && typeof front.autoNote === "string"
     && jpeg(front.photo)
     && !!front.quality
-    && !!side
-    && (side.faceDir === 1 || side.faceDir === -1)
-    && finiteSize(side.width, side.height)
-    && !!side.points
-    && (!side.photo || jpeg(side.photo))
-    && (!side.feedback || (
-      !!side.photo
-      && !!side.automaticPoints
-      && side.seedMethod === side.feedback.seedMethod
-      && side.seedVersion === side.feedback.seedVersion
-      && sideFeedbackIntentIssues(side.feedback, side.width, side.height).length === 0
-    ));
+    && sideValid;
 }
 
 function claimTokenFromBrowser(): string | null {

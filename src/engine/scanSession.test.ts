@@ -30,6 +30,14 @@ test("invalid transitions are rejected without mutating the scan", () => {
   assert.equal(session.snapshot().phase, "front");
 });
 
+test("a front-only scan can move straight through the gate to results", () => {
+  const session = new ScanSession();
+  const token = session.begin("user:one", "camera", FIRST);
+  assert.equal(session.transition(token, "gate"), true);
+  assert.equal(session.transition(token, "analyzing"), true);
+  assert.equal(session.transition(token, "results"), true);
+});
+
 test("cancelling a result-side edit returns to the same result", () => {
   const session = new ScanSession();
   const token = session.begin("user:one", "camera", FIRST);
