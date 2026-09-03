@@ -14,6 +14,7 @@ import type { ZoomSpec } from "./zoomTransform.js";
 import { zoomFor } from "./regions.js";
 import { fmt, metricTrait, rankShort } from "./templates.js";
 import { metricRead } from "../engine/metricReads.js";
+import { scoreTone } from "./scoreTone.js";
 
 // ---------------------------------------------------------------------------
 // One measurement, opened.
@@ -85,6 +86,20 @@ export function stageViewFor(
 /** Step through the deck without wrapping — a counter that wraps lies. */
 export function stepIndex(index: number, delta: number, total: number): number {
   return Math.min(total - 1, Math.max(0, index + delta));
+}
+
+/** A short, human read for the score shown beside one measurement. */
+export function metricScoreLabel(score: number, name: string): string {
+  const quality = score >= 7.5
+    ? "Excellent"
+    : score >= 6
+      ? "Good"
+      : score >= 4.5
+        ? "Balanced"
+        : score >= 3
+          ? "Below range"
+          : "Weak";
+  return `${quality} ${name.toLowerCase()}`;
 }
 
 let active: HTMLElement | null = null;
@@ -395,7 +410,17 @@ function showAt(next: number): void {
   void info.offsetWidth;
   info.classList.add("enter");
   info.querySelector(".mdx-value")!.textContent = fmt(m);
-  info.querySelector(".mdx-score")!.textContent = m.implausible ? "–" : m.score.toFixed(1);
+  const tone = m.implausible ? null : scoreTone(m.score);
+  const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
+  stage.classList.remove("tone-hi", "tone-mid", "tone-lo");
+  if (tone) stage.classList.add(`tone-${tone}`);
+  const score = info.querySelector<HTMLElement>(".mdx-score")!;
+  score.classList.remove("tone-hi", "tone-mid", "tone-lo");
+  if (tone) score.classList.add(`tone-${tone}`);
+  score.textContent = m.implausible ? "–" : `${m.score.toFixed(1)} / 10`;
+  info.querySelector(".mdx-grade")!.textContent = m.implausible
+    ? "Re-check this measurement"
+    : metricScoreLabel(m.score, m.def.name);
   info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : rankShort(m.percentile);
   // No population bar for an impossible reading — its marker sits at phi(z) of
   // a value that is not a face, pinned to one end and presented as a position.
@@ -453,6 +478,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
           <span class="mdx-chip mdx-score"></span>
           <span class="mdx-chip mdx-rank"></span>
         </div>
+        <p class="mdx-grade"></p>
         <div class="mdx-barhost"></div>
         <nav class="mdx-tabs">
           <button class="mdx-tab" data-tab="overview">Overview</button>

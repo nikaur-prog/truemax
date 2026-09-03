@@ -22,7 +22,7 @@ test("taking the automatic placement never reaches a confirm screen", () => {
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented \}\)/);
   // And the only path back to the review row is the one where a person chose
   // to edit, where the row is the tool they asked for...
-  assert.match(auto, /if \(edit\) \{[\s\S]*?showGuidedActions\(\);/);
+  assert.match(auto, /if \(!useAnyway\) \{[\s\S]*?showGuidedActions\(\);/);
   // ...or a confirm the engine refused. The furniture is never mounted under
   // the dialogs, so a refusal (a reading outside what a face can be) has to
   // put the editor up itself. Every showReviewActions here follows a

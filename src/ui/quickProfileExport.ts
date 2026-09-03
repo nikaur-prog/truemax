@@ -28,6 +28,26 @@ export interface QuickProfileAssets {
   scores: QuickProfileScores;
 }
 
+const PROFILE_SCORECARD_ORDER = ["jaw", "chin", "nose", "lips"] as const;
+
+/** Keep every profile export comparable, even when input regions are sorted by score. */
+export function profileScorecardRegions(
+  regions: QuickProfileScores["regions"],
+): QuickProfileScores["regions"] {
+  const available = regions.filter((region) => Number.isFinite(region.score));
+  const picked: QuickProfileScores["regions"] = [];
+  for (const wanted of PROFILE_SCORECARD_ORDER) {
+    const match = available.find((region) => region.name.trim().toLowerCase() === wanted);
+    if (match) picked.push(match);
+  }
+  for (const region of available) {
+    if (picked.includes(region)) continue;
+    picked.push(region);
+    if (picked.length === 4) break;
+  }
+  return picked.slice(0, 4);
+}
+
 interface Crop { x: number; y: number; w: number; h: number }
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -247,7 +267,7 @@ export function renderQuickProfileFrame(canvas: HTMLCanvasElement, assets: Quick
   ctx.fillStyle = "#8ff3e0";
   ctx.fillText(rankShort(assets.scores.percentile), 36, 776);
 
-  const rows = assets.scores.regions.slice(0, 4);
+  const rows = profileScorecardRegions(assets.scores.regions);
   rows.forEach((row, index) => {
     const rowReveal = smoother((t - 3.35 - index * 0.16) / 0.48);
     if (rowReveal <= 0) return;
@@ -371,7 +391,7 @@ export function renderProfileScoreCard(canvas: HTMLCanvasElement, assets: QuickP
   ctx.letterSpacing = "0px";
   ctx.fillStyle = "#8ff3e0";
   ctx.fillText(rankShort(assets.scores.percentile), 98, 1080);
-  const rows = assets.scores.regions.slice(0, 4);
+  const rows = profileScorecardRegions(assets.scores.regions);
   rows.forEach((row, index) => {
     const col = index % 2;
     const rowIndex = Math.floor(index / 2);

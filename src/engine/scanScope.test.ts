@@ -169,6 +169,34 @@ test("an unclaimed pending analysis needs possession of its one-time token", () 
   clearPendingAnalysis();
 });
 
+test("a version 3 pending analysis can preserve a front-only scan through signup", () => {
+  local.clear();
+  session.clear();
+  const claimToken = "10000000-0000-4000-8000-000000000023";
+  const scanId = "20000000-0000-4000-8000-000000000023";
+  local.setItem("truemax:pending-analysis:v2", JSON.stringify({
+    version: 3,
+    scanId,
+    claimToken,
+    createdAt: Date.now(),
+    sex: "male",
+    front: {
+      landmarks: Array.from({ length: 468 }, () => ({ x: 0.5, y: 0.5, z: 0 })),
+      width: 720,
+      height: 720,
+      quality: {},
+      autoNote: "test",
+      photo: "data:image/jpeg;base64,AA==",
+    },
+  }));
+  session.setItem("truemax:pending-analysis-claim:v2", claimToken);
+
+  const claimed = claimPendingAnalysis("00000000-0000-4000-8000-000000000023");
+  assert.equal(claimed?.scanId, scanId);
+  assert.equal(claimed?.side, undefined);
+  clearPendingAnalysis();
+});
+
 test("redirect auth carries the anonymous scan claim token", () => {
   session.clear();
   const claimToken = "10000000-0000-4000-8000-000000000003";

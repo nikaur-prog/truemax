@@ -203,7 +203,7 @@ function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"], st
 function placementChoiceControl(): string {
   const choice = readSidePlacementChoice();
   if (!choice) return "";
-  const label = choice === "cloud" ? "Cloud point placement is on" : "Points stay on this device";
+  const label = choice === "cloud" ? "Automatic point placement is on" : "Points stay on this device";
   return `<p class="side-placement-pref"><span>${label}</span><button type="button" data-side-placement-choice>Change</button></p>`;
 }
 
@@ -821,14 +821,19 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
 async function cloudPlacementFor(canvas: HTMLCanvasElement): Promise<SidePlacementSeed | null> {
   const token = await currentAccessToken().catch(() => null);
   if (!token) return null;
-
-  let choice = readSidePlacementChoice();
-  if (!choice) {
-    choice = await askCloudPlacementConsent();
-    if (choice) storeSidePlacementChoice(choice);
-  }
-  if (choice !== "cloud") return null;
+  if (readSidePlacementChoice() !== "cloud") return null;
   return requestCloudSidePlacement(canvas, token);
+}
+
+/** Resolve the one-time privacy choice before opening the profile camera. */
+export async function prepareSidePlacementChoice(): Promise<boolean> {
+  const token = await currentAccessToken().catch(() => null);
+  // Guests cannot call the authenticated cloud route and stay on-device.
+  if (!token || readSidePlacementChoice()) return true;
+  const choice = await askCloudPlacementConsent();
+  if (!choice) return false;
+  storeSidePlacementChoice(choice);
+  return true;
 }
 
 // Shared by the first pass and by a later correction, so the two cannot drift
@@ -888,12 +893,11 @@ function mountVerify(
   const startInGuidedMode = seedMethod !== "existing";
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
-  e.layer.classList.toggle("point-confidence", !!seed.confidenceByPoint);
+  // Confidence guides fusion internally. Every visible point keeps the same
+  // crisp weight so the person reviews anatomy rather than model uncertainty.
+  e.layer.classList.remove("point-confidence");
   for (const point of e.layer.querySelectorAll<HTMLElement>(".vpoint")) {
-    const id = point.dataset.id as SidePointId | undefined;
-    const confidence = id ? seed.confidenceByPoint?.[id] : undefined;
-    if (confidence === undefined) point.style.removeProperty("--point-confidence");
-    else point.style.setProperty("--point-confidence", String(0.42 + confidence * 0.58));
+    point.style.removeProperty("--point-confidence");
   }
   // The whole-face reference badge, for the free-editing review where a person
   // is looking at all thirteen rings at once and wants to compare the set.
@@ -1271,14 +1275,11 @@ function mountVerify(
         if (def) setReference(id, def.label, def.hint);
       };
     }
-    const low = (seed.confidence ?? 1) < 0.7;
     const cloud = seedMethod === "vision" || seedMethod === "fused";
-    e.panelCopy.innerHTML = `<h2 class="side-title">${low ? "These points need a check" : "Check the automatic points"}</h2>
-      <p class="side-sub">${low
-        ? "The automatic placement was unsure on this photo, so treat every ring as a starting position. Drag any ring straight onto the feature it names: the hollow centre shows the pixel underneath."
-        : cloud
-          ? "All thirteen points were placed from this photo. Fainter rings are the points the cloud pass was less certain about. Drag any ring straight onto the feature it names."
-          : "The front of the face is measured; the five behind it, jaw corner, ear, and the neck point, are estimated from an average head, so they are the ones worth checking. Drag any ring straight onto the feature it names."}</p>
+    e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
+      <p class="side-sub">${cloud
+        ? "All thirteen points were identified from this photo. Drag any ring straight onto the feature it names, paying closest attention to the hairline, ear, jaw corner and neck point."
+        : "The front outline is read from the photo. Check the hairline, ear, jaw corner and neck point, then drag any ring that missed straight onto the feature it names."}</p>
       <p class="side-review-note">${cloud
         ? "The placement request is finished and TrueMax kept no copy. Sharing a correction later is a separate choice."
         : "Nothing leaves this device unless you separately choose to share it."}</p>`;
@@ -1525,12 +1526,12 @@ function mountVerify(
    *
    *   Do these look right?
    *     yes  -> consent, then analysis
-   *     no   -> would you like to place them yourself?
-   *               yes -> the walkthrough, which ends at the review screen and
-   *                      its own confirm, because at that point a person IS
+   *     no   -> use them anyway?
+   *               no  -> the walkthrough, which ends at the review screen and
+   *                      its own confirm, because at that point a person is
    *                      editing and the row is the tool for it
-   *               no  -> consent, then analysis, with the side recorded
-   *                      UNVERIFIED
+   *               yes -> consent, then analysis, with the side recorded
+   *                      unverified
    *
    * The unverified branch is deliberate and is the owner's call. Somebody who
    * will not spend thirty seconds on thirteen rings will not spend them on a
@@ -1538,16 +1539,11 @@ function mountVerify(
    * is scored, and the report says what it is built on.
    */
   const afterAutomatic = async () => {
-    const cloud = seedMethod === "vision" || seedMethod === "fused";
     const right = await askSideQuestion({
       klabel: "ONE QUESTION",
       title: "Do these points look right?",
       preview: { photo: e.canvas, points: verifier!.points },
-      copy: cloud
-        ? "All thirteen points were placed from this photo. Fainter rings show where the cloud pass was less certain. Check the hairline, ear, jaw corner and neck point most closely."
-        : "The front of the face is measured from the photo. The five behind it, the jaw"
-          + " corner, the ear, the hinge and the neck point, are estimated from an average head,"
-          + " so those are the ones that drift.",
+      copy: "We identified all thirteen points from this photo. Check the hairline, ear, jaw corner and neck point most closely.",
       no: "No, they look off",
       yes: "Yes, they look right",
       fine: "Yes goes straight to your analysis. No lets you place them yourself first.",
@@ -1570,18 +1566,16 @@ function mountVerify(
     // They said the placement is wrong, which is the single most useful thing
     // anybody tells us about the seeder. Offer the fix before asking for it.
     flaggedWrong = true;
-    const edit = await askSideQuestion({
+    const useAnyway = await askSideQuestion({
       klabel: "YOUR CHOICE",
-      title: "Would you like to place them yourself?",
-      copy: "Thirteen points, one at a time, each one named and shown on a reference face."
-        + " It takes about thirty seconds and it is the difference between a side score that"
-        + " measures your face and one that measures a guess.",
-      no: "No, score it as it is",
-      yes: "Yes, place them",
-      fine: "Declining is fine. Your report will say the side profile was not verified.",
+      title: "Use these points anyway?",
+      copy: "Placing the thirteen points yourself gives the most accurate profile score. Each point is named and shown on a reference face, and it takes about thirty seconds.",
+      no: "Place them myself",
+      yes: "Use them anyway",
+      fine: "If you continue, the report will mark the side placement as unverified.",
     });
-    if (edit === null) return;
-    if (edit) {
+    if (useAnyway === null) return;
+    if (!useAnyway) {
       // Into the walkthrough. Consent is asked at the end of it, on the review
       // screen, where there is a correction worth sharing.
       releaseFurniture();
@@ -1675,13 +1669,13 @@ function askCloudPlacementConsent(): Promise<SidePlacementChoice | null> {
     const backdrop = document.createElement("div");
     backdrop.className = "side-mode-backdrop";
     backdrop.innerHTML = `<section class="side-mode-card side-cloud-consent" role="dialog" aria-modal="true" aria-labelledby="side-cloud-title">
-      <span class="klabel">PROFILE POINTS</span>
-      <h2 id="side-cloud-title">Place the points with our cloud pass?</h2>
-      <p class="side-mode-copy">To place all thirteen side points, TrueMax sends this one side photo for a single cloud request and reads the points back. TrueMax does not store the photo or use it to train anything. The processing provider may retain API inputs for up to 30 days under its commercial terms. Your front photo stays on your phone.</p>
-      <p class="side-mode-copy">Or place the points on this device yourself, with no photo sent.</p>
+      <span class="klabel">AUTOMATIC PROFILE POINTS</span>
+      <h2 id="side-cloud-title">Allow automatic point placement?</h2>
+      <p class="side-mode-copy">For automatic placement, TrueMax sends this side photo for one secure processing request and reads the thirteen points back. TrueMax does not store the photo or use it to train anything. The processing provider may retain API inputs for up to 30 days under its commercial terms. Your front photo stays on your phone.</p>
+      <p class="side-mode-copy">You can instead keep the photo on this device and place the points yourself.</p>
       <div class="side-mode-actions">
-        <button type="button" class="btn gho" data-placement-choice="device">Keep it on this device</button>
-        <button type="button" class="btn pri" data-placement-choice="cloud">Send once and place points</button>
+        <button type="button" class="btn gho" data-placement-choice="device">Place on this device</button>
+        <button type="button" class="btn pri" data-placement-choice="cloud">Allow automatic placement</button>
       </div>
       <p class="side-mode-fine">This choice is remembered on this device. You can change it from the profile capture screen.</p>
     </section>`;
@@ -1737,9 +1731,9 @@ function askCloudPlacementConsent(): Promise<SidePlacementChoice | null> {
 function askPlacementMode(
   photo: HTMLCanvasElement,
   points: SidePoints,
-  confidence: number,
+  _confidence: number,
   broken: string[] = [],
-  marginal: string[] = [],
+  _marginal: string[] = [],
 ): Promise<"auto" | "manual" | null> {
   // Three states, not two, and the third is the one that was missing.
   //
@@ -1749,26 +1743,21 @@ function askPlacementMode(
   //   low      the seeder reported low confidence in itself.
   //   ok       a normal placement.
   const blocked = broken.length > 0;
-  const low = !blocked && (confidence < 0.7 || marginal.length > 0);
   return new Promise((resolve) => {
     let done = false;
     const backdrop = document.createElement("div");
     backdrop.className = "side-mode-backdrop";
     backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-mode-title">
-      <span class="klabel">${blocked ? "PLACEMENT FAILED" : low ? "LOW CONFIDENCE" : "AUTOMATIC PLACEMENT"}</span>
+      <span class="klabel">${blocked ? "QUICK CORRECTION" : "AUTOMATIC PLACEMENT"}</span>
       <h2 id="side-mode-title">${blocked
-        ? "We could not place these"
-        : low ? "Here is our best guess" : "We placed the points for you"}</h2>
+        ? "These points need one correction"
+        : "We identified these points"}</h2>
       <figure class="side-mode-shot">
         <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
       <p class="side-mode-copy">${blocked
-        ? `Our own measurement says at least one of these is in the wrong place: ${broken.join("; ")}. Rather than hand you a number built on it, we would like you to place them.`
-        : low
-          ? marginal.length
-            ? `One reading is just outside the safety range: ${marginal.join("; ")}. You can use these points, but that reading will be left out of the score.`
-            : "This photo was a hard one to read, so treat these as starting positions rather than an answer."
-          : "This is where our system put them, on your photo."}</p>
+        ? `One or more points would produce an invalid measurement: ${broken.join("; ")}. Place them yourself so the profile score is built from valid anatomy.`
+        : "This is what TrueMax identified on your photo. Review the placement, then use it or place the points yourself."}</p>
       <div class="side-mode-actions${blocked ? " single" : ""}">
         ${blocked ? "" : `<button type="button" class="btn gho" data-mode="manual">Place them myself</button>`}
         <button type="button" class="btn pri" data-mode="${blocked ? "manual" : "auto"}">${

@@ -47,11 +47,9 @@ test("the wall reads one score, computed the same way the report will be", () =>
 });
 
 test("the signed-out film draws real constructions without disclosing values", () => {
-  assert.equal(
-    (passSrc.match(/\{ labels: false \}/g) ?? []).length,
-    2,
-    "both front and side overlays must suppress their value chips",
-  );
+  const hiddenLabels = passSrc.match(/(?:drawSideMeasurement|drawMeasurement)\([\s\S]*?labels:\s*false[\s\S]*?\);/g) ?? [];
+  assert.equal(hiddenLabels.length, 2, "both front and side overlays must suppress their value chips");
+  assert.match(passSrc, /drawMeasurement\([\s\S]*?tone:\s*"neutral"[\s\S]*?\);/);
   assert.match(passSrc, /say\(step\.label, step\.metric\.def\.name\)/);
   assert.doesNotMatch(passSrc, /say\([^\n]*step\.metric\.value/);
 });

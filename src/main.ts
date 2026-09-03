@@ -45,7 +45,12 @@ import { setMemberPricing } from "./engine/scanPricing.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
-import { openSideAdjust, openSideCapture, close as closeSide } from "./ui/sideFlow.js";
+import {
+  openSideAdjust,
+  openSideCapture,
+  prepareSidePlacementChoice,
+  close as closeSide,
+} from "./ui/sideFlow.js";
 import { openFrontEdit } from "./ui/frontEdit.js";
 import { analyzeSide } from "./engine/scoring.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
@@ -2049,14 +2054,10 @@ async function handleCanvas(
     }),
   };
 
-  // The main product is two photographs: front, then side, then one analysis of
-  // both. That is the whole mechanism, so the side is a required step here, not
-  // an optional extra — after the front is captured the flow goes straight to
-  // the profile. (Front-only lives on the separate /quick.html page, which is
-  // built for filming and deliberately skips the side.)
-  //
-  // runFullAnalysis still accepts null so a report restored from history can
-  // render front-only; the interactive flow always supplies a side report.
+  // The side view adds measurements the front cannot see, but it must not hold
+  // the front result hostage. Ask for it as a clearly valuable second view and
+  // keep a complete front-only path for somebody who is not ready to turn away
+  // from the camera or does not have a suitable profile photograph.
   el.frame.classList.remove("scanning");
   el.capRight.textContent = "FRONT CAPTURED";
   drawCalm(el.overlayCanvas, landmarks, width, height);
@@ -2077,9 +2078,22 @@ async function handleCanvas(
     return;
   }
   track("scan-front-done");
-  el.status.innerHTML = "<b>Front captured.</b> Now the side profile.";
-  if (!scanSession.transition(token, "side")) return;
-  startSide();
+  el.status.innerHTML = "<b>Front captured.</b> Add a profile for the full analysis, or continue with the front.";
+  const takeSide = await confirmScanAction({
+    eyebrow: "OPTIONAL SECOND VIEW",
+    title: "And now the side photo",
+    copy: "Turn your head 90 degrees so one ear faces the camera. Keep your head level and your full forehead and chin visible. This adds projection, jaw-angle and profile measurements, but you can skip it and see your front analysis now.",
+    confirmLabel: "Take side photo",
+    cancelLabel: "Skip side photo",
+    tone: "positive",
+  });
+  if (!scanIsCurrent(token, generation)) return;
+  if (takeSide) {
+    startSide();
+    return;
+  }
+  track("scan-side-skipped");
+  await gateAnalysis(null, token);
 }
 
 interface PendingFront {
@@ -2702,15 +2716,15 @@ async function runFullAnalysis(
       // owner's next preselect.
       if (!scanSubject) storeSex(sex);
       paintRefPop();
-      if (!lastSide) return;
       // The corrected cloud when there is one: switching population must not
       // silently throw away the points somebody just fixed by hand.
       const f = analyze(editedLandmarks ?? landmarks, width, height, sex, frontShot);
-      const sd = analyzeSide(lastSide.points, lastSide.faceDir, sex);
-      const merged = mergeReports(f, sd);
-      const rescoredDelta = compareAndStore(merged, token.scanId, scanSubject ?? undefined);
+      const rescored = lastSide
+        ? mergeReports(f, analyzeSide(lastSide.points, lastSide.faceDir, sex))
+        : f;
+      const rescoredDelta = compareAndStore(rescored, token.scanId, scanSubject ?? undefined);
       renderQualityChips(quality, `Scored against ${sex} norms`);
-      renderResults({ ...ctxArgs, report: merged, delta: rescoredDelta });
+      renderResults({ ...ctxArgs, report: rescored, delta: rescoredDelta });
     },
   };
   track("results-shown");
@@ -2743,11 +2757,12 @@ async function runFullAnalysis(
   resumePendingStarted = false;
 }
 
-// The visitor has completed both photographs before we ask for an account.
-// That ordering is the acquisition flow: let them experience the scan first,
-// then ask for identity only at the moment the result becomes valuable.
+// The visitor has completed the front photograph and, when they chose it, the
+// optional profile before we ask for an account. That ordering is the
+// acquisition flow: let them experience the scan first, then ask for identity
+// only at the moment the result becomes valuable.
 async function gateAnalysis(
-  sideReport: Report,
+  sideReport: Report | null,
   token = scanSession.currentToken(),
 ): Promise<void> {
   if (!pending || !token || !scanSession.isCurrent(token)) return;
@@ -2807,20 +2822,22 @@ async function gateAnalysis(
     return;
   }
 
-  const saved = pending && lastSide
+  const saved = pending
     ? savePendingAnalysis({
         scanId: token.scanId,
         sex: selectedSex,
         front: { ...pending, canvas: el.photoCanvas },
-        side: {
-          points: lastSide.points,
-          faceDir: lastSide.faceDir,
-          canvas: lastSide.photo,
-          automaticPoints: lastSide.automaticPoints,
-          seedMethod: lastSide.seedMethod,
-          seedVersion: lastSide.seedVersion,
-          feedback: lastSide.feedback,
-        },
+        ...(lastSide ? {
+          side: {
+            points: lastSide.points,
+            faceDir: lastSide.faceDir,
+            canvas: lastSide.photo,
+            automaticPoints: lastSide.automaticPoints,
+            seedMethod: lastSide.seedMethod,
+            seedVersion: lastSide.seedVersion,
+            feedback: lastSide.feedback,
+          },
+        } : {}),
       })
     : false;
   if (!scanSession.transition(token, "gate")) return;
@@ -2944,7 +2961,7 @@ async function gateAnalysis(
   // with the card. The line keeps the completion beat and gives up the ask.
   el.status.innerHTML = front
     ? "<b>Analysis complete.</b>"
-    : "<b>Both views captured.</b>";
+    : lastSide ? "<b>Both views captured.</b>" : "<b>Front captured.</b>";
   el.barFill.style.width = "100%";
   // Last, and after the pane above has been filled. Leaving `scanning` is what
   // drops the photograph out of the full-screen scan stage and back into the
@@ -3000,7 +3017,7 @@ async function gateAnalysis(
  * runFullAnalysis's persistent scan-ID guard from PR #199.
  */
 async function continueAuthenticatedAnalysis(
-  sideReport: Report,
+  sideReport: Report | null,
   token: ScanToken,
   generation: number,
 ): Promise<boolean> {
@@ -3093,7 +3110,7 @@ async function runPendingResume(): Promise<boolean> {
   el.photoCanvas.getContext("2d")!.drawImage(frontShot, 0, 0);
 
   let sidePhoto: HTMLCanvasElement | undefined;
-  if (saved.side.photo) {
+  if (saved.side?.photo) {
     sidePhoto = document.createElement("canvas");
     const sideOk = await drawStoredPhoto(
       sidePhoto,
@@ -3121,7 +3138,7 @@ async function runPendingResume(): Promise<boolean> {
     // from one frame and says so by simply having none.
     extraFrames: [],
   };
-  lastSide = {
+  lastSide = saved.side ? {
     points: saved.side.points,
     faceDir: saved.side.faceDir,
     photo: sidePhoto,
@@ -3129,7 +3146,7 @@ async function runPendingResume(): Promise<boolean> {
     seedMethod: saved.side.seedMethod,
     seedVersion: saved.side.seedVersion,
     feedback: saved.side.feedback,
-  };
+  } : null;
   closeSide();
   el.upload.classList.add("hidden");
   el.main.classList.remove("hidden");
@@ -3143,7 +3160,10 @@ async function runPendingResume(): Promise<boolean> {
   // owner's next preselect.
   if (!scanSubject) storeSex(saved.sex);
   startConsentedSideFeedback();
-  await runFullAnalysis(analyzeSide(saved.side.points, saved.side.faceDir, saved.sex), token);
+  const sideReport = saved.side
+    ? analyzeSide(saved.side.points, saved.side.faceDir, saved.sex)
+    : null;
+  await runFullAnalysis(sideReport, token);
   return true;
 }
 
@@ -3184,11 +3204,17 @@ function showFrontReview(): void {
   el.status.innerHTML = `<b>Front captured.</b> The profile has not been taken yet.
     <span class="reject-actions">
       <button type="button" class="btn pri" id="front-continue">Continue to the side profile</button>
+      <button type="button" class="btn gho" id="front-skip-side">See my front analysis</button>
       <button type="button" class="btn gho" id="front-redo">Retake the front photo</button>
       <button type="button" class="btn cancel" id="front-quit">Cancel the scan</button>
     </span>`;
   document.getElementById("front-continue")?.addEventListener("click", () => {
     if (scanSession.isCurrent(token)) startSide();
+  });
+  document.getElementById("front-skip-side")?.addEventListener("click", () => {
+    if (!scanSession.isCurrent(token)) return;
+    track("scan-side-skipped");
+    void gateAnalysis(null, token);
   });
   // Retake reopens the camera when the front came from one, because that is
   // the whole reason somebody backs out here — they want another go at the
@@ -3201,9 +3227,7 @@ function showFrontReview(): void {
 
 function startSide(): void {
   const token = scanSession.currentToken();
-  if (!token || !scanSession.transition(token, "side")) return;
-  feedbackDeliveryNote = null;
-  el.main.classList.add("hidden");
+  if (!token) return;
   const openSide = () => openSideCapture({
     scanId: token.scanId,
     sex: selectedSex,
@@ -3260,8 +3284,26 @@ function startSide(): void {
   // exact moment the instructions are telling somebody to turn their head away
   // from the screen those instructions are on. A sound is the only channel
   // that still reaches them.
-  soundChapter();
-  openSide();
+  // Automatic cloud placement needs one explicit, remembered permission, but
+  // the decision belongs before capture. Asking after the photograph is taken
+  // makes a normal continuation look like an unexpected upload request and
+  // leaves the user staring at a modal instead of the promised loading state.
+  void (async () => {
+    if (!(await prepareSidePlacementChoice())) {
+      // Escape means "do not send the profile", not "discard the completed
+      // front scan". Continue to the result that is already available.
+      if (scanSession.isCurrent(token)) {
+        track("scan-side-skipped");
+        await gateAnalysis(null, token);
+      }
+      return;
+    }
+    if (!scanSession.transition(token, "side")) return;
+    feedbackDeliveryNote = null;
+    el.main.classList.add("hidden");
+    soundChapter();
+    openSide();
+  })();
 }
 
 function renderQualityChips(q: QualityCheck, autoNote = ""): void {

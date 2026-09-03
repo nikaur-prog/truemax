@@ -22,7 +22,10 @@ export interface ScanSessionSnapshot {
 }
 
 const NEXT = {
-  front: ["side"],
+  // The side photograph is optional. A front can therefore continue through
+  // the account gate or straight into analysis without manufacturing a side
+  // phase that never happened.
+  front: ["side", "gate", "analyzing"],
   // `results` is the cancel path when an existing result opened side-point
   // editing and returned without changing anything.
   side: ["gate", "analyzing", "results"],

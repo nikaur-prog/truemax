@@ -441,7 +441,10 @@ export function runMeasurePass(
       drawSideMeasurement(host.overlayCanvas, s.points, s.width, s.height, step.metric, progress, { labels: false });
     } else {
       const f = sources.front;
-      drawMeasurement(host.overlayCanvas, f.landmarks, f.width, f.height, step.metric, progress, { labels: false });
+      drawMeasurement(host.overlayCanvas, f.landmarks, f.width, f.height, step.metric, progress, {
+        labels: false,
+        tone: "neutral",
+      });
     }
   };
 

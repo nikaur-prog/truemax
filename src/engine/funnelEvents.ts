@@ -5,6 +5,7 @@ export const FUNNEL_EVENTS = [
   "visit",
   "scan-front-done",
   "scan-side-done",
+  "scan-side-skipped",
   "gate-shown",
   "account-created",
   "results-shown",
