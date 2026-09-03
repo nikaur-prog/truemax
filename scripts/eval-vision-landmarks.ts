@@ -23,7 +23,7 @@
 // describes production, not a benchmark copy of it.
 //
 //   ANTHROPIC_API_KEY=... npx tsx scripts/eval-vision-landmarks.ts [--limit 10] [--ids s000,s001]
-//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom] [--seed]
+//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom] [--seed] [--repeat 3]
 //
 // Predictions are cached in .side-dataset/vision-<model>-<version>[-seed|-nozoom].json
 // so a re-run of the table costs nothing; delete the file or pass --no-cache
@@ -81,6 +81,8 @@ interface Cached {
   gonionDisagreement?: number | null;
   mentonRetried?: boolean;
   seeded?: boolean;
+  /** Further runs of the same pass, for the repeatability block. */
+  runs?: Array<{ result: SideLandmarkResult; stages?: Cached["stages"] }>;
 }
 
 function arg(name: string): string | undefined {
@@ -96,6 +98,11 @@ const concurrency = Math.max(1, Number(arg("concurrency") || 2));
 const useCache = !flag("no-cache");
 const zoom = !flag("no-zoom");
 const useSeed = flag("seed");
+// --repeat N runs the pass N times on the chosen faces (use --ids or --limit)
+// and prints run-to-run scatter per stage: the model's own noise, which says
+// whether an error is a stable misreading (fix the definition) or a wobble
+// (vote). Extra runs are kept in the cache entry beside the first.
+const repeat = Math.max(1, Number(arg("repeat") || 1));
 const cachePath = `${DATA}/vision-${model.replace(/[^a-z0-9.-]/gi, "_")}-${LANDMARK_VERSION}${zoom ? "" : "-nozoom"}${useSeed ? "-seed" : ""}.json`;
 
 const labels = JSON.parse(readFileSync(`${DATA}/labels.json`, "utf8")) as Record<string, Labelled>;
@@ -120,7 +127,7 @@ try {
 } catch {
   apiKey = null;
 }
-const pending = ids.filter((id) => !(cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION));
+const pending = ids.filter((id) => !(cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION && (cache[id].runs?.length ?? 0) + 1 >= repeat));
 if (pending.length && !apiKey) {
   console.error(`${pending.length} profile(s) need a model call and ANTHROPIC_API_KEY is not set.`);
   process.exit(1);
@@ -146,16 +153,26 @@ async function predict(id: string): Promise<void> {
     hint = {} as Record<SideLandmarkId, LandmarkPoint>;
     for (const pid of SIDE_LANDMARK_IDS) hint[pid] = { x: seeds[id].points[pid].x / w, y: seeds[id].points[pid].y / h };
   }
-  const pass = await placeSideLandmarks(client!, prepared, {
+  const run = () => placeSideLandmarks(client!, prepared, {
     model,
     zoom,
     hint,
     onZoomError: (stage, error) => console.error(`${id}: ${stage} failed, ${error instanceof Error ? error.message : String(error)}`),
   });
-  cache[id] = {
-    model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms,
-    stages: pass.stages, gonion: pass.gonion, gonionDisagreement: pass.gonionDisagreement, mentonRetried: pass.mentonRetried, seeded: pass.seeded,
-  };
+  const have = cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION ? cache[id] : null;
+  const pass = have ? null : await run();
+  if (pass) {
+    cache[id] = {
+      model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms,
+      stages: pass.stages, gonion: pass.gonion, gonionDisagreement: pass.gonionDisagreement, mentonRetried: pass.mentonRetried, seeded: pass.seeded,
+    };
+  }
+  while ((cache[id].runs?.length ?? 0) + 1 < repeat) {
+    const again = await run();
+    cache[id].runs = [...(cache[id].runs ?? []), { result: again.result, stages: again.stages }];
+    if (useCache) writeFileSync(cachePath, JSON.stringify(cache, null, 1));
+  }
+  if (!pass) return;
   if (useCache) writeFileSync(cachePath, JSON.stringify(cache, null, 1));
   console.error(`${id}: ${pass.calls} call(s), ${(pass.ms / 1000).toFixed(1)}s, jaw corner ${pass.gonion ?? "first pass"}${pass.mentonRetried ? ", chin re-asked" : ""} (${pass.usage.inputTokens} in, ${pass.usage.outputTokens} out)`);
 }
@@ -253,9 +270,11 @@ interface Bucket {
   dy: number[];
   /** The seed the app would actually use: device and model fused by policy. */
   fused: number[];
+  /** The fused seed on the points the labeller moved, beside seedMoved and modelMoved. */
+  fusedMoved: number[];
 }
 const perPoint: Record<SideLandmarkId, Bucket> = Object.fromEntries(
-  SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [], anchoredY: [], anchored: [], dx: [], dy: [], fused: [] }]),
+  SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [], anchoredY: [], anchored: [], dx: [], dy: [], fused: [], fusedMoved: [] }]),
 ) as Record<SideLandmarkId, Bucket>;
 const FRONT_LANDMARK_IDS = SIDE_LANDMARK_IDS.filter((id) => !BACK_LANDMARK_IDS.includes(id));
 // The y scale each face implies, model against truth. A value that is not 1
@@ -294,6 +313,13 @@ const byConfidence: Record<string, number[]> = { "0.8 to 1": [], "0.5 to 0.8": [
 // Does the fused band mean what it says? Error of the fused point by band.
 const byBand: Record<ConfidenceBand, number[]> = { high: [], mid: [], low: [] };
 const overallBands: Record<ConfidenceBand, number> = { high: 0, mid: 0, low: 0 };
+// Per face, per back point, per reader: the error, for the face-bootstrap
+// verdict (a face's five back points share one head-width error, so the
+// resampling unit is the face, never the point).
+type Reader = "seeder" | "model" | "fused";
+const perFace: Array<{ id: string; moved: Set<SideLandmarkId>; err: Record<Reader, Partial<Record<SideLandmarkId, number>>>; highWrong: number; highCount: number }> = [];
+// Run-to-run scatter, per landmark and stage, from --repeat.
+const scatter: Record<string, number[]> = {};
 const skipped: string[] = [];
 for (const id of ids) {
   const cached = cache[id];
@@ -340,6 +366,28 @@ for (const id of ids) {
   // production policy, in the same display frame as the labels.
   const fused = seed ? fuseSideSeeds(seed as SidePoints, modelPx as SidePoints, cached.result.confidence) : null;
   if (fused) overallBands[fused.overall] += 1;
+  const face: (typeof perFace)[number] = { id, moved: new Set(), err: { seeder: {}, model: {}, fused: {} }, highWrong: 0, highCount: 0 };
+  perFace.push(face);
+  // Repeatability: distance between runs of the same pass, per stage.
+  if (cached.runs?.length) {
+    const all = [cached, ...cached.runs];
+    for (const pid of BACK_LANDMARK_IDS) {
+      if (partial.has(pid)) continue;
+      const key = (stage: string) => `${pid}:${stage}`;
+      const pts = all.map((r) => ({ x: r.result.points[pid].x * w, y: r.result.points[pid].y * h }));
+      const ds: number[] = [];
+      for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) ds.push(dist(pts[a], pts[b]) / unit);
+      (scatter[key("final")] ??= []).push(median(ds));
+      for (const stage of ["first", "coarse", "fine"] as const) {
+        const sp = all.map((r) => r.stages?.[stage]?.[pid]).filter(Boolean) as LandmarkPoint[];
+        if (sp.length < 2) continue;
+        const spx = sp.map((p) => ({ x: p.x * w, y: p.y * h }));
+        const sd: number[] = [];
+        for (let a = 0; a < spx.length; a++) for (let b = a + 1; b < spx.length; b++) sd.push(dist(spx[a], spx[b]) / unit);
+        (scatter[key(stage)] ??= []).push(median(sd));
+      }
+    }
+  }
   // Facing, so a left-facing and a right-facing profile do not cancel each other
   // out in the signed table below.
   const facing = truth.pronasale.x > truth.tragion.x ? 1 : -1;
@@ -384,6 +432,14 @@ for (const id of ids) {
       const fErr = dist(fused.points[pid], t) / unit;
       perPoint[pid].fused.push(fErr);
       byBand[fused.band[pid]].push(fErr);
+      if (BACK_LANDMARK_IDS.includes(pid)) {
+        face.err.fused[pid] = fErr;
+        face.err.model[pid] = mErr;
+        if (fused.band[pid] === "high") {
+          face.highCount += 1;
+          if (fErr > 0.1) face.highWrong += 1;
+        }
+      }
       if (seed?.[pid] && BACK_LANDMARK_IDS.includes(pid)) {
         const sErr = dist(seed[pid], t) / unit;
         const blend = dist({ x: (seed[pid].x + m.x) / 2, y: (seed[pid].y + m.y) / 2 }, t) / unit;
@@ -394,9 +450,12 @@ for (const id of ids) {
       const sErr = dist(seed[pid], t) / unit;
       perPoint[pid].seed.push(sErr);
       const moved = sErr > 0.5 / unit;
+      if (BACK_LANDMARK_IDS.includes(pid)) face.err.seeder[pid] = sErr;
       if (moved) {
         perPoint[pid].seedMoved.push(sErr);
         perPoint[pid].modelMoved.push(mErr);
+        if (BACK_LANDMARK_IDS.includes(pid)) face.moved.add(pid);
+        if (fused) perPoint[pid].fusedMoved.push(dist(fused.points[pid], t) / unit);
       }
     }
   }
@@ -404,14 +463,15 @@ for (const id of ids) {
 
 const fmt = (x: number) => (Number.isFinite(x) ? x.toFixed(3) : "  n/a");
 const line = (label: string, b: Bucket) =>
-  `${label.padEnd(16)} ${String(b.model.length).padStart(3)}  ${fmt(median(b.model))}  ${fmt(p90(b.model))}   ${fmt(median(b.seed))}  ${fmt(p90(b.seed))}   ${String(b.seedMoved.length).padStart(3)}  ${fmt(median(b.modelMoved))}  ${fmt(median(b.seedMoved))}   ${fmt(median(b.fused))}  ${fmt(p90(b.fused))}`;
+  `${label.padEnd(16)} ${String(b.model.length).padStart(3)}  ${fmt(median(b.model))}  ${fmt(p90(b.model))}   ${fmt(median(b.seed))}  ${fmt(p90(b.seed))}   ${String(b.seedMoved.length).padStart(3)}  ${fmt(median(b.modelMoved))}  ${fmt(median(b.seedMoved))}  ${fmt(median(b.fusedMoved))}   ${fmt(median(b.fused))}  ${fmt(p90(b.fused))}`;
 const biasLine = (label: string, b: Bucket) =>
   `${label.padEnd(16)} ${String(b.dx.length).padStart(3)}  ${fmt(median(b.dx))}  ${fmt(median(b.dy))}   ${fmt(median(b.anchoredY))}  ${fmt(p90(b.anchoredY))}   ${fmt(median(b.anchored))}`;
 
 console.log(`\nVision pass ${model} (${LANDMARK_VERSION}) against ${scored} labelled profiles; error in head widths (nose tip to ear notch).`);
 if (skipped.length) console.log(`Skipped: ${skipped.join(", ")}`);
 console.log("");
-console.log("landmark           n   model med  p90    seeder med  p90    moved  model@moved seeder@moved   fused med  p90");
+console.log("landmark           n   model med  p90    seeder med  p90    moved  model@moved seeder@moved fused@moved   fused med  p90");
+console.log("(a label the hand never moved IS the seed, so the seeder's error there is zero by construction; the @moved columns are the honest comparison)");
 for (const pid of SIDE_LANDMARK_IDS) console.log(line(pid, perPoint[pid]));
 
 const merge = (idsToMerge: readonly SideLandmarkId[]): Bucket => ({
@@ -424,6 +484,7 @@ const merge = (idsToMerge: readonly SideLandmarkId[]): Bucket => ({
   dx: idsToMerge.flatMap((id) => perPoint[id].dx),
   dy: idsToMerge.flatMap((id) => perPoint[id].dy),
   fused: idsToMerge.flatMap((id) => perPoint[id].fused),
+  fusedMoved: idsToMerge.flatMap((id) => perPoint[id].fusedMoved),
 });
 const front = SIDE_LANDMARK_IDS.filter((id) => !BACK_LANDMARK_IDS.includes(id));
 console.log("");
@@ -568,6 +629,85 @@ for (const b of ["high", "mid", "low"] as const) {
 }
 console.log(`Overall band per profile: ${overallBands.high} high, ${overallBands.mid} mid, ${overallBands.low} low.`);
 
+// The verdict, per landmark, on the points a hand placed, with the face as
+// the unit of resampling. One pooled ratio hid two things: 86 of the 122
+// moved back points are the ear pair, so the jaw corner and chin bottom
+// could not move it either way; and a median cannot see the tail, which is
+// what a person meets (a seeder ear a third of a head out on a third of
+// faces). So: median with a bootstrap interval over faces, the paired win
+// rate against the seeder, the gross-miss rate over ALL labelled points
+// (error over 0.15 head widths, a miss anybody would notice), and the
+// fraction of profiles whose five back points are all within 0.10.
+const READERS: Reader[] = ["seeder", "model", "fused"];
+const rng = (() => {
+  let x = 20260903;
+  return () => ((x = (x * 1103515245 + 12345) % 2147483648) / 2147483648);
+})();
+const bootstrapMedian = (values: (f: (typeof perFace)[number]) => number | undefined, faces: typeof perFace): [number, number] => {
+  const meds: number[] = [];
+  for (let i = 0; i < 1000; i++) {
+    const sample: number[] = [];
+    for (let k = 0; k < faces.length; k++) {
+      const v = values(faces[Math.floor(rng() * faces.length)]);
+      if (v !== undefined) sample.push(v);
+    }
+    if (sample.length) meds.push(median(sample));
+  }
+  meds.sort((a, b) => a - b);
+  return [meds[Math.floor(0.025 * (meds.length - 1))] ?? NaN, meds[Math.floor(0.975 * (meds.length - 1))] ?? NaN];
+};
+console.log("");
+console.log("Verdict per back point, hand-placed labels only (moved), face-bootstrap 95% interval; gross miss = error over 0.15 on all labelled points:");
+console.log("landmark    reader   n   median   [95% CI]        beats seeder   gross-miss%");
+const holds: string[] = [];
+for (const pid of BACK_LANDMARK_IDS) {
+  const movedFaces = perFace.filter((f) => f.moved.has(pid));
+  for (const reader of READERS) {
+    const vals = movedFaces.map((f) => f.err[reader][pid]).filter((v): v is number => v !== undefined);
+    const all = perFace.map((f) => f.err[reader][pid]).filter((v): v is number => v !== undefined);
+    if (!vals.length) continue;
+    const [lo, hi] = bootstrapMedian((f) => f.err[reader][pid], movedFaces);
+    const wins = movedFaces.filter((f) => (f.err[reader][pid] ?? Infinity) < (f.err.seeder[pid] ?? Infinity)).length;
+    const gross = all.filter((v) => v > 0.15).length / all.length;
+    console.log(
+      `${pid.padEnd(11)} ${reader.padEnd(7)} ${String(vals.length).padStart(3)}   ${fmt(median(vals))}   [${fmt(lo)}, ${fmt(hi)}]   ${reader === "seeder" ? "     " : `${String(Math.round((100 * wins) / Math.max(1, movedFaces.length))).padStart(3)}% `}        ${(100 * gross).toFixed(0).padStart(3)}%`,
+    );
+  }
+  // SHIP conditions for the fused reader on this landmark.
+  const fusedMoved = movedFaces.map((f) => f.err.fused[pid]).filter((v): v is number => v !== undefined);
+  const seedMoved = movedFaces.map((f) => f.err.seeder[pid]).filter((v): v is number => v !== undefined);
+  const fusedAll = perFace.map((f) => f.err.fused[pid]).filter((v): v is number => v !== undefined);
+  const seedAll = perFace.map((f) => f.err.seeder[pid]).filter((v): v is number => v !== undefined);
+  if (fusedMoved.length && seedMoved.length) {
+    const [, seedHi] = bootstrapMedian((f) => f.err.seeder[pid], movedFaces);
+    const fusedGross = fusedAll.filter((v) => v > 0.15).length / Math.max(1, fusedAll.length);
+    const seedGross = seedAll.filter((v) => v > 0.15).length / Math.max(1, seedAll.length);
+    if (median(fusedMoved) > seedHi) holds.push(`${pid}: fused median ${fmt(median(fusedMoved))} is worse than the seeder's interval`);
+    if (fusedGross > Math.max(0.05, seedGross / 2)) holds.push(`${pid}: fused gross-miss ${(100 * fusedGross).toFixed(0)}% against the seeder's ${(100 * seedGross).toFixed(0)}%`);
+  }
+}
+const cleanAt = (reader: Reader, within: number) =>
+  perFace.filter((f) => BACK_LANDMARK_IDS.every((pid) => f.err[reader][pid] === undefined || f.err[reader][pid]! <= within)).length / Math.max(1, perFace.length);
+console.log("");
+console.log(`Clean profiles (all five back points within 0.10): seeder ${(100 * cleanAt("seeder", 0.1)).toFixed(0)}%, model ${(100 * cleanAt("model", 0.1)).toFixed(0)}%, fused ${(100 * cleanAt("fused", 0.1)).toFixed(0)}%; within 0.06: seeder ${(100 * cleanAt("seeder", 0.06)).toFixed(0)}%, model ${(100 * cleanAt("model", 0.06)).toFixed(0)}%, fused ${(100 * cleanAt("fused", 0.06)).toFixed(0)}%.`);
+const highCount = perFace.reduce((t, f) => t + f.highCount, 0);
+const highWrong = perFace.reduce((t, f) => t + f.highWrong, 0);
+console.log(`Points shown as high confidence that were more than 0.10 out: ${highWrong} of ${highCount} (${highCount ? ((100 * highWrong) / highCount).toFixed(0) : "n/a"}%).`);
+if (cleanAt("fused", 0.1) < 0.7) holds.push(`clean-profile rate at 0.10 is ${(100 * cleanAt("fused", 0.1)).toFixed(0)}%, under 70%`);
+if (highCount && highWrong / highCount > 0.1) holds.push(`high band wrong on ${((100 * highWrong) / highCount).toFixed(0)}% of points, over 10%`);
+console.log(holds.length ? `HOLD the fused seed as AI-first: ${holds.join("; ")}.` : "SHIP: the fused seed is no worse than the seeder on every back point, misses less, and its high band means what it says.");
+console.log("(A head width is about 335 px on the 640 px review canvas and about 200 px on a phone, so 0.10 is 20 phone pixels.)");
+
+if (Object.keys(scatter).length) {
+  console.log("");
+  console.log(`Run-to-run scatter from --repeat (median distance between runs, head widths):`);
+  console.log("landmark          first  coarse   fine   final");
+  for (const pid of BACK_LANDMARK_IDS) {
+    const cell = (stage: string) => fmt(median(scatter[`${pid}:${stage}`] ?? [])).padStart(7);
+    console.log(`${pid.padEnd(16)}${cell("first")}${cell("coarse")}${cell("fine")}${cell("final")}`);
+  }
+}
+
 const back = merge(BACK_LANDMARK_IDS);
 const ratio = median(back.modelMoved) / median(back.seedMoved);
 console.log("");
@@ -575,8 +715,8 @@ console.log(`Tokens: ${tokensIn} in, ${tokensOut} out across ${scored} profiles,
 if (latencies.length) console.log(`Latency per photo: median ${(median(latencies) / 1000).toFixed(1)}s, p90 ${(p90(latencies) / 1000).toFixed(1)}s (client deadline is what the app sets).`);
 if (Number.isFinite(ratio)) {
   console.log(
-    `Back points where the seeder was wrong: model median ${fmt(median(back.modelMoved))} vs seeder ${fmt(median(back.seedMoved))} (ratio ${ratio.toFixed(2)}). ` +
-      (ratio <= 0.5 ? "GO: the model halves the seeder's error where it fails." : "NO-GO on AI-first: use the model on refusal only, or try a larger model."),
+    `Legacy pooled rule (70% of these points are the ear pair): model median ${fmt(median(back.modelMoved))} vs seeder ${fmt(median(back.seedMoved))} where the seeder was wrong (ratio ${ratio.toFixed(2)}). ` +
+      (ratio <= 0.5 ? "GO by the pooled rule." : "NO-GO by the pooled rule; the verdict block above is the one that decides."),
   );
 }
 // The same rule with the production correction applied. The seeder's front
