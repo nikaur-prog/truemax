@@ -122,6 +122,8 @@ export const LANDMARK_FINE_GRID_STEP = 50;
 // Crop sizes in head widths (nose tip to ear notch), per stage.
 export const ZOOM_SIZES = {
   coarse: 0.8,
+  /** The coarse ear crop when cut around the device seed, whose ear is the point most often a quarter head out. */
+  coarseSeededEar: 1.0,
   coarseLower: 0.9,
   fineEar: 0.35,
   fineJaw: 0.45,
@@ -166,7 +168,7 @@ const DEFINITIONS: Record<SideLandmarkId, string> = {
   menton: "Chin bottom: the lowest point of the chin itself, where the front curve of the chin turns under. It is directly below the chin front or slightly behind it, and only a little lower: about one fifteenth of the nose-to-ear distance below the chin front. Stop there. The skin under the jaw often keeps sloping down and back toward the neck; that lower skin is not the chin bottom.",
   cervicale: "Neck point: where the underside of the jaw meets the front of the neck, the deepest point of the angle between them. It is about a third of the nose-to-ear distance behind the chin bottom and level with it or slightly lower.",
   gonion: "Jaw corner: the back corner of the jaw, where the lower edge of the jaw stops running back from the chin and turns upward toward the ear. It sits far below the ear: about half the nose-to-ear distance below the ear notch, a little in front of it, and almost level with the chin bottom, usually a little above it. It is on the skin of the jaw line, never on or under the ear lobe. Follow the jaw line back from the chin bottom until it turns up; that turn is the point.",
-  condylion: "Jaw hinge: the joint the jaw pivots on. On the skin it is essentially at the ear notch: a few pixels in front of the ear notch, about one fiftieth of the nose-to-ear distance, and at the same height. Never on the cheek in front of the ear and never above the notch.",
+  condylion: "Jaw hinge: the joint the jaw pivots on. On the skin it is essentially at the ear notch: a little in front of it, about one fiftieth of the nose-to-ear distance, and at the same height. Never on the cheek in front of the ear and never above the notch.",
   tragion: "Ear notch: the notch at the front of the ear where the ear's rim curves down and meets the top of the small flap (the tragus) that covers the ear canal. It is at the height of the top of the canal opening, and the dark opening is directly below and behind it. It is not the higher point where the rim first leaves the head.",
 };
 
@@ -192,8 +194,8 @@ const OUTLINE_DEFINITIONS: Record<JawOutlineId, string> = {
 const FINE_CONTEXT: Record<"ear" | "jaw" | "chin", string> = {
   ear:
     "This is a close crop around the ear notch of that photograph; the first image shows the wider ear region with this crop outlined. " +
-    "The tragus is the small flap of skin in front of the ear canal opening. The ear notch (tragion) is the notch on the FRONT edge of the ear just above that flap. " +
-    "The jaw hinge (condylion) is on the cheek skin directly in front of the notch, about one finger-width toward the face, level with it.",
+    "The tragus is the small flap of skin over the ear canal opening. The ear notch (tragion) is where the ear's rim comes down and meets the top of that flap, at the height of the top of the canal opening; not the higher point where the rim first leaves the head. " +
+    "The jaw hinge (condylion) sits essentially on that notch: a little toward the face, about one fiftieth of the nose-to-ear distance, and at the same height. Never on the cheek in front of the ear and never above the notch.",
   jaw:
     "This is a close crop centred on the back half of the jaw, well below the ear; the first image shows the wider region with this crop outlined. " +
     "The bottom of the ear lobe is near the top of this crop and the chin is toward the front edge. " +
@@ -771,6 +773,33 @@ export interface LandmarkPass {
   mentonRetried: boolean;
   /** Whether the front eight came from the device seed rather than a model call. */
   seeded: boolean;
+  /** Every crop the pass cut, as fractions of the frame, so the harness can score coverage. */
+  windows: Partial<Record<WindowName, { left: number; top: number; size: number }>>;
+  /** With samples above one: per ear point, the spread between reads in head widths. */
+  spread: Partial<Record<SideLandmarkId, number>>;
+}
+
+export type WindowName = "coarseEar" | "coarseChin" | "fineEar" | "fineJaw" | "fineChin";
+
+/** The component-wise median of several reads of one point; confidence is the median too. */
+export function medianPlacement(reads: readonly PixelPlacement[]): PixelPlacement {
+  const med = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  return { x: med(reads.map((r) => r.x)), y: med(reads.map((r) => r.y)), confidence: med(reads.map((r) => r.confidence)) };
+}
+
+/** The largest distance between any two reads of one point, in the unit given. */
+export function readSpread(reads: readonly PixelPlacement[], unit: number): number {
+  let worst = 0;
+  for (let a = 0; a < reads.length; a++) {
+    for (let b = a + 1; b < reads.length; b++) {
+      worst = Math.max(worst, Math.hypot(reads[a].x - reads[b].x, reads[a].y - reads[b].y));
+    }
+  }
+  return unit > 0 ? worst / unit : 0;
 }
 
 interface ImageBlock {
@@ -813,6 +842,13 @@ export interface PlaceOptions {
   hint?: Record<SideLandmarkId, LandmarkPoint> | null;
   /** Cut the crops around the hint and skip the whole-frame pass. Needs a hint. Default true. */
   seeded?: boolean;
+  /**
+   * Reads of the fine ear crop, each from a window shifted a little, taken
+   * together and settled by the component-wise median. One in production
+   * until the harness says the spread predicts the error and the median
+   * lowers it. Never more than five.
+   */
+  samples?: number;
   onZoomError?: (stage: string, error: unknown) => void;
 }
 
@@ -891,6 +927,10 @@ export async function placeSideLandmarks(
   let gonion: ConstructedGonion["method"] | null = null;
   let gonionDisagreement: number | null = null;
   let mentonRetried = false;
+  const windows: LandmarkPass["windows"] = {};
+  const spread: LandmarkPass["spread"] = {};
+  const samples = Math.max(1, Math.min(5, Math.round(options.samples ?? 1)));
+  const asFraction = (w: ZoomWindow) => ({ left: w.left / frame.width, top: w.top / frame.height, size: w.size / frame.width });
 
   if (zoom) {
     // ---- coarse: the two clusters, in parallel.
@@ -898,9 +938,11 @@ export async function placeSideLandmarks(
     // the lower-face crop, beside the chin bottom it is level with, so no
     // crop centred on the ear can pull it up to the lobe.
     const coarseWindows = {
-      ear: squareWindow(centroid(placed, EAR_IDS), unit * ZOOM_SIZES.coarse, frame),
+      ear: squareWindow(centroid(placed, EAR_IDS), unit * (seeded ? ZOOM_SIZES.coarseSeededEar : ZOOM_SIZES.coarse), frame),
       chin: squareWindow(centroid({ ...placed, gonion: expectedGonion(placed.tragion, placed.pronasale, placed.menton, unit) }, LOWER_IDS), unit * ZOOM_SIZES.coarseLower, frame),
     };
+    windows.coarseEar = asFraction(coarseWindows.ear);
+    windows.coarseChin = asFraction(coarseWindows.chin);
     const coarseCrops: Partial<Record<"ear" | "chin", Awaited<ReturnType<typeof zoomCrop>>>> = {};
     await Promise.all(
       (["ear", "chin"] as const).map(async (cluster) => {
@@ -938,6 +980,9 @@ export async function placeSideLandmarks(
       jaw: squareWindow(jawCentre, unit * ZOOM_SIZES.fineJaw, frame),
       chin: squareWindow(centroid(placed, CHIN_IDS), unit * ZOOM_SIZES.fineChin, frame),
     };
+    windows.fineEar = asFraction(fineWindows.ear);
+    windows.fineJaw = asFraction(fineWindows.jaw);
+    windows.fineChin = asFraction(fineWindows.chin);
     // Where to look, in each crop's own pixels, from the labelled relations.
     const cueFor = (region: "ear" | "jaw" | "chin"): string => {
       const window = fineWindows[region];
@@ -969,8 +1014,9 @@ export async function placeSideLandmarks(
       region: "ear" | "jaw" | "chin",
       ids: readonly Id[],
       redo?: { marks: ReadonlyArray<{ x: number; y: number; label: string }>; instruction: string },
+      windowOverride?: ZoomWindow,
     ): Promise<Partial<Record<Id, PixelPlacement>>> => {
-      const window = fineWindows[region];
+      const window = windowOverride ?? fineWindows[region];
       const crop = await zoomCrop(
         image.plain,
         window,
@@ -989,12 +1035,37 @@ export async function placeSideLandmarks(
     };
 
     let jawRead: Partial<Record<"gonion" | JawOutlineId, PixelPlacement>> | null = null;
+    // The jittered windows for extra ear samples: the same crop size shifted
+    // by 0.04 head widths in four directions, so the grid sits differently
+    // over the same anatomy and the reads are not copies of one another.
+    const jitters = [
+      { dx: 0, dy: 0 },
+      { dx: 0.04, dy: 0.04 },
+      { dx: -0.04, dy: -0.04 },
+      { dx: 0.04, dy: -0.04 },
+      { dx: -0.04, dy: 0.04 },
+    ].slice(0, samples);
     await Promise.all([
       (async () => {
         try {
-          const read = await fineCall("ear", ["tragion", "condylion"] as const);
-          placed.tragion = read.tragion!;
-          placed.condylion = read.condylion!;
+          const base = fineWindows.ear;
+          const reads = await Promise.all(
+            jitters.map((j) =>
+              fineCall(
+                "ear",
+                ["tragion", "condylion"] as const,
+                undefined,
+                j.dx === 0 && j.dy === 0
+                  ? undefined
+                  : squareWindow({ x: base.left + base.size / 2 + j.dx * unit, y: base.top + base.size / 2 + j.dy * unit }, base.size, frame),
+              ),
+            ),
+          );
+          for (const id of ["tragion", "condylion"] as const) {
+            const all = reads.map((r) => r[id]!);
+            placed[id] = medianPlacement(all);
+            if (all.length > 1) spread[id] = readSpread(all, unit);
+          }
         } catch (error) {
           options.onZoomError?.("fine ear", error);
         }
@@ -1051,5 +1122,7 @@ export async function placeSideLandmarks(
     gonionDisagreement,
     mentonRetried,
     seeded,
+    windows,
+    spread,
   };
 }

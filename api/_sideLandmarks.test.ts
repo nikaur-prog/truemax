@@ -19,7 +19,9 @@ import {
   landmarkTool,
   landmarksToPixels,
   markerOverlaySvg,
+  medianPlacement,
   mentonLooksWrong,
+  readSpread,
   outlineOverlaySvg,
   parseLandmarkToolInput,
   parsePixelToolInput,
@@ -90,6 +92,10 @@ test("the prompt names every landmark, states the frame and the grid, asks for p
   assert.match(ear, /pointing to the right/);
   assert.match(ear, /Find the ear first/);
   assert.ok(ear.includes("- tragion:") && ear.includes("- gonion:") && !ear.includes("- pronasale:"));
+  const fineEar = finePrompt("ear", ["tragion", "condylion"], { width: 1024, height: 1024, step: 50 }, 1);
+  assert.doesNotMatch(fineEar, /finger/, "the fine ear call must agree with the definitions");
+  assert.match(fineEar, /same height/);
+  assert.match(fineEar, /Never on the cheek/);
   const cued = finePrompt("jaw", ["gonion", "jawLower", "jawBack"], { width: 1024, height: 1024, step: 50 }, 1, undefined, "From a first look, the ear notch is near (12, 34).");
   assert.match(cued, /ear notch is near \(12, 34\)/);
   const chin = zoomPrompt("chin", ["pogonion", "menton", "cervicale"], { width: 1024, height: 1024, step: 100 }, -1);
@@ -334,4 +340,19 @@ test("the expected jaw corner sits about half a head width below the notch and l
   // Well below the notch, near the chin bottom's height, never up at the lobe.
   assert.ok(g.y > tragion.y + 0.35 * unit, String(g.y));
   assert.ok(Math.abs(g.y - menton.y) < 0.2 * unit, String(g.y));
+});
+
+test("several reads of one point settle on the component-wise median, and their spread is the widest pair", () => {
+  const reads = [
+    { x: 100, y: 200, confidence: 0.9 },
+    { x: 104, y: 190, confidence: 0.5 },
+    { x: 130, y: 205, confidence: 0.7 },
+  ];
+  const m = medianPlacement(reads);
+  assert.deepEqual(m, { x: 104, y: 200, confidence: 0.7 });
+  assert.equal(readSpread(reads, 100), Math.hypot(30, 5) / 100);
+  assert.equal(readSpread([reads[0]], 100), 0);
+  assert.equal(readSpread(reads, 0), 0);
+  // The seeded coarse ear crop is wider than the blind one.
+  assert.ok(ZOOM_SIZES.coarseSeededEar > ZOOM_SIZES.coarse);
 });
