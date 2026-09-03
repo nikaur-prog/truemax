@@ -36,7 +36,8 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 export { GOAL_PREVIEW_CAPTION, GOAL_PREVIEW_CONSENT_VERSION };
 export const GOAL_PREVIEW_RENDERS_PER_DAY = 3;
 
-const BUCKET = "goal-previews";
+export const GOAL_PREVIEW_BUCKET = "goal-previews";
+const BUCKET = GOAL_PREVIEW_BUCKET;
 const MAX_PHOTO_BYTES = 2_000_000;
 const MAX_BODY_BYTES = 2 * MAX_PHOTO_BYTES + 60_000;
 const MAX_INPUT_PIXELS = 40_000_000;
@@ -84,12 +85,12 @@ export function parseSpec(value: unknown): GoalPreviewSpecInput | null {
   };
 }
 
-function nextUtcMidnight(now = Date.now()): string {
+export function nextUtcMidnight(now = Date.now()): string {
   const d = new Date(now);
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)).toISOString();
 }
 
-async function prepared(bytes: Buffer): Promise<Buffer> {
+export async function prepared(bytes: Buffer): Promise<Buffer> {
   return sharp(bytes, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS })
     .rotate()
     .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
@@ -124,11 +125,11 @@ export async function captioned(image: Buffer): Promise<Buffer | null> {
   return null;
 }
 
-function dataUrl(jpeg: Buffer): string {
+export function dataUrl(jpeg: Buffer): string {
   return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
 }
 
-async function consented(userId: string): Promise<boolean> {
+export async function consented(userId: string): Promise<boolean> {
   const { data, error } = await getSupabaseAdmin()
     .from("goal_preview_consents")
     .select("consent_version,revoked_at")

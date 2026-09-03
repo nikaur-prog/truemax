@@ -31,6 +31,7 @@ Authenticated clients send `POST /api/morph-preview` with:
 {
   "version": 1,
   "variant": "selected",
+  "scanId": "<the scan's uuid>",
   "source": {
     "front": "data:image/jpeg;base64,...",
     "side": "data:image/jpeg;base64,..."
@@ -50,6 +51,28 @@ unapproved host.
 
 The service may return `accepted` or `processing` with a job ID. The client
 polls `GET /api/morph-preview?job=<id>` with the same bearer token.
+
+## What the server asserts, and what the device must
+
+The server (`api/morph-preview.ts`, built on the shared Goal preview
+machinery in `api/goal-preview.ts`) stands behind three of the five gates:
+`moderationPassed` (the provider did not refuse), `naturalOnly` (the
+instruction set came from the catalogue's layers and nothing typed) and
+`crossViewConsistent` (both views rendered from one instruction set in one
+job). `identityPreserved` and `targetAligned` are pixel questions for the
+landmarker and the metrics, which run on the device and not on the server,
+so a fresh `ready` response carries them as `false` with
+`"pending": ["identityPreserved", "targetAligned"]`. The browser runs its
+re-measurement on the returned images, posts the verdict to
+`PATCH /api/goal-preview?id=<jobId>` as `{ "validation": { "passed": true } }`
+(or `false`, which marks the job rejected), and from then on
+`GET /api/morph-preview?job=<jobId>` returns all five gates true. The
+display rule below is unchanged: nothing is shown until all five are true.
+
+The request also carries `scanId`, the scan the photographs came from, so
+the stored job names its scan. Consent is a separate call the dialog makes
+once, `PUT /api/goal-preview-consent` with `{ "version": "goal-preview-v1" }`;
+without it the render answers 403 "Choose Goal preview in Settings first."
 
 ## Required validation
 
