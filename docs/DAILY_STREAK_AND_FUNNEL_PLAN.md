@@ -231,6 +231,12 @@ changes in section 1 stood.
 - The funnel chain's side stage is two branches, side done or side skipped,
   so a front-only completion (PR #257) is a person who went on, not a
   drop-off.
+- `api/_sql-invariants.test.ts` runs the three migrations in a real
+  Postgres and tries to break them: a goal paid twice, a day counted but
+  unpaid, two phones migrating at once, a phone's value landing on a
+  half-filled row, a signup blocked by a bad height, a browser reading a
+  neighbour's rows. It needs `TRUEMAX_TEST_PG` set to a libpq conninfo
+  string (a local `initdb` cluster is enough) and skips otherwise.
 - `src/engine/dailyStreak.ts`: the tier table the SQL is tested against,
   the multiplier and glow from a count, the local day string, the same grace
   arithmetic as the function for an optimistic render (`nextStreak`), the
