@@ -1,7 +1,7 @@
 # Daily streak, points, the funnel, and the home screen: plan of record
 
 Written 3 September 2026 from the owner's asks and the discussion around
-them. Nothing here is built yet. The owner reads this, changes what needs
+them. Section 9 records what has shipped. The owner reads this, changes what needs
 changing, and then the build order in section 7 runs.
 
 ## 1. What was asked, and the three changes made to it
@@ -205,3 +205,53 @@ the return rate, the store would not have either.
 - Points live on the server and move only through service-role functions.
 - The funnel counts and never identifies.
 - No em dashes in user-facing copy.
+
+## 9. What shipped, and what is left
+
+Built 4 September 2026, Claude's share of sections 3, 4 and 5. The three
+changes in section 1 stood.
+
+**Server and engine, shipped:**
+
+- `supabase/migrations/20260904090000_daily_streak_and_points.sql`:
+  `daily_streaks` (current, best, last counted day, grace banked, the
+  Settings switch), `points_events` (append-only; nobody holds update or
+  delete, the service role included), the `points_balances` view, and the
+  functions `streak_multiplier`, `count_streak_day`, `award_consistency` and
+  `award_progress`, all service-only. Apply it in the SQL editor before the
+  route is used.
+- `api/streak.ts`: GET (row, today's reading, both balances), POST (count a
+  day; the day must be within one day of the server's UTC date; points only
+  when the day was newly counted; funnel bumps for `streak-day-counted` and
+  `streak-ended`), PATCH (the Settings switch).
+- `src/engine/dailyStreak.ts`: the tier table the SQL is tested against,
+  the multiplier and glow from a count, the local day string, the same grace
+  arithmetic as the function for an optimistic render (`nextStreak`), the
+  reading that applies a gap before the next action (`readStreak`), the
+  copy, and `fetchStreak`, `countStreakDay`, `setStreakEnabled`.
+- The routine tick on the protocol record: `Protocol.ticks`, `tickProtocol`,
+  `tickedOn`, `adherenceFromTicks`, and the judge reads the record before
+  the check-in answers.
+- The funnel: seven new event names, `src/engine/funnelReport.ts`, the
+  staff-only `GET /api/funnel-report` (404 to everyone else), and
+  `scripts/funnel-report.ts`, which prints the chain and the biggest drop
+  from the service credentials. `src/engine/standalone.ts` reads a
+  home-screen launch.
+
+**Front end, Codex (section 4):**
+
+- The lamp beside the weekly chip: `glowFor(reading.days)` is the CSS class,
+  `dayLabel(reading.days)` the label, `streakLine(reading)` the line under
+  it, `bestLine(reading.best)` shown once when `reading.lapsed`.
+- "Did it today" on running protocol cards: `tickProtocol(p, localDay())`,
+  write the protocols, then `countStreakDay(token, "routine")`. A check-in
+  answered calls it with `"checkin"`, a scan on the person's own account
+  with `"scan"`. Never for a guest scan.
+- The points line from `snapshot.balances`.
+- The Settings switch through `setStreakEnabled`. Off hides the lamp and
+  the points; the record keeps counting.
+- The install prompt and the iOS sheet, with `track("install-prompt-shown")`,
+  `track("install-accepted")`, and `track("launch-standalone")` on load when
+  `isStandaloneLaunch()`.
+- `track("signup-return-analysis")` or `track("signup-return-lost")` where a
+  guest who signed up at the wall lands.

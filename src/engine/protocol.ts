@@ -128,6 +128,13 @@ export interface Protocol {
   /** When they confirmed they had actually begun. The judge clock starts here. */
   startedAt: number | null;
   checkIns: CheckIn[];
+  /**
+   * Days (YYYY-MM-DD, local) the person tapped "Did it today" while the
+   * protocol was running. The record the judge reads adherence from instead
+   * of a memory, and the daily action the streak counts. Absent on rows
+   * stored before the tick existed.
+   */
+  ticks?: string[];
   status: ProtocolStatus;
 }
 
@@ -277,6 +284,48 @@ function isProtocol(p: unknown): p is Protocol {
   const x = p as Protocol;
   return Boolean(x && typeof x.id === "string" && typeof x.recId === "string"
     && typeof x.weeksToJudge === "number");
+}
+
+// ---------------------------------------------------------------------------
+// The daily tick.
+//
+// One tap a day on a running protocol. Idempotent per day, so two devices
+// or two taps make one record. Only a running protocol takes a tick: before
+// they have started there is nothing to have done today, and after the
+// judgement the record is closed.
+// ---------------------------------------------------------------------------
+
+const TICK_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function tickedOn(p: Protocol, day: string): boolean {
+  return Boolean(p.ticks?.includes(day));
+}
+
+export function tickProtocol(p: Protocol, day: string): Protocol {
+  if (p.status !== "running" || !TICK_DAY_RE.test(day) || tickedOn(p, day)) return p;
+  const ticks = [...(p.ticks ?? []), day].sort();
+  return { ...p, ticks: ticks.slice(-400) };
+}
+
+export interface Adherence {
+  /** Calendar days the protocol has been running, today included. */
+  days: number;
+  ticked: number;
+  /** ticked over days, capped at one. */
+  fraction: number;
+}
+
+/**
+ * Adherence read from the tick record. Null when there is no record to
+ * read: the protocol has not started, or it was never ticked at all, which
+ * is as likely to mean the button went unnoticed as the routine did, and
+ * the judge falls back to the check-in answers in that case.
+ */
+export function adherenceFromTicks(p: Protocol, now: number): Adherence | null {
+  if (p.startedAt == null || !p.ticks?.length) return null;
+  const days = Math.max(1, Math.floor((now - p.startedAt) / DAY_MS) + 1);
+  const ticked = p.ticks.length;
+  return { days, ticked, fraction: Math.min(1, ticked / days) };
 }
 
 /** Weeks elapsed since a protocol actually started. Null until it has. */
@@ -452,10 +501,22 @@ export function judge(p: Protocol, now: number, scanMoved: boolean): Verdict {
   // Adherence beats everything. A protocol nobody ran has not been tested, and
   // calling it a failure would retire a perfectly good recommendation on no
   // evidence and send somebody off to buy a second thing they also will not use.
-  const answered = p.checkIns.filter((c) => c.using != null);
-  const kept = answered.filter((c) => c.using).length;
-  if (answered.length >= 2 && kept / answered.length < 0.5) {
+  //
+  // The tick record beats the check-in memory when there is one. A run of
+  // ticks covering half the days or more says it ran, whatever a weekly
+  // answer recalled; a record two weeks long with fewer than half the days
+  // ticked says it did not. Without a record, the check-in answers decide
+  // as before.
+  const record = adherenceFromTicks(p, now);
+  if (record && record.days >= 14 && record.fraction < 0.5) {
     return { kind: "notRun", protocol: p, weeks: Math.floor(weeks) };
+  }
+  if (!(record && record.fraction >= 0.5)) {
+    const answered = p.checkIns.filter((c) => c.using != null);
+    const kept = answered.filter((c) => c.using).length;
+    if (answered.length >= 2 && kept / answered.length < 0.5) {
+      return { kind: "notRun", protocol: p, weeks: Math.floor(weeks) };
+    }
   }
   if (scanMoved) return { kind: "worked", protocol: p, weeks: Math.floor(weeks) };
   return { kind: "addAlongside", protocol: p, weeks: Math.floor(weeks) };

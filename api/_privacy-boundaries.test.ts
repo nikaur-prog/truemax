@@ -24,7 +24,7 @@ test("every public application table enables row-level security", () => {
 });
 
 test("browser-readable rows are owner-bound and service-only rows are revoked", () => {
-  for (const table of ["scans", "profiles", "entitlements", "scan_credits", "app_admins", "max_chat_usage", "body_profiles"]) {
+  for (const table of ["scans", "profiles", "entitlements", "scan_credits", "app_admins", "max_chat_usage", "body_profiles", "daily_streaks", "points_events"]) {
     const ownerPolicy = new RegExp(
       `create policy[\\s\\S]{0,180}on\\s+public\\.${table}[\\s\\S]{0,220}auth\\.uid\\(\\)[\\s\\S]{0,80}user_id`,
       "i",
