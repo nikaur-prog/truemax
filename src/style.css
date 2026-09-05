@@ -1489,6 +1489,13 @@ body.body-profile-open { overflow: hidden; }
   /* An odd last item spans the pair rather than sitting alone beside a hole,
      which reads as a missing button rather than as the end of a list. */
   .ract-row .ract:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* These two sentences are calibration and correction controls, not terse
+     utility labels. Keep both visible instead of clipping the longer one to
+     an ellipsis on a 390px screen. */
+  .ract-utils .ract { min-height: 48px; padding-inline: 8px; }
+  .ract-utils .ract span {
+    overflow: visible; text-overflow: clip; white-space: normal; text-align: center;
+  }
 }
 
 .navrow { display: flex; gap: 10px; margin-top: 20px; }
@@ -6145,9 +6152,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
     min-width: 32px; padding: 4px 7px; border-radius: 99px; background: var(--acc-soft);
     color: var(--acc); font: 600 10px var(--mono); font-style: normal; text-align: center;
   }
-  /* The face remains useful while the summary starts moving. Keep it pinned
-     at a portrait-friendly 38% of the viewport until the category rail reaches
-     the compact header; results.ts then hands the sticky slot to the rail. */
+  /* The face remains useful for the entire report. It and the category rail
+     below form one persistent mobile header, so a long region never leaves
+     somebody reading numbers with no face or way to change category. */
   .pane-photo {
     position: static; z-index: 5;
     display: flex; flex-direction: column;
@@ -6220,9 +6227,12 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo:has(.reject-actions) .scan-status {
     max-height: none; overflow: visible;
   }
-  /* The rail takes over under the compact app chrome and remains there for the
-     report. Its top is measured from the live header rather than hard-coded. */
-  .rtabs-rail { top: var(--report-header-h, 38px); }
+  /* The rail stays directly beneath the pinned photograph. Both heights are
+     measured live, so account avatars, browser text scaling and a rotated
+     phone cannot make the controls overlap either the face or app chrome. */
+  .rtabs-rail {
+    top: calc(var(--report-header-h, 38px) + var(--report-photo-h, 38svh));
+  }
   /* The rail only earns elevation once it is actually pinned. Before that it
      remains part of the page; afterwards one restrained shadow separates the
      controls from report copy moving beneath them. */

@@ -31,6 +31,7 @@ test("guest scans are where the tiers actually differ", () => {
   // Free is zero, and states it rather than leaving it implied: the subject
   // chooser is member-gated, so a free account cannot declare a guest at all.
   assert.equal(guestAllowance("free"), 0);
+  assert.equal(guestAllowance("free", false, true), Number.POSITIVE_INFINITY);
 });
 
 test("only scans inside the trailing week count, newest first", () => {

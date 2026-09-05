@@ -102,6 +102,11 @@ export function openSubjectChooser(
   //               The gate closed on the self scan; the chooser must not
   //               reopen it.
   selfLock?: SelfLock,
+  // The allowance before any scans were spent. A zero remaining count can
+  // mean either "used" or "not included", and those are different promises.
+  // Keeping the total separate stops a Free account from being told it used
+  // guest scans it never had.
+  guestLimit?: number,
 ): void {
   closeSubjectChooser();
   const el = document.createElement("div");
@@ -123,7 +128,9 @@ export function openSubjectChooser(
           </button>
           <button class="subjpick-opt" data-who="other" type="button"${guestsLeft === 0 ? " disabled" : ""}>
             <b>Someone else</b><span>${guestsLeft === 0
-              ? "You have used this week's scans of other people"
+              ? guestLimit === 0
+                ? "Scanning other people is included with Starter and Max"
+                : "You've used this week's scans of other people"
               : "Saved separately, kept off your chart"}</span>
           </button>
         </div>

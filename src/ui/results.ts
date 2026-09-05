@@ -264,8 +264,8 @@ export function renderResults(c: Ctx): void {
   mobileSummary.innerHTML = mobileScoreSummary(c.report);
   c.analysis.appendChild(mobileSummary);
   // Unlike a sticky element, this marker keeps reporting the rail's natural
-  // document position after the rail pins. It makes the handoff from photo to
-  // category controls deterministic and avoids a second "back to photo" UI.
+  // document position after the rail pins. It lets us add elevation only when
+  // the controls are genuinely pinned beneath the persistent photograph.
   const railSentinel = document.createElement("div");
   railSentinel.className = "rtabs-sentinel";
   railSentinel.setAttribute("aria-hidden", "true");
@@ -332,9 +332,10 @@ function mountTabScrollbar(tabs: HTMLElement, track: HTMLElement): void {
 }
 
 /**
- * Publish the two useful states of the mobile category rail without doing any
- * scroll-time layout work: whether it is pinned, and whether the photograph
- * has completely left the viewport above it. CSS owns the visual treatment.
+ * Publish whether the mobile category rail is pinned without doing any
+ * scroll-time layout work. CSS owns the visual treatment and keeps the photo
+ * pinned independently, so reading farther down the report can never replace
+ * the face with the controls.
  * One passive listener, coalesced to one animation frame, keeps long reports
  * cheap on iOS Safari.
  */
@@ -345,17 +346,12 @@ function mountReportRailState(rail: HTMLElement, sentinel: HTMLElement): () => v
     const mobile = window.matchMedia?.("(max-width: 850px)").matches ?? window.innerWidth <= 850;
     if (!mobile) {
       rail.classList.remove("is-stuck");
-      document.querySelector(".pane-photo")?.classList.remove("report-photo-pinned");
       return;
     }
     const stickyTop = Number.parseFloat(getComputedStyle(rail).top) || 0;
     const naturalTop = sentinel.getBoundingClientRect().top;
-    const railHasTakenOver = naturalTop <= stickyTop + 1 && window.scrollY > 0;
-    rail.classList.toggle("is-stuck", railHasTakenOver);
-    document.querySelector(".pane-photo")?.classList.toggle(
-      "report-photo-pinned",
-      !railHasTakenOver,
-    );
+    const railIsPinned = naturalTop <= stickyTop + 1 && window.scrollY > 0;
+    rail.classList.toggle("is-stuck", railIsPinned);
   };
   const schedule = (): void => {
     if (!frame) frame = requestAnimationFrame(sync);
@@ -367,7 +363,7 @@ function mountReportRailState(rail: HTMLElement, sentinel: HTMLElement): () => v
     window.removeEventListener("scroll", schedule);
     window.removeEventListener("resize", schedule);
     if (frame) cancelAnimationFrame(frame);
-    document.querySelector(".pane-photo")?.classList.remove("report-photo-pinned");
+    rail.classList.remove("is-stuck");
   };
 }
 
