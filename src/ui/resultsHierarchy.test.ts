@@ -51,14 +51,15 @@ test("mobile report scrolling compacts chrome without building a hidden score ca
   assert.match(photoLifecycle, /classList\.toggle\("report-compact", compact\)/);
   assert.doesNotMatch(photoLifecycle, /classList\.(?:add|remove)\("shrunk"/);
   assert.match(styles, /\.pane-photo\.results-ready\.report-photo-pinned \{\s+position: sticky/);
-  assert.match(styles, /\.rtabs-rail \{ top: var\(--report-header-h, 38px\); \}/);
+  assert.match(styles, /top: calc\(var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 38svh\)\)/);
 });
 
-test("the photograph hands the sticky slot directly to the category rail", () => {
+test("the photograph and category rail remain one persistent mobile stack", () => {
   assert.match(results, /className = "rtabs-sentinel"/);
   assert.match(results, /requestAnimationFrame\(sync\)/);
-  assert.match(results, /const railHasTakenOver = naturalTop <= stickyTop \+ 1/);
-  assert.match(results, /"report-photo-pinned",\s+!railHasTakenOver/);
+  assert.match(results, /const railIsPinned = naturalTop <= stickyTop \+ 1/);
+  assert.doesNotMatch(results, /"report-photo-pinned",\s+!rail/);
+  assert.match(photoLifecycle, /--report-photo-h/);
   assert.doesNotMatch(results, /rtabs-face-back/);
   assert.match(styles, /\.rtabs-rail\.is-stuck/);
 });

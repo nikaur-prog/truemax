@@ -56,7 +56,11 @@ export function weeklyAllowance(_tier: EntitlementTier): number {
 //
 // Fifty is a cap rather than a target. It exists so "unlimited" is not printed
 // on a card next to a number nobody has measured the cost of.
-export function guestAllowance(tier: EntitlementTier, declined = false): number {
+export function guestAllowance(tier: EntitlementTier, declined = false, staff = false): number {
+  // Staff and the owner must be able to test every subject path without a
+  // device-local QA counter eventually disabling it. The personal-scan gate
+  // already grants the same staff bypass from the authoritative account flag.
+  if (staff) return Number.POSITIVE_INFINITY;
   if (tier === "max") return 50;
   if (tier === "starter") return 3;
   // A DECLINED free account keeps its weekly scan, and that scan is a guest

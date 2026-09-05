@@ -42,9 +42,13 @@ test("mobile photographs stay full-sized and category navigation owns stickiness
   assert.match(styles, /height: min\(38svh, 430px\); object-fit: cover/);
   assert.doesNotMatch(styles, /\.pane-photo\.shrunk/);
   assert.match(styles, /\.topbar\.report-compact/);
-  assert.match(styles, /top: var\(--report-header-h, 38px\)/);
+  assert.match(styles, /var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 38svh\)/);
   assert.match(styles, /var\(--face-x, center\)/);
   assert.match(styles, /var\(--face-y, 40%\)/);
+});
+
+test("mobile correction actions do not truncate their labels", () => {
+  assert.match(styles, /\.ract-utils \.ract span\s*\{[\s\S]{0,120}?white-space:\s*normal/);
 });
 
 test("history can read a thumbnail before its IndexedDB write finishes", () => {

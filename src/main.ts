@@ -42,6 +42,7 @@ import {
   recordScanRun,
 } from "./ui/scanGate.js";
 import { setMemberPricing } from "./engine/scanPricing.js";
+import { guestAllowance } from "./engine/scanAllowance.js";
 import { mountGateDemo } from "./ui/gateDemo.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { mergeReports } from "./engine/scoring.js";
@@ -211,6 +212,9 @@ async function refreshPathwayState(): Promise<void> {
 // tell Starter's three a week from Max's fifty. Defaults to "free", so a read
 // that has not landed yet offers no guest scans rather than fifty.
 let lastKnownTier: EntitlementTier = "free";
+// Kept separately from plan tier. Staff access is not a subscription, but it
+// does need an unlimited subject chooser so the owner can test guest scans.
+let lastKnownAdmin = false;
 // Staff may inspect Max surfaces, but only an actual paid Max entitlement
 // triggers the mandatory body-details setup. Access and purchase are different
 // facts, and a staff flag must never masquerade as a subscription.
@@ -257,6 +261,7 @@ async function refreshMaxAccess(): Promise<void> {
       currentPaidScan = use?.consumed === true;
     }
     setMaxAccess(hasMaxOrStaffAccess(entitlement, admin));
+    lastKnownAdmin = admin;
     lastKnownPaidMax = hasMaxAccess(entitlement);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
@@ -278,6 +283,7 @@ async function refreshMaxAccess(): Promise<void> {
     // retry — where the paid product handed to everybody during an outage is
     // not.
     setMaxAccess(false);
+    lastKnownAdmin = false;
     lastKnownPaidMax = false;
     // The standard price, for the same reason: quoting the member price to
     // somebody we could not confirm is a member sets up a charge that does not
@@ -778,7 +784,7 @@ paintRefPop();
 // A signed-out visitor skips the whole thing. There is no "you" to compare
 // against without an account, so the question would be one more screen between
 // a stranger and their first result.
-function ensureSex(then: () => void): void {
+async function ensureSex(then: () => void): Promise<void> {
   const askPopulation = (preselect: Sex | undefined, subject: { name: string } | null) => {
     openSexChooser(
       (sex) => {
@@ -808,6 +814,15 @@ function ensureSex(then: () => void): void {
     askPopulation(storedSex() ?? undefined, null);
     return;
   }
+
+  // Auth paints the signed-in shell before the entitlement read returns. The
+  // chooser used to open in that gap with lastKnownTier's closed default and
+  // tell paid owners they had used zero guest slots. Resolve access before the
+  // one screen that quotes it.
+  const owner = activeScanOwner();
+  const generation = scanGeneration;
+  await refreshMaxAccess();
+  if (owner !== activeScanOwner() || generation !== scanGeneration) return;
 
   openSubjectChooser((answer) => {
     subjectAsked = true;
@@ -850,7 +865,10 @@ function ensureSex(then: () => void): void {
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  }, undefined, guestScansLeft(lastKnownTier, declinedNow()), selfLockNow());
+  }, undefined,
+  guestScansLeft(lastKnownTier, declinedNow(), lastKnownAdmin),
+  selfLockNow(),
+  guestAllowance(lastKnownTier, declinedNow(), lastKnownAdmin));
 }
 
 /** The two facts the chooser needs, read at the moment it opens. */
@@ -887,8 +905,9 @@ function askLateSubject(): Promise<boolean> {
       // neither, which made it the way around both: capture signed out, sign
       // in at the gate, and answer a chooser that had never heard of the
       // guest budget or the decline.
-      guestScansLeft(lastKnownTier, declinedNow()),
+      guestScansLeft(lastKnownTier, declinedNow(), lastKnownAdmin),
       selfLockNow(),
+      guestAllowance(lastKnownTier, declinedNow(), lastKnownAdmin),
     );
   });
 }
@@ -1023,7 +1042,7 @@ el.btnUpload.addEventListener("click", () => {
   const generation = scanGeneration;
   void ensureScanAllowed(() => {
     if (generation !== scanGeneration) return;
-    ensureSex(() => {
+    void ensureSex(() => {
       if (generation !== scanGeneration) return;
       offerBothTutorials(() => {
         if (generation !== scanGeneration) return;
@@ -1049,7 +1068,7 @@ enablePhotoPaste({
     const generation = scanGeneration;
     void ensureScanAllowed(() => {
       if (generation !== scanGeneration) return;
-      ensureSex(() => handleFile(file, generation));
+      void ensureSex(() => handleFile(file, generation));
     });
   },
 });
@@ -1450,7 +1469,7 @@ el.btnCamera.addEventListener("click", async () => {
     const generation = scanGeneration;
     void ensureScanAllowed(() => {
       if (generation !== scanGeneration) return;
-      ensureSex(() => {
+      void ensureSex(() => {
         if (generation !== scanGeneration) return;
         // After the reference population is settled and before the camera
         // opens: the tutorial is about the photographs, so it belongs at the
@@ -2445,7 +2464,10 @@ async function runFullAnalysis(
   // photo is chosen — an abandoned capture must not cost the week's scan. A
   // guest's scan does not start it at all: it cannot move the owner's chart,
   // so it should not spend the week that would have.
-  recordScanRun(scanSubject !== null);
+  // A resumed or re-scored scan updates the existing history row. It must not
+  // spend another guest slot merely because the same immutable scan ID passed
+  // through the rendering pipeline again.
+  if (!existingScan) recordScanRun(scanSubject !== null);
   // A credit used only to skip the weekly cadence is committed here, after a
   // valid report exists. Bad photos, cancelled cameras and abandoned side
   // flows never reach this point and therefore never spend it.
@@ -3417,6 +3439,7 @@ if (isAuthAvailable()) {
       // other's self-scan. They go back to the closed defaults and are
       // repopulated by the next entitlement read.
       lastKnownTier = "free";
+      lastKnownAdmin = false;
       // CLEAR rather than set-false. setDeclinedCache(false) is a claim that
       // this account has not declined, and it writes that claim through to the
       // device: on an identity change it would erase the incoming account's

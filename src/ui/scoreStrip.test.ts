@@ -34,6 +34,7 @@ test("the report header stays compact until the actual report top", () => {
     classList: paneClasses,
     closest: () => main,
     parentElement: main,
+    getBoundingClientRect: () => ({ height: 384 }),
   } as unknown as HTMLElement;
   const header = {
     isConnected: true,
@@ -84,6 +85,7 @@ test("the report header stays compact until the actual report top", () => {
     assert.equal(paneClasses.contains("results-ready"), true);
     assert.equal(headerClasses.contains("report-compact"), false);
     assert.equal(properties.get("--report-header-h"), "52px");
+    assert.equal(properties.get("--report-photo-h"), "384px");
 
     y = 120;
     listeners.get("scroll")?.();
@@ -102,6 +104,7 @@ test("the report header stays compact until the actual report top", () => {
 
     clearScoreStrip();
     assert.equal(properties.has("--report-header-h"), false);
+    assert.equal(properties.has("--report-photo-h"), false);
     assert.equal(listeners.has("scroll"), false);
   } finally {
     clearScoreStrip();

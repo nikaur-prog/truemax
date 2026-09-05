@@ -92,9 +92,9 @@ function readGuestTimes(): number[] {
  * Pruned to the window on read, so the stored list cannot grow without bound
  * on an account that scans a lot of faces.
  */
-export function guestScansLeft(tier: EntitlementTier, declined = false): number {
+export function guestScansLeft(tier: EntitlementTier, declined = false, staff = false): number {
   const used = scansInWindow(readGuestTimes(), Date.now()).length;
-  return Math.max(0, guestAllowance(tier, declined) - used);
+  return Math.max(0, guestAllowance(tier, declined, staff) - used);
 }
 
 /** Clear an unspent weekly-skip intent when its capture is abandoned. */
@@ -335,15 +335,13 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
   track("scan-gate-shown");
   const member = isMemberPricing();
 
-  // The sheet describes the allowance the person actually has. Telling a Max
-  // subscriber they have used "your free scan" understates what they paid
-  // for at the exact moment they are being asked to pay again.
-  const title = allowance > 1
-    ? "You've used both of this week's scans"
-    : "You've used your free scan this week";
+  // The cadence is the fact that matters. "Free scan" made a signed-in owner
+  // sound signed out and understated a paid plan at the exact moment the gate
+  // was explaining why another self scan is closed.
+  const title = "You've used your weekly scan.";
   const sub = allowance > 1
     ? "One scan of your own face a week, on every plan. Your face doesn't change in a day, so a second scan mostly measures your lighting. Leave it and the number can actually move. Max scans of other people are separate and do not spend this."
-    : "You get one free scan a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.";
+    : "You get one scan of your own face a week. Your face doesn't change in a day, so scanning again tomorrow mostly measures your lighting. Leave it a week and the number can actually move.";
   // One upsell line each: non-members hear about the member price, Starter
   // members hear that Max carries a second weekly scan. Max members, who have
   // nothing further to be sold, get neither.
@@ -355,7 +353,7 @@ function openScanGate(nextAt: number, allowance = 1, scanGuest: (() => void) | n
   // guessing. Members only, because the subject chooser is members only.
   const guestOffer = scanGuest
     ? `<button class="btn gho" id="sg-guest">Scan someone else instead</button>
-       <p class="sg-note">Scanning a friend is always free and never spends your week: their result just doesn't go on your chart.</p>`
+       <p class="sg-note">Scanning a friend uses your separate plan allowance and never spends your personal weekly scan. Their result does not go on your chart.</p>`
     : "";
   const note = !member
     ? `<p class="sg-note">Members pay ${SCAN_PRICE_MEMBER} for extra scans.</p>`

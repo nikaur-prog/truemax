@@ -6,8 +6,8 @@ import type { Report } from "../engine/types.js";
 // until they return to the actual top of the report.
 //
 // The photograph never shrinks. On a phone it remains pinned at a useful size
-// while the report summary starts moving; results.ts hands that sticky slot to
-// the facial-category rail when the rail reaches the compact app header.
+// for the entire report, and the facial-category rail pins directly beneath
+// it. That compact photo-and-controls stack is the report's persistent header.
 //
 // The old implementation also built, animated and wired a score card here.
 // That card is superseded by the complete overall/front/side summary at the
@@ -26,6 +26,7 @@ export function clearScoreStrip(): void {
   pane?.classList.remove("region-focus", "results-ready", "report-photo-pinned");
   document.querySelector(".topbar")?.classList.remove("report-compact");
   document.querySelector<HTMLElement>("#v-main")?.style.removeProperty("--report-header-h");
+  document.querySelector<HTMLElement>("#v-main")?.style.removeProperty("--report-photo-h");
 }
 
 export function renderScoreStrip(_report: Report): void {
@@ -52,13 +53,15 @@ function watchReportScroll(pane: HTMLElement): () => void {
   // and accessibility font settings can all change its height.
   const header = document.querySelector<HTMLElement>(".topbar");
   const main = pane.closest<HTMLElement>("#v-main") ?? pane.parentElement;
-  const publishHeaderHeight = (): void => {
+  const publishStickyHeights = (): void => {
     if (!main || !header?.isConnected || !pane.isConnected) return;
     main.style.setProperty("--report-header-h", `${Math.round(header.getBoundingClientRect().height)}px`);
+    main.style.setProperty("--report-photo-h", `${Math.round(pane.getBoundingClientRect().height)}px`);
   };
-  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publishHeaderHeight);
+  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publishStickyHeights);
   if (header) ro?.observe(header);
-  publishHeaderHeight();
+  ro?.observe(pane);
+  publishStickyHeights();
 
   const measure = (): void => {
     queued = false;
@@ -70,7 +73,7 @@ function watchReportScroll(pane: HTMLElement): () => void {
       header?.classList.toggle("report-compact", compact);
       // ResizeObserver publishes each transition frame in modern browsers.
       // This direct read keeps the rail correctly placed in older ones too.
-      publishHeaderHeight();
+      publishStickyHeights();
     }
   };
   const onScroll = (): void => {
@@ -86,6 +89,7 @@ function watchReportScroll(pane: HTMLElement): () => void {
     if (frame) cancelAnimationFrame(frame);
     ro?.disconnect();
     main?.style.removeProperty("--report-header-h");
+    main?.style.removeProperty("--report-photo-h");
     header?.classList.remove("report-compact");
     pane.classList.remove("region-focus");
   };
