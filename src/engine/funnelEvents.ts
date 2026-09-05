@@ -48,6 +48,24 @@ export const FUNNEL_EVENTS = [
   "downsell-shown",
   "downsell-checkout",
   "downsell-declined",
+  // The guest-recovery pair. A guest who signed up at the wall either landed
+  // on their analysis or landed somewhere else. The ratio is the recovery
+  // bug as a number, before and after the fix, and the morning report
+  // prints it.
+  "signup-return-analysis",
+  "signup-return-lost",
+  // Home screen first, the store after. The prompt was offered (Chrome and
+  // Android), it was accepted, and the app was opened from a home screen
+  // icon (read from display-mode: standalone; see src/engine/standalone.ts).
+  // Thirty days of the last one against return visits is the store decision.
+  "install-prompt-shown",
+  "install-accepted",
+  "launch-standalone",
+  // The daily streak. Bumped by the server when a day is newly counted and
+  // when a run ends, so the streak's effect on return visits can be read
+  // without anything about whose streak it was.
+  "streak-day-counted",
+  "streak-ended",
 ] as const;
 
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];

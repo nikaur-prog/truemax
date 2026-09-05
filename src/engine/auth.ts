@@ -274,7 +274,12 @@ export async function socialAvailability(): Promise<SocialAvailability | null> {
  * So one field at signup makes the greeting work immediately, prefills the
  * quiz, and touches no schema.
  */
-export async function signUp(email: string, password: string, name = ""): Promise<AuthResult> {
+export async function signUp(
+  email: string,
+  password: string,
+  name = "",
+  body: { heightCm: number; weightKg: number; unit: "metric" | "imperial" } | null = null,
+): Promise<AuthResult> {
   try {
     const c = await getSupabaseClient();
     // Split on the first space only: "Mary Anne Smith" is a first name of
@@ -290,8 +295,18 @@ export async function signUp(email: string, password: string, name = ""): Promis
       options: {
         emailRedirectTo: authRedirects().scan,
         // Omitted entirely when blank, so an empty field cannot overwrite a
-        // name an OAuth provider already supplied on a later link.
-        ...(first ? { data: { first_name: first, last_name: last } } : {}),
+        // name an OAuth provider already supplied on a later link. The
+        // optional height and weight ride the same way; a database trigger
+        // turns them into the body_profiles row at account creation and
+        // ignores anything out of bounds, so they can never block a signup.
+        ...(first || body
+          ? {
+              data: {
+                ...(first ? { first_name: first, last_name: last } : {}),
+                ...(body ? { height_cm: body.heightCm, weight_kg: body.weightKg, unit_preference: body.unit } : {}),
+              },
+            }
+          : {}),
       },
     });
     if (error) return { ok: false, message: friendly(error.message) };

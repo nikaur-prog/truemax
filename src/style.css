@@ -3839,6 +3839,7 @@ body.auth-modal-open { overflow: hidden; }
 .acct-msg { min-height: 0; font-size: 12.5px; line-height: 1.4; margin: 0; }
 .acct-msg.err { color: var(--warm); }
 .acct-msg.ok { color: var(--acc); }
+.acct-msg.info { color: var(--mut); }
 .acct-submit { width: 100%; margin-top: 2px; }
 .acct-submit:disabled { opacity: .48; cursor: not-allowed; }
 .acct-submit.ready {
