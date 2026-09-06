@@ -17,7 +17,7 @@ export type AuthMode = "link" | "password" | "signup" | "forgot" | "reset";
 
 export interface AuthFormOptions {
   initialMode?: AuthMode;
-  context?: "account" | "analysis" | "portal";
+  context?: "account" | "analysis" | "plan" | "portal";
   portalHref?: string;
   onAuthenticated: (user: User) => void | Promise<void>;
   onDeferred?: () => void | Promise<void>;
@@ -27,6 +27,21 @@ export interface AuthFormOptions {
 
 export function renderAuthForm(root: HTMLElement, options: AuthFormOptions): void {
   renderMode(root, options.initialMode ?? "signup", options);
+}
+
+export function authFormIntro(mode: AuthMode, context?: AuthFormOptions["context"]): { title: string; lede: string } {
+  if (context === "analysis") return {
+    title: "Create an account to see your analysis",
+    lede: "Your scan is already measured on this device. Sign up or log in to open the result.",
+  };
+  if (context === "plan") return {
+    title: mode === "signup" ? "Create an account to build your plan" : "Sign in to build your plan",
+    lede: "Your analysis is ready. Sign up or log in to choose your goals and explore your plan options.",
+  };
+  return {
+    title: mode === "signup" ? "Create your account" : "Welcome back",
+    lede: "Photos stay on this device by default. Your account keeps your membership attached to you across browsers.",
+  };
 }
 
 function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions): void {
@@ -41,15 +56,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
 
   const isSignup = mode === "signup";
   const isLink = mode === "link";
-  const analysis = options.context === "analysis";
-  const title = analysis
-    ? "Create an account to see your analysis"
-    : isSignup
-      ? "Create your account"
-      : "Welcome back";
-  const lede = analysis
-    ? "Your scan is already measured on this device. Sign up or log in to open the result."
-    : "Photos stay on this device by default. Your account keeps your membership attached to you across browsers.";
+  const { title, lede } = authFormIntro(mode, options.context);
 
   root.innerHTML = `
     <h2 id="auth-title">${title}</h2>

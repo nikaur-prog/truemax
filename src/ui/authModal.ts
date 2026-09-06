@@ -42,7 +42,7 @@ export interface OpenAccountOptions {
   notice?: string;
   checkoutSessionId?: string | null;
   initialMode?: AuthMode;
-  reason?: "account" | "analysis";
+  reason?: "account" | "analysis" | "plan";
   /**
    * The computed-but-locked result shell shown inside the modal. It carries
    * the visitor's local thumbnails and region labels, but no score-derived
@@ -252,7 +252,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   document.body.appendChild(activeOverlay);
 
   const body = activeOverlay.querySelector(".acct-body") as HTMLElement;
-  const requestedMode = options.initialMode ?? (options.reason === "analysis" ? "signup" : null);
+  const requestedMode = options.initialMode ?? (options.reason === "analysis" || options.reason === "plan" ? "signup" : null);
   const renderSignedOut = (initialMode: AuthMode) => {
     // The finished scan sits beside the form, not above the notice text: a
     // sentence says a result exists, this SHOWS it existing. aria-hidden and
@@ -276,7 +276,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     body.appendChild(formCol);
     renderAuthForm(formCol, {
       initialMode,
-      context: options.reason === "analysis" ? "analysis" : "account",
+      context: options.reason ?? "account",
       portalHref: `/auth?mode=${initialMode}`,
       onDeferred: options.onDeferred,
       onAuthAttempt: options.onAuthAttempt,

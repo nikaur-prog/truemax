@@ -2630,7 +2630,7 @@ async function runFullAnalysis(
         return;
       }
       await openAccount({
-        reason: "analysis",
+        reason: "plan",
         notice: "Create your account to choose a plan.",
         onAuthenticated: async (signedInUser) => {
           await openTrialFunnel(signedInUser, undefined, { ceiling });
@@ -2646,7 +2646,7 @@ async function runFullAnalysis(
         return;
       }
       await openAccount({
-        reason: "analysis",
+        reason: "plan",
         notice: "Create your account to save your pathway and choose a trial.",
         onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser, undefined, { ceiling }),
       });
