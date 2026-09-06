@@ -10,7 +10,7 @@ import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import { openMaxChat } from "./maxChat.js";
 import { MAX_MONTHLY } from "./onboardingFunnel.js";
 import { readProtocols } from "../engine/protocol.js";
-import { mountProtocolCard } from "./protocolCard.js";
+import { mountDailyTicks, mountProtocolCard } from "./protocolCard.js";
 import { announceMembershipBrand } from "./membershipBrand.js";
 import {
   MAX_CONVERSATIONS_CHANGED,
@@ -125,6 +125,7 @@ function performanceTrackerMarkup(): string {
     <span class="klabel">PERFORMANCE TRACKER</span>
     <h3 id="maxtab-tracker-title">Your current plan</h3>
     <p>Check-ins and follow-ups live here, separate from the analysis of a new scan.</p>
+    <div data-performance-ticks></div>
     <div data-performance-due></div>
     <div data-performance-items>${performanceItems()}</div>
   </section>`;
@@ -229,8 +230,11 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
 
   if (opts.paid) {
     const items = root.querySelector<HTMLElement>("[data-performance-items]");
+    mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
     mountProtocolCard(root.querySelector<HTMLElement>("[data-performance-due]"), null, () => {
       if (items) items.innerHTML = performanceItems();
+      // Starting a protocol adds its tick immediately; judging removes it.
+      mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
     });
     // Any intent — focus, tap, submit — opens the real chat. The composer here
     // is a doorknob shaped like the door.
