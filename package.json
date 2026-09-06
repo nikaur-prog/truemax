@@ -20,10 +20,12 @@
     "@supabase/supabase-js": "^2.112.2",
     "html-to-image": "^1.11.13",
     "mediabunny": "^1.53.0",
-    "stripe": "^22.5.0"
+    "stripe": "^22.5.0",
+    "three": "0.185.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "@types/three": "0.185.4",
     "playwright": "^1.62.1",
     "sharp": "^0.35.3",
     "tsx": "^4.20.6",

@@ -61,6 +61,10 @@ import { morphBlueprints } from "../engine/morphPlan.js";
 import { morphPreviewHTML, wireMorphPreview } from "./morphPreview.js";
 import { mountReportRailState, mountTabScrollbar, scrollReportPanelToStart } from "./reportNavigation.js";
 import { createSkinTrialAccess } from "./skinTrialAccess.js";
+import { activeScanOwner } from "../engine/scanScope.js";
+import { clearGoalTargetDraft, createGoalTargetDraft, draftMatchesPlan, heldTargetRenderState, readGoalTargetDraft, saveGoalTargetDraft } from "../engine/goalTargets.js";
+import type { GoalTargetDraft } from "../engine/goalTargets.js";
+import type { MorphBlueprint } from "../engine/morphPlan.js";
 
 interface Ctx {
   report: Report;
@@ -146,6 +150,8 @@ let photoRecovery: CanvasRecoveryHandle | null = null;
 let detachReportRail: (() => void) | null = null;
 let detachTabScrollbar: (() => void) | null = null;
 let detachMorphPreview: (() => void) | null = null;
+let resultOwner: string | null = null;
+let goalDraft: GoalTargetDraft | null = null;
 
 export function clearResultPhotoRecovery(): void {
   cancelReportDrawing();
@@ -200,6 +206,13 @@ export function renderResults(c: Ctx): void {
   installCelebrityPortraitFallback();
   clearResultPhotoRecovery();
   ctx = c;
+  resultOwner = activeScanOwner();
+  goalDraft = null;
+  if (adultUser && !observationsOnly() && resultOwner?.startsWith("user:")) {
+    const saved = readGoalTargetDraft();
+    const plan = morphBlueprints(c.report, loadProfile(), Boolean(c.sidePhoto)).selected;
+    if (saved && draftMatchesPlan(saved, plan)) goalDraft = saved;
+  }
   // The curve is taught before the first number is ever shown. Fire-and-forget
   // rather than awaited: the panel behind it renders as normal and the primer
   // covers it, so a storage failure or a dismissed dialog can never leave
@@ -2323,7 +2336,39 @@ function idealWindow(m: ScoredMetric, sex: Sex): string {
   const d = distFor(m.def, sex);
   const lo = phi((m.idealRange[0] - d.mean) / d.sd) * 100;
   const hi = phi((m.idealRange[1] - d.mean) / d.sd) * 100;
-  return `<div class="ideal" style="left:${lo.toFixed(1)}%;width:${Math.max(4, hi - lo).toFixed(1)}%"></div>`;
+  return `<div class="ideal" style="left:${lo.toFixed(1)}%;width:${Math.max(4, hi - lo).toFixed(1)}%"></div>${goalMarker(m, sex)}`;
+}
+
+function goalMarker(m: ScoredMetric, sex: Sex): string {
+  if (!adultUser || !goalDraft || resultOwner !== activeScanOwner() || observationsOnly() || m.implausible
+    || (m.def.view === "side" && ctx?.sideVerified !== true)) return "";
+  const target = goalDraft.targets.find((t) => t.id === m.def.id && t.view === m.def.view
+    && t.unit === m.def.unit && t.decimals === m.def.decimals);
+  if (!target || !Number.isFinite(m.value)) return "";
+  const d = distFor(m.def, sex);
+  const pct = Math.min(98, Math.max(2, phi((target.target - d.mean) / d.sd) * 100));
+  const label = `Current ${m.value.toFixed(m.def.decimals)}${m.def.unit}. Draft goal ${target.target.toFixed(target.decimals)}${target.unit}. Illustrative, not a guaranteed outcome.`;
+  return `<span class="goal-target-marker" role="img" aria-label="${escapeHTML(label)}" title="${escapeHTML(label)}" style="left:${pct.toFixed(1)}%"><b>Goal</b></span>`;
+}
+
+function goalDraftPanel(plan: MorphBlueprint): string {
+  if (!adultUser || resultOwner !== activeScanOwner()) return "";
+  const saved = readGoalTargetDraft();
+  const matching = saved && draftMatchesPlan(saved, plan);
+  const available = Boolean(ctx?.capture?.scanId
+    && plan.targets.some((target) => target.view !== "side" || ctx?.sideVerified === true)
+    && resultOwner?.startsWith("user:"));
+  return `<section class="panel goal-target-panel" aria-labelledby="goal-target-title">
+    <h4 id="goal-target-title">YOUR DRAFT TARGET MARKERS</h4>
+    <p>${matching ? "Your saved targets stay fixed across scans. White is your current reading; green is your draft goal."
+      : saved ? "Your goals or measurement method changed. Your old targets are kept, but are not shown on these measurements. Replace them only if you want a new baseline."
+      : "Keep this scan as your starting point and add a green draft goal marker beside the white current marker on supported measurements."}</p>
+    <p class="goal-target-note">These are illustrative estimates, not promised results. They stay on this device for this account. Appearance points remain unavailable until repeatability and completion rules are validated.</p>
+    <div class="navrow">${available ? `<button type="button" class="btn gho" id="keep-goal-targets">${saved ? "Replace draft targets with this scan" : "Keep these draft targets"}</button>` : ""}
+      ${saved ? '<button type="button" class="btn cancel" id="clear-goal-targets">Clear draft targets</button>' : ""}</div>
+    ${!available && !saved ? '<p class="goal-target-note">No supported measurement target is available for these goals yet. You can still follow the routine without an invented number.</p>' : ""}
+    <p id="goal-target-status" role="status"></p>
+  </section>`;
 }
 
 function rarityLine(r: RegionScore): string {
@@ -2537,6 +2582,11 @@ const PRIORITY = ["FIRST PRIORITY", "SECOND PRIORITY", "DO THIS THIRD", "DO THIS
 
 function showImprove(): void {
   if (!ctx) return;
+  if (resultOwner !== activeScanOwner()) return;
+  // Target edits and quiz returns redraw this panel without going through
+  // select(). Cancel its previous render before replacing the owned DOM.
+  detachMorphPreview?.();
+  detachMorphPreview = null;
   // The plan is the OWNER'S plan, built from THEIR current scan and goals.
   // A guest's scan and a recalled record have no plan to show — the tab is
   // not rendered for them, and any stray path here lands on the overview.
@@ -2546,6 +2596,16 @@ function showImprove(): void {
   setZoom(null);
   const profile = loadProfile();
   const morph = morphBlueprints(r, profile, Boolean(ctx.sidePhoto));
+  const savedDraft = adultUser ? readGoalTargetDraft() : null;
+  goalDraft = savedDraft && draftMatchesPlan(savedDraft, morph.selected) ? savedDraft : null;
+  if (goalDraft) {
+    // The saved destination never drifts. Only request still-supported edits
+    // from this new photo, and pause the composite rather than silently widen
+    // a bound or reapply a broad goal effect after its numeric target is met.
+    const held = heldTargetRenderState(goalDraft, morph.selected, r, ctx.sideVerified === true);
+    morph.selected.targets = held.targets;
+    morph.selected.renderHoldReason = held.renderHoldReason;
+  }
   const morphRenderEnabled = import.meta.env.VITE_MORPH_PREVIEW === "1" && maxAccess && adultUser && Boolean(ctx.capture?.scanId);
 
   // The plan is where someone's answers have to actually bite. Regions they
@@ -2596,6 +2656,7 @@ function showImprove(): void {
         <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
         <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
       ${goalHead(profile)}
+      ${goalDraftPanel(morph.selected)}
       ${morphPreviewHTML({ selected: morph.selected, maxVision: morph.maxVision, renderEnabled: morphRenderEnabled })}
       ${quietNote}
       ${progress}
@@ -2712,6 +2773,28 @@ function showImprove(): void {
   if (upgrade) upgrade.onclick = () => ctx?.onUpgrade?.();
   const edit = document.getElementById("goal-edit");
   if (edit) edit.onclick = () => openQuiz(() => showImprove(), "all");
+  const draftOwner = resultOwner;
+  const draftScanId = ctx.capture?.scanId;
+  const keepTargets = document.getElementById("keep-goal-targets");
+  if (keepTargets && !gated && adultUser) keepTargets.onclick = async () => {
+    if (!draftScanId || !ctx || resultOwner !== draftOwner || activeScanOwner() !== draftOwner) return;
+    if (readGoalTargetDraft() && !(await confirmScanAction({
+      title: "Replace your draft targets?",
+      copy: "This scan becomes the new baseline on this device. Replacing a target does not count as progress or earn points.",
+      confirmLabel: "Replace targets", cancelLabel: "Keep existing targets",
+    }))) return;
+    if (!ctx || ctx.capture?.scanId !== draftScanId || resultOwner !== draftOwner || activeScanOwner() !== draftOwner) return;
+    const fresh = morphBlueprints(ctx.report, loadProfile(), Boolean(ctx.sidePhoto)).selected;
+    // A confirmed later scan cannot repair an unverified baseline.
+    fresh.targets = fresh.targets.filter((target) => target.view !== "side" || ctx!.sideVerified === true);
+    const draft = createGoalTargetDraft(fresh, draftScanId);
+    if (draft && saveGoalTargetDraft(draft, draftOwner)) showImprove();
+    else { const status = document.getElementById("goal-target-status"); if (status) status.textContent = "The draft could not be saved on this device. Your scan has not changed."; }
+  };
+  const clearTargets = document.getElementById("clear-goal-targets");
+  if (clearTargets && !gated && adultUser) clearTargets.onclick = () => {
+    if (clearGoalTargetDraft(draftOwner)) { goalDraft = null; showImprove(); }
+  };
 
   // First time someone reaches their plan, ask what to leave alone — the
   // moment prose is about to be written, and the first moment they have the
@@ -2797,7 +2880,15 @@ let adultUser = false;
 export function setAdult(value: boolean): void {
   if (value === adultUser) return;
   adultUser = value;
+  goalDraft = null;
+  if (value && ctx && !observationsOnly() && resultOwner === activeScanOwner()) {
+    const saved = readGoalTargetDraft();
+    const plan = morphBlueprints(ctx.report, loadProfile(), Boolean(ctx.sidePhoto)).selected;
+    if (saved && draftMatchesPlan(saved, plan)) goalDraft = saved;
+  }
   syncMaxSurfaces();
+  const open = ctx?.analysis.querySelector<HTMLButtonElement>(".rtab.sel")?.dataset.id;
+  if (open && open !== "overall" && open !== "improve") select(open, undefined, { silent: true });
 }
 
 // The date of birth behind that flag, kept because the macro calculator's age
@@ -2836,6 +2927,8 @@ let scansLeft = 0;
 // those callbacks from repainting another identity's screen. The next result
 // starts locked until its own reads complete.
 export function clearResultsIdentityState(): void {
+  resultOwner = null;
+  goalDraft = null;
   skinTrialAccess.reset();
   repaintSkinTrial();
   // The detail view holds a COPY of the photograph and the landmarks it was

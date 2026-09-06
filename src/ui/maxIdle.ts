@@ -1,214 +1,103 @@
-// ---------------------------------------------------------------------------
-// What Max does when nobody is talking to him.
-//
-// He used to stand there, breathing. Breathing is enough to say "not a
-// graphic" and nowhere near enough to say "someone worth talking to" — and he
-// sits on a screen where the whole proposition is that there is a coach on the
-// other side of it.
-//
-// So he has a repertoire. Every few seconds he picks something and does it for
-// about five: thumbs at his phone, tinkers with a spanner, pulls out a hand
-// mirror and kisses his own reflection, drops and knocks out a set of
-// press-ups, rides a skateboard on the spot. Nothing here is functional and
-// that is the point — the acts are deliberately beside the product, because a
-// character who only ever mimes the task is a progress indicator with a face.
-// They should read as upbeat and a bit ridiculous. He is pleased with himself.
-//
-// Four rules keep it from becoming wallpaper:
-//
-//   Silence first. Ten seconds of nothing after he appears. Somebody who has
-//   just landed is reading the screen, and a robot breaking into a dance over
-//   the top of that is an interruption rather than a personality.
-//
-//   Never twice running. Picking uniformly at random means the same act
-//   repeats now and then, and a repeat reads as a stuck loop rather than as a
-//   choice. Drawing from everything-but-the-last makes it impossible.
-//
-//   Only when he can be seen. Off screen or in a hidden tab he stops, since
-//   animating a character nobody is looking at is pure battery. Under a
-//   pointer he does not START anything new, because performing under
-//   somebody's cursor fights the poke they came for; but an act already
-//   running is allowed to finish. Cutting it dead on pointerenter stripped
-//   the act's class in one frame, which threw the arm from mid-swing to rest
-//   and blinked the skateboard out of existence at the exact moment the
-//   person had moved the mouse over to watch.
-//
-//   Asleep when unseen, not merely idle. The acts were always gated on
-//   visibility; the dozen resting animations underneath them — bob, blink,
-//   glance, antenna, pulse, shadow — were not, and ticked forever on every
-//   drawing of him on the page whether or not it was in the viewport. The
-//   `mx-asleep` class pauses the lot. It is the single biggest thing this
-//   module does for a phone, and it is why the observer now drives a class
-//   rather than just a boolean.
-// ---------------------------------------------------------------------------
+import { observeMaxMotion } from "./maxMotion.js";
 
-/** How long he stays still after arriving. */
+// Quiet first, no repeated act, no props. Hidden and reduced-motion drawings
+// have no scheduled idle timers. Returning to the screen starts a fresh rest.
 const QUIET_MS = 10_000;
-/** The gap between acts. */
 const GAP_MS = 5_000;
-/** How long one act runs. Matches the CSS animation durations. */
 const ACT_MS = 5_000;
-
-// The repertoire.
-//
-// Eight rather than four, because at four the set itself becomes the loop: you
-// see all of them inside a minute and after that he is a character with four
-// moves. At eight the next one is genuinely a surprise for long enough that
-// nobody counts.
-//
-// Chosen to be mostly silly and never about faces. `mirror` is the one that
-// comes closest — he admires himself and plants a kiss on his own reflection —
-// and it earns its place by being a joke at his expense rather than the
-// reader's. Nothing in here mimes scanning, measuring or judging.
-const ACTS = [
-  "phone",
-  "confused",
-  "dance",
-  "skate",
-  "tinker",
-  "mirror",
-  "pushups",
-  "think",
-  "stretch",
-  "lookout",
-] as const;
-
-/** The gather before an act, and the bounce back to breathing after it. */
 const WINDUP_MS = 340;
 const SETTLE_MS = 550;
+const ACTS = ["confused", "dance", "think", "stretch", "lookout"] as const;
 type Act = (typeof ACTS)[number];
 
 export interface IdleHandle {
-  /** Stop performing and clean up every listener. */
   destroy(): void;
-  /** Run one act now, whatever the schedule says. Used by tests. */
+  /** Preview an act only when the drawing is visible and motion is allowed. */
   play(act: Act): void;
 }
-
-/** The full repertoire, for tests and for anything that wants to preview one. */
 export const IDLE_ACTS: readonly Act[] = ACTS;
+export interface MaxIdleRuntime {
+  schedule(callback: () => void, delay: number): number;
+  cancel(id: number): void;
+  observe(svg: SVGSVGElement, changed: (active: boolean) => void): () => void;
+}
+const browserRuntime: MaxIdleRuntime = {
+  schedule: (callback, delay) => window.setTimeout(callback, delay),
+  cancel: (id) => window.clearTimeout(id),
+  observe: observeMaxMotion,
+};
 
-/**
- * Give a mounted Max an idle life.
- *
- * Returns a handle whose destroy() removes everything; every surface that
- * mounts him is responsible for calling it, and the observers self-disconnect
- * if the element leaves the document anyway.
- */
-export function mountMaxIdle(stage: HTMLElement | null): IdleHandle | null {
-  if (!stage) return null;
-  const svg = stage.querySelector<SVGSVGElement>(".mx-svg");
-  if (!svg) return null;
-  // Reduced motion means reduced motion. He keeps the breathing the stylesheet
-  // already turns off; he does not gain a dance.
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
-
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let clear: ReturnType<typeof setTimeout> | null = null;
+export function mountMaxIdle(stage: HTMLElement | null, runtime: MaxIdleRuntime = browserRuntime): IdleHandle | null {
+  const svg = stage?.querySelector<SVGSVGElement>(".mx-svg");
+  if (!stage || !svg) return null;
+  let timer: number | null = null;
+  let clear: number | null = null;
   let last: Act | null = null;
-  let visible = true;
+  let active = false;
   let hovered = false;
   let dead = false;
-
-  // Paused whenever he cannot be seen, for either reason. Both conditions feed
-  // one class so a tab switch while he is off screen cannot wake him by
-  // resolving only half of it.
-  const syncSleep = (): void => {
-    svg.classList.toggle("mx-asleep", !visible || document.hidden);
-  };
-
+  const awake = (): boolean => !dead && active && svg.isConnected;
   const stopAct = (): void => {
-    if (clear) clearTimeout(clear);
+    if (clear !== null) runtime.cancel(clear);
     clear = null;
     svg.classList.remove("mx-windup", "mx-settle");
-    for (const a of ACTS) svg.classList.remove(`mx-act-${a}`);
+    for (const act of ACTS) svg.classList.remove(`mx-act-${act}`);
   };
-
-  // Wind-up, act, settle. The act does not start from a standstill and does
-  // not stop dead — he gathers, performs, and bounces back to breathing.
-  // Anticipation and follow-through are most of the difference between "a
-  // character" and "a div with keyframes", and wrapping them here once means
-  // every act in the repertoire, present and future, gets both.
+  const stopTimer = (): void => {
+    if (timer !== null) runtime.cancel(timer);
+    timer = null;
+  };
   const play = (act: Act): void => {
+    if (!awake() || !ACTS.includes(act)) return;
     stopAct();
     last = act;
     svg.classList.add("mx-windup");
-    clear = setTimeout(() => {
+    clear = runtime.schedule(() => {
+      clear = null;
+      if (!awake()) { stopAct(); return; }
       svg.classList.remove("mx-windup");
       svg.classList.add(`mx-act-${act}`);
-      clear = setTimeout(() => {
+      clear = runtime.schedule(() => {
+        clear = null;
+        if (!awake()) { stopAct(); return; }
         svg.classList.remove(`mx-act-${act}`);
         svg.classList.add("mx-settle");
-        clear = setTimeout(stopAct, SETTLE_MS);
+        clear = runtime.schedule(stopAct, SETTLE_MS);
       }, ACT_MS);
     }, WINDUP_MS);
   };
-
-  const pick = (): Act => {
-    // Draw from everything except what he just did, so a repeat is impossible
-    // rather than merely unlikely. Math.random is fine here: this is a
-    // character choosing a mannerism, not anything that has to be reproducible.
-    const pool = ACTS.filter((a) => a !== last);
-    return pool[Math.floor(Math.random() * pool.length)]!;
-  };
-
   const tick = (): void => {
     timer = null;
-    if (dead) return;
-    if (!svg.isConnected) {
-      destroy();
-      return;
+    if (!awake()) return;
+    if (!hovered) {
+      const pool = ACTS.filter((act) => act !== last);
+      play(pool[Math.floor(Math.random() * pool.length)]!);
     }
-    // Not while he is being pointed at, and not while he cannot be seen. The
-    // clock keeps running either way, so he does not owe a backlog of dances
-    // to somebody who scrolls back.
-    if (visible && !hovered && !document.hidden) play(pick());
-    timer = setTimeout(tick, GAP_MS + ACT_MS);
+    timer = runtime.schedule(tick, GAP_MS + ACT_MS + WINDUP_MS + SETTLE_MS);
   };
-
-  const io = typeof IntersectionObserver === "undefined"
-    ? null
-    : new IntersectionObserver(
-        (entries) => {
-          visible = entries.some((e) => e.isIntersecting);
-          if (!visible) stopAct();
-          syncSleep();
-        },
-        { threshold: 0.2 },
-      );
-  io?.observe(svg);
-
   const onEnter = (): void => {
-    // Skip the NEXT act; let the current one complete. Every act's keyframes
-    // return to rest on their own, so finishing is the clean way out.
     hovered = true;
   };
-  const onLeave = (): void => {
-    hovered = false;
-  };
-  const onVisibility = (): void => {
-    if (document.hidden) stopAct();
-    syncSleep();
-  };
+  const onLeave = (): void => { hovered = false; };
   stage.addEventListener("pointerenter", onEnter);
   stage.addEventListener("pointerleave", onLeave);
-  document.addEventListener("visibilitychange", onVisibility);
-
-  function destroy(): void {
-    dead = true;
-    stopAct();
-    // Woken on the way out. Leaving the class behind would freeze him mid-blink
-    // for whatever mounts him next, since the markup is often reused.
-    svg!.classList.remove("mx-asleep");
-    if (timer) clearTimeout(timer);
-    timer = null;
-    io?.disconnect();
-    stage!.removeEventListener("pointerenter", onEnter);
-    stage!.removeEventListener("pointerleave", onLeave);
-    document.removeEventListener("visibilitychange", onVisibility);
-  }
-
-  syncSleep();
-  timer = setTimeout(tick, QUIET_MS);
-  return { destroy, play };
+  const stopMotion = runtime.observe(svg, (visible) => {
+    if (dead) return;
+    active = visible;
+    stopTimer();
+    if (!awake()) stopAct();
+    else timer = runtime.schedule(tick, QUIET_MS);
+  });
+  return {
+    play,
+    destroy(): void {
+      if (dead) return;
+      dead = true;
+      stopAct();
+      stopTimer();
+      stopMotion();
+      stage.removeEventListener("pointerenter", onEnter);
+      stage.removeEventListener("pointerleave", onLeave);
+    },
+  };
 }

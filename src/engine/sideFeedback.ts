@@ -1,6 +1,7 @@
 import { currentAccessToken } from "./auth.js";
+import { activeScanOwner } from "./scanScope.js";
 import type { SidePoints } from "./sideMetrics.js";
-import { SIDE_FEEDBACK_CONSENT_VERSION } from "./sideFeedbackPayload.js";
+import { cloneSidePoints, SIDE_FEEDBACK_CONSENT_VERSION } from "./sideFeedbackPayload.js";
 import type { SideFeedbackIntent, SideFeedbackMetadata } from "./sideFeedbackPayload.js";
 
 export interface SideFeedbackSubmitResult {
@@ -108,57 +109,88 @@ export async function revokeSideCorrectionFeedback(
   }
 }
 
-export async function submitSideCorrectionFeedback(
-  photo: HTMLCanvasElement,
-  correctedPoints: SidePoints,
-  faceDir: number,
-  intent: SideFeedbackIntent,
-): Promise<SideFeedbackSubmitResult> {
-  const token = await currentAccessToken();
-  if (!token) return { ok: false, message: "Sign in is required before sharing feedback." };
-
-  const image = await canvasJpeg(photo);
-  if (!image) return { ok: false, message: "The side photo could not be prepared." };
-
-  const metadata: SideFeedbackMetadata = {
-    scanId: intent.scanId,
-    submissionId: intent.submissionId,
-    consentVersion: intent.consentVersion,
-    faceDir: faceDir === -1 ? -1 : 1,
-    width: photo.width,
-    height: photo.height,
-    seedMethod: intent.seedMethod,
-    seedVersion: intent.seedVersion,
-    automaticPoints: intent.automaticPoints,
-    correctedPoints,
-  };
-  const body = new FormData();
-  body.append("metadata", JSON.stringify(metadata));
-  body.append("photo", image, `${intent.submissionId}.jpg`);
-
-  try {
-    const response = await fetch("/api/side-correction-feedback", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body,
-    });
-    const result = await response.json().catch(() => ({})) as {
-      submissionId?: string;
-      error?: string;
-    };
-    if (!response.ok) {
-      return {
-        ok: false,
-        rateLimited: response.status === 429,
-        message: result.error || "Feedback could not be sent.",
-      };
-    }
-    return { ok: true, submissionId: result.submissionId };
-  } catch {
-    // A thrown fetch is a network failure and nothing else — never a limit.
-    return { ok: false, message: "Feedback could not be sent. Your analysis will continue." };
-  }
+export interface SideFeedbackSubmitOptions {
+  signal?: AbortSignal;
 }
+
+interface SideFeedbackUploadDependencies {
+  owner: typeof activeScanOwner;
+  token: typeof currentAccessToken;
+  encode: (canvas: HTMLCanvasElement) => Promise<Blob | null>;
+  fetch: typeof fetch;
+}
+
+/** Dependency boundary also lets interruption tests run without a real account. */
+export function createSideFeedbackSubmitter(dependencies: SideFeedbackUploadDependencies) {
+  return async function submitSideCorrectionFeedback(
+    photo: HTMLCanvasElement,
+    correctedPoints: SidePoints,
+    faceDir: number,
+    intent: SideFeedbackIntent,
+    options: SideFeedbackSubmitOptions = {},
+  ): Promise<SideFeedbackSubmitResult> {
+    const owner = dependencies.owner();
+    const current = () => !!owner?.startsWith("user:") && dependencies.owner() === owner && !options.signal?.aborted;
+    const cancelled = () => ({ ok: false, message: "Feedback was not sent because the scan or account changed." });
+    if (!current()) return cancelled();
+    try {
+      const metadata: SideFeedbackMetadata = {
+        scanId: intent.scanId,
+        submissionId: intent.submissionId,
+        consentVersion: intent.consentVersion,
+        faceDir: faceDir === -1 ? -1 : 1,
+        width: photo.width,
+        height: photo.height,
+        seedMethod: intent.seedMethod,
+        seedVersion: intent.seedVersion,
+        automaticPoints: cloneSidePoints(intent.automaticPoints),
+        correctedPoints: cloneSidePoints(correctedPoints),
+        review: intent.review ? { ...intent.review } : undefined,
+      };
+      const token = await dependencies.token(owner!.slice("user:".length));
+      if (!current()) return cancelled();
+      if (!token) return { ok: false, message: "Sign in is required before sharing feedback." };
+
+      const image = await dependencies.encode(photo);
+      if (!current()) return cancelled();
+      if (!image) return { ok: false, message: "The side photo could not be prepared." };
+      const body = new FormData();
+      body.append("metadata", JSON.stringify(metadata));
+      body.append("photo", image, `${metadata.submissionId}.jpg`);
+
+      if (!current()) return cancelled();
+      const response = await dependencies.fetch("/api/side-correction-feedback", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body,
+        signal: options.signal,
+      });
+      if (!current()) return cancelled();
+      const result = await response.json().catch(() => ({})) as {
+        submissionId?: string;
+        error?: string;
+      };
+      if (!current()) return cancelled();
+      if (!response.ok) {
+        return {
+          ok: false,
+          rateLimited: response.status === 429,
+          message: result.error || "Feedback could not be sent.",
+        };
+      }
+      return { ok: true, submissionId: result.submissionId };
+    } catch {
+      return { ok: false, message: "Feedback could not be sent. Your analysis will continue." };
+    }
+  };
+}
+
+export const submitSideCorrectionFeedback = createSideFeedbackSubmitter({
+  owner: activeScanOwner,
+  token: currentAccessToken,
+  encode: canvasJpeg,
+  fetch: (...args) => fetch(...args),
+});
 
 function canvasJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.84));

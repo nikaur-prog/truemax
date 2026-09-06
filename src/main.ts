@@ -1,5 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { captureAttribution } from "./engine/attribution.js";
+import { startScanPerformanceAttempt } from "./engine/scanPerformance.js";
+import type { ScanPerformanceAttempt } from "./engine/scanPerformance.js";
 import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
 import { detectStable } from "./engine/consensus.js";
 import { assessQuality } from "./engine/quality.js";
@@ -26,7 +28,7 @@ import { toCelebEntry } from "./engine/celebs.js";
 import { readOrientation } from "./engine/exif.js";
 import type { Report, Sex } from "./engine/types.js";
 import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
-import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
+import { buildPassPlan, INTERACTIVE_MESH_REVEAL_MS, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
 import { landPhoto } from "./ui/photoLanding.js";
 import { beginSkinTrialStaffCheck, clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
@@ -136,7 +138,7 @@ import {
 import type { MembershipBrand } from "./ui/membershipBrand.js";
 import { closeTrialFunnel, openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
 import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, profileIsAdult } from "./engine/onboarding.js";
-import { closeSettings, openSettings } from "./ui/settings.js";
+import { closeLazySettings, openLazySettings } from "./ui/lazySettings.js";
 import { track } from "./engine/track.js";
 import { signupReturn } from "./engine/signupReturn.js";
 import { mountInstallPrompt } from "./ui/installPrompt.js";
@@ -311,6 +313,13 @@ const installPrompt = mountInstallPrompt();
 
 if (import.meta.env.DEV) {
   const preview = new URLSearchParams(location.search).get("preview");
+  if (preview === "max3d") {
+    queueMicrotask(async () => {
+      const { mountMax3DPreview } = await import("./ui/max3dPreview.js");
+      document.querySelectorAll<HTMLElement>("body > :not(script)").forEach((node) => { node.style.display = "none"; });
+      mountMax3DPreview(document.body);
+    });
+  }
   if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
     queueMicrotask(() => void openTrialFunnelPreview(preview !== "offer-minor", preview !== "funnel"));
   }
@@ -429,10 +438,16 @@ let captureMethod: "camera" | "upload" | null = null;
 // an old animation/upload cannot repaint the next person's screen.
 let scanGeneration = 0;
 const scanSession = new ScanSession();
+let scanTiming: ScanPerformanceAttempt | null = null;
+let scanWorkAbort = new AbortController();
 
 function beginScan(source: Exclude<ScanSource, "restored">): ScanToken | null {
   const owner = activeScanOwner();
   if (!owner) return null;
+  scanTiming?.cancel();
+  scanTiming = startScanPerformanceAttempt();
+  scanWorkAbort.abort();
+  scanWorkAbort = new AbortController();
   return scanSession.begin(owner, source);
 }
 
@@ -983,6 +998,7 @@ let enginePromise: Promise<void> | null = null;
 
 function ensureEngine(): Promise<void> {
   if (enginePromise) return enginePromise;
+  const finishInit = scanTiming?.start("model_init");
   markEngine("loading");
   // Only after the load is genuinely slow, so a fast connection never sees a
   // line of copy about a wait that did not happen.
@@ -992,11 +1008,13 @@ function ensureEngine(): Promise<void> {
   );
   enginePromise = initLandmarker()
     .then(() => {
+      finishInit?.("success");
       window.clearTimeout(slowEngineNote);
       clearEngineNote();
       markEngine("ready");
     })
     .catch((err: unknown) => {
+      finishInit?.("error");
       window.clearTimeout(slowEngineNote);
       console.error(err);
       showEngineNote("ENGINE FAILED TO LOAD · REFRESH TO RETRY", "error");
@@ -1173,7 +1191,7 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
   }
   await ensureOnboarded(user);
   if (generation !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
-  if (cam) await closeCamera();
+  if (cam || camOpening) await closeCamera();
   if (generation !== scanGeneration) return;
   closeSide();
   document.getElementById("v-side")?.classList.add("hidden");
@@ -1185,7 +1203,19 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
     onScan: () => resetToUpload(),
     name: displayName(user),
     membership: brand === "max" ? "max" : "member",
-    onSettings: () => void openSettings(user),
+    onSettings: () => {
+      const ownsDashboard = () => dashboardGeneration === scanGeneration
+        && activeScanOwner() === `user:${user.id}`;
+      document.getElementById("settings-load-error")?.remove();
+      void openLazySettings(user, ownsDashboard).then((result) => {
+        if (result !== "failed" || !ownsDashboard()) return;
+        const notice = document.createElement("p");
+        notice.id = "settings-load-error";
+        notice.setAttribute("role", "alert");
+        notice.textContent = "Your settings could not load. Select your profile to try again.";
+        document.getElementById("dash-views")?.prepend(notice);
+      });
+    },
     adult: knownAdult,
   });
 });
@@ -1269,6 +1299,7 @@ function displayName(user: User): string | null {
 // ---- camera ----
 let cam: CameraHandle | null = null;
 let camOpening = false;
+let cameraAbort: AbortController | null = null;
 let lastCheck: FrameCheck | null = null;
 let autoFront: AutoCapture | null = null;
 let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -1285,6 +1316,11 @@ async function openCamera(): Promise<void> {
     camOpening = false;
     return;
   }
+  const controller = new AbortController();
+  cameraAbort = controller;
+  const cameraOwner = activeScanOwner();
+  const ownsCamera = () => cameraAbort === controller && !controller.signal.aborted
+    && generation === scanGeneration && activeScanOwner() === cameraOwner;
   // Started, not awaited. The camera permission prompt and the engine download
   // are independent, and the guidance loop needs landmarks only once there is
   // a live frame to run them on — so both should be in flight at once rather
@@ -1297,21 +1333,26 @@ async function openCamera(): Promise<void> {
   el.camHintDetail.textContent = desktop
     ? "Your browser will ask at the top of the window. Choose Allow"
     : "Tap Allow when your browser asks";
+  const frontSettle = createSettler();
   try {
     const started = await startCamera({
       video: el.camVideo,
       guideCanvas: el.camGuide,
-      onPause: () => autoFront?.cancel(),
+      signal: controller.signal,
+      onPause: () => { if (ownsCamera()) autoFront?.cancel(); },
       // Both cameras refused during a swap and the working one is already
       // released: close the viewfinder rather than leave controls over a dead
       // frame, and say why.
       onLost: () => {
+        if (!ownsCamera()) return;
         void closeCamera().then(() => {
+          if (cameraAbort || generation !== scanGeneration || activeScanOwner() !== cameraOwner) return;
           el.camHintTitle.textContent = "Camera unavailable";
           el.camHintDetail.textContent = "Switching cameras failed. Try again, or upload a photo.";
         });
       },
       onCheck: (c) => {
+        if (!ownsCamera()) return;
         lastCheck = c;
         // Hold the opening instruction for a beat before the live coaching
         // takes over. Glasses can be detected once the camera is running; a
@@ -1351,7 +1392,7 @@ async function openCamera(): Promise<void> {
         autoFront?.update(c.ready);
       },
     });
-    if (generation !== scanGeneration) {
+    if (!ownsCamera()) {
       started.stop();
       return;
     }
@@ -1359,9 +1400,9 @@ async function openCamera(): Promise<void> {
     // The front gets the same hands-off shutter as the side. It matters less
     // here — you can see the screen — but a photo taken while reaching for a
     // button is a photo that moved, and that is true of both views.
-    const frontSettle = createSettler();
     autoFront = createAutoCapture({
       onTick: (remaining) => {
+        if (!ownsCamera()) return;
         if (remaining == null) {
           el.camHint.classList.remove("counting");
           setCameraLabel("Capture");
@@ -1372,10 +1413,11 @@ async function openCamera(): Promise<void> {
         el.camHintDetail.textContent = automaticCaptureDetail();
         setCameraLabel(`Capturing in ${remaining}`);
       },
-      onFire: () => el.btnCamera.click(),
+      onFire: () => { if (ownsCamera()) el.btnCamera.click(); },
     });
     // Space or Enter fires the shutter now instead of waiting out the count.
     frontKeyHandler = (e: KeyboardEvent) => {
+      if (!ownsCamera()) return;
       // Escape backs out of the viewfinder — a full-screen surface without an
       // Escape route reads as a trap on a keyboard machine.
       if (e.key === "Escape") {
@@ -1403,8 +1445,10 @@ async function openCamera(): Promise<void> {
     // trustworthy here — permission was just granted, so the device list is
     // fully labeled.
     void cameraCount().then((n) => {
+      if (!ownsCamera()) return;
       el.camSwap.classList.toggle("hidden", n < 2 || !cam);
     });
+    el.camSwap.disabled = false;
     // Starts on the male silhouette and morphs once the shape vote settles —
     // waiting for the vote would leave the frame empty at the exact moment
     // someone needs help positioning.
@@ -1418,10 +1462,11 @@ async function openCamera(): Promise<void> {
     el.btnCamera.disabled = true;
 
   } catch {
+    if (!ownsCamera()) return;
     el.camHintTitle.textContent = "Camera unavailable";
     el.camHintDetail.textContent = "Permission was denied. You can still upload a photo.";
   } finally {
-    camOpening = false;
+    if (cameraAbort === controller) camOpening = false;
   }
 }
 
@@ -1441,6 +1486,10 @@ async function openCamera(): Promise<void> {
 // screen, and then it will go through and scan the photo", and that is
 // exactly what it was doing.
 async function closeCamera(opts: { instant?: boolean } = {}): Promise<void> {
+  const cancelledCamera = cameraAbort;
+  cameraAbort = null;
+  camOpening = false;
+  cancelledCamera?.abort();
   autoFront?.cancel();
   autoFront = null;
   if (frontKeyHandler) {
@@ -1537,11 +1586,13 @@ el.btnCancel.addEventListener("click", async () => {
 
 el.camSwap.addEventListener("click", async () => {
   if (!cam) return;
+  const swappingCamera = cam;
+  const controller = cameraAbort;
   // Disabled while the switch is in flight: a second tap mid-switch would race
   // two getUserMedia calls for one camera.
   el.camSwap.disabled = true;
-  await cam.swap();
-  el.camSwap.disabled = false;
+  await swappingCamera.swap();
+  if (cam === swappingCamera && cameraAbort === controller) el.camSwap.disabled = false;
 });
 
 el.btnNoGlasses.addEventListener("click", () => {
@@ -1772,6 +1823,10 @@ function retakeFront(method: "camera" | "upload" | null): void {
 }
 
 function resetToUpload(): void {
+  if (cam || camOpening) void closeCamera({ instant: true });
+  scanTiming?.cancel();
+  scanTiming = null;
+  scanWorkAbort.abort();
   installPrompt.clear();
   closeScanConfirm();
   disarmLeaveGuard();
@@ -1954,7 +2009,7 @@ async function handleCanvas(
   // mode, and the still-image detector then threw "Landmarker is in VIDEO
   // mode". Capturing had always torn the camera down first; choosing a file
   // never did. Both go through here now, so both are safe.
-  if (cam) await closeCamera({ instant: true });
+  if (cam || camOpening) await closeCamera({ instant: true });
   if (!scanIsCurrent(token, generation)) {
     // Abandoned mid-handoff. The stage was put up above, so it has to come
     // back down here rather than being left on screen for the next thing.
@@ -1975,8 +2030,10 @@ async function handleCanvas(
   }
 
   // Real math (milliseconds) happens inside the theatre beat (~2.2s)
+  const finishInference = scanTiming?.start("front_inference");
   const result = detectStable(el.photoCanvas);
   const quality = assessQuality(result);
+  finishInference?.(quality.faceFound ? "success" : "error");
 
   if (!quality.faceFound) {
     el.frame.classList.remove("scanning");
@@ -2099,6 +2156,7 @@ async function handleCanvas(
   drawCalm(el.overlayCanvas, landmarks, width, height);
   armLeaveGuard("scan");
   const method = captureMethod;
+  const finishReview = scanTiming?.start("capture_review");
   const accepted = await confirmScanAction({
     eyebrow: "CHECK YOUR PHOTO",
     title: "Happy with this front photo?",
@@ -2108,6 +2166,7 @@ async function handleCanvas(
     preview: frontShot,
     tone: "positive",
   });
+  finishReview?.(accepted ? "success" : "cancelled");
   if (!scanIsCurrent(token, generation)) return;
   if (!accepted) {
     retakeFront(method);
@@ -2231,6 +2290,7 @@ async function submitConsentedSideFeedback(generation = scanGeneration): Promise
     side.points,
     side.faceDir,
     side.feedback,
+    { signal: scanWorkAbort.signal },
   );
   if (!scanIsCurrent(token, generation)) return;
   if (result.ok) {
@@ -2370,7 +2430,11 @@ async function playMeasurePass(
   await nextFrame();
   // The mesh landing is the opening beat, handed to the pass so it waits for
   // the reveal to finish rather than clearing it off the canvas underneath.
-  const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height);
+  const reveal = drawLandmarksAnimated(el.overlayCanvas, landmarks, width, height, {
+    durationMs: INTERACTIVE_MESH_REVEAL_MS,
+    signal: scanWorkAbort.signal,
+    neutral: true,
+  });
   const sideShot = lastSide?.photo;
   const plan = buildPassPlan(front, sideReport);
   const progressStart = analysisHandoff?.finish() ?? 0;
@@ -2394,6 +2458,8 @@ async function playMeasurePass(
     plan,
     {
       open: reveal.done,
+      durationPolicy: "interactive",
+      signal: scanWorkAbort.signal,
       // The front photograph is already painted and the reveal owns the
       // overlay; repainting would blank it on the pass's first frame.
       startPainted: "front",
@@ -2406,6 +2472,9 @@ async function playMeasurePass(
     pass.cancel();
     return false;
   }
+  // The compact reveal may reach its deadline while displaying the side.
+  // Always restore the immutable front before the front report owns the pane.
+  paintFrontPane(frontShot);
   markMeasuredOnScreen(token.scanId);
   // Back to rest, and with no camera transition attached: the results screen
   // owns this element's zoom from here and must not inherit a half-finished
@@ -2565,13 +2634,11 @@ async function runFullAnalysis(
     window.setTimeout(() => el.barFill.parentElement?.classList.remove("spent"), 250);
   }, 260);
   drawCalm(el.overlayCanvas, landmarks, width, height);
-  // The one place the upload's outcome is actually needed: it decides a quality
-  // chip. By now the reveal animation has run, so the POST fired underneath it
-  // has almost always landed and this waits for nothing. A slow connection
-  // costs a slightly later chip rather than a blank screen up front, and a
-  // rejection must never surface here — it is optional feedback and the note
-  // itself already records the failure.
-  await feedbackInFlight?.catch(() => {});
+  // Optional feedback cannot hold a finished report behind a slow upload.
+  // Refresh only the chip when it settles, and only for this same scan.
+  void feedbackInFlight?.then(() => {
+    if (scanIsCurrent(token, generation) && pending) renderQualityChips(quality, autoNote);
+  }).catch(() => {});
   if (!scanIsCurrent(token, generation) || !pending) return;
   renderQualityChips(quality, autoNote);
 
@@ -2780,7 +2847,14 @@ async function runFullAnalysis(
   // replay an entrance nobody is entering.
   el.analysis.classList.add("analysis-arrive");
   window.setTimeout(() => el.analysis.classList.remove("analysis-arrive"), 900);
+  const finishedTiming = scanTiming;
+  const finishPaint = finishedTiming?.start("report_paint");
   renderResults(ctxArgs);
+  void nextFrame().then(() => {
+    if (!scanIsCurrent(token, generation)) return;
+    finishPaint?.();
+    finishedTiming?.finish();
+  });
   scanSession.transition(token, "results");
   signupReturn.finish(true, token.scanId);
   installPrompt.afterOwnResult(el.analysis, () =>
@@ -2836,6 +2910,7 @@ async function gateAnalysis(
       paintFrontPane(pending.photo);
       drawCalm(el.overlayCanvas, pending.landmarks, pending.width, pending.height);
     },
+    sideReport !== null,
   );
   // A temporary auth/session read failure must never strand a signed-out user
   // on an empty result view. Treat an unreadable session as signed out and
@@ -3286,6 +3361,7 @@ function startSide(): void {
   const openSide = () => openSideCapture({
     scanId: token.scanId,
     sex: selectedSex,
+    performance: scanTiming ?? undefined,
     // Carry the front's capture method so the side does not make the user
     // switch: camera stays camera, upload stays upload.
     method: captureMethod ?? undefined,
@@ -3293,11 +3369,20 @@ function startSide(): void {
     // so back means back one step, to the front photograph that was just
     // taken. Leaving the scan entirely is a button on that screen.
     onBack: () => showFrontReview(),
+    onSkip: () => {
+      if (!scanSession.isCurrent(token) || !pending) return;
+      lastSide = null;
+      feedbackDeliveryNote = null;
+      track("scan-side-skipped");
+      void gateAnalysis(null, token);
+    },
     onDone: async (sideReport, points, faceDir, review) => {
+      if (!scanSession.isCurrent(token) || !pending
+        || scanSession.snapshot().owner !== activeScanOwner()) return;
       // Copy the profile out before the side screen is torn down — the results
       // panel shows it under the Side tab, and after closeSide() the canvas it
       // lives on is fair game.
-      const shot = document.getElementById("side-canvas") as HTMLCanvasElement | null;
+      const shot = review.photo;
       let photo: HTMLCanvasElement | undefined;
       if (shot?.width) {
         photo = document.createElement("canvas");
@@ -3484,7 +3569,7 @@ if (isAuthAvailable()) {
       closeScanGate();
       closeDashboard();
       closeHistory();
-      closeSettings();
+      closeLazySettings();
       closeBodyProfileDialog();
       closeTrialFunnel();
       closeScanRecall();

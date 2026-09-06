@@ -31,6 +31,8 @@ test("the plan preview distinguishes selected goals from Max's full view", () =>
   assert.match(html, /Identity and bone structure stay fixed/);
   assert.doesNotMatch(html, /Create my visual target/);
   assert.doesNotMatch(html, /—/);
+  assert.match(html, /Illustrative preview/);
+  assert.doesNotMatch(html, /pts available|pts on completion|Complete after at least|\d+ to \d+ weeks/);
 });
 
 test("the render action appears only behind its rollout gate", () => {

@@ -48,6 +48,11 @@ test("a two-view blueprint rejects a missing profile source", () => {
   assert.throws(() => createMorphRenderRequest(SCAN_ID, blueprint, { front: PIXEL }), /profile photograph/i);
 });
 
+test("a front-only request never transmits an unused side photograph", () => {
+  const blueprint = buildMorphBlueprint(REPORT, EMPTY_PROFILE, "selected", false);
+  assert.deepEqual(createMorphRenderRequest(SCAN_ID, blueprint, { front: PIXEL, side: PIXEL }).source, { front: PIXEL });
+});
+
 test("renderer output is withheld unless every validation gate passes", () => {
   const failed = ready({
     validation: {

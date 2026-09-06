@@ -1906,6 +1906,16 @@ body.scan-confirm-open { overflow: hidden; }
    against: a second button here would be offering a choice we know the answer
    to. */
 .side-mode-actions.single { grid-template-columns: 1fr; }
+.side-exit-actions { display: grid; grid-template-columns: 1fr; gap: 8px; width: 100%; flex-basis: 100%; margin-top: 12px; }
+.side-exit-actions .btn { min-height: 44px; white-space: normal; line-height: 1.35; color: var(--ink); }
+.side-mode-card .side-exit-actions { border-top: 1px solid var(--line); padding-top: 12px; }
+.rangebar:has(.goal-target-marker) { margin-bottom: 22px; }
+.goal-target-marker { position: absolute; top: -4px; bottom: -4px; width: 3px; transform: translateX(-50%); background: #078569; box-shadow: 0 0 0 1px var(--card); border-radius: 2px; z-index: 2; }
+.goal-target-marker b { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font: 600 9px/1.4 var(--sans); color: #087760; padding-top: 3px; }
+.goal-target-panel p { line-height: 1.55; }
+.goal-target-note { color: var(--mut); font-size: 12px; }
+.goal-target-panel .navrow { flex-wrap: wrap; }
+.goal-target-panel .btn { white-space: normal; min-height: 44px; }
 .side-mode-actions .btn { width: 100%; padding: 11px 8px; font-size: 13.5px; min-width: 0; }
 /* Under the buttons, quieter than everything above it, and it never claims the
    automatic placement is fine. */

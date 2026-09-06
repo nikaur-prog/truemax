@@ -4,6 +4,9 @@ import { EMPTY_PROFILE, type Profile } from "./goals.js";
 import { METRICS } from "./metrics.js";
 import { buildMorphBlueprint, MORPH_GOAL_RULES } from "./morphPlan.js";
 import type { Report, ScoredMetric } from "./types.js";
+import { allowedLayers, goalEffect } from "./goalCatalogue.js";
+import { MORPH_EFFECT_LAYERS } from "./morphEffects.js";
+import type { MorphEffectId } from "./morphPlan.js";
 
 function metric(id: string, value: number, conformance = 0.2): ScoredMetric {
   const def = METRICS.find((candidate) => candidate.id === id);
@@ -89,3 +92,17 @@ test("goal rules cannot ask a renderer to redesign identity or bone", () => {
   }
 });
 
+test("every goal blueprint uses only its shared catalogue layers and does not promise appearance rewards", () => {
+  for (const id of Object.keys(MORPH_GOAL_RULES)) {
+    const plan = buildMorphBlueprint(report([metric("jawCheekRatio", 0.5)]), profile([id]), "selected", true);
+    const allowed = new Set(allowedLayers([id], true));
+    for (const [effect, amount] of Object.entries(plan.effects)) {
+      if (amount) assert.ok(allowed.has(MORPH_EFFECT_LAYERS[effect as MorphEffectId]), `${id}: ${effect}`);
+    }
+    for (const target of plan.targets) assert.ok(goalEffect(id)?.measures.includes(target.id));
+    assert.equal(plan.totalPoints, 0);
+    assert.doesNotMatch(plan.goals[0].timeframe, /\d.*weeks/);
+  }
+  const debloat = buildMorphBlueprint(report([]), profile(["debloat"]), "selected", false);
+  assert.equal(debloat.effects.underEyePuffiness, 0, "do not expand a debloat goal into the disallowed skin layer");
+});

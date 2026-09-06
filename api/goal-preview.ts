@@ -229,7 +229,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     claimedUserId = null;
 
-    const [frontOut, sideOut] = await Promise.all([captioned(rendered.front), captioned(rendered.side)]);
+    const [frontOut, sideOut] = await Promise.all([captioned(rendered.front), rendered.side ? captioned(rendered.side) : Promise.resolve(null)]);
     if (!frontOut || !sideOut) {
       await markFailed("failed");
       return json({ error: "The preview was too large to deliver safely." }, 502);

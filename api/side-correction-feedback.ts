@@ -3,6 +3,8 @@ import {
   movedSidePointIds,
   normalizedSidePoints,
   sideFeedbackMetadataIssues,
+  sideFeedbackProvenance,
+  initialSideFeedbackReviewStatus,
 } from "../src/engine/sideFeedbackPayload.js";
 import type { SideFeedbackMetadata } from "../src/engine/sideFeedbackPayload.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
@@ -334,6 +336,7 @@ export async function POST(request: Request): Promise<Response> {
       moved_point_ids: movedPointIds,
       consent_version: metadata.consentVersion,
       app_commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      review_status: initialSideFeedbackReviewStatus(metadata),
     });
     if (insertError) {
       const { error: removeError } = await admin.storage.from(BUCKET).remove([storagePath]);
@@ -348,7 +351,7 @@ export async function POST(request: Request): Promise<Response> {
       scan_id: metadata.scanId,
       event_type: "granted",
       consent_version: metadata.consentVersion,
-      details: { source: "explicit_consent_upload" },
+      details: sideFeedbackProvenance(metadata),
     });
     if (auditError) {
       // Fail closed: a consented upload is not accepted without its grant

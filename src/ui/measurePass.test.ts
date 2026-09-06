@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPassPlan } from "./measurePass.js";
+import { buildPassPlan, passDurationMs, passTiming, INTERACTIVE_MESH_REVEAL_MS, INTERACTIVE_REVEAL_BUDGET_MS } from "./measurePass.js";
 import { hasOverlay } from "./measureOverlay.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import { REGION_RELIABLE_MIN } from "../engine/scoring.js";
@@ -194,4 +194,19 @@ test("the pass walks EVERY honest measurement in a region, not one speaker", () 
   assert.deepEqual(new Set(plan.map((s) => s.metric.def.id)), new Set(expected));
 });
 
-
+test("interactive presentation stays within its reveal budget while default video pacing is unchanged", () => {
+  const front = report([region("eyes", ["browTilt", "canthalTilt", "browPosition", "eyeAspectRatio"]), region("jaw", ["jawCheekRatio"])]);
+  const side = report([region("jaw", ["gonialAngle"])]);
+  const before = JSON.stringify({ front, side });
+  const plan = buildPassPlan(front, side);
+  for (const count of [0, 1, 9, 30]) {
+    const repeated = Array.from({ length: count }, (_, index) => plan[index % plan.length]);
+    assert.equal(passDurationMs(repeated), 1400 + count * 520 + 760);
+    assert.ok(passDurationMs(repeated, "interactive") <= INTERACTIVE_REVEAL_BUDGET_MS);
+    assert.equal(passTiming(repeated, "interactive").open, INTERACTIVE_MESH_REVEAL_MS);
+  }
+  const alternating = Array.from({ length: 50 }, (_, index) => ({ ...plan[0], view: index % 2 ? "side" as const : "front" as const }));
+  assert.ok(passDurationMs(alternating, "interactive") <= INTERACTIVE_REVEAL_BUDGET_MS, "even nonstandard callers cannot budget excess transition time");
+  assert.equal(JSON.stringify({ front, side }), before, "timing never changes report metrics or scoring");
+  for (const step of plan) assert.ok((step.view === "front" ? front : side).metrics.includes(step.metric), "animation reads the original finished metric reference");
+});

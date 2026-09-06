@@ -3,6 +3,8 @@
 // cannot drift apart. Its own version, never merged with the cloud-pass
 // choice or the feedback consent: agreeing to one is never agreeing to
 // another (docs/FACIAL_MORPH_PLAN.md, section 5a).
+import { previewDeadline } from "./previewDeadline.js";
+
 export const GOAL_PREVIEW_CONSENT_VERSION = "goal-preview-v1";
 
 /** The caption every rendered preview carries, in its pixels and beside it. */
@@ -42,39 +44,44 @@ async function consentRequest(
   fetcher: typeof fetch = fetch,
 ): Promise<GoalPreviewConsentResult> {
   if (!accessToken.trim()) return { ok: false, error: "Sign in again to manage Goal preview." };
-  const response = await fetcher("/api/goal-preview-consent", {
-    method,
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      ...(method === "PUT" ? { "content-type": "application/json" } : {}),
-    },
-    ...(method === "PUT" ? { body: JSON.stringify({ version: GOAL_PREVIEW_CONSENT_VERSION }) } : {}),
-    signal,
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    return {
-      ok: false,
-      error: isRecord(payload) && typeof payload.error === "string"
-        ? payload.error.slice(0, 240)
-        : "Goal preview consent could not be updated.",
-    };
+  const budget = previewDeadline(signal, 15_000, "Consent could not be checked in time. Please try again.");
+  try {
+    const response = await budget.run((signal) => fetcher("/api/goal-preview-consent", {
+      method,
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        ...(method === "PUT" ? { "content-type": "application/json" } : {}),
+      },
+      ...(method === "PUT" ? { body: JSON.stringify({ version: GOAL_PREVIEW_CONSENT_VERSION }) } : {}),
+      signal,
+    }));
+    const payload = await budget.run(() => response.json().catch(() => null));
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: isRecord(payload) && typeof payload.error === "string"
+          ? payload.error.slice(0, 240)
+          : "Goal preview consent could not be updated.",
+      };
+    }
+    const state = stateFrom(payload);
+    if (state) return { ok: true, state };
+    if (method === "DELETE" && isRecord(payload) && payload.granted === false) {
+      return {
+        ok: true,
+        state: { granted: false, version: GOAL_PREVIEW_CONSENT_VERSION, grantedAt: null },
+      };
+    }
+    if (method === "PUT" && isRecord(payload) && payload.granted === true) {
+      return {
+        ok: true,
+        state: { granted: true, version: GOAL_PREVIEW_CONSENT_VERSION, grantedAt: null },
+      };
+    }
+    return { ok: false, error: "Goal preview consent returned an invalid response." };
+  } finally {
+    budget.dispose();
   }
-  const state = stateFrom(payload);
-  if (state) return { ok: true, state };
-  if (method === "DELETE" && isRecord(payload) && payload.granted === false) {
-    return {
-      ok: true,
-      state: { granted: false, version: GOAL_PREVIEW_CONSENT_VERSION, grantedAt: null },
-    };
-  }
-  if (method === "PUT" && isRecord(payload) && payload.granted === true) {
-    return {
-      ok: true,
-      state: { granted: true, version: GOAL_PREVIEW_CONSENT_VERSION, grantedAt: null },
-    };
-  }
-  return { ok: false, error: "Goal preview consent returned an invalid response." };
 }
 
 export function readGoalPreviewConsent(

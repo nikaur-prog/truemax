@@ -76,7 +76,7 @@ export function createMorphRenderRequest(
     version: 1,
     scanId,
     variant: blueprint.variant,
-    source: { front: source.front, ...(source.side ? { side: source.side } : {}) },
+    source: { front: source.front, ...(blueprint.hasSide && source.side ? { side: source.side } : {}) },
     blueprint,
     privacy: { purpose: "goal-preview", retainSource: false },
   };

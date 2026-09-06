@@ -268,6 +268,26 @@ const BREATH_MS = 70;
 const OPEN_MS = 1400;
 /** Closing beat: both views merged into one number. */
 const CLOSE_MS = 760;
+export const INTERACTIVE_MESH_REVEAL_MS = 320;
+export const INTERACTIVE_REVEAL_BUDGET_MS = 2500;
+export type PassDurationPolicy = "default" | "interactive";
+
+/** Presentation timing only. Scoring, metric selection and export defaults are unchanged. */
+export function passTiming(plan: readonly PassStep[], policy: PassDurationPolicy = "default") {
+  if (policy !== "interactive") return { open: OPEN_MS, arrive: ARRIVE_MS, hold: HOLD_MS, breath: BREATH_MS, close: CLOSE_MS, fadeOut: 170, fadeIn: 120, swap: 120 };
+  let view: "front" | "side" = "front";
+  let transitions = 0;
+  for (const step of plan) { if (step.view !== view) transitions++; view = step.view; }
+  if (view !== "front") transitions++;
+  const open = INTERACTIVE_MESH_REVEAL_MS, close = 120;
+  const transitionScale = Math.min(1, 460 / Math.max(1, transitions * 110));
+  const fadeOut = 70 * transitionScale, fadeIn = 40 * transitionScale;
+  // Reserve 200ms for browser frame alignment. The deadline below also bounds
+  // unexpected frame throttling or an opening promise that does not settle.
+  const available = Math.max(0, INTERACTIVE_REVEAL_BUDGET_MS - 200 - open - close - transitions * (fadeOut + fadeIn));
+  const beat = Math.min(ARRIVE_MS + HOLD_MS + BREATH_MS, available / Math.max(1, plan.length));
+  return { open, arrive: beat * 0.58, hold: beat * 0.32, breath: beat * 0.1, close, fadeOut, fadeIn, swap: 0 };
+}
 
 export interface PassHost {
   /** The photo pane that carries the camera move. */
@@ -317,24 +337,21 @@ export interface PassRun {
  * how a bar reaches 100% while three beats are still to come and then sits
  * there — which reads as the app having hung on the last one.
  */
-export function passDurationMs(plan: PassStep[]): number {
-  return OPEN_MS + plan.length * (BREATH_MS + ARRIVE_MS + HOLD_MS) + CLOSE_MS;
+export function passDurationMs(plan: PassStep[], policy: PassDurationPolicy = "default"): number {
+  const timing = passTiming(plan, policy);
+  if (policy !== "interactive") return OPEN_MS + plan.length * (BREATH_MS + ARRIVE_MS + HOLD_MS) + CLOSE_MS;
+  let view: "front" | "side" = "front", transitions = 0;
+  for (const step of plan) { if (view !== step.view) transitions++; view = step.view; }
+  if (view !== "front") transitions++;
+  return timing.open + plan.length * (timing.breath + timing.arrive + timing.hold) + timing.close + transitions * (timing.fadeOut + timing.fadeIn);
 }
 
-const sleep = (ms: number, signal: { cancelled: boolean }): Promise<void> =>
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((r) => {
-    const t = window.setTimeout(r, ms);
-    // Cancellation resolves rather than rejects. Every await in the runner is
-    // followed by a cancellation check, and a rejected sleep would need a
-    // try/catch around each one to say the same thing.
-    const poll = window.setInterval(() => {
-      if (signal.cancelled) {
-        window.clearTimeout(t);
-        window.clearInterval(poll);
-        r();
-      }
-    }, 60);
-    window.setTimeout(() => window.clearInterval(poll), ms + 80);
+    if (signal.aborted || ms <= 0) { r(); return; }
+    const end = (): void => { window.clearTimeout(timer); signal.removeEventListener("abort", end); r(); };
+    const timer = window.setTimeout(end, ms);
+    signal.addEventListener("abort", end, { once: true });
   });
 
 export interface PassOptions {
@@ -361,6 +378,10 @@ export interface PassOptions {
   startPainted?: "front" | "side";
   /** Progress already shown by the authentication handoff. */
   progressStart?: number;
+  /** Short post-compute reveal for the interactive app. Video/export callers omit it. */
+  durationPolicy?: PassDurationPolicy;
+  /** Cancels all local frames, waits and narration updates immediately. */
+  signal?: AbortSignal;
 }
 
 /** Run the pass. */
@@ -370,10 +391,37 @@ export function runMeasurePass(
   plan: PassStep[],
   opts: PassOptions = {},
 ): PassRun {
-  const signal = { cancelled: false };
-  const total = passDurationMs(plan);
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const timing = passTiming(plan, opts.durationPolicy);
+  const total = passDurationMs(plan, opts.durationPolicy);
   const progressStart = Math.max(0, Math.min(0.9, opts.progressStart ?? 0));
   let raf = 0;
+  let arriveFrame = 0;
+  let narrationTimer: number | null = null;
+  let deadline: number | null = null;
+  let budgetExpired = false;
+  let finished = false;
+  const cleanVisuals = (): void => {
+    cancelAnimationFrame(raf);
+    cancelAnimationFrame(arriveFrame);
+    if (narrationTimer !== null) window.clearTimeout(narrationTimer);
+    narrationTimer = null;
+    host.frame?.classList.remove("measuring");
+    host.status.classList.remove("swapping");
+    host.zoomable.classList.remove("viewfade");
+    host.barFill.classList.remove("driven");
+  };
+  const cancel = (): void => {
+    if (finished) return;
+    if (deadline !== null) window.clearTimeout(deadline);
+    deadline = null;
+    controller.abort();
+    cleanVisuals();
+  };
+  if (opts.signal?.aborted) return { done: Promise.resolve(), cancel: () => {} };
+  opts.signal?.addEventListener("abort", cancel, { once: true });
+  if (opts.durationPolicy === "interactive") deadline = window.setTimeout(() => { budgetExpired = true; cancel(); }, INTERACTIVE_REVEAL_BUDGET_MS);
 
   // The bar is a plain function of elapsed time against the pass's own known
   // duration. It was previously driven by a stage clock that had to be kept in
@@ -381,7 +429,7 @@ export function runMeasurePass(
   // is driven by the same await chain that decides when the pass is over.
   const t0 = performance.now();
   const tick = (now: number) => {
-    if (signal.cancelled) return;
+    if (signal.aborted || finished) return;
     const p = Math.min(1, (now - t0) / total);
     const eased = 1 - Math.pow(1 - p, 1.6);
     host.barFill.style.width = `${((progressStart + (1 - progressStart) * eased) * 100).toFixed(2)}%`;
@@ -391,14 +439,17 @@ export function runMeasurePass(
   raf = requestAnimationFrame(tick);
 
   const say = (title: string, detail: string) => {
+    if (signal.aborted || finished) return;
+    if (narrationTimer !== null) window.clearTimeout(narrationTimer);
     host.status.classList.add("swapping");
-    window.setTimeout(() => {
-      if (signal.cancelled) return;
+    narrationTimer = window.setTimeout(() => {
+      narrationTimer = null;
+      if (signal.aborted) return;
       host.status.innerHTML = detail
         ? `<b>${title}</b> <span class="mp-detail">${detail}</span>`
         : `<b>${title}</b> <span class="scan-ellipsis"><i>.</i><i>.</i><i>.</i></span>`;
       host.status.classList.remove("swapping");
-    }, 120);
+    }, timing.swap);
   };
 
   // Paint whichever photograph this beat is about. Only when it changes: a
@@ -426,12 +477,12 @@ export function runMeasurePass(
   const crossTo = async (view: "front" | "side"): Promise<void> => {
     if (painted === view) return;
     host.zoomable.classList.add("viewfade");
-    await sleep(170, signal);
-    if (signal.cancelled) return;
+    await sleep(timing.fadeOut, signal);
+    if (signal.aborted) return;
     applyZoom(host.zoomable, IDENTITY_ZOOM);
     paint(view);
     host.zoomable.classList.remove("viewfade");
-    await sleep(120, signal);
+    await sleep(timing.fadeIn, signal);
   };
 
   const drawStep = (step: PassStep, progress: number): void => {
@@ -453,19 +504,21 @@ export function runMeasurePass(
   // the canvas, which the results screen immediately overpaints anyway.
   const arrive = (step: PassStep): Promise<void> =>
     new Promise((resolve) => {
-      let start = 0;
+      const start = performance.now();
+      const finish = (): void => { cancelAnimationFrame(arriveFrame); signal.removeEventListener("abort", finish); resolve(); };
+      if (signal.aborted) { resolve(); return; }
+      signal.addEventListener("abort", finish, { once: true });
       const frame = (now: number) => {
-        if (signal.cancelled) {
-          resolve();
+        if (signal.aborted) {
+          finish();
           return;
         }
-        if (!start) start = now;
-        const t = Math.min(1, (now - start) / ARRIVE_MS);
+        const t = timing.arrive <= 0 ? 1 : Math.min(1, (now - start) / timing.arrive);
         drawStep(step, t);
-        if (t < 1) requestAnimationFrame(frame);
-        else resolve();
+        if (t < 1) arriveFrame = requestAnimationFrame(frame);
+        else finish();
       };
-      requestAnimationFrame(frame);
+      arriveFrame = requestAnimationFrame(frame);
     });
 
   const run = async (): Promise<void> => {
@@ -480,11 +533,16 @@ export function runMeasurePass(
     // is. Raced against the constant so a reveal that somehow never resolves
     // cannot strand the whole scan on its first beat.
     if (opts.open && !reduced) {
-      await Promise.race([opts.open, sleep(OPEN_MS * 2, signal)]);
+      const opening = new AbortController();
+      const abortOpening = (): void => opening.abort();
+      signal.addEventListener("abort", abortOpening, { once: true });
+      try {
+        await Promise.race([opts.open, sleep(opts.durationPolicy === "interactive" ? timing.open : OPEN_MS * 2, opening.signal)]);
+      } finally { opening.abort(); signal.removeEventListener("abort", abortOpening); }
     } else {
-      await sleep(reduced ? 260 : OPEN_MS, signal);
+      await sleep(reduced ? Math.min(260, timing.open) : timing.open, signal);
     }
-    if (signal.cancelled) return;
+    if (signal.aborted) return;
 
     host.frame?.classList.add("measuring");
     // The whole pass — frame, narration, bar — must be on screen when it
@@ -493,10 +551,11 @@ export function runMeasurePass(
     host.frame?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
     for (let i = 0; i < plan.length; i++) {
       const step = plan[i];
-      if (signal.cancelled) return;
+      if (signal.aborted) return;
       await crossTo(step.view);
-      if (signal.cancelled) return;
+      if (signal.aborted) return;
       opts.onStep?.(step, i);
+      if (signal.aborted) return;
       // Region plus the measurement's name — no values. The values were here
       // once and were cut on purpose: while the face is being read the
       // construction is the show, and numbers flashing past is noise wearing
@@ -507,17 +566,17 @@ export function runMeasurePass(
       if (!reduced) {
         // No camera move — see BREATH_MS. The face stays put; the lines come
         // to it.
-        await sleep(BREATH_MS, signal);
-        if (signal.cancelled) return;
+        await sleep(timing.breath, signal);
+        if (signal.aborted) return;
         await arrive(step);
-        if (signal.cancelled) return;
-        await sleep(HOLD_MS, signal);
+        if (signal.aborted) return;
+        await sleep(timing.hold, signal);
       } else {
         drawStep(step, 1);
-        await sleep(200, signal);
+        await sleep(Math.min(200, timing.arrive + timing.hold + timing.breath), signal);
       }
     }
-    if (signal.cancelled) return;
+    if (signal.aborted) return;
 
     // Back to the front photograph and out to the whole face for the last beat.
     // The number about to arrive is about all of it, and ending on a close-up
@@ -527,22 +586,22 @@ export function runMeasurePass(
     // front stage.
     host.frame?.classList.remove("measuring");
     await crossTo("front");
-    if (signal.cancelled) return;
+    if (signal.aborted) return;
     applyZoom(host.zoomable, IDENTITY_ZOOM);
     say(sources.side ? "Merging both views" : "Comparing against population", "");
-    await sleep(reduced ? 240 : CLOSE_MS, signal);
+    await sleep(reduced ? Math.min(240, timing.close) : timing.close, signal);
   };
 
   const done = run().finally(() => {
-    cancelAnimationFrame(raf);
+    finished = true;
+    if (deadline !== null) window.clearTimeout(deadline);
+    opts.signal?.removeEventListener("abort", cancel);
+    cleanVisuals();
+    if (!signal.aborted || budgetExpired) host.barFill.style.width = "100%";
   });
 
   return {
     done,
-    cancel: () => {
-      signal.cancelled = true;
-      host.frame?.classList.remove("measuring");
-      cancelAnimationFrame(raf);
-    },
+    cancel,
   };
 }

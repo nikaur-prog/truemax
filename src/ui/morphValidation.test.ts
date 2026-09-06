@@ -62,6 +62,8 @@ test("target validation accepts bounded progress and rejects reversal or oversho
   assert.equal(targetsMoveAsSpecified([target], report(0.95)), true);
   assert.equal(targetsMoveAsSpecified([target], report(1.02)), false);
   assert.equal(targetsMoveAsSpecified([target], report(0.8)), false);
+  assert.equal(targetsMoveAsSpecified([{ ...target, current: NaN }], report(0.95)), false);
+  assert.equal(targetsMoveAsSpecified([{ ...target, target: Infinity }], report(0.95)), false);
 });
 
 for (const stage of ["init", "decode"] as const) {
@@ -73,7 +75,7 @@ for (const stage of ["init", "decode"] as const) {
     const started = new Promise<void>((resolve) => { entered = resolve; });
     const work = validateMorphImages({
       blueprint: buildMorphBlueprint(report(1), EMPTY_PROFILE, "selected", false),
-      originalFrontLandmarks: points, images: { front: "unused" }, signal: abort.signal,
+      originalFrontLandmarks: points, originalFrontSize: { width: 1200, height: 800 }, images: { front: "unused" }, signal: abort.signal,
     }, {
       init: async () => { if (stage === "init") { entered(); await delayed; } },
       decode: async () => { if (stage === "decode") { entered(); await delayed; } return {} as HTMLCanvasElement; },
@@ -91,4 +93,28 @@ test("an already cancelled side-validation seed never starts segmentation", asyn
   const abort = new AbortController();
   abort.abort();
   await assert.rejects(seedSidePointsSmart({} as HTMLCanvasElement, undefined, abort.signal), { name: "AbortError" });
+});
+
+test("identity alignment is invariant to crop, padding, uniform resize and roll across aspect ratios", () => {
+  const original = { width: 900, height: 1400 };
+  const rendered = { width: 1500, height: 1100 };
+  const angle = 0.08, scale = 0.6;
+  const moved = points.map((p) => ({ ...p,
+    x: (scale * (p.x * original.width * Math.cos(angle) - p.y * original.height * Math.sin(angle)) + 350) / rendered.width,
+    y: (scale * (p.x * original.width * Math.sin(angle) + p.y * original.height * Math.cos(angle)) + 60) / rendered.height,
+  }));
+  const distance = identityLandmarkDistance(points, moved, original, rendered);
+  assert.ok(distance);
+  assert.ok(distance.median < 1e-8);
+  assert.ok(distance.p90 < 1e-8);
+});
+
+test("aspect correction does not excuse vertical face stretching or missing geometry", () => {
+  const stretched = points.map((p) => ({ ...p, y: 0.4 + (p.y - 0.4) * 1.4 }));
+  const distance = identityLandmarkDistance(points, stretched, { width: 900, height: 1400 }, { width: 900, height: 1400 });
+  assert.ok(distance && distance.p90 > 0.09);
+  assert.equal(identityLandmarkDistance(points, points, { width: 0, height: 1 }), null);
+  const invalid = points.map((p) => ({ ...p }));
+  invalid[6].x = NaN;
+  assert.equal(identityLandmarkDistance(points, invalid), null);
 });

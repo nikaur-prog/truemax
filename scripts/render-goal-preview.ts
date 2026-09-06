@@ -67,7 +67,7 @@ console.error(`Provider: ${provider.name}. Layers: ${layers.join(", ") || "(none
 console.error(`Instructions:\n${instructions}\n`);
 
 const front = await prepared(readFileSync(frontPath));
-const side = sidePath && existsSync(sidePath) ? await prepared(readFileSync(sidePath)) : front;
+const side = sidePath && existsSync(sidePath) ? await prepared(readFileSync(sidePath)) : undefined;
 const started = Date.now();
 const rendered = await provider.render({ front, side, instructions, deadline: Date.now() + 240_000 });
 if (!("front" in rendered)) {
@@ -77,7 +77,7 @@ if (!("front" in rendered)) {
 mkdirSync(OUT, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const frontOut = await captioned(rendered.front);
-const sideOut = sidePath ? await captioned(rendered.side) : null;
+const sideOut = sidePath && rendered.side ? await captioned(rendered.side) : null;
 if (!frontOut) {
   console.error("The rendered front could not be captioned.");
   process.exit(1);

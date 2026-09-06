@@ -6,6 +6,7 @@ import { buildMorphBlueprint, MORPH_GOAL_RULES } from "../src/engine/morphPlan.j
 import { EMPTY_PROFILE } from "../src/engine/goals.js";
 import { createMorphRenderRequest, parseMorphRenderState, requestMorphRender } from "../src/engine/morphContract.js";
 import type { Report } from "../src/engine/types.js";
+import { GOAL_CATALOGUE_VERSION, specAllowed } from "../src/engine/goalCatalogue.js";
 
 const route = readFileSync(new URL("./morph-preview.ts", import.meta.url), "utf8");
 const contract = readFileSync(new URL("../docs/MORPH_PREVIEW_CONTRACT.md", import.meta.url), "utf8");
@@ -86,6 +87,9 @@ test("the request is parsed strictly: ids, bounded images, a stated purpose, a s
   assert.match((parseMorphRequest(request({}, { goals: [{ id: "nosejob" }] })) as { error: string }).error, /goal the catalogue does not know/);
   assert.match((parseMorphRequest(request({}, { effects: { boneWidth: 0.5 } })) as { error: string }).error, /effect the server does not render/);
   assert.match((parseMorphRequest(request({}, { effects: { browDefinition: 1.5 } })) as { error: string }).error, /out of range/);
+  assert.ok("error" in parseMorphRequest(request({}, { effects: { constructor: 1 } })));
+  assert.ok("error" in parseMorphRequest(request({}, { effects: [] })));
+  assert.ok("error" in parseMorphRequest(request({}, { goals: [null] })));
   // A front-only blueprint needs no side.
   const frontOnly = parseMorphRequest(request({ source: { front: PIXEL } }, { hasSide: false }));
   assert.ok(!("error" in frontOnly) && frontOnly.side === null);
@@ -96,6 +100,7 @@ test("every real blueprint keeps signed effects inside the server's existing uni
     const blueprint = buildMorphBlueprint(REPORT, { ...EMPTY_PROFILE, goals: [id] }, "selected", true);
     const parsed = parseMorphRequest(createMorphRenderRequest(SCAN, blueprint, { front: PIXEL, side: PIXEL }));
     assert.ok(!("error" in parsed), `${id}: ${"error" in parsed ? parsed.error : ""}`);
+    assert.equal(specAllowed({ goalIds: parsed.goalIds, layers: parsed.layers, catalogueVersion: GOAL_CATALOGUE_VERSION }, true).ok, true, id);
   }
   const reducing = parseMorphRequest(request({}, { effects: { facialFullness: -1, blemishVisibility: -0.4, browDefinition: 0, hairFinish: -0 } }));
   assert.ok(!("error" in reducing));

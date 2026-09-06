@@ -4,6 +4,8 @@ import type { RenderLayer } from "../src/engine/goalCatalogue.js";
 import { GOAL_PREVIEW_CAPTION, GOAL_PREVIEW_CONSENT_VERSION } from "../src/engine/goalPreviewConsent.js";
 import { GOALS } from "../src/engine/goals.js";
 import type { MorphBlueprint, MorphEffectId } from "../src/engine/morphPlan.js";
+import { MORPH_EFFECT_LAYERS } from "../src/engine/morphEffects.js";
+import { parseMorphNumericRecipe, type MorphNumericRecipe } from "./_morphRecipe.js";
 import { isScanId } from "../src/engine/scanSession.js";
 import { maxAccessForUser } from "./_maxAccess.js";
 import { previewInstructions, previewProvider } from "./_previewProvider.js";
@@ -49,19 +51,7 @@ const SERVER_GATES = ["moderationPassed", "naturalOnly", "crossViewConsistent"] 
 const CLIENT_GATES = ["identityPreserved", "targetAligned"] as const;
 
 /** The effects a blueprint may carry, and the presentation layer each is allowed to touch. */
-export const EFFECT_LAYERS: Record<MorphEffectId, RenderLayer> = {
-  facialFullness: "leanerPresentation",
-  underEyePuffiness: "skinSurface",
-  jawDefinition: "leanerPresentation",
-  underChinFullness: "leanerPresentation",
-  skinEvenness: "skinSurface",
-  blemishVisibility: "skinSurface",
-  browDefinition: "brows",
-  hairFinish: "hair",
-  smileFinish: "expression",
-  posture: "posture",
-  lighting: "lighting",
-};
+export const EFFECT_LAYERS = MORPH_EFFECT_LAYERS;
 
 export interface MorphRequestInput {
   scanId: string;
@@ -71,6 +61,7 @@ export interface MorphRequestInput {
   goalIds: string[];
   layers: RenderLayer[];
   hasSide: boolean;
+  recipe: MorphNumericRecipe;
 }
 
 function decodeImage(value: unknown): Buffer | null {
@@ -101,31 +92,35 @@ export function parseMorphRequest(value: unknown): MorphRequestInput | { error: 
   const front = decodeImage(source?.front);
   if (!front) return { error: "The front photograph is missing or not a bounded JPEG or WebP." };
   const blueprint = raw.blueprint as Partial<MorphBlueprint> | undefined;
-  if (!blueprint || blueprint.version !== 1 || !Array.isArray(blueprint.goals) || !blueprint.effects || typeof blueprint.effects !== "object") {
+  if (!blueprint || blueprint.version !== 1 || !Array.isArray(blueprint.goals) || !blueprint.effects || typeof blueprint.effects !== "object" || Array.isArray(blueprint.effects)) {
     return { error: "The blueprint is missing or malformed." };
   }
   const hasSide = blueprint.hasSide === true;
   const side = hasSide ? decodeImage(source?.side) : null;
   if (hasSide && !side) return { error: "The profile photograph is missing or not a bounded JPEG or WebP." };
-  const goalIds = [...new Set(blueprint.goals.map((g) => (g as { id?: unknown }).id).filter((id): id is string => typeof id === "string" && GOALS.some((d) => d.id === id)))];
+  const goalIds = [...new Set(blueprint.goals.map((g) => g && typeof g === "object" ? (g as { id?: unknown }).id : null).filter((id): id is string => typeof id === "string" && GOALS.some((d) => d.id === id)))];
   if (goalIds.length !== blueprint.goals.length) return { error: "The blueprint names a goal the catalogue does not know." };
   const layers = new Set<RenderLayer>();
   for (const [effect, amount] of Object.entries(blueprint.effects)) {
-    if (!(effect in EFFECT_LAYERS)) return { error: `The blueprint names an effect the server does not render: ${effect}.` };
+    if (!Object.prototype.hasOwnProperty.call(EFFECT_LAYERS, effect)) return { error: "The blueprint names an effect the server does not render." };
     // The blueprint is a signed vector: less fullness or visible blemishes is
     // negative, more definition is positive. Both directions activate a layer;
     // the same bounded [-1, 1] budget applies and zero means no requested edit.
     if (typeof amount !== "number" || !Number.isFinite(amount) || amount < -1 || amount > 1) return { error: "An effect amount is out of range." };
     if (amount !== 0) layers.add(EFFECT_LAYERS[effect as MorphEffectId]);
   }
+  const orderedLayers = RENDER_LAYERS.filter((l) => layers.has(l));
+  const recipe = parseMorphNumericRecipe(blueprint as unknown as Record<string, unknown>, goalIds, orderedLayers, hasSide);
+  if ("error" in recipe) return recipe;
   return {
     scanId: raw.scanId,
     variant: raw.variant,
     front,
     side,
     goalIds,
-    layers: RENDER_LAYERS.filter((l) => layers.has(l)),
+    layers: orderedLayers,
     hasSide,
+    recipe,
   };
 }
 
@@ -198,7 +193,7 @@ export async function POST(request: Request): Promise<Response> {
     claimedUserId = user.id;
 
     previewId = randomUUID();
-    const spec = { contract: "morph-preview-1", variant: parsed.variant, goalIds: parsed.goalIds, layers: parsed.layers, hasSide: parsed.hasSide, catalogueVersion: GOAL_CATALOGUE_VERSION };
+    const spec = { contract: "morph-preview-1", variant: parsed.variant, goalIds: parsed.goalIds, layers: parsed.layers, hasSide: parsed.hasSide, catalogueVersion: GOAL_CATALOGUE_VERSION, recipe: parsed.recipe };
     const { error: insertError } = await admin.from("goal_previews").insert({
       id: previewId,
       user_id: user.id,
@@ -213,10 +208,8 @@ export async function POST(request: Request): Promise<Response> {
 
     const deadline = Date.now() + TOTAL_BUDGET_MS;
     const frontIn = await prepared(parsed.front);
-    // A front-only scan renders the front twice so the provider interface
-    // stays one shape; the second image is dropped below.
-    const sideIn = parsed.side ? await prepared(parsed.side) : frontIn;
-    const rendered = await provider.render({ front: frontIn, side: sideIn, instructions: previewInstructions(parsed.layers), deadline });
+    const sideIn = parsed.side ? await prepared(parsed.side) : undefined;
+    const rendered = await provider.render({ front: frontIn, side: sideIn, instructions: previewInstructions(parsed.layers, parsed.recipe), deadline });
     if (!("front" in rendered)) {
       await releaseClaim().catch((releaseError) => console.error("morph-preview release", safeMessage(releaseError)));
       await markFailed();
@@ -225,7 +218,7 @@ export async function POST(request: Request): Promise<Response> {
     claimedUserId = null;
 
     const frontOut = await captioned(rendered.front);
-    const sideOut = parsed.side ? await captioned(rendered.side) : null;
+    const sideOut = parsed.side && rendered.side ? await captioned(rendered.side) : null;
     if (!frontOut || (parsed.side && !sideOut)) {
       await markFailed();
       return json({ status: "failed", jobId: previewId, error: "The preview was too large to deliver safely." }, 502);

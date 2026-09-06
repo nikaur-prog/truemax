@@ -41,6 +41,8 @@
 // and a mascot the same colour as the furniture is furniture.
 // ---------------------------------------------------------------------------
 
+import { maxMotionActive, observeMaxGaze, observeMaxMotion } from "./maxMotion.js";
+
 export type MaxMood = "happy" | "excited" | "thinking" | "concerned" | "sad" | "mad";
 
 // Thinking is a pose, not a loading state. A report may deliberately open on
@@ -395,7 +397,7 @@ export interface MaxWireOptions {
   repertoire?: "auto" | "full" | "quiet";
 }
 
-type WiredSvg = SVGSVGElement & { __mxWired?: boolean; __mxIdle?: { destroy(): void } | null };
+type WiredSvg = SVGSVGElement & { __mxWired?: boolean; __mxIdle?: { destroy(): void } | null; __mxCleanup?: () => void };
 
 export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireOptions = {}): void {
   if (!stage) return;
@@ -403,14 +405,17 @@ export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireO
   if (!svg || svg.__mxWired) return;
   svg.__mxWired = true;
   installMaxSleep();
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let dead = false;
+  let loadingIdle = false;
+  let measureFrame: number | null = null;
+  let thinkingTimer: number | null = null;
 
   // A deterministic results pose can be `thinking`. Keep that rotation, since
   // it gives the report some character, while making it a bounded beat. The
   // idle controller below still has its own five-second thinking ACT later;
   // both paths cleanly return to the happy resting face.
   if (svg.classList.contains("mx-mood-thinking")) {
-    releaseThinkingPose(svg, reduced ? 0 : THINKING_POSE_MS);
+    thinkingTimer = releaseThinkingPose(svg, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : THINKING_POSE_MS);
   }
 
   // The idle repertoire, only where he is big enough to be watched. Five of
@@ -421,54 +426,16 @@ export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireO
   // of ZERO means "not laid out" (a hidden tab), not "small", so that case is
   // measured again the first time he is actually on screen.
   const mountIdle = (): void => {
-    if (!svg.isConnected || svg.__mxIdle) return;
+    if (dead || !maxMotionActive(svg) || svg.__mxIdle || loadingIdle) return;
+    loadingIdle = true;
     void import("./maxIdle.js").then((m) => {
-      if (!svg.isConnected || svg.__mxIdle) return;
+      loadingIdle = false;
+      if (dead || !maxMotionActive(svg) || svg.__mxIdle) return;
       svg.__mxIdle = m.mountMaxIdle(stage);
-    });
+    }).catch(() => { loadingIdle = false; });
   };
   const repertoire = options.repertoire ?? "auto";
-  if (repertoire === "full") {
-    mountIdle();
-  } else if (repertoire === "auto") {
-    requestAnimationFrame(() => {
-      if (!svg.isConnected) return;
-      const width = svg.getBoundingClientRect().width;
-      if (width >= IDLE_MIN_PX) {
-        mountIdle();
-        return;
-      }
-      if (width === 0 && typeof IntersectionObserver !== "undefined") {
-        const once = new IntersectionObserver((entries) => {
-          if (!entries.some((e) => e.isIntersecting)) return;
-          once.disconnect();
-          if (svg.isConnected && svg.getBoundingClientRect().width >= IDLE_MIN_PX) mountIdle();
-        });
-        once.observe(svg);
-      }
-    });
-  }
-
-  const gaze = svg.querySelector<SVGGElement>(".mx-gaze");
-  if (gaze && !reduced && window.matchMedia("(pointer: fine)").matches) {
-    const onMove = (event: PointerEvent) => {
-      if (!stage.isConnected) {
-        document.removeEventListener("pointermove", onMove);
-        return;
-      }
-      const box = svg.getBoundingClientRect();
-      if (!box.width) return;
-      const dx = event.clientX - (box.left + box.width / 2);
-      const dy = event.clientY - (box.top + box.height * 0.38);
-      const reach = Math.hypot(dx, dy) || 1;
-      // Clamp to the white of the eye. Beyond ~3px the pupil crosses the iris
-      // outline and he stops looking attentive and starts looking unwell.
-      const r = Math.min(3, reach / 40);
-      svg.style.setProperty("--mx-gaze-x", `${((dx / reach) * r).toFixed(2)}px`);
-      svg.style.setProperty("--mx-gaze-y", `${((dy / reach) * r).toFixed(2)}px`);
-    };
-    document.addEventListener("pointermove", onMove, { passive: true });
-  }
+  const stopGaze = svg.querySelector(".mx-gaze") ? observeMaxGaze(svg) : () => {};
 
   const sticker = stage.querySelector(".max-sticker");
   const poked = sticker ? [svg, sticker] : [svg];
@@ -478,11 +445,11 @@ export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireO
     pokeTimer = null;
     for (const el of poked) el.classList.remove("poked");
   };
-  svg.querySelector(".mx-bob")?.addEventListener("animationend", (e) => {
+  const onAnimationEnd = (e: Event): void => {
     if ((e as AnimationEvent).animationName === "mx-hop") unpoke();
-  });
-  stage.addEventListener("click", () => {
-    if (reduced) return;
+  };
+  const onClick = (): void => {
+    if (dead || !maxMotionActive(svg)) return;
     unpoke();
     for (const el of poked) {
       // Reflow, or re-adding the class in the same frame does nothing.
@@ -491,7 +458,7 @@ export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireO
     }
     pokeTimer = window.setTimeout(unpoke, POKE_MS);
     greet(svg);
-  });
+  };
 
   // Hovering him is the other way to say hello, and it used to be a CSS
   // `:hover` rule, which is what made the hand snap. A hover animation is
@@ -499,10 +466,38 @@ export function wireMaxInteractions(stage: HTMLElement | null, options: MaxWireO
   // so leaving the box mid-wave threw his arm from shoulder height to his side
   // in a single frame. Driven from here the wave always finishes and the
   // keyframes bring the arm down themselves, whatever the pointer does.
-  stage.addEventListener("pointerenter", (e) => {
-    if (reduced || (e as PointerEvent).pointerType === "touch") return;
+  const onEnter = (e: Event): void => {
+    if (dead || (e as PointerEvent).pointerType === "touch") return;
     greet(svg);
+  };
+  const bob = svg.querySelector(".mx-bob");
+  bob?.addEventListener("animationend", onAnimationEnd);
+  stage.addEventListener("click", onClick);
+  stage.addEventListener("pointerenter", onEnter);
+  const stopMotion = observeMaxMotion(svg, (active) => {
+    if (measureFrame !== null) cancelAnimationFrame(measureFrame);
+    measureFrame = null;
+    if (!active) { unpoke(); clearMaxReaction(svg); clearMaxGreeting(svg); return; }
+    if (repertoire === "full") mountIdle();
+    else if (repertoire === "auto") measureFrame = requestAnimationFrame(() => {
+      measureFrame = null;
+      if (!dead && maxMotionActive(svg) && svg.getBoundingClientRect().width >= IDLE_MIN_PX) mountIdle();
+    });
   });
+  svg.__mxCleanup = () => {
+    if (dead) return;
+    dead = true;
+    stopMotion();
+    stopGaze();
+    unpoke();
+    if (measureFrame !== null) cancelAnimationFrame(measureFrame);
+    if (thinkingTimer !== null) window.clearTimeout(thinkingTimer);
+    bob?.removeEventListener("animationend", onAnimationEnd);
+    stage.removeEventListener("click", onClick);
+    stage.removeEventListener("pointerenter", onEnter);
+    svg.__mxWired = false;
+    delete svg.__mxCleanup;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -524,24 +519,10 @@ let sleepInstalled = false;
 
 export function installMaxSleep(): void {
   if (sleepInstalled) return;
-  if (typeof document === "undefined" || typeof IntersectionObserver === "undefined" || typeof MutationObserver === "undefined") return;
+  if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
   sleepInstalled = true;
 
-  const watched = new Set<Element>();
-  const offscreen = new WeakSet<Element>();
-  const apply = (svg: Element): void => {
-    svg.classList.toggle("mx-asleep", offscreen.has(svg) || document.hidden);
-  };
-  const io = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) offscreen.delete(entry.target);
-        else offscreen.add(entry.target);
-        apply(entry.target);
-      }
-    },
-    { threshold: 0.2 },
-  );
+  const watched = new Map<Element, () => void>();
   const drawingsIn = (root: Element | Document): Element[] => {
     const list: Element[] = [];
     if (root instanceof Element && root.matches(".mx-svg")) list.push(root);
@@ -551,15 +532,13 @@ export function installMaxSleep(): void {
   const watch = (root: Element | Document): void => {
     for (const svg of drawingsIn(root)) {
       if (watched.has(svg)) continue;
-      watched.add(svg);
-      io.observe(svg);
+      watched.set(svg, observeMaxMotion(svg as SVGSVGElement, (active) => svg.classList.toggle("mx-asleep", !active)));
     }
   };
   const release = (root: Element): void => {
     for (const svg of drawingsIn(root)) {
-      io.unobserve(svg);
+      watched.get(svg)?.();
       watched.delete(svg);
-      offscreen.delete(svg);
       // Woken on the way out: the markup is often reused, and a drawing that
       // comes back frozen mid-blink is worse than one that idles for a frame.
       svg.classList.remove("mx-asleep");
@@ -568,6 +547,9 @@ export function installMaxSleep(): void {
         idle.destroy();
         (svg as WiredSvg).__mxIdle = null;
       }
+      (svg as WiredSvg).__mxCleanup?.();
+      clearMaxReaction(svg as SVGSVGElement);
+      clearMaxGreeting(svg as SVGSVGElement);
     }
   };
   watch(document);
@@ -577,9 +559,6 @@ export function installMaxSleep(): void {
       for (const node of record.removedNodes) if (node instanceof Element && !node.isConnected) release(node);
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
-  document.addEventListener("visibilitychange", () => {
-    for (const svg of watched) apply(svg);
-  });
 }
 
 if (typeof document !== "undefined") installMaxSleep();
@@ -607,11 +586,16 @@ export type MaxReaction = "cheer" | "nod" | "shake";
 
 const REACTION_MS: Record<MaxReaction, number> = { cheer: 1600, nod: 900, shake: 800 };
 const reactionTimers = new WeakMap<SVGSVGElement, number>();
+function clearMaxReaction(svg: SVGSVGElement): void {
+  const pending = reactionTimers.get(svg);
+  if (pending !== undefined) window.clearTimeout(pending);
+  reactionTimers.delete(svg);
+  svg.classList.remove("mx-react-cheer", "mx-react-nod", "mx-react-shake", "mx-react-face");
+}
 
 export function reactMax(stage: HTMLElement | null, reaction: MaxReaction): void {
   const svg = stage?.querySelector<SVGSVGElement>(".mx-svg");
-  if (!svg) return;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!svg || !maxMotionActive(svg)) return;
 
   const pending = reactionTimers.get(svg);
   if (pending) window.clearTimeout(pending);
@@ -636,6 +620,8 @@ export function reactMax(stage: HTMLElement | null, reaction: MaxReaction): void
 /** How many times this drawing has waved. */
 const WAVE_LIMIT = 2;
 const waves = new WeakMap<SVGSVGElement, number>();
+const greetings = new WeakMap<SVGSVGElement, () => void>();
+function clearMaxGreeting(svg: SVGSVGElement): void { greetings.get(svg)?.(); }
 
 /**
  * Wave hello, at most twice per drawing.
@@ -648,7 +634,7 @@ const waves = new WeakMap<SVGSVGElement, number>();
  * attention with the idle repertoire instead (ui/maxIdle.ts).
  */
 export function greet(svg: SVGSVGElement | null, opts: { big?: boolean } = {}): void {
-  if (!svg) return;
+  if (!svg || !maxMotionActive(svg)) return;
   const arm = svg.querySelector<SVGGElement>(".mx-arm");
   if (!arm) return;
   // A big wave is a deliberate entrance, not a greeting, so it is exempt from
@@ -664,8 +650,12 @@ export function greet(svg: SVGSVGElement | null, opts: { big?: boolean } = {}): 
   if (arm.classList.contains("waving") || arm.classList.contains("waving-big")) return;
   arm.classList.add(cls);
   const done = () => {
+    window.clearTimeout(timer);
     arm.classList.remove("waving", "waving-big");
     arm.removeEventListener("animationend", done);
+    greetings.delete(svg);
   };
+  const timer = window.setTimeout(done, 1800);
+  greetings.set(svg, done);
   arm.addEventListener("animationend", done);
 }

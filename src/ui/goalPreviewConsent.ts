@@ -41,6 +41,7 @@ export async function ensureGoalPreviewConsent(
 
   if (active) return false;
   return new Promise<boolean>((resolve) => {
+    const previousFocus = document.activeElement as HTMLElement | null;
     const host = document.createElement("div");
     const controller = new AbortController();
     let settled = false;
@@ -50,11 +51,18 @@ export async function ensureGoalPreviewConsent(
       settled = true;
       controller.abort();
       options.signal?.removeEventListener("abort", cancelled);
+      document.removeEventListener("focusin", containFocus);
       host.remove();
       // Only this request's modal may be closed by a late grant response.
       if (active === host) active = null;
       if (!document.querySelector(".trial-overlay")) document.body.classList.remove("funnel-open");
+      if (current() && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
       resolve(granted);
+    };
+    const containFocus = (event: FocusEvent) => {
+      if (!settled && active === host && !host.contains(event.target as Node)) {
+        host.querySelector<HTMLElement>("#goal-consent-title")?.focus({ preventScroll: true });
+      }
     };
     const cancelled = () => finish(false);
     options.signal?.addEventListener("abort", cancelled, { once: true });
@@ -66,7 +74,7 @@ export async function ensureGoalPreviewConsent(
         <button class="trial-close" type="button" aria-label="Close">✕</button>
       </header>
       <main class="trial-body">
-        <h2 id="goal-consent-title">Send this scan once to create your visual target?</h2>
+        <h2 id="goal-consent-title" tabindex="-1">Send this scan once to create your visual target?</h2>
         <p>TrueMax will send the front photograph, the profile photograph if this scan has one, and a bounded list of your selected presentation goals. It does not send your name, chat history or measurements outside that goal recipe.</p>
         <div class="goal-consent-facts">
           <p><b>Who processes it</b> The render may be processed by Higgsfield or OpenAI, depending on which service is available. <a href="https://higgsfield.ai/privacy-policy" target="_blank" rel="noopener noreferrer">Higgsfield privacy</a> · <a href="https://openai.com/policies/privacy-policy/" target="_blank" rel="noopener noreferrer">OpenAI privacy</a>.</p>
@@ -84,6 +92,8 @@ export async function ensureGoalPreviewConsent(
     </div>`;
     document.body.appendChild(host);
     document.body.classList.add("funnel-open");
+    document.addEventListener("focusin", containFocus);
+    host.querySelector<HTMLElement>("#goal-consent-title")?.focus({ preventScroll: true });
 
     const no = host.querySelector<HTMLButtonElement>("[data-goal-consent-no]");
     const yes = host.querySelector<HTMLButtonElement>("[data-goal-consent-yes]");
@@ -93,6 +103,16 @@ export async function ensureGoalPreviewConsent(
     host.querySelector(".trial-close")?.addEventListener("click", decline);
     host.addEventListener("keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); decline(); }
+      if (event.key === "Tab") {
+        const controls = [...host.querySelectorAll<HTMLElement>('button, a[href], [tabindex="0"]')]
+          .filter((element) => !element.hidden && !(element as HTMLButtonElement).disabled);
+        if (!controls.length) { event.preventDefault(); return; }
+        const index = controls.indexOf(document.activeElement as HTMLElement);
+        if (index < 0 || (!event.shiftKey && index === controls.length - 1) || (event.shiftKey && index === 0)) {
+          event.preventDefault();
+          controls[event.shiftKey ? controls.length - 1 : 0].focus({ preventScroll: true });
+        }
+      }
     });
     yes?.addEventListener("click", async () => {
       if (!yes || settled || busy) return;

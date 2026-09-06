@@ -812,6 +812,7 @@ async function callTool(
   images: ImageBlock[],
   prompt: string,
   tool: Anthropic.Messages.Tool,
+  signal?: AbortSignal,
 ): Promise<{ input: unknown; usage: LandmarkPassUsage }> {
   const content: Anthropic.Messages.ContentBlockParam[] = [];
   images.forEach((image, i) => {
@@ -819,13 +820,15 @@ async function callTool(
     content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image.data } });
   });
   content.push({ type: "text", text: prompt });
+  signal?.throwIfAborted();
   const response = await client.messages.create({
     model,
     max_tokens: 900,
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name },
     messages: [{ role: "user", content }],
-  });
+  }, { signal, maxRetries: 0 });
+  signal?.throwIfAborted();
   const block = response.content.find((b) => b.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new Error("The model returned no landmark tool call");
   return {
@@ -835,6 +838,8 @@ async function callTool(
 }
 
 export interface PlaceOptions {
+  /** Shared deadline/retake signal. Aborted work must not schedule later crops. */
+  signal?: AbortSignal;
   model?: string;
   /** False runs the whole-frame pass only. */
   zoom?: boolean;
@@ -892,6 +897,7 @@ export async function placeSideLandmarks(
   image: PreparedImage,
   options: PlaceOptions = {},
 ): Promise<LandmarkPass> {
+  options.signal?.throwIfAborted();
   const model = options.model || process.env.SIDE_LANDMARK_MODEL || LANDMARK_MODEL_DEFAULT;
   const zoom = options.zoom ?? true;
   const frame: GridFrame = { width: image.width, height: image.height, step: LANDMARK_GRID_STEP };
@@ -914,7 +920,7 @@ export async function placeSideLandmarks(
       placed[id] = { x: options.hint![id].x * frame.width, y: options.hint![id].y * frame.height, confidence: 0.5 };
     }
   } else {
-    const first = await callTool(client, model, [{ data: await withGrid(image.plain, frame) }], landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame));
+    const first = await callTool(client, model, [{ data: await withGrid(image.plain, frame) }], landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame), options.signal);
     spend(first.usage);
     placed = parsePixelToolInput(first.input, SIDE_LANDMARK_IDS, frame) as Record<SideLandmarkId, PixelPlacement>;
     stages.first = snapshot(placed, SIDE_LANDMARK_IDS, frame);
@@ -951,7 +957,7 @@ export async function placeSideLandmarks(
           const window = coarseWindows[cluster];
           const crop = await zoomCrop(image.plain, window);
           coarseCrops[cluster] = crop;
-          const answer = await callTool(client, model, [{ data: crop.data }], zoomPrompt(cluster, ids, crop.frame, faceDir), landmarkTool(ids, crop.frame));
+          const answer = await callTool(client, model, [{ data: crop.data }], zoomPrompt(cluster, ids, crop.frame, faceDir), landmarkTool(ids, crop.frame), options.signal);
           spend(answer.usage);
           const read = parsePixelToolInput(answer.input, ids, crop.frame);
           for (const id of ids) {
@@ -959,6 +965,7 @@ export async function placeSideLandmarks(
             if (!zoomed.includes(id)) zoomed.push(id);
           }
         } catch (error) {
+          options.signal?.throwIfAborted();
           options.onZoomError?.(`coarse ${cluster}`, error);
         }
       }),
@@ -1026,7 +1033,7 @@ export async function placeSideLandmarks(
       );
       const context = await contextFor(region);
       const images = context ? [context, { data: crop.data }] : [{ data: crop.data }];
-      const answer = await callTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction, cueFor(region)), landmarkTool(ids, crop.frame));
+      const answer = await callTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction, cueFor(region)), landmarkTool(ids, crop.frame), options.signal);
       spend(answer.usage);
       const read = parsePixelToolInput(answer.input, ids, crop.frame);
       const out: Partial<Record<Id, PixelPlacement>> = {};
@@ -1067,6 +1074,7 @@ export async function placeSideLandmarks(
             if (all.length > 1) spread[id] = readSpread(all, unit);
           }
         } catch (error) {
+          options.signal?.throwIfAborted();
           options.onZoomError?.("fine ear", error);
         }
       })(),
@@ -1074,6 +1082,7 @@ export async function placeSideLandmarks(
         try {
           jawRead = await fineCall("jaw", ["gonion", ...JAW_OUTLINE_IDS] as const);
         } catch (error) {
+          options.signal?.throwIfAborted();
           options.onZoomError?.("fine jaw", error);
         }
       })(),
@@ -1095,6 +1104,7 @@ export async function placeSideLandmarks(
           }
           for (const id of CHIN_IDS) placed[id] = read[id]!;
         } catch (error) {
+          options.signal?.throwIfAborted();
           options.onZoomError?.("fine chin", error);
         }
       })(),
@@ -1109,6 +1119,7 @@ export async function placeSideLandmarks(
     stages.fine = snapshot(placed, [...EAR_IDS, ...LOWER_IDS], frame);
   }
 
+  options.signal?.throwIfAborted();
   return {
     result: resultFromPixels(placed, frame),
     model,
