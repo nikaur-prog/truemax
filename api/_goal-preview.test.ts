@@ -56,6 +56,26 @@ test("the caption lands in the pixels and the output stays under the response ce
   assert.ok(mean < 120, `bottom band mean ${mean}`);
 });
 
+for (const [label, width, height, expectedWidth, expectedHeight] of [
+  ["portrait", 1024, 1536, 933, 1400],
+  ["landscape", 1536, 1024, 1400, 933],
+] as const) {
+  test(`a large ${label} preview is captioned after downscaling`, async () => {
+    const src = await sharp({ create: { width, height, channels: 3, background: "#b08a70" } }).jpeg().toBuffer();
+    const out = await captioned(src);
+    assert.ok(out, "safe captioned output exists");
+    const meta = await sharp(out).metadata();
+    assert.deepEqual([meta.width, meta.height], [expectedWidth, expectedHeight]);
+    assert.equal(meta.format, "jpeg");
+    assert.ok(out.length <= 1_400_000, "within the per-view response ceiling");
+    const bandHeight = Math.max(14, Math.round(expectedWidth / 46)) * 2;
+    const data = await sharp(out).extract({ left: 0, top: expectedHeight - bandHeight, width: expectedWidth, height: bandHeight }).raw().toBuffer();
+    assert.ok(data.some((value) => value > 230), "caption text remains visible in the delivered bottom band");
+    const corner = await sharp(out).extract({ left: 0, top: expectedHeight - 4, width: 10, height: 4 }).raw().toBuffer();
+    assert.ok([...corner].reduce((sum, value) => sum + value, 0) / corner.length < 120, "caption background reaches the delivered bottom edge");
+  });
+}
+
 test("a spec is ids only, from the catalogue's vocabularies, and the versions must match", () => {
   const good = { sourceScanId: "123e4567-e89b-42d3-a456-426614174000", goalIds: ["grooming", "eyes"], layers: ["brows", "hair"], catalogueVersion: GOAL_CATALOGUE_VERSION, consentVersion: GOAL_PREVIEW_CONSENT_VERSION };
   const parsed = parseSpec(JSON.stringify(good));
