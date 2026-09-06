@@ -1,0 +1,13 @@
+.celeb .ava, .mdx-ava, .dash-faces-fan i, .celeb-photo, .cd-photo { position: relative; overflow: hidden; }
+img[data-celebrity-portrait] {
+  position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%;
+  object-fit: cover; object-position: center 22%; display: block;
+}
+img[data-celebrity-portrait][hidden] { display: none !important; }
+.portrait-credits { margin: 10px 0 16px; color: var(--mut); font: 12px/1.5 var(--sans); }
+.portrait-credits summary { padding: 10px 0; min-height: 44px; box-sizing: border-box; cursor: pointer; }
+.portrait-credits a { color: inherit; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.portrait-credits ul { padding-left: 20px; }
+.portrait-credits li { margin: 12px 0; }
+.portrait-credits li > span { display: block; }
+.portrait-credits p, .portrait-disclosure { font-size: 12px; line-height: 1.5; color: var(--mut); }

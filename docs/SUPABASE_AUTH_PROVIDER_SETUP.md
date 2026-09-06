@@ -71,13 +71,21 @@ Google Auth Platform; the audience is in production and the branding is verified
 and published. A real Google sign-in returned successfully to the signed-in app.
 Frontend button copy does not control this Google-hosted screen.
 
-The separate custom-domain cutover is not yet complete. Both the original
-callback and `https://auth.truemax.app/auth/v1/callback` are saved on the existing
-OAuth client. The CNAME and certificate challenge are present, but the branded
-Auth settings endpoint still returns HTTP 400 while the original returns HTTP
-200. Do not switch the production client URL until Supabase activation and a
-fresh end-to-end sign-in pass. The owner has approved the USD 10/month add-on;
-activation currently needs access to the signed-in Supabase dashboard.
+The owner-approved custom domain is now active. Supabase reports
+`auth.truemax.app` is serving traffic; both it and the original project return
+HTTP 200 from Auth settings with the public application key. Google and email
+authentication are enabled, and signup is not disabled.
+
+A fresh production sign-out and Google sign-in passed after activation. The
+Google request used `https://auth.truemax.app/auth/v1/callback`, displayed the
+TrueMax name and logo, and returned to the signed-in TrueMax account. Both
+callbacks remain saved on the existing OAuth client. Supabase switched the
+provider callback automatically, so no production client environment change
+was necessary to remove the Supabase name from the login screen. Keep the
+working client URL and its same-project session key stable for this release.
+
+This verifies existing-account Google login, not a new-account email delivery
+or password-recovery round trip. Those need their own test inbox check.
 
 The client now bounds Auth settings probes to three seconds, including body
 reads, and retains its same-project fallback and stable session storage key.

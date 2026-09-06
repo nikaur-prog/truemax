@@ -40,6 +40,7 @@ import { SKIN_PATTERN_LABELS, SKIN_ZONE_LABELS } from "../engine/skinPatterns.js
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
+import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback } from "./celebrityPortrait.js";
 import { showScalePrimer, wireScaleNote } from "./scaleNote.js";
 // The verdict VIEW is gone; the verdict TONE is not — it still sets how Max
 // speaks, which is a voice setting rather than a depth one.
@@ -192,6 +193,7 @@ const escapeHTML = (v: string): string =>
   v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function renderResults(c: Ctx): void {
+  installCelebrityPortraitFallback();
   clearResultPhotoRecovery();
   ctx = c;
   // The curve is taught before the first number is ever shown. Fire-and-forget
@@ -2007,10 +2009,10 @@ function celebCard(matches: ReturnType<typeof regionMatches>): string {
   // name under the name is the whole of that claim.
   return matches
     .map(
-      (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
+      (m) => `<div class="celeb"><div class="ava">${m.name[0]}${celebrityPortraitImage(m.name)}</div>
         <div class="nm">${m.name}<span>${m.metricName}</span></div></div>`,
     )
-    .join("");
+    .join("") + celebrityPortraitCredits(matches.map(m => m.name));
 }
 
 // ---------------------------------------------------------------------------

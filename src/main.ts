@@ -70,11 +70,10 @@ import { loadPhotos } from "./engine/photoStore.js";
 import { createSettler } from "./engine/captureSettle.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import type { OpenAccountOptions } from "./ui/authModal.js";
-import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
+import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
   clearPurchaseResult,
   consumePurchaseResult,
-  hasMaxAccess,
   hasMaxOrStaffAccess,
   consumeScanCreditForScan,
   loadEntitlement,
@@ -144,8 +143,8 @@ import { mountInstallPrompt } from "./ui/installPrompt.js";
 import { markPlatform } from "./engine/platform.js";
 import { beginAnalysisHandoff } from "./ui/analysisHandoff.js";
 import type { AnalysisHandoffRun } from "./ui/analysisHandoff.js";
-import { readBody } from "./engine/bodyProfile.js";
-import { openBodyProfileDialog } from "./ui/bodyProfileDialog.js";
+import { fetchBodyProfile, migrateLocalBodyProfile } from "./engine/bodyProfile.js";
+import { closeBodyProfileDialog, openBodyProfileDialog } from "./ui/bodyProfileDialog.js";
 
 // Ingest cap, and it is an EXPORT setting as much as a detection one.
 //
@@ -218,10 +217,6 @@ let lastKnownTier: EntitlementTier = "free";
 // Kept separately from plan tier. Staff access is not a subscription, but it
 // does need an unlimited subject chooser so the owner can test guest scans.
 let lastKnownAdmin = false;
-// Staff may inspect Max surfaces, but only an actual paid Max entitlement
-// triggers the mandatory body-details setup. Access and purchase are different
-// facts, and a staff flag must never masquerade as a subscription.
-let lastKnownPaidMax = false;
 
 
 async function refreshMaxAccess(): Promise<void> {
@@ -265,7 +260,6 @@ async function refreshMaxAccess(): Promise<void> {
     }
     setMaxAccess(hasMaxOrStaffAccess(entitlement, admin));
     lastKnownAdmin = admin;
-    lastKnownPaidMax = hasMaxAccess(entitlement);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     lastKnownTier = tierOf(entitlement);
@@ -287,7 +281,6 @@ async function refreshMaxAccess(): Promise<void> {
     // not.
     setMaxAccess(false);
     lastKnownAdmin = false;
-    lastKnownPaidMax = false;
     // The standard price, for the same reason: quoting the member price to
     // somebody we could not confirm is a member sets up a charge that does not
     // match what they were shown.
@@ -1148,20 +1141,23 @@ async function ensureOnboarded(user: User): Promise<void> {
   await openTrialFunnel(user, undefined, { required: true });
 }
 
-async function requirePaidMaxBodyProfile(user: User): Promise<void> {
-  if (!lastKnownPaidMax || readBody()) return;
+async function requirePaidMaxBodyProfile(user: User, allowPrompt = true): Promise<void> {
   const generation = scanGeneration;
-  let profile;
-  try {
-    profile = await loadOnboardingProfile(user);
-  } catch {
-    return;
+  const ownsAccount = () => activeScanOwner() === `user:${user.id}`;
+  const accessToken = await currentAccessToken(user.id);
+  if (!accessToken || !ownsAccount()) return;
+  // Import a usable legacy device value before hydration can clear it. The
+  // server only accepts an import into an account with no saved/cleared row.
+  // This runs on the guest signup-return path too, without delaying its report.
+  await migrateLocalBodyProfile(accessToken);
+  if (!ownsAccount()) return;
+  const profile = await fetchBodyProfile(accessToken);
+  if (!allowPrompt || generation !== scanGeneration || !ownsAccount()) return;
+  // The server owns the age, live entitlement and missing-details decision.
+  // A cached tier or body value must never decide whether this is mandatory.
+  if (profile?.required) {
+    await openBodyProfileDialog({ required: true, userId: user.id, initialProfile: profile });
   }
-  if (generation !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
-  // Missing or under-18 dates fail closed. Body and diet planning are never
-  // opened by a client-side flag, and an unfinished signup keeps its own gate.
-  if (!onboardingComplete(profile) || !profileIsAdult(profile)) return;
-  await openBodyProfileDialog({ required: true });
 }
 
 document.getElementById("logo-home")?.addEventListener("click", async () => {
@@ -3485,6 +3481,7 @@ if (isAuthAvailable()) {
       closeDashboard();
       closeHistory();
       closeSettings();
+      closeBodyProfileDialog();
       closeTrialFunnel();
       closeScanRecall();
       discardPendingScanCredit();
@@ -3532,15 +3529,23 @@ if (isAuthAvailable()) {
       // full-resolution canvases.
       setTimeout(() => {
         void (async () => {
+          const ownsAccount = () => activeScanOwner() === `user:${user.id}`;
+          if (!ownsAccount()) return;
           await refreshMaxAccess();
+          if (!ownsAccount()) return;
           await reconcileReturnedPurchase();
+          if (!ownsAccount()) return;
           const resumed = await resumePendingAfterAuth();
+          if (!ownsAccount()) return;
           if (!resumed && !resumePendingStarted) {
             signupReturn.finish(false);
             await ensureOnboarded(user);
-            await requirePaidMaxBodyProfile(user);
           }
-        })();
+          if (!ownsAccount()) return;
+          // An account created at the scan wall receives its analysis before
+          // any unrelated setup prompt. Its details still hydrate here.
+          await requirePaidMaxBodyProfile(user, !resumed && !resumePendingStarted);
+        })().catch(() => undefined);
       }, 0);
     } else if (returnedPurchase?.status === "success") {
       showPurchaseNotice("Sign in to confirm the payment and add it to this account.");
