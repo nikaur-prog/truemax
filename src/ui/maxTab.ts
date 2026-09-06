@@ -233,6 +233,8 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
     mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
     mountProtocolCard(root.querySelector<HTMLElement>("[data-performance-due]"), null, () => {
       if (items) items.innerHTML = performanceItems();
+      // Starting a protocol adds its tick immediately; judging removes it.
+      mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
     });
     // Any intent — focus, tap, submit — opens the real chat. The composer here
     // is a doorknob shaped like the door.

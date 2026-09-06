@@ -1,4 +1,4 @@
-import { currentAccessToken } from "../engine/auth.js";
+import { currentAccessToken, onAuthChange } from "../engine/auth.js";
 import {
   EMPTY_STREAK,
   bestLine,
@@ -6,12 +6,13 @@ import {
   dayLabel,
   fetchStreak,
   localDay,
-  nextStreak,
   readStreak,
+  setStreakEnabled,
   streakLine,
 } from "../engine/dailyStreak.js";
-import type { StreakBalances, StreakReading, StreakReason, StreakState } from "../engine/dailyStreak.js";
-import { scopedStorageKey } from "../engine/scanScope.js";
+import type { StreakBalances, StreakReading, StreakReason } from "../engine/dailyStreak.js";
+import { activeScanOwner } from "../engine/scanScope.js";
+import { createDailyStreakStore, type StreakCache } from "../engine/dailyStreakStore.js";
 
 // ---------------------------------------------------------------------------
 // The daily streak lamp, and the one place an action reports itself.
@@ -33,35 +34,45 @@ import { scopedStorageKey } from "../engine/scanScope.js";
 // never reaches it.
 // ---------------------------------------------------------------------------
 
-interface CachedStreak {
-  state: StreakState;
-  balances: StreakBalances;
+const store = createDailyStreakStore({
+  owner: activeScanOwner,
+  token: currentAccessToken,
+  storage: () => localStorage,
+  now: () => new Date(),
+  read: fetchStreak,
+  count: countStreakDay,
+  enable: setStreakEnabled,
+  changed: (cache) => render(cache),
+});
+
+// One app-lifetime subscription, not one subscription per dashboard render.
+// A late request can never write into a newly selected account's cache.
+let watching = false;
+function watch(): void {
+  if (watching || typeof window === "undefined") return;
+  watching = true;
+  onAuthChange(() => {
+    render(store.cached());
+    // Never invoke another Auth method synchronously inside its callback.
+    queueMicrotask(() => { void store.refresh(); });
+  });
+  window.addEventListener("online", () => { void store.refresh(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      render(store.cached());
+      void store.refresh();
+    }
+  });
 }
 
-const CACHE_KEY = () => scopedStorageKey("truemax:dailyStreak");
-
-function readCache(): CachedStreak | null {
-  const key = CACHE_KEY();
-  if (!key) return null;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedStreak;
-    if (!parsed || typeof parsed.state?.current !== "number") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+export function refreshStreak(expectedUserId?: string): Promise<StreakCache | null> {
+  watch();
+  return store.refresh(expectedUserId);
 }
 
-function writeCache(cache: CachedStreak): void {
-  const key = CACHE_KEY();
-  if (!key) return;
-  try {
-    localStorage.setItem(key, JSON.stringify(cache));
-  } catch {
-    /* the cache is a convenience; the server holds the record */
-  }
+export function updateStreakEnabled(enabled: boolean, userId: string): Promise<StreakCache | null> {
+  watch();
+  return store.setEnabled(enabled, userId);
 }
 
 /**
@@ -88,7 +99,7 @@ export function lampMarkup(reading: StreakReading, balances: StreakBalances | nu
 // Every mounted lamp, so an action anywhere updates the light everywhere.
 const hosts = new Set<HTMLElement>();
 
-function render(cache: CachedStreak | null): void {
+function render(cache: StreakCache | null): void {
   const reading = readStreak(cache?.state ?? EMPTY_STREAK, localDay());
   for (const host of [...hosts]) {
     if (!host.isConnected) {
@@ -109,22 +120,9 @@ function render(cache: CachedStreak | null): void {
 export function mountStreakLamp(host: HTMLElement | null): void {
   if (!host) return;
   hosts.add(host);
-  render(readCache());
-  void (async () => {
-    const token = await currentAccessToken();
-    if (!token) return;
-    const snapshot = await fetchStreak(token);
-    if (!snapshot) return;
-    const cache = { state: snapshot.state, balances: snapshot.balances };
-    writeCache(cache);
-    render(cache);
-  })();
+  render(store.cached());
+  void refreshStreak();
 }
-
-// One server call per day per page load. The server is idempotent anyway;
-// this just keeps a tick, a check-in and a scan in one session from sending
-// three requests that two of which would answer counted=false.
-const sentDays = new Set<string>();
 
 /**
  * Something that counts happened: a routine ticked, a check-in answered, or
@@ -132,33 +130,6 @@ const sentDays = new Set<string>();
  * guest scan must never reach this function.
  */
 export function recordStreakAction(reason: StreakReason): void {
-  const day = localDay();
-
-  // Optimistic: the same arithmetic count_streak_day runs, on the cached
-  // row, so the lamp brightens under the person's finger.
-  const cached = readCache();
-  if (cached) {
-    const step = nextStreak(cached.state, day);
-    if (step.counted) {
-      const updated = { ...cached, state: step.state };
-      writeCache(updated);
-      render(updated);
-    }
-  }
-
-  if (sentDays.has(day)) return;
-  sentDays.add(day);
-  void (async () => {
-    try {
-      const token = await currentAccessToken();
-      if (!token) return;
-      const result = await countStreakDay(token, reason, day);
-      if (!result) return;
-      const cache = { state: result.state, balances: result.balances };
-      writeCache(cache);
-      render(cache);
-    } catch {
-      /* the day is safe: the server counts it once whenever it next hears */
-    }
-  })();
+  watch();
+  void store.record(reason, localDay());
 }

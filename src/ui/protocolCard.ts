@@ -13,6 +13,7 @@ import type { ScanDelta } from "../engine/history.js";
 import { localDay } from "../engine/dailyStreak.js";
 import { tickProtocol, tickedOn } from "../engine/protocol.js";
 import { recordStreakAction } from "./streakLamp.js";
+import { activeScanOwner } from "../engine/scanScope.js";
 
 // ---------------------------------------------------------------------------
 // The check-in, in the performance tracker.
@@ -107,6 +108,7 @@ export function mountProtocolCard(
   onChange?: () => void,
 ): ProtocolCardHandle | null {
   if (!host) return null;
+  const owner = activeScanOwner();
   const list = readProtocols();
   if (!list.length) return null;
 
@@ -141,9 +143,13 @@ export function mountProtocolCard(
 
     for (const b of el.querySelectorAll<HTMLButtonElement>("[data-when]")) {
       b.onclick = () => {
+        if (!owner || activeScanOwner() !== owner || !el.isConnected) return;
         const opt = WHEN_OPTIONS[Number(b.dataset.when)]!;
-        const updated = answerWhen(p, opt.days, now());
-        save(readProtocols(), updated);
+        const list = readProtocols();
+        const latest = list.find((entry) => entry.id === p.id);
+        if (!latest || nextPrompt(latest, now())?.kind !== prompt.kind) return;
+        const updated = answerWhen(latest, opt.days, now());
+        save(list, updated);
         onChange?.();
         // The clock is explicit, because a promise with a vague date is not a
         // promise. Said as the date it starts, not as "in five days".
@@ -157,9 +163,15 @@ export function mountProtocolCard(
   }
 
   function answer(el: HTMLElement, p: Protocol, prompt: ProtocolPrompt, said: boolean): void {
+    if (!owner || activeScanOwner() !== owner || !el.isConnected) return;
     const at = now();
-    const updated = applyAnswer(p, prompt, said, at);
-    save(readProtocols(), updated);
+    const list = readProtocols();
+    const latest = list.find((entry) => entry.id === p.id);
+    if (!latest || nextPrompt(latest, at)?.kind !== prompt.kind) return;
+    // The daily tick can change this record while the check-in remains open.
+    // Answer the latest record so that answering never erases today's tick.
+    const updated = applyAnswer(latest, prompt, said, at);
+    save(list, updated);
 
     // An answered check-in is a plan action, so it counts the day. Only the
     // kinds that record a check-in: deciding or dating a protocol is
@@ -228,25 +240,66 @@ export function tickRowMarkup(list: Protocol[], day: string): string {
   }).join("");
 }
 
+const tickMounts = new WeakMap<HTMLElement, { refresh(): void; destroy(): void }>();
+
 /** Mount the tick row for every running protocol. Renders nothing without one. */
 export function mountDailyTicks(host: HTMLElement | null): void {
   if (!host) return;
+  tickMounts.get(host)?.destroy();
+  const owner = activeScanOwner();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const abort = new AbortController();
+  const destroy = () => {
+    stopped = true;
+    clearTimeout(timer);
+    abort.abort();
+    detached.disconnect();
+    tickMounts.delete(host);
+  };
   const draw = () => {
+    clearTimeout(timer);
+    if (stopped) return;
+    if (!host.isConnected || activeScanOwner() !== owner) {
+      host.innerHTML = "";
+      destroy();
+      return;
+    }
     const day = localDay();
     host.innerHTML = tickRowMarkup(readProtocols(), day);
     for (const button of host.querySelectorAll<HTMLButtonElement>("[data-tick]:not([disabled])")) {
       button.onclick = () => {
+        if (!owner || activeScanOwner() !== owner || !host.isConnected) return;
         const list = readProtocols();
         const protocol = list.find((p) => p.id === button.dataset.tick);
         if (!protocol) return;
-        const ticked = tickProtocol(protocol, day);
+        // A tab may have stayed open overnight. The action's day is the tap,
+        // not the calendar day on which its button was first drawn.
+        const ticked = tickProtocol(protocol, localDay());
         if (ticked === protocol) return;
         save(list, ticked);
         recordStreakAction("routine");
         draw();
       };
     }
+    const nextDay = new Date();
+    nextDay.setHours(24, 0, 0, 50);
+    timer = setTimeout(draw, Math.max(50, nextDay.getTime() - Date.now()));
   };
+  const detached = new MutationObserver(() => {
+    if (!host.isConnected) destroy();
+  });
+  // Dashboard removal is a direct body mutation; observing only that level
+  // avoids inspecting every animated node and releases the timer immediately.
+  detached.observe(document.body, { childList: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") draw();
+  }, { signal: abort.signal });
+  window.addEventListener("focus", draw, { signal: abort.signal });
+  window.addEventListener("storage", (event) => {
+    if (event.key === `truemax:protocols:${owner}`) draw();
+  }, { signal: abort.signal });
+  tickMounts.set(host, { refresh: draw, destroy });
   draw();
 }
 

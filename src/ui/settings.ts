@@ -17,7 +17,7 @@ import {
 import type { SharedSideFeedback } from "../engine/sideFeedback.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import { currentAccessToken } from "../engine/auth.js";
-import { fetchStreak, setStreakEnabled } from "../engine/dailyStreak.js";
+import { refreshStreak, updateStreakEnabled } from "./streakLamp.js";
 import {
   readGoalPreviewConsent,
   revokeGoalPreviewConsent,
@@ -144,6 +144,7 @@ export async function openSettings(user: User): Promise<void> {
   let streakEnabled: boolean | null = null;
   let streakLoaded = false;
   let streakBusy = false;
+  let streakMessage = "";
 
   const streakMarkup = (): string => {
     if (!streakLoaded) {
@@ -152,7 +153,7 @@ export async function openSettings(user: User): Promise<void> {
     if (streakEnabled === null) {
       return `<div class="set-feedback-empty">Your streak setting could not be read just then.</div>`;
     }
-    return `<div class="set-consent-state">
+    return `${streakMessage ? `<p role="status">${esc(streakMessage)}</p>` : ""}<div class="set-consent-state">
       <div><b>The daily streak is ${streakEnabled ? "on" : "off"}</b><span>${streakEnabled
         ? "A day counts when you tick a routine, answer a check-in or scan. Opening the app counts nothing."
         : "The light and the points are hidden. The record keeps counting, so turning it back on shows the true run."}</span></div>
@@ -276,7 +277,7 @@ export async function openSettings(user: User): Promise<void> {
         <section class="set-group" aria-labelledby="set-streak-title">
           <h3 id="set-streak-title">The daily streak</h3>
           <p class="set-hint">For anyone who finds a running count a pressure rather than a help. Off hides the light and the points everywhere; nothing is deleted.</p>
-          ${streakMarkup()}
+          <div id="set-streak-state">${streakMarkup()}</div>
         </section>
 
         <section class="set-group" aria-labelledby="set-preview-consent-title">
@@ -477,33 +478,44 @@ export async function openSettings(user: User): Promise<void> {
     draw();
   };
 
+  const drawStreak = () => {
+    if (host !== activeHost || !activeHost.isConnected) return;
+    const section = activeHost.querySelector<HTMLElement>("#set-streak-state");
+    if (!section) return;
+    // A background read or switch must not replace the name/goals form while
+    // the person is editing it, or jump a phone back up the Settings sheet.
+    section.innerHTML = streakMarkup();
+    section.querySelector("#set-streak-toggle")?.addEventListener("click", () => void toggleStreak());
+  };
+
   const loadStreak = async () => {
     try {
       const token = await currentAccessToken(user.id);
       if (token) {
-        const snapshot = await fetchStreak(token);
+        const snapshot = await refreshStreak(user.id);
         if (snapshot) streakEnabled = snapshot.state.enabled;
       }
     } catch {
       /* the section says it could not be read */
     }
     streakLoaded = true;
-    if (host === activeHost && activeHost.isConnected) draw();
+    drawStreak();
   };
 
   const toggleStreak = async () => {
     if (streakBusy || streakEnabled === null) return;
     streakBusy = true;
-    draw();
+    streakMessage = "";
+    drawStreak();
     try {
-      const token = await currentAccessToken(user.id);
-      const snapshot = token ? await setStreakEnabled(token, !streakEnabled) : null;
+      const snapshot = await updateStreakEnabled(!streakEnabled, user.id);
       if (snapshot) streakEnabled = snapshot.state.enabled;
+      else streakMessage = "Your setting could not be saved. Please try again.";
     } catch {
-      /* unchanged on failure; the label still shows the stored state */
+      streakMessage = "Your setting could not be saved. Please try again.";
     }
     streakBusy = false;
-    if (host === activeHost && activeHost.isConnected) draw();
+    drawStreak();
   };
 
   const loadPreviewConsent = async () => {

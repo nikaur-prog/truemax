@@ -72,7 +72,7 @@ test("the wiring pins: own scans count, guests never, reopens never; check-ins c
   const maxTab = read("src/ui/maxTab.ts");
   assert.match(maxTab, /mountDailyTicks\(root\.querySelector<HTMLElement>\("\[data-performance-ticks\]"\)\)/);
   const settings = read("src/ui/settings.ts");
-  assert.match(settings, /setStreakEnabled\(token, !streakEnabled\)/);
+  assert.match(settings, /updateStreakEnabled\(!streakEnabled, user\.id\)/);
 });
 
 test("no loss framing in the new surfaces, and no em dashes in the lamp module", () => {
