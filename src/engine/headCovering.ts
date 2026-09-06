@@ -28,7 +28,12 @@ function segmenter(): Promise<ImageSegmenter> {
       outputCategoryMask: true,
       outputConfidenceMasks: false,
     });
-  })());
+  })().catch((error: unknown) => {
+    // A failed speculative warm-up must not disable this detector for the
+    // rest of the session after a phone regains its connection.
+    segmenterPromise = null;
+    throw error;
+  }));
 }
 
 /**

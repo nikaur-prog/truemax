@@ -431,6 +431,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       video: e.video,
       guideCanvas: e.guide,
       mode: "side",
+      onPause: () => auto?.cancel(),
       // See main.ts: a swap that loses both cameras leaves nothing behind the
       // viewfinder, so the screen closes instead of decorating a dead frame.
       onLost: () => {
@@ -685,9 +686,10 @@ const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(re
 async function load(file: File, ctx: SideCtx): Promise<void> {
   const img = await loadImage(file);
   const c = document.createElement("canvas");
-  c.width = img.naturalWidth;
-  c.height = img.naturalHeight;
-  c.getContext("2d")!.drawImage(img, 0, 0);
+  const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+  c.width = Math.round(img.naturalWidth * scale);
+  c.height = Math.round(img.naturalHeight * scale);
+  c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
   await loadCanvas(c, ctx);
 }
 

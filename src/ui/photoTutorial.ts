@@ -264,7 +264,7 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
     ? "Twenty seconds on what ruins a front photo, and what a good one looks like."
     : view === "side"
       ? "The profile is the shot people get wrong most. Twenty seconds on why."
-      : "A scan is two photographs, square to the lens, then a full quarter turn. Forty seconds on both, now, while you are still looking at the screen.";
+      : "Start with a front photo, square to the lens. You can add an optional side photo with a full quarter turn, or skip it. This tutorial covers both in forty seconds.";
 
   const wrap = document.createElement("div");
   wrap.className = "tut-ask";

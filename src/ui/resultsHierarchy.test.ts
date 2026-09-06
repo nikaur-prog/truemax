@@ -6,6 +6,7 @@ const results = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../style.css", import.meta.url), "utf8");
 const shareCard = readFileSync(new URL("./shareCard.ts", import.meta.url), "utf8");
 const photoLifecycle = readFileSync(new URL("./scoreStrip.ts", import.meta.url), "utf8");
+const navigation = readFileSync(new URL("./reportNavigation.ts", import.meta.url), "utf8");
 
 test("mobile results start with one complete score summary before navigation", () => {
   assert.match(results, /c\.analysis\.appendChild\(mobileSummary\);[\s\S]*c\.analysis\.appendChild\(railSentinel\);\s+c\.analysis\.appendChild\(rail\)/);
@@ -56,8 +57,8 @@ test("mobile report scrolling compacts chrome without building a hidden score ca
 
 test("the photograph and category rail remain one persistent mobile stack", () => {
   assert.match(results, /className = "rtabs-sentinel"/);
-  assert.match(results, /requestAnimationFrame\(sync\)/);
-  assert.match(results, /const railIsPinned = naturalTop <= stickyTop \+ 1/);
+  assert.match(navigation, /new IntersectionObserver/);
+  assert.match(navigation, /entry\.boundingClientRect\.top <= next \+ 1/);
   assert.doesNotMatch(results, /"report-photo-pinned",\s+!rail/);
   assert.match(photoLifecycle, /--report-photo-h/);
   assert.doesNotMatch(results, /rtabs-face-back/);

@@ -745,18 +745,30 @@ export function animateMeasurement(
   return { cancel: () => cancelAnimationFrame(raf) };
 }
 
+// One snapshot per overlay, reused by both front and side measurement draws.
+// Unlike the cross-fade pool above, this is the hot path when hovering a new
+// row: allocating here for every row caused full-resolution buffer churn.
+const departingBuffers = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+
 // The previous overlay content, captured only when the canvas is already at
-// the target size — a first draw, or a resize, has nothing worth fading from.
+// the target size. A first draw or a resize has nothing worth fading from.
+// Callers cancel the preceding animation before taking the next snapshot.
 export function snapshotIfMatching(
   canvas: HTMLCanvasElement,
   width: number,
   height: number,
 ): HTMLCanvasElement | null {
   if (canvas.width !== width || canvas.height !== height || !width || !height) return null;
-  const from = document.createElement("canvas");
-  from.width = width;
-  from.height = height;
-  from.getContext("2d")!.drawImage(canvas, 0, 0);
+  let from = departingBuffers.get(canvas);
+  if (!from) {
+    from = document.createElement("canvas");
+    departingBuffers.set(canvas, from);
+  }
+  if (from.width !== width) from.width = width;
+  if (from.height !== height) from.height = height;
+  const context = from.getContext("2d")!;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(canvas, 0, 0);
   return from;
 }
 

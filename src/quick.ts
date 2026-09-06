@@ -427,7 +427,7 @@ function resetSexAsk(): void {
   askedForThisFace = false;
 }
 
-function withSex(next: () => void): void {
+function withSex(next: () => void, onCancel?: () => void): void {
   if (askedForThisFace && storedSex()) {
     next();
     return;
@@ -446,6 +446,10 @@ function withSex(next: () => void): void {
     // it with the count intact rather than leaving a camera pointed at nothing.
     () => {
       resetSexAsk();
+      if (onCancel) {
+        onCancel();
+        return;
+      }
       if (mode !== "calibrate") return;
       el.capture.classList.add("hidden");
       el.cal.classList.remove("hidden");
@@ -769,7 +773,7 @@ function beginQuickProfileCapture(): void {
         openScanViewChoice();
       },
     });
-  });
+  }, () => openScanViewChoice());
 }
 
 function enterMode(next: QuickMode): void {

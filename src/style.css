@@ -693,7 +693,7 @@ body {
   position: absolute; top: 0; bottom: 0;
   width: var(--thumb-w, 30%); left: var(--thumb-x, 0%);
   border-radius: 2px; background: var(--ink); opacity: .42;
-  transition: left .08s linear;
+  /* Follow the coalesced swipe directly instead of chasing it with a tween. */
 }
 /* Below the two-pane breakpoint the analysis column is narrow enough that
    wrapping the tabs eats too much height, so they scroll instead — with a
@@ -777,7 +777,7 @@ body {
      blurrier desktop reveal reads as latency under a thumb, so a phone gets a
      short six-pixel settle while the wider canvas keeps the cinematic move. */
   .reveal { transform: translateY(6px); animation-duration: .28s; }
-  .overview-step { transform: translateY(-8px); animation-duration: .36s; }
+  .overview-step { transform: translateY(6px); filter: none; animation-name: rise; animation-duration: .28s; }
 }
 
 /* overall */
@@ -1248,6 +1248,10 @@ button.pillar:active { transform: translateY(0); }
    hover reflows the whole column under the cursor. */
 .metric.tappable { padding: 6px 8px; margin-left: -8px; margin-right: -8px; }
 .metric.tappable:hover { background: var(--soft); }
+.metric.tappable[role="button"]:focus-visible {
+  outline: 2px solid var(--acc); outline-offset: 3px;
+  background: var(--acc-soft);
+}
 .metric:last-of-type { margin-bottom: 16px; }
 .mrow { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; margin-bottom: 7px; }
 .mrow b { font-weight: 500; }
@@ -1363,10 +1367,13 @@ body.body-profile-open { overflow: hidden; }
 .body-profile-overlay {
   position: fixed; inset: 0; z-index: 10020; display: grid; place-items: center;
   padding: 18px; background: rgba(8, 10, 10, .62); backdrop-filter: blur(14px);
+  overflow-y: auto; overscroll-behavior-y: contain;
 }
 .body-profile-dialog {
   width: min(100%, 520px); border: 1px solid var(--line); border-radius: 24px;
   background: var(--card); box-shadow: 0 28px 80px rgba(0, 0, 0, .28); padding: 26px;
+  min-height: 0; max-height: calc(100vh - 36px); max-height: calc(100dvh - 36px);
+  overflow-y: auto; overscroll-behavior-y: contain; scroll-padding-block: 20px;
 }
 .body-profile-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .body-profile-dialog header span {
@@ -1375,7 +1382,8 @@ body.body-profile-open { overflow: hidden; }
 .body-profile-dialog h2 { margin: 0; font: 400 30px/1.08 var(--serif); }
 .body-profile-dialog > p { margin: 14px 0; color: var(--mut); font-size: 13px; line-height: 1.55; }
 .body-profile-close {
-  width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 50%; background: transparent;
+  width: 44px; height: 44px; flex: 0 0 44px;
+  border: 1px solid var(--line); border-radius: 50%; background: transparent;
   color: var(--mut); cursor: pointer;
 }
 .body-profile-units {
@@ -1390,14 +1398,15 @@ body.body-profile-open { overflow: hidden; }
   background: var(--card); color: var(--ink); box-shadow: 0 2px 12px rgba(0, 0, 0, .08);
 }
 .body-profile-fields { display: grid; gap: 10px; margin-bottom: 12px; }
-.body-profile-fields.two { grid-template-columns: 1fr 1fr; }
-.body-profile-fields.imperial { grid-template-columns: .72fr .72fr 1fr; }
+.body-profile-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.body-profile-fields.imperial { grid-template-columns: minmax(0, .72fr) minmax(0, .72fr) minmax(0, 1fr); }
+.body-profile-fields label, .body-profile-fields label > div { min-width: 0; }
 .body-profile-fields label > span {
   display: block; margin: 0 0 6px; font: 500 9px var(--mono); letter-spacing: .12em; color: var(--mut);
 }
 .body-profile-fields label > div { position: relative; }
 .body-profile-fields input {
-  width: 100%; min-height: 48px; padding: 11px 44px 11px 12px; border: 1px solid var(--line);
+  width: 100%; min-width: 0; min-height: 48px; padding: 11px 36px 11px 12px; border: 1px solid var(--line);
   border-radius: 12px; background: var(--card); color: var(--ink); font: 500 16px var(--sans);
 }
 .body-profile-fields input:focus {
@@ -1411,9 +1420,11 @@ body.body-profile-open { overflow: hidden; }
 .body-profile-dialog .body-profile-privacy { margin: 12px 0; font-size: 11px; }
 .body-profile-save { width: 100%; }
 @media (max-width: 520px) {
-  .body-profile-overlay { align-items: end; padding: 0; }
+  .body-profile-overlay { align-items: end; padding: max(12px, env(safe-area-inset-top)) 0 0; }
   .body-profile-dialog {
     border-radius: 24px 24px 0 0; padding: 24px 20px max(24px, env(safe-area-inset-bottom));
+    max-height: calc(100vh - max(12px, env(safe-area-inset-top)));
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)));
   }
   .body-profile-dialog h2 { font-size: 27px; }
 }
@@ -6087,6 +6098,11 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      height is published for the sticky category rail below. */
   .topbar {
     transition: padding .24s cubic-bezier(.32, 0, .15, 1), box-shadow .24s ease;
+    /* Scrolling report content must not be sampled into a full-width blur
+       on every frame. An opaque mobile header preserves the same separation. */
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .topbar.report-compact {
     padding: 5px 14px;
@@ -6238,9 +6254,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      controls from report copy moving beneath them. */
   .rtabs-rail.is-stuck {
     box-shadow: 0 10px 24px rgba(20, 21, 24, .07);
-    background: color-mix(in srgb, var(--bg) 94%, transparent);
-    -webkit-backdrop-filter: blur(14px) saturate(1.05);
-    backdrop-filter: blur(14px) saturate(1.05);
+    background: var(--bg);
   }
 }
 

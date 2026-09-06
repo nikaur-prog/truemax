@@ -36,6 +36,8 @@ export function resetTapPreview(): void {
 }
 
 export interface TapPreviewHandlers {
+  /** A concise name for assistive technology, including the metric name. */
+  label?: string;
   /** Draw this row's measurement and light the row. */
   preview(id: string): void;
   /** Open the full breakdown. */
@@ -44,6 +46,43 @@ export interface TapPreviewHandlers {
   disarm?(): void;
   /** A mouse left the row — start the grace period before undrawing. */
   leave?(): void;
+}
+
+function nestedControl(row: HTMLElement, target: EventTarget | null): boolean {
+  const control = (target as Element | null)?.closest?.("a, button, input, select, textarea, summary, [contenteditable='true'], [role='button']");
+  return Boolean(control && control !== row);
+}
+
+/** Button behavior for the block-level measurement row without nesting buttons. */
+export function wireMetricButton(
+  row: HTMLElement,
+  label: string,
+  open: () => void,
+  focus?: () => void,
+  blur?: () => void,
+): void {
+  row.setAttribute("role", "button");
+  row.setAttribute("aria-label", label);
+  row.setAttribute("aria-haspopup", "dialog");
+  row.tabIndex = 0;
+  let spaceDown = false;
+  row.onfocus = () => focus?.();
+  row.onblur = () => { spaceDown = false; blur?.(); };
+  row.onkeydown = (event) => {
+    if (nestedControl(row, event.target)) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (event.repeat) return;
+    if (event.key === "Enter") open();
+    else spaceDown = true;
+  };
+  row.onkeyup = (event) => {
+    if (event.key !== " " || nestedControl(row, event.target)) return;
+    event.preventDefault();
+    if (!spaceDown) return;
+    spaceDown = false;
+    open();
+  };
 }
 
 /**
@@ -55,6 +94,16 @@ export interface TapPreviewHandlers {
  * the metric id and the other on the side metric id.
  */
 export function wireTapPreview(row: HTMLElement, id: string, h: TapPreviewHandlers): void {
+  const open = () => {
+    h.disarm?.();
+    armed = null;
+    clearArmed();
+    h.open(id);
+  };
+  wireMetricButton(row, h.label ?? `Open ${id} details`, open, () => {
+    h.disarm?.();
+    h.preview(id);
+  }, () => h.leave?.());
   row.onpointerenter = (e) => {
     if (e.pointerType === "touch") return;
     h.disarm?.();
@@ -64,23 +113,24 @@ export function wireTapPreview(row: HTMLElement, id: string, h: TapPreviewHandle
     if (e.pointerType === "touch") return;
     h.leave?.();
   };
-  // pointerup rather than click, so the armed flag is set before any click
-  // handler further up the tree sees the press.
+  // Update the armed state before any bubbling click handler sees the press.
   row.onclick = (e) => {
+    if (nestedControl(row, e.target)) return;
     h.disarm?.();
     // A mouse or a pen has already had its hover; there is nothing to stage.
     const touch = (e as PointerEvent).pointerType === "touch"
       // A click synthesised from a tap reports pointerType "" in some
       // browsers, so fall back to asking whether hover exists at all.
       || (!(e as PointerEvent).pointerType && !window.matchMedia("(hover: hover)").matches);
-    if (!touch || armed === id) {
-      armed = null;
+    // Keyboard and screen-reader activation has no physical pointer and a
+    // zero click count. It opens directly, including VoiceOver on iPhone.
+    const virtual = !((e as PointerEvent).pointerType) && e.detail === 0;
+    if (virtual || !touch || armed === id) {
       // Clear the lit state as the modal opens. Leaving it on was a lie about
       // what the next press does: the row still looked armed, so it read as
       // "press me again to open", while the state behind it had reset and a
       // press would have armed it a second time instead.
-      clearArmed();
-      h.open(id);
+      open();
       return;
     }
     armed = id;

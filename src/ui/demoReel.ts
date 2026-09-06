@@ -2,6 +2,7 @@ import { METRICS } from "../engine/metrics.js";
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
 import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
+import { previewIsVisible } from "./previewLoop.js";
 
 // The landing reel shows display scores rather than the engine's output, for
 // the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
@@ -90,6 +91,8 @@ export interface ReelOptions {
    * the thumbnail, which this renderer already drives.
    */
   compact?: boolean;
+  /** The landing canvas is still intersecting when a full-screen panel covers it. */
+  pauseWhenCovered?: boolean;
 }
 
 // The thumbnail cut ends once the score has landed and been readable for a
@@ -130,7 +133,7 @@ export function mountDemoReel(
   let shownAny = false;
 
   const frame = (now: number) => {
-    if (stopped) return;
+    if (stopped || paused) return;
     if (!start) start = now;
     const t = now - start;
     const face = REEL[idx];
@@ -169,9 +172,11 @@ export function mountDemoReel(
     // prominent surface on the landing page at two thirds of its screen's
     // resolution, which is most visible on the hairline overlay text.
     const dpr = Math.min(3, window.devicePixelRatio || 1);
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+    const pixelWidth = Math.round(w * dpr);
+    const pixelHeight = Math.round(h * dpr);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
     }
     const ctx = canvas.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -540,8 +545,11 @@ export function mountDemoReel(
   // which is how somebody came back to a tab mid-dissolve.
   // -------------------------------------------------------------------------
   let paused = false;
+  let inViewport = true;
+  let elapsedAtPause = 0;
   const pause = () => {
     if (paused || stopped) return;
+    elapsedAtPause = start ? performance.now() - start : 0;
     paused = true;
     cancelAnimationFrame(raf);
   };
@@ -553,39 +561,40 @@ export function mountDemoReel(
     start = performance.now() - elapsedAtPause;
     raf = requestAnimationFrame(frame);
   };
-  let elapsedAtPause = 0;
+  const syncVisibility = () => {
+    const covered = opts.pauseWhenCovered === true
+      && document.querySelector('.dash, [aria-modal="true"], dialog[open]') !== null;
+    if (previewIsVisible(!document.hidden, inViewport, canvas.isConnected, covered)) resume();
+    else pause();
+  };
   const io =
     typeof IntersectionObserver === "function"
       ? new IntersectionObserver(
           (entries) => {
-            const visible = entries.some((en) => en.isIntersecting);
-            if (visible) resume();
-            else {
-              elapsedAtPause = performance.now() - start;
-              pause();
-            }
+            inViewport = entries.some((en) => en.isIntersecting);
+            syncVisibility();
           },
           { threshold: 0.01 },
         )
       : null;
   io?.observe(canvas);
-  const onVisibility = () => {
-    if (document.hidden) {
-      elapsedAtPause = performance.now() - start;
-      pause();
-    } else if (canvas.isConnected) {
-      resume();
-    }
-  };
-  document.addEventListener("visibilitychange", onVisibility);
+  // Only the landing instance watches top-level panels. The small reel inside
+  // the signup wall belongs to that panel and must not be paused by itself.
+  const panelObserver = opts.pauseWhenCovered && typeof MutationObserver === "function"
+    ? new MutationObserver(syncVisibility)
+    : null;
+  panelObserver?.observe(document.body, { childList: true, attributes: true, attributeFilter: ["class"] });
+  document.addEventListener("visibilitychange", syncVisibility);
 
   raf = requestAnimationFrame(frame);
+  syncVisibility();
 
   return {
     stop() {
       stopped = true;
       io?.disconnect();
-      document.removeEventListener("visibilitychange", onVisibility);
+      panelObserver?.disconnect();
+      document.removeEventListener("visibilitychange", syncVisibility);
       cancelAnimationFrame(raf);
       const ctx = canvas.getContext("2d");
       ctx?.clearRect(0, 0, canvas.width, canvas.height);

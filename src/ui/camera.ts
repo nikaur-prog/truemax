@@ -2,6 +2,8 @@ import { detectVideo, initLandmarker, setRunningMode } from "../engine/landmarke
 import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.js";
 import { detectOcclusion } from "../engine/occlusion.js";
 import type { FrameCheck, Viewport } from "../engine/captureGuide.js";
+import { createPreviewCadence, createPreviewLoop } from "./previewLoop.js";
+import type { PreviewLoop } from "./previewLoop.js";
 
 // Live camera capture. The preview starts on the landing screen so the first
 // thing someone sees is their own face already being tracked — the guidance is
@@ -34,17 +36,9 @@ interface Opts {
    * dead frame.
    */
   onLost?: () => void;
+  /** Invalidate a countdown while camera frames are unavailable. */
+  onPause?: () => void;
 }
-
-let stream: MediaStream | null = null;
-let raf = 0;
-let scratch: HTMLCanvasElement | null = null;
-
-// Which way the active camera faces, and (on a desktop cycling real devices)
-// which device holds the preview. Module-level like `stream`: one camera at a
-// time is a standing assumption of this file.
-let facing: "user" | "environment" = "user";
-let deviceId: string | null = null;
 
 /** How many cameras this machine has. Meaningful after permission is granted. */
 export async function cameraCount(): Promise<number> {
@@ -72,10 +66,15 @@ export async function permissionGranted(): Promise<boolean> {
 }
 
 export async function startCamera(opts: Opts): Promise<CameraHandle> {
-  facing = "user";
-  deviceId = null;
+  // A late callback from a closed camera must never stop or mutate its successor.
+  let stream: MediaStream | null = null;
+  let facing: "user" | "environment" = "user";
+  let deviceId: string | null = null;
   let live = true;
   let attachAttempt = 0;
+  let previewLoop: PreviewLoop | null = null;
+  const cadence = createPreviewCadence();
+  let lastFrameAt = performance.now();
 
   const constraints = (): MediaStreamConstraints => ({
     video: {
@@ -100,13 +99,24 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     opts.guideCanvas.classList.toggle("unmirrored", rear);
   };
 
+  const releaseStream = () => {
+    const ownedPreview = opts.video.srcObject === stream;
+    stream?.getTracks().forEach((track) => {
+      track.removeEventListener("ended", onTrackDown);
+      track.stop();
+    });
+    stream = null;
+    if (ownedPreview) opts.video.srcObject = null;
+    return ownedPreview;
+  };
+
   async function attach(): Promise<void> {
     if (!live) throw new Error("Camera request was cancelled");
+    opts.onPause?.();
     const attempt = ++attachAttempt;
     // Stop the old tracks BEFORE asking for new ones: many phones refuse to
     // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
-    stream?.getTracks().forEach((t) => t.stop());
-    stream = null;
+    releaseStream();
     const nextStream = await navigator.mediaDevices.getUserMedia(constraints());
     // getUserMedia cannot be aborted. A cancel, a newer swap, or a recovery
     // can therefore win while this permission/device request is in flight.
@@ -189,6 +199,8 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     reacquiring = false;
   }
   function onTrackDown(): void {
+    if (!live) return;
+    opts.onPause?.();
     // Recover into a visible tab immediately; a hidden one would just lose
     // the fresh track the same way, so it reacquires on return instead.
     if (document.visibilityState === "visible") {
@@ -197,7 +209,15 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     }
   }
   const onVisible = () => {
-    if (document.visibilityState !== "visible") return;
+    if (!live) return;
+    if (document.visibilityState !== "visible") {
+      previewLoop?.pause();
+      opts.onPause?.();
+      return;
+    }
+    lastFrameAt = performance.now();
+    cadence.reset();
+    previewLoop?.resume();
     const track = stream?.getVideoTracks()[0];
     if (!track || track.readyState !== "live" || track.muted) {
       reacquireRetries = 0;
@@ -212,9 +232,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     live = false;
     attachAttempt++;
     document.removeEventListener("visibilitychange", onVisible);
-    stream?.getTracks().forEach((t) => t.stop());
-    stream = null;
-    opts.video.srcObject = null;
+    releaseStream();
     throw err;
   }
 
@@ -240,13 +258,14 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
     });
 
   const side = opts.mode === "side";
-  scratch = scratch ?? document.createElement("canvas");
+  const scratch = document.createElement("canvas");
   let last = -1;
-  let frameNo = 0;
+  let analyzedTime = -1;
+  let glassesCheckedAt = -Infinity;
   // The glasses measure resamples a face crop and reads it back, which is far
   // too expensive per frame and does not need to be: nobody puts glasses on
-  // and takes them off between frames. Sampled every 20th frame, roughly three
-  // times a second, and the last verdict is held in between.
+  // and takes them off between frames. Use time, not the frame count, so a
+  // slower guidance cadence does not make the warning take seconds to appear.
   let glasses = { advise: false, block: false };
 
   // ---- the stall watchdog ---------------------------------------------------
@@ -262,13 +281,24 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   // for STALL_MS while the page is visible and the camera is supposed to be
   // running, the stream is gone whatever it claims, and it is reacquired.
   const STALL_MS = 2600;
-  let lastFrameAt = performance.now();
+  const STALE_FRAME_MS = 500;
+  let staleReported = false;
 
-  const loop = () => {
+  const loop = (now: number) => {
+    if (!live) return;
+    if (document.visibilityState !== "visible") {
+      previewLoop?.pause();
+      opts.onPause?.();
+      return;
+    }
     const v = opts.video;
     if (v.readyState >= 2 && v.currentTime !== last) {
       last = v.currentTime;
-      lastFrameAt = performance.now();
+      lastFrameAt = now;
+      staleReported = false;
+    }
+    if (v.readyState >= 2 && v.currentTime !== analyzedTime && cadence.due(now)) {
+      analyzedTime = v.currentTime;
       const ts = performance.now();
       let result = null;
       try {
@@ -279,9 +309,10 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       // Measure exposure and focus on the face itself — a bright wall or a
       // busy background otherwise decides whether the shot is "sharp".
       const box = faceBox(result);
-      const stats = frameStats(v, scratch!, box);
+      const stats = frameStats(v, scratch, box);
       const lm = result?.faceLandmarks?.[0];
-      if (!side && lm && ++frameNo % 20 === 0) {
+      if (!side && lm && now - glassesCheckedAt >= 500) {
+        glassesCheckedAt = now;
         try {
           const o = detectOcclusion(v, lm, v.videoWidth, v.videoHeight);
           if (o) glasses = { advise: o.glasses, block: o.glassesStrong && !glassesOverride };
@@ -293,38 +324,44 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         ? checkSideFrame(result, stats)
         : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
       opts.onCheck(check);
-      drawGuide(opts.guideCanvas, v);
-    } else if (
+      if (live) drawGuide(opts.guideCanvas, v);
+      cadence.measured(ts, performance.now());
+    }
+    if (!staleReported && now - lastFrameAt > STALE_FRAME_MS) {
+      staleReported = true;
+      opts.onPause?.();
+    }
+    if (
       live &&
       !reacquiring &&
       document.visibilityState === "visible" &&
-      performance.now() - lastFrameAt > STALL_MS
+      now - lastFrameAt > STALL_MS
     ) {
       // Reset the clock before the attempt so a slow reacquire does not
       // retrigger itself every frame.
-      lastFrameAt = performance.now();
+      lastFrameAt = now;
       void reacquire();
     }
-    raf = requestAnimationFrame(loop);
   };
 
-  raf = requestAnimationFrame(loop);
+  previewLoop = createPreviewLoop(loop);
+  if (document.visibilityState === "visible") previewLoop.resume();
 
   return {
     stop() {
       live = false;
       attachAttempt++;
-      cancelAnimationFrame(raf);
+      previewLoop?.pause();
+      opts.onPause?.();
       if (reacquireTimer !== null) clearTimeout(reacquireTimer);
       reacquireTimer = null;
       document.removeEventListener("visibilitychange", onVisible);
-      stream?.getTracks().forEach((t) => t.stop());
-      stream = null;
-      opts.video.srcObject = null;
-      opts.video.classList.remove("unmirrored");
-      opts.guideCanvas.classList.remove("unmirrored");
-      const ctx = opts.guideCanvas.getContext("2d");
-      ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
+      if (releaseStream()) {
+        opts.video.classList.remove("unmirrored");
+        opts.guideCanvas.classList.remove("unmirrored");
+        const ctx = opts.guideCanvas.getContext("2d");
+        ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
+      }
     },
     capture() {
       const v = opts.video;
@@ -443,10 +480,16 @@ function drawGuide(canvas: HTMLCanvasElement, video: HTMLVideoElement): void {
   const w = canvas.clientWidth || canvas.width;
   const h = canvas.clientHeight || canvas.height;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+  const width = Math.round(w * dpr);
+  const height = Math.round(h * dpr);
+  const resized = canvas.width !== width || canvas.height !== height;
+  if (resized) {
+    canvas.width = width;
+    canvas.height = height;
   }
+  // The normal guide is intentionally empty. Resizing clears it; repeating
+  // a full high-DPI canvas clear on every camera frame only spends GPU work.
+  if (!DEBUG) return;
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
