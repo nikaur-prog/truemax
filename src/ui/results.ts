@@ -60,6 +60,7 @@ import type { CanvasRecoveryHandle } from "./canvasRecovery.js";
 import { morphBlueprints } from "../engine/morphPlan.js";
 import { morphPreviewHTML, wireMorphPreview } from "./morphPreview.js";
 import { mountReportRailState, mountTabScrollbar, scrollReportPanelToStart } from "./reportNavigation.js";
+import { createSkinTrialAccess } from "./skinTrialAccess.js";
 
 interface Ctx {
   report: Report;
@@ -630,18 +631,34 @@ function softTissueBlock(r: Report, delta: ScanDelta | null): string {
   </section>`;
 }
 
-/** The trial flag: the owner and staff see the block first. */
-function skinTrialEnabled(): boolean {
+/** This preference is not permission. Staff is read separately from app_admins. */
+const skinTrialAccess = createSkinTrialAccess(() => {
   try {
     if (new URLSearchParams(location.search).get("skin") === "1") return true;
     return localStorage.getItem("truemax.skinTrial") === "1";
   } catch {
     return false;
   }
+});
+
+function repaintSkinTrial(): void {
+  const slot = ctx?.analysis.querySelector<HTMLTemplateElement>("[data-skin-trial-slot]");
+  if (!slot || !ctx) return;
+  ctx.analysis.querySelector(".skin-patterns")?.remove();
+  slot.insertAdjacentHTML("afterend", skinPatternsBlock(ctx.report));
+}
+
+/** Ordinary results never wait for this staff-only, opt-in block. */
+export function beginSkinTrialStaffCheck(): (staff: boolean) => void {
+  const resolve = skinTrialAccess.begin();
+  repaintSkinTrial();
+  return (staff) => {
+    if (resolve(staff)) repaintSkinTrial();
+  };
 }
 
 function skinPatternsBlock(r: Report): string {
-  if (!skinTrialEnabled()) return "";
+  if (!skinTrialAccess.enabled()) return "";
   const s = r.skinPatterns;
   const head = `<h4 id="skin-patterns-title">VISIBLE SKIN PATTERNS <i class="trial-chip" title="Shown while the detector is being checked against labelled photographs">trial</i></h4>`;
   if (!s) {
@@ -1416,7 +1433,7 @@ function showOverall(): void {
       ${populationBlock(r)}
       ${primaryMeasurements(r)}
       ${softTissueBlock(r, delta)}
-      ${skinPatternsBlock(r)}
+      <template data-skin-trial-slot></template>${skinPatternsBlock(r)}
       ${resultActions(Boolean(merged), ctx)}
       ${modeSwitcher("full")}
       ${hasHistory() ? `<button class="hist-entry" id="btn-history">View all your scans →</button>` : ""}
@@ -2816,6 +2833,8 @@ let scansLeft = 0;
 // those callbacks from repainting another identity's screen. The next result
 // starts locked until its own reads complete.
 export function clearResultsIdentityState(): void {
+  skinTrialAccess.reset();
+  repaintSkinTrial();
   // The detail view holds a COPY of the photograph and the landmarks it was
   // opened with, so leaving it up across an identity change or a new scan
   // would leave the previous person's face on screen over the next person's
