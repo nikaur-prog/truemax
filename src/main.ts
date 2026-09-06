@@ -18,7 +18,7 @@ import {
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
 import { loadArchive, pruneArchivesTo, saveArchive } from "./engine/scanArchive.js";
-import { setSidePriorSuspended, writeSidePrior } from "./engine/sidePrior.js";
+import { canLearnSidePrior, setSidePriorSuspended, writeSidePrior } from "./engine/sidePrior.js";
 import { closeScanRecall, setScanReopen } from "./ui/scanRecall.js";
 import type { StoredScan } from "./engine/history.js";
 import { maybeAdoptAvatar } from "./engine/avatar.js";
@@ -2506,8 +2506,9 @@ async function runFullAnalysis(
     const sidePoints = lastSide?.points ?? null;
     const sideDims = lastSide?.photo ? { w: lastSide.photo.width, h: lastSide.photo.height } : null;
     // The owner's confirmed points become the prior for their next scan —
-    // their own ears instead of the population template. Never a guest's.
-    if (!guest && sidePoints && sideDims) writeSidePrior(sidePoints, sideDims.w, sideDims.h);
+    // their own ears instead of the population template. Never a guest's, or
+    // a placement they explicitly said was wrong but chose to score anyway.
+    if (canLearnSidePrior(guest, lastSide?.verified) && sidePoints && sideDims) writeSidePrior(sidePoints, sideDims.w, sideDims.h);
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
