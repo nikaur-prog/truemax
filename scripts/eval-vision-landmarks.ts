@@ -49,6 +49,7 @@ import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult, StageName, Wind
 import { fuseSideSeeds } from "../src/engine/sideSeedFusion.js";
 import type { ConfidenceBand } from "../src/engine/sideSeedFusion.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
+import { cleanProfileRate, evaluationCompletenessHolds } from "./side-eval-completeness.js";
 
 const APP_DIR = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const DATA = `${APP_DIR}/.side-dataset`;
@@ -117,9 +118,10 @@ const seeds = JSON.parse(readFileSync(`${DATA}/seeds.json`, "utf8")) as Record<s
 const cache: Record<string, Cached> = useCache && existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : {};
 
 const files = readdirSync(`${DATA}/raw`).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).sort();
-const ids = files
+const eligibleIds = files
   .map((f) => f.replace(/\.[^.]+$/, ""))
-  .filter((id) => labels[id] && !EXCLUDE.has(id))
+  .filter((id) => labels[id] && !EXCLUDE.has(id));
+const ids = eligibleIds
   .filter((id) => !onlyIds || onlyIds.includes(id))
   .slice(0, Number.isFinite(limit) ? limit : undefined);
 
@@ -282,7 +284,7 @@ interface Bucket {
   /** The fused seed on the points the labeller moved, beside seedMoved and modelMoved. */
   fusedMoved: number[];
 }
-const perPoint: Record<SideLandmarkId, Bucket> = Object.fromEntries(
+const perPoint: Record<SideLandmarkId, Bucket> = Object.fromEntries<Bucket>(
   SIDE_LANDMARK_IDS.map((id) => [id, { model: [], seed: [], modelMoved: [], seedMoved: [], anchoredY: [], anchored: [], dx: [], dy: [], fused: [], fusedMoved: [] }]),
 ) as Record<SideLandmarkId, Bucket>;
 const FRONT_LANDMARK_IDS = SIDE_LANDMARK_IDS.filter((id) => !BACK_LANDMARK_IDS.includes(id));
@@ -298,9 +300,9 @@ let zoomedPoints = 0;
 const latencies: number[] = [];
 // Where each back point stood after each stage, so a stage that buys nothing is visible.
 const byStage: Record<StageName, Record<SideLandmarkId, number[]>> = {
-  first: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
-  coarse: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
-  fine: Object.fromEntries(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
+  first: Object.fromEntries<number[]>(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
+  coarse: Object.fromEntries<number[]>(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
+  fine: Object.fromEntries<number[]>(SIDE_LANDMARK_IDS.map((id) => [id, []])) as Record<SideLandmarkId, number[]>,
 };
 const gonionMethods: Record<string, number> = {};
 // Per back point: the two readers' errors and their disagreement, for the
@@ -349,7 +351,7 @@ const spreadPairs: Record<string, Array<{ spread: number; err: number }>> = { tr
 const skipped: string[] = [];
 for (const id of ids) {
   const cached = cache[id];
-  if (!cached || cached.model !== model) {
+  if (!cached || cached.model !== model || cached.version !== LANDMARK_VERSION) {
     skipped.push(id);
     continue;
   }
@@ -705,7 +707,10 @@ const bootstrapMedian = (values: (f: (typeof perFace)[number]) => number | undef
 console.log("");
 console.log("Verdict per back point, hand-placed labels only (moved), face-bootstrap 95% interval; gross miss = error over 0.15 on all labelled points:");
 console.log("landmark    reader   n   median   [95% CI]        beats seeder   gross-miss%");
-const holds: string[] = [];
+// A selected subset or skipped response remains useful diagnostically, but
+// cannot approve rollout for the full labelled set. Missing back points also
+// remain failures rather than silently counting as clean profiles.
+const holds = evaluationCompletenessHolds(eligibleIds, perFace, BACK_LANDMARK_IDS, READERS);
 for (const pid of BACK_LANDMARK_IDS) {
   const movedFaces = perFace.filter((f) => f.moved.has(pid));
   for (const reader of READERS) {
@@ -733,7 +738,7 @@ for (const pid of BACK_LANDMARK_IDS) {
   }
 }
 const cleanAt = (reader: Reader, within: number) =>
-  perFace.filter((f) => BACK_LANDMARK_IDS.every((pid) => f.err[reader][pid] === undefined || f.err[reader][pid]! <= within)).length / Math.max(1, perFace.length);
+  cleanProfileRate(perFace, BACK_LANDMARK_IDS, reader, within);
 console.log("");
 console.log(`Clean profiles (all five back points within 0.10): seeder ${(100 * cleanAt("seeder", 0.1)).toFixed(0)}%, model ${(100 * cleanAt("model", 0.1)).toFixed(0)}%, fused ${(100 * cleanAt("fused", 0.1)).toFixed(0)}%; within 0.06: seeder ${(100 * cleanAt("seeder", 0.06)).toFixed(0)}%, model ${(100 * cleanAt("model", 0.06)).toFixed(0)}%, fused ${(100 * cleanAt("fused", 0.06)).toFixed(0)}%.`);
 const highCount = perFace.reduce((t, f) => t + f.highCount, 0);
@@ -741,6 +746,7 @@ const highWrong = perFace.reduce((t, f) => t + f.highWrong, 0);
 console.log(`Points shown as high confidence that were more than 0.10 out: ${highWrong} of ${highCount} (${highCount ? ((100 * highWrong) / highCount).toFixed(0) : "n/a"}%).`);
 if (cleanAt("fused", 0.1) < 0.7) holds.push(`clean-profile rate at 0.10 is ${(100 * cleanAt("fused", 0.1)).toFixed(0)}%, under 70%`);
 if (highCount && highWrong / highCount > 0.1) holds.push(`high band wrong on ${((100 * highWrong) / highCount).toFixed(0)}% of points, over 10%`);
+if (holds.length) process.exitCode = 1;
 console.log(holds.length ? `HOLD the fused seed as AI-first: ${holds.join("; ")}.` : "SHIP: the fused seed is no worse than the seeder on every back point, misses less, and its high band means what it says.");
 console.log("(A head width is about 335 px on the 640 px review canvas and about 200 px on a phone, so 0.10 is 20 phone pixels.)");
 
