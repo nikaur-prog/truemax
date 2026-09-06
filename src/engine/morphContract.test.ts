@@ -76,6 +76,47 @@ test("a server-checked render waits for the device instead of becoming a false f
   assert.equal(parseMorphRenderState(pending, true).status, "validation_pending");
 });
 
+test("nested pending gates and the legacy wire shape both wait for validation", () => {
+  const gates = ["identityPreserved", "targetAligned"];
+  const validation = {
+    identityPreserved: false, targetAligned: false,
+    naturalOnly: true, crossViewConsistent: true, moderationPassed: true,
+  };
+  for (const overrides of [
+    { validation: { ...validation, pending: gates } },
+    { validation, pending: gates },
+    { validation: { ...validation, pending: gates }, pending: [...gates].reverse() },
+  ]) assert.equal(parseMorphRenderState(ready(overrides), true).status, "validation_pending");
+});
+
+test("pending cannot rescue failed gates, unsafe images or conflicting incomplete lists", () => {
+  const gates = ["identityPreserved", "targetAligned"];
+  const validation = {
+    identityPreserved: false, targetAligned: false,
+    naturalOnly: true, crossViewConsistent: true, moderationPassed: true,
+    pending: gates,
+  };
+  for (const badPending of [null, "identityPreserved", [], ["identityPreserved"], ["targetAligned"], [...gates, "unknown"], ["identityPreserved", "identityPreserved"]]) {
+    assert.equal(parseMorphRenderState(ready({ validation: { ...validation, pending: badPending }, pending: gates }), true).status, "failed");
+  }
+  assert.equal(parseMorphRenderState(ready({ validation, pending: ["identityPreserved"] }), true).status, "failed");
+  for (const gate of ["naturalOnly", "crossViewConsistent", "moderationPassed"]) {
+    assert.equal(parseMorphRenderState(ready({ validation: { ...validation, [gate]: false } }), true).status, "failed");
+  }
+  assert.equal(parseMorphRenderState(ready({ validation: { ...validation, targetAligned: true } }), true).status, "failed");
+  assert.equal(parseMorphRenderState(ready({ validation, images: { front: "https://example.invalid/face.jpg", side: PIXEL } }), true).status, "failed");
+  assert.equal(parseMorphRenderState(ready({ validation, images: { front: PIXEL } }), true).status, "failed");
+});
+
+test("completed pixel checks cannot coexist with pending markers", () => {
+  const validation = ready().validation as Record<string, unknown>;
+  assert.equal(parseMorphRenderState(ready({ validation: { ...validation, pending: [] }, pending: [] }), true).status, "ready");
+  for (const pending of [["identityPreserved", "targetAligned"], ["identityPreserved"], null, "", false]) {
+    assert.equal(parseMorphRenderState(ready({ validation: { ...validation, pending } }), true).status, "failed");
+    assert.equal(parseMorphRenderState(ready({ pending }), true).status, "failed");
+  }
+});
+
 test("renderer output rejects remote URLs and missing paired views", () => {
   assert.equal(parseMorphRenderState(ready({ images: { front: "https://example.com/face.jpg", side: PIXEL } }), true).status, "failed");
   assert.equal(parseMorphRenderState(ready({ images: { front: PIXEL } }), true).status, "failed");

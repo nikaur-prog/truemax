@@ -55,6 +55,11 @@ function jobId(value: unknown): string | null {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{8,128}$/.test(value) ? value : null;
 }
 
+function pendingClientGates(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 2
+    && value.includes("identityPreserved") && value.includes("targetAligned");
+}
+
 export function createMorphRenderRequest(
   scanId: string,
   blueprint: MorphBlueprint,
@@ -123,14 +128,16 @@ export function parseMorphRenderState(value: unknown, expectSide: boolean): Morp
   }
 
   if (!clientPassed) {
-    const pending = Array.isArray(value.pending)
-      ? value.pending.filter((gate): gate is string => typeof gate === "string")
-      : [];
+    // The API sends validation.pending. Accept the original top-level shape
+    // too, but never merge partial lists or let it override a malformed nested
+    // list. Either shape still requires both pixel checks before any display.
+    const hasNestedPending = Object.prototype.hasOwnProperty.call(validation, "pending");
+    const pending = hasNestedPending ? validation.pending : value.pending;
+    const legacyConsistent = !hasNestedPending || value.pending === undefined || pendingClientGates(value.pending);
     const waitingForDevice =
       validation.identityPreserved === false &&
       validation.targetAligned === false &&
-      pending.includes("identityPreserved") &&
-      pending.includes("targetAligned");
+      pendingClientGates(pending) && legacyConsistent;
     return waitingForDevice
       ? {
           status: "validation_pending",
@@ -138,6 +145,14 @@ export function parseMorphRenderState(value: unknown, expectSide: boolean): Morp
           images: { front, ...(safeImage(side) ? { side } : {}) },
         }
       : { status: "failed", error: "The preview did not pass TrueMax validation." };
+  }
+
+  // A contradictory pending marker is not proof of completed pixel checks,
+  // even when the same response also claims all five booleans are true.
+  for (const pending of [validation.pending, value.pending]) {
+    if (pending !== undefined && (!Array.isArray(pending) || pending.length !== 0)) {
+      return { status: "failed", error: "The preview did not pass TrueMax validation." };
+    }
   }
 
   return {

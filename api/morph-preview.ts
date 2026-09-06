@@ -112,8 +112,11 @@ export function parseMorphRequest(value: unknown): MorphRequestInput | { error: 
   const layers = new Set<RenderLayer>();
   for (const [effect, amount] of Object.entries(blueprint.effects)) {
     if (!(effect in EFFECT_LAYERS)) return { error: `The blueprint names an effect the server does not render: ${effect}.` };
-    if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 || amount > 1) return { error: "An effect amount is out of range." };
-    if (amount > 0) layers.add(EFFECT_LAYERS[effect as MorphEffectId]);
+    // The blueprint is a signed vector: less fullness or visible blemishes is
+    // negative, more definition is positive. Both directions activate a layer;
+    // the same bounded [-1, 1] budget applies and zero means no requested edit.
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount < -1 || amount > 1) return { error: "An effect amount is out of range." };
+    if (amount !== 0) layers.add(EFFECT_LAYERS[effect as MorphEffectId]);
   }
   return {
     scanId: raw.scanId,
@@ -307,4 +310,4 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 
-export { SERVER_GATES, CLIENT_GATES };
+export { SERVER_GATES, CLIENT_GATES, validationBlock };
