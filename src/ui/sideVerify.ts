@@ -1031,13 +1031,16 @@ export type SeedValidator = (points: SidePoints, faceDir: number) => boolean;
 export async function seedSidePointsSmart(
   canvas: HTMLCanvasElement,
   validate?: SeedValidator,
+  signal?: AbortSignal,
 ): Promise<SideSeed> {
+  if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
   let g: SideMaskGeometry | null = null;
   try {
     g = await sideMaskGeometry(canvas);
   } catch {
     g = null;
   }
+  if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
   if (!g) return seedSidePoints(canvas);
 
   const mesh = seedFromLandmarks(canvas);

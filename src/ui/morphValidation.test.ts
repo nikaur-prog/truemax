@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { MorphMetricTarget } from "../engine/morphPlan.js";
+import { buildMorphBlueprint } from "../engine/morphPlan.js";
+import { EMPTY_PROFILE } from "../engine/goals.js";
 import type { Report } from "../engine/types.js";
-import { identityLandmarkDistance, targetsMoveAsSpecified } from "./morphValidation.js";
+import { identityLandmarkDistance, targetsMoveAsSpecified, validateMorphImages } from "./morphValidation.js";
+import { seedSidePointsSmart } from "./sideVerify.js";
 
 const points = Array.from({ length: 478 }, (_, index) => ({
   x: 0.2 + (index % 19) * 0.02,
@@ -59,4 +62,33 @@ test("target validation accepts bounded progress and rejects reversal or oversho
   assert.equal(targetsMoveAsSpecified([target], report(0.95)), true);
   assert.equal(targetsMoveAsSpecified([target], report(1.02)), false);
   assert.equal(targetsMoveAsSpecified([target], report(0.8)), false);
+});
+
+for (const stage of ["init", "decode"] as const) {
+  test(`cancelling during ${stage} prevents stale validation from switching the camera mode`, async () => {
+    const abort = new AbortController();
+    let release!: () => void;
+    const delayed = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const work = validateMorphImages({
+      blueprint: buildMorphBlueprint(report(1), EMPTY_PROFILE, "selected", false),
+      originalFrontLandmarks: points, images: { front: "unused" }, signal: abort.signal,
+    }, {
+      init: async () => { if (stage === "init") { entered(); await delayed; } },
+      decode: async () => { if (stage === "decode") { entered(); await delayed; } return {} as HTMLCanvasElement; },
+      mode: async () => { assert.fail("cancelled validation must not reset a new camera to IMAGE"); },
+      detect: () => { assert.fail("cancelled validation must not detect"); },
+    });
+    await started;
+    abort.abort();
+    release();
+    assert.equal((await work).passed, false);
+  });
+}
+
+test("an already cancelled side-validation seed never starts segmentation", async () => {
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(seedSidePointsSmart({} as HTMLCanvasElement, undefined, abort.signal), { name: "AbortError" });
 });

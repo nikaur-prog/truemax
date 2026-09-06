@@ -1,4 +1,5 @@
 import { currentAccessToken } from "../engine/auth.js";
+import { activeScanOwner } from "../engine/scanScope.js";
 import {
   grantGoalPreviewConsent,
   readGoalPreviewConsent,
@@ -6,26 +7,57 @@ import {
 
 let active: HTMLDivElement | null = null;
 
-function close(result: boolean, resolve: (value: boolean) => void): void {
-  active?.remove();
-  active = null;
-  document.body.classList.remove("funnel-open");
-  resolve(result);
+interface ConsentRuntime {
+  owner: typeof activeScanOwner;
+  token: typeof currentAccessToken;
+  read: typeof readGoalPreviewConsent;
+  grant: typeof grantGoalPreviewConsent;
 }
 
 /**
  * A separate, purpose-bound consent. Agreeing to cloud landmark placement or
  * correction feedback never grants this one.
  */
-export async function ensureGoalPreviewConsent(): Promise<boolean> {
-  const accessToken = await currentAccessToken();
-  if (!accessToken) return false;
-  const current = await readGoalPreviewConsent(accessToken);
-  if (current.ok && current.state?.granted) return true;
+export async function ensureGoalPreviewConsent(
+  options: { userId: string; signal?: AbortSignal },
+  overrides: Partial<ConsentRuntime> = {},
+): Promise<boolean> {
+  const runtime: ConsentRuntime = { owner: activeScanOwner, token: currentAccessToken, read: readGoalPreviewConsent, grant: grantGoalPreviewConsent, ...overrides };
+  const owner = `user:${options.userId}`;
+  const current = () => !options.signal?.aborted && runtime.owner() === owner;
+  if (!current()) return false;
+  const accessToken = await runtime.token(options.userId);
+  if (!current() || !accessToken) return false;
+  let saved;
+  try {
+    saved = await runtime.read(accessToken, options.signal);
+  } catch (error) {
+    if (!current()) return false;
+    throw error;
+  }
+  if (!current()) return false;
+  if (!saved.ok) throw new Error(saved.error || "Consent could not be checked.");
+  if (saved.state?.granted) return true;
 
   if (active) return false;
   return new Promise<boolean>((resolve) => {
     const host = document.createElement("div");
+    const controller = new AbortController();
+    let settled = false;
+    let busy = false;
+    const finish = (granted: boolean) => {
+      if (settled) return;
+      settled = true;
+      controller.abort();
+      options.signal?.removeEventListener("abort", cancelled);
+      host.remove();
+      // Only this request's modal may be closed by a late grant response.
+      if (active === host) active = null;
+      if (!document.querySelector(".trial-overlay")) document.body.classList.remove("funnel-open");
+      resolve(granted);
+    };
+    const cancelled = () => finish(false);
+    options.signal?.addEventListener("abort", cancelled, { once: true });
     active = host;
     host.className = "trial-overlay goal-preview-consent";
     host.innerHTML = `<div class="trial-shell goal-preview-consent-shell" role="dialog" aria-modal="true" aria-labelledby="goal-consent-title">
@@ -56,23 +88,38 @@ export async function ensureGoalPreviewConsent(): Promise<boolean> {
     const no = host.querySelector<HTMLButtonElement>("[data-goal-consent-no]");
     const yes = host.querySelector<HTMLButtonElement>("[data-goal-consent-yes]");
     const status = host.querySelector<HTMLElement>(".trial-status");
-    const decline = () => close(false, resolve);
+    const decline = () => finish(false);
     no?.addEventListener("click", decline);
     host.querySelector(".trial-close")?.addEventListener("click", decline);
+    host.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); decline(); }
+    });
     yes?.addEventListener("click", async () => {
-      if (!yes) return;
+      if (!yes || settled || busy) return;
+      if (!current() || active !== host) { finish(false); return; }
+      busy = true;
       yes.disabled = true;
       if (no) no.disabled = true;
       yes.textContent = "Saving choice...";
-      const result = await grantGoalPreviewConsent(accessToken);
-      if (result.ok && result.state?.granted) {
-        close(true, resolve);
-        return;
+      try {
+        const token = await runtime.token(options.userId);
+        if (!current() || active !== host || settled) { finish(false); return; }
+        if (!token) throw new Error("Sign in again to create this preview.");
+        const result = await runtime.grant(token, controller.signal);
+        if (!current() || active !== host || settled) { finish(false); return; }
+        if (result.ok && result.state?.granted) {
+          finish(true);
+          return;
+        }
+        if (status) status.textContent = result.error || "Consent could not be saved.";
+      } catch (error) {
+        if (!current() || settled || active !== host) { finish(false); return; }
+        if (status) status.textContent = error instanceof Error ? error.message : "Consent could not be saved.";
       }
+      busy = false;
       yes.disabled = false;
       if (no) no.disabled = false;
       yes.textContent = "Create my preview";
-      if (status) status.textContent = result.error || "Consent could not be saved.";
     });
   });
 }

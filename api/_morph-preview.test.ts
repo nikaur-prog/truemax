@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { CLIENT_GATES, EFFECT_LAYERS, SERVER_GATES, parseMorphRequest } from "./morph-preview.js";
+import { CLIENT_GATES, EFFECT_LAYERS, SERVER_GATES, parseMorphRequest, validationBlock } from "./morph-preview.js";
+import { buildMorphBlueprint, MORPH_GOAL_RULES } from "../src/engine/morphPlan.js";
+import { EMPTY_PROFILE } from "../src/engine/goals.js";
+import { createMorphRenderRequest, parseMorphRenderState, requestMorphRender } from "../src/engine/morphContract.js";
+import type { Report } from "../src/engine/types.js";
 
 const route = readFileSync(new URL("./morph-preview.ts", import.meta.url), "utf8");
 const contract = readFileSync(new URL("../docs/MORPH_PREVIEW_CONTRACT.md", import.meta.url), "utf8");
 
 const PIXEL = "data:image/jpeg;base64," + Buffer.alloc(400, 7).toString("base64");
 const SCAN = "123e4567-e89b-42d3-a456-426614174000";
+const REPORT: Report = {
+  sex: "male", overall: 5, overallPercentile: 50, overallZ: 0, potential: 5.5,
+  pillars: { Harmony: 5, Angularity: 5, Dimorphism: 5, Features: 5 }, regions: [], metrics: [], zScores: {},
+};
 function request(overrides: Record<string, unknown> = {}, blueprint: Record<string, unknown> = {}) {
   return {
     version: 1,
@@ -66,7 +74,7 @@ test("the request is parsed strictly: ids, bounded images, a stated purpose, a s
   assert.ok(!("error" in ok));
   if ("error" in ok) return;
   assert.deepEqual(ok.goalIds, ["grooming", "skin"]);
-  assert.deepEqual(ok.layers, ["brows", "skinSurface"], "only effects above zero become layers, in the catalogue's order");
+  assert.deepEqual(ok.layers, ["brows", "skinSurface"], "only nonzero effects become layers, in the catalogue's order");
   assert.equal(ok.hasSide, true);
   assert.ok(ok.side && ok.front.length === 400);
   assert.match((parseMorphRequest(request({ scanId: "nope" })) as { error: string }).error, /name the scan/);
@@ -81,6 +89,34 @@ test("the request is parsed strictly: ids, bounded images, a stated purpose, a s
   // A front-only blueprint needs no side.
   const frontOnly = parseMorphRequest(request({ source: { front: PIXEL } }, { hasSide: false }));
   assert.ok(!("error" in frontOnly) && frontOnly.side === null);
+});
+
+test("every real blueprint keeps signed effects inside the server's existing unit budget", () => {
+  for (const id of Object.keys(MORPH_GOAL_RULES)) {
+    const blueprint = buildMorphBlueprint(REPORT, { ...EMPTY_PROFILE, goals: [id] }, "selected", true);
+    const parsed = parseMorphRequest(createMorphRenderRequest(SCAN, blueprint, { front: PIXEL, side: PIXEL }));
+    assert.ok(!("error" in parsed), `${id}: ${"error" in parsed ? parsed.error : ""}`);
+  }
+  const reducing = parseMorphRequest(request({}, { effects: { facialFullness: -1, blemishVisibility: -0.4, browDefinition: 0, hairFinish: -0 } }));
+  assert.ok(!("error" in reducing));
+  assert.deepEqual(reducing.layers, ["skinSurface", "leanerPresentation"]);
+  for (const amount of [-1.0001, 1.0001, NaN, Infinity, -Infinity, "-0.4", null]) {
+    const rejected = parseMorphRequest(request({}, { effects: { facialFullness: amount } }));
+    assert.ok("error" in rejected, String(amount));
+  }
+});
+
+test("the actual API validation block survives the client wire parser without becoming display-ready", async () => {
+  const blueprint = buildMorphBlueprint(REPORT, { ...EMPTY_PROFILE, goals: ["bodyfat", "skin"] }, "selected", true);
+  const payload = createMorphRenderRequest(SCAN, blueprint, { front: PIXEL, side: PIXEL });
+  const fetcher: typeof fetch = async (_input, init) => {
+    const parsed = parseMorphRequest(JSON.parse(String(init?.body)));
+    assert.ok(!("error" in parsed));
+    return Response.json({ status: "ready", jobId: SCAN, images: { front: PIXEL, side: PIXEL }, validation: validationBlock(false) });
+  };
+  const result = await requestMorphRender(payload, "test-member-token", undefined, fetcher);
+  assert.equal(result.status, "validation_pending", "a fresh render still needs the device validator");
+  assert.equal(parseMorphRenderState({ status: "ready", jobId: SCAN, images: { front: PIXEL, side: PIXEL }, validation: validationBlock(true) }, true).status, "ready");
 });
 
 test("every effect maps to a layer the catalogue knows, and body composition only to the adult-only layer", () => {

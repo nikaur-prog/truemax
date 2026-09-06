@@ -18,7 +18,7 @@ import {
 import { paintHeadline, pickHeadline } from "./ui/landingHeadline.js";
 import { pruneTo, savePhotos, toThumb } from "./engine/photoStore.js";
 import { loadArchive, pruneArchivesTo, saveArchive } from "./engine/scanArchive.js";
-import { setSidePriorSuspended, writeSidePrior } from "./engine/sidePrior.js";
+import { canLearnSidePrior, setSidePriorSuspended, writeSidePrior } from "./engine/sidePrior.js";
 import { closeScanRecall, setScanReopen } from "./ui/scanRecall.js";
 import type { StoredScan } from "./engine/history.js";
 import { maybeAdoptAvatar } from "./engine/avatar.js";
@@ -29,7 +29,7 @@ import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
 import { landPhoto } from "./ui/photoLanding.js";
-import { clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
+import { beginSkinTrialStaffCheck, clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { closeMaxChat } from "./ui/maxChat.js";
 import {
@@ -222,6 +222,7 @@ let lastKnownAdmin = false;
 async function refreshMaxAccess(): Promise<void> {
   const owner = activeScanOwner();
   const generation = scanGeneration;
+  const resolveSkinTrialStaff = beginSkinTrialStaffCheck();
   // The scan count comes from local history rather than the account, because it
   // is not a billing fact: it decides how much of the analysis to show, not
   // what anyone is charged. Reading it from the device keeps a free allowance
@@ -259,6 +260,7 @@ async function refreshMaxAccess(): Promise<void> {
       currentPaidScan = use?.consumed === true;
     }
     setMaxAccess(hasMaxOrStaffAccess(entitlement, admin));
+    resolveSkinTrialStaff(admin);
     lastKnownAdmin = admin;
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
@@ -280,6 +282,7 @@ async function refreshMaxAccess(): Promise<void> {
     // retry — where the paid product handed to everybody during an outage is
     // not.
     setMaxAccess(false);
+    resolveSkinTrialStaff(false);
     lastKnownAdmin = false;
     // The standard price, for the same reason: quoting the member price to
     // somebody we could not confirm is a member sets up a charge that does not
@@ -2506,8 +2509,9 @@ async function runFullAnalysis(
     const sidePoints = lastSide?.points ?? null;
     const sideDims = lastSide?.photo ? { w: lastSide.photo.width, h: lastSide.photo.height } : null;
     // The owner's confirmed points become the prior for their next scan —
-    // their own ears instead of the population template. Never a guest's.
-    if (!guest && sidePoints && sideDims) writeSidePrior(sidePoints, sideDims.w, sideDims.h);
+    // their own ears instead of the population template. Never a guest's, or
+    // a placement they explicitly said was wrong but chose to score anyway.
+    if (canLearnSidePrior(guest, lastSide?.verified) && sidePoints && sideDims) writeSidePrior(sidePoints, sideDims.w, sideDims.h);
     const frontThumb = toThumb(frontShot);
     const sideThumb = lastSide?.photo ? toThumb(lastSide.photo) : null;
     await savePhotos(token.scanId, {
@@ -2630,7 +2634,7 @@ async function runFullAnalysis(
         return;
       }
       await openAccount({
-        reason: "analysis",
+        reason: "plan",
         notice: "Create your account to choose a plan.",
         onAuthenticated: async (signedInUser) => {
           await openTrialFunnel(signedInUser, undefined, { ceiling });
@@ -2646,7 +2650,7 @@ async function runFullAnalysis(
         return;
       }
       await openAccount({
-        reason: "analysis",
+        reason: "plan",
         notice: "Create your account to save your pathway and choose a trial.",
         onAuthenticated: (signedInUser) => openTrialFunnel(signedInUser, undefined, { ceiling }),
       });

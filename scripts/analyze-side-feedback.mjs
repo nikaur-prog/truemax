@@ -33,6 +33,8 @@
 //   SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY=sb_secret_... \
 //     node scripts/analyze-side-feedback.mjs
 
+import { sideFeedbackOffsets } from "./side-feedback-analysis.mjs";
+
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SECRET_KEY;
 if (!url || !key) {
@@ -50,7 +52,7 @@ const MIN_N = 25;
 
 const response = await fetch(
   `${url.replace(/\/$/, "")}/rest/v1/side_landmark_feedback` +
-    `?select=face_dir,seed_method,seed_version,automatic_points,corrected_points,moved_point_ids,created_at&order=created_at.asc`,
+    `?select=face_dir,image_width,image_height,review_status,seed_method,seed_version,automatic_points,corrected_points,moved_point_ids,created_at&order=created_at.asc`,
   { headers: { apikey: key, Authorization: `Bearer ${key}` } },
 );
 if (!response.ok) {
@@ -60,6 +62,7 @@ if (!response.ok) {
 const rows = await response.json();
 console.log(`${rows.length} submissions on record.\n`);
 if (!rows.length) process.exit(0);
+console.log("Rejected or unknown-review rows are excluded. Unreviewed rows remain diagnostic, not verified labels; this report applies no offsets.\n");
 
 const bySeed = {};
 for (const row of rows) {
@@ -103,31 +106,16 @@ for (const [seedKey, seedRows] of Object.entries(groupedRows)) {
   const offsets = Object.fromEntries(POINT_IDS.map((id) => [id, []]));
   let unusable = 0;
   for (const row of seedRows) {
-    const auto = row.automatic_points;
-    const fixed = row.corrected_points;
-    if (!auto || !fixed) {
-      unusable++;
-      continue;
-    }
-    // Unit of distance: corrected face height. Stored coordinates are
-    // normalised by image dimensions, which vary with framing.
-    const faceH = Math.abs((fixed.menton?.y ?? 0) - (fixed.trichion?.y ?? 0));
-    if (!Number.isFinite(faceH) || faceH < 0.05) {
+    const normalized = sideFeedbackOffsets(row, POINT_IDS);
+    if (!normalized) {
       unusable++;
       continue;
     }
     for (const id of POINT_IDS) {
-      const a = auto[id];
-      const c = fixed[id];
-      if (!a || !c) continue;
-      const rawDx = (c.x - a.x) / faceH;
-      const dy = (c.y - a.y) / faceH;
-      const dx = row.face_dir === -1 ? -rawDx : rawDx;
-      // Zeroes are evidence that the seed was right and must count.
-      offsets[id].push({ dx, dy });
+      if (normalized[id]) offsets[id].push(normalized[id]);
     }
   }
-  if (unusable) console.log(`${unusable} rows skipped (malformed points or degenerate face box).`);
+  if (unusable) console.log(`${unusable} rows skipped (rejected, unknown review status, invalid dimensions or malformed points).`);
 
   const qualified = {};
   console.log(

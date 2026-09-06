@@ -31,6 +31,11 @@ const KEY = () => scopedStorageKey("truemax:sidePrior");
 
 let suspended = false;
 
+/** Legacy confirmed scans have no flag; an explicit rejection never teaches. */
+export function canLearnSidePrior(guest: boolean, verified: boolean | undefined): boolean {
+  return !guest && verified !== false;
+}
+
 /** While a guest is being scanned, the owner's prior must not apply. */
 export function setSidePriorSuspended(on: boolean): void {
   suspended = on;

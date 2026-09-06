@@ -103,9 +103,15 @@ export async function prepared(bytes: Buffer): Promise<Buffer> {
  * is stored or returned, so no unlabelled preview exists anywhere.
  */
 export async function captioned(image: Buffer): Promise<Buffer | null> {
-  const meta = await sharp(image, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS }).metadata();
-  const width = meta.width ?? 0;
-  const height = meta.height ?? 0;
+  // Build the caption at the delivered size. An original-size SVG cannot be
+  // composited onto a portrait or landscape image after its long edge shrinks.
+  // Keep the normalized pixels raw so retries do not add JPEG generations.
+  const { data: pixels, info } = await sharp(image, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS })
+    .rotate()
+    .resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
   if (!width || !height) return null;
   const font = Math.max(14, Math.round(width / 46));
   const band = font * 2;
@@ -115,8 +121,7 @@ export async function captioned(image: Buffer): Promise<Buffer | null> {
     `<text x="${Math.round(width / 2)}" y="${height - Math.round(band / 2) + Math.round(font / 3)}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${font}" fill="#ffffff">${GOAL_PREVIEW_CAPTION}</text>` +
     `</svg>`;
   for (const quality of [88, 76, 62]) {
-    const out = await sharp(image, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS })
-      .resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true })
+    const out = await sharp(pixels, { raw: { width, height, channels } })
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
       .jpeg({ quality, mozjpeg: true })
       .toBuffer();

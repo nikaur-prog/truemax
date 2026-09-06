@@ -4,6 +4,7 @@ import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 import { allowanceLine } from "../engine/maxAllowance.js";
 import { requestedActionPlan } from "./maxActionBridge.js";
+import { drainMaxStream, maxStreamErrorMessage } from "./maxStream.js";
 import {
   announceMaxConversationChanged,
   loadMaxConversation,
@@ -33,16 +34,6 @@ interface Turn {
   role: "user" | "assistant";
   content: string;
 }
-
-// Characters a second the buffer drains at. Fast enough not to be a wait,
-// slow enough that the mouth animation and the reading pace agree.
-const DRAIN_CPS = 55;
-
-// How long the stream may go quiet mid-answer before Max visibly goes back to
-// thinking. Short enough to cover a real stall, long enough that ordinary
-// token-rate jitter — which is easily a few hundred milliseconds between
-// chunks — never makes the dots flicker on and off under the text.
-const STALL_MS = 1400;
 
 // And the outer limit. Nothing on the other end promises to ever close the
 // stream, and a request that hangs forever leaves a thought bubble pulsing
@@ -350,6 +341,7 @@ async function ask(
     onConversation: (id: string) => void;
   },
 ): Promise<string | null> {
+  const isCurrent = (): boolean => generation === chatGeneration && log.isConnected && form.isConnected;
   say(log, question, "you");
   transcript.push({ role: "user", content: question });
 
@@ -358,7 +350,7 @@ async function ask(
   bubble.innerHTML = `<i></i><i></i><i></i>`;
   form.classList.add("busy");
 
-  const face = document.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
+  const face = form.closest(".maxchat")?.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
   // He thinks while you wait. The character has always had the pose — flat
   // mouth, raised brow, eyes up-left, a thought bubble of messenger dots — but
   // nothing ever switched him into it, so the only sign anything was happening
@@ -373,7 +365,7 @@ async function ask(
   // hung request leaves him thinking until the panel is closed.
   const giveUp = window.setTimeout(() => controller.abort(new DOMException("timeout", "TimeoutError")), GIVE_UP_MS);
 
-  // Out of the thought and into the answer. Called by drain() on the first
+  // Out of the thought and into the answer. Called by the drain on the first
   // character that actually reaches the screen — NOT when the response
   // arrives.
   //
@@ -386,7 +378,7 @@ async function ask(
   // to read.
   let speaking = false;
   const beginSpeaking = (): void => {
-    if (speaking) return;
+    if (speaking || !isCurrent()) return;
     speaking = true;
     bubble.classList.remove("thinking");
     bubble.innerHTML = `<span class="mc-text"></span><span class="mc-wait" hidden><i></i><i></i><i></i></span>`;
@@ -397,7 +389,8 @@ async function ask(
 
   try {
     const token = await currentAccessToken();
-    if (generation !== chatGeneration) return null;
+    if (!isCurrent()) return null;
+    if (controller.signal.aborted) throw controller.signal.reason;
     if (!token) {
       fail(bubble, "Sign in and I'll be right here.");
       return null;
@@ -418,11 +411,15 @@ async function ask(
       }),
       signal: controller.signal,
     });
-    if (generation !== chatGeneration) return null;
+    if (!isCurrent()) {
+      void response.body?.cancel().catch(() => {});
+      return null;
+    }
+    if (controller.signal.aborted) throw controller.signal.reason;
 
     if (!response.ok || !response.body) {
       const detail = (await response.json().catch(() => null)) as { error?: string; resetsAt?: string } | null;
-      if (generation !== chatGeneration) return null;
+      if (!isCurrent()) return null;
       // The daily wall, said in the reader's own clock rather than the
       // server's "tomorrow", which is a UTC day boundary.
       const wall = response.status === 429 ? allowanceLine(0, detail?.resetsAt) : null;
@@ -440,6 +437,10 @@ async function ask(
       persistence.onConversation(savedConversation);
       announceMaxConversationChanged();
     }
+    if (!isCurrent()) {
+      void response.body.cancel().catch(() => {});
+      return null;
+    }
     // How many are left today, said only once it matters (see maxAllowance).
     const remainingHeader = Number(response.headers.get("X-Max-Remaining"));
     showAllowance(allowanceLine(
@@ -447,8 +448,23 @@ async function ask(
       response.headers.get("X-Max-Resets-At"),
     ));
 
-    const said = await drain(response.body, bubble, log, beginSpeaking);
-    if (generation !== chatGeneration) return null;
+    const said = await drainMaxStream(response.body, {
+      signal: controller.signal,
+      isCurrent: () => isCurrent() && bubble.isConnected,
+      begin: beginSpeaking,
+      write: (text) => {
+        // Measure before adding text: a large chunk must not make a reader
+        // who was at the bottom appear to have scrolled away from it.
+        const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+        write(bubble, text);
+        if (atBottom) log.scrollTop = log.scrollHeight;
+      },
+      waiting: (on) => {
+        const dots = bubble.querySelector<HTMLElement>(".mc-wait");
+        if (dots) dots.hidden = !on;
+      },
+    });
+    if (!isCurrent()) return null;
     // A stream that closed having said nothing. Rare, but it used to land as
     // an empty bubble that stayed empty for good, and an empty assistant turn
     // in the transcript that every later message would carry along.
@@ -460,28 +476,27 @@ async function ask(
     transcript.push({ role: "assistant", content: said });
     // Said his piece: a small nod as the reply lands. Follow-through, not
     // celebration — the reply is the content, the nod is the punctuation.
-    reactMax(document.querySelector<HTMLElement>(".maxchat-face"), "nod");
+    reactMax(form.closest(".maxchat")?.querySelector<HTMLElement>(".maxchat-face") ?? null, "nod");
     return said;
   } catch (error) {
-    const name = (error as Error)?.name;
-    if (generation === chatGeneration && name !== "AbortError") {
-      fail(bubble, "I lost the connection there. Ask me again?");
-      transcript.pop();
-    } else if (generation === chatGeneration && controller.signal.reason instanceof DOMException
-      && controller.signal.reason.name === "TimeoutError") {
-      fail(bubble, "That took too long to come back. Ask me again?");
+    if (isCurrent()) {
+      const message = maxStreamErrorMessage(error, controller.signal);
+      if (message) fail(bubble, message);
       transcript.pop();
     }
     return null;
   } finally {
     window.clearTimeout(giveUp);
-    face?.classList.remove("speaking");
     // Every exit, not just the successful one. A failed or aborted request
     // that left the thinking class on would strand him mid-thought with a
     // thought bubble over an error message, and nothing would ever clear it.
-    face?.classList.remove("mx-mood-thinking");
-    face?.classList.add("mx-mood-happy");
-    form.classList.remove("busy");
+    if (generation === chatGeneration) {
+      if (face?.isConnected) {
+        face.classList.remove("speaking", "mx-mood-thinking");
+        face.classList.add("mx-mood-happy");
+      }
+      if (form.isConnected) form.classList.remove("busy");
+    }
     if (inFlight === controller) inFlight = null;
   }
 }
@@ -500,135 +515,7 @@ function fail(bubble: HTMLElement, message: string): void {
   bubble.classList.add("maxchat-err");
   bubble.textContent = message;
   // He minds that it broke — with you, briefly, and then back to normal.
-  reactMax(document.querySelector<HTMLElement>(".maxchat-face"), "shake");
-}
-
-// Max is told to write plain sentences for a plain bubble, but a model under
-// instruction still occasionally reaches for markdown. The bubble renders
-// textContent, where **bold** is four characters of asterisk noise around the
-// word it meant to stress, so whatever slips through is stripped rather than
-// shown. Runs over the whole buffer every frame — it is a handful of regexes
-// on a few hundred characters, and re-running it means a marker split across
-// two network chunks still disappears the moment its second half lands.
-function scrub(raw: string): string {
-  return raw
-    .replace(/\*\*|__|`/g, "")
-    .replace(/\*([^*\n]{1,80})\*/g, "$1")
-    .replace(/^#{1,4}\s+/gm, "")
-    .replace(/^(\s*)[*•]\s+/gm, "$1- ");
-}
-
-// Read the stream into a buffer, and let a steady clock move characters from
-// the buffer onto the screen. The two rates are independent on purpose: the
-// network delivers in clumps, the reader wants an even pace, and the gap
-// between them is what the buffer is for.
-//
-// The clock runs for everybody, reduced motion included. The pacing is not a
-// motion effect, it is what lets a person follow the answer as it is said —
-// dumping the whole reply at once is exactly the bug this exists to fix.
-async function drain(
-  body: ReadableStream<Uint8Array>,
-  bubble: HTMLElement,
-  log: HTMLElement,
-  onFirstText: () => void,
-): Promise<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffered = "";
-  let shown = 0;
-  let done = false;
-
-  const pump = (async () => {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffered += decoder.decode(chunk.value, { stream: true });
-    }
-    buffered += decoder.decode();
-    done = true;
-  })();
-
-  await new Promise<void>((resolve) => {
-    let last = performance.now();
-    // When the buffer last grew. A stream that has caught up and gone quiet
-    // for longer than STALL_MS puts the dots back — under the text this time,
-    // not instead of it, so the half of the answer already written stays
-    // readable while he works out the rest. This is the same bug as the one
-    // before the first token, in the middle of a sentence.
-    let grewAt = performance.now();
-    let waiting = false;
-    const setWaiting = (on: boolean): void => {
-      if (on === waiting) return;
-      waiting = on;
-      const dots = bubble.querySelector<HTMLElement>(".mc-wait");
-      if (dots) dots.hidden = !on;
-    };
-    // Fractional characters are CARRIED between frames rather than floored
-    // away. At sixty frames a second one frame earns 0.9 of a character, so
-    // rounding each frame down on its own drops the remainder every time and
-    // the text crawls out at roughly half the rate this constant asks for.
-    let carry = 0;
-    let seen = 0;
-    const step = (now: number): void => {
-      const text = scrub(buffered);
-      // Scrubbing can shorten the buffer after the fact — a lone * becomes a
-      // pair when its twin arrives and both vanish — so the cursor is clamped
-      // rather than trusted.
-      shown = Math.min(shown, text.length);
-      if (text.length !== seen) {
-        seen = text.length;
-        grewAt = now;
-      }
-      // Nothing has been written yet and nothing has arrived: hold the whole
-      // thinking state, do not touch the bubble, and do not start the clock.
-      // last is re-seated each frame so the wait cannot bank drain time and
-      // then spray the opening of the answer out in one frame.
-      if (shown === 0 && text.length === 0) {
-        last = now;
-        if (done) resolve();
-        else requestAnimationFrame(step);
-        return;
-      }
-      if (shown === 0) onFirstText();
-      // Reading pace by default. When a big backlog appears at once — a proxy
-      // buffered the stream, or the tab was hidden and frames stopped — speed
-      // up in proportion so the replay takes a second or two, not a minute,
-      // while still visibly typing.
-      const backlog = text.length - shown;
-      const cps = DRAIN_CPS + (backlog > 360 ? (backlog - 360) * 1.4 : 0);
-      carry += ((now - last) / 1000) * cps;
-      last = now;
-      const take = Math.floor(carry);
-      if (take > 0) {
-        carry -= take;
-        shown = Math.min(text.length, shown + take);
-        write(bubble, text.slice(0, shown));
-        // Only follow the text down if the reader has not scrolled up to
-        // re-read something. Yanking them back to the bottom mid-sentence is
-        // the most annoying thing a chat window can do.
-        const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-        if (atBottom) log.scrollTop = log.scrollHeight;
-      }
-      // Caught up with a stream that has not finished. Drop the carry rather
-      // than letting it bank during the wait, or a network stall of two
-      // seconds would be followed by a hundred characters appearing at once.
-      if (shown >= text.length) carry = 0;
-      setWaiting(!done && shown >= text.length && now - grewAt > STALL_MS);
-      if (done && shown >= text.length) resolve();
-      else requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  });
-
-  await pump;
-  const said = scrub(buffered);
-  if (said) {
-    onFirstText();
-    write(bubble, said);
-    const dots = bubble.querySelector<HTMLElement>(".mc-wait");
-    if (dots) dots.hidden = true;
-  }
-  return said;
+  reactMax(bubble.closest(".maxchat")?.querySelector<HTMLElement>(".maxchat-face") ?? null, "shake");
 }
 
 // The answer lives in a child span, not in the bubble's own text, because the
