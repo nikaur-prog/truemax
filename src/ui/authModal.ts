@@ -58,6 +58,8 @@ export interface OpenAccountOptions {
   };
   onAuthenticated?: (user: User) => void | Promise<void>;
   onDeferred?: () => void | Promise<void>;
+  onAuthAttempt?: () => void;
+  onAuthFailure?: () => void;
 }
 
 /**
@@ -277,6 +279,8 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
       context: options.reason === "analysis" ? "analysis" : "account",
       portalHref: `/auth?mode=${initialMode}`,
       onDeferred: options.onDeferred,
+      onAuthAttempt: options.onAuthAttempt,
+      onAuthFailure: options.onAuthFailure,
       onAuthenticated: async (signedInUser) => {
         if (options.onAuthenticated) {
           close();

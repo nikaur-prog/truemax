@@ -21,6 +21,8 @@ export interface AuthFormOptions {
   portalHref?: string;
   onAuthenticated: (user: User) => void | Promise<void>;
   onDeferred?: () => void | Promise<void>;
+  onAuthAttempt?: () => void;
+  onAuthFailure?: () => void;
 }
 
 export function renderAuthForm(root: HTMLElement, options: AuthFormOptions): void {
@@ -191,6 +193,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     if (isSignup && body === "invalid") {
       say(msg, "Height and weight were left out: enter both, within a plausible range, or leave both blank. Creating your account without them.", "info");
     }
+    options.onAuthAttempt?.();
     const result = isLink
       ? await signInWithLink(email)
       : isSignup
@@ -201,6 +204,7 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     updateSubmit();
 
     if (!result.ok) {
+      options.onAuthFailure?.();
       say(msg, result.message || "Something went wrong.", "err");
       return;
     }
@@ -225,8 +229,10 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       socialWorking = true;
       disableSocial(root, true);
       button.textContent = "Opening…";
+      options.onAuthAttempt?.();
       const result = await signInWithProvider(provider);
       if (!result.ok) {
+        options.onAuthFailure?.();
         socialWorking = false;
         disableSocial(root, false);
         button.innerHTML = socialLabel(provider);

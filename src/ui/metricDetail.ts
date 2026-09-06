@@ -15,6 +15,7 @@ import { zoomFor } from "./regions.js";
 import { fmt, metricTrait, rankShort } from "./templates.js";
 import { metricRead } from "../engine/metricReads.js";
 import { scoreTone } from "./scoreTone.js";
+import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback } from "./celebrityPortrait.js";
 
 // ---------------------------------------------------------------------------
 // One measurement, opened.
@@ -269,10 +270,10 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   if (matches.length) {
     return matches
       .map(
-        (c) => `<div class="mdx-celeb"><span class="mdx-ava">${c.name[0]}</span>
+        (c) => `<div class="mdx-celeb"><span class="mdx-ava">${c.name[0]}${celebrityPortraitImage(c.name)}</span>
           <span class="mdx-celeb-nm">${c.name}<small>${c.metricName}</small></span></div>`,
       )
-      .join("");
+      .join("") + celebrityPortraitCredits(matches.map(c => c.name));
   }
   // The two reasons are genuinely different and the copy has to match the
   // code. CELEB_MATCH_MIN_PCT is the matcher's real threshold — the previous
@@ -447,6 +448,7 @@ function renderTab(): void {
 
 export function openMetricDetail(o: MetricDetailOpts): void {
   if (!o.metrics.length) return;
+  installCelebrityPortraitFallback();
   closeMetricDetail();
   opts = o;
   index = Math.min(o.metrics.length - 1, Math.max(0, o.index));

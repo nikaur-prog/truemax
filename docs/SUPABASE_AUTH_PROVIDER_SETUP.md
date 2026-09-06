@@ -65,11 +65,30 @@ Add a narrowly scoped Vercel preview wildcard only during preview testing.
 
 ## 4. Replace the project ID on OAuth screens
 
-Google currently shows `ruvgkrlfmixfnmnzqgap.supabase.co` because that is the
-host receiving the OAuth callback. Frontend button copy cannot change it. The
-production fix is the Supabase custom domain `auth.truemax.app` plus a verified
-Google OAuth brand. Supabase custom domains are a paid add-on, so confirm the
-add-on in the project billing screen before starting.
+As of 7 September 2026, Google's production account chooser says **continue to
+TrueMax**. The app name, logo, home page, privacy and terms links were saved in
+Google Auth Platform; the audience is in production and the branding is verified
+and published. A real Google sign-in returned successfully to the signed-in app.
+Frontend button copy does not control this Google-hosted screen.
+
+The owner-approved custom domain is now active. Supabase reports
+`auth.truemax.app` is serving traffic; both it and the original project return
+HTTP 200 from Auth settings with the public application key. Google and email
+authentication are enabled, and signup is not disabled.
+
+A fresh production sign-out and Google sign-in passed after activation. The
+Google request used `https://auth.truemax.app/auth/v1/callback`, displayed the
+TrueMax name and logo, and returned to the signed-in TrueMax account. Both
+callbacks remain saved on the existing OAuth client. Supabase switched the
+provider callback automatically, so no production client environment change
+was necessary to remove the Supabase name from the login screen. Keep the
+working client URL and its same-project session key stable for this release.
+
+This verifies existing-account Google login, not a new-account email delivery
+or password-recovery round trip. Those need their own test inbox check.
+
+The client now bounds Auth settings probes to three seconds, including body
+reads, and retains its same-project fallback and stable session storage key.
 
 Use this cutover order so sign-in never goes offline:
 

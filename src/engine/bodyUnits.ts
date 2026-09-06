@@ -47,9 +47,27 @@ export function toMetric(entry: BodyEntry): BodyMetric | null {
 
 /** Canonical units as feet, inches and pounds for display. */
 export function toImperial(metric: BodyMetric): { feet: number; inches: number; pounds: number } {
-  const totalInches = metric.heightCm / CM_PER_INCH;
+  const totalInches = round1(metric.heightCm / CM_PER_INCH);
   const feet = Math.floor(totalInches / 12);
   return { feet, inches: round1(totalInches - feet * 12), pounds: round1(metric.weightKg / KG_PER_POUND) };
+}
+
+/** Convert entered fields independently, without filling an unanswered field. */
+export function convertBodyEntryUnits(entry: BodyEntry, unit: UnitSystem): BodyEntry {
+  if (entry.unit === unit) return { ...entry };
+  if (unit === "imperial") {
+    const hasHeight = Number.isFinite(entry.heightCm);
+    const hasWeight = Number.isFinite(entry.weightKg);
+    const converted = toImperial({ heightCm: hasHeight ? entry.heightCm! : 0, weightKg: hasWeight ? entry.weightKg! : 0 });
+    return { unit, ...(hasHeight ? { feet: converted.feet, inches: converted.inches } : {}),
+      ...(hasWeight ? { pounds: converted.pounds } : {}) };
+  }
+  const hasHeight = Number.isFinite(entry.feet) && Number.isFinite(entry.inches ?? 0);
+  const hasWeight = Number.isFinite(entry.pounds);
+  const converted = toMetric({ unit: "imperial", feet: hasHeight ? entry.feet : 0,
+    inches: hasHeight ? entry.inches ?? 0 : 0, pounds: hasWeight ? entry.pounds : 0 })!;
+  return { unit, ...(hasHeight ? { heightCm: converted.heightCm } : {}),
+    ...(hasWeight ? { weightKg: converted.weightKg } : {}) };
 }
 
 /** Inside the bounds the calculator, the dialog and the database share. */

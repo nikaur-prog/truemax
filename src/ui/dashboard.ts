@@ -19,6 +19,8 @@ import { brandClass, logoMarkup } from "./membershipBrand.js";
 import type { MembershipBrand } from "./membershipBrand.js";
 import { countUp } from "./countUp.js";
 import { maxTabMarkup, wireMaxTab } from "./maxTab.js";
+import { celebrityPortrait } from "../engine/celebrityPortraits.js";
+import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback, PORTRAIT_DISCLOSURE } from "./celebrityPortrait.js";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -204,13 +206,13 @@ export function openDashboard(opts: {
           ${scanSection(scans, legacyCount, allComparable.length - scans.length, allComparable.length)}
           ${celebrities.length ? `<button class="dash-faces-strip dash-anim" id="dash-celeb-strip" style="--d:520ms">
             <span class="dash-faces-fan">
-              ${CELEBS.slice(0, 5).map((celebrity) => `<i aria-hidden="true">${celebrityInitials(celebrity.name)}</i>`).join("")}
+              ${CELEBS.slice(0, 5).map((celebrity) => `<i aria-hidden="true">${celebrityInitials(celebrity.name)}${celebrityPortraitImage(celebrity.name)}</i>`).join("")}
             </span>
             <span class="dash-faces-copy">
               <b>${celebrities.length} celebrity reference profiles</b>
               <em>Browse the real measurement set used by metric comparisons →</em>
             </span>
-          </button>` : ""}
+          </button>${celebrityPortraitCredits(CELEBS.slice(0, 5).map(celebrity => celebrity.name))}` : ""}
         </section>
         <section class="dash-view" data-view="scans" role="tabpanel" aria-labelledby="dash-bar-scans" hidden></section>
         <section class="dash-view" data-view="faces" role="tabpanel" aria-labelledby="dash-bar-faces" hidden></section>
@@ -252,6 +254,7 @@ export function openDashboard(opts: {
       </button>` : ""}
     </nav>`;
 
+  installCelebrityPortraitFallback();
   document.body.appendChild(overlay);
   countHero(overlay);
   currentView = "home";
@@ -676,14 +679,17 @@ function wireScanRows(root: HTMLElement): void {
 // destination behind whichever card you happened to tap.
 function facesMarkup(): string {
   const celebrities = celebrityList();
+  const portraitCount = celebrities.filter(celebrity => celebrityPortrait(celebrity.name)).length;
   return `
     <header class="dash-head">
       <h1>Celebrities</h1>
       <p>Real reference measurements used by TrueMax comparisons. Search a name, or browse the set.</p>
+      <p class="portrait-disclosure">${PORTRAIT_DISCLOSURE} ${portraitCount} licensed photos are available. Other entries, or photos that cannot load, show initials.</p>
     </header>
     <input class="celeb-q" id="celeb-q" placeholder="Search a name" autocomplete="off" />
     <div class="celeb-grid" id="celeb-grid">${celebrities.map((celebrity, index) => celebCard(celebrity, index)).join("")}</div>
-    <p class="celeb-empty hidden" id="celeb-empty">No one by that name in the set yet.</p>`;
+    <p class="celeb-empty hidden" id="celeb-empty">No one by that name in the set yet.</p>
+    ${celebrityPortraitCredits(celebrities.map(celebrity => celebrity.name))}`;
 }
 
 function wireFaces(root: ParentNode): void {
@@ -742,6 +748,7 @@ function openCelebDetail(celebrity: CelebEntry): void {
             <path d="m17 19 5-2M31 19l-5-2M19 25h.1M29 25h.1M20 33l4 2 4-2"/>
           </svg>
           <b>${celebrityInitials(celebrity.name)}</b>
+          ${celebrityPortraitImage(celebrity.name)}
         </div>
         <div class="cd-meta">
           <span class="klabel">REFERENCE PROFILE</span>
@@ -750,6 +757,8 @@ function openCelebDetail(celebrity: CelebEntry): void {
         </div>
       </div>
 
+      <p class="portrait-disclosure">${PORTRAIT_DISCLOSURE}</p>
+      ${celebrityPortraitCredits([celebrity.name])}
       <div class="cd-measure-groups">
         ${[...grouped.entries()].map(([region, defs]) => `<section class="cd-measure-group">
           <h2 class="cd-h2">${escapeHtml(region)}</h2>
@@ -760,9 +769,9 @@ function openCelebDetail(celebrity: CelebEntry): void {
         </section>`).join("")}
       </div>
 
-      <p class="cd-note">Measured from a public official portrait and used only as a per-metric
-        reference. TrueMax does not distribute that source photograph here. These are raw
-        readings, not an attractiveness verdict, and a different photograph can move them.</p>
+      <p class="cd-note">These are raw per-metric readings, not an attractiveness verdict.
+        A different photograph can move them. The displayed reference photo is not a claim
+        that these readings were measured from that photo.</p>
     </div>`;
   document.body.appendChild(detailEl);
   detailEl.querySelector(".hist-close")!.addEventListener("click", () => {
@@ -780,6 +789,7 @@ function celebCard(celebrity: CelebEntry, index: number): string {
         <path d="m17 19 5-2M31 19l-5-2M19 25h.1M29 25h.1M20 33l4 2 4-2"/>
       </svg>
       <b>${celebrityInitials(celebrity.name)}</b>
+      ${celebrityPortraitImage(celebrity.name)}
     </div>
     <div class="celeb-meta">
       <b>${escapeHtml(celebrity.name)}</b>

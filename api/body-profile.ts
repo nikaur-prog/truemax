@@ -16,10 +16,10 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 //
 // PUT accepts metric or imperial and stores canonical centimetres and
 // kilograms, bounded by the same numbers the calculator and the table
-// enforce. A request marked as a device migration goes through one
-// conditional statement that writes only when the row holds neither
-// figure, so a value that lived on one phone cannot overwrite a value
-// typed on another. DELETE clears the two values and keeps the row.
+// enforce. A device migration inserts only when no row exists. Any existing
+// row wins, including an intentionally cleared one, so an old device cannot
+// resurrect deleted measurements. DELETE upserts that empty row even when
+// nothing was stored yet. The database resolves both writes atomically.
 //
 // Nothing here reaches facial scoring, and a test pins that the scoring
 // modules never read these columns.
@@ -124,16 +124,14 @@ export async function PUT(request: Request): Promise<Response> {
     }
     const admin = getSupabaseAdmin();
     if (parsed.source === "device_migration") {
-      // Once, and only into a row holding neither figure. One conditional
-      // statement in the database, so two devices racing cannot both win
-      // and a phone's cache never lands on a value typed elsewhere.
-      const { error } = await admin.rpc("migrate_body_profile", {
-        p_user_id: user.id,
-        p_height_cm: metric.heightCm,
-        p_weight_kg: metric.weightKg,
-        p_unit: parsed.entry.unit,
-      });
-      if (error) throw new Error(`migrate_body_profile failed: ${error.message}`);
+      // ON CONFLICT DO NOTHING protects both a saved value and a cleared
+      // tombstone. A GET followed by the old empty-row RPC could resurrect a
+      // clear that committed between those requests. Never reuse that RPC.
+      const { error } = await admin.from("body_profiles").upsert(
+        { user_id: user.id, height_cm: metric.heightCm, weight_kg: metric.weightKg, unit_preference: parsed.entry.unit, source: parsed.source },
+        { onConflict: "user_id", ignoreDuplicates: true },
+      );
+      if (error) throw new Error(`Body profile migration failed: ${error.message}`);
       return json(await state(user.id));
     }
     const { error } = await admin.from("body_profiles").upsert(
@@ -148,16 +146,22 @@ export async function PUT(request: Request): Promise<Response> {
   }
 }
 
-/** Clear the two values. The row stays so the unit preference survives. */
+/** Clear the two values, retaining a tombstone against old device migrations. */
 export async function DELETE(request: Request): Promise<Response> {
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin profile writes are not allowed." }, 403);
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in first." }, 401);
-    const { error } = await getSupabaseAdmin()
-      .from("body_profiles")
-      .update({ height_cm: null, weight_kg: null, source: "settings" })
-      .eq("user_id", user.id);
+    const admin = getSupabaseAdmin();
+    const { data: previous, error: readError } = await admin.from("body_profiles")
+      .select("unit_preference").eq("user_id", user.id).maybeSingle<{ unit_preference: string }>();
+    if (readError) throw new Error(readError.message);
+    // INSERT handles a previously absent row. On conflict the nulls replace
+    // the measurements, so clearing wins whichever migration write runs first.
+    const { error } = await admin.from("body_profiles").upsert(
+      { user_id: user.id, height_cm: null, weight_kg: null, unit_preference: previous?.unit_preference === "imperial" ? "imperial" : "metric", source: "settings" },
+      { onConflict: "user_id" },
+    );
     if (error) throw new Error(error.message);
     return json(await state(user.id));
   } catch (error) {

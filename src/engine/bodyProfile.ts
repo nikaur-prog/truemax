@@ -1,14 +1,7 @@
 // ---------------------------------------------------------------------------
 // Height, weight, activity and goal: what the macro calculator reads from.
 //
-// LOCAL ONLY, and that is a decision rather than an omission. Height and weight
-// are the most sensitive thing this app would hold about a person outside the
-// photograph itself, they are of no use to any server-side feature we have, and
-// nothing here is ever sent anywhere. Scoped to the signed-in account by the
-// same key rule the scan allowance uses, so signing out and in as somebody else
-// does not hand them the previous person's body.
-//
-// Since 3 September 2026 the two measurements also have a server row
+// The two measurements have a private server row
 // (public.body_profiles, api/body-profile.ts) so a plan follows the person
 // across devices. This store is now the offline cache of that row: fetch
 // hydrates it, save writes through, and migrate pushes a value that was only
@@ -16,13 +9,14 @@
 // and body fat stay device-only; the server holds only height and weight.
 // ---------------------------------------------------------------------------
 
-import { scopedStorageKey } from "./scanScope.js";
+import { activeScanOwner, scopedStorageKey } from "./scanScope.js";
 import { ACTIVITY, GOAL_LABEL, bodyInputIsUsable } from "./macros.js";
 import type { Activity, EnergyGoal } from "./macros.js";
 import { bodyMetricUsable } from "./bodyUnits.js";
 import type { BodyEntry, BodyMetric, UnitSystem } from "./bodyUnits.js";
 
 const KEY = "truemax.body";
+export const BODY_PROFILE_CHANGED = "truemax:body-profile-changed";
 
 export interface StoredBody {
   heightCm: number;
@@ -117,17 +111,96 @@ export interface ServerBodyProfile {
   updatedAt: string | null;
 }
 
+function serverHasBody(server: ServerBodyProfile): server is ServerBodyProfile & BodyMetric {
+  return bodyMetricUsable({ heightCm: server.heightCm ?? undefined, weightKg: server.weightKg ?? undefined });
+}
+
 function parseServerBody(value: unknown): ServerBodyProfile | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
-  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const num = (v: unknown) => v === null || (typeof v === "number" && Number.isFinite(v));
+  if (!num(raw.heightCm) || !num(raw.weightKg) || typeof raw.required !== "boolean"
+    || (raw.unit !== "metric" && raw.unit !== "imperial")
+    || (raw.updatedAt !== null && (typeof raw.updatedAt !== "string" || !Number.isFinite(Date.parse(raw.updatedAt))))) return null;
+  const heightCm = raw.heightCm as number | null;
+  const weightKg = raw.weightKg as number | null;
+  if (heightCm !== null && weightKg !== null && !bodyMetricUsable({ heightCm, weightKg })) return null;
   return {
-    heightCm: num(raw.heightCm),
-    weightKg: num(raw.weightKg),
-    unit: raw.unit === "imperial" ? "imperial" : "metric",
-    required: raw.required === true,
-    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+    heightCm, weightKg, unit: raw.unit, required: raw.required,
+    updatedAt: raw.updatedAt as string | null,
   };
+}
+
+const operations = new Map<string, Promise<unknown>>();
+const synced = new Set<string>();
+const currentOwner = () => {
+  const owner = activeScanOwner();
+  return owner?.startsWith("user:") ? owner : null;
+};
+function tokenOwner(accessToken: string): string | null {
+  const owner = currentOwner();
+  if (!owner) return null;
+  try {
+    // This is only cache isolation, never authorization. The endpoint still
+    // verifies the token. A session can switch between awaiting getSession
+    // and entering this helper, so bind the captured scope to the token too.
+    const payload = JSON.parse(atob(accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) as { sub?: string };
+    return owner === `user:${payload.sub}` ? owner : null;
+  } catch { return null; }
+}
+const sameOwner = (owner: string) => currentOwner() === owner;
+const marker = (owner: string) => `${KEY}:serverSynced:${owner}`;
+
+function markSynced(owner: string): void {
+  synced.add(owner);
+  try { localStorage.setItem(marker(owner), "1"); } catch { /* session marker still works */ }
+}
+
+function applyServer(owner: string, server: ServerBodyProfile): void {
+  if (!sameOwner(owner)) return;
+  const before = JSON.stringify(readBody());
+  if (serverHasBody(server)) {
+    const local = readBody();
+    writeBody({
+      heightCm: server.heightCm, weightKg: server.weightKg,
+      activity: local?.activity ?? "moderate", goal: local?.goal ?? "hold",
+      ...(local?.bodyFat !== undefined ? { bodyFat: local.bodyFat } : {}),
+    }, server.updatedAt ? Date.parse(server.updatedAt) : Date.now());
+  } else {
+    // Clearing on another device must not leave an old usable calculator here.
+    clearBody();
+  }
+  markSynced(owner);
+  if (typeof window !== "undefined" && before !== JSON.stringify(readBody())) {
+    window.dispatchEvent(new Event(BODY_PROFILE_CHANGED));
+  }
+}
+
+function serialized<T>(owner: string, task: () => Promise<T>): Promise<T> {
+  const previous = operations.get(owner) ?? Promise.resolve();
+  const result = previous.catch(() => undefined).then(task);
+  operations.set(owner, result);
+  void result.finally(() => { if (operations.get(owner) === result) operations.delete(owner); }).catch(() => undefined);
+  return result;
+}
+
+async function callBody(accessToken: string, method: string, fetcher: typeof fetch, body?: unknown): Promise<{
+  server: ServerBodyProfile | null; message: string;
+}> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetcher("/api/body-profile", {
+      method, signal: controller.signal,
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return { server: response.ok ? parseServerBody(payload) : null,
+      message: typeof payload?.error === "string" ? payload.error : "Your details could not be saved just then." };
+  } catch {
+    return { server: null, message: "Your details could not be saved. Check your connection and try again." };
+  } finally { clearTimeout(timer); }
 }
 
 /**
@@ -136,21 +209,15 @@ function parseServerBody(value: unknown): ServerBodyProfile | null {
  * once it has one); activity and goal on the device are kept.
  */
 export async function fetchBodyProfile(accessToken: string, fetcher: typeof fetch = fetch): Promise<ServerBodyProfile | null> {
-  const response = await fetcher("/api/body-profile", { headers: { authorization: `Bearer ${accessToken}` } }).catch(() => null);
-  if (!response || !response.ok) return null;
-  const server = parseServerBody(await response.json().catch(() => null));
-  if (!server) return null;
-  if (server.heightCm !== null && server.weightKg !== null) {
-    const local = readBody();
-    writeBody({
-      heightCm: server.heightCm,
-      weightKg: server.weightKg,
-      activity: local?.activity ?? "moderate",
-      goal: local?.goal ?? "hold",
-      ...(local?.bodyFat ? { bodyFat: local.bodyFat } : {}),
-    });
-  }
-  return server;
+  const owner = tokenOwner(accessToken);
+  if (!owner) return null;
+  return serialized(owner, async () => {
+    if (!sameOwner(owner)) return null;
+    const { server } = await callBody(accessToken, "GET", fetcher);
+    if (!server || !sameOwner(owner)) return null;
+    applyServer(owner, server);
+    return server;
+  });
 }
 
 /** Write through: the server first, then the cache, so a failed save leaves nothing half-done. */
@@ -160,21 +227,28 @@ export async function saveBodyProfile(
   source: "dialog" | "settings" = "dialog",
   fetcher: typeof fetch = fetch,
 ): Promise<{ ok: true; metric: BodyMetric } | { ok: false; message: string }> {
-  const response = await fetcher("/api/body-profile", {
-    method: "PUT",
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ ...entry, source }),
-  }).catch(() => null);
-  const payload = (await response?.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!response || !response.ok) {
-    return { ok: false, message: typeof payload?.error === "string" ? payload.error : "Your details could not be saved just then." };
-  }
-  const server = parseServerBody(payload);
-  if (!server || server.heightCm === null || server.weightKg === null) return { ok: false, message: "Your details could not be saved just then." };
-  const metric = { heightCm: server.heightCm, weightKg: server.weightKg };
-  const local = readBody();
-  writeBody({ ...metric, activity: local?.activity ?? "moderate", goal: local?.goal ?? "hold", ...(local?.bodyFat ? { bodyFat: local.bodyFat } : {}) });
-  return { ok: true, metric };
+  const owner = tokenOwner(accessToken);
+  if (!owner) return { ok: false, message: "Sign in again to save your details." };
+  return serialized(owner, async () => {
+    if (!sameOwner(owner)) return { ok: false, message: "Your account changed. Open your details again." };
+    const { server, message } = await callBody(accessToken, "PUT", fetcher, { ...entry, source });
+    if (!server || !serverHasBody(server)) return { ok: false, message };
+    if (!sameOwner(owner)) return { ok: false, message: "Your account changed. Open your details again." };
+    applyServer(owner, server);
+    return { ok: true, metric: { heightCm: server.heightCm, weightKg: server.weightKg } };
+  });
+}
+
+export async function deleteBodyProfile(accessToken: string, fetcher: typeof fetch = fetch): Promise<ServerBodyProfile | null> {
+  const owner = tokenOwner(accessToken);
+  if (!owner) return null;
+  return serialized(owner, async () => {
+    if (!sameOwner(owner)) return null;
+    const { server } = await callBody(accessToken, "DELETE", fetcher);
+    if (!server || !sameOwner(owner)) return null;
+    applyServer(owner, server);
+    return server;
+  });
 }
 
 /**
@@ -184,12 +258,26 @@ export async function saveBodyProfile(
  * whose cache is empty or unusable sends nothing.
  */
 export async function migrateLocalBodyProfile(accessToken: string, fetcher: typeof fetch = fetch): Promise<boolean> {
-  const local = readBody();
-  if (!local || !bodyMetricUsable(local)) return false;
-  const response = await fetcher("/api/body-profile", {
-    method: "PUT",
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ unit: "metric", heightCm: local.heightCm, weightKg: local.weightKg, source: "device_migration" }),
-  }).catch(() => null);
-  return !!response && response.ok;
+  const owner = tokenOwner(accessToken);
+  if (!owner) return false;
+  return serialized(owner, async () => {
+    if (!sameOwner(owner) || synced.has(owner)) return false;
+    try { if (localStorage.getItem(marker(owner)) === "1") return false; } catch { /* continue with session marker */ }
+    const local = readBody();
+    if (!local || !bodyMetricUsable(local)) return false;
+    const previous = await callBody(accessToken, "GET", fetcher);
+    if (!previous.server || !sameOwner(owner)) return false;
+    // A row with a timestamp was already saved or explicitly cleared. Do not
+    // resurrect cleared measurements from a stale second device's cache.
+    if (previous.server.updatedAt !== null || serverHasBody(previous.server)) {
+      applyServer(owner, previous.server);
+      return false;
+    }
+    const { server } = await callBody(accessToken, "PUT", fetcher, {
+      unit: "metric", heightCm: local.heightCm, weightKg: local.weightKg, source: "device_migration",
+    });
+    if (!server || !sameOwner(owner)) return false;
+    applyServer(owner, server);
+    return true;
+  });
 }

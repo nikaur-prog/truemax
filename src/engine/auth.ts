@@ -5,6 +5,7 @@ import { activateScanOwner } from "./scanScope.js";
 import { settleAttributionForAuth } from "./attribution.js";
 import { pendingAnalysisRedirect } from "./pendingAnalysis.js";
 import { beginIntentionalNavigation, cancelIntentionalNavigation } from "./navigationIntent.js";
+import { withAuthDeadline } from "./authDeadline.js";
 
 // ---------------------------------------------------------------------------
 // Accounts, on Supabase.
@@ -134,10 +135,11 @@ async function resolvedAuthEnv(): Promise<AuthEnv> {
   if (!resolvedAuthEnvPromise) {
     resolvedAuthEnvPromise = (async () => {
       try {
-        const response = await fetch(`${primary}/auth/v1/settings`, {
+        const response = await withAuthDeadline((signal) => fetch(`${primary}/auth/v1/settings`, {
           headers: { apikey: env.key },
           cache: "no-store",
-        });
+          signal,
+        }));
         if (response.ok) return env;
         console.error("[auth] branded Auth domain is not active; using the project URL", response.status);
       } catch (error) {
@@ -234,19 +236,22 @@ export function authRedirects(origin = window.location.origin): { scan: string; 
 export async function socialAvailability(): Promise<SocialAvailability | null> {
   try {
     const env = await resolvedAuthEnv();
-    const response = await fetch(`${env.url}/auth/v1/settings`, {
-      headers: { apikey: env.key },
-      cache: "no-store",
+    return await withAuthDeadline(async (signal) => {
+      const response = await fetch(`${env.url}/auth/v1/settings`, {
+        headers: { apikey: env.key },
+        cache: "no-store",
+        signal,
+      });
+      if (!response.ok) {
+        console.error("[auth] provider settings read failed", response.status, response.statusText);
+        return null;
+      }
+      const settings = await response.json() as { external?: Partial<SocialAvailability> };
+      return {
+        google: settings.external?.google === true,
+        apple: settings.external?.apple === true,
+      };
     });
-    if (!response.ok) {
-      console.error("[auth] provider settings read failed", response.status, response.statusText);
-      return null;
-    }
-    const settings = await response.json() as { external?: Partial<SocialAvailability> };
-    return {
-      google: settings.external?.google === true,
-      apple: settings.external?.apple === true,
-    };
   } catch (error) {
     // Logged rather than swallowed. This one call decides whether the social
     // buttons work, and a silent null here presents as "sign-in is broken" with

@@ -72,6 +72,15 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     // before doing any work so a readiness update arriving during this frame
     // can schedule exactly one successor, never a parallel countdown loop.
     raf = 0;
+    // An iOS background/foreground transition can dispatch a queued paint
+    // before the next camera result. Never spend time hidden as a countdown.
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      stop();
+      pausedAt = 0;
+      badSince = 0;
+      opts.onTick(null);
+      return;
+    }
     // PAUSED MEANS PAUSED, even for a callback already in flight.
     //
     // cancelAnimationFrame is asked for below, and belt-and-braces is right
@@ -92,11 +101,16 @@ export function createAutoCapture(opts: Opts): AutoCapture {
 
     // Counting down out loud is the whole point: on the side capture the person
     // is turned away from the screen and the audio is all they have.
-    if (whole !== lastBeep && whole > 0) {
+    if (whole !== lastBeep) {
       lastBeep = whole;
-      tick(whole);
+      if (whole > 0) {
+        tick(whole);
+        // The label changes twice, not on every animation frame. Rewriting
+        // identical camera text sixty times a second makes layout compete
+        // with inference on the phones that need the countdown most.
+        opts.onTick(whole);
+      }
     }
-    opts.onTick(whole);
 
     if (remaining <= 0) {
       fired = true;

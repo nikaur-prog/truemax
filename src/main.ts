@@ -70,11 +70,10 @@ import { loadPhotos } from "./engine/photoStore.js";
 import { createSettler } from "./engine/captureSettle.js";
 import { mountAccountButton, openAccount } from "./ui/authModal.js";
 import type { OpenAccountOptions } from "./ui/authModal.js";
-import { currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
+import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "./engine/auth.js";
 import {
   clearPurchaseResult,
   consumePurchaseResult,
-  hasMaxAccess,
   hasMaxOrStaffAccess,
   consumeScanCreditForScan,
   loadEntitlement,
@@ -139,11 +138,13 @@ import { closeTrialFunnel, openTrialFunnel, openTrialFunnelPreview } from "./ui/
 import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, profileIsAdult } from "./engine/onboarding.js";
 import { closeSettings, openSettings } from "./ui/settings.js";
 import { track } from "./engine/track.js";
+import { signupReturn } from "./engine/signupReturn.js";
+import { mountInstallPrompt } from "./ui/installPrompt.js";
 import { markPlatform } from "./engine/platform.js";
 import { beginAnalysisHandoff } from "./ui/analysisHandoff.js";
 import type { AnalysisHandoffRun } from "./ui/analysisHandoff.js";
-import { readBody } from "./engine/bodyProfile.js";
-import { openBodyProfileDialog } from "./ui/bodyProfileDialog.js";
+import { fetchBodyProfile, migrateLocalBodyProfile } from "./engine/bodyProfile.js";
+import { closeBodyProfileDialog, openBodyProfileDialog } from "./ui/bodyProfileDialog.js";
 
 // Ingest cap, and it is an EXPORT setting as much as a detection one.
 //
@@ -216,10 +217,6 @@ let lastKnownTier: EntitlementTier = "free";
 // Kept separately from plan tier. Staff access is not a subscription, but it
 // does need an unlimited subject chooser so the owner can test guest scans.
 let lastKnownAdmin = false;
-// Staff may inspect Max surfaces, but only an actual paid Max entitlement
-// triggers the mandatory body-details setup. Access and purchase are different
-// facts, and a staff flag must never masquerade as a subscription.
-let lastKnownPaidMax = false;
 
 
 async function refreshMaxAccess(): Promise<void> {
@@ -263,7 +260,6 @@ async function refreshMaxAccess(): Promise<void> {
     }
     setMaxAccess(hasMaxOrStaffAccess(entitlement, admin));
     lastKnownAdmin = admin;
-    lastKnownPaidMax = hasMaxAccess(entitlement);
     // Which of the two scan prices this account is quoted, everywhere it is
     // quoted. A live subscription of any tier is a member.
     lastKnownTier = tierOf(entitlement);
@@ -285,7 +281,6 @@ async function refreshMaxAccess(): Promise<void> {
     // not.
     setMaxAccess(false);
     lastKnownAdmin = false;
-    lastKnownPaidMax = false;
     // The standard price, for the same reason: quoting the member price to
     // somebody we could not confirm is a member sets up a charge that does not
     // match what they were shown.
@@ -309,6 +304,7 @@ if (stamp) stamp.textContent = __BUILD__;
 // First touch wins and it expires; see engine/attribution.ts.
 captureAttribution();
 track("visit");
+const installPrompt = mountInstallPrompt();
 
 if (import.meta.env.DEV) {
   const preview = new URLSearchParams(location.search).get("preview");
@@ -523,7 +519,7 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
 ).__truemaxMeasure;
 
 // The idle frame runs the demo reel — real scans of public-domain portraits.
-mountDemoReel(el.reelCanvas, el.reelScore);
+mountDemoReel(el.reelCanvas, el.reelScore, { pauseWhenCovered: true });
 
 // The docked demo neither pins nor shrinks. Both were tried, the resize was
 // re-tuned twice, and it still read as choppy on a real phone — a card that
@@ -1145,20 +1141,23 @@ async function ensureOnboarded(user: User): Promise<void> {
   await openTrialFunnel(user, undefined, { required: true });
 }
 
-async function requirePaidMaxBodyProfile(user: User): Promise<void> {
-  if (!lastKnownPaidMax || readBody()) return;
+async function requirePaidMaxBodyProfile(user: User, allowPrompt = true): Promise<void> {
   const generation = scanGeneration;
-  let profile;
-  try {
-    profile = await loadOnboardingProfile(user);
-  } catch {
-    return;
+  const ownsAccount = () => activeScanOwner() === `user:${user.id}`;
+  const accessToken = await currentAccessToken(user.id);
+  if (!accessToken || !ownsAccount()) return;
+  // Import a usable legacy device value before hydration can clear it. The
+  // server only accepts an import into an account with no saved/cleared row.
+  // This runs on the guest signup-return path too, without delaying its report.
+  await migrateLocalBodyProfile(accessToken);
+  if (!ownsAccount()) return;
+  const profile = await fetchBodyProfile(accessToken);
+  if (!allowPrompt || generation !== scanGeneration || !ownsAccount()) return;
+  // The server owns the age, live entitlement and missing-details decision.
+  // A cached tier or body value must never decide whether this is mandatory.
+  if (profile?.required) {
+    await openBodyProfileDialog({ required: true, userId: user.id, initialProfile: profile });
   }
-  if (generation !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
-  // Missing or under-18 dates fail closed. Body and diet planning are never
-  // opened by a client-side flag, and an unfinished signup keeps its own gate.
-  if (!onboardingComplete(profile) || !profileIsAdult(profile)) return;
-  await openBodyProfileDialog({ required: true });
 }
 
 document.getElementById("logo-home")?.addEventListener("click", async () => {
@@ -1299,6 +1298,7 @@ async function openCamera(): Promise<void> {
     const started = await startCamera({
       video: el.camVideo,
       guideCanvas: el.camGuide,
+      onPause: () => autoFront?.cancel(),
       // Both cameras refused during a swap and the working one is already
       // released: close the viewfinder rather than leave controls over a dead
       // frame, and say why.
@@ -1769,6 +1769,7 @@ function retakeFront(method: "camera" | "upload" | null): void {
 }
 
 function resetToUpload(): void {
+  installPrompt.clear();
   closeScanConfirm();
   disarmLeaveGuard();
   scanGeneration++;
@@ -1854,13 +1855,19 @@ async function handleFile(file: File, expectedGeneration = scanGeneration): Prom
     showEngineNote((err as Error).message.toUpperCase(), "error");
     return;
   }
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return;
+  }
   // Browsers apply EXIF orientation during decode — verified against rotated
   // iPhone-style files (orientation 3 and 6 both land upright). We read the
   // flag only for diagnostics; applying it again would rotate twice, which is
   // exactly the bug this check caught.
   const exifOrientation = await readOrientation(file);
-  if (!scanIsCurrent(token, generation)) return;
+  if (!scanIsCurrent(token, generation)) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return;
+  }
   const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(image.width, image.height));
   const dw = Math.round(image.width * scale);
   const dh = Math.round(image.height * scale);
@@ -1869,7 +1876,13 @@ async function handleFile(file: File, expectedGeneration = scanGeneration): Prom
   const src = document.createElement("canvas");
   src.width = width;
   src.height = height;
-  src.getContext("2d")!.drawImage(image, 0, 0, dw, dh);
+  try {
+    src.getContext("2d")!.drawImage(image, 0, 0, dw, dh);
+  } finally {
+    // The bounded canvas owns the pixels now. Do not keep a full-size iPhone
+    // bitmap alive throughout the measurement film and signup wall as well.
+    if ("close" in image && typeof image.close === "function") image.close();
+  }
   await handleCanvas(src, exifOrientation, generation, token);
 }
 
@@ -2765,6 +2778,12 @@ async function runFullAnalysis(
   window.setTimeout(() => el.analysis.classList.remove("analysis-arrive"), 900);
   renderResults(ctxArgs);
   scanSession.transition(token, "results");
+  signupReturn.finish(true, token.scanId);
+  installPrompt.afterOwnResult(el.analysis, () =>
+    scanSession.isCurrent(token) && scanSession.snapshot().phase === "results"
+      && activeScanOwner()?.startsWith("user:") === true && scanSubject === null
+      && !el.main.classList.contains("hidden"),
+  );
 
   // The plan renders locked and unlocks in place if this comes back positive.
   // Deliberately not awaited: a finished analysis must never wait on a billing
@@ -3009,6 +3028,8 @@ async function gateAnalysis(
       initialMode: saved ? "signup" : "password",
       reason: "analysis",
       teaser,
+      onAuthAttempt: () => signupReturn.begin(token.scanId),
+      onAuthFailure: () => signupReturn.clear(),
       onDeferred: () => {
         el.status.innerHTML = "<b>Scan saved on this device.</b> Open the newest email link to continue.";
       },
@@ -3016,10 +3037,13 @@ async function gateAnalysis(
         // Supabase emits SIGNED_IN before signInWithPassword resolves. Claim
         // this continuation before the deferred auth listener gets a turn, so
         // one password login cannot analyze and append history twice.
-        if (saved) resumePendingStarted = true;
+        resumePendingStarted = true;
         scanSession.claim(token, `user:${signedInUser.id}`);
         const continued = await continueAuthenticatedAnalysis(sideReport, token, generation);
-        if (!continued) resumePendingStarted = false;
+        if (!continued) {
+          resumePendingStarted = false;
+          signupReturn.finish(false, token.scanId);
+        }
       },
     }).catch(() => {
       // Keep the visible inline gate available if a browser blocks or fails to
@@ -3079,6 +3103,7 @@ async function runPendingResume(): Promise<boolean> {
   if (generation !== scanGeneration || !user) return false;
   const saved = claimPendingAnalysis(user.id);
   if (!saved) return false;
+  signupReturn.bindClaim(saved.scanId);
 
   // Claim the redirect continuation before its first network read. Supabase
   // may emit INITIAL_SESSION and SIGNED_IN for the same navigation; without
@@ -3436,6 +3461,7 @@ if (isAuthAvailable()) {
     const nextUserId = user?.id ?? null;
     const identityChanged = previousUserId !== undefined && previousUserId !== nextUserId;
     if (identityChanged) {
+      installPrompt.clear();
       // Both of these are module state describing the PREVIOUS account, and
       // neither was reset here. A Max holder finishing a scan and a free user
       // signing in on the same tab left the second one holding the first one's
@@ -3455,6 +3481,7 @@ if (isAuthAvailable()) {
       closeDashboard();
       closeHistory();
       closeSettings();
+      closeBodyProfileDialog();
       closeTrialFunnel();
       closeScanRecall();
       discardPendingScanCredit();
@@ -3464,6 +3491,7 @@ if (isAuthAvailable()) {
     // hard scan boundary. Anonymous -> authenticated is the intentional claim
     // path and keeps the just-captured canvases alive.
     if (previousUserId && previousUserId !== nextUserId) {
+      signupReturn.clear();
       void closeCamera();
       closeSide();
       resetToUpload();
@@ -3501,14 +3529,23 @@ if (isAuthAvailable()) {
       // full-resolution canvases.
       setTimeout(() => {
         void (async () => {
+          const ownsAccount = () => activeScanOwner() === `user:${user.id}`;
+          if (!ownsAccount()) return;
           await refreshMaxAccess();
+          if (!ownsAccount()) return;
           await reconcileReturnedPurchase();
+          if (!ownsAccount()) return;
           const resumed = await resumePendingAfterAuth();
+          if (!ownsAccount()) return;
           if (!resumed && !resumePendingStarted) {
+            signupReturn.finish(false);
             await ensureOnboarded(user);
-            await requirePaidMaxBodyProfile(user);
           }
-        })();
+          if (!ownsAccount()) return;
+          // An account created at the scan wall receives its analysis before
+          // any unrelated setup prompt. Its details still hydrate here.
+          await requirePaidMaxBodyProfile(user, !resumed && !resumePendingStarted);
+        })().catch(() => undefined);
       }, 0);
     } else if (returnedPurchase?.status === "success") {
       showPurchaseNotice("Sign in to confirm the payment and add it to this account.");

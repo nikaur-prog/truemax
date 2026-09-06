@@ -13,7 +13,7 @@ import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
 import { regionIconMarkup } from "./regionIcons.js";
 import { scoreTone } from "./scoreTone.js";
-import { resetTapPreview, wireTapPreview } from "./tapPreview.js";
+import { resetTapPreview, wireMetricButton, wireTapPreview } from "./tapPreview.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, drawMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
@@ -40,6 +40,7 @@ import { SKIN_PATTERN_LABELS, SKIN_ZONE_LABELS } from "../engine/skinPatterns.js
 import { track } from "../engine/track.js";
 import type { Depth } from "../engine/depth.js";
 import { GOALS } from "../engine/goals.js";
+import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback } from "./celebrityPortrait.js";
 import { showScalePrimer, wireScaleNote } from "./scaleNote.js";
 // The verdict VIEW is gone; the verdict TONE is not — it still sets how Max
 // speaks, which is a voice setting rather than a depth one.
@@ -58,6 +59,7 @@ import { mountCanvasRecovery } from "./canvasRecovery.js";
 import type { CanvasRecoveryHandle } from "./canvasRecovery.js";
 import { morphBlueprints } from "../engine/morphPlan.js";
 import { morphPreviewHTML, wireMorphPreview } from "./morphPreview.js";
+import { mountReportRailState, mountTabScrollbar, scrollReportPanelToStart } from "./reportNavigation.js";
 
 interface Ctx {
   report: Report;
@@ -141,12 +143,38 @@ interface Ctx {
 let ctx: Ctx | null = null;
 let photoRecovery: CanvasRecoveryHandle | null = null;
 let detachReportRail: (() => void) | null = null;
+let detachTabScrollbar: (() => void) | null = null;
 
 export function clearResultPhotoRecovery(): void {
+  cancelReportDrawing();
   photoRecovery?.destroy();
   photoRecovery = null;
   detachReportRail?.();
   detachReportRail = null;
+  detachTabScrollbar?.();
+  detachTabScrollbar = null;
+  toggleObserver?.disconnect();
+  toggleObserver = null;
+}
+
+// Every tab shares the same overlay canvas. A drawing or delayed hover revert
+// from the old panel must stop before the next panel paints into it.
+function cancelReportDrawing(): void {
+  transition?.cancel();
+  transition = null;
+  fade?.cancel();
+  fade = null;
+  sideFade?.cancel();
+  sideFade = null;
+  pillarFade?.cancel();
+  pillarFade = null;
+  if (revert !== null) window.clearTimeout(revert);
+  revert = null;
+  if (pillarRevert !== null) window.clearTimeout(pillarRevert);
+  pillarRevert = null;
+  activeMetric = null;
+  sideActive = null;
+  resetTapPreview();
 }
 
 // Whether the screen is showing observations only — a guest's scan or a
@@ -165,6 +193,7 @@ const escapeHTML = (v: string): string =>
   v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function renderResults(c: Ctx): void {
+  installCelebrityPortraitFallback();
   clearResultPhotoRecovery();
   ctx = c;
   // The curve is taught before the first number is ever shown. Fire-and-forget
@@ -237,7 +266,7 @@ export function renderResults(c: Ctx): void {
   track.setAttribute("aria-hidden", "true");
   track.innerHTML = `<i></i>`;
   rail.appendChild(track);
-  mountTabScrollbar(tabs, track);
+  detachTabScrollbar = mountTabScrollbar(tabs, track);
 
   // The Side tab is gone from this row: it is not a ninth region, it is the
   // other half of the scan, and burying it among eight regions made a quarter
@@ -301,70 +330,6 @@ function placeQualityChips(): void {
   // its original pane rather than moving an invisible block in front of the
   // score hierarchy.
   photo.appendChild(chips);
-}
-
-/**
- * Keep the tab row's position indicator in step with its scroll.
- *
- * Reads on scroll and on resize, both passive, and writes two custom
- * properties rather than restyling — so a swipe costs one style recalculation
- * per frame on one element and nothing else on the page moves.
- */
-function mountTabScrollbar(tabs: HTMLElement, track: HTMLElement): void {
-  const sync = (): void => {
-    const { scrollWidth, clientWidth, scrollLeft } = tabs;
-    const overflow = scrollWidth - clientWidth;
-    // A couple of pixels of slack: sub-pixel layout leaves a phantom 0.5px of
-    // overflow on rows that visibly fit, and a scrollbar for half a pixel is
-    // worse than none.
-    if (overflow <= 2) {
-      track.hidden = true;
-      return;
-    }
-    track.hidden = false;
-    const frac = clientWidth / scrollWidth;
-    track.style.setProperty("--thumb-w", `${(frac * 100).toFixed(2)}%`);
-    track.style.setProperty("--thumb-x", `${((scrollLeft / overflow) * (1 - frac) * 100).toFixed(2)}%`);
-  };
-  tabs.addEventListener("scroll", sync, { passive: true });
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(sync).observe(tabs);
-  sync();
-}
-
-/**
- * Publish whether the mobile category rail is pinned without doing any
- * scroll-time layout work. CSS owns the visual treatment and keeps the photo
- * pinned independently, so reading farther down the report can never replace
- * the face with the controls.
- * One passive listener, coalesced to one animation frame, keeps long reports
- * cheap on iOS Safari.
- */
-function mountReportRailState(rail: HTMLElement, sentinel: HTMLElement): () => void {
-  let frame = 0;
-  const sync = (): void => {
-    frame = 0;
-    const mobile = window.matchMedia?.("(max-width: 850px)").matches ?? window.innerWidth <= 850;
-    if (!mobile) {
-      rail.classList.remove("is-stuck");
-      return;
-    }
-    const stickyTop = Number.parseFloat(getComputedStyle(rail).top) || 0;
-    const naturalTop = sentinel.getBoundingClientRect().top;
-    const railIsPinned = naturalTop <= stickyTop + 1 && window.scrollY > 0;
-    rail.classList.toggle("is-stuck", railIsPinned);
-  };
-  const schedule = (): void => {
-    if (!frame) frame = requestAnimationFrame(sync);
-  };
-  window.addEventListener("scroll", schedule, { passive: true });
-  window.addEventListener("resize", schedule, { passive: true });
-  schedule();
-  return () => {
-    window.removeEventListener("scroll", schedule);
-    window.removeEventListener("resize", schedule);
-    if (frame) cancelAnimationFrame(frame);
-    rail.classList.remove("is-stuck");
-  };
 }
 
 // The tab row belongs to the view, not to the report.
@@ -731,12 +696,8 @@ function wirePrimaryMeasurements(): void {
  */
 function scrollReportToTop(): void {
   const rail = ctx?.analysis.querySelector<HTMLElement>(".rtabs-rail");
-  if (!rail) return;
-  // Already at or above the top of the report: a scroll here would drag
-  // somebody who is reading the photograph downward, which is the opposite of
-  // the complaint.
-  if (rail.getBoundingClientRect().top >= 0) return;
-  rail.scrollIntoView({ behavior: "smooth", block: "start" });
+  const sentinel = ctx?.analysis.querySelector<HTMLElement>(".rtabs-sentinel");
+  if (rail && sentinel) scrollReportPanelToStart(rail, sentinel);
 }
 
 /**
@@ -760,6 +721,7 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
     ctx.onUpgrade?.();
     return;
   }
+  cancelReportDrawing();
   stopTypewriter();
   // Two tabs belong to neither view. Max reads the whole scan and the plan is
   // built from every measurement in it, so reaching either from the profile
@@ -911,7 +873,7 @@ function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
 
 function mobileRegionFocused(): boolean {
   return Boolean(
-    window.matchMedia?.("(max-width: 760px)").matches &&
+    window.matchMedia?.("(max-width: 850px)").matches &&
     document.querySelector(".pane-photo")?.classList.contains("region-focus"),
   );
 }
@@ -1188,6 +1150,8 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
     if (metric && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
       row.addEventListener("pointerenter", () => {
         if (!ctx) return;
+        transition?.cancel();
+        transition = null;
         if (pillarRevert !== null) window.clearTimeout(pillarRevert);
         pillarRevert = null;
         pillarFade?.cancel();
@@ -1202,7 +1166,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
         pillarRevert = window.setTimeout(restoreReportPhoto, LEAVE_GRACE_MS);
       });
     }
-    row.addEventListener("click", () => {
+    const open = () => {
       if (!ctx) return;
       openMetricDetail({
         // The deck spans regions by definition, so the card takes each
@@ -1218,7 +1182,9 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
         sidePhoto: ctx.sidePhoto ?? null,
         sidePoints: ctx.sidePoints ?? null,
       });
-    });
+    };
+    row.addEventListener("click", open);
+    wireMetricButton(row, `Open ${metric.def.name} details`, open);
   }
 
   document.body.appendChild(wrap);
@@ -1286,6 +1252,8 @@ function wireSideMeasurementTaps(report: Report): void {
 
   const show = (id: string | null) => {
     if (!ctx || id === sideActive) return;
+    transition?.cancel();
+    transition = null;
     sideActive = id;
     const metric = id ? metrics.find((m) => m.def.id === id) : null;
     for (const other of document.querySelectorAll(".metric[data-side-metric]")) {
@@ -1333,6 +1301,7 @@ function wireSideMeasurementTaps(report: Report): void {
     // On a phone the first press draws the measurement on the pinned profile
     // and the second opens it — see ui/tapPreview.ts. A mouse is unchanged.
     wireTapPreview(row, id, {
+      label: `Open ${metrics.find((metric) => metric.def.id === id)?.def.name ?? id} details`,
       preview: (which) => show(which),
       leave: arm,
       disarm,
@@ -2040,10 +2009,10 @@ function celebCard(matches: ReturnType<typeof regionMatches>): string {
   // name under the name is the whole of that claim.
   return matches
     .map(
-      (m) => `<div class="celeb"><div class="ava">${m.name[0]}</div>
+      (m) => `<div class="celeb"><div class="ava">${m.name[0]}${celebrityPortraitImage(m.name)}</div>
         <div class="nm">${m.name}<span>${m.metricName}</span></div></div>`,
     )
-    .join("");
+    .join("") + celebrityPortraitCredits(matches.map(m => m.name));
 }
 
 // ---------------------------------------------------------------------------
@@ -2435,6 +2404,8 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
   // be skipped by one path and applied by another.
   const show = (id: string | null) => {
     if (!ctx || id === activeMetric) return;
+    transition?.cancel();
+    transition = null;
     activeMetric = id;
     const metric = id ? r.metrics.find((m) => m.def.id === id) : null;
     for (const other of document.querySelectorAll(".metric")) {
@@ -2524,6 +2495,7 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     // appeared underneath a modal that had already covered it, and the best
     // thing on this screen was desktop-only. See ui/tapPreview.ts.
     wireTapPreview(row, id, {
+      label: `Open ${r.metrics.find((metric) => metric.def.id === id)?.def.name ?? id} details`,
       preview: show,
       leave: arm,
       disarm,

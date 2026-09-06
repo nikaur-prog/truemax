@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BODY_BOUNDS, bodyMetricUsable, boundsSentence, toImperial, toMetric } from "./bodyUnits.js";
+import { BODY_BOUNDS, bodyMetricUsable, boundsSentence, convertBodyEntryUnits, toImperial, toMetric } from "./bodyUnits.js";
 import { bodyInputIsUsable } from "./macros.js";
 
 test("metric and imperial entries of the same body agree to a tenth", () => {
@@ -19,6 +19,16 @@ test("a missing or non-numeric field is null, never a guess", () => {
   assert.equal(toMetric({ unit: "metric", heightCm: Number.NaN, weightKg: 70 }), null);
   assert.equal(toMetric({ unit: "imperial", feet: undefined, pounds: 150 }), null);
   assert.equal(toMetric({ unit: "metric" }), null);
+});
+
+test("unit conversion retains partial drafts without inventing missing values", () => {
+  assert.deepEqual(convertBodyEntryUnits({ unit: "metric", heightCm: 181.2 }, "imperial"), { unit: "imperial", feet: 5, inches: 11.3 });
+  assert.deepEqual(convertBodyEntryUnits({ unit: "imperial", pounds: 180 }, "metric"), { unit: "metric", weightKg: 81.6 });
+  assert.deepEqual(convertBodyEntryUnits({ unit: "metric" }, "imperial"), { unit: "imperial" });
+});
+
+test("display rounding carries twelve inches into the next foot", () => {
+  assert.deepEqual(toImperial({ heightCm: 182.8, weightKg: 70 }), { feet: 6, inches: 0, pounds: 154.3 });
 });
 
 test("the bounds are the calculator's bounds and the database's bounds", () => {

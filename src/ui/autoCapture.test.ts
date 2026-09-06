@@ -61,6 +61,37 @@ test("a clean run fires after the full countdown", () => {
   assert.equal(h.fired(), 1);
 });
 
+test("identical countdown labels are not repainted on every animation frame", () => {
+  const h = harness(1.5);
+  h.auto.update(true);
+  for (let i = 0; i < 100; i++) advance(16);
+  assert.deepEqual(h.ticks, [2, 1, null]);
+  assert.equal(h.fired(), 1);
+});
+
+test("a queued frame cannot fire the shutter while the page is hidden", () => {
+  const h = harness(1.5);
+  h.auto.update(true);
+  advance(1400);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const page = { visibilityState: "hidden" };
+  Object.defineProperty(globalThis, "document", { configurable: true, value: page });
+  try {
+    advance(5000);
+    assert.equal(h.fired(), 0);
+    assert.equal(h.auto.armed(), false);
+    page.visibilityState = "visible";
+    h.auto.update(true);
+    advance(100);
+    assert.equal(h.fired(), 0, "returning needs the whole countdown again");
+    advance(1500);
+    assert.equal(h.fired(), 1);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
 test("readiness frames advance the count when animation frames are starved", () => {
   const h = harness(1.5);
   h.auto.update(true);
