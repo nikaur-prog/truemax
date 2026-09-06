@@ -145,6 +145,7 @@ let ctx: Ctx | null = null;
 let photoRecovery: CanvasRecoveryHandle | null = null;
 let detachReportRail: (() => void) | null = null;
 let detachTabScrollbar: (() => void) | null = null;
+let detachMorphPreview: (() => void) | null = null;
 
 export function clearResultPhotoRecovery(): void {
   cancelReportDrawing();
@@ -161,6 +162,8 @@ export function clearResultPhotoRecovery(): void {
 // Every tab shares the same overlay canvas. A drawing or delayed hover revert
 // from the old panel must stop before the next panel paints into it.
 function cancelReportDrawing(): void {
+  detachMorphPreview?.();
+  detachMorphPreview = null;
   transition?.cancel();
   transition = null;
   fade?.cancel();
@@ -2669,7 +2672,7 @@ function showImprove(): void {
   // canvas, which by now may be showing the side profile.
   paintCeilingCta(body(), frontPhoto);
   if (!gated) {
-    wireMorphPreview(body(), {
+    detachMorphPreview = wireMorphPreview(body(), {
       scanId: ctx.capture?.scanId ?? "",
       selected: morph.selected,
       maxVision: morph.maxVision,

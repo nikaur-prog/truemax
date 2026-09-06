@@ -12,6 +12,7 @@ export interface MorphValidationInput {
   blueprint: MorphBlueprint;
   originalFrontLandmarks: NormalizedLandmark[];
   images: MorphRenderSource;
+  signal?: AbortSignal;
 }
 
 export interface MorphValidationResult {
@@ -104,10 +105,23 @@ export function targetsMoveAsSpecified(targets: MorphMetricTarget[], report: Rep
   return true;
 }
 
-function imageCanvas(data: string): Promise<HTMLCanvasElement> {
+function imageCanvas(data: string, signal?: AbortSignal): Promise<HTMLCanvasElement> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException("Cancelled", "AbortError"));
     const image = new Image();
+    const clear = () => {
+      signal?.removeEventListener("abort", abort);
+      image.onload = null;
+      image.onerror = null;
+    };
+    const abort = () => {
+      clear();
+      image.src = "";
+      reject(new DOMException("Cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
     image.onload = () => {
+      clear();
       const canvas = document.createElement("canvas");
       canvas.width = image.naturalWidth || image.width;
       canvas.height = image.naturalHeight || image.height;
@@ -119,17 +133,34 @@ function imageCanvas(data: string): Promise<HTMLCanvasElement> {
       g.drawImage(image, 0, 0, canvas.width, canvas.height);
       resolve(canvas);
     };
-    image.onerror = () => reject(new Error("The generated image could not be read."));
+    image.onerror = () => { clear(); reject(new Error("The generated image could not be read.")); };
     image.src = data;
   });
 }
 
-export async function validateMorphImages(input: MorphValidationInput): Promise<MorphValidationResult> {
+interface ValidationRuntime {
+  init: typeof initLandmarker;
+  mode: typeof setRunningMode;
+  decode: typeof imageCanvas;
+  detect: typeof detectStable;
+  analyzeFront: typeof analyze;
+  seedSide: typeof seedSidePointsSmart;
+  analyzeSide: typeof analyzeSide;
+}
+
+export async function validateMorphImages(input: MorphValidationInput, overrides: Partial<ValidationRuntime> = {}): Promise<MorphValidationResult> {
+  const runtime: ValidationRuntime = { init: initLandmarker, mode: setRunningMode, decode: imageCanvas, detect: detectStable, analyzeFront: analyze, seedSide: seedSidePointsSmart, analyzeSide, ...overrides };
+  const check = () => { if (input.signal?.aborted) throw new DOMException("Cancelled", "AbortError"); };
   try {
-    await initLandmarker();
-    await setRunningMode("IMAGE");
-    const front = await imageCanvas(input.images.front);
-    const frontDetection = detectStable(front);
+    check();
+    await runtime.init();
+    check();
+    const front = await runtime.decode(input.images.front, input.signal);
+    check();
+    // Do not change the shared camera engine's mode after a cancelled decode.
+    await runtime.mode("IMAGE");
+    check();
+    const frontDetection = runtime.detect(front);
     const frontLandmarks = frontDetection.faceLandmarks?.[0];
     if (!frontLandmarks) {
       return { passed: false, identityPreserved: false, targetAligned: false, reason: "No face was found in the generated front view." };
@@ -140,7 +171,7 @@ export async function validateMorphImages(input: MorphValidationInput): Promise<
       return { passed: false, identityPreserved: false, targetAligned: false, reason: "The generated front view changed identity-stable facial geometry." };
     }
 
-    const frontReport = analyze(frontLandmarks, front.width, front.height, input.blueprint.sex, front);
+    const frontReport = runtime.analyzeFront(frontLandmarks, front.width, front.height, input.blueprint.sex, front);
     const frontTargets = input.blueprint.targets.filter((target) => target.view === "front");
     let targetAligned = targetsMoveAsSpecified(frontTargets, frontReport);
 
@@ -149,10 +180,12 @@ export async function validateMorphImages(input: MorphValidationInput): Promise<
       if (!input.images.side) {
         targetAligned = false;
       } else {
-        const side = await imageCanvas(input.images.side);
-        const seed = await seedSidePointsSmart(side, (points, faceDir) =>
-          sidePointIntegrityIssues(points, side.width, side.height, faceDir).length === 0);
-        const sideReport = analyzeSide(seed.points, seed.faceDir, input.blueprint.sex);
+        const side = await runtime.decode(input.images.side, input.signal);
+        check();
+        const seed = await runtime.seedSide(side, (points, faceDir) =>
+          sidePointIntegrityIssues(points, side.width, side.height, faceDir).length === 0, input.signal);
+        check();
+        const sideReport = runtime.analyzeSide(seed.points, seed.faceDir, input.blueprint.sex);
         targetAligned = targetsMoveAsSpecified(sideTargets, sideReport);
       }
     }

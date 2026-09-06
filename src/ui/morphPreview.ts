@@ -1,4 +1,5 @@
-import { currentAccessToken } from "../engine/auth.js";
+import { currentAccessToken, onAuthChange } from "../engine/auth.js";
+import { activeScanOwner } from "../engine/scanScope.js";
 import {
   createMorphRenderRequest,
   pollMorphRender,
@@ -161,17 +162,45 @@ function photoData(photo: HTMLCanvasElement): string {
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => {
+    if (signal.aborted) return reject(new DOMException("Cancelled", "AbortError"));
+    const abort = () => {
       window.clearTimeout(timer);
       reject(new DOMException("Cancelled", "AbortError"));
-    }, { once: true });
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", abort, { once: true });
   });
 }
 
-export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): void {
+interface MorphPreviewRuntime {
+  owner: typeof activeScanOwner;
+  token: typeof currentAccessToken;
+  consent: typeof ensureGoalPreviewConsent;
+  request: typeof requestMorphRender;
+  poll: typeof pollMorphRender;
+  submit: typeof submitMorphValidation;
+  validate: typeof validateMorphImages;
+  photo: typeof photoData;
+  wait: typeof delay;
+  subscribeOwner: (changed: () => void) => () => void;
+}
+
+/** Returns the panel's disposer; replacing the report must cancel its work. */
+export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, overrides: Partial<MorphPreviewRuntime> = {}): () => void {
   const shell = host.querySelector<HTMLElement>(".morph-preview");
-  if (!shell) return;
+  if (!shell) return () => {};
+  const runtime: MorphPreviewRuntime = {
+    owner: activeScanOwner, token: currentAccessToken, consent: ensureGoalPreviewConsent,
+    request: requestMorphRender, poll: pollMorphRender, submit: submitMorphValidation,
+    validate: validateMorphImages, photo: photoData, wait: delay,
+    subscribeOwner: (changed) => onAuthChange(() => changed()),
+    ...overrides,
+  };
+  const owner = runtime.owner();
+  const userId = owner?.startsWith("user:") ? owner.slice(5) : null;
   let variant: MorphBlueprint["variant"] = "selected";
   const blueprints: Record<MorphBlueprint["variant"], MorphBlueprint> = {
     selected: input.selected,
@@ -179,13 +208,16 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
   };
   const outputs: Partial<Record<MorphBlueprint["variant"], MorphRenderSource>> = {};
   const controller = new AbortController();
+  let disposed = false;
+  let busy = false;
+  let unsubscribe = () => {};
 
   let source: MorphRenderSource | null = null;
   try {
     if (input.frontPhoto) {
       source = {
-        front: photoData(input.frontPhoto),
-        ...(input.sidePhoto ? { side: photoData(input.sidePhoto) } : {}),
+        front: runtime.photo(input.frontPhoto),
+        ...(input.sidePhoto ? { side: runtime.photo(input.sidePhoto) } : {}),
       };
       for (const image of shell.querySelectorAll<HTMLImageElement>('[data-morph-current="front"]')) image.src = source.front;
       if (source.side) {
@@ -198,6 +230,26 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
 
   const status = shell.querySelector<HTMLElement>("[data-morph-status]");
   const create = shell.querySelector<HTMLButtonElement>("[data-morph-create]");
+
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    controller.abort();
+    unsubscribe();
+    source = null;
+    delete outputs.selected;
+    delete outputs.max_vision;
+    for (const image of shell.querySelectorAll<HTMLImageElement>("[data-morph-current], [data-morph-output]")) image.removeAttribute("src");
+    for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-variant], [data-morph-view-button], [data-morph-create]")) {
+      button.onclick = null;
+      button.disabled = true;
+    }
+  };
+  const current = (): boolean => {
+    if (!disposed && shell.isConnected && runtime.owner() === owner) return true;
+    dispose();
+    return false;
+  };
 
   const showOutput = (): void => {
     const result = outputs[variant];
@@ -215,6 +267,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
   };
 
   const activateVariant = (next: MorphBlueprint["variant"]): void => {
+    if (!current()) return;
     variant = next;
     shell.dataset.morphActive = next;
     for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-variant]")) {
@@ -227,7 +280,10 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
     }
     const points = shell.querySelector<HTMLElement>("[data-morph-points]");
     if (points) points.textContent = `${blueprints[next].totalPoints} pts available`;
-    if (create) create.disabled = blueprints[next].goals.length === 0;
+    if (create) create.disabled = busy || !userId || blueprints[next].goals.length === 0;
+    if (status && !busy && input.renderEnabled) {
+      status.textContent = outputs[next] ? "Preview checks passed." : "Create a visual target for this selection.";
+    }
     showOutput();
   };
 
@@ -236,6 +292,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
   }
   for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-view-button]")) {
     button.onclick = () => {
+      if (!current()) return;
       const view = button.dataset.morphViewButton;
       for (const candidate of shell.querySelectorAll<HTMLButtonElement>("[data-morph-view-button]")) {
         const active = candidate === button;
@@ -250,64 +307,90 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput): v
 
   if (create) {
     create.onclick = async () => {
+      if (!current() || busy || !userId || !input.renderEnabled) return;
       if (!source || !input.frontPhoto) {
         if (status) status.textContent = "The scan photographs are not available. Reopen the latest scan and try again.";
         return;
       }
-      const blueprint = blueprints[variant];
+      const renderVariant = variant;
+      const blueprint = blueprints[renderVariant];
+      if (!blueprint.goals.length) return;
+      const renderSource = source;
+      busy = true;
       create.disabled = true;
       create.classList.add("working");
       if (status) status.textContent = "Building a natural target and checking identity across both views...";
       try {
-        const accessToken = await currentAccessToken();
+        let accessToken = await runtime.token(userId);
+        if (!current()) return;
         if (!accessToken) throw new Error("Sign in again to create this preview.");
-        const consented = await ensureGoalPreviewConsent();
+        const consented = await runtime.consent({ userId, signal: controller.signal });
+        if (!current()) return;
         if (!consented) {
           if (status) status.textContent = "Goal preview was not enabled. You can choose it whenever you are ready.";
           return;
         }
-        const request = createMorphRenderRequest(input.scanId, blueprint, source);
-        let state = await requestMorphRender(request, accessToken, controller.signal);
-        for (let attempt = 0; shell.isConnected && (state.status === "accepted" || state.status === "processing") && attempt < 90; attempt++) {
-          await delay(2500, controller.signal);
-          state = await pollMorphRender(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+        // Consent can remain open long enough for a session to change or its
+        // token to refresh. Bind the upload to the original scan owner again.
+        accessToken = await runtime.token(userId);
+        if (!current()) return;
+        if (!accessToken) throw new Error("Sign in again to create this preview.");
+        const request = createMorphRenderRequest(input.scanId, blueprint, renderSource);
+        let state = await runtime.request(request, accessToken, controller.signal);
+        if (!current()) return;
+        for (let attempt = 0; (state.status === "accepted" || state.status === "processing") && attempt < 90; attempt++) {
+          await runtime.wait(2500, controller.signal);
+          if (!current()) return;
+          state = await runtime.poll(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+          if (!current()) return;
         }
         if (state.status === "validation_pending") {
           if (status) status.textContent = "Checking that the result kept your identity and reached the measured target...";
-          const validation = await validateMorphImages({
+          const validation = await runtime.validate({
             blueprint,
             originalFrontLandmarks: input.frontLandmarks,
             images: state.images,
+            signal: controller.signal,
           });
-          const submitted = await submitMorphValidation(state.jobId, validation.passed, accessToken, controller.signal);
+          if (!current()) return;
+          const submitted = await runtime.submit(state.jobId, validation.passed, accessToken, controller.signal);
+          if (!current()) return;
           if (!submitted.ok) throw new Error(submitted.error || "The validation result could not be recorded.");
           if (!validation.passed) {
             if (status) status.textContent = validation.reason || "The generated face did not pass the identity and target checks, so it was withheld.";
             return;
           }
-          state = await pollMorphRender(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+          state = await runtime.poll(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+          if (!current()) return;
         }
         if (state.status === "ready") {
-          outputs[variant] = state.images;
+          outputs[renderVariant] = state.images;
           showOutput();
-          if (status) status.textContent = "Identity, natural-change and cross-view checks passed.";
+          if (status) status.textContent = variant === renderVariant
+            ? "Identity, natural-change and cross-view checks passed."
+            : "Your other preview is ready. Switch back to view it.";
         } else if (state.status === "failed") {
           if (status) status.textContent = state.error;
         } else if (status) {
           status.textContent = "The preview is taking longer than expected. Try again shortly.";
         }
       } catch (error) {
-        if (status && (!(error instanceof DOMException) || error.name !== "AbortError")) {
+        if (current() && status && (!(error instanceof DOMException) || error.name !== "AbortError")) {
           status.textContent = error instanceof Error ? error.message : "The preview could not be created.";
         }
       } finally {
-        if (shell.isConnected) {
-          create.disabled = blueprints[variant].goals.length === 0;
+        busy = false;
+        if (current()) {
+          create.disabled = !userId || blueprints[variant].goals.length === 0;
           create.classList.remove("working");
         }
       }
     };
   }
 
+  const stop = runtime.subscribeOwner(() => { if (runtime.owner() !== owner) dispose(); });
+  if (disposed) stop();
+  else unsubscribe = stop;
   activateVariant("selected");
+  return dispose;
 }
