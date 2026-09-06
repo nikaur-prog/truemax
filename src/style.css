@@ -3151,6 +3151,45 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
   margin-bottom: 22px;
 }
 
+/* The daily streak lamp: one green light, brighter with the run. The person
+   reads the day count; the glow classes are the tiers and never appear as
+   words. Empty until a signed-in snapshot exists, so nothing flashes for
+   guests or the signed out. */
+.daily-slot { display: none; align-items: center; gap: 7px; }
+.daily-slot.has-lamp { display: inline-flex; }
+.daily-lamp {
+  width: 9px; height: 9px; border-radius: 50%; background: #b9c1bb; flex: none;
+  transition: background .4s ease, box-shadow .6s ease;
+}
+.daily-lamp.glow-faint { background: #6fbf87; box-shadow: 0 0 4px rgba(64, 186, 110, 0.45); }
+.daily-lamp.glow-steady { background: #4fbf74; box-shadow: 0 0 7px rgba(64, 186, 110, 0.6); }
+.daily-lamp.glow-bright { background: #34c469; box-shadow: 0 0 10px rgba(52, 196, 105, 0.75); }
+.daily-lamp.glow-bloom { background: #22ca61; box-shadow: 0 0 13px rgba(34, 202, 97, 0.85), 0 0 26px rgba(34, 202, 97, 0.35); }
+.daily-lamp.glow-full { background: #12d15a; box-shadow: 0 0 16px rgba(18, 209, 90, 0.95), 0 0 34px rgba(18, 209, 90, 0.45); }
+.daily-count, .daily-best {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink);
+}
+.daily-pts { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: var(--mut); }
+.daily-line { display: none; }
+.dash-hero.empty .daily-slot.has-lamp { margin-bottom: 10px; }
+.dash-hero.empty .daily-line { display: inline; font-size: 10.5px; color: var(--mut); font-style: normal; }
+
+/* "Did it today" on a running protocol: one tap, and the done state stays
+   visible so the tap clearly registered. */
+.protick {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  padding: 9px 12px; margin: 0 0 8px; font: inherit; font-size: 12.5px; color: var(--ink);
+  cursor: pointer;
+}
+.protick i {
+  width: 16px; height: 16px; border-radius: 50%; border: 1.6px solid var(--mut); flex: none;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-style: normal;
+}
+.protick.done { color: var(--mut); cursor: default; }
+.protick.done i { border-color: var(--acc); background: var(--acc-soft); color: var(--acc); }
+
 /* Hover dropdowns under each action card. Grid-rows 0fr -> 1fr animates a
    height the browser can actually interpolate, without hard-coding a pixel
    height that would clip the taller of the two panels. */

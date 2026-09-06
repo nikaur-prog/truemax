@@ -4,6 +4,7 @@ import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
 import type { MaxMood } from "./maxCharacter.js";
 import type { StoredScan } from "../engine/history.js";
 import { computeStreak } from "../engine/streak.js";
+import { mountStreakLamp } from "./streakLamp.js";
 import type { Streak } from "../engine/streak.js";
 import { headline, nextVisit, subline } from "./greeting.js";
 import { loadAvatar } from "../engine/avatar.js";
@@ -273,6 +274,8 @@ export function openDashboard(opts: {
   }
   wireScanRows(overlay);
   wireMaxInteractions(overlay.querySelector<HTMLElement>(".maxread-face"));
+  // The daily lamp: cached snapshot instantly, server truth when it answers.
+  mountStreakLamp(overlay.querySelector<HTMLElement>("[data-daily-streak]"));
 }
 
 // --- the three tabs --------------------------------------------------------
@@ -406,6 +409,7 @@ function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): strin
   const line = trend(scans);
   if (!scans.length || !line) {
     return `<section class="dash-hero empty dash-anim" style="--d:60ms">
+      <span class="daily-slot" data-daily-streak></span>
       <h1>${escapeHtml(headline(ctx))}</h1>
       <p>${escapeHtml(subline(ctx))}</p>
     </section>`;
@@ -427,6 +431,7 @@ function heroBlock(scans: StoredScan[], ctx: GreetingCtx, streak: Streak): strin
     <div class="dash-hero-top">
       <p class="dash-hero-hello">${escapeHtml(headline(ctx))}</p>
       ${streakChip(streak)}
+      <span class="daily-slot" data-daily-streak></span>
     </div>
     <div class="dash-hero-row">
       <div class="dash-hero-fig">
