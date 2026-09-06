@@ -29,7 +29,7 @@ const START = 0.08;
 const CEILING = 0.28;
 const TRAVEL_MS = 5_000;
 
-export function beginAnalysisHandoff(view: AnalysisHandoffView, paint: () => void): AnalysisHandoffRun {
+export function beginAnalysisHandoff(view: AnalysisHandoffView, paint: () => void, hasSide = false): AnalysisHandoffRun {
   view.upload.classList.add("hidden");
   view.main.classList.remove("hidden");
   paint();
@@ -38,7 +38,7 @@ export function beginAnalysisHandoff(view: AnalysisHandoffView, paint: () => voi
   view.frame.classList.add("scanning");
   view.capRight.textContent = "PREPARING ANALYSIS";
   view.status.classList.remove("swapping");
-  view.status.innerHTML = `<b>Bringing both views together</b><span class="scan-ellipsis" aria-label="working"><i>.</i><i>.</i><i>.</i></span>`;
+  view.status.innerHTML = `<b>${hasSide ? "Bringing both views together" : "Preparing your front analysis"}</b><span class="scan-ellipsis" aria-label="working"><i>.</i><i>.</i><i>.</i></span>`;
   view.barFill.parentElement?.classList.remove("spent");
   view.barFill.style.width = `${START * 100}%`;
 

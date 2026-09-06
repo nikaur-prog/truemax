@@ -23,6 +23,8 @@ export interface CameraHandle {
 interface Opts {
   video: HTMLVideoElement;
   guideCanvas: HTMLCanvasElement;
+  /** Cancels startup, recovery and the live preview without retaining a frame. */
+  signal?: AbortSignal;
   // "front" runs the full landmark-driven gating. "side" cannot: the face mesh
   // does not track a true profile, so it gates on exposure, focus, and the
   // detector NOT seeing a front-on face.
@@ -65,7 +67,19 @@ export async function permissionGranted(): Promise<boolean> {
   }
 }
 
-export async function startCamera(opts: Opts): Promise<CameraHandle> {
+interface CameraEngine {
+  initLandmarker(): Promise<void>;
+  setRunningMode(mode: "IMAGE" | "VIDEO"): Promise<void>;
+}
+
+// Engine boot is injectable so camera ownership can be exercised with real
+// delayed media promises, without downloading an inference runtime in tests.
+export async function startCamera(
+  opts: Opts,
+  engine: CameraEngine = { initLandmarker, setRunningMode },
+): Promise<CameraHandle> {
+  const cancelled = () => new DOMException("Camera request was cancelled", "AbortError");
+  if (opts.signal?.aborted) throw cancelled();
   // A late callback from a closed camera must never stop or mutate its successor.
   let stream: MediaStream | null = null;
   let facing: "user" | "environment" = "user";
@@ -100,7 +114,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   };
 
   const releaseStream = () => {
-    const ownedPreview = opts.video.srcObject === stream;
+    const ownedPreview = stream !== null && opts.video.srcObject === stream;
     stream?.getTracks().forEach((track) => {
       track.removeEventListener("ended", onTrackDown);
       track.stop();
@@ -111,8 +125,9 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   };
 
   async function attach(): Promise<void> {
-    if (!live) throw new Error("Camera request was cancelled");
+    if (!live) throw cancelled();
     opts.onPause?.();
+    if (!live) throw cancelled();
     const attempt = ++attachAttempt;
     // Stop the old tracks BEFORE asking for new ones: many phones refuse to
     // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
@@ -224,16 +239,42 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       void reacquire();
     }
   };
-  document.addEventListener("visibilitychange", onVisible);
 
-  try {
-    await attach();
-  } catch (err) {
+  let rejectStartup: ((error: Error) => void) | null = null;
+  const startupCancelled = new Promise<never>((_resolve, reject) => { rejectStartup = reject; });
+  const onAbort = () => {
+    stop(false);
+    rejectStartup?.(cancelled());
+  };
+  function stop(notifyPause = true): void {
+    const wasLive = live;
     live = false;
     attachAttempt++;
+    previewLoop?.pause();
+    if (notifyPause && wasLive) opts.onPause?.();
+    if (reacquireTimer !== null) clearTimeout(reacquireTimer);
+    reacquireTimer = null;
     document.removeEventListener("visibilitychange", onVisible);
-    releaseStream();
+    opts.signal?.removeEventListener("abort", onAbort);
+    if (releaseStream()) {
+      opts.video.classList.remove("unmirrored");
+      opts.guideCanvas.classList.remove("unmirrored");
+      const ctx = opts.guideCanvas.getContext("2d");
+      ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
+    }
+  }
+  document.addEventListener("visibilitychange", onVisible);
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    // Permission cannot itself be aborted. Reject promptly, while attach's
+    // existing generation checks stop a late stream before it touches video.
+    await Promise.race([attach(), startupCancelled]);
+  } catch (err) {
+    stop(false);
     throw err;
+  } finally {
+    rejectStartup = null;
   }
 
   // The preview goes up without waiting for the landmarker.
@@ -248,9 +289,9 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   // So the mode switch waits for the boot instead, and the loop below starts
   // immediately. Until the switch lands detectVideo returns null and the
   // guidance shows its "looking for a face" state, which is true.
-  void initLandmarker()
+  void engine.initLandmarker()
     .then(() => {
-      if (live) return setRunningMode("VIDEO");
+      if (live) return engine.setRunningMode("VIDEO");
       return undefined;
     })
     .catch(() => {
@@ -324,7 +365,8 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
         ? checkSideFrame(result, stats)
         : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
       opts.onCheck(check);
-      if (live) drawGuide(opts.guideCanvas, v);
+      if (!live) return;
+      drawGuide(opts.guideCanvas, v);
       cadence.measured(ts, performance.now());
     }
     if (!staleReported && now - lastFrameAt > STALE_FRAME_MS) {
@@ -348,22 +390,9 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
   if (document.visibilityState === "visible") previewLoop.resume();
 
   return {
-    stop() {
-      live = false;
-      attachAttempt++;
-      previewLoop?.pause();
-      opts.onPause?.();
-      if (reacquireTimer !== null) clearTimeout(reacquireTimer);
-      reacquireTimer = null;
-      document.removeEventListener("visibilitychange", onVisible);
-      if (releaseStream()) {
-        opts.video.classList.remove("unmirrored");
-        opts.guideCanvas.classList.remove("unmirrored");
-        const ctx = opts.guideCanvas.getContext("2d");
-        ctx?.clearRect(0, 0, opts.guideCanvas.width, opts.guideCanvas.height);
-      }
-    },
+    stop,
     capture() {
+      if (!live || !stream || opts.video.srcObject !== stream) return null;
       const v = opts.video;
       if (!v.videoWidth) return null;
       const c = document.createElement("canvas");
@@ -382,6 +411,7 @@ export async function startCamera(opts: Opts): Promise<CameraHandle> {
       return c;
     },
     async swap() {
+      if (!live) return false;
       const wasFacing = facing;
       const wasDevice = deviceId;
       try {

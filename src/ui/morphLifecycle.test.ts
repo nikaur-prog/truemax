@@ -50,6 +50,8 @@ class Element extends EventTarget {
   removeAttribute(key: string) { this.attributes.delete(key); if (key === "src") this.src = ""; }
   remove() { this.isConnected = false; }
   click() { this.dispatchEvent(new Event("click")); return this.onclick?.(); }
+  focus() { (globalThis.document as unknown as { activeElement: Element }).activeElement = this; }
+  contains(node: Element) { return node === this || [...this.nodes.values()].some((nodes) => nodes.includes(node)); }
 }
 
 function fixture(overrides: Parameters<typeof wireMorphPreview>[2] = {}) {
@@ -185,16 +187,19 @@ function consentDocument() {
   const hosts: Element[] = [];
   const body = new Element();
   Object.assign(body, { appendChild: (host: Element) => { hosts.push(host); host.isConnected = true; } });
-  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+  const opener = new Element();
+  Object.defineProperty(globalThis, "document", { configurable: true, value: Object.assign(new EventTarget(), {
     body,
+    activeElement: opener,
     createElement: () => {
       const host = new Element();
-      for (const selector of ["[data-goal-consent-no]", "[data-goal-consent-yes]", ".trial-close", ".trial-status"]) host.nodes.set(selector, [new Element()]);
+      for (const selector of ["[data-goal-consent-no]", "[data-goal-consent-yes]", ".trial-close", ".trial-status", "#goal-consent-title"]) host.nodes.set(selector, [new Element()]);
+      host.nodes.set("button", [host.querySelector(".trial-close")!, host.querySelector("[data-goal-consent-no]")!, host.querySelector("[data-goal-consent-yes]")!]);
       return host;
     },
     querySelector: () => hosts.find((host) => host.isConnected) ?? null,
-  } });
-  return { hosts, restore: () => previous ? Object.defineProperty(globalThis, "document", previous) : Reflect.deleteProperty(globalThis, "document") };
+  }) });
+  return { hosts, opener, restore: () => previous ? Object.defineProperty(globalThis, "document", previous) : Reflect.deleteProperty(globalThis, "document") };
 }
 const consentState = (granted: boolean) => ({ ok: true, state: { granted, version: "goal-preview-v1" as const, grantedAt: null } });
 const consentRuntime = { owner: () => "user:member-a", token: async () => "member-a-token", read: async () => consentState(false) };
@@ -247,4 +252,73 @@ test("a consent click after the account changes cannot grant for the old account
     dom.hosts[0].querySelector("[data-goal-consent-yes]")!.click();
     assert.equal(await result, false);
   } finally { dom.restore(); }
+});
+
+test("consent enters at its heading, loops keyboard focus and restores its opener", async () => {
+  const dom = consentDocument();
+  try {
+    const result = ensureGoalPreviewConsent({ userId: "member-a" }, consentRuntime);
+    await flush();
+    const host = dom.hosts[0];
+    assert.equal(document.activeElement, host.querySelector("#goal-consent-title"));
+    const key = (shiftKey = false) => {
+      const event = new Event("keydown", { cancelable: true });
+      Object.assign(event, { key: "Tab", shiftKey });
+      host.dispatchEvent(event);
+      assert.equal(event.defaultPrevented, true);
+    };
+    key();
+    assert.equal(document.activeElement, host.querySelector(".trial-close"));
+    key(true);
+    assert.equal(document.activeElement, host.querySelector("[data-goal-consent-yes]"));
+    key();
+    assert.equal(document.activeElement, host.querySelector(".trial-close"));
+    const escape = new Event("keydown", { cancelable: true });
+    Object.assign(escape, { key: "Escape" });
+    host.dispatchEvent(escape);
+    assert.equal(await result, false);
+    assert.equal(document.activeElement, dom.opener);
+  } finally { dom.restore(); }
+});
+
+test("a hanging render exits its total deadline and does not paint a late response", async () => {
+  const work = deferred<MorphRenderState>();
+  let signal: AbortSignal | undefined;
+  const f = fixture({ renderBudgetMs: 10, request: async (_request, _token, next) => { signal = next; return work.promise; } });
+  await f.create.click();
+  assert.equal(signal?.aborted, true);
+  assert.equal(f.create.disabled, false);
+  assert.match(f.shell.querySelector("[data-morph-status]")!.textContent, /took too long/);
+  work.resolve(ready);
+  await flush();
+  assert.equal(f.output.hidden, true);
+  f.dispose();
+});
+
+test("checking a known job after timeout resumes it without another render request", async () => {
+  let requests = 0, polls = 0;
+  const f = fixture({ renderBudgetMs: 10,
+    request: async () => { requests++; return { status: "accepted", jobId: ready.jobId }; },
+    wait: async () => {},
+    poll: async () => { polls++; return polls === 1 ? new Promise(() => {}) : ready; },
+  });
+  await f.create.click();
+  assert.equal(f.create.textContent, "Check existing preview");
+  assert.equal(f.output.hidden, true);
+  await f.create.click();
+  assert.equal(requests, 1);
+  assert.equal(polls, 2);
+  assert.equal(f.output.hidden, false);
+  f.dispose();
+});
+
+test("a held composite cannot start a render even through a programmatic click", async () => {
+  selected.renderHoldReason = "Review this fixed draft first.";
+  try {
+    const f = fixture({ request: async () => { assert.fail("held composite must not render"); } });
+    assert.equal(f.create.disabled, true);
+    await f.create.click();
+    assert.match(f.shell.querySelector("[data-morph-status]")!.textContent, /Review this fixed draft/);
+    f.dispose();
+  } finally { delete selected.renderHoldReason; }
 });

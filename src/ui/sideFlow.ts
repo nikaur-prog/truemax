@@ -1,4 +1,5 @@
 import { currentAccessToken } from "../engine/auth.js";
+import { activeScanOwner } from "../engine/scanScope.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
 import { classifySidePlacement } from "../engine/sidePlacementQuality.js";
@@ -28,13 +29,14 @@ import {
   cloneSidePoints,
   createSideFeedbackIntent,
   movedSidePointIds,
+  shouldAskSideCorrectionConsent,
 } from "../engine/sideFeedbackPayload.js";
 import type {
   SideFeedbackIntent,
   SideSeedMethod,
 } from "../engine/sideFeedbackPayload.js";
 import { cameraCount, startCamera } from "./camera.js";
-import { clearCameraTakeover, enterCameraTakeover, exitCameraTakeover } from "./camTakeover.js";
+import { enterCameraTakeover, exitCameraTakeover } from "./camTakeover.js";
 import { setRunningMode } from "../engine/landmarker.js";
 import { resetSideTracking } from "../engine/captureGuide.js";
 import { createAutoCapture } from "./autoCapture.js";
@@ -49,6 +51,9 @@ import {
 } from "./sideCloudPlacement.js";
 import type { SidePlacementChoice } from "./sideCloudPlacement.js";
 import { fuseSideSeeds } from "../engine/sideSeedFusion.js";
+import { createSideAttemptOwner } from "./sideAttempt.js";
+import { createSideInputGuard } from "./sideInputGuard.js";
+import type { ScanPerformanceAttempt } from "../engine/scanPerformance.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -101,6 +106,9 @@ interface SideCtx {
     review: SidePlacementReview,
   ) => void;
   onBack: () => void;
+  /** Present only when an already captured front can be shown without this side. */
+  onSkip?: () => void;
+  performance?: ScanPerformanceAttempt;
 }
 
 export interface SidePlacementReview {
@@ -159,8 +167,11 @@ let soundToggle: { destroy(): void } | null = null;
 let sideCam: CameraHandle | null = null;
 let sideCamOpening = false;
 let sideCamAttempt = 0;
+let sideCameraAbort: AbortController | null = null;
 let auto: AutoCapture | null = null;
 let sideKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+const sideAttempt = createSideAttemptOwner();
+const sideInputGuard = createSideInputGuard(activeScanOwner);
 
 const el = () => ({
   section: document.getElementById("v-side")!,
@@ -248,6 +259,8 @@ function clearWalkthrough(frame: HTMLElement): void {
 }
 
 export function openSideCapture(ctx: SideCtx): void {
+  sideAttempt.cancel();
+  clearSideInputs();
   // Any dialog belonging to the placement that is being retaken goes with it.
   //
   // The placement sheet stops pointer events reaching the photograph beneath
@@ -262,6 +275,8 @@ export function openSideCapture(ctx: SideCtx): void {
   // keyboard, pointer or assistive technology.
   cancelDialogs();
   const e = el();
+  e.section.inert = false;
+  e.actions.classList.remove("mode-pending", "guided-row");
   verifier?.destroy();
   verifier = null;
   // Or the guide badge stays pinned over the live camera preview.
@@ -299,10 +314,8 @@ export function openSideCapture(ctx: SideCtx): void {
     return;
   }
 
-  // Both views are required, so there is no "skip" — but backing out of the
-  // capture must still be possible, because capture is free. Nothing has been
-  // spent at this point: the analysis is the costly step and it has not run.
-  // So this is a plain Cancel, not an offer to abandon a half-finished scan.
+  // Back preserves the front. A paired scan can also skip straight to that
+  // completed result; a standalone profile has no front result to show.
   const camBtn = ctx.method === "upload"
     ? ""
     : `<button class="btn pri" id="side-cam">Use camera</button>`;
@@ -320,23 +333,82 @@ export function openSideCapture(ctx: SideCtx): void {
     close();
     ctx.onBack();
   };
+  appendSideExitActions(e.actions, ctx, false);
   wireSideInputs(e, ctx);
+}
+
+function skipSide(ctx: SideCtx): void {
+  if (!ctx.onSkip) return;
+  close();
+  ctx.onSkip();
+}
+
+function appendSideExitActions(host: HTMLElement, ctx: SideCtx, allowRetake = true): void {
+  const row = document.createElement("div");
+  row.className = "side-exit-actions";
+  if (allowRetake) {
+    const retakeButton = document.createElement("button");
+    retakeButton.type = "button";
+    retakeButton.className = "btn gho";
+    retakeButton.textContent = "Take another side photo";
+    retakeButton.onclick = () => openSideCapture(ctx);
+    row.appendChild(retakeButton);
+  }
+  if (ctx.onSkip) {
+    const skipButton = document.createElement("button");
+    skipButton.type = "button";
+    skipButton.className = "btn cancel";
+    skipButton.textContent = "Skip side and see front analysis";
+    skipButton.onclick = () => skipSide(ctx);
+    row.appendChild(skipButton);
+  } else if (allowRetake) {
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "btn cancel";
+    cancelButton.textContent = ctx.standalone ? "Cancel profile scan" : "Back to results";
+    cancelButton.onclick = () => { close(); ctx.onBack(); };
+    row.appendChild(cancelButton);
+  }
+  if (row.childElementCount) host.appendChild(row);
 }
 
 // The paste listener, module-level so re-wiring the inputs replaces it
 // instead of stacking a second copy that would load the same file twice.
 let sidePaste: ((ev: ClipboardEvent) => void) | null = null;
 
+function clearSideInputs(): void {
+  sideInputGuard.cancel();
+  if (sidePaste) document.removeEventListener("paste", sidePaste);
+  sidePaste = null;
+  const e = el();
+  e.input.onchange = null;
+  e.input.value = "";
+  e.drop.ondragover = null;
+  e.drop.ondragleave = null;
+  e.drop.ondrop = null;
+  e.drop.classList.remove("dragover");
+}
+
 // The file input and drop handlers, shared by the choice screen and the
 // camera-first path (so an upload still works even when the camera opened first).
 function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
+  clearSideInputs();
+  // A native picker belongs to its input element. Replace that element for a
+  // new capture so an older picker cannot deliver its file to a new account's
+  // newly installed handler, even if the old picker remains open during logout.
+  const input = e.input.cloneNode(false) as HTMLInputElement;
+  input.value = "";
+  e.input.replaceWith(input);
+  e.input = input;
+  const ownsInput = sideInputGuard.begin();
+  const acceptsInput = () => ownsInput() && e.section.isConnected
+    && !e.section.classList.contains("hidden") && !e.section.inert;
   // Paste works here for the same reason it works on the front capture: the
   // profile photo has usually just been cropped or screenshotted and is
   // already on the clipboard. Scoped to this screen being visible, and torn
   // down in close(), so a stray Cmd-V anywhere else in the app does nothing.
-  if (sidePaste) document.removeEventListener("paste", sidePaste);
   sidePaste = (ev: ClipboardEvent) => {
-    if (e.section.classList.contains("hidden")) return;
+    if (!acceptsInput()) return;
     const f = [...(ev.clipboardData?.items ?? [])]
       .find((i) => i.type.startsWith("image/"))
       ?.getAsFile();
@@ -357,14 +429,16 @@ function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
     // silently does nothing and the screen looks frozen. The front input has
     // always cleared itself; this one did not. Found by testing the skip path.
     e.input.value = "";
-    if (file) await load(file, ctx);
+    if (file && acceptsInput()) await load(file, ctx);
   };
   e.drop.ondragover = (ev) => {
+    if (!acceptsInput()) return;
     ev.preventDefault();
     e.drop.classList.add("dragover");
   };
   e.drop.ondragleave = () => e.drop.classList.remove("dragover");
   e.drop.ondrop = async (ev) => {
+    if (!acceptsInput()) return;
     ev.preventDefault();
     e.drop.classList.remove("dragover");
     const f = (ev as DragEvent).dataTransfer?.files?.[0];
@@ -376,6 +450,11 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   const e = el();
   if (sideCam || sideCamOpening) return;
   const attempt = ++sideCamAttempt;
+  const cameraAbort = new AbortController();
+  sideCameraAbort = cameraAbort;
+  const cameraOwner = activeScanOwner();
+  const ownsCamera = () => attempt === sideCamAttempt
+    && activeScanOwner() === cameraOwner && !e.section.classList.contains("hidden");
   sideCamOpening = true;
   // The retake button reaches here without going through openSideCapture, and
   // it is the path that produced the bug: a walkthrough part-way through, then
@@ -406,10 +485,26 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // That memory has to start empty on every new attempt.
   resetSideTracking();
   let ready = false;
+  const chooseUpload = (): void => {
+    if (!ownsCamera()) return;
+    stopSideCamera();
+    openSideCapture({ ...ctx, method: "upload" });
+  };
+  // Permission and device startup can be slow or fail. Keep an exit available
+  // before awaiting either, including when this is the first side attempt.
+  e.actions.innerHTML = `<button class="btn gho" id="side-start-upload">${UPLOAD_ICON}<span>Upload a photo</span></button><button class="btn cancel" id="side-start-cancel">Cancel</button>`;
+  document.getElementById("side-start-upload")!.onclick = chooseUpload;
+  document.getElementById("side-start-cancel")!.onclick = () => {
+    if (!ownsCamera()) return;
+    close();
+    ctx.onBack();
+  };
+  appendSideExitActions(e.actions, ctx, false);
   // Hands-off shutter. On the side you are turned away from the screen, so the
   // countdown is mostly audible; see ui/autoCapture.ts.
   auto = createAutoCapture({
     onTick: (remaining) => {
+      if (!ownsCamera()) return;
       const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
       if (remaining == null) {
         e.hint.classList.remove("counting");
@@ -422,6 +517,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       if (shoot) shoot.textContent = `Capturing in ${remaining}`;
     },
     onFire: () => {
+      if (!ownsCamera()) return;
       const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
       shoot?.click();
     },
@@ -430,16 +526,18 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     const started = await startCamera({
       video: e.video,
       guideCanvas: e.guide,
+      signal: cameraAbort.signal,
       mode: "side",
-      onPause: () => auto?.cancel(),
+      onPause: () => { if (ownsCamera()) auto?.cancel(); },
       // See main.ts: a swap that loses both cameras leaves nothing behind the
       // viewfinder, so the screen closes instead of decorating a dead frame.
       onLost: () => {
-        stopSideCamera();
-        openSideCapture(ctx);
-        e.hintTitle.textContent = "Camera unavailable";
+        if (!ownsCamera()) return;
+        chooseUpload();
+        e.cap.textContent = ctx.onSkip ? "CAMERA UNAVAILABLE · UPLOAD OR SKIP" : "CAMERA UNAVAILABLE · UPLOAD A PHOTO";
       },
       onCheck: (c) => {
+        if (!ownsCamera()) return;
         // Guidance and auto-capture can wait for the ideal turn. Manual
         // capture cannot: side detection is deliberately uncertain at a true
         // 90-degree profile, and that uncertainty used to strand users even
@@ -477,20 +575,17 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         }
       },
     });
-    if (attempt !== sideCamAttempt) {
+    if (!ownsCamera()) {
       started.stop();
-      await setRunningMode("IMAGE");
+      // This camera no longer owns the detector. Its replacement may already
+      // be reading video, so the stale close must not switch it back to IMAGE.
       return;
     }
     sideCam = started;
   } catch {
-    if (attempt !== sideCamAttempt) return;
-    clearCameraTakeover();
-    e.live.classList.add("hidden");
-    e.frame.classList.remove("live");
-    e.frame.classList.add("awaiting");
-    e.drop.classList.remove("hidden");
-    e.hintTitle.textContent = "Camera unavailable";
+    if (!ownsCamera()) return;
+    chooseUpload();
+    e.cap.textContent = ctx.onSkip ? "CAMERA UNAVAILABLE · UPLOAD OR SKIP" : "CAMERA UNAVAILABLE · UPLOAD A PHOTO";
     return;
   } finally {
     if (attempt === sideCamAttempt) sideCamOpening = false;
@@ -507,13 +602,16 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // taking the photo holds the phone the way a photographer does, back camera
   // out.
   void cameraCount().then((n) => {
+    if (!ownsCamera()) return;
     e.swap.classList.toggle("hidden", n < 2 || !sideCam);
   });
+  e.swap.disabled = false;
   e.swap.onclick = async () => {
-    if (!sideCam) return;
+    if (!ownsCamera() || !sideCam) return;
+    const swappingCamera = sideCam;
     e.swap.disabled = true;
-    await sideCam.swap();
-    e.swap.disabled = false;
+    await swappingCamera.swap();
+    if (ownsCamera() && sideCam === swappingCamera) e.swap.disabled = false;
   };
   // Same order as the front screen: the shutter first, upload second. They were
   // reversed here, so the button under your thumb changed meaning between the
@@ -526,6 +624,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     `<button class="btn cancel" id="side-quit2">Cancel</button>`,
   );
   document.getElementById("side-quit2")!.onclick = () => {
+    if (!ownsCamera()) return;
     // Back one step, NOT out of the scan.
     //
     // This used to run resetToUpload() directly, so cancelling the profile
@@ -542,21 +641,22 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     ctx.onBack();
   };
   document.getElementById("side-stop")!.onclick = () => {
-    stopSideCamera();
-    openSideCapture(ctx);
+    chooseUpload();
   };
   document.getElementById("side-shoot")!.onclick = async () => {
-    if (!sideCam || !ready) return;
+    if (!ownsCamera() || !sideCam || !ready) return;
     const shot = sideCam.capture();
     stopSideCamera();
     if (shot) await loadCanvas(shot, ctx);
   };
+  appendSideExitActions(e.actions, ctx, false);
 
   // Space or Enter takes it now rather than waiting out the countdown. On a
   // laptop the keyboard is under your hands while the screen is turned away,
   // which makes it the one control you can still hit blind — and it does not
   // shift the framing the way reaching for a button does.
   sideKeyHandler = (e: KeyboardEvent) => {
+    if (!ownsCamera()) return;
     if (e.key !== " " && e.key !== "Enter") return;
     const t = e.target as HTMLElement | null;
     // Never hijack a key from a field or another button.
@@ -581,6 +681,9 @@ function stopSideCamera(): void {
   }
   sideCamAttempt++;
   sideCamOpening = false;
+  const cancelledCamera = sideCameraAbort;
+  sideCameraAbort = null;
+  cancelledCamera?.abort();
   const held = sideCam;
   sideCam = null;
   held?.stop();
@@ -615,6 +718,9 @@ export function openSideAdjust(
   seed: SidePlacementSeed,
   ctx: SideCtx,
 ): void {
+  sideAttempt.cancel();
+  clearSideInputs();
+  cancelDialogs();
   const e = el();
   markSideOpen(true);
   e.section.classList.remove("hidden");
@@ -652,6 +758,8 @@ function cancelDialogs(): void {
 }
 
 export function close(): void {
+  sideAttempt.cancel();
+  clearSideInputs();
   cancelDialogs();
   stopSideCamera();
   verifier?.destroy();
@@ -664,48 +772,67 @@ export function close(): void {
   soundToggle = null;
   stopThinking();
   clearWalkthrough(el().frame);
-  if (sidePaste) {
-    document.removeEventListener("paste", sidePaste);
-    sidePaste = null;
-  }
   markSideOpen(false);
   el().section.classList.add("hidden");
+  el().section.inert = false;
 }
 
-/**
- * The floor on how long the profile is visibly read for.
- *
- * Long enough that the state reads as a step rather than a flicker, short
- * enough that it is never the reason somebody is waiting: the seeding usually
- * outruns it, in which case this costs nothing at all.
- */
-const READ_BEAT_MS = 1150;
-
-const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
-
 async function load(file: File, ctx: SideCtx): Promise<void> {
+  const signal = sideAttempt.begin();
+  cancelDialogs();
+  verifier?.destroy();
+  verifier = null;
+  el().section.inert = false;
+  el().actions.classList.remove("mode-pending", "guided-row");
+  try {
   const img = await loadImage(file);
+  if (!sideAttempt.current(signal)) return;
   const c = document.createElement("canvas");
   const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
   c.width = Math.round(img.naturalWidth * scale);
   c.height = Math.round(img.naturalHeight * scale);
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  await loadCanvas(c, ctx);
+  await loadCanvas(c, ctx, signal);
+  } catch {
+    if (sideAttempt.current(signal)) showSideLoadFailure(ctx);
+  }
+}
+
+function showSideLoadFailure(ctx: SideCtx): void {
+  const e = el();
+  stopThinking();
+  e.frame.classList.remove("scanning");
+  e.cap.textContent = "PHOTO COULD NOT BE READ";
+  e.actions.replaceChildren();
+  e.panelCopy.innerHTML = `<h2 class="side-title">Try another side photo</h2><p class="side-sub">That photo could not be prepared.${ctx.onSkip ? " Your front scan has not changed." : " Choose a clearer photo to try again."}</p>`;
+  appendSideExitActions(e.actions, ctx);
 }
 
 // Both entry points — a chosen file and a captured frame — converge here, so
 // the verify step cannot behave differently depending on where the pixels came
 // from.
-async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
+async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAttempt.begin()): Promise<void> {
   const e = el();
+  try {
+  cancelDialogs();
+  verifier?.destroy();
+  verifier = null;
+  e.section.inert = false;
+  e.actions.classList.remove("mode-pending", "guided-row");
   stopSideCamera();
   // Awaited, not assumed: seeding runs the still-image detector below.
   await setRunningMode("IMAGE");
+  if (!sideAttempt.current(signal)) return;
   const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
   const w = Math.round(src.width * scale);
   const h = Math.round(src.height * scale);
   e.canvas.width = w;
   e.canvas.height = h;
+  // Async readers own a snapshot, never the display canvas a retake reuses.
+  const snapshot = document.createElement("canvas");
+  snapshot.width = w;
+  snapshot.height = h;
+  snapshot.getContext("2d")!.drawImage(src, 0, 0, w, h);
   e.canvas.getContext("2d")!.drawImage(src, 0, 0, w, h);
 
   // Do not reject a side still here. Profile focus, crop, lighting, pose and
@@ -734,6 +861,11 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   e.frame.classList.add("scanning");
   e.cap.textContent = "READING PROFILE";
   startThinking();
+  e.actions.replaceChildren();
+  appendSideExitActions(e.actions, ctx);
+  // Yield for the loading controls. There is no artificial minimum wait.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  if (!sideAttempt.current(signal)) return;
 
   // Canonicalise the facing. A profile photograph mirrored horizontally has
   // identical geometry — faces are measured bilaterally — so instead of
@@ -754,24 +886,23 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   // shape a face comes in, and try the next one. Somebody is only told the
   // placement failed once every method has failed.
   //
-  // Held for a beat whatever the hardware does. The seeding is anywhere from
-  // 200ms to a couple of seconds depending on the phone and on how many
-  // methods have to be measured before one passes, and a state that sometimes
-  // flashes past in three frames and sometimes sits for two seconds is worse
-  // than either: the fast case reads as a flicker. A floor makes it one beat.
-  const localSeed = seedSidePointsSmart(
-      e.canvas,
+  // Send the supported seed in the exact same frame as the immutable photo.
+  // The cloud refines an existing placement instead of starting without it.
+  const finishSeed = ctx.performance?.start("side_seed");
+  const localResult = await seedSidePointsSmart(
+      snapshot,
       (points, faceDir) => {
         const assessment = seedAssessment(points, faceDir, ctx.sex);
         return assessment.hard.length === 0 && assessment.marginal.length === 0;
       },
+      signal,
     );
-  const cloudSeed = cloudPlacementFor(e.canvas);
-  const [localResult, cloudResult] = await Promise.all([
-    localSeed,
-    cloudSeed,
-    wait(READ_BEAT_MS),
-  ]);
+  finishSeed?.(signal.aborted ? "cancelled" : "success");
+  if (!sideAttempt.current(signal)) return;
+  const finishCloud = ctx.performance?.start("side_cloud");
+  const cloudResult = await cloudPlacementFor(snapshot, localResult, signal);
+  finishCloud?.(signal.aborted ? "cancelled" : cloudResult ? "success" : "fallback");
+  if (!sideAttempt.current(signal)) return;
   // The cloud is a second reader, not a replacement for the device seed. The
   // benchmark policy decides which reader to trust per landmark, while their
   // disagreement becomes the confidence shown on each ring. If the request is
@@ -818,13 +949,20 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx): Promise<void> {
   }
 
   mountVerify(e.canvas, seed, ctx, "VERIFY LANDMARKS");
+  } catch {
+    if (sideAttempt.current(signal)) showSideLoadFailure(ctx);
+  }
 }
 
-async function cloudPlacementFor(canvas: HTMLCanvasElement): Promise<SidePlacementSeed | null> {
+async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal): Promise<SidePlacementSeed | null> {
   const token = await currentAccessToken().catch(() => null);
-  if (!token) return null;
+  if (!token || signal.aborted) return null;
   if (readSidePlacementChoice() !== "cloud") return null;
-  return requestCloudSidePlacement(canvas, token);
+  return requestCloudSidePlacement(canvas, token, {
+    seed: seed.points,
+    faceDir: seed.faceDir < 0 ? -1 : 1,
+    signal,
+  });
 }
 
 /** Resolve the one-time privacy choice before opening the profile camera. */
@@ -895,6 +1033,8 @@ function mountVerify(
   const startInGuidedMode = seedMethod !== "existing";
   verifier?.destroy();
   verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
+  const mountedVerifier = verifier;
+  const isMounted = () => verifier === mountedVerifier;
   // Confidence guides fusion internally. Every visible point keeps the same
   // crisp weight so the person reviews anatomy rather than model uncertainty.
   e.layer.classList.remove("point-confidence");
@@ -926,7 +1066,7 @@ function mountVerify(
   // Whether the person told us the placement was wrong, and what they said to
   // "send it to our team". Answered at most once, at the moment of the
   // complaint — not re-asked at confirm.
-  let flaggedWrong = false;
+  let verificationAnswer: "yes" | "no" | "unknown" = "unknown";
   let consentAnswer: boolean | null = null;
   // Set once the "nothing was moved" prompt has been shown, so the second press
   // goes through. Scoped per mounted photo, so the next face asks again.
@@ -1195,6 +1335,7 @@ function mountVerify(
       <button class="btn gho" id="side-gback" type="button" aria-label="Previous point">‹</button>
       <span class="side-gcount" id="side-gcount"></span>
       <button class="btn cancel" id="side-gall" type="button">All points at once</button>`;
+    appendSideExitActions(e.actions, ctx);
     document.getElementById("side-gback")!.onclick = () => verifier?.guidedBack();
     document.getElementById("side-gall")!.onclick = () => {
       inFrame.remove();
@@ -1294,6 +1435,7 @@ function mountVerify(
       <button class="btn side-confirm" id="side-go">Confirm</button>
       <button class="btn gho" id="side-guided">One by one</button>
       <button class="btn gho" id="side-wrong">Points are wrong</button>`;
+    appendSideExitActions(e.actions, ctx);
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
     // this screen: the question is asked as a dialog now, before the scan runs,
@@ -1320,8 +1462,9 @@ function mountVerify(
       // being asked to sign up before you have even confirmed your points is
       // the moment an app starts feeling like a funnel, so the send waits
       // until after Confirm, when sign-in happens anyway.
-      flaggedWrong = true;
+      verificationAnswer = "no";
       consentAnswer = await askSideFeedbackConsent();
+      if (!isMounted()) return;
       const wrongButton = document.getElementById("side-wrong");
       if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
       e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
@@ -1356,7 +1499,7 @@ function mountVerify(
     verified?: boolean;
     consented?: boolean;
   } = {}): Promise<boolean> => {
-    if (!verifier) return false;
+    if (!verifier || !isMounted()) return false;
     const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
     if (confirmButton) confirmButton.disabled = true;
     // The facing comes from the confirmed points, not from the detector that
@@ -1464,16 +1607,18 @@ function mountVerify(
 
       // Consent, asked only when there is something to learn.
       //
-      //   Flagged wrong          — already asked, at the complaint.
+      //   Flagged wrong          - ask if the earlier review did not ask yet.
       //   Edited without a flag  — they fixed something and did not say so;
       //                            ask now, framed around the edit.
       //   Confirmed untouched    — the seed was right and there is nothing to
       //                            teach. Asking would be pure friction.
       let consented = opts.consented ?? consentAnswer ?? false;
-      if (!opts.auto && !flaggedWrong && consentAnswer === null) {
-        const moved = movedSidePointIds(automaticPoints, correctedPoints);
-        if (moved.length > 0) consented = await askSideFeedbackConsent(true);
+      const moved = movedSidePointIds(automaticPoints, correctedPoints);
+      if (shouldAskSideCorrectionConsent(Boolean(opts.auto), consentAnswer, moved.length)) {
+        consentAnswer = await askSideFeedbackConsent(true);
+        consented = consentAnswer;
       }
+      if (!isMounted()) return false;
       const feedback = createSideFeedbackIntent(
         consented,
         ctx.scanId,
@@ -1481,6 +1626,7 @@ function mountVerify(
         automaticPoints,
         seedMethod,
         seedVersion,
+        { verificationAnswer, finalPlacementVerified: opts.verified ?? true },
       );
       e.cap.textContent = "ANALYZED";
       const reviewed = document.createElement("canvas");
@@ -1549,16 +1695,18 @@ function mountVerify(
       no: "No, they look off",
       yes: "Yes, they look right",
       fine: "Yes goes straight to your analysis. No lets you place them yourself first.",
+      exitCtx: ctx,
     });
-    if (right === null) return;
+    if (right === null || !isMounted()) return;
+    verificationAnswer = right ? "yes" : "no";
     if (right) {
-      const consented = await askSideFeedbackConsent();
-      if (!verifier) return;
+      consentAnswer = await askSideFeedbackConsent();
+      if (!isMounted()) return;
       // A refused confirm (a reading outside what a face can be, or a point
       // pair that cannot both be right) leaves the person on this screen
       // with the message and nothing to act on it with. The review
       // furniture is mounted at that moment and not before.
-      if (!(await confirmPlacement({ auto: true, verified: true, consented })) && verifier) {
+      if (!(await confirmPlacement({ auto: true, verified: true, consented: consentAnswer })) && verifier) {
         releaseFurniture();
         showReviewActions();
       }
@@ -1567,16 +1715,16 @@ function mountVerify(
 
     // They said the placement is wrong, which is the single most useful thing
     // anybody tells us about the seeder. Offer the fix before asking for it.
-    flaggedWrong = true;
     const useAnyway = await askSideQuestion({
       klabel: "YOUR CHOICE",
       title: "Use these points anyway?",
-      copy: "Placing the thirteen points yourself gives the most accurate profile score. Each point is named and shown on a reference face, and it takes about thirty seconds.",
+      copy: `Correcting misplaced points can improve the profile measurement. Each point is named and shown on a reference face. You can also take another photo${ctx.onSkip ? " or continue without the side" : " instead"}.`,
       no: "Place them myself",
       yes: "Use them anyway",
       fine: "If you continue, the report will mark the side placement as unverified.",
+      exitCtx: ctx,
     });
-    if (useAnyway === null) return;
+    if (useAnyway === null || !isMounted()) return;
     if (!useAnyway) {
       // Into the walkthrough. Consent is asked at the end of it, on the review
       // screen, where there is a correction worth sharing.
@@ -1585,9 +1733,9 @@ function mountVerify(
       return;
     }
 
-    const consented = await askSideFeedbackConsent();
-    if (!verifier) return;
-    if (!(await confirmPlacement({ auto: true, verified: false, consented })) && verifier) {
+    consentAnswer = await askSideFeedbackConsent();
+    if (!isMounted()) return;
+    if (!(await confirmPlacement({ auto: true, verified: false, consented: consentAnswer })) && verifier) {
       releaseFurniture();
       showReviewActions();
     }
@@ -1638,12 +1786,13 @@ function mountVerify(
       seed.confidence ?? 1,
       assessment.hard,
       assessment.marginal,
+      ctx,
     ).then(async (mode) => {
       try {
         // Null is a cancelled dialog: the flow was closed or the identity
         // changed underneath it, and there is nothing left for either branch
         // to act on.
-        if (mode === null) return;
+        if (mode === null || !isMounted()) return;
         if (mode === "manual") {
           releaseFurniture();
           showGuidedActions();
@@ -1651,7 +1800,7 @@ function mountVerify(
         }
         await afterAutomatic();
       } finally {
-        releaseFurniture();
+        if (isMounted()) releaseFurniture();
       }
     });
   } else showReviewActions();
@@ -1682,6 +1831,7 @@ function askCloudPlacementConsent(): Promise<SidePlacementChoice | null> {
       <p class="side-mode-fine">This choice is remembered on this device. You can change it from the profile capture screen.</p>
     </section>`;
     document.body.appendChild(backdrop);
+    trapSideDialogFocus(backdrop);
     backdrop.querySelector<HTMLButtonElement>('[data-placement-choice="cloud"]')?.focus();
     const settle = (choice: SidePlacementChoice | null) => {
       if (done) return;
@@ -1736,6 +1886,7 @@ function askPlacementMode(
   _confidence: number,
   broken: string[] = [],
   _marginal: string[] = [],
+  exitCtx?: SideCtx,
 ): Promise<"auto" | "manual" | null> {
   // Three states, not two, and the third is the one that was missing.
   //
@@ -1767,9 +1918,11 @@ function askPlacementMode(
       </div>
       <p class="side-mode-fine">${blocked
         ? "It takes about thirty seconds. Each point is named and shown one at a time."
-        : "Placing them yourself gives a more accurate score. Taking these skips the walkthrough; you can still say they look off on the next screen."}</p>
+        : "Correcting misplaced points can improve the measurement. If the photo is not clear or fully side-on, take another one."}</p>
     </section>`;
+    if (exitCtx) appendSideExitActions(backdrop.querySelector("section")!, exitCtx);
     document.body.appendChild(backdrop);
+    trapSideDialogFocus(backdrop);
     const shot = backdrop.querySelector("canvas")!;
     // The evidence opens at inspection size. Starting with a thumbnail made
     // the points look like one cluster and required a hidden extra action
@@ -1784,7 +1937,8 @@ function askPlacementMode(
     // picture sized for the other orientation.
     const onResize = () => draw();
     window.addEventListener("resize", onResize);
-    backdrop.querySelector<HTMLButtonElement>('[data-mode="auto"]')?.focus();
+    (backdrop.querySelector<HTMLButtonElement>('[data-mode="auto"]')
+      ?? backdrop.querySelector<HTMLButtonElement>('[data-mode="manual"]'))?.focus();
     const settle = (mode: "auto" | "manual" | null) => {
       if (done) return;
       done = true;
@@ -1825,6 +1979,7 @@ function askSideQuestion(opts: {
   no: string;
   yes: string;
   fine?: string;
+  exitCtx?: SideCtx;
 }): Promise<boolean | null> {
   return new Promise((resolve) => {
     let done = false;
@@ -1843,7 +1998,9 @@ function askSideQuestion(opts: {
       </div>
       ${opts.fine ? `<p class="side-mode-fine">${opts.fine}</p>` : ""}
     </section>`;
+    if (opts.exitCtx) appendSideExitActions(backdrop.querySelector("section")!, opts.exitCtx);
     document.body.appendChild(backdrop);
+    trapSideDialogFocus(backdrop);
     if (opts.preview) backdrop.classList.add("expanded");
     const previewCanvas = backdrop.querySelector<HTMLCanvasElement>(".side-mode-shot canvas");
     const drawPreview = () => {
@@ -1869,6 +2026,22 @@ function askSideQuestion(opts: {
       if (answer !== "yes" && answer !== "no") return;
       settle(answer === "yes");
     };
+  });
+}
+
+/** Keep keyboard review inside the active dialog, including Retake and Skip. */
+function trapSideDialogFocus(backdrop: HTMLElement): void {
+  backdrop.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const buttons = [...backdrop.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
+    if (!buttons.length) return;
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault(); first.focus();
+    }
   });
 }
 

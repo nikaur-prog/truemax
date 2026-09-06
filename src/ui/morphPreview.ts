@@ -15,6 +15,7 @@ import type {
 } from "../engine/morphPlan.js";
 import { ensureGoalPreviewConsent } from "./goalPreviewConsent.js";
 import { validateMorphImages } from "./morphValidation.js";
+import { previewDeadline } from "../engine/previewDeadline.js";
 
 export interface MorphPreviewInput {
   scanId: string;
@@ -72,7 +73,7 @@ function targets(plan: MorphBlueprint): string {
       (target) => `<div class="morph-measure">
         <span>${esc(target.name)}</span>
         <b>${formatTarget(target, target.current)} <i>to</i> ${formatTarget(target, target.target)}</b>
-        <small>Complete after at least ${formatTarget(target, target.completionDelta)} of movement repeats across comparable scans.</small>
+        <small>Illustrative target only. Comparable repeat scans and validated measurement noise are required before progress can be confirmed.</small>
       </div>`,
     )
     .join("");
@@ -85,7 +86,7 @@ function goals(plan: MorphBlueprint): string {
   return plan.goals
     .map(
       (goal) => `<article class="morph-goal">
-        <div><b>${esc(goal.label)}</b><span>${goal.effortPoints} pts on completion</span></div>
+        <div><b>${esc(goal.label)}</b></div>
         <p>${esc(goal.visualSummary)}</p>
         <small>${esc(goal.timeframe)}</small>
       </article>`,
@@ -98,7 +99,7 @@ function planPanel(plan: MorphBlueprint): string {
   return `<section class="morph-plan" data-morph-plan="${plan.variant}"${plan.variant === "max_vision" ? " hidden" : ""}>
     <div class="morph-change-map" aria-label="Allowed visual changes for ${esc(label)}">${effectTags(plan)}</div>
     <div class="morph-goals">${goals(plan)}</div>
-    <div class="morph-measures"><h5>HOW COMPLETION IS PROVED</h5>${targets(plan)}</div>
+    <div class="morph-measures"><h5>DRAFT MEASUREMENT TARGETS</h5>${targets(plan)}</div>
   </section>`;
 }
 
@@ -108,9 +109,9 @@ export function morphPreviewHTML(input: Pick<MorphPreviewInput, "selected" | "ma
   return `<section class="morph-preview" data-morph-active="selected">
     <div class="morph-head">
       <div><span>YOUR VISUAL TARGET</span><h4>See what the plan is aiming for</h4></div>
-      <span class="morph-points" data-morph-points>${input.selected.totalPoints} pts available</span>
+      <span class="morph-points" data-morph-points>Illustrative preview</span>
     </div>
-    <p class="morph-intro">A measured target, not a promise. Identity and bone structure stay fixed. Only naturally changeable soft tissue, grooming, skin appearance and presentation can move.</p>
+    <p class="morph-intro">An illustrative direction, not a prediction or a proven personal target. Identity and bone structure stay fixed as a requirement. Only permitted presentation changes can be requested, and no appearance points are awarded from this preview.</p>
     <div class="morph-switch" role="tablist" aria-label="Visual target version">
       <button type="button" class="active" data-morph-variant="selected" role="tab" aria-selected="true">My goals</button>
       <button type="button" data-morph-variant="max_vision" role="tab" aria-selected="false">Max's full view</button>
@@ -139,11 +140,11 @@ export function morphPreviewHTML(input: Pick<MorphPreviewInput, "selected" | "ma
     </div>` : ""}
     ${planPanel(input.selected)}
     ${planPanel(input.maxVision)}
-    ${canCreate ? `<button type="button" class="morph-create" data-morph-create>Create my visual target</button>` : ""}
+    ${canCreate ? `<button type="button" class="morph-create" data-morph-create${input.selected.renderHoldReason ? " disabled" : ""}>Create my visual target</button>` : ""}
     <p class="morph-status" data-morph-status aria-live="polite">${
-      input.renderEnabled
+      input.selected.renderHoldReason ? esc(input.selected.renderHoldReason) : input.renderEnabled
         ? "The preview request instructs the service not to retain your source photos. A result appears only after every validation check passes."
-        : "Your measurable target is ready. The image version stays locked until identity, natural-change and two-view consistency checks are live."
+        : "Your draft goal map is ready. The image version stays locked until identity, natural-change and required-view checks are validated."
     }</p>
   </section>`;
 }
@@ -186,6 +187,7 @@ interface MorphPreviewRuntime {
   photo: typeof photoData;
   wait: typeof delay;
   subscribeOwner: (changed: () => void) => () => void;
+  renderBudgetMs: number;
 }
 
 /** Returns the panel's disposer; replacing the report must cancel its work. */
@@ -197,6 +199,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
     request: requestMorphRender, poll: pollMorphRender, submit: submitMorphValidation,
     validate: validateMorphImages, photo: photoData, wait: delay,
     subscribeOwner: (changed) => onAuthChange(() => changed()),
+    renderBudgetMs: 300_000,
     ...overrides,
   };
   const owner = runtime.owner();
@@ -207,6 +210,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
     max_vision: input.maxVision,
   };
   const outputs: Partial<Record<MorphBlueprint["variant"], MorphRenderSource>> = {};
+  const pendingJobs: Partial<Record<MorphBlueprint["variant"], string>> = {};
   const controller = new AbortController();
   let disposed = false;
   let busy = false;
@@ -239,6 +243,8 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
     source = null;
     delete outputs.selected;
     delete outputs.max_vision;
+    delete pendingJobs.selected;
+    delete pendingJobs.max_vision;
     for (const image of shell.querySelectorAll<HTMLImageElement>("[data-morph-current], [data-morph-output]")) image.removeAttribute("src");
     for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-variant], [data-morph-view-button], [data-morph-create]")) {
       button.onclick = null;
@@ -279,10 +285,13 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
       panel.hidden = panel.dataset.morphPlan !== next;
     }
     const points = shell.querySelector<HTMLElement>("[data-morph-points]");
-    if (points) points.textContent = `${blueprints[next].totalPoints} pts available`;
-    if (create) create.disabled = busy || !userId || blueprints[next].goals.length === 0;
+    if (points) points.textContent = "Illustrative preview";
+    if (create) {
+      create.disabled = busy || !userId || blueprints[next].goals.length === 0 || Boolean(blueprints[next].renderHoldReason);
+      create.textContent = pendingJobs[next] ? "Check existing preview" : "Create my visual target";
+    }
     if (status && !busy && input.renderEnabled) {
-      status.textContent = outputs[next] ? "Preview checks passed." : "Create a visual target for this selection.";
+      status.textContent = blueprints[next].renderHoldReason || (outputs[next] ? "Preview checks passed." : "Create a visual target for this selection.");
     }
     showOutput();
   };
@@ -314,12 +323,13 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
       }
       const renderVariant = variant;
       const blueprint = blueprints[renderVariant];
-      if (!blueprint.goals.length) return;
+      if (!blueprint.goals.length || blueprint.renderHoldReason) return;
       const renderSource = source;
       busy = true;
       create.disabled = true;
       create.classList.add("working");
-      if (status) status.textContent = "Building a natural target and checking identity across both views...";
+      if (status) status.textContent = blueprint.hasSide ? "Building your preview and checking both supplied views..." : "Building your preview and checking the supplied front view...";
+      let budget: ReturnType<typeof previewDeadline> | undefined;
       try {
         let accessToken = await runtime.token(userId);
         if (!current()) return;
@@ -332,56 +342,73 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
         }
         // Consent can remain open long enough for a session to change or its
         // token to refresh. Bind the upload to the original scan owner again.
-        accessToken = await runtime.token(userId);
+        // Deliberating over consent is not timed. Once accepted, token refresh,
+        // upload, response bodies, polling and device checks share one budget.
+        budget = previewDeadline(controller.signal, runtime.renderBudgetMs, "The preview took too long and was withheld. Your plan is still here. Try again shortly.");
+        accessToken = await budget.run(() => runtime.token(userId));
         if (!current()) return;
         if (!accessToken) throw new Error("Sign in again to create this preview.");
         const request = createMorphRenderRequest(input.scanId, blueprint, renderSource);
-        let state = await runtime.request(request, accessToken, controller.signal);
+        const existingJob = pendingJobs[renderVariant];
+        let state = existingJob
+          ? await budget.run((signal) => runtime.poll(existingJob, blueprint.hasSide, accessToken!, signal))
+          : await budget.run((signal) => runtime.request(request, accessToken!, signal));
         if (!current()) return;
+        if (state.status !== "failed") pendingJobs[renderVariant] = state.jobId;
         for (let attempt = 0; (state.status === "accepted" || state.status === "processing") && attempt < 90; attempt++) {
-          await runtime.wait(2500, controller.signal);
+          await budget.run((signal) => runtime.wait(2500, signal));
           if (!current()) return;
-          state = await runtime.poll(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+          const pendingId = state.jobId;
+          state = await budget.run((signal) => runtime.poll(pendingId, blueprint.hasSide, accessToken!, signal));
           if (!current()) return;
         }
         if (state.status === "validation_pending") {
           if (status) status.textContent = "Checking that the result kept your identity and reached the measured target...";
-          const validation = await runtime.validate({
+          const pendingState = state;
+          const validation = await budget.run((signal) => runtime.validate({
             blueprint,
             originalFrontLandmarks: input.frontLandmarks,
-            images: state.images,
-            signal: controller.signal,
-          });
+            originalFrontSize: { width: input.frontPhoto!.width, height: input.frontPhoto!.height },
+            images: pendingState.images,
+            signal,
+          }));
           if (!current()) return;
-          const submitted = await runtime.submit(state.jobId, validation.passed, accessToken, controller.signal);
+          const submitted = await budget.run((signal) => runtime.submit(pendingState.jobId, validation.passed, accessToken!, signal));
           if (!current()) return;
           if (!submitted.ok) throw new Error(submitted.error || "The validation result could not be recorded.");
           if (!validation.passed) {
+            delete pendingJobs[renderVariant];
             if (status) status.textContent = validation.reason || "The generated face did not pass the identity and target checks, so it was withheld.";
             return;
           }
-          state = await runtime.poll(state.jobId, blueprint.hasSide, accessToken, controller.signal);
+          state = await budget.run((signal) => runtime.poll(pendingState.jobId, blueprint.hasSide, accessToken!, signal));
           if (!current()) return;
         }
         if (state.status === "ready") {
+          delete pendingJobs[renderVariant];
           outputs[renderVariant] = state.images;
           showOutput();
           if (status) status.textContent = variant === renderVariant
-            ? "Identity, natural-change and cross-view checks passed."
+            ? "Preview checks passed. This illustration is not a prediction or proof of an achievable result."
             : "Your other preview is ready. Switch back to view it.";
         } else if (state.status === "failed") {
+          delete pendingJobs[renderVariant];
           if (status) status.textContent = state.error;
         } else if (status) {
-          status.textContent = "The preview is taking longer than expected. Try again shortly.";
+          status.textContent = "The preview is still processing. Check the existing preview shortly; this does not start another render.";
         }
       } catch (error) {
         if (current() && status && (!(error instanceof DOMException) || error.name !== "AbortError")) {
-          status.textContent = error instanceof Error ? error.message : "The preview could not be created.";
+          status.textContent = pendingJobs[renderVariant]
+            ? "The preview check was interrupted. Check the existing preview to resume without starting another render."
+            : error instanceof Error ? error.message : "The preview could not be created.";
         }
       } finally {
+        budget?.dispose();
         busy = false;
         if (current()) {
-          create.disabled = !userId || blueprints[variant].goals.length === 0;
+          create.disabled = !userId || blueprints[variant].goals.length === 0 || Boolean(blueprints[variant].renderHoldReason);
+          create.textContent = pendingJobs[variant] ? "Check existing preview" : "Create my visual target";
           create.classList.remove("working");
         }
       }

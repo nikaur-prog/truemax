@@ -11,6 +11,8 @@ import type { MorphRenderSource } from "../engine/morphContract.js";
 export interface MorphValidationInput {
   blueprint: MorphBlueprint;
   originalFrontLandmarks: NormalizedLandmark[];
+  /** The frame in which the original normalized landmarks were measured. */
+  originalFrontSize: { width: number; height: number };
   images: MorphRenderSource;
   signal?: AbortSignal;
 }
@@ -44,6 +46,14 @@ interface Frame {
   angle: number;
 }
 
+interface ImageSize { width: number; height: number }
+
+function aspectCorrect(points: NormalizedLandmark[], size: ImageSize): NormalizedLandmark[] | null {
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) return null;
+  const edge = Math.max(size.width, size.height);
+  return points.map((point) => ({ ...point, x: point.x * size.width / edge, y: point.y * size.height / edge }));
+}
+
 function eyeFrame(points: NormalizedLandmark[]): Frame | null {
   const right = points[33];
   const left = points[263];
@@ -74,15 +84,23 @@ function inFrame(point: NormalizedLandmark, frame: Frame): { x: number; y: numbe
 export function identityLandmarkDistance(
   original: NormalizedLandmark[],
   rendered: NormalizedLandmark[],
+  originalSize: ImageSize = { width: 1, height: 1 },
+  renderedSize: ImageSize = { width: 1, height: 1 },
 ): { median: number; p90: number } | null {
-  const a = eyeFrame(original);
-  const b = eyeFrame(rendered);
+  // Normalized x and y have different units in a non-square photograph.
+  // Compare isotropic image coordinates before aligning by the eyes. This
+  // removes framing/padding changes, not nonuniform face stretching.
+  const sourcePoints = aspectCorrect(original, originalSize);
+  const targetPoints = aspectCorrect(rendered, renderedSize);
+  if (!sourcePoints || !targetPoints) return null;
+  const a = eyeFrame(sourcePoints);
+  const b = eyeFrame(targetPoints);
   if (!a || !b) return null;
   const distances: number[] = [];
   for (const index of IDENTITY_POINTS) {
-    const source = original[index];
-    const target = rendered[index];
-    if (!source || !target) return null;
+    const source = sourcePoints[index];
+    const target = targetPoints[index];
+    if (!source || !target || ![source.x, source.y, target.x, target.y].every(Number.isFinite)) return null;
     const x = inFrame(source, a);
     const y = inFrame(target, b);
     distances.push(Math.hypot(x.x - y.x, x.y - y.y));
@@ -92,6 +110,7 @@ export function identityLandmarkDistance(
 
 export function targetsMoveAsSpecified(targets: MorphMetricTarget[], report: Report): boolean {
   for (const target of targets) {
+    if (!Number.isFinite(target.current) || !Number.isFinite(target.target)) return false;
     const measured = report.metrics.find((metric) => metric.def.id === target.id);
     if (!measured || measured.implausible || !Number.isFinite(measured.value)) return false;
     const expected = target.target - target.current;
@@ -165,7 +184,7 @@ export async function validateMorphImages(input: MorphValidationInput, overrides
     if (!frontLandmarks) {
       return { passed: false, identityPreserved: false, targetAligned: false, reason: "No face was found in the generated front view." };
     }
-    const identity = identityLandmarkDistance(input.originalFrontLandmarks, frontLandmarks);
+    const identity = identityLandmarkDistance(input.originalFrontLandmarks, frontLandmarks, input.originalFrontSize, front);
     const identityPreserved = Boolean(identity && identity.median <= 0.045 && identity.p90 <= 0.09);
     if (!identityPreserved) {
       return { passed: false, identityPreserved: false, targetAligned: false, reason: "The generated front view changed identity-stable facial geometry." };

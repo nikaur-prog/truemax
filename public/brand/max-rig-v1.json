@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "source": "scripts/build-max-3d.mjs",
+  "rig": "rigid transform hierarchy",
+  "triangles": 8596,
+  "materials": 3,
+  "bytes": 203356,
+  "clips": [
+    "idle",
+    "listening",
+    "thinking",
+    "speaking",
+    "celebrate",
+    "quiet"
+  ],
+  "license": "Original TrueMax project asset. No third-party source meshes or textures.",
+  "approved": false
+}

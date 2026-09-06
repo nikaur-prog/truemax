@@ -72,7 +72,8 @@ test("the report uses the server-backed staff result without awaiting it or usin
   assert.doesNotMatch(refresh, /await beginSkinTrialStaffCheck/);
   const results = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
   assert.match(results, /if \(!skinTrialAccess\.enabled\(\)\) return ""/);
-  assert.match(results, /clearResultsIdentityState\(\): void \{\s*skinTrialAccess\.reset\(\);\s*repaintSkinTrial\(\)/);
+  const identityReset = results.slice(results.indexOf("export function clearResultsIdentityState"), results.indexOf("export function setMaxAccess"));
+  assert.match(identityReset, /skinTrialAccess\.reset\(\);\s*repaintSkinTrial\(\)/);
   assert.match(results, /<template data-skin-trial-slot><\/template>/);
   const entitlement = readFileSync(new URL("../engine/entitlement.ts", import.meta.url), "utf8");
   assert.match(entitlement, /loadIsAdmin[\s\S]*?\.from\("app_admins"\)/);

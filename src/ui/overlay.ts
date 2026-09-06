@@ -16,13 +16,22 @@ export interface OverlayHandle {
   cancel(): void;
   done: Promise<void>;
 }
+export interface LandmarkRevealOptions {
+  /** Presentation duration only. Export callers keep the original default. */
+  durationMs?: number;
+  /** White construction points before scored results are shown. */
+  neutral?: boolean;
+  signal?: AbortSignal;
+}
 
 export function drawLandmarksAnimated(
   canvas: HTMLCanvasElement,
   landmarks: NormalizedLandmark[],
   width: number,
   height: number,
+  opts: LandmarkRevealOptions = {},
 ): OverlayHandle {
+  if (opts.signal?.aborted) return { cancel: () => {}, done: Promise.resolve() };
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
@@ -32,13 +41,22 @@ export function drawLandmarksAnimated(
   const dotR = Math.max(1.2, width / 480);
 
   let raf = 0;
-  let start = 0;
+  const start = performance.now();
+  const duration = Number.isFinite(opts.durationMs) ? Math.max(0, Math.min(5000, opts.durationMs!)) : REVEAL_MS;
+  let stopped = false;
   let resolveDone: () => void;
   const done = new Promise<void>((r) => (resolveDone = r));
+  const cancel = (): void => {
+    if (stopped) return;
+    stopped = true;
+    cancelAnimationFrame(raf);
+    opts.signal?.removeEventListener("abort", cancel);
+    resolveDone();
+  };
 
   const frame = (now: number) => {
-    if (!start) start = now;
-    const t = Math.min(1, (now - start) / REVEAL_MS);
+    if (stopped) return;
+    const t = duration === 0 ? 1 : Math.min(1, (now - start) / duration);
     ctx.clearRect(0, 0, width, height);
 
     // NO MESH in the reveal.
@@ -56,19 +74,17 @@ export function drawLandmarksAnimated(
     const n = Math.floor(easeOut(t) * order.length);
     for (let i = 0; i < n; i++) {
       const idx = order[i];
-      dot(ctx, landmarks[idx], width, height, idx >= 468 ? dotR * 1.6 : dotR, idx >= 468 ? DOT_IRIS : DOT);
+      dot(ctx, landmarks[idx], width, height, idx >= 468 ? dotR * 1.6 : dotR, !opts.neutral && idx >= 468 ? DOT_IRIS : DOT);
     }
 
     if (t < 1) raf = requestAnimationFrame(frame);
-    else resolveDone();
+    else cancel();
   };
+  opts.signal?.addEventListener("abort", cancel, { once: true });
   raf = requestAnimationFrame(frame);
 
   return {
-    cancel() {
-      cancelAnimationFrame(raf);
-      resolveDone();
-    },
+    cancel,
     done,
   };
 }

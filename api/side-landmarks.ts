@@ -10,14 +10,20 @@ import {
 } from "./_sideLandmarks.js";
 import type { LandmarkMediaType } from "./_sideLandmarks.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import {
+  sidePlacementDeadline,
+  sidePlacementTimeoutMs,
+  sidePlacementProtocolVersion,
+  SIDE_PLACEMENT_RESPONSE_RESERVE_MS,
+} from "../src/engine/sidePlacementRequest.js";
 
 // ---------------------------------------------------------------------------
 // POST /api/side-landmarks
 //
 // The side photograph in, thirteen points out. This is the only place in the
-// product where a photograph leaves the device before the person has answered
-// a consent question, which is why the client must ask before calling it (see
-// docs/SIDE_LANDMARKS_AI_FIRST.md) and why this handler does exactly one thing
+// product where a photograph can leave the device for initial placement.
+// The client must ask for cloud permission before calling it (see
+// docs/SIDE_LANDMARKS_AI_FIRST.md). This handler does exactly one thing
 // with the bytes: uprights and resizes them in memory, forwards them to the
 // model (the whole frame, then an enlarged ear crop and chin crop) and drops
 // them. No bucket, no row, no log line with image data. The feedback record
@@ -37,8 +43,10 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 // Request: multipart form with `photo` (JPEG, PNG or WebP, at most 2 MB),
 // optional `width` and `height` of the frame the client draws in, so the
 // response can carry pixels as well as fractions, and optional `seed`, the
-// device seeder's thirteen points as fractions of the same photo (JSON), which
-// the pass may use as a hint and never returns as an answer.
+// device seeder's thirteen points as fractions of the same photo (JSON).
+// Seeded refinement keeps the front points and reads the back-point crops.
+// Optional `timeoutMs` is the remaining client budget, capped below the route's
+// duration; all provider rounds share it. No provider retry starts implicitly.
 // ---------------------------------------------------------------------------
 
 const MAX_BODY_BYTES = MAX_LANDMARK_IMAGE_BYTES + 20_000;
@@ -60,6 +68,8 @@ function frameSize(value: FormDataEntryValue | null): number | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const startedAt = Date.now();
+  let deadline: ReturnType<typeof sidePlacementDeadline> | undefined;
   let claimedUserId: string | null = null;
   const releaseClaim = async () => {
     const userId = claimedUserId;
@@ -86,6 +96,12 @@ export async function POST(request: Request): Promise<Response> {
     const width = frameSize(form.get("width"));
     const height = frameSize(form.get("height"));
     const hint = parseSeedHint(form.get("seed"));
+    const remainingMs = sidePlacementTimeoutMs(form.get("timeoutMs"))
+      - (Date.now() - startedAt) - SIDE_PLACEMENT_RESPONSE_RESERVE_MS;
+    if (remainingMs <= 0 || request.signal.aborted) {
+      return json({ error: "The placement request timed out. Use the device points or try again." }, 408);
+    }
+    deadline = sidePlacementDeadline(remainingMs, request.signal);
 
     // Claimed before the model is called, as one statement, so two requests
     // racing cannot both pass the ceiling (same shape as the chat allowance).
@@ -108,9 +124,12 @@ export async function POST(request: Request): Promise<Response> {
 
     let pass;
     try {
+      deadline.signal.throwIfAborted();
       const prepared = await prepareLandmarkImage(Buffer.from(await photo.arrayBuffer()));
+      deadline.signal.throwIfAborted();
       pass = await placeSideLandmarks(client(), prepared, {
         hint,
+        signal: deadline.signal,
         onZoomError: (cluster, error) => console.error(`side-landmarks zoom ${cluster}`, safeMessage(error)),
       });
     } catch (error) {
@@ -130,7 +149,7 @@ export async function POST(request: Request): Promise<Response> {
       confidence: pass.result.confidence,
       faceDir: pass.result.faceDir,
       model: pass.model,
-      version: pass.version,
+      version: sidePlacementProtocolVersion(pass.version, pass.seeded),
       zoomed: pass.zoomed,
       remaining: typeof remaining === "number" ? remaining : null,
     });
@@ -140,5 +159,7 @@ export async function POST(request: Request): Promise<Response> {
       console.error("side-landmarks release", safeMessage(releaseError));
     });
     return json({ error: "The points could not be placed just then." }, 500);
+  } finally {
+    deadline?.dispose();
   }
 }

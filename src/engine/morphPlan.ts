@@ -1,14 +1,16 @@
 import { chosenGoals, GOALS, isQuiet } from "./goals.js";
 import type { GoalDef, Profile } from "./goals.js";
 import { evidenceFor } from "./goalEvidence.js";
+import { allowedLayers, goalEffect } from "./goalCatalogue.js";
+import { MORPH_EFFECT_LAYERS } from "./morphEffects.js";
 import type { Report, ScoredMetric, View } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // The measurable blueprint behind a goal preview.
 //
 // This module does not edit pixels. It decides what a member's selected goals
-// are allowed to change, which measurements can honestly track that change,
-// and when the change is large enough to count. Keeping that decision outside
+// are allowed to illustrate and which measurements are eligible to describe
+// that illustration. Keeping that decision outside
 // an image prompt is load-bearing: a renderer may improve, change provider, or
 // fail, while the product's promise must stay the same.
 //
@@ -36,7 +38,7 @@ export interface MorphGoalRule {
   id: string;
   /** Plain expectation shown beside this goal, never a promised deadline. */
   timeframe: string;
-  /** Plan points reward consistency and difficulty, not attractiveness. */
+  /** Reserved for a future validated award contract; currently always zero. */
   effortPoints: number;
   views: View[];
   effects: Partial<MorphEffectVector>;
@@ -51,7 +53,7 @@ export interface MorphMetricTarget {
   target: number;
   decimals: number;
   unit: string;
-  /** The minimum move toward target that must repeat before it counts. */
+  /** Legacy display metadata only; not a calibrated progress or award rule. */
   completionDelta: number;
   goalIds: string[];
 }
@@ -77,6 +79,8 @@ export interface MorphBlueprint {
   totalPoints: number;
   hasFront: boolean;
   hasSide: boolean;
+  /** Client-side pause when a saved draft cannot safely describe this new scan. */
+  renderHoldReason?: string;
 }
 
 const EMPTY_EFFECTS = (): MorphEffectVector => ({
@@ -103,88 +107,88 @@ const EMPTY_EFFECTS = (): MorphEffectVector => ({
 export const MORPH_GOAL_RULES: Readonly<Record<string, MorphGoalRule>> = {
   bodyfat: {
     id: "bodyfat",
-    timeframe: "Review after 8 to 16 weeks",
-    effortPoints: 90,
+    timeframe: "Track comparable photos and your chosen routine; no outcome date is promised.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { facialFullness: -0.55, jawDefinition: 0.42, underChinFullness: -0.42 },
     visualSummary: "A leaner soft-tissue outline while bone structure and identity stay unchanged.",
   },
   jaw: {
     id: "jaw",
-    timeframe: "Review posture and definition after 6 to 10 weeks",
-    effortPoints: 55,
+    timeframe: "Compare posture under the same camera conditions; jaw bone is unchanged.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { jawDefinition: 0.24, underChinFullness: -0.16, posture: 0.3 },
     visualSummary: "Cleaner posture and under-chin presentation, with no invented jaw growth.",
   },
   eyes: {
     id: "eyes",
-    timeframe: "Review after 3 to 6 weeks",
-    effortPoints: 35,
+    timeframe: "Compare grooming and visible presentation under consistent lighting.",
+    effortPoints: 0,
     views: ["front"],
     effects: { underEyePuffiness: -0.28, browDefinition: 0.2 },
     visualSummary: "A more rested eye area and tidier brow presentation without changing eye shape.",
   },
   debloat: {
     id: "debloat",
-    timeframe: "Review after 1 to 3 consistent weeks",
-    effortPoints: 30,
+    timeframe: "Compare repeated photos; temporary puffiness is not evidence of fat loss.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { facialFullness: -0.22, underEyePuffiness: -0.3, jawDefinition: 0.12 },
     visualSummary: "A less puffy presentation, shown as a modest soft-tissue change.",
   },
   symmetry: {
     id: "symmetry",
-    timeframe: "Review capture and posture after 8 to 12 weeks",
-    effortPoints: 50,
+    timeframe: "Keep head position consistent; natural asymmetry is not a defect to erase.",
+    effortPoints: 0,
     views: ["front"],
     effects: { posture: 0.25 },
     visualSummary: "A straighter presentation only. Natural asymmetry remains part of the face.",
   },
   grooming: {
     id: "grooming",
-    timeframe: "Visible as soon as the routine is applied",
-    effortPoints: 15,
+    timeframe: "Track the grooming routine you chose; no facial-shape change is promised.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { browDefinition: 0.3, hairFinish: 0.2 },
     visualSummary: "Cleaner brows, facial-hair edges and styling with the same underlying face.",
   },
   photos: {
     id: "photos",
-    timeframe: "Visible on the next controlled photograph",
-    effortPoints: 10,
+    timeframe: "Compare the same camera setup; this is presentation, not biological change.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { posture: 0.22, lighting: 0.42 },
     visualSummary: "More controlled posture and light, labelled as presentation rather than anatomy.",
   },
   hair: {
     id: "hair",
-    timeframe: "A cut is immediate; growth goals take longer",
-    effortPoints: 25,
+    timeframe: "Compare styling in the same light; the scan does not measure hair growth.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { hairFinish: 0.55 },
     visualSummary: "A more intentional haircut and finish, without inventing density or a new hairline.",
   },
   skin: {
     id: "skin",
-    timeframe: "Review a consistent routine after 8 to 12 weeks",
-    effortPoints: 60,
+    timeframe: "Track your routine and visible appearance; this is not a diagnosis or treatment prediction.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { skinEvenness: 0.48, blemishVisibility: -0.4 },
     visualSummary: "A calmer, more even surface while pores, texture and normal skin detail remain.",
   },
   teeth: {
     id: "teeth",
-    timeframe: "Depends on the option chosen with a qualified professional",
-    effortPoints: 45,
+    timeframe: "Track your chosen routine; treatment expectations belong with a qualified professional.",
+    effortPoints: 0,
     views: ["front"],
     effects: { smileFinish: 0.35 },
     visualSummary: "A tidier smile presentation only, never a promised treatment result.",
   },
   muscle: {
     id: "muscle",
-    timeframe: "Review frame changes after 8 to 16 weeks",
-    effortPoints: 80,
+    timeframe: "Track your routine separately; facial measurements do not verify muscle growth.",
+    effortPoints: 0,
     views: ["front", "side"],
     effects: { posture: 0.36 },
     visualSummary: "A stronger neck, shoulder and posture presentation outside the facial score.",
@@ -199,6 +203,8 @@ function round(n: number, decimals: number): number {
 }
 
 function metricTarget(metric: ScoredMetric, goalId: string): MorphMetricTarget | null {
+  const catalogue = goalEffect(goalId);
+  if (!catalogue?.measures.includes(metric.def.id)) return null;
   if (metric.implausible || !Number.isFinite(metric.value)) return null;
   const [lo, hi] = metric.idealRange;
   let edge = metric.value;
@@ -207,12 +213,12 @@ function metricTarget(metric: ScoredMetric, goalId: string): MorphMetricTarget |
   else return null;
 
   const gap = edge - metric.value;
-  // Close only the share the existing scoring definition says can move without
-  // surgery. The 0.85 ceiling leaves the preview on the attainable side of an
-  // already uncertain estimate rather than drawing the exact edge as a fact.
-  const movableShare = clamp(metric.def.fixability * 0.85, 0, 0.85);
+  // This is an illustrative editing budget, not an established achievable
+  // target. Use the shared catalogue ceiling without changing scoring norms.
+  const movableShare = clamp(metric.def.fixability * catalogue.movement.high, 0, 0.85);
   const target = metric.value + gap * movableShare;
   if (Math.abs(target - metric.value) < 10 ** -(metric.def.decimals + 1)) return null;
+  if (round(target, metric.def.decimals) === round(metric.value, metric.def.decimals)) return null;
   const smallestVisibleStep = 10 ** -metric.def.decimals;
   return {
     id: metric.def.id,
@@ -288,7 +294,9 @@ function mergeEffects(goals: GoalDef[]): MorphEffectVector {
   for (const goal of goals) {
     const rule = MORPH_GOAL_RULES[goal.id];
     if (!rule) continue;
+    const allowed = new Set(allowedLayers([goal.id], true));
     for (const [id, amount] of Object.entries(rule.effects) as Array<[MorphEffectId, number]>) {
+      if (!allowed.has(MORPH_EFFECT_LAYERS[id])) continue;
       effects[id] = clamp(effects[id] + amount, -1, 1);
     }
   }
@@ -302,7 +310,7 @@ export function buildMorphBlueprint(
   hasSide: boolean,
 ): MorphBlueprint {
   const defs = variant === "selected" ? selectedDefs(profile) : suggestedDefs(report, profile);
-  const targets = mergeTargets(report, defs);
+  const targets = mergeTargets(report, defs).filter((target) => target.view === "front" || hasSide);
   const goals = defs.map((goal): MorphGoalPreview => {
     const rule = MORPH_GOAL_RULES[goal.id];
     const targetIds = targets.filter((target) => target.goalIds.includes(goal.id)).map((target) => target.id);

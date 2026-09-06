@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   BACK_LANDMARK_IDS,
   LANDMARK_GRID_STEP,
@@ -26,6 +27,7 @@ import {
   parseLandmarkToolInput,
   parsePixelToolInput,
   parseSeedHint,
+  placeSideLandmarks,
   prepareLandmarkImage,
   squareWindow,
   toZoom,
@@ -34,6 +36,8 @@ import {
   zoomWindow,
 } from "./_sideLandmarks.js";
 import type { PixelPlacement, SideLandmarkId } from "./_sideLandmarks.js";
+import { cloudSideSeedFractions } from "../src/ui/sideCloudPlacement.js";
+import type { SidePoints } from "../src/engine/sideMetrics.js";
 
 const FRAME = { width: 1000, height: 1400 };
 const GRID = { ...FRAME, step: LANDMARK_GRID_STEP };
@@ -252,6 +256,41 @@ test("a seed hint is all thirteen fractions or nothing", () => {
   assert.equal(parseSeedHint({ ...full, tragion: { x: 1.4, y: 0.4 } }), null);
   assert.equal(parseSeedHint("not json"), null);
   assert.equal(parseSeedHint(null), null);
+});
+
+test("the browser seed serializes into the server's existing hint contract", () => {
+  const seed = facingRight() as unknown as SidePoints;
+  const fractions = cloudSideSeedFractions(seed, FRAME.width, FRAME.height, 1);
+  assert.deepEqual(parseSeedHint(JSON.stringify(fractions)), fractions);
+});
+
+test("placement passes the shared abort signal and disables hidden provider retries", async () => {
+  const controller = new AbortController();
+  const image = await prepareLandmarkImage(await sharp({ create: { width: 100, height: 140, channels: 3, background: "white" } }).jpeg().toBuffer());
+  let calls = 0;
+  const client = { messages: { create: async (_body: unknown, options: { signal: AbortSignal; maxRetries: number }) => {
+    calls++;
+    assert.equal(options.signal, controller.signal);
+    assert.equal(options.maxRetries, 0);
+    controller.abort(new Error("Retake"));
+    // Even an SDK response that races abort must not start the crop rounds.
+    return { content: [{ type: "tool_use", input: facingRight() }] };
+  } } } as unknown as Anthropic;
+  await assert.rejects(placeSideLandmarks(client, image, { signal: controller.signal }), /Retake/);
+  assert.equal(calls, 1);
+  await assert.rejects(placeSideLandmarks(client, image, { signal: controller.signal }), /Retake/);
+  assert.equal(calls, 1, "already-aborted requests must not reach the provider");
+});
+
+test("an aborted seeded crop pass is not returned as an accepted seed", async () => {
+  const controller = new AbortController();
+  const image = await prepareLandmarkImage(await sharp({ create: { width: 100, height: 140, channels: 3, background: "white" } }).jpeg().toBuffer());
+  const client = { messages: { create: async () => {
+    controller.abort(new Error("Deadline"));
+    throw new Error("network cancelled");
+  } } } as unknown as Anthropic;
+  const hint = parseSeedHint(cloudSideSeedFractions(facingRight() as unknown as SidePoints, FRAME.width, FRAME.height, 1));
+  await assert.rejects(placeSideLandmarks(client, image, { hint, signal: controller.signal }), /Deadline/);
 });
 
 test("a square window is centred, at least a head width fraction wide, and kept inside the frame", () => {

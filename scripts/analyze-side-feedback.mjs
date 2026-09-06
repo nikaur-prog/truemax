@@ -7,7 +7,7 @@
 // session, not for this script.
 //
 // What it prints, per landmark:
-//   n        how many submissions moved this point at all
+//   n        usable diagnostic submissions for this point
 //   med dx   the median correction along x, in canonical orientation
 //   med dy   the median correction along y
 //   spread   the interquartile range — small spread + consistent sign is a
@@ -23,9 +23,9 @@
 // offset only helps if the bias is consistent; applying medians estimated
 // from a handful of rows would move placement AWAY from faces the seeder
 // currently gets right. The rule printed at the bottom of the report says
-// when a landmark has earned an offset: n >= 25 and |median| > half the IQR.
-// When landmarks qualify, the emitted JSON block is ready to paste into a
-// calibration table.
+// when a landmark merits a candidate: at least 25 independently reviewed,
+// moved points with |median| > half the IQR. An emitted JSON block still needs
+// a subject-separated held-out comparison and approval before use.
 //
 // Run it with the service credentials in the environment (from Vercel env,
 // never committed):
@@ -33,7 +33,7 @@
 //   SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY=sb_secret_... \
 //     node scripts/analyze-side-feedback.mjs
 
-import { sideFeedbackOffsets } from "./side-feedback-analysis.mjs";
+import { fetchSideFeedbackRows, sideFeedbackCalibrationOffsets, sideFeedbackOffsets } from "./side-feedback-analysis.mjs";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SECRET_KEY;
@@ -50,19 +50,18 @@ const POINT_IDS = [
 
 const MIN_N = 25;
 
-const response = await fetch(
-  `${url.replace(/\/$/, "")}/rest/v1/side_landmark_feedback` +
-    `?select=face_dir,image_width,image_height,review_status,seed_method,seed_version,automatic_points,corrected_points,moved_point_ids,created_at&order=created_at.asc`,
-  { headers: { apikey: key, Authorization: `Bearer ${key}` } },
-);
-if (!response.ok) {
-  console.error(`Read failed: HTTP ${response.status} — ${(await response.text()).slice(0, 300)}`);
+const snapshotTime = new Date().toISOString();
+let rows;
+try {
+  rows = await fetchSideFeedbackRows(url, key, { now: snapshotTime });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : "Feedback could not be read completely");
   process.exit(1);
 }
-const rows = await response.json();
-console.log(`${rows.length} submissions on record.\n`);
+console.log(`${rows.length} unexpired submissions at ${snapshotTime}.\n`);
 if (!rows.length) process.exit(0);
 console.log("Rejected or unknown-review rows are excluded. Unreviewed rows remain diagnostic, not verified labels; this report applies no offsets.\n");
+console.log("Only independently reviewed, explicitly moved points can qualify a calibration candidate. A user Yes is not expert review.\n");
 
 const bySeed = {};
 for (const row of rows) {
@@ -87,8 +86,8 @@ function iqr(xs) {
 }
 
 console.log(`
-Reading the verdicts: an offset is only earned at n >= ${MIN_N} with a median
-larger than half the spread — a consistent lean, not scatter. Units are
+Reading the verdicts: a candidate needs at least ${MIN_N} reviewed moved points
+with a median larger than half the spread. Units are
 fractions of face height in faceDir=+1 space (positive dx = toward the face).
 `);
 
@@ -104,6 +103,7 @@ for (const row of rows) {
 for (const [seedKey, seedRows] of Object.entries(groupedRows)) {
   console.log(`\n${seedKey} (${seedRows.length} rows)`);
   const offsets = Object.fromEntries(POINT_IDS.map((id) => [id, []]));
+  const calibrationOffsets = Object.fromEntries(POINT_IDS.map((id) => [id, []]));
   let unusable = 0;
   for (const row of seedRows) {
     const normalized = sideFeedbackOffsets(row, POINT_IDS);
@@ -113,6 +113,10 @@ for (const [seedKey, seedRows] of Object.entries(groupedRows)) {
     }
     for (const id of POINT_IDS) {
       if (normalized[id]) offsets[id].push(normalized[id]);
+    }
+    const reviewed = sideFeedbackCalibrationOffsets(row, POINT_IDS, Date.parse(snapshotTime));
+    for (const id of POINT_IDS) {
+      if (reviewed?.[id]) calibrationOffsets[id].push(reviewed[id]);
     }
   }
   if (unusable) console.log(`${unusable} rows skipped (rejected, unknown review status, invalid dimensions or malformed points).`);
@@ -138,10 +142,13 @@ for (const [seedKey, seedRows] of Object.entries(groupedRows)) {
     const mdy = median(dys);
     const ix = iqr(dxs);
     const iy = iqr(dys);
-    const biased =
-      all.length >= MIN_N &&
-      (Math.abs(mdx) > Math.max(0.004, ix / 2) || Math.abs(mdy) > Math.max(0.004, iy / 2));
-    if (biased) qualified[id] = { dx: +mdx.toFixed(4), dy: +mdy.toFixed(4) };
+    const reviewed = calibrationOffsets[id];
+    const reviewedDx = reviewed.map((o) => o.dx);
+    const reviewedDy = reviewed.map((o) => o.dy);
+    const biased = reviewed.length >= MIN_N
+      && (Math.abs(median(reviewedDx)) > Math.max(0.004, iqr(reviewedDx) / 2)
+        || Math.abs(median(reviewedDy)) > Math.max(0.004, iqr(reviewedDy) / 2));
+    if (biased) qualified[id] = { dx: +median(reviewedDx).toFixed(4), dy: +median(reviewedDy).toFixed(4) };
     console.log(
       id.padEnd(17),
       String(all.length).padStart(5),
@@ -150,14 +157,14 @@ for (const [seedKey, seedRows] of Object.entries(groupedRows)) {
       mdy.toFixed(4).padStart(9),
       ix.toFixed(4).padStart(9),
       iy.toFixed(4).padStart(9),
-      biased ? "  BIASED — offset earned" : "  noise / fine",
+      biased ? `  candidate (${reviewed.length} reviewed moved points)` : `  diagnostic only (${reviewed.length} reviewed moved points)`,
     );
   }
 
   if (Object.keys(qualified).length) {
-    console.log(`Calibration block for ${seedKey} (mirrored by faceDir):`);
+    console.log(`Calibration candidate for ${seedKey} (mirrored by faceDir; requires a held-out review before use):`);
     console.log(JSON.stringify(qualified, null, 2));
   } else {
-    console.log(`No ${seedKey} landmark has earned a calibration offset yet.`);
+    console.log(`No ${seedKey} landmark qualifies a reviewed calibration candidate yet.`);
   }
 }

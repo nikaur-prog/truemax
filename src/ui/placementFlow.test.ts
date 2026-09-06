@@ -18,8 +18,11 @@ const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
 test("taking the automatic placement never reaches a confirm screen", () => {
   const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("if (startInGuidedMode)"));
   // Both terminal branches go straight to confirmPlacement with auto set.
-  assert.match(auto, /confirmPlacement\(\{ auto: true, verified: true, consented \}\)/);
-  assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented \}\)/);
+  assert.match(auto, /confirmPlacement\(\{ auto: true, verified: true, consented: consentAnswer \}\)/);
+  assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented: consentAnswer \}\)/);
+  // Remember the sharing answer so a refused measurement followed by a
+  // manual correction cannot ask again after an explicit No.
+  assert.equal(auto.match(/consentAnswer = await askSideFeedbackConsent\(\)/g)?.length, 2);
   // And the only path back to the review row is the one where a person chose
   // to edit, where the row is the tool they asked for...
   assert.match(auto, /if \(!useAnyway\) \{[\s\S]*?showGuidedActions\(\);/);
@@ -154,7 +157,7 @@ const verify = readFileSync(new URL("./sideVerify.ts", import.meta.url), "utf8")
 test("every seeding method is measured before anybody is told it failed", () => {
   // The validator is threaded from the flow, where the scoring engine lives, so
   // the seeder never has to import the thing it is estimating for.
-  assert.match(src, /seedSidePointsSmart\(\s*e\.canvas,[\s\S]*?const assessment = seedAssessment\(points, faceDir, ctx\.sex\);[\s\S]*?assessment\.hard\.length === 0 && assessment\.marginal\.length === 0;/);
+  assert.match(src, /seedSidePointsSmart\(\s*snapshot,[\s\S]*?const assessment = seedAssessment\(points, faceDir, ctx\.sex\);[\s\S]*?assessment\.hard\.length === 0 && assessment\.marginal\.length === 0;/);
   // Candidates are ranked geometrically and then filtered, so a seed that is
   // both plausible AND well placed still wins.
   assert.match(verify, /candidates\.sort\(\(a, b\) => b\.score - a\.score\)/);

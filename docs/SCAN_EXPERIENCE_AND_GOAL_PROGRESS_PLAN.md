@@ -2,6 +2,17 @@
 
 Audit date: 7 September 2026.
 
+## Implementation follow-up
+
+The first implementation batch is recorded in
+`SCAN_PLAN_BUILD_2026-09-07.md`. It delivers reversible side review, seeded
+cloud refinement and label provenance, a bounded interactive reveal, safer
+morph requests and fixed illustrative target markers, plus an original 3D
+Max prototype. The findings below describe the audit baseline, not a claim
+that every research or rollout gate has now passed. In particular, no new
+population calibration, clinical detector, appearance reward or default 3D
+rollout is authorized by this build.
+
 ## Decision summary
 
 The first scan is the priority: usable photo, consistent points, uninterrupted

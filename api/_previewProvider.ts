@@ -3,6 +3,7 @@ import { createHiggsfieldClient } from "@higgsfield/client/v2";
 import { RENDER_LAYERS } from "../src/engine/goalCatalogue.js";
 import type { RenderLayer } from "../src/engine/goalCatalogue.js";
 import { downloadRemoteImage } from "./_remoteImage.js";
+import type { MorphNumericRecipe } from "./_morphRecipe.js";
 
 // ---------------------------------------------------------------------------
 // The image provider behind the Goal preview, behind one interface.
@@ -37,7 +38,7 @@ export type PreviewProviderName = "higgsfield" | "openai";
 export interface PreviewRenderInput {
   /** Prepared JPEGs, upright, at most 1600 px on the long side. */
   front: Buffer;
-  side: Buffer;
+  side?: Buffer;
   /** From previewInstructions; nothing else. */
   instructions: string;
   /** Absolute time by which everything must be done. */
@@ -46,7 +47,7 @@ export interface PreviewRenderInput {
 
 export interface PreviewRenderOutput {
   front: Buffer;
-  side: Buffer;
+  side?: Buffer;
   providerRef: string | null;
 }
 
@@ -82,12 +83,15 @@ const LAYER_PHRASES: Record<RenderLayer, string> = {
  * are dropped, never passed through; an empty set still carries the
  * identity clauses, so a render with nothing allowed changes nothing.
  */
-export function previewInstructions(layers: readonly string[]): string {
+export function previewInstructions(layers: readonly string[], recipe?: MorphNumericRecipe): string {
   const allowed = RENDER_LAYERS.filter((l) => layers.includes(l));
   const changes = allowed.length
     ? `Only the following presentation may differ from the photograph: ${allowed.map((l) => LAYER_PHRASES[l]).join(" ")}`
     : "Nothing about the person's presentation differs from the photograph.";
-  return `${IDENTITY_CLAUSES} ${changes}`;
+  const numerical = recipe
+    ? ` This is an illustrative recipe, not a prediction of biological change. Effect amounts are signed bounded strengths, not percentages of an anatomical change. Respect the listed measurement direction and do not exceed its allowedRange. Only targets for the supplied view apply. If a target would require changing protected identity or bone geometry, leave that feature unchanged for the independent check to reject; do not invent a different face. Numeric recipe: ${JSON.stringify(recipe)}`
+    : "";
+  return `${IDENTITY_CLAUSES} ${changes}${numerical}`;
 }
 
 interface Credentials {
@@ -105,6 +109,20 @@ function higgsfieldCredentials(env: NodeJS.ProcessEnv): Credentials | null {
 
 function remaining(deadline: number): number {
   return deadline - Date.now();
+}
+
+/** Render only supplied views. A missing profile never consumes a second image call. */
+export async function renderPreviewViews(
+  input: PreviewRenderInput,
+  renderOne: (image: Buffer, instructions: string, deadline: number) => Promise<Buffer | PreviewRenderFailure>,
+): Promise<PreviewRenderOutput | PreviewRenderFailure> {
+  const [front, side] = await Promise.all([
+    renderOne(input.front, input.instructions, input.deadline),
+    input.side ? renderOne(input.side, `${input.instructions} This is the side profile of the same person.`, input.deadline) : Promise.resolve(undefined),
+  ]);
+  if (!Buffer.isBuffer(front)) return front;
+  if (input.side && !Buffer.isBuffer(side)) return side ?? { error: "The image service returned no profile preview.", status: 502 };
+  return { front, ...(Buffer.isBuffer(side) ? { side } : {}), providerRef: null };
 }
 
 function higgsfield(credentials: Credentials, endpoint: string): PreviewProvider {
@@ -154,15 +172,9 @@ function higgsfield(credentials: Credentials, endpoint: string): PreviewProvider
   return {
     name: "higgsfield",
     async render(input) {
-      // Both views together: the budget is shared and the calls are independent.
       const refs: string[] = [];
-      const [front, side] = await Promise.all([
-        renderOne(input.front, input.instructions, input.deadline, refs),
-        renderOne(input.side, `${input.instructions} This is the side profile of the same person.`, input.deadline, refs),
-      ]);
-      if (!Buffer.isBuffer(front)) return front;
-      if (!Buffer.isBuffer(side)) return side;
-      return { front, side, providerRef: refs.length ? refs.join(" ") : null };
+      const result = await renderPreviewViews(input, (image, instructions, deadline) => renderOne(image, instructions, deadline, refs));
+      return "front" in result ? { ...result, providerRef: refs.length ? refs.join(" ") : null } : result;
     },
   };
 }
@@ -201,13 +213,7 @@ function openai(apiKey: string): PreviewProvider {
   return {
     name: "openai",
     async render(input) {
-      const [front, side] = await Promise.all([
-        editOne(input.front, input.instructions, input.deadline),
-        editOne(input.side, `${input.instructions} This is the side profile of the same person.`, input.deadline),
-      ]);
-      if (!Buffer.isBuffer(front)) return front;
-      if (!Buffer.isBuffer(side)) return side;
-      return { front, side, providerRef: null };
+      return renderPreviewViews(input, editOne);
     },
   };
 }

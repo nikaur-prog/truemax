@@ -43,3 +43,66 @@ test("mobile scan exits use app UI, while refresh keeps the browser guard", () =
   assert.match(main, /window\.addEventListener\("beforeunload"/);
   assert.match(main, /closeScanConfirm\(\);\s*disarmLeaveGuard\(\);/);
 });
+
+test("side review offers retake and skip at the preview and correction steps", () => {
+  const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
+  assert.match(src, /retakeButton\.textContent = "Take another side photo"/);
+  assert.match(src, /skipButton\.textContent = "Skip side and see front analysis"/);
+  assert.match(src, /if \(ctx\.onSkip\)/);
+  assert.match(src, /if \(exitCtx\) appendSideExitActions\(backdrop\.querySelector\("section"\)!, exitCtx\)/);
+  assert.match(src, /if \(opts\.exitCtx\) appendSideExitActions/);
+  const guided = src.slice(src.indexOf("const showGuidedActions"), src.indexOf("const showReviewActions"));
+  assert.match(guided, /appendSideExitActions\(e.actions, ctx\)/);
+  const review = src.slice(src.indexOf("const showReviewActions"), src.indexOf("const confirmPlacement"));
+  assert.match(review, /appendSideExitActions\(e.actions, ctx\)/);
+});
+
+test("skipping the side routes the owned front to analysis without a side result", () => {
+  const src = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+  const flow = src.slice(src.indexOf("function startSide()"));
+  const skip = flow.slice(flow.indexOf("onSkip:"), flow.indexOf("onDone:"));
+  assert.match(skip, /scanSession.isCurrent\(token\)/);
+  assert.match(skip, /lastSide = null/);
+  assert.match(skip, /gateAnalysis\(null, token\)/);
+  assert.doesNotMatch(skip, /resetToUpload|onDone\(/);
+});
+
+test("side readers use an owned snapshot with cancellation and no artificial delay", () => {
+  const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
+  assert.match(src, /seedSidePointsSmart\(\s*snapshot,/);
+  assert.match(src, /cloudPlacementFor\(snapshot, localResult, signal\)/);
+  assert.match(src, /if \(!sideAttempt.current\(signal\)\) return/);
+  assert.doesNotMatch(src, /READ_BEAT_MS/);
+});
+
+test("retake removes the old preview's invisible action state", () => {
+  const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
+  const capture = src.slice(src.indexOf("export function openSideCapture"), src.indexOf("function skipSide"));
+  assert.match(capture, /e\.actions\.classList\.remove\("mode-pending", "guided-row"\)/);
+});
+
+test("optional feedback never blocks report paint and uses scan cancellation", () => {
+  const src = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /await feedbackInFlight/);
+  assert.match(src, /signal: scanWorkAbort.signal/);
+  assert.match(src, /durationPolicy: "interactive"/);
+  const pass = src.slice(src.indexOf("async function playMeasurePass"), src.indexOf("async function runFullAnalysis"));
+  assert.match(pass, /paintFrontPane\(frontShot\);\s*markMeasuredOnScreen/);
+});
+
+test("draft targets require verified side baselines and reset on identity change", () => {
+  const src = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
+  assert.match(src, /fresh.targets = fresh.targets.filter\(\(target\) => target.view !== "side" \|\| ctx!.sideVerified === true\)/);
+  assert.match(src, /clearResultsIdentityState\(\): void \{\s*resultOwner = null;\s*goalDraft = null;/);
+  assert.match(src, /if \(keepTargets && !gated && adultUser\)/);
+});
+
+test("direct goal panel redraw disposes a running preview before replacing its DOM", () => {
+  const src = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
+  const panel = src.slice(src.indexOf("function showImprove(): void"));
+  const dispose = panel.indexOf("detachMorphPreview?.();");
+  const replace = panel.indexOf("body().innerHTML =");
+  const mount = panel.indexOf("detachMorphPreview = wireMorphPreview");
+  assert.ok(dispose > 0 && replace > dispose && mount > replace);
+  assert.match(panel.slice(dispose, replace), /detachMorphPreview = null/);
+});

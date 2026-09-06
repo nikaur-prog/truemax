@@ -8,6 +8,13 @@ export type SideSeedMethod = "mesh" | "silhouette" | "segmentation" | "vision" |
 
 const SEED_METHODS: ReadonlySet<string> = new Set(["mesh", "silhouette", "segmentation", "vision", "fused", "existing"]);
 
+export interface SideFeedbackReview {
+  /** The answer about the automatic placement, not expert annotation. */
+  verificationAnswer: "yes" | "no" | "unknown";
+  /** Whether the person accepted the final points after any corrections. */
+  finalPlacementVerified: boolean;
+}
+
 export interface SideFeedbackIntent {
   scanId: string;
   submissionId: string;
@@ -15,6 +22,7 @@ export interface SideFeedbackIntent {
   automaticPoints: SidePoints;
   seedMethod: SideSeedMethod;
   seedVersion?: string;
+  review?: SideFeedbackReview;
 }
 
 export interface SideFeedbackMetadata {
@@ -28,12 +36,22 @@ export interface SideFeedbackMetadata {
   seedVersion?: string;
   automaticPoints: SidePoints;
   correctedPoints: SidePoints;
+  review?: SideFeedbackReview;
 }
 
 export function cloneSidePoints(points: SidePoints): SidePoints {
   const copy = {} as SidePoints;
   for (const { id } of SIDE_POINTS) copy[id] = { x: points[id].x, y: points[id].y };
   return copy;
+}
+
+/** A correction asks once; an earlier No must remain a no-upload decision. */
+export function shouldAskSideCorrectionConsent(
+  automatic: boolean,
+  consentAnswer: boolean | null,
+  movedPointCount: number,
+): boolean {
+  return !automatic && consentAnswer === null && movedPointCount > 0;
 }
 
 // The only function that turns a consent choice into uploadable state. A No
@@ -46,6 +64,7 @@ export function createSideFeedbackIntent(
   automaticPoints: SidePoints,
   seedMethod: SideSeedMethod,
   seedVersion?: string,
+  review?: SideFeedbackReview,
 ): SideFeedbackIntent | null {
   if (!consented) return null;
   return {
@@ -55,6 +74,7 @@ export function createSideFeedbackIntent(
     automaticPoints: cloneSidePoints(automaticPoints),
     seedMethod,
     seedVersion: validSeedVersion(seedVersion) ? seedVersion : undefined,
+    review: review ? { ...review } : undefined,
   };
 }
 
@@ -71,6 +91,7 @@ export function sideFeedbackMetadataIssues(value: unknown): string[] {
     issues.push("Seed method is invalid");
   }
   if (m.seedVersion !== undefined && !validSeedVersion(m.seedVersion)) issues.push("Seed version is invalid");
+  if (m.review !== undefined && !validReview(m.review)) issues.push("Placement review is invalid");
   if (dimension(m.width) && dimension(m.height)) {
     issues.push(...pointIssues(m.automaticPoints, m.width, m.height, "Automatic"));
     issues.push(...pointIssues(m.correctedPoints, m.width, m.height, "Corrected"));
@@ -89,8 +110,34 @@ export function sideFeedbackIntentIssues(value: unknown, width: number, height: 
     issues.push("Seed method is invalid");
   }
   if (intent.seedVersion !== undefined && !validSeedVersion(intent.seedVersion)) issues.push("Seed version is invalid");
+  if (intent.review !== undefined && !validReview(intent.review)) issues.push("Placement review is invalid");
   issues.push(...pointIssues(intent.automaticPoints, width, height, "Automatic"));
   return issues.slice(0, 6);
+}
+
+/** Small, photo-free provenance stored with the existing private consent event. */
+export function sideFeedbackProvenance(metadata: SideFeedbackMetadata) {
+  const correctedPointIds = movedSidePointIds(metadata.automaticPoints, metadata.correctedPoints);
+  const answer = metadata.review?.verificationAnswer ?? "unknown";
+  const finalVerified = metadata.review?.finalPlacementVerified ?? null;
+  return {
+    source: "explicit_consent_upload",
+    provenanceVersion: "side-review-v1",
+    verificationAnswer: answer,
+    finalPlacementVerified: finalVerified,
+    labelSource: finalVerified === false ? "unverified"
+      : finalVerified === true && correctedPointIds.length > 0 ? "user_corrected"
+      : finalVerified === true && answer === "yes" ? "user_confirmed" : "unknown",
+    seedMethod: metadata.seedMethod,
+    seedVersion: metadata.seedVersion ?? null,
+    correctedPointIds,
+    geometryFrame: { space: "upright-photo-fractions", width: metadata.width, height: metadata.height, faceDir: metadata.faceDir },
+  };
+}
+
+/** User approval cannot grant expert review; a rejected final seed is excluded. */
+export function initialSideFeedbackReviewStatus(metadata: Pick<SideFeedbackMetadata, "review">): "new" | "rejected" {
+  return metadata.review?.finalPlacementVerified === false ? "rejected" : "new";
 }
 
 export function normalizedSidePoints(points: SidePoints, width: number, height: number) {
@@ -150,6 +197,13 @@ function finite(value: unknown): value is number {
 
 function validSeedVersion(value: unknown): value is string {
   return typeof value === "string" && value.length >= 1 && value.length <= 80 && /^[a-z0-9._-]+$/i.test(value);
+}
+
+function validReview(value: unknown): value is SideFeedbackReview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const review = value as Partial<SideFeedbackReview>;
+  return ["yes", "no", "unknown"].includes(review.verificationAnswer ?? "")
+    && typeof review.finalPlacementVerified === "boolean";
 }
 
 function uuid(value: unknown): value is string {

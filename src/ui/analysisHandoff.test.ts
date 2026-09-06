@@ -52,7 +52,14 @@ test("the scan view is visible and working before the session read can begin", (
   assert.equal(bar.classList.contains("spent"), false);
   assert.equal(barFill.style.width, "8%");
   assert.equal(capRight.textContent, "PREPARING ANALYSIS");
-  assert.match(status.innerHTML, /Bringing both views together/);
+  assert.match(status.innerHTML, /Preparing your front analysis/);
+  assert.doesNotMatch(status.innerHTML, /both views/);
   assert.equal(analysis.innerHTML, "");
   assert.equal(painted, true);
+});
+
+test("paired handoff only mentions both views when a side report exists", () => {
+  const view = { upload: node(), main: node(), frame: node(), analysis: node(), capRight: node(), status: node(), barFill: node() };
+  beginAnalysisHandoff(view as unknown as Parameters<typeof beginAnalysisHandoff>[0], () => {}, true);
+  assert.match(view.status.innerHTML, /Bringing both views together/);
 });

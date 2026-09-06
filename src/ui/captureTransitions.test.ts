@@ -75,12 +75,10 @@ test("the profile is visibly read BEFORE the question about it is asked", () => 
   assert.ok(reading > -1 && reading < seeding, "the treatment goes up before the work starts");
   assert.ok(done > seeding && done < mount, "and comes down before the points are shown");
   assert.match(body, /e\.cap\.textContent = "READING PROFILE"/);
-  // A floor on the beat, because a state that sometimes flashes past in three
-  // frames and sometimes holds for two seconds reads as a glitch in the fast
-  // case. Raced, not added: when the seeding is slower this costs nothing.
-  assert.match(body, /const localSeed = seedSidePointsSmart/);
-  assert.match(body, /Promise\.all\(\[\s*localSeed,\s*cloudSeed,\s*wait\(READ_BEAT_MS\)/);
-  assert.match(side, /wait\(READ_BEAT_MS\)/);
+  // The visible state yields before actual work, without an artificial floor.
+  assert.match(body, /const localResult = await seedSidePointsSmart/);
+  assert.match(body, /await cloudPlacementFor\(snapshot, localResult, signal\)/);
+  assert.doesNotMatch(side, /READ_BEAT_MS/);
 });
 
 test("a flow abandoned mid-read does not hand its animation to the next screen", () => {

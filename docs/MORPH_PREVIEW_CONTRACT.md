@@ -14,10 +14,10 @@ The Plan shows two targets:
   measured gap. It never infers an unmeasured skin, hair, teeth or body issue.
 
 Front and profile stay paired. If the scan has no profile photograph, the
-profile target is withheld. Each goal shows its expected review window, the
-points available on completion and the repeatable measurements that can prove
-movement. Points reward the consistency and effort of completing a plan item;
-they are not attractiveness points.
+profile target is withheld. The goal map labels draft measurements as illustrative,
+not proven personal outcomes. Required time estimates and appearance-point
+promises are omitted until repeatability, realistic target ranges and the reward
+service are validated. Routine/streak rewards are separate.
 
 The current release can ship the target map with image rendering disabled.
 `VITE_MORPH_PREVIEW=1` should be set only after the endpoint and all validation
@@ -49,8 +49,33 @@ outputs must be in-memory JPEG or WebP data URLs. Remote output URLs are
 rejected so the browser never leaks a member token or photograph to an
 unapproved host.
 
+The server sanitizes a numeric recipe from the blueprint's known effect and
+metric IDs. Names, units and permitted measurements come from the server
+catalogue, not client text. Direction and amount are bounded by that catalogue's
+illustrative movement ceiling. The provider receives the signed effect amounts,
+baseline, requested target and allowed range, rather than just nonzero layer
+switches. This constrains instructions; it is not proof that the pixels comply
+or that the target is biologically achievable. The independent validation and
+release gates below remain required.
+
+A front-only request contains and renders exactly one photograph. The provider
+interface's optional side output must not be synthesized from a duplicate front.
+
 The service may return `accepted` or `processing` with a job ID. The client
 polls `GET /api/morph-preview?job=<id>` with the same bearer token.
+
+After consent, the client has a single five-minute wall-clock budget across token
+refresh, upload, response-body reads, polling and validation. It cancels stale work
+on teardown or account change and withholds late results, even when a transport
+ignores cancellation. Each consent API request has its own 15-second budget;
+there is no timer on the person's reading or decision. Consent has focus entry,
+keyboard containment, Escape dismissal and safe return to its opener.
+
+If the server has already supplied a job ID, Check existing preview resumes that
+job in the current report instead of buying another render. This is not durable
+resume after reload. The existing synchronous POST cannot be recovered by job ID
+if it times out before returning one; a future accepted-job endpoint and saved-job
+picker are still needed for that case.
 
 ## What the server asserts, and what the device must
 
@@ -112,11 +137,24 @@ and under-chin definition, visible skin evenness and blemish patterns, grooming,
 hair finish, smile presentation, posture and lighting. There are no controls
 for bone structure, eye size, nose size, lip size, skin tone, age or identity.
 
-Measurement targets close at most 85 percent of the changeable share already
-declared by the scoring engine. Skeletal, implausible, noisy or already-in-range
-readings do not become promises. Completion requires at least 60 percent of the
-modelled move to repeat across comparable scans; one photograph cannot complete
-a goal.
+Measurement targets use the shared catalogue's conservative movement ceiling
+and eligible IDs, within the existing scoring definition's changeable share.
+Skeletal, implausible, noisy or already-in-range readings do not become promises.
+The draft's legacy completion-delta field is not an award rule. No preview or
+single photograph completes a goal or mints appearance points.
+
+Saved device-local drafts keep their accepted baseline and destination fixed.
+Only canonical catalogue measurements, views and units are restored. For a new
+scan, a reached or passed draft marker is omitted from further numeric edits,
+not treated as verified progress. A missing verified view, incompatible goal
+set or destination beyond the current illustration budget pauses the combined
+selected-goal render. This preserves the marker without silently moving it or
+reapplying a broad effect after dropping its numerical target.
+
+The device compares isotropic image coordinates before eye-based alignment, using
+the original and generated frame dimensions. Uniform resize, padding, crop and
+roll no longer appear to change identity merely because the aspect ratio changed.
+This repair leaves thresholds unchanged and is not an identity validation study.
 
 ## Per-goal teasers
 

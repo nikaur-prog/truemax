@@ -5,6 +5,8 @@ import {
   SIDE_FEEDBACK_CONSENT_VERSION,
   createSideFeedbackIntent,
   movedSidePointIds,
+  initialSideFeedbackReviewStatus,
+  sideFeedbackProvenance,
 } from "../src/engine/sideFeedbackPayload.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
 import {
@@ -136,4 +138,44 @@ test("revocation requires both immutable submission and scan IDs", () => {
 test("account feedback lists expose lifecycle metadata only", () => {
   assert.equal(SIDE_FEEDBACK_LIST_FIELDS, "id,scan_id,created_at,expires_at,consent_version");
   assert.doesNotMatch(SIDE_FEEDBACK_LIST_FIELDS, /storage|points|sha|review|notes/);
+});
+
+test("review answer and final acceptance survive intent without implying expert review", () => {
+  const review = { verificationAnswer: "yes" as const, finalPlacementVerified: true };
+  const intent = createSideFeedbackIntent(true, SCAN_ID, SUBMISSION_ID, points(), "fused", "pass-v2", review)!;
+  review.finalPlacementVerified = false;
+  assert.equal(intent.review?.finalPlacementVerified, true, "snapshot the review answer");
+  const metadata = parseSideFeedbackMetadata(JSON.stringify({ ...intent, faceDir: 1, width: 400, height: 500, correctedPoints: points() }));
+  assert.equal(initialSideFeedbackReviewStatus(metadata), "new", "Yes must not set reviewed");
+  const provenance = sideFeedbackProvenance(metadata);
+  assert.equal(provenance.verificationAnswer, "yes");
+  assert.equal(provenance.labelSource, "user_confirmed");
+  assert.deepEqual(provenance.correctedPointIds, []);
+  assert.deepEqual(provenance.geometryFrame, { space: "upright-photo-fractions", width: 400, height: 500, faceDir: 1 });
+  assert.doesNotMatch(JSON.stringify(provenance), /automaticPoints|correctedPoints|storage_path/);
+});
+
+test("No then use anyway is persisted as rejected, while No then correct keeps both facts", () => {
+  const intent = createSideFeedbackIntent(true, SCAN_ID, SUBMISSION_ID, points(), "mesh", undefined, {
+    verificationAnswer: "no", finalPlacementVerified: false,
+  })!;
+  const metadata = { ...intent, faceDir: 1 as const, width: 400, height: 500, correctedPoints: points() };
+  assert.equal(initialSideFeedbackReviewStatus(metadata), "rejected");
+  assert.equal(sideFeedbackProvenance(metadata).labelSource, "unverified");
+  metadata.review!.finalPlacementVerified = true;
+  metadata.correctedPoints.gonion.x += 10;
+  assert.equal(initialSideFeedbackReviewStatus(metadata), "new");
+  assert.equal(sideFeedbackProvenance(metadata).verificationAnswer, "no");
+  assert.equal(sideFeedbackProvenance(metadata).labelSource, "user_corrected");
+  assert.deepEqual(sideFeedbackProvenance(metadata).correctedPointIds, ["gonion"]);
+});
+
+test("legacy feedback has unknown provenance and invalid review payloads fail validation", () => {
+  const intent = createSideFeedbackIntent(true, SCAN_ID, SUBMISSION_ID, points(), "mesh")!;
+  const metadata = { ...intent, faceDir: 1, width: 400, height: 500, correctedPoints: points() };
+  assert.equal(sideFeedbackProvenance({ ...metadata, faceDir: 1 }).verificationAnswer, "unknown");
+  assert.equal(sideFeedbackProvenance({ ...metadata, faceDir: 1 }).finalPlacementVerified, null);
+  for (const review of [null, [], { verificationAnswer: "reviewed", finalPlacementVerified: true }, { verificationAnswer: "yes", finalPlacementVerified: "true" }]) {
+    assert.throws(() => parseSideFeedbackMetadata(JSON.stringify({ ...metadata, review })), /Placement review/);
+  }
 });

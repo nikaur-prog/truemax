@@ -189,7 +189,13 @@ test("late camera and rundown work cannot resurrect replaced user media", () => 
   const quick = read("src/quick.ts");
   const exporter = read("src/ui/rundownExport.ts");
   assert.match(camera, /const attempt = \+\+attachAttempt[\s\S]*?!live \|\| attempt !== attachAttempt[\s\S]*?nextStream\.getTracks\(\)/);
-  assert.match(camera, /stop\(\) \{[\s\S]*?live = false;[\s\S]*?attachAttempt\+\+[\s\S]*?removeEventListener\("visibilitychange"/);
+  const stop = camera.slice(camera.indexOf("function stop(notifyPause = true)"), camera.indexOf('document.addEventListener("visibilitychange", onVisible)'));
+  assert.match(stop, /live = false;[\s\S]*?attachAttempt\+\+[\s\S]*?previewLoop\?\.pause\(\)[\s\S]*?removeEventListener\("visibilitychange"/);
+  assert.match(stop, /opts\.signal\?\.removeEventListener\("abort", onAbort\)/);
+  assert.match(stop, /releaseStream\(\)/);
+  // The handle and abort path delegate to the same ownership cleanup.
+  assert.match(camera, /return \{\s*stop,\s*capture\(\)/);
+  assert.match(camera, /const onAbort = \(\) => \{\s*stop\(false\)/);
   assert.match(quick, /if \(!last \|\| rundownRendering\) return/);
   assert.match(quick, /shouldCancel: \(\) => mediaEpoch !== rundownMediaEpoch \|\| source !== last/);
   assert.match(exporter, /const ensureCurrent[\s\S]*?throw new RundownCancelled[\s\S]*?for \(let frame[\s\S]*?ensureCurrent\(\)/);
