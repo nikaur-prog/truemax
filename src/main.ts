@@ -101,6 +101,7 @@ import { automaticCaptureDetail } from "./ui/captureCopy.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { closeScanConfirm, confirmScanAction } from "./ui/scanConfirm.js";
 import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
+import { recordStreakAction } from "./ui/streakLamp.js";
 import { mountFaceOutline } from "./ui/faceOutline.js";
 import type { CameraHandle } from "./ui/camera.js";
 import { stillFrameStats } from "./engine/captureGuide.js";
@@ -2468,6 +2469,9 @@ async function runFullAnalysis(
   // spend another guest slot merely because the same immutable scan ID passed
   // through the rendering pipeline again.
   if (!existingScan) recordScanRun(scanSubject !== null);
+  // A scan on the person's own account counts their streak day. A guest scan
+  // counts nothing, and reopening a stored scan is not an action today.
+  if (!existingScan && !scanSubject) recordStreakAction("scan");
   // A credit used only to skip the weekly cadence is committed here, after a
   // valid report exists. Bad photos, cancelled cameras and abandoned side
   // flows never reach this point and therefore never spend it.

@@ -10,6 +10,9 @@ import {
 import type { Protocol, ProtocolPrompt } from "../engine/protocol.js";
 import { DISPLAY_NOISE } from "../engine/history.js";
 import type { ScanDelta } from "../engine/history.js";
+import { localDay } from "../engine/dailyStreak.js";
+import { tickProtocol, tickedOn } from "../engine/protocol.js";
+import { recordStreakAction } from "./streakLamp.js";
 
 // ---------------------------------------------------------------------------
 // The check-in, in the performance tracker.
@@ -158,6 +161,11 @@ export function mountProtocolCard(
     const updated = applyAnswer(p, prompt, said, at);
     save(readProtocols(), updated);
 
+    // An answered check-in is a plan action, so it counts the day. Only the
+    // kinds that record a check-in: deciding or dating a protocol is
+    // paperwork, not doing the thing.
+    if (prompt.kind === "adherence" || prompt.kind === "judge") recordStreakAction("checkin");
+
     if (prompt.kind === "judge") {
       // Their answer and the scan's are two different readings and both get
       // said. "worthNoting" is history.ts's own grade against DISPLAY_NOISE —
@@ -195,6 +203,51 @@ export function mountProtocolCard(
   }
 
   return { destroy: () => card.remove() };
+}
+
+// ---------------------------------------------------------------------------
+// "Did it today" — the daily tick.
+//
+// One tap a day on each running protocol. This is the daily action the
+// product lacked: the tick record is what lets the judge read adherence
+// from evidence instead of a memory (adherenceFromTicks), and a tick is
+// what counts the day for the streak. Idempotent per day per protocol, and
+// a protocol already ticked today renders as done rather than vanishing,
+// so the tap visibly registered.
+// ---------------------------------------------------------------------------
+
+export function tickRowMarkup(list: Protocol[], day: string): string {
+  const running = list.filter((p) => p.status === "running");
+  if (!running.length) return "";
+  return running.map((p) => {
+    const done = tickedOn(p, day);
+    return `<button type="button" class="protick${done ? " done" : ""}" data-tick="${escapeHTML(p.id)}"${done ? " disabled" : ""}>
+      <i aria-hidden="true">${done ? "✓" : ""}</i>
+      <span>${done ? "Done today" : "Did it today"} · ${escapeHTML(p.title)}</span>
+    </button>`;
+  }).join("");
+}
+
+/** Mount the tick row for every running protocol. Renders nothing without one. */
+export function mountDailyTicks(host: HTMLElement | null): void {
+  if (!host) return;
+  const draw = () => {
+    const day = localDay();
+    host.innerHTML = tickRowMarkup(readProtocols(), day);
+    for (const button of host.querySelectorAll<HTMLButtonElement>("[data-tick]:not([disabled])")) {
+      button.onclick = () => {
+        const list = readProtocols();
+        const protocol = list.find((p) => p.id === button.dataset.tick);
+        if (!protocol) return;
+        const ticked = tickProtocol(protocol, day);
+        if (ticked === protocol) return;
+        save(list, ticked);
+        recordStreakAction("routine");
+        draw();
+      };
+    }
+  };
+  draw();
 }
 
 function escapeHTML(s: string): string {

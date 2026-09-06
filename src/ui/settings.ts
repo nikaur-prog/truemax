@@ -17,6 +17,7 @@ import {
 import type { SharedSideFeedback } from "../engine/sideFeedback.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import { currentAccessToken } from "../engine/auth.js";
+import { fetchStreak, setStreakEnabled } from "../engine/dailyStreak.js";
 import {
   readGoalPreviewConsent,
   revokeGoalPreviewConsent,
@@ -140,6 +141,24 @@ export async function openSettings(user: User): Promise<void> {
   let previewConsentLoaded = false;
   let previewConsentMessage = "";
   let previewConsentBusy = false;
+  let streakEnabled: boolean | null = null;
+  let streakLoaded = false;
+  let streakBusy = false;
+
+  const streakMarkup = (): string => {
+    if (!streakLoaded) {
+      return `<div class="set-feedback-state"><span class="trial-loader" aria-hidden="true"></span><span>Loading your streak setting...</span></div>`;
+    }
+    if (streakEnabled === null) {
+      return `<div class="set-feedback-empty">Your streak setting could not be read just then.</div>`;
+    }
+    return `<div class="set-consent-state">
+      <div><b>The daily streak is ${streakEnabled ? "on" : "off"}</b><span>${streakEnabled
+        ? "A day counts when you tick a routine, answer a check-in or scan. Opening the app counts nothing."
+        : "The light and the points are hidden. The record keeps counting, so turning it back on shows the true run."}</span></div>
+      <button type="button" class="set-feedback-revoke" id="set-streak-toggle"${streakBusy ? " disabled" : ""}>${streakBusy ? "Saving..." : streakEnabled ? "Turn it off" : "Turn it on"}</button>
+    </div>`;
+  };
 
   const previewConsentMarkup = (): string => {
     if (!previewConsentLoaded) {
@@ -254,6 +273,12 @@ export async function openSettings(user: User): Promise<void> {
             : ""}
         </section>
 
+        <section class="set-group" aria-labelledby="set-streak-title">
+          <h3 id="set-streak-title">The daily streak</h3>
+          <p class="set-hint">For anyone who finds a running count a pressure rather than a help. Off hides the light and the points everywhere; nothing is deleted.</p>
+          ${streakMarkup()}
+        </section>
+
         <section class="set-group" aria-labelledby="set-preview-consent-title">
           <h3 id="set-preview-consent-title">Goal preview permission</h3>
           <p class="set-hint">This permission is separate from side-point placement and correction feedback. Revoking it deletes every generated preview TrueMax stores and prevents another render until you choose it again.</p>
@@ -313,6 +338,7 @@ export async function openSettings(user: User): Promise<void> {
 
     activeHost.querySelector("#set-save")?.addEventListener("click", () => void save());
     activeHost.querySelector("#set-preview-revoke")?.addEventListener("click", () => void revokePreviewConsent());
+    activeHost.querySelector("#set-streak-toggle")?.addEventListener("click", () => void toggleStreak());
 
     // The profile picture. Choices are the person's OWN scans only — a guest's
     // face is not offered, for the same reason it is never auto-adopted.
@@ -451,6 +477,35 @@ export async function openSettings(user: User): Promise<void> {
     draw();
   };
 
+  const loadStreak = async () => {
+    try {
+      const token = await currentAccessToken(user.id);
+      if (token) {
+        const snapshot = await fetchStreak(token);
+        if (snapshot) streakEnabled = snapshot.state.enabled;
+      }
+    } catch {
+      /* the section says it could not be read */
+    }
+    streakLoaded = true;
+    if (host === activeHost && activeHost.isConnected) draw();
+  };
+
+  const toggleStreak = async () => {
+    if (streakBusy || streakEnabled === null) return;
+    streakBusy = true;
+    draw();
+    try {
+      const token = await currentAccessToken(user.id);
+      const snapshot = token ? await setStreakEnabled(token, !streakEnabled) : null;
+      if (snapshot) streakEnabled = snapshot.state.enabled;
+    } catch {
+      /* unchanged on failure; the label still shows the stored state */
+    }
+    streakBusy = false;
+    if (host === activeHost && activeHost.isConnected) draw();
+  };
+
   const loadPreviewConsent = async () => {
     const accessToken = await currentAccessToken();
     if (host !== activeHost || !activeHost.isConnected) return;
@@ -494,4 +549,5 @@ export async function openSettings(user: User): Promise<void> {
   draw();
   void loadFeedback();
   void loadPreviewConsent();
+  void loadStreak();
 }
