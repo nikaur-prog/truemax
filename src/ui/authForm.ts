@@ -114,7 +114,8 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
               <span>Password</span>
               <input type="password" name="password" autocomplete="${
                 isSignup ? "new-password" : "current-password"
-              }" placeholder="At least 6 characters" required minlength="6" />
+              }" placeholder="${isSignup ? "8 or more characters" : "Your password"}" required minlength="${isSignup ? 8 : 1}" />
+              ${isSignup ? `<small>Use 8 or more characters and avoid a commonly used or leaked password.</small>` : ""}
             </label>`
       }
       <p class="acct-msg" role="status" aria-live="polite"></p>
@@ -160,7 +161,8 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   root.querySelector<HTMLAnchorElement>(".acct-portal-link")?.addEventListener("click", () => {
     beginIntentionalNavigation();
   });
-  const updateSubmit = syncSubmitState(form, submit, !isLink, () => formWorking);
+  const minimumPasswordLength = isLink ? 0 : isSignup ? 8 : 1;
+  const updateSubmit = syncSubmitState(form, submit, minimumPasswordLength, () => formWorking);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -174,8 +176,8 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
       say(msg, "Enter your email.", "err");
       return;
     }
-    if (!isLink && password.length < 6) {
-      say(msg, "Password must be at least 6 characters.", "err");
+    if (password.length < minimumPasswordLength) {
+      say(msg, isSignup ? "Use at least 8 characters." : "Enter your password.", "err");
       return;
     }
 
@@ -298,16 +300,16 @@ export function authSubmitReady(
   emailPresent: boolean,
   emailValid: boolean,
   passwordLength: number,
-  requiresPassword: boolean,
+  minimumPasswordLength: number,
   working: boolean,
 ): boolean {
-  return !working && emailPresent && emailValid && (!requiresPassword || passwordLength >= 6);
+  return !working && emailPresent && emailValid && passwordLength >= minimumPasswordLength;
 }
 
 function syncSubmitState(
   form: HTMLFormElement,
   button: HTMLButtonElement,
-  requiresPassword: boolean,
+  minimumPasswordLength: number,
   isWorking: () => boolean,
 ): () => void {
   const update = () => {
@@ -317,7 +319,7 @@ function syncSubmitState(
       Boolean(email?.value.trim()),
       Boolean(email?.validity.valid),
       password?.value.length ?? 0,
-      requiresPassword,
+      minimumPasswordLength,
       isWorking(),
     );
     button.disabled = !ready;

@@ -1,4 +1,14 @@
-import { getSupabaseClient, currentAccessToken, currentUser, signIn, signUp } from "../engine/auth.js";
+import {
+  getSupabaseClient,
+  currentAccessToken,
+  currentUser,
+  requestPasswordReset,
+  signIn,
+  signInWithLink,
+  signInWithProvider,
+  signUp,
+  socialAvailability,
+} from "../engine/auth.js";
 import type { Tier } from "./tiers.js";
 import { earnedCents, nextTier, fmtMoney, fmtCount } from "./tiers.js";
 import type { AudienceStats, AudienceTier } from "./audience.js";
@@ -216,6 +226,13 @@ function topBarHTML(right = ""): string {
   </div>`;
 }
 
+export type LeagueAuthMode = "signin" | "signup";
+
+/** Existing passwords are checked by Supabase, not by today's signup rule. */
+export function leaguePasswordMinimum(mode: LeagueAuthMode): number {
+  return mode === "signup" ? 8 : 1;
+}
+
 // --- the gate ---------------------------------------------------------------
 
 function renderGate(): void {
@@ -247,7 +264,17 @@ function renderGate(): void {
     <div class="lg-form" id="lg-authbox" hidden>
       <h3 style="margin:0 0 2px">Sign in, or create your account</h3>
       <p class="lg-note" style="margin-top:4px">One account works for the app and the League.
-      Choose the action you mean so a mistyped password can never become a sign-up attempt.</p>
+      Use the same method you chose when you made your TrueMax account.</p>
+      <button type="button" class="lg-auth-google" id="lg-auth-google" data-available="checking" disabled>
+        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+          <path fill="#4285f4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.91h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.4Z"/>
+          <path fill="#34a853" d="M12 22c2.7 0 4.98-.9 6.63-2.43l-3.24-2.54c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22Z"/>
+          <path fill="#fbbc05" d="M6.39 13.86a6.01 6.01 0 0 1 0-3.72V7.52H3.04a10 10 0 0 0 0 8.96l3.35-2.62Z"/>
+          <path fill="#ea4335" d="M12 6.01c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.52l3.35 2.62C7.18 7.77 9.39 6.01 12 6.01Z"/>
+        </svg>
+        <span>Checking Google sign-in…</span>
+      </button>
+      <div class="lg-auth-divider"><span>or use email</span></div>
       <div class="lg-auth-modes" role="group" aria-label="Account action">
         <button type="button" class="lg-auth-mode active" id="lg-auth-signin" aria-pressed="true">Sign in</button>
         <button type="button" class="lg-auth-mode" id="lg-auth-signup" aria-pressed="false">Create account</button>
@@ -255,9 +282,14 @@ function renderGate(): void {
       <label for="lg-email">Email</label>
       <input id="lg-email" type="email" autocomplete="email" />
       <label for="lg-pass">Password</label>
-      <input id="lg-pass" type="password" autocomplete="current-password" />
+      <input id="lg-pass" type="password" autocomplete="current-password" placeholder="Your password" minlength="1" />
+      <p class="lg-auth-password-help" id="lg-auth-password-help">Use the password attached to this email account.</p>
       <p style="margin-top:16px"><button class="lg-btn pri lg-auth-submit" id="lg-auth-go" disabled>Sign in</button></p>
       <p class="lg-error" id="lg-auth-err"></p>
+      <div class="lg-auth-recovery" id="lg-auth-recovery">
+        <button type="button" id="lg-auth-link">Email me a sign-in link</button>
+        <button type="button" id="lg-auth-reset">Forgot password?</button>
+      </div>
       <p class="lg-note">Signing up agrees to the
       <a href="/terms" target="_blank" rel="noopener">terms</a> and
       <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>.</p>
@@ -278,17 +310,32 @@ function renderGate(): void {
   const emailInput = document.getElementById("lg-email") as HTMLInputElement;
   const passInput = document.getElementById("lg-pass") as HTMLInputElement;
   const authButton = document.getElementById("lg-auth-go") as HTMLButtonElement;
+  const googleButton = document.getElementById("lg-auth-google") as HTMLButtonElement;
+  const linkButton = document.getElementById("lg-auth-link") as HTMLButtonElement;
+  const resetButton = document.getElementById("lg-auth-reset") as HTMLButtonElement;
+  const passwordHelp = document.getElementById("lg-auth-password-help") as HTMLParagraphElement;
+  const recovery = document.getElementById("lg-auth-recovery") as HTMLDivElement;
   const signInMode = document.getElementById("lg-auth-signin") as HTMLButtonElement;
   const signUpMode = document.getElementById("lg-auth-signup") as HTMLButtonElement;
-  let authMode: "signin" | "signup" = "signin";
+  let authMode: LeagueAuthMode = "signin";
   let authWorking = false;
+  const leagueReturn = new URL("/league", window.location.origin).toString();
+  const authMessage = (message: string, ok = false) => {
+    const node = document.getElementById("lg-auth-err")!;
+    node.textContent = message;
+    node.classList.toggle("ok", ok);
+  };
   const syncAuthButton = () => {
+    const minimum = leaguePasswordMinimum(authMode);
     const ready = !authWorking
-      && Boolean(emailInput.value.trim() && emailInput.validity.valid && passInput.value.length >= 6);
+      && Boolean(emailInput.value.trim() && emailInput.validity.valid && passInput.value.length >= minimum);
     authButton.disabled = !ready;
     authButton.classList.toggle("ready", ready);
+    linkButton.disabled = authWorking;
+    resetButton.disabled = authWorking;
+    googleButton.disabled = authWorking || googleButton.dataset.available !== "true";
   };
-  const setAuthMode = (mode: "signin" | "signup", clearError = true) => {
+  const setAuthMode = (mode: LeagueAuthMode, clearError = true) => {
     authMode = mode;
     const signingIn = mode === "signin";
     signInMode.classList.toggle("active", signingIn);
@@ -296,8 +343,14 @@ function renderGate(): void {
     signInMode.setAttribute("aria-pressed", String(signingIn));
     signUpMode.setAttribute("aria-pressed", String(!signingIn));
     passInput.autocomplete = signingIn ? "current-password" : "new-password";
+    passInput.placeholder = signingIn ? "Your password" : "8 or more characters";
+    passInput.minLength = leaguePasswordMinimum(mode);
+    passwordHelp.textContent = signingIn
+      ? "Use the password attached to this email account."
+      : "Use 8 or more characters and avoid a commonly used or leaked password.";
+    recovery.hidden = !signingIn;
     authButton.textContent = signingIn ? "Sign in" : "Create account";
-    if (clearError) document.getElementById("lg-auth-err")!.textContent = "";
+    if (clearError) authMessage("");
     syncAuthButton();
   };
   signInMode.onclick = () => setAuthMode("signin");
@@ -309,12 +362,12 @@ function renderGate(): void {
     if (authWorking) return;
     const email = emailInput.value.trim();
     const pass = passInput.value;
-    const err = document.getElementById("lg-auth-err")!;
-    err.textContent = "";
-    // 6 is the app-wide minimum (authForm.ts) — demanding 8 here locked out
-    // existing app accounts with shorter passwords before signIn even ran.
-    if (!email || pass.length < 6) {
-      err.textContent = "Email and a password of at least 6 characters.";
+    authMessage("");
+    const minimum = leaguePasswordMinimum(authMode);
+    if (!email || !emailInput.validity.valid || pass.length < minimum) {
+      authMessage(authMode === "signup"
+        ? "Enter a valid email and a password of at least 8 characters."
+        : "Enter a valid email and your password.");
       return;
     }
     authWorking = true;
@@ -323,23 +376,91 @@ function renderGate(): void {
     if (authMode === "signin") {
       const si = await signIn(email, pass);
       if (si.ok) return void boot();
-      err.textContent = si.message || "That didn't work. Try again.";
+      authMessage(si.message || "That didn't work. Try again.");
       authWorking = false;
       setAuthMode("signin", false);
       return;
     }
     const su = await signUp(email, pass);
     if (su.ok && su.needsConfirmation) {
-      err.textContent = `Check ${email} for the confirmation link, then return here to apply.`;
+      authMessage(`Check ${email} for the confirmation link, then return here to apply.`, true);
       authWorking = false;
       setAuthMode("signup", false);
       return;
     }
     if (su.ok) return void boot();
-    err.textContent = su.message || "That didn't work. Try again.";
+    authMessage(su.message || "That didn't work. Try again.");
     authWorking = false;
     setAuthMode("signup", false);
   };
+
+  googleButton.onclick = async () => {
+    if (authWorking || googleButton.dataset.available !== "true") return;
+    authWorking = true;
+    googleButton.querySelector("span")!.textContent = "Opening Google…";
+    syncAuthButton();
+    const result = await signInWithProvider("google", leagueReturn);
+    if (result.ok) return;
+    authWorking = false;
+    googleButton.querySelector("span")!.textContent = "Continue with Google";
+    authMessage(result.message || "Could not start Google sign-in.");
+    syncAuthButton();
+  };
+
+  linkButton.onclick = async () => {
+    if (authWorking) return;
+    const email = emailInput.value.trim();
+    if (!email || !emailInput.validity.valid) {
+      authMessage("Enter the email on your account first.");
+      emailInput.focus();
+      return;
+    }
+    authWorking = true;
+    linkButton.textContent = "Sending…";
+    syncAuthButton();
+    const result = await signInWithLink(email, leagueReturn);
+    authWorking = false;
+    linkButton.textContent = "Email me a sign-in link";
+    authMessage(result.ok
+      ? `Check ${email} for the newest sign-in link.`
+      : result.message || "Could not send the sign-in link.", result.ok);
+    syncAuthButton();
+  };
+
+  resetButton.onclick = async () => {
+    if (authWorking) return;
+    const email = emailInput.value.trim();
+    if (!email || !emailInput.validity.valid) {
+      authMessage("Enter the email on your account first.");
+      emailInput.focus();
+      return;
+    }
+    authWorking = true;
+    resetButton.textContent = "Sending…";
+    syncAuthButton();
+    const result = await requestPasswordReset(email);
+    authWorking = false;
+    resetButton.textContent = "Forgot password?";
+    authMessage(result.ok
+      ? `Check ${email} for the newest password reset link.`
+      : result.message || "Could not send the reset link.", result.ok);
+    syncAuthButton();
+  };
+
+  void socialAvailability().then((availability) => {
+    if (availability?.google) {
+      googleButton.dataset.available = "true";
+      googleButton.querySelector("span")!.textContent = "Continue with Google";
+      googleButton.title = "";
+    } else {
+      googleButton.dataset.available = "false";
+      googleButton.querySelector("span")!.textContent = availability
+        ? "Google sign-in is unavailable"
+        : "Google sign-in could not be checked";
+      googleButton.title = "Use email sign-in below";
+    }
+    syncAuthButton();
+  });
 }
 
 // --- application -------------------------------------------------------------

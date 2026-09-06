@@ -309,7 +309,7 @@ export async function signUp(
           : {}),
       },
     });
-    if (error) return { ok: false, message: friendly(error.message) };
+    if (error) return { ok: false, message: friendlyAuthError(error.message) };
     // Counted at sign-up success, confirmed or not — the account exists either
     // way, and this is the only spot both outcomes pass through.
     track("account-created");
@@ -327,7 +327,7 @@ export async function signIn(email: string, password: string): Promise<AuthResul
   try {
     const c = await getSupabaseClient();
     const { error } = await c.auth.signInWithPassword({ email, password });
-    if (error) return { ok: false, message: friendly(error.message) };
+    if (error) return { ok: false, message: friendlyAuthError(error.message) };
     return { ok: true };
   } catch (error) {
     console.error("TrueMax sign-in client failure", error);
@@ -337,32 +337,32 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 
 // Passwordless, for people who will not make up a password on a face app. Sends
 // a one-time link to the address.
-export async function signInWithLink(email: string): Promise<AuthResult> {
+export async function signInWithLink(email: string, returnTo?: string): Promise<AuthResult> {
   try {
     const c = await getSupabaseClient();
     const { error } = await c.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: authRedirects().scan,
+        emailRedirectTo: authReturnUrl(returnTo),
         // This is a sign-in surface, not a second unlabelled signup path.
         shouldCreateUser: false,
       },
     });
-    if (error) return { ok: false, message: friendly(error.message) };
+    if (error) return { ok: false, message: friendlyAuthError(error.message) };
     return { ok: true, needsConfirmation: true };
   } catch {
     return { ok: false, message: "Could not reach the sign-in service. Try again." };
   }
 }
 
-export async function signInWithProvider(provider: SocialProvider): Promise<AuthResult> {
+export async function signInWithProvider(provider: SocialProvider, returnTo?: string): Promise<AuthResult> {
   try {
     const env = await resolvedAuthEnv();
     const c = await getSupabaseClient();
     const { data, error } = await c.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: authRedirects().scan,
+        redirectTo: authReturnUrl(returnTo),
         // Do not let the SDK navigate until it has produced a real authorize
         // URL. An unconfigured provider used to leave iPhone users staring at
         // a blank OAuth document before the error could be painted in-app.
@@ -389,7 +389,7 @@ export async function signInWithProvider(provider: SocialProvider): Promise<Auth
     });
     if (error) {
       console.error("[auth] signInWithOAuth rejected", provider, error);
-      return { ok: false, message: friendly(error.message) };
+      return { ok: false, message: friendlyAuthError(error.message) };
     }
     const target = safeOAuthRedirect(data.url, env.url);
     if (!target) {
@@ -407,6 +407,23 @@ export async function signInWithProvider(provider: SocialProvider): Promise<Auth
   } catch (error) {
     console.error("[auth] signInWithOAuth threw", provider, error);
     return { ok: false, message: "Could not start social sign-in. Try again." };
+  }
+}
+
+/**
+ * OAuth and passwordless links may return to a dedicated same-origin surface,
+ * such as the Creator League. The default remains the scan and its pending
+ * analysis handoff. An external or malformed target is never passed to Auth.
+ */
+export function authReturnUrl(returnTo?: string, origin = window.location.origin): string {
+  const fallback = authRedirects(origin).scan;
+  if (!returnTo) return fallback;
+  try {
+    const expected = new URL(origin);
+    const target = new URL(returnTo, expected);
+    return target.origin === expected.origin ? target.toString() : fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -429,7 +446,7 @@ export async function requestPasswordReset(email: string): Promise<AuthResult> {
     const { error } = await c.auth.resetPasswordForEmail(email, {
       redirectTo: authRedirects().reset,
     });
-    if (error) return { ok: false, message: friendly(error.message) };
+    if (error) return { ok: false, message: friendlyAuthError(error.message) };
     return { ok: true, needsConfirmation: true };
   } catch {
     return { ok: false, message: "Could not send the reset email. Try again." };
@@ -440,7 +457,7 @@ export async function updatePassword(password: string): Promise<AuthResult> {
   try {
     const c = await getSupabaseClient();
     const { error } = await c.auth.updateUser({ password });
-    if (error) return { ok: false, message: friendly(error.message) };
+    if (error) return { ok: false, message: friendlyAuthError(error.message) };
     return { ok: true };
   } catch {
     return { ok: false, message: "Could not update the password. Open the newest reset link and try again." };
@@ -538,15 +555,21 @@ export function onAuthChange(
 
 // Supabase's error strings are for developers. These are the ones a user can
 // actually act on.
-function friendly(msg: string): string {
+export function friendlyAuthError(msg: string): string {
   const m = msg.toLowerCase();
   if (m.includes("already registered")) return "That email already has an account. Sign in instead.";
-  if (m.includes("invalid login")) return "Email address or password not found.";
+  // Supabase deliberately does not reveal whether an email exists. Calling
+  // this "account not found" was both inaccurate and especially confusing for
+  // social-only accounts whose email is present but has no password identity.
+  if (m.includes("invalid login"))
+    return "That email and password combination did not work. Try the same sign-in method you used before, or reset your password.";
   if (m.includes("email address not authorized"))
     return "Email signup is awaiting production email setup. Continue with Google for now.";
   if (m.includes("provider is not enabled") || m.includes("unsupported provider"))
     return "That sign-in option is not enabled yet.";
   if (m.includes("same password")) return "Choose a password you have not used for this account.";
+  if (m.includes("weak password") || m.includes("password is known to be weak") || m.includes("password is too weak"))
+    return "This password appears in known password leaks or is too easy to guess. Choose a new password, or reset it if this is an existing account.";
   if (m.includes("session") || m.includes("expired"))
     return "That link has expired. Request a new one and try again.";
   // Supabase's password-policy messages ("should be at least N characters",
@@ -562,7 +585,7 @@ function friendly(msg: string): string {
 function clientFailure(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/failed to fetch|network|load chunk|dynamically imported/i.test(message)) return fallback;
-  return friendly(message);
+  return friendlyAuthError(message);
 }
 
 // A tab can stay open across a Vercel release. If it later submits code whose

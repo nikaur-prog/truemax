@@ -4,10 +4,16 @@ import { readFileSync } from "node:fs";
 import { authSubmitReady } from "./authForm.js";
 
 test("auth submit readiness stays false while a request is active", () => {
-  assert.equal(authSubmitReady(true, true, 12, true, false), true);
-  assert.equal(authSubmitReady(true, true, 12, true, true), false);
-  assert.equal(authSubmitReady(true, true, 0, false, false), true);
-  assert.equal(authSubmitReady(true, true, 0, false, true), false);
+  assert.equal(authSubmitReady(true, true, 12, 8, false), true);
+  assert.equal(authSubmitReady(true, true, 12, 8, true), false);
+  assert.equal(authSubmitReady(true, true, 0, 0, false), true);
+  assert.equal(authSubmitReady(true, true, 0, 0, true), false);
+});
+
+test("sign in accepts an existing non-empty password while signup requires eight characters", () => {
+  assert.equal(authSubmitReady(true, true, 1, 1, false), true);
+  assert.equal(authSubmitReady(true, true, 7, 8, false), false);
+  assert.equal(authSubmitReady(true, true, 8, 8, false), true);
 });
 
 test("every async auth form is guarded against a second submit event", () => {
