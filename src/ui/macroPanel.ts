@@ -6,9 +6,9 @@
 // the panel runs the calculation and shows the answer, and everything on it is
 // an adjustment to a number that is already there.
 //
-// The one exception is height and weight, which nothing collects yet. Those are
-// asked once, in two fields, and remembered. Once a profile column exists the
-// ask disappears and nothing else on this panel changes.
+// Height and weight come from the private account profile, with a device cache
+// for offline use. The setup dialog writes through to the server; this panel
+// follows account changes and only edits activity and calculator goals locally.
 //
 // Every number here comes from engine/macros.ts. Nothing is recomputed locally,
 // because the whole reason that module exists is that Coach Max and this panel
@@ -17,7 +17,8 @@
 
 import { ACTIVITY, GOAL_LABEL, macroPlan, oldEnoughForMacros, proteinReferenceKg } from "../engine/macros.js";
 import type { Activity, EnergyGoal, MacroPlan } from "../engine/macros.js";
-import { isStale, readBody, writeBody } from "../engine/bodyProfile.js";
+import { BODY_PROFILE_CHANGED, isStale, readBody, writeBody } from "../engine/bodyProfile.js";
+import { activeScanOwner } from "../engine/scanScope.js";
 import { ageOnDate } from "../engine/age.js";
 import type { StoredBody } from "../engine/bodyProfile.js";
 import type { Sex } from "../engine/types.js";
@@ -181,14 +182,24 @@ function macroCell(label: string, grams: number): string {
  * it cannot do.
  */
 export function wireMacroPanel(host: HTMLElement, ctx: MacroPanelCtx, now = new Date()): void {
+  const owner = activeScanOwner();
+  const abort = new AbortController();
+  const cleanup = () => { abort.abort(); detached.disconnect(); };
+  const detached = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
+  detached.observe(document.body, { childList: true });
+  if (host.parentElement) detached.observe(host.parentElement, { childList: true });
   const rerender = () => {
+    if (!host.isConnected) { cleanup(); return; }
+    if (activeScanOwner() !== owner) { cleanup(); host.remove(); return; }
     const fresh = document.createElement("div");
     fresh.innerHTML = macroPanelHTML(ctx, now);
     const next = fresh.firstElementChild as HTMLElement | null;
     if (!next) return;
+    cleanup();
     host.replaceWith(next);
     wireMacroPanel(next, ctx, now);
   };
+  window.addEventListener(BODY_PROFILE_CHANGED, rerender, { signal: abort.signal });
 
   host.querySelector<HTMLButtonElement>("#mac-add-body")?.addEventListener("click", () => {
     void openBodyProfileDialog().then((saved) => { if (saved) rerender(); });
@@ -199,10 +210,12 @@ export function wireMacroPanel(host: HTMLElement, ctx: MacroPanelCtx, now = new 
   const activity = host.querySelector<HTMLSelectElement>("#mac-activity");
   if (body && goal && activity) {
     const save = () => {
+      const current = readBody();
+      if (!current || activeScanOwner() !== owner) { rerender(); return; }
       writeBody({
-        heightCm: body.heightCm,
-        weightKg: body.weightKg,
-        bodyFat: body.bodyFat,
+        heightCm: current.heightCm,
+        weightKg: current.weightKg,
+        bodyFat: current.bodyFat,
         goal: goal.value as EnergyGoal,
         activity: activity.value as Activity,
       });

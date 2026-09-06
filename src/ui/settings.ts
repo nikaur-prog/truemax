@@ -18,6 +18,10 @@ import type { SharedSideFeedback } from "../engine/sideFeedback.js";
 import { askVerdictTone } from "./tonePrompt.js";
 import { currentAccessToken } from "../engine/auth.js";
 import { refreshStreak, updateStreakEnabled } from "./streakLamp.js";
+import { deleteBodyProfile, fetchBodyProfile, type ServerBodyProfile } from "../engine/bodyProfile.js";
+import { bodyMetricUsable, toImperial } from "../engine/bodyUnits.js";
+import { isAdult } from "../engine/age.js";
+import { openBodyProfileDialog } from "./bodyProfileDialog.js";
 import {
   readGoalPreviewConsent,
   revokeGoalPreviewConsent,
@@ -49,9 +53,9 @@ import {
 // easily as it was given is not consent. One tap, no confirmation, applies to
 // the next sentence the app writes.
 //
-// The measurements are not in here and never will be. Nothing on this screen
-// changes a score; the scan reports the number it read whatever anyone would
-// prefer, which is the whole product.
+// Facial measurements are not editable here. Height and weight belong to the
+// separate account profile used for adult body-based planning, never scoring.
+// The scan reports the number it read whatever anyone would prefer.
 // ---------------------------------------------------------------------------
 
 let host: HTMLDivElement | null = null;
@@ -145,6 +149,24 @@ export async function openSettings(user: User): Promise<void> {
   let streakLoaded = false;
   let streakBusy = false;
   let streakMessage = "";
+  let bodyProfile: ServerBodyProfile | null = null;
+  let bodyLoaded = false;
+  let bodyBusy = false;
+  let bodyMessage = "";
+
+  const bodyMarkup = (): string => {
+    if (!bodyLoaded) return '<p role="status">Loading your height and weight...</p>';
+    const metric = bodyProfile ? { heightCm: bodyProfile.heightCm ?? undefined, weightKg: bodyProfile.weightKg ?? undefined } : null;
+    const hasBody = bodyMetricUsable(metric);
+    const imperial = hasBody ? toImperial(metric) : null;
+    const values = !hasBody ? "No height and weight saved."
+      : bodyProfile?.unit === "imperial" && imperial ? `${imperial.feet} ft ${imperial.inches} in, ${imperial.pounds} lb`
+        : `${metric.heightCm} cm, ${metric.weightKg} kg`;
+    return `<div class="set-consent-state"><div><b>${values}</b><span>Saved privately to your account. Activity and calculator goals stay on this device.</span></div>
+      <button type="button" class="set-feedback-revoke" id="set-body-edit"${bodyBusy ? " disabled" : ""}>${hasBody ? "Edit" : "Add details"}</button>
+      ${hasBody ? `<button type="button" class="set-feedback-revoke" id="set-body-clear"${bodyBusy ? " disabled" : ""}>${bodyBusy ? "Clearing..." : "Clear"}</button>` : ""}</div>
+      <p role="status">${esc(bodyMessage)}</p>`;
+  };
 
   const streakMarkup = (): string => {
     if (!streakLoaded) {
@@ -197,6 +219,12 @@ export async function openSettings(user: User): Promise<void> {
     }).join("")}</div>`;
   };
 
+  const feedbackSectionMarkup = () => `${feedbackMarkup()}
+    <p class="set-feedback-message" role="status">${esc(feedbackMessage)}</p>
+    ${feedbackLoadFailed ? '<button type="button" class="linkish" id="set-feedback-retry">Try loading again</button>' : ""}`;
+  const previewSectionMarkup = () => `${previewConsentMarkup()}
+    <p class="set-feedback-message" role="status">${esc(previewConsentMessage)}</p>`;
+
   const draw = () => {
     if (host !== activeHost || !activeHost.isConnected) return;
     const tone = loadVerdictTone();
@@ -231,6 +259,12 @@ export async function openSettings(user: User): Promise<void> {
             <small>Locked. Your age decides which plans can be offered to you, so changing it here isn't something we let a form do, email support@truemax.app if it's wrong.</small>
           </div>
         </section>
+
+        ${isAdult(profile.dateOfBirth) ? `<section class="set-group" aria-labelledby="set-body-title">
+          <h3 id="set-body-title">Height and weight</h3>
+          <p class="set-hint">These are optional for an account and required for an adult's Max daily plan. Clearing them stops body-based calculations until you enter them again. Facial scores never use them.</p>
+          <div id="set-body-state">${bodyMarkup()}</div>
+        </section>` : ""}
 
         <section class="set-group">
           <h3>What you want out of this</h3>
@@ -267,11 +301,7 @@ export async function openSettings(user: User): Promise<void> {
         <section class="set-group" aria-labelledby="set-feedback-title">
           <h3 id="set-feedback-title">Correction feedback you've shared</h3>
           <p class="set-hint">Only optional side-photo corrections appear here. They are private, never affect your score, and expire after 90 days. Revoking removes the review record immediately and queues the private photo for deletion.</p>
-          ${feedbackMarkup()}
-          <p class="set-feedback-message" role="status">${esc(feedbackMessage)}</p>
-          ${feedbackLoadFailed
-            ? `<button type="button" class="linkish" id="set-feedback-retry">Try loading again</button>`
-            : ""}
+          <div id="set-feedback-state">${feedbackSectionMarkup()}</div>
         </section>
 
         <section class="set-group" aria-labelledby="set-streak-title">
@@ -283,8 +313,7 @@ export async function openSettings(user: User): Promise<void> {
         <section class="set-group" aria-labelledby="set-preview-consent-title">
           <h3 id="set-preview-consent-title">Goal preview permission</h3>
           <p class="set-hint">This permission is separate from side-point placement and correction feedback. Revoking it deletes every generated preview TrueMax stores and prevents another render until you choose it again.</p>
-          ${previewConsentMarkup()}
-          <p class="set-feedback-message" role="status">${esc(previewConsentMessage)}</p>
+          <div id="set-preview-state">${previewSectionMarkup()}</div>
         </section>
       </main>
       <p class="trial-status" role="status"></p>
@@ -340,6 +369,7 @@ export async function openSettings(user: User): Promise<void> {
     activeHost.querySelector("#set-save")?.addEventListener("click", () => void save());
     activeHost.querySelector("#set-preview-revoke")?.addEventListener("click", () => void revokePreviewConsent());
     activeHost.querySelector("#set-streak-toggle")?.addEventListener("click", () => void toggleStreak());
+    wireBody();
 
     // The profile picture. Choices are the person's OWN scans only — a guest's
     // face is not offered, for the same reason it is never auto-adopted.
@@ -439,20 +469,76 @@ export async function openSettings(user: User): Promise<void> {
     }, 700);
   };
 
+  const replaceSection = (id: string, markup: string): HTMLElement | null => {
+    if (host !== activeHost || !activeHost.isConnected) return null;
+    const section = activeHost.querySelector<HTMLElement>(`#${id}`);
+    if (section) section.innerHTML = markup;
+    return section;
+  };
+  const drawFeedback = () => {
+    const section = replaceSection("set-feedback-state", feedbackSectionMarkup());
+    section?.querySelector("#set-feedback-retry")?.addEventListener("click", () => void loadFeedback());
+    for (const button of section?.querySelectorAll<HTMLButtonElement>("[data-feedback-submission]") ?? []) {
+      button.onclick = () => {
+        const item = feedbackItems?.find((candidate) => candidate.submissionId === button.dataset.feedbackSubmission
+          && candidate.scanId === button.dataset.feedbackScan);
+        if (item) void revokeFeedback(item);
+      };
+    }
+  };
+  const drawPreview = () => {
+    replaceSection("set-preview-state", previewSectionMarkup())?.querySelector("#set-preview-revoke")
+      ?.addEventListener("click", () => void revokePreviewConsent());
+  };
+  const wireBody = () => {
+    activeHost.querySelector("#set-body-edit")?.addEventListener("click", () => {
+      void openBodyProfileDialog({ userId: user.id, source: "settings", initialProfile: bodyProfile ?? undefined }).then((saved) => {
+        if (saved) void loadBody();
+      });
+    });
+    activeHost.querySelector("#set-body-clear")?.addEventListener("click", () => void clearBodyDetails());
+  };
+  const drawBody = () => {
+    if (replaceSection("set-body-state", bodyMarkup())) wireBody();
+  };
+  const loadBody = async () => {
+    if (!isAdult(profile.dateOfBirth)) return;
+    const token = await currentAccessToken(user.id).catch(() => null);
+    if (host !== activeHost || !activeHost.isConnected) return;
+    bodyProfile = token ? await fetchBodyProfile(token) : null;
+    bodyLoaded = true;
+    bodyMessage = bodyProfile ? "" : "Your details could not be loaded. Please try opening this section again.";
+    drawBody();
+  };
+  const clearBodyDetails = async () => {
+    if (bodyBusy) return;
+    bodyBusy = true;
+    bodyMessage = "";
+    drawBody();
+    const token = await currentAccessToken(user.id).catch(() => null);
+    if (host !== activeHost || !activeHost.isConnected) return;
+    const cleared = token ? await deleteBodyProfile(token) : null;
+    if (cleared) bodyProfile = cleared;
+    bodyMessage = cleared ? "Height and weight cleared from your account and this device."
+      : "Your details could not be cleared. Please try again.";
+    bodyBusy = false;
+    drawBody();
+  };
+
   const loadFeedback = async () => {
     const request = ++feedbackRequest;
     readInputs();
     feedbackItems = null;
     feedbackMessage = "";
     feedbackLoadFailed = false;
-    draw();
+    drawFeedback();
     const result = await listSideCorrectionFeedback(user.id);
     if (request !== feedbackRequest || host !== activeHost || !activeHost.isConnected) return;
     readInputs();
     feedbackItems = result.submissions;
     feedbackLoadFailed = !result.ok;
     feedbackMessage = result.ok ? "" : (result.message || "Shared feedback could not be loaded.");
-    draw();
+    drawFeedback();
   };
 
   const revokeFeedback = async (item: SharedSideFeedback) => {
@@ -460,7 +546,7 @@ export async function openSettings(user: User): Promise<void> {
     revokingFeedback.add(item.submissionId);
     feedbackMessage = "";
     readInputs();
-    draw();
+    drawFeedback();
     const result = await revokeSideCorrectionFeedback(user.id, item);
     if (host !== activeHost || !activeHost.isConnected) return;
     revokingFeedback.delete(item.submissionId);
@@ -475,7 +561,7 @@ export async function openSettings(user: User): Promise<void> {
     } else {
       feedbackMessage = result.message || "Feedback could not be revoked. Try again.";
     }
-    draw();
+    drawFeedback();
   };
 
   const drawStreak = () => {
@@ -519,12 +605,12 @@ export async function openSettings(user: User): Promise<void> {
   };
 
   const loadPreviewConsent = async () => {
-    const accessToken = await currentAccessToken();
+    const accessToken = await currentAccessToken(user.id);
     if (host !== activeHost || !activeHost.isConnected) return;
     if (!accessToken) {
       previewConsentLoaded = true;
       previewConsentMessage = "Sign in again to read this permission.";
-      draw();
+      drawPreview();
       return;
     }
     const result = await readGoalPreviewConsent(accessToken);
@@ -533,7 +619,7 @@ export async function openSettings(user: User): Promise<void> {
     previewConsentLoaded = true;
     previewConsent = result.state ?? null;
     previewConsentMessage = result.ok ? "" : (result.error || "Goal preview permission could not be read.");
-    draw();
+    drawPreview();
   };
 
   const revokePreviewConsent = async () => {
@@ -541,8 +627,8 @@ export async function openSettings(user: User): Promise<void> {
     readInputs();
     previewConsentBusy = true;
     previewConsentMessage = "";
-    draw();
-    const accessToken = await currentAccessToken();
+    drawPreview();
+    const accessToken = await currentAccessToken(user.id);
     const result = accessToken
       ? await revokeGoalPreviewConsent(accessToken)
       : { ok: false, error: "Sign in again to revoke Goal preview." };
@@ -555,11 +641,12 @@ export async function openSettings(user: User): Promise<void> {
     } else {
       previewConsentMessage = result.error || "Goal preview could not be revoked.";
     }
-    draw();
+    drawPreview();
   };
 
   draw();
   void loadFeedback();
   void loadPreviewConsent();
   void loadStreak();
+  void loadBody();
 }
