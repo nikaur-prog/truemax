@@ -28,7 +28,30 @@
     { "source": "/improve-your-looks.html", "destination": "/improve-your-looks", "permanent": true },
     { "source": "/looksmaxxing-guide.html", "destination": "/looksmaxxing-guide", "permanent": true },
     { "source": "/glow-up-guide.html", "destination": "/glow-up-guide", "permanent": true },
-    { "source": "/methodology.html", "destination": "/methodology", "permanent": true }
+    { "source": "/methodology.html", "destination": "/methodology", "permanent": true },
+    { "source": "/pricing.html", "destination": "/pricing", "permanent": true },
+    { "source": "/how-it-works.html", "destination": "/how-it-works", "permanent": true },
+    { "source": "/about.html", "destination": "/about", "permanent": true },
+    { "source": "/photo-help.html", "destination": "/help/take-a-good-face-scan", "permanent": true },
+    { "source": "/auth/", "destination": "/auth", "permanent": true },
+    { "source": "/quick/", "destination": "/quick", "permanent": true },
+    { "source": "/calib/", "destination": "/calib", "permanent": true },
+    { "source": "/privacy/", "destination": "/privacy", "permanent": true },
+    { "source": "/delete-account/", "destination": "/delete-account", "permanent": true },
+    { "source": "/terms/", "destination": "/terms", "permanent": true },
+    { "source": "/brand/", "destination": "/brand", "permanent": true },
+    { "source": "/league/", "destination": "/league", "permanent": true },
+    { "source": "/league/tools/", "destination": "/league/tools", "permanent": true },
+    { "source": "/guides/", "destination": "/guides", "permanent": true },
+    { "source": "/face-score/", "destination": "/face-score", "permanent": true },
+    { "source": "/improve-your-looks/", "destination": "/improve-your-looks", "permanent": true },
+    { "source": "/looksmaxxing-guide/", "destination": "/looksmaxxing-guide", "permanent": true },
+    { "source": "/glow-up-guide/", "destination": "/glow-up-guide", "permanent": true },
+    { "source": "/methodology/", "destination": "/methodology", "permanent": true },
+    { "source": "/pricing/", "destination": "/pricing", "permanent": true },
+    { "source": "/how-it-works/", "destination": "/how-it-works", "permanent": true },
+    { "source": "/about/", "destination": "/about", "permanent": true },
+    { "source": "/help/take-a-good-face-scan/", "destination": "/help/take-a-good-face-scan", "permanent": true }
   ],
   "rewrites": [
     { "source": "/auth", "destination": "/auth.html" },
@@ -45,7 +68,11 @@
     { "source": "/improve-your-looks", "destination": "/improve-your-looks.html" },
     { "source": "/looksmaxxing-guide", "destination": "/looksmaxxing-guide.html" },
     { "source": "/glow-up-guide", "destination": "/glow-up-guide.html" },
-    { "source": "/methodology", "destination": "/methodology.html" }
+    { "source": "/methodology", "destination": "/methodology.html" },
+    { "source": "/pricing", "destination": "/pricing.html" },
+    { "source": "/how-it-works", "destination": "/how-it-works.html" },
+    { "source": "/about", "destination": "/about.html" },
+    { "source": "/help/take-a-good-face-scan", "destination": "/photo-help.html" }
   ],
   "crons": [
     { "path": "/api/cleanup-side-correction-feedback", "schedule": "15 3 * * *" },
@@ -83,6 +110,10 @@
     {
       "source": "/league(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
     },
     {
       "source": "/wasm/(.*)",

@@ -252,6 +252,18 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   document.body.appendChild(activeOverlay);
 
   const body = activeOverlay.querySelector(".acct-body") as HTMLElement;
+  let authenticationAccepted = false;
+  const acceptAuthenticated = async (user: User) => {
+    if (authenticationAccepted || overlay !== activeOverlay || !body.isConnected) return;
+    authenticationAccepted = true;
+    if (options.onAuthenticated) {
+      close();
+      await options.onAuthenticated(user);
+      return;
+    }
+    body.classList.remove("acct-two");
+    renderSignedIn(body, user, options.notice, options.checkoutSessionId);
+  };
   const requestedMode = options.initialMode ?? (options.reason === "analysis" || options.reason === "plan" ? "signup" : null);
   const renderSignedOut = (initialMode: AuthMode) => {
     // The finished scan sits beside the form, not above the notice text: a
@@ -281,15 +293,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
       onDeferred: options.onDeferred,
       onAuthAttempt: options.onAuthAttempt,
       onAuthFailure: options.onAuthFailure,
-      onAuthenticated: async (signedInUser) => {
-        if (options.onAuthenticated) {
-          close();
-          await options.onAuthenticated(signedInUser);
-        } else {
-          body.classList.remove("acct-two");
-          renderSignedIn(body, signedInUser, options.notice, options.checkoutSessionId);
-        }
-      },
+      onAuthenticated: acceptAuthenticated,
     });
   };
 
@@ -302,8 +306,7 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
     renderSignedOut(requestedMode);
     void sessionCheck.then((lateUser) => {
       if (lateUser && overlay === activeOverlay && body.isConnected) {
-        body.classList.remove("acct-two");
-        renderSignedIn(body, lateUser, options.notice, options.checkoutSessionId);
+        void acceptAuthenticated(lateUser);
       }
     });
     return;
@@ -318,15 +321,13 @@ export async function openAccount(input?: string | OpenAccountOptions): Promise<
   ]);
   if (overlay !== activeOverlay || !activeOverlay.isConnected) return;
   if (user) {
-    body.classList.remove("acct-two");
-    renderSignedIn(body, user, options.notice, options.checkoutSessionId);
+    await acceptAuthenticated(user);
   }
   else {
     renderSignedOut("password");
     void sessionCheck.then((lateUser) => {
       if (lateUser && overlay === activeOverlay && body.isConnected) {
-        body.classList.remove("acct-two");
-        renderSignedIn(body, lateUser, options.notice, options.checkoutSessionId);
+        void acceptAuthenticated(lateUser);
       }
     });
   }

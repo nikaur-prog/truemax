@@ -29,6 +29,8 @@ import { typewriteBlock } from "./typewriter.js";
 import { isNativeApp } from "../engine/platform.js";
 import { METRICS } from "../engine/metrics.js";
 import { SIDE_METRICS } from "../engine/sideMetrics.js";
+import { BODY_BOUNDS, convertBodyEntryUnits, type BodyEntry, type UnitSystem } from "../engine/bodyUnits.js";
+import { loadOptionalOnboardingBody, saveOptionalOnboardingBody } from "./onboardingBody.js";
 
 type PlanTier = "starter" | "max";
 
@@ -407,6 +409,7 @@ function onKey(event: KeyboardEvent): void {
 interface FunnelPreview {
   profile: OnboardingProfile;
   offer: boolean;
+  body?: boolean;
 }
 
 export interface FunnelOptions {
@@ -932,7 +935,6 @@ export async function openTrialFunnel(
     }
     const result = preview ? { ok: true } : await saveOnboardingProfile(user, profile);
     if (!alive()) return;
-    busy = false;
 
     // A failed write must NEVER strand somebody at the end of the quiz.
     //
@@ -962,7 +964,104 @@ export async function openTrialFunnel(
     // questions were compulsory; being sold to is not, and a paywall you cannot
     // close is a different product to the one this is trying to be.
     locked = false;
+    if (result.ok && !preview) {
+      const body = await loadOptionalOnboardingBody(user, alive);
+      if (!alive()) return;
+      if (body) {
+        busy = false;
+        drawOptionalBody(body.unit);
+        return;
+      }
+    }
+    busy = false;
     await showSell();
+  };
+
+  // Optional final question, only after the saved account confirms an adult.
+  // The paid-Max requirement is separate and still comes from the API.
+  const drawOptionalBody = (unit: UnitSystem) => {
+    let entry: BodyEntry = { unit };
+    let drafts: Partial<Record<UnitSystem, BodyEntry>> = {};
+    let saving = false;
+    let showing = true;
+    let message = "";
+    const current = () => alive() && showing;
+    const advance = () => {
+      if (!current()) return;
+      showing = false;
+      void showSell();
+    };
+    const read = () => {
+      const value = (id: string) => {
+        const raw = activeHost.querySelector<HTMLInputElement>(`#${id}`)?.value.trim();
+        return raw ? Number(raw) : undefined;
+      };
+      const next: BodyEntry = entry.unit === "metric"
+        ? { unit: "metric", heightCm: value("trial-height-cm"), weightKg: value("trial-weight-kg") }
+        : { unit: "imperial", feet: value("trial-height-ft"), inches: value("trial-height-in"), pounds: value("trial-weight-lb") };
+      if (JSON.stringify(next) !== JSON.stringify(entry)) drafts = {};
+      entry = next;
+      drafts[entry.unit] = { ...entry };
+    };
+    const input = (id: string, label: string, value: number | undefined, min: number, max: number, step = "0.1") =>
+      `<label class="trial-field"><span>${label}</span><input class="trial-input" id="${id}" type="number" inputmode="decimal" min="${min}" max="${max}" step="${step}" value="${Number.isFinite(value) ? value : ""}"${saving ? " disabled" : ""}></label>`;
+    const drawBody = () => {
+      if (!current()) return;
+      activeHost.innerHTML = `<section class="trial-shell trial-body-setup" role="dialog" aria-modal="true" aria-labelledby="trial-title">
+        <header class="trial-nav"><div class="trial-brand">TRUE<span>MAX</span></div>
+          <div class="trial-progress" aria-label="Pathway questions complete">${progress(total, total)}</div>
+          <button class="trial-close" type="button" aria-label="Close">✕</button></header>
+        <main class="trial-body">
+          <span class="trial-eyebrow">YOUR DETAILS · OPTIONAL</span>
+          <h2 id="trial-title">A starting point for your daily plan.</h2>
+          <p class="trial-note">Add your height and weight if you would like Max to personalise your energy and macro calculations. You can skip this now. They never change your face score.</p>
+          <div class="trial-body-units" role="group" aria-label="Height and weight units">
+            <button type="button" data-trial-body-unit="metric" aria-pressed="${entry.unit === "metric"}"${saving ? " disabled" : ""}>Metric</button>
+            <button type="button" data-trial-body-unit="imperial" aria-pressed="${entry.unit === "imperial"}"${saving ? " disabled" : ""}>Imperial</button>
+          </div>
+          <div class="trial-fields ${entry.unit === "metric" ? "two" : "trial-imperial-fields"}">
+            ${entry.unit === "metric"
+              ? input("trial-height-cm", "Height (cm)", entry.heightCm, BODY_BOUNDS.heightCm.min, BODY_BOUNDS.heightCm.max)
+                + input("trial-weight-kg", "Weight (kg)", entry.weightKg, BODY_BOUNDS.weightKg.min, BODY_BOUNDS.weightKg.max)
+              : input("trial-height-ft", "Height (ft)", entry.feet, 3, 7, "1")
+                + input("trial-height-in", "Height (in)", entry.inches, 0, 11.9)
+                + input("trial-weight-lb", "Weight (lb)", entry.pounds, 77, 661.4)}
+          </div>
+          <div class="privacy-note"><b>Private to your account.</b><span>Saved to your account with an offline copy on this device. Edit or clear these values in Settings. Adult Max members need these details before using their daily plan.</span></div>
+        </main>
+        <p class="trial-status" role="status" aria-live="polite">${esc(message)}</p>
+        <footer class="trial-actions"><button class="btn gho" id="trial-body-skip" type="button">Skip for now</button>
+          <button class="btn pri" id="trial-body-save" type="button"${saving ? " disabled" : ""}>${saving ? "Saving…" : "Save and continue"}</button></footer>
+      </section>`;
+      activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+      activeHost.querySelector("#trial-body-skip")?.addEventListener("click", advance);
+      for (const button of activeHost.querySelectorAll<HTMLButtonElement>("[data-trial-body-unit]")) {
+        button.addEventListener("click", () => {
+          if (saving || !current()) return;
+          read();
+          const nextUnit = button.dataset.trialBodyUnit === "imperial" ? "imperial" : "metric";
+          entry = drafts[nextUnit] ?? convertBodyEntryUnits(entry, nextUnit);
+          message = "";
+          drawBody();
+          activeHost.querySelector<HTMLButtonElement>(`[data-trial-body-unit="${nextUnit}"]`)?.focus({ preventScroll: true });
+        });
+      }
+      activeHost.querySelector("#trial-body-save")?.addEventListener("click", async () => {
+        if (saving || !current()) return;
+        read();
+        saving = true;
+        message = "";
+        drawBody();
+        const result = preview ? { ok: true } : await saveOptionalOnboardingBody(user, entry, current);
+        if (!current()) return;
+        saving = false;
+        if (result.ok) { advance(); return; }
+        message = result.message || "Your details could not be saved. You can skip for now.";
+        drawBody();
+      });
+    };
+    drawBody();
+    activeHost.querySelector<HTMLElement>(".trial-close")?.focus({ preventScroll: true });
   };
 
   // The offer, or the reason there isn't one.
@@ -994,7 +1093,7 @@ export async function openTrialFunnel(
   const draw = () => {
     if (!alive()) return;
     const headers = [
-      ["A LITTLE ABOUT YOU", `Let's make this yours, ${esc(profile.firstName || "first")}.`, "Your email already comes from your secure account. We only ask for what shapes your experience."],
+      ["A LITTLE ABOUT YOU", profile.firstName ? `Let's make this yours, ${esc(profile.firstName)}.` : "Let's make this yours.", "Your account is ready. Tell us what to call you and we will shape the next steps around you."],
       ["AGE & DISCOVERY", "Keep the experience age-appropriate.", "Your date of birth controls which plan can be offered. Your mobile is optional and is never required for analysis."],
       ["YOUR OBJECTIVE", "What would you most like to improve?", "Pick as many as fit. This personalises the pathway; it never changes your measurements or score."],
       ["THE OUTCOME", "What would make TrueMax genuinely useful?", "A short answer helps Coach Max focus on your version of progress, not somebody else's."],
@@ -1047,12 +1146,14 @@ export async function openTrialFunnel(
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
     activeHost.querySelector("#trial-back")?.addEventListener("click", () => {
+      if (busy) return;
       if (step === 0) return close();
       readInputs(profile, activeHost);
       step--;
       draw();
     });
     activeHost.querySelector("#trial-next")?.addEventListener("click", () => {
+      if (busy) return;
       readInputs(profile, activeHost);
       const issue = validateOnboardingStep(profile, step);
       const status = activeHost.querySelector<HTMLElement>(".trial-status");
@@ -1083,7 +1184,8 @@ export async function openTrialFunnel(
     }
   };
 
-  if (preview?.offer) drawOffer();
+  if (preview?.body && profileIsAdult(profile)) drawOptionalBody("metric");
+  else if (preview?.offer) drawOffer();
   else if (step === total - 1 && !validateOnboardingStep(profile, total - 1) && profile.completedAt) {
     // Nothing left to ask. Opening on the last answered question and making
     // somebody press Continue to reach a screen that may say "you are already
@@ -1095,7 +1197,7 @@ export async function openTrialFunnel(
 
 // Local visual QA only. Vite folds import.meta.env.DEV to false in production,
 // so main.ts never exposes this route in the deployed build.
-export function openTrialFunnelPreview(adult: boolean, offer: boolean): Promise<void> {
+export function openTrialFunnelPreview(adult: boolean, offer: boolean, body = false): Promise<void> {
   const user = {
     id: "00000000-0000-0000-0000-000000000000",
     user_metadata: { first_name: "Nikau", last_name: "Preview" },
@@ -1112,5 +1214,5 @@ export function openTrialFunnelPreview(adult: boolean, offer: boolean): Promise<
   // A stand-in ceiling so the offer screen's before-and-after strip can be
   // looked at in development. No photograph, which is a real production state
   // too (a report reopened from history), and the one the strip has to survive.
-  return openTrialFunnel(user, { profile, offer }, { ceiling: { overall: 5.6, potential: 7.1, photo: null } });
+  return openTrialFunnel(user, { profile, offer, body }, { ceiling: { overall: 5.6, potential: 7.1, photo: null } });
 }

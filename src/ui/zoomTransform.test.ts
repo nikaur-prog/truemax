@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { IDENTITY_ZOOM, zoomToBounds, zoomTransform } from "./zoomTransform.js";
+import { IDENTITY_ZOOM, applyCanvasZoom, containZoom, zoomToBounds, zoomTransform } from "./zoomTransform.js";
 
 // ---------------------------------------------------------------------------
 // The zoom is algebra, and algebra is testable without a browser.
@@ -84,4 +84,77 @@ test("the minimum-scale floor never crops the box it is framing", () => {
       `span ${span} at scale ${z.scale.toFixed(3)} covers ${(span * z.scale).toFixed(3)} frames — the ends are cropped`,
     );
   }
+});
+
+test("contain mapping preserves full-fit coordinates and identity", () => {
+  const spec = { scale: 2, originX: 25, originY: 70 };
+  assert.deepEqual(containZoom(spec, { imageWidth: 600, imageHeight: 800, boxWidth: 300, boxHeight: 400 }), spec);
+  assert.equal(containZoom(IDENTITY_ZOOM, { imageWidth: 600, imageHeight: 800, boxWidth: 330, boxHeight: 130 }), IDENTITY_ZOOM);
+  assert.equal(containZoom(spec, { imageWidth: 600, imageHeight: 800, boxWidth: 0, boxHeight: 0 }), spec);
+});
+
+test("portrait letterboxing maps source features through the horizontal inset", () => {
+  // The 100px-wide photo is centred inside a 320px-wide short phone stage.
+  const mapped = containZoom({ scale: 2.4, originX: 75, originY: 40 }, {
+    imageWidth: 600, imageHeight: 780, boxWidth: 320, boxHeight: 130,
+  });
+  const x = (110 + 75) / 320 * 100;
+  assert.equal(mapped.originX, x);
+  assert.equal(mapped.originY, 40);
+  assert.ok(Math.abs(apply(mapped, x, "x") - x) < .01, "hover preserves the actual feature pivot");
+  assert.ok(Math.abs(apply({ scale: 2.4, originX: 75, originY: 40 }, x, "x") - x) > 20, "fixture exposes the previous coordinate mismatch");
+});
+
+test("landscape letterboxing respects the vertical object position", () => {
+  const mapped = containZoom({ scale: 2, originX: 20, originY: 75 }, {
+    imageWidth: 1200, imageHeight: 600, boxWidth: 300, boxHeight: 400,
+    positionX: .5, positionY: .4,
+  });
+  const y = (250 * .4 + 150 * .75) / 400 * 100;
+  assert.equal(mapped.originX, 20);
+  assert.equal(mapped.originY, y);
+  assert.ok(Math.abs(apply(mapped, y, "y") - y) < .01);
+});
+
+test("edge features retain their pivot for each photo aspect and object position", () => {
+  for (const [imageWidth, imageHeight] of [[600, 900], [900, 600]]) {
+    for (const position of [.2, .5, .8]) for (const edge of [0, 5, 95, 100]) {
+      const mapped = containZoom({ scale: 2.6, originX: edge, originY: edge }, {
+        imageWidth, imageHeight, boxWidth: 340, boxHeight: 140,
+        positionX: position, positionY: position,
+      });
+      assert.ok(mapped.originX >= 0 && mapped.originX <= 100);
+      assert.ok(mapped.originY >= 0 && mapped.originY <= 100);
+      assert.ok(Math.abs(apply(mapped, mapped.originX, "x") - mapped.originX) < .01);
+      assert.ok(Math.abs(apply(mapped, mapped.originY, "y") - mapped.originY) < .01);
+    }
+  }
+});
+
+test("report canvas zoom reads untransformed geometry once per request and keeps full-box surfaces unchanged", (t) => {
+  let reads = 0;
+  const canvas = { width: 600, height: 780, clientWidth: 320, clientHeight: 130 };
+  const el = { style: { transform: "", transformOrigin: "" }, querySelector: () => canvas } as unknown as HTMLElement;
+  let objectFit = "contain";
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+  Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, value: () => {
+    reads++;
+    return { objectFit, objectPosition: "50% 40%" };
+  } });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, "getComputedStyle", previous);
+    else Reflect.deleteProperty(globalThis, "getComputedStyle");
+  });
+  const spec = { scale: 2, originX: 75, originY: 40 };
+  applyCanvasZoom(el, spec);
+  const first = el.style.transform;
+  applyCanvasZoom(el, spec);
+  assert.equal(el.style.transform, first, "an existing transform cannot compound the next zoom");
+  assert.equal(reads, 2);
+  objectFit = "fill";
+  applyCanvasZoom(el, spec);
+  assert.equal(el.style.transform, zoomTransform(spec));
+  applyCanvasZoom(el, IDENTITY_ZOOM);
+  assert.equal(el.style.transform, zoomTransform(IDENTITY_ZOOM));
+  assert.equal(reads, 3, "returning to rest does not read layout");
 });

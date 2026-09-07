@@ -1,6 +1,6 @@
 /** Local, bounded timing diagnostics. Never includes image, score or account data. */
 export const SCAN_PERFORMANCE_STAGES = [
-  "download", "model_init", "front_inference", "capture_review", "side_seed",
+  "download", "model_init", "front_inference", "head_covering", "capture_review", "side_seed",
   "side_cloud", "report_paint", "auth_return",
 ] as const;
 export type ScanPerformanceStage = typeof SCAN_PERFORMANCE_STAGES[number];
