@@ -1,0 +1,108 @@
+/* Static reading pages: shared brand, type and legal/guide shell only.
+   Keep capture, results, coaching and editor styles out of this dependency. */
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/inter/wght.css";
+
+:root {
+  --bg: #f4f3ef; --card: #fff; --panel: #fff; --ink: #141518;
+  --mut: #6b6e74; --line: #e6e4dd; --soft: #efede7;
+  --acc: #0e7a68; --acc-soft: #e4f0ec;
+  --serif: "Fraunces Variable", "Fraunces", Georgia, serif;
+  --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: var(--sans);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+body {
+  background: var(--bg); font-family: var(--sans); color: var(--ink);
+  min-height: 100vh; font-size: 16px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums; font-synthesis: none;
+  overflow-wrap: break-word; touch-action: manipulation;
+}
+::selection { background: var(--acc-soft); }
+a:focus-visible, summary:focus-visible { outline: 3px solid var(--acc); outline-offset: 5px; }
+.topbar {
+  position: sticky; top: 0; z-index: 10; display: flex; align-items: center;
+  justify-content: space-between; gap: 16px; padding: 14px 26px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.wordmark {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .22em; font-weight: 500;
+  flex: none; white-space: nowrap; color: var(--ink); text-decoration: none;
+}
+.wordmark::before {
+  content: ""; display: inline-block; width: 15px; height: 15px;
+  margin-right: 8px; vertical-align: -3px; background: currentColor;
+  -webkit-mask: url("/brand/truemax-glyph.svg") center / contain no-repeat;
+  mask: url("/brand/truemax-glyph.svg") center / contain no-repeat;
+}
+.wordmark b { color: var(--acc); font-weight: 500; }
+.auth-scan-link { color: var(--acc); font-size: 12.5px; text-decoration: none; }
+.auth-scan-link:hover { text-decoration: underline; }
+.legal-shell { max-width: 62ch; margin: 40px auto 0; padding: 0 24px 52px; }
+.legal-kicker { font-size: 9.5px; letter-spacing: .18em; color: var(--mut); margin-bottom: 10px; }
+.legal-shell h1 {
+  font-family: var(--serif); font-weight: 300; font-size: 40px;
+  letter-spacing: -.015em; line-height: 1.1; margin-bottom: 10px; text-wrap: balance;
+}
+.legal-meta { font-size: 12.5px !important; color: var(--mut); margin-bottom: 30px !important; }
+.legal-shell h2 { font-size: 17px; font-weight: 600; margin: 34px 0 10px; text-wrap: balance; }
+.legal-shell h3 { font-size: 14.5px; font-weight: 600; margin: 24px 0 8px; }
+.legal-shell p { font-size: 15px; line-height: 1.65; margin-bottom: 14px; }
+.legal-shell ul, .legal-shell ol { margin: 0 0 16px 20px; }
+.legal-shell li { font-size: 15px; line-height: 1.6; margin-bottom: 8px; }
+.legal-shell a { color: var(--acc); }
+.legal-summary { background: var(--acc-soft); border-radius: 16px; padding: 20px 22px 8px; margin-bottom: 12px; }
+.legal-summary h2 { margin-top: 0; font-size: 14px; color: var(--acc); }
+.legal-table { width: 100%; border-collapse: collapse; margin: 6px 0 18px; font-size: 13.5px; }
+.legal-table caption { text-align: left; font-weight: 600; margin-bottom: 12px; }
+.legal-table th { text-align: left; font-size: 10px; letter-spacing: .06em; color: var(--mut); font-weight: 600; padding: 0 10px 8px 0; border-bottom: 1px solid var(--line); }
+.legal-table td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--line); line-height: 1.5; vertical-align: top; }
+.legal-nav { margin: 40px 0 10px !important; font-size: 14px !important; line-height: 2 !important; }
+.btn { display: inline-flex; justify-content: center; border: none; border-radius: 14px; padding: 15px 20px; font: 600 14px var(--sans); text-decoration: none; min-height: 48px; }
+.btn.pri { background: var(--ink); color: #fff; }
+.btn:hover { opacity: .9; }
+.guide-shell { max-width: 70ch; }
+.guide-deck { font-size: 18px !important; color: var(--mut); margin-bottom: 28px !important; }
+.guide-breadcrumbs { font-size: 10px; letter-spacing: .08em; color: var(--mut); margin-bottom: 22px; }
+.guide-breadcrumbs a { color: inherit; }
+.guide-callout { background: var(--acc-soft); border: 1px solid rgba(14,122,104,.18); border-radius: 16px; padding: 18px 20px 5px; margin: 24px 0; }
+.guide-callout h2 { color: var(--acc); font-size: 15px; margin-top: 0; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 22px 0 30px; }
+.guide-card { display: block; color: var(--ink) !important; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+.guide-card:hover { border-color: var(--acc); }
+.guide-card b { display: block; font-size: 15px; margin-bottom: 6px; }
+.guide-card span { color: var(--mut); font-size: 13px; line-height: 1.5; }
+.guide-steps { counter-reset: guide-step; list-style: none; margin-left: 0 !important; }
+.guide-steps li { position: relative; padding-left: 38px; }
+.guide-steps li::before { counter-increment: guide-step; content: counter(guide-step); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--acc-soft); color: var(--acc); font-size: 10px; }
+.guide-cta { margin-top: 38px; padding: 22px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); }
+.guide-cta h2 { margin-top: 0; }
+.guide-cta .btn { color: #fff; margin-top: 4px; }
+.guide-figure { margin: 24px 0; padding: 20px; border: 1px solid var(--line); background: var(--card); border-radius: 16px; }
+.guide-figure svg { display: block; width: 100%; height: auto; color: var(--acc); }
+.guide-figure svg text { fill: var(--ink); font: 14px var(--sans); }
+.guide-figure figcaption { font-size: 13px; line-height: 1.6; color: var(--mut); margin-top: 16px; }
+.guide-diagram-key { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px !important; margin: 16px 0 0 !important; }
+.guide-diagram-key b { color: var(--acc); margin-right: 3px; }
+.guide-diagram-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.guide-equation { padding: 14px 18px; background: var(--soft); border-radius: 10px; font-variant-numeric: tabular-nums; }
+.guide-toc { border-block: 1px solid var(--line); padding: 16px 0; margin: 24px 0; }
+.guide-toc ul { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: none; margin: 0; }
+.guide-toc li { margin: 0; font-size: 13px; }
+.guide-faq { border-bottom: 1px solid var(--line); padding: 16px 0; }
+.guide-faq summary { cursor: pointer; font-size: 15px; font-weight: 600; }
+.guide-faq p { margin-top: 12px; }
+@media (max-width: 640px) {
+  .topbar { padding: 14px 18px; }
+  .legal-shell { margin-top: 24px; padding-inline: 18px; }
+  .legal-shell h1 { font-size: 31px; }
+  .legal-table thead { display: none; }
+  .legal-table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .legal-table td { display: block; border: 0; padding: 0 0 4px; }
+  .legal-table td:first-child { font-weight: 600; }
+  .guide-grid, .guide-diagram-pair { grid-template-columns: 1fr; }
+  .guide-figure { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

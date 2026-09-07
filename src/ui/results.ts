@@ -13,6 +13,7 @@ import { curveLegend, curveSVG } from "./curve.js";
 import { REGION_LANDMARKS, zoomFor } from "./regions.js";
 import { regionIconMarkup } from "./regionIcons.js";
 import { scoreTone } from "./scoreTone.js";
+import { metricRead } from "../engine/metricReads.js";
 import { resetTapPreview, wireMetricButton, wireTapPreview } from "./tapPreview.js";
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, drawMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
@@ -21,13 +22,13 @@ import { animateSideMeasurement, drawSideMeasurement, hasSideOverlay, sideMeasur
 import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
 import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, startKindFor, writeProtocols } from "../engine/protocol.js";
-import { IDENTITY_ZOOM, applyZoom, zoomToBounds } from "./zoomTransform.js";
+import { IDENTITY_ZOOM, applyCanvasZoom as applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import type { CeilingInput } from "./ceilingCta.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, regionSummary, scoreHigherText, topPctText } from "./templates.js";
 import { nutritionPlanHTML } from "./nutritionPlan.js";
 import { macroPanelHTML, wireMacroPanel } from "./macroPanel.js";
-import { stopTypewriter, typewrite } from "./typewriter.js";
+import { stopTypewriter } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, RECS, buyGuideFor, recsFor, productSearchUrl } from "../engine/recommendations.js";
@@ -361,6 +362,7 @@ function buildTabs(view: "front" | "side"): void {
   const tabs = ctx.analysis.querySelector<HTMLElement>(".rtabs");
   if (!tabs) return;
   tabs.innerHTML = "";
+  tabs.parentElement?.querySelector(".rtab-plan")?.remove();
   const mk = (label: string, id: string) => {
     const b = document.createElement("button");
     b.className = "rtab";
@@ -376,7 +378,10 @@ function buildTabs(view: "front" | "side"): void {
     b.appendChild(text);
     b.dataset.id = id;
     b.onclick = () => select(id);
-    tabs.appendChild(b);
+    if (id === "improve") {
+      b.classList.add("rtab-plan");
+      tabs.parentElement?.appendChild(b);
+    } else tabs.appendChild(b);
   };
   // A guest's scan and a recalled one carry no coaching, so the row does not
   // promise any: the headline tab is a plain Overview and the Plan tab is
@@ -464,7 +469,6 @@ function viewCards(r: Report): string {
   // 1%" beside a 3.5 — the most precise-sounding claim in the product sitting
   // on its least established measurement. See SIDE_TAIL_LIMIT_PCT.
   const cards: Array<[string, number, number, number | undefined]> = [
-    ["OVERALL", r.overall, r.overallPercentile, undefined],
     ["FRONT", r.views.front.score, r.views.front.percentile, undefined],
     ["SIDE", r.views.side.score, r.views.side.percentile, SIDE_TAIL_LIMIT_PCT],
   ];
@@ -1048,13 +1052,8 @@ function calmSide(): void {
 }
 
 function revealBars(): void {
-  setTimeout(
-    () =>
-      document
-        .querySelectorAll<HTMLElement>(".rangebar i")
-        .forEach((i) => (i.style.left = `${i.dataset.l}%`)),
-    120,
-  );
+  document.querySelectorAll<HTMLElement>(".rangebar i")
+    .forEach((i) => (i.style.left = `${i.dataset.l}%`));
 }
 
 // Hover a side measurement row → draw that measurement's real construction on
@@ -1150,7 +1149,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
         .map(
           (m, i) => `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}${
             m.implausible ? " implausible" : ""
-          }" data-pillar-row="${i}" style="animation-delay:${60 + i * 55}ms">
+          }" data-pillar-row="${i}" style="animation-delay:${Math.min(i * 20, 100)}ms">
         <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${
           m.implausible ? "–" : m.score.toFixed(1)
         }</span></span></div>
@@ -1160,7 +1159,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
           // side rows and in the detail card. The row still appears, because
           // dropping it would change how many measurements a pillar has from
           // one scan to the next with no account of why.
-          m.implausible ? "" : `<div class="rangebar">${idealWindow(m, sex)}<i data-l="${m.markerPct}"></i></div>`
+          m.implausible ? "" : `<div class="rangebar">${idealWindow(m, sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`
         }
       </div>`,
         )
@@ -1223,13 +1222,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
   document.body.appendChild(wrap);
   document.addEventListener("keydown", onPillarKey);
   wrap.querySelector<HTMLElement>(".psx-close")?.focus();
-  // Same deferred paint the region list uses: the bars animate from zero to
-  // their marker rather than appearing already placed.
-  setTimeout(() => {
-    for (const i of wrap.querySelectorAll<HTMLElement>(".rangebar i")) {
-      i.style.left = `${i.dataset.l}%`;
-    }
-  }, 30);
+  // Markers are already at their measured positions on the first paint.
 }
 
 let sideFade: OverlayFade | null = null;
@@ -1395,9 +1388,7 @@ function showOverall(): void {
         ? deltaChip(delta.vsAverage, `vs your average of ${delta.averageOf}`)
         : "")
     : "";
-  // Every score is now measured from both views — the flow requires the profile
-  // before it will analyse anything. The flag stays because a report restored
-  // from history may predate that.
+  // Side capture is optional. The headline must reflect the views actually measured.
   const merged = Number.isFinite(r.zScores["view:side"]);
 
   body().innerHTML = `
@@ -1854,7 +1845,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
       <h3>${regionHeadline(r, r.region)}<em>SIDE</em></h3>
       ${r.metrics
         .map(
-          (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}${m.implausible ? " implausible" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${60 + i * 60}ms">
+          (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}${m.implausible ? " implausible" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${Math.min(i * 20, 100)}ms">
         <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}${
           m.implausible
             ? `<span class="mscore mscore-skip">not scored</span>`
@@ -1863,7 +1854,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
         ${
           m.implausible
             ? `<p class="mimplausible">No head measures this. Re-check ${pointLabels(m)} and this will score.</p>`
-            : `<div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}"></i></div>`
+            : `<div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`
         }</div>`,
         )
         .join("")}
@@ -2268,22 +2259,22 @@ function showRegion(id: RegionId): void {
 
   body().innerHTML = `
     <div class="reveal">
-      <div class="dots" id="dots"><i class="on"></i><i></i></div>
-      <div class="deck" id="deck">
+      <div class="deck report-deck" id="deck">
         <div class="dcard">
           <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
               (m, i) => wasMeasured(m)
-                ? `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+                ? `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${Math.min(i * 20, 100)}ms">
             <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-            <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}"></i></div></div>`
+            <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>
+            ${metricRead(m, ctx!.report.sex) ? `<p class="metric-summary">On this photo: ${metricRead(m, ctx!.report.sex)}.</p>` : ""}</div>`
                 // Not measured on this photograph. It keeps its row and says so,
                 // rather than vanishing: the same region would otherwise show a
                 // different number of measurements from one scan to the next with
                 // no account of why. Not tappable and no range bar, because there
                 // is no reading to draw or to place.
-                : `<div class="metric unmeasured" data-unmeasured="${m.def.id}" style="animation-delay:${80 + i * 70}ms">
+                : `<div class="metric unmeasured" data-unmeasured="${m.def.id}" style="animation-delay:${Math.min(i * 20, 100)}ms">
             <div class="mrow"><b>${m.def.name}</b><span>not measured</span></div>
             <p class="unmeasured-why">This photograph did not give a clear enough reading, so it is left out of the score rather than guessed at.</p></div>`,
             )
@@ -2296,38 +2287,24 @@ function showRegion(id: RegionId): void {
               ? `<button class="tap-hint" id="tap-hint"><i>◱</i>Hover to draw it on your face · tap to open</button>`
               : ""
           }
-          <div class="typebox" id="tw"></div>
+          <details class="report-reading"><summary>What these measurements mean</summary><div class="typebox" id="tw"></div></details>
         </div>
-        <div class="dcard">
-          <h3>Notable comparisons<em>REFERENCE</em></h3>
+        <details class="dcard report-comparisons"${window.matchMedia("(min-width: 1440px)").matches ? " open" : ""}>
+          <summary>Notable comparisons <span>Reference faces</span></summary>
           ${matchCard}
-          <p class="footnote">Reference set grows with every analysed face. Matches are on specific metrics where you genuinely align.</p>
-        </div>
+          <p class="footnote">Matches compare specific measurements in the reference set, not your whole face.</p>
+        </details>
       </div>
       ${regionPositionPanel(r, id, ctx!.report.sex)}
     </div>`;
 
-  setTimeout(
-    () =>
-      document
-        .querySelectorAll<HTMLElement>(".rangebar i")
-        .forEach((i) => (i.style.left = `${i.dataset.l}%`)),
-    120,
-  );
   // A guest's delta is deliberately null, so a guest scan cannot borrow the
   // owner's trend; they get the neutral opener with their own name.
-  typewrite(document.getElementById("tw")!, regionSummary(r, ctx.report.sex, {
+  document.getElementById("tw")!.textContent = regionSummary(r, ctx.report.sex, {
     name: ctx.subjectName || ctx.selfName,
     delta: ctx.delta?.regions.find((d) => d.region === r.region)?.delta ?? null,
-  }));
+  });
   wireMeasurementTaps(r, id);
-
-  const deck = document.getElementById("deck")!;
-  const dots = document.getElementById("dots")!;
-  deck.onscroll = () => {
-    const on = deck.scrollLeft > deck.clientWidth / 2 ? 1 : 0;
-    dots.querySelectorAll("i").forEach((x, j) => x.classList.toggle("on", j === on));
-  };
 }
 
 // Ideal window on the gradient bar, drawn in the same population-percentile

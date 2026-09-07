@@ -1,13 +1,13 @@
 import { METRICS } from "../engine/metrics.js";
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
-import { LABEL_H, LABEL_W, placeCallouts } from "./demoReelLayout.js";
+import { LABEL_H, LABEL_W } from "./demoReelLayout.js";
+import { createReelCallouts, createReelImages, createReelValueWriter } from "./demoReelRuntime.js";
 import { previewIsVisible } from "./previewLoop.js";
 
 // The landing reel shows display scores rather than the engine's output, for
 // the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
 const REEL = applyShim(REEL_MEASURED);
-import type { ReelFace } from "./demoReelData.js";
 
 // ---------------------------------------------------------------------------
 // Landing demo reel.
@@ -58,15 +58,6 @@ export interface ReelHandle {
 const seg = (t: number, a: number, b: number) => Math.max(0, Math.min(1, (t - a) / (b - a)));
 const ease = (x: number) => 1 - Math.pow(1 - x, 2);
 
-// Three regions, chosen to look like an actual read of the face rather than a
-// highlight reel: the best, the worst, and the median. Showing only strengths
-// is what the competition does.
-function calloutsFor(face: ReelFace) {
-  const rs = [...face.regions].sort((a, b) => b.score - a.score);
-  if (rs.length < 3) return rs;
-  return [rs[0], rs[rs.length >> 1], rs[rs.length - 1]];
-}
-
 export interface ReelOptions {
   /**
    * Render the thumbnail cut of the reel: the photograph and the scan sweep,
@@ -116,12 +107,6 @@ export function mountDemoReel(
   const compact = opts.compact === true;
   const TT = compact ? { ...T, ...COMPACT_TAIL } : T;
 
-  const images = REEL.map((f) => {
-    const img = new Image();
-    img.src = `/demo/${f.slug}.jpg`;
-    return img;
-  });
-
   // Stills only, by decision. The living-portrait loops were tried and cut:
   // a photograph that blinks reads as a photograph malfunctioning, not as a
   // person — the scan line supplies all the motion this card needs.
@@ -131,19 +116,52 @@ export function mountDemoReel(
   let raf = 0;
   let stopped = false;
   let shownAny = false;
+  let paused = false;
+  let waitingForNext = false;
+  let w = canvas.clientWidth || canvas.width;
+  let h = canvas.clientHeight || canvas.height;
+  const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  let reduced = motion?.matches === true;
+  const callouts = createReelCallouts();
+  const writeValue = createReelValueWriter();
+  const coverRects = new WeakMap<HTMLImageElement, { key: string; width: number; height: number }>();
+  const images = createReelImages(REEL.map((face) => `/demo/${face.slug}.jpg`), () => {
+    syncImages();
+    requestFrame();
+  });
+  function syncImages(): void {
+    if (images.failed(idx)) idx = images.next(idx);
+    images.ensure(idx);
+    // First still first, then only one ahead. A static demo never downloads
+    // the other five portraits merely because it has been mounted.
+    if (images.ready(idx) && !reduced) images.ensure(images.next(idx));
+  }
+  function requestFrame(): void {
+    if (!stopped && !paused && !raf) raf = requestAnimationFrame(frame);
+  }
 
   const frame = (now: number) => {
+    raf = 0;
     if (stopped || paused) return;
+    const live = images.ready(idx);
+    if (!live) return;
     if (!start) start = now;
-    const t = now - start;
+    let t = reduced ? (compact ? T.score[1] : T.regions[1]) : now - start;
     const face = REEL[idx];
-    const img = images[idx];
     if (!face) return;
-
-    const live: HTMLImageElement = img;
-
-    const w = canvas.clientWidth || canvas.width;
-    const h = canvas.clientHeight || canvas.height;
+    const nextIndex = images.next(idx);
+    const next = images.ready(nextIndex);
+    const canAdvance = nextIndex !== idx && next !== null;
+    // Keep the current finished portrait visible while the next decode is
+    // pending. No blank crossfade and no busy loop waiting for the network.
+    if (!reduced && !canAdvance && t >= TT.out) {
+      t = TT.out;
+      waitingForNext = true;
+    } else if (waitingForNext && !reduced) {
+      start = now - TT.out;
+      t = TT.out;
+      waitingForNext = false;
+    }
 
     // ---- the dock ---------------------------------------------------------
     //
@@ -207,30 +225,26 @@ export function mountDemoReel(
     // height this is an exact fill; as the dock closes, the box gets wider
     // than the picture and the fit crops equally off the top and the bottom,
     // which takes hair and collar and leaves the face untouched in the middle.
-    const sizeOf = (source: HTMLImageElement | HTMLVideoElement) =>
-      source instanceof HTMLVideoElement
-        ? { sw: source.videoWidth, sh: source.videoHeight }
-        : { sw: source.naturalWidth, sh: source.naturalHeight };
-    const readyOf = (source: HTMLImageElement | HTMLVideoElement) =>
-      source instanceof HTMLVideoElement
-        ? source.readyState >= 2 && source.videoWidth > 0
-        : source.complete && source.naturalWidth > 0;
-    const rectOf = (source: HTMLImageElement | HTMLVideoElement, zoom: number) => {
-      const { sw, sh } = sizeOf(source);
-      const s = Math.max(w / sw, photoH / sh) * zoom;
-      const dw = sw * s;
-      const dh = sh * s;
+    const rectOf = (source: NonNullable<ReturnType<typeof images.ready>>, zoom: number) => {
+      const key = `${w}:${photoH}`;
+      let rect = coverRects.get(source.image);
+      if (!rect || rect.key !== key) {
+        const scale = Math.max(w / source.width, photoH / source.height);
+        rect = { key, width: source.width * scale, height: source.height * scale };
+        coverRects.set(source.image, rect);
+      }
+      const dw = rect.width * zoom;
+      const dh = rect.height * zoom;
       return { dx: (w - dw) / 2, dy: (photoH - dh) / 2, dw, dh };
     };
-    const drawCover = (source: HTMLImageElement | HTMLVideoElement, zoom: number, a: number) => {
-      if (!readyOf(source)) return;
+    const drawCover = (source: NonNullable<ReturnType<typeof images.ready>>, zoom: number, a: number) => {
       const r = rectOf(source, zoom);
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, w, photoH);
       ctx.clip();
       ctx.globalAlpha = a;
-      ctx.drawImage(source, r.dx, r.dy, r.dw, r.dh);
+      ctx.drawImage(source.image, r.dx, r.dy, r.dw, r.dh);
       ctx.restore();
       ctx.globalAlpha = a;
     };
@@ -243,8 +257,8 @@ export function mountDemoReel(
     // The incoming face, underneath, at its own rest zoom — which is exactly
     // where it will be drawn on its first frame as the current face, so the
     // handover is continuous rather than a four-per-cent pop.
-    if (REEL.length > 1 && fadeOut < 1) {
-      drawCover(images[(idx + 1) % REEL.length], 1, 1);
+    if (canAdvance && next && fadeOut < 1) {
+      drawCover(next, 1, 1);
     }
     drawCover(live, 1 + 0.04 * Math.min(1, t / TT.hold), alpha);
     ctx.globalAlpha = alpha;
@@ -399,11 +413,10 @@ export function mountDemoReel(
 
       // ---- region callouts --------------------------------------------------
       if (t >= T.regions[0]) {
-        const outs = calloutsFor(face);
         // Docked, the score is on its own panel and the whole photograph is
         // free — only a small margin off the bottom edge so a label never
         // straddles the seam.
-        const placed = placeCallouts(outs, w, photoH, 150 - 132 * dockT);
+        const { outs, placed } = callouts(face, w, photoH, 150 - 132 * dockT);
         const appearOf = (i: number) => seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
 
         // Two passes with a scrim between them. The layout keeps LABELS out of
@@ -493,9 +506,12 @@ export function mountDemoReel(
     // The count-up is work; the landing is the result, and a result deserves
     // punctuation the intermediate numbers do not get.
     const shown = face.overall * ease(seg(t, T.score[0], T.score[1]));
-    scoreEl.textContent = t >= T.score[0] ? shown.toFixed(1) : "";
-    scoreEl.style.opacity = String(alpha);
-    scoreEl.classList.toggle("landed", t >= T.score[1]);
+    const score = t >= T.score[0] ? shown.toFixed(1) : "";
+    const opacity = String(alpha);
+    const landed = t >= T.score[1];
+    writeValue("score", score, () => { scoreEl.textContent = score; });
+    writeValue("opacity", opacity, () => { scoreEl.style.opacity = opacity; });
+    writeValue("landed", landed, () => { scoreEl.classList.toggle("landed", landed); });
     // Nothing under the number.
     //
     // The slot held the invented name first ("Dev", "Adrian"), which was a
@@ -517,14 +533,16 @@ export function mountDemoReel(
     // offsets carry that 24px now the line is gone, and the score stays
     // exactly where it has always sat rather than sliding down into the
     // pillar labels (which top out at 30.5px).
-    if (cap) cap.style.bottom = `${(108 - 32 * dockT).toFixed(1)}px`;
+    const bottom = `${(108 - 32 * dockT).toFixed(1)}px`;
+    if (cap) writeValue("bottom", bottom, () => { cap.style.bottom = bottom; });
 
-    if (t >= TT.hold) {
-      idx = (idx + 1) % REEL.length;
+    if (!reduced && canAdvance && t >= TT.hold) {
+      idx = nextIndex;
       start = now;
       shownAny = true;
+      syncImages();
     }
-    raf = requestAnimationFrame(frame);
+    if (!reduced && !waitingForNext) requestFrame();
   };
 
   // -------------------------------------------------------------------------
@@ -544,7 +562,6 @@ export function mountDemoReel(
   // treatment: browsers throttle rAF there but the timeline still advances,
   // which is how somebody came back to a tab mid-dissolve.
   // -------------------------------------------------------------------------
-  let paused = false;
   let inViewport = true;
   let elapsedAtPause = 0;
   const pause = () => {
@@ -552,6 +569,7 @@ export function mountDemoReel(
     elapsedAtPause = start ? performance.now() - start : 0;
     paused = true;
     cancelAnimationFrame(raf);
+    raf = 0;
   };
   const resume = () => {
     if (!paused || stopped) return;
@@ -559,7 +577,7 @@ export function mountDemoReel(
     // Rebase so the current face carries on from where it stopped rather than
     // snapping to wherever the wall clock has got to.
     start = performance.now() - elapsedAtPause;
-    raf = requestAnimationFrame(frame);
+    requestFrame();
   };
   const syncVisibility = () => {
     const covered = opts.pauseWhenCovered === true
@@ -586,14 +604,35 @@ export function mountDemoReel(
   panelObserver?.observe(document.body, { childList: true, attributes: true, attributeFilter: ["class"] });
   document.addEventListener("visibilitychange", syncVisibility);
 
-  raf = requestAnimationFrame(frame);
+  const resize = (): void => {
+    w = canvas.clientWidth || w;
+    h = canvas.clientHeight || h;
+    requestFrame();
+  };
+  const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(resize) : null;
+  resizeObserver?.observe(canvas);
+  window.addEventListener("resize", resize, { passive: true });
+  const motionChanged = (): void => {
+    reduced = motion?.matches === true;
+    waitingForNext = false;
+    start = 0;
+    syncImages();
+    requestFrame();
+  };
+  motion?.addEventListener?.("change", motionChanged);
+  syncImages();
   syncVisibility();
 
   return {
     stop() {
+      if (stopped) return;
       stopped = true;
       io?.disconnect();
       panelObserver?.disconnect();
+      resizeObserver?.disconnect();
+      images.stop();
+      window.removeEventListener("resize", resize);
+      motion?.removeEventListener?.("change", motionChanged);
       document.removeEventListener("visibilitychange", syncVisibility);
       cancelAnimationFrame(raf);
       const ctx = canvas.getContext("2d");

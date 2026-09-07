@@ -1,5 +1,3 @@
-import { BODY_BOUNDS, bodyMetricUsable, toMetric } from "../engine/bodyUnits.js";
-import type { UnitSystem } from "../engine/bodyUnits.js";
 import type { User } from "@supabase/supabase-js";
 import {
   currentUser,
@@ -11,6 +9,7 @@ import {
   socialAvailability,
   updatePassword,
 } from "../engine/auth.js";
+import type { SocialAvailability, SocialProvider } from "../engine/auth.js";
 import { beginIntentionalNavigation } from "../engine/navigationIntent.js";
 
 export type AuthMode = "link" | "password" | "signup" | "forgot" | "reset";
@@ -31,7 +30,7 @@ export function renderAuthForm(root: HTMLElement, options: AuthFormOptions): voi
 
 export function authFormIntro(mode: AuthMode, context?: AuthFormOptions["context"]): { title: string; lede: string } {
   if (context === "analysis") return {
-    title: "Create an account to see your analysis",
+    title: mode === "signup" ? "Create an account to see your analysis" : "Sign in to see your analysis",
     lede: "Your scan is already measured on this device. Sign up or log in to open the result.",
   };
   if (context === "plan") return {
@@ -61,61 +60,11 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   root.innerHTML = `
     <h2 id="auth-title">${title}</h2>
     <p class="acct-lede">${lede}</p>
-    <div class="acct-social" aria-label="Social sign in">
-      <button type="button" class="acct-oauth" data-provider="google" data-available="checking" disabled>
-        ${socialLabel("google")}<small>Checking…</small>
-      </button>
-      <button type="button" class="acct-oauth apple" data-provider="apple" data-available="checking" disabled>
-        ${socialLabel("apple")}<small>Checking…</small>
-      </button>
-    </div>
-    <div class="acct-divider"><span>or</span></div>
     <form class="acct-form" novalidate>
-      ${
-        // Signup only. Asked here rather than left to the quiz so the app can
-        // greet somebody by name the moment they are through the wall, and so
-        // the quiz opens with a field already filled instead of a blank one.
-        // Not required: an account is worth more than a name, and this is the
-        // screen standing between a finished scan and the person who took it.
-        isSignup && !isLink
-          ? `<label class="acct-field">
-              <span>First name <em>optional</em></span>
-              <input type="text" name="name" autocomplete="given-name" placeholder="What should we call you?" maxlength="60" />
-            </label>`
-          : ""
-      }
       <label class="acct-field">
         <span>Email</span>
         <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
       </label>
-      ${
-        // Signup only, and optional in the plainest sense: the fields can be
-        // left blank and the button does not care. They are here because the
-        // calculator on Max needs them and asking at the start beats an
-        // interruption later; a database trigger stores what is entered and
-        // drops anything out of bounds. Free and Starter signups are never
-        // blocked by them. Whether they are asked again is decided by the
-        // server's required flag (api/body-profile.ts), never by this form.
-        isSignup && !isLink
-          ? `<fieldset class="acct-field acct-body">
-              <legend><span>Height and weight <em>optional, for your daily plan</em></span></legend>
-              <div class="acct-units" role="group" aria-label="Units">
-                <button type="button" data-acct-unit="metric" aria-pressed="true">Metric</button>
-                <button type="button" data-acct-unit="imperial" aria-pressed="false">Imperial</button>
-              </div>
-              <div class="acct-body-fields" data-acct-body="metric">
-                <input type="number" name="heightCm" inputmode="decimal" min="${BODY_BOUNDS.heightCm.min}" max="${BODY_BOUNDS.heightCm.max}" step="0.1" placeholder="Height, cm" aria-label="Height in centimetres" />
-                <input type="number" name="weightKg" inputmode="decimal" min="${BODY_BOUNDS.weightKg.min}" max="${BODY_BOUNDS.weightKg.max}" step="0.1" placeholder="Weight, kg" aria-label="Weight in kilograms" />
-              </div>
-              <div class="acct-body-fields" data-acct-body="imperial" hidden>
-                <input type="number" name="feet" inputmode="numeric" min="3" max="7" step="1" placeholder="ft" aria-label="Height, feet" />
-                <input type="number" name="inches" inputmode="decimal" min="0" max="11.9" step="0.1" placeholder="in" aria-label="Height, inches" />
-                <input type="number" name="pounds" inputmode="decimal" min="77" max="661" step="0.1" placeholder="Weight, lb" aria-label="Weight in pounds" />
-              </div>
-              <small class="acct-body-note">Never used for your face score. You can add or change these later.</small>
-            </fieldset>`
-          : ""
-      }
       ${
         isLink
           ? ""
@@ -132,6 +81,19 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
         isLink ? "Email me a sign-in link" : isSignup ? "Create free account" : "Sign in"
       }</button>
     </form>
+    <div class="acct-provider-options">
+      <div class="acct-divider"><span>or continue with</span></div>
+      <div class="acct-social" aria-label="Social sign in">
+        <button type="button" class="acct-oauth" data-provider="google" data-available="checking" disabled>
+          ${socialLabel("google")}
+        </button>
+        <button type="button" class="acct-oauth apple" data-provider="apple" data-available="checking" disabled hidden>
+          ${socialLabel("apple")}
+        </button>
+      </div>
+      <p class="acct-provider-status" role="status" hidden></p>
+      <button type="button" class="acct-provider-retry" hidden>Try Google again</button>
+    </div>
     <div class="acct-switch">
       ${
         isLink
@@ -154,35 +116,30 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
   const form = root.querySelector(".acct-form") as HTMLFormElement;
   const msg = root.querySelector(".acct-msg") as HTMLElement;
   const submit = root.querySelector(".acct-submit") as HTMLButtonElement;
+  const current = () => root.isConnected && root.querySelector(".acct-form") === form;
   let formWorking = false;
-  let bodyUnit: UnitSystem = "metric";
-  for (const button of root.querySelectorAll<HTMLButtonElement>("[data-acct-unit]")) {
-    button.addEventListener("click", () => {
-      bodyUnit = button.dataset.acctUnit === "imperial" ? "imperial" : "metric";
-      for (const b of root.querySelectorAll<HTMLButtonElement>("[data-acct-unit]")) {
-        b.setAttribute("aria-pressed", String(b.dataset.acctUnit === bodyUnit));
-      }
-      for (const group of root.querySelectorAll<HTMLElement>("[data-acct-body]")) {
-        group.hidden = group.dataset.acctBody !== bodyUnit;
-      }
-    });
-  }
+  let socialWorking = false;
   root.querySelector<HTMLAnchorElement>(".acct-portal-link")?.addEventListener("click", () => {
     beginIntentionalNavigation();
   });
   const minimumPasswordLength = isLink ? 0 : isSignup ? 8 : 1;
-  const updateSubmit = syncSubmitState(form, submit, minimumPasswordLength, () => formWorking);
+  const updateSubmit = syncSubmitState(form, submit, minimumPasswordLength, () => formWorking || socialWorking);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     // A disabled submit button does not stop Enter from dispatching another
     // submit event. Keep the request itself single-flight as well as the UI.
     if (formWorking) return;
+    if (socialWorking || !current()) return;
     const data = new FormData(form);
     const email = String(data.get("email") || "").trim();
     const password = String(data.get("password") || "");
     if (!email) {
       say(msg, "Enter your email.", "err");
+      return;
+    }
+    if (!form.querySelector<HTMLInputElement>('input[name="email"]')?.validity.valid) {
+      say(msg, "Enter a valid email address.", "err");
       return;
     }
     if (password.length < minimumPasswordLength) {
@@ -191,22 +148,18 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     }
 
     formWorking = true;
+    disableSocial(root, true);
     setWorking(submit, true);
     updateSubmit();
-    // Optional means optional: blank fields are not sent, a partly filled
-    // or out-of-bounds pair is dropped with a note rather than a refusal,
-    // and the account is created either way.
-    const body = isSignup ? signupBody(data, bodyUnit) : null;
-    if (isSignup && body === "invalid") {
-      say(msg, "Height and weight were left out: enter both, within a plausible range, or leave both blank. Creating your account without them.", "info");
-    }
     options.onAuthAttempt?.();
     const result = isLink
       ? await signInWithLink(email)
       : isSignup
-        ? await signUp(email, password, String(data.get("name") || ""), body === "invalid" ? null : body)
+        ? await signUp(email, password)
         : await signIn(email, password);
+    if (!current()) return;
     formWorking = false;
+    disableSocial(root, false);
     setWorking(submit, false, isLink ? "Email me a sign-in link" : isSignup ? "Create free account" : "Sign in");
     updateSubmit();
 
@@ -217,96 +170,80 @@ function renderMode(root: HTMLElement, mode: AuthMode, options: AuthFormOptions)
     }
     if (isLink || result.needsConfirmation) {
       await options.onDeferred?.();
+      if (!current()) return;
       renderEmailSent(root, email, isLink ? "sign in" : "confirm your account");
       return;
     }
     const user = await currentUser();
+    if (!current()) return;
     if (user) await options.onAuthenticated(user);
     else say(msg, "The account was created, but the session did not start. Try signing in.", "err");
   });
 
   for (const button of root.querySelectorAll<HTMLButtonElement>("[data-mode]")) {
-    button.addEventListener("click", () => renderMode(root, button.dataset.mode as AuthMode, options));
+    button.addEventListener("click", () => {
+      if (!formWorking && !socialWorking) renderMode(root, button.dataset.mode as AuthMode, options);
+    });
   }
-  let socialWorking = false;
   for (const button of root.querySelectorAll<HTMLButtonElement>("[data-provider]")) {
     button.addEventListener("click", async () => {
       if (socialWorking || button.dataset.available !== "true") return;
+      if (formWorking || !current()) return;
       const provider = button.dataset.provider as "google" | "apple";
       socialWorking = true;
       disableSocial(root, true);
+      updateSubmit();
       button.textContent = "Opening…";
       options.onAuthAttempt?.();
       const result = await signInWithProvider(provider);
+      if (!current()) return;
       if (!result.ok) {
         options.onAuthFailure?.();
         socialWorking = false;
         disableSocial(root, false);
+        updateSubmit();
         button.innerHTML = socialLabel(provider);
         say(msg, result.message || "Could not start social sign-in.", "err");
       }
     });
   }
 
-  // Provider configuration lives in Supabase, so these buttons become active
-  // automatically the moment Google/Apple credentials are enabled—no redeploy.
-  //
-  // Buttons start disabled, so a quick tap cannot beat this settings read on a
-  // slow phone. Unknown stays unavailable; a provider becomes clickable only
-  // after Supabase confirms it is configured.
-  void socialAvailability().then((availability) => {
+  // Only offer a configured provider. In particular, an unavailable Apple
+  // button must never masquerade as an alternative to creating an account.
+  const providerStatus = root.querySelector<HTMLElement>(".acct-provider-status")!;
+  const providerRetry = root.querySelector<HTMLButtonElement>(".acct-provider-retry")!;
+  let checkingProviders = false;
+  const checkProviders = async () => {
+    if (checkingProviders || formWorking || socialWorking || !current()) return;
+    checkingProviders = true;
+    providerRetry.disabled = true;
+    const availability = await socialAvailability();
+    if (!current()) return;
+    checkingProviders = false;
+    providerRetry.disabled = false;
+    providerRetry.hidden = availability !== null;
+    providerStatus.hidden = availability?.google === true;
+    providerStatus.textContent = availability === null
+      ? "Google sign-in could not be loaded. Try again or use email above."
+      : "Google sign-in is unavailable right now. Continue with email above.";
     for (const button of root.querySelectorAll<HTMLButtonElement>("[data-provider]")) {
-      const provider = button.dataset.provider as "google" | "apple";
-      if (!availability) {
-        const name = provider === "google" ? "Google" : "Apple";
-        button.dataset.available = "false";
-        button.disabled = true;
-        button.title = `${name} sign-in could not be checked. Use email below.`;
-        button.setAttribute("aria-label", button.title);
-        button.innerHTML = `${socialLabel(provider)}<small>Try email</small>`;
-        continue;
-      }
-      if (availability[provider]) {
-        button.dataset.available = "true";
-        // The settings read can resolve after an OAuth click. It may confirm
-        // availability, but it must not reopen either provider while that
-        // navigation request is still in flight.
-        button.disabled = socialWorking;
-        button.title = "";
-        button.removeAttribute("aria-label");
-        button.innerHTML = socialLabel(provider);
-        continue;
-      }
-      const name = provider === "google" ? "Google" : "Apple";
-      button.dataset.available = "false";
-      button.disabled = true;
-      button.title = `${name} sign-in is awaiting provider setup`;
-      button.setAttribute("aria-label", button.title);
-      button.innerHTML = `${socialLabel(provider)}<small>Coming soon</small>`;
+      const provider = button.dataset.provider as SocialProvider;
+      const state = authProviderState(provider, availability, formWorking || socialWorking);
+      button.dataset.available = String(state.available);
+      button.hidden = state.hidden;
+      button.disabled = state.disabled;
+      if (!socialWorking) button.innerHTML = socialLabel(provider);
     }
-  });
+  };
+  providerRetry.addEventListener("click", () => void checkProviders());
+  void checkProviders();
 }
 
-/**
- * The optional body from the signup form: null when both fields are blank,
- * "invalid" when something was typed that cannot be used, otherwise the
- * canonical pair. Exported for its test; the form never blocks on it.
- */
-export function signupBody(
-  data: FormData,
-  unit: UnitSystem,
-): { heightCm: number; weightKg: number; unit: UnitSystem } | null | "invalid" {
-  const field = (name: string) => String(data.get(name) ?? "").trim();
-  const filled = unit === "metric"
-    ? [field("heightCm"), field("weightKg")]
-    : [field("feet"), field("pounds")];
-  if (filled.every((v) => v === "")) return null;
-  if (filled.some((v) => v === "")) return "invalid";
-  const metric = toMetric(unit === "metric"
-    ? { unit, heightCm: Number(field("heightCm")), weightKg: Number(field("weightKg")) }
-    : { unit, feet: Number(field("feet")), inches: Number(field("inches") || 0), pounds: Number(field("pounds")) });
-  if (!bodyMetricUsable(metric)) return "invalid";
-  return { ...metric, unit };
+export function authProviderState(provider: SocialProvider, availability: SocialAvailability | null, working: boolean): {
+  available: boolean; hidden: boolean; disabled: boolean;
+} {
+  const available = availability?.[provider] === true;
+  return { available, hidden: !available, disabled: !available || working };
 }
 
 export function authSubmitReady(
@@ -431,7 +368,7 @@ function setWorking(button: HTMLButtonElement, working: boolean, idleText = "Wor
 
 function disableSocial(root: HTMLElement, disabled: boolean): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>(".acct-oauth")) {
-    button.disabled = disabled || button.dataset.available === "false";
+    button.disabled = disabled || button.dataset.available !== "true";
   }
 }
 

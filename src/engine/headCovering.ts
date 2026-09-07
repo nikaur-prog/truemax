@@ -1,4 +1,5 @@
-import { FilesetResolver, ImageSegmenter } from "@mediapipe/tasks-vision";
+import type { ImageSegmenter } from "@mediapipe/tasks-vision";
+import { createOptionalModelLoader } from "./optionalModel.js";
 
 // Google's SelfieMulticlass labels:
 // 0 background, 1 hair, 2 body skin, 3 face skin, 4 clothes, 5 accessories.
@@ -17,35 +18,35 @@ export interface HeadCoveringCheck {
   sideCoverRatio: number;
 }
 
-let segmenterPromise: Promise<ImageSegmenter> | null = null;
+const segmenter = createOptionalModelLoader<ImageSegmenter>(async () => {
+  const { FilesetResolver, ImageSegmenter } = await import("@mediapipe/tasks-vision");
+  const fileset = await FilesetResolver.forVisionTasks("/wasm");
+  return ImageSegmenter.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: MODEL, delegate: "CPU" },
+    runningMode: "IMAGE",
+    outputCategoryMask: true,
+    outputConfidenceMasks: false,
+  });
+}, (engine) => engine.close());
 
-function segmenter(): Promise<ImageSegmenter> {
-  return (segmenterPromise ??= (async () => {
-    const fileset = await FilesetResolver.forVisionTasks("/wasm");
-    return ImageSegmenter.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: MODEL, delegate: "CPU" },
-      runningMode: "IMAGE",
-      outputCategoryMask: true,
-      outputConfidenceMasks: false,
-    });
-  })().catch((error: unknown) => {
-    // A failed speculative warm-up must not disable this detector for the
-    // rest of the session after a phone regains its connection.
-    segmenterPromise = null;
-    throw error;
-  }));
+export const COVERING_WAIT_MS = 1_500;
+export interface SegmentationOptions {
+  signal?: AbortSignal;
+  /** The caller's existing scan generation check, including sign-out. */
+  isCurrent?: () => boolean;
+  waitMs?: number;
 }
 
 /**
  * Start the optional covering detector before a captured frame needs it.
  *
- * The model is substantially larger than the face landmarker. Warming both on
- * the person's first capture intent lets the network and WASM setup overlap
+ * The model is substantially larger than the face landmarker. Warming after
+ * the essential detector is ready lets the network and WASM setup overlap
  * the camera/upload interaction instead of presenting that cost as a frozen
  * "Preparing analysis" state after the photograph is already accepted.
  */
 export async function warmHeadCovering(): Promise<void> {
-  await segmenter();
+  await segmenter.load();
 }
 
 interface Box {
@@ -163,27 +164,34 @@ export function classifyCoveringMask(data: Uint8Array, width: number, height: nu
  */
 export async function segmentCategories(
   source: HTMLCanvasElement,
+  options: SegmentationOptions = {},
 ): Promise<{ data: Uint8Array; width: number; height: number } | null> {
   try {
-    const engine = await segmenter();
+    if (options.signal?.aborted || options.isCurrent?.() === false) return null;
+    const engine = await segmenter.load(options.waitMs, options.signal);
+    // A late initialization must never read a reused canvas from an abandoned
+    // scan. This guard runs before the synchronous inference call.
+    if (!engine || options.signal?.aborted || options.isCurrent?.() === false) return null;
     const result = engine.segment(source);
     const mask = result.categoryMask;
     if (!mask) return null;
-    const data = new Uint8Array(mask.getAsUint8Array());
-    const out = { data, width: mask.width, height: mask.height };
-    mask.close();
-    return out;
+    try {
+      const data = new Uint8Array(mask.getAsUint8Array());
+      return { data, width: mask.width, height: mask.height };
+    } finally {
+      mask.close();
+    }
   } catch (error) {
     console.warn("Segmentation unavailable", error);
     return null;
   }
 }
 
-export async function detectHeadCovering(source: HTMLCanvasElement): Promise<HeadCoveringCheck> {
+export async function detectHeadCovering(source: HTMLCanvasElement, options: SegmentationOptions = {}): Promise<HeadCoveringCheck> {
   // The structural scan remains usable if the optional 16 MB model cannot
   // load. The screen has already asked for bare, uncovered capture; the
   // returned availability flag keeps this failure visible to diagnostics.
-  const seg = await segmentCategories(source);
+  const seg = await segmentCategories(source, { ...options, waitMs: options.waitMs ?? COVERING_WAIT_MS });
   if (!seg) return { available: false, hatLikely: false, hoodLikely: false, topCoverRatio: 0, sideCoverRatio: 0 };
   return classifyCoveringMask(seg.data, seg.width, seg.height);
 }

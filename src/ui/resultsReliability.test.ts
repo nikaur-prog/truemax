@@ -38,11 +38,11 @@ test("a thinking result pose is preserved but bounded before idle", () => {
 test("mobile photographs stay full-sized and category navigation owns stickiness", () => {
   assert.match(results, /classList\.toggle\("region-focus", isRegion\)/);
   assert.match(results, /mobileRegionFocused\(\) \? IDENTITY_ZOOM : zoomFor/);
-  assert.match(styles, /max-height: min\(38svh, 430px\)/);
-  assert.match(styles, /height: min\(38svh, 430px\); object-fit: cover/);
+  assert.match(styles, /max-height: var\(--report-frame-h, min\(28svh, 330px\)\)/);
+  assert.match(styles, /height: var\(--report-frame-h, min\(28svh, 330px\)\); object-fit: contain/);
   assert.doesNotMatch(styles, /\.pane-photo\.shrunk/);
   assert.match(styles, /\.topbar\.report-compact/);
-  assert.match(styles, /var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 38svh\)/);
+  assert.match(styles, /var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 28svh\)/);
   assert.match(styles, /var\(--face-x, center\)/);
   assert.match(styles, /var\(--face-y, 40%\)/);
 });

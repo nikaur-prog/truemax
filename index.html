@@ -7,7 +7,7 @@
     <!-- Link previews. Without these, a share of truemax.app on TikTok,
          iMessage or anywhere else renders as a bare URL: no image, no claim.
          The image is generated from the Max drawing by scripts/make-og.mjs. -->
-    <meta name="description" content="Rate your face with 43 measurements against published reference ranges. Get a private, on-device face score and practical ways to improve your appearance." />
+    <meta name="description" content="Understand your face with on-device measurements, an optional side photo and clear reference ranges. See your face score and practical next steps." />
     <meta name="google-site-verification" content="y-xbNIn9onb3iggaNGiTsUBpZQmGBKXZ4xe4lPa8Ut4" />
     <link rel="canonical" href="https://www.truemax.app/" />
     <meta property="og:title" content="Face Score and Facial Analysis App | TrueMax" />
@@ -18,7 +18,7 @@
     <meta property="og:site_name" content="TrueMax" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Face Score and Facial Analysis App | TrueMax" />
-    <meta name="twitter:description" content="A private, on-device face score built from 43 facial measurements and published reference ranges." />
+    <meta name="twitter:description" content="An on-device face score with an optional side photo, clear measurements and practical next steps." />
     <meta name="twitter:image" content="https://www.truemax.app/og.png" />
     <meta name="theme-color" content="#141518" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -51,7 +51,7 @@
             "url": "https://www.truemax.app/",
             "applicationCategory": "LifestyleApplication",
             "operatingSystem": "Any modern web browser",
-            "description": "An on-device facial analysis app that compares 43 facial measurements with published reference ranges.",
+            "description": "A facial analysis app with on-device front measurements, an optional side photo and explained reference ranges.",
             "offers": {
               "@type": "Offer",
               "price": "0",
@@ -177,6 +177,7 @@
              keyboard and a pointer. Telling a phone to press Cmd-V is worse
              than saying nothing. -->
         <p class="paste-hint" id="paste-hint" hidden></p>
+        <p class="capture-privacy">Front analysis stays on this device. Side photo optional.</p>
       </div>
       <input type="file" id="file-input" accept="image/*" hidden />
 
@@ -187,7 +188,7 @@
            and worth reading; it is not worth making first. -->
       <p class="sub">
         <b class="sub-num">478</b> facial landmarks detected, supporting 43
-        measurements compared against real population data.
+        measurements compared against defined reference ranges.
         <!-- The provenance line moved here from the demo card itself: the
              owner's call that a caption stamped on the picture over-explained
              a demo, while dropping the disclosure entirely would let a named,
@@ -272,7 +273,7 @@
           <li>
             <span class="journey-n">1</span>
             <b>Measure</b>
-            <p>43 measurements, taken the same way every scan, against published population data. You see all of them and the range each was compared to.</p>
+            <p>43 measurements against defined reference ranges. You see the range each was compared to, with the research and calibration limits in <a href="/methodology">our methodology</a>.</p>
           </li>
           <li>
             <span class="journey-n">2</span>
@@ -466,7 +467,7 @@
 
     <p class="foot">
       TRUEMAX · ON-DEVICE MEASUREMENT ENGINE · TRUEMAX.APP · <span id="build-stamp">·······</span>
-      <span class="foot-links"><a href="/guides">Guides</a> · <a href="/methodology">Methodology</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
+      <span class="foot-links"><a href="/how-it-works">How it works</a> · <a href="/pricing">Pricing</a> · <a href="/help/take-a-good-face-scan">Photo help</a> · <a href="/guides">Guides</a> · <a href="/methodology">Methodology</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
     </p>
     <script type="module" src="/src/main.ts"></script>
   </body>

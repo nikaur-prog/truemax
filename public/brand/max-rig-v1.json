@@ -1,17 +1,25 @@
 {
-  "version": 1,
+  "version": 3,
   "source": "scripts/build-max-3d.mjs",
+  "identitySource": "src/ui/maxCharacter.ts",
+  "identity": "Round original oval Max with pupil-less light bars, inset visor, navy flippers and expressive prop routines",
   "rig": "rigid transform hierarchy",
-  "triangles": 8596,
+  "triangles": 18712,
   "materials": 3,
-  "bytes": 203356,
+  "bytes": 1066568,
   "clips": [
     "idle",
     "listening",
     "thinking",
     "speaking",
     "celebrate",
-    "quiet"
+    "quiet",
+    "wave",
+    "shocked",
+    "angry",
+    "mirror",
+    "skate",
+    "guitar"
   ],
   "license": "Original TrueMax project asset. No third-party source meshes or textures.",
   "approved": false

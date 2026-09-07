@@ -454,7 +454,7 @@ body {
    wrapping at around 46 characters inside a column that had room to spare while
    the page had empty gutters on both sides. Height is untouched: this is a
    column-width change, not a bigger card. */
-#v-main { display: grid; grid-template-columns: 38% 1fr; gap: 34px; max-width: 1240px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
+#v-main { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr); gap: 28px; max-width: 1320px; margin: 26px auto 90px; padding: 0 26px; align-items: start; }
 .pane-photo { position: sticky; top: 78px; }
 .face-frame { position: relative; border-radius: 22px; overflow: hidden; background: #101113; box-shadow: 0 18px 60px rgba(20, 21, 24, 0.12); line-height: 0; scroll-margin-top: 84px; }
 /* The camera. Zooms are translate+scale about a fixed 0 0 origin (see
@@ -679,8 +679,14 @@ body {
 }
 .rtabs-sentinel { height: 0; pointer-events: none; }
 .rtabs {
-  display: flex; flex-wrap: wrap; gap: 7px;
+  display: flex; flex-wrap: nowrap; gap: 7px; min-width: 0;
+  overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
 }
+.rtabs::-webkit-scrollbar { display: none; }
+.rtabs-rail { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
+.rtabs { grid-column: 1; grid-row: 1; }
+.rtabs-track { grid-column: 1 / -1; grid-row: 2; }
+.rtab-plan { grid-column: 2; grid-row: 1; align-self: start; }
 /* Where you are in the row, and how much of it is left. Two pixels tall, and
    absent entirely when the tabs already fit — see mountTabScrollbar in
    ui/results.ts. Above the wrapping breakpoint the row cannot scroll, so it
@@ -701,7 +707,7 @@ body {
    right-edge fade so it reads as scrollable rather than cut off. That fade,
    not a wider strip, is the fix for "the Proportions tab looks chopped": the
    tabs were always scrollable, they just never looked it. */
-@media (max-width: 760px) {
+@media (max-width: 850px) {
   .rtabs {
     flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
     /* Without this the swipe CHAINS to the document once the tabs hit their
@@ -718,10 +724,11 @@ body {
      block for an absolutely positioned child, and declaring relative in a
      later rule silently un-sticks the whole row. */
   .rtabs-rail::after {
-    content: ""; position: absolute; right: 0; top: 0; bottom: 1px; width: 42px;
+    content: ""; position: absolute; right: 0; top: 0; bottom: 1px; width: 24px;
     pointer-events: none;
     background: linear-gradient(90deg, transparent, var(--bg) 78%);
   }
+  .rtabs-rail:has(.rtab-plan)::after { right: 66px; }
 }
 .rtabs::-webkit-scrollbar { display: none; }
 /* `transition: all` animates layout-affecting properties too, so every tab
@@ -806,7 +813,7 @@ body {
 .delta-read.worthNoting { background: var(--acc-soft); color: #4a6b63; }
 .delta-read.worthNoting b { color: var(--acc); }
 
-.viewcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 4px; }
+.viewcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0 4px; }
 .viewcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 10px 11px; text-align: center; }
 .viewcard.lead { background: var(--acc-soft); border-color: transparent; }
 .vc-label { display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.14em; color: var(--mut); }
@@ -880,7 +887,7 @@ body.funnel-open { overflow: hidden; }
 .trial-progress i.done { background: color-mix(in srgb, var(--acc) 45%, var(--line)); }
 .trial-progress i.now { background: var(--acc); box-shadow: 0 0 10px rgba(17,138,113,.34); }
 .trial-close {
-  width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line);
+  width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--line);
   border-radius: 99px; background: color-mix(in srgb, var(--card) 88%, transparent); color: var(--mut);
   font: 12px var(--sans); cursor: pointer; transition: color .2s, border-color .2s, transform .2s;
 }
@@ -907,6 +914,21 @@ body.funnel-open { overflow: hidden; }
 .trial-input:focus { border-color: var(--acc); background: #fff; box-shadow: 0 0 0 4px rgba(17,138,113,.09); }
 .trial-input:disabled { color: var(--mut); background: var(--soft); cursor: not-allowed; }
 .trial-field-note { margin: -5px 0 14px; color: var(--mut); font-size: 10.5px; line-height: 1.45; }
+.trial-body-units {
+  display: inline-flex; gap: 4px; padding: 4px; margin: 0 0 20px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--soft);
+}
+.trial-body-units button {
+  min-width: 104px; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--mut); font: 600 14px/1.2 var(--sans); cursor: pointer;
+}
+.trial-body-units button[aria-pressed="true"] { background: var(--card); color: var(--acc); box-shadow: 0 2px 6px rgba(20,21,24,.06); }
+.trial-body-units button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.trial-body-units button:disabled { cursor: wait; opacity: .6; }
+.trial-imperial-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.trial-body-setup .trial-body { overscroll-behavior-y: contain; }
+.trial-body-setup .trial-field { min-width: 0; }
+.trial-body-setup .trial-input { min-width: 0; }
 .trial-textarea { min-height: 102px; resize: vertical; }
 .trial-label { margin: 22px 0 10px; }
 .trial-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
@@ -1140,6 +1162,8 @@ body.funnel-open { overflow: hidden; }
   .trial-body { padding: 28px 20px 18px; }
   .trial-body h2 { font-size: clamp(31px, 9vw, 42px); }
   .trial-fields.two, .trial-choices { grid-template-columns: 1fr; }
+  .trial-imperial-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trial-imperial-fields > :last-child { grid-column: 1 / -1; }
   .trial-choices.compact { grid-template-columns: 1fr 1fr; }
   .trial-choice { min-height: 58px; }
   .trial-status { padding: 0 20px; }
@@ -1243,6 +1267,28 @@ button.pillar:active { transform: translateY(0); }
 .dcard h3 { font-size: 13.5px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 .dcard h3 em { font-family: var(--mono); font-style: normal; font-size: 9.5px; letter-spacing: 0.15em; color: var(--mut); font-weight: 400; }
 
+/* Measurements are the primary reading at every width. Comparisons and
+   explanations expand in place, never behind a horizontal swipe gesture. */
+.report-deck { display: grid; grid-template-columns: minmax(0, 1fr); overflow: visible; scroll-snap-type: none; }
+.report-reading { border-top: 1px solid var(--line); margin-top: 12px; }
+.report-reading > summary, .report-comparisons > summary {
+  min-height: 44px; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; cursor: pointer; font-size: 13px; font-weight: 600; list-style: none;
+}
+.report-reading > summary::-webkit-details-marker,
+.report-comparisons > summary::-webkit-details-marker { display: none; }
+.report-reading > summary::after, .report-comparisons > summary::after { content: "+"; font-size: 19px; font-weight: 400; flex: none; }
+.report-reading[open] > summary::after, .report-comparisons[open] > summary::after { content: "−"; }
+.report-comparisons > summary > span { flex: 1; text-align: right; font-size: 10px; font-weight: 400; color: var(--mut); }
+.report-comparisons:not([open]) { padding-top: 10px; padding-bottom: 10px; }
+.report-comparisons[open] > summary { margin-bottom: 10px; }
+.report-reading .typebox { margin-top: 4px; padding-top: 0; border-top: 0; }
+.metric-summary { margin: 7px 0 0; color: var(--mut); font-size: 12.5px; line-height: 1.5; }
+.report-reading > summary:focus-visible, .report-comparisons > summary:focus-visible { outline: 2px solid var(--acc); outline-offset: 4px; border-radius: 6px; }
+@media (min-width: 1440px) {
+  .report-deck { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+}
+
 .metric { margin-bottom: 14px; opacity: 0; transform: translateY(6px); animation: rise 0.32s cubic-bezier(0.2, 0.6, 0.2, 1) forwards; border-radius: 10px; transition: background-color 0.12s; }
 /* Hovering a row is now the primary gesture, so it needs to look like a target.
    Padding is baked in at rest rather than added on hover — changing padding on
@@ -1260,7 +1306,7 @@ button.pillar:active { transform: translateY(0); }
 .mrow .mscore { color: var(--mut); margin-left: 8px; }
 .rangebar { position: relative; height: 6px; border-radius: 99px; background: linear-gradient(90deg, #d6907c, #e8cb84, #a3cd97, #5fb79f, #a3cd97, #e8cb84, #d6907c); }
 .rangebar .ideal { position: absolute; top: -2.5px; bottom: -2.5px; border: 1px solid rgba(20, 21, 24, 0.22); border-radius: 99px; pointer-events: none; }
-.rangebar i { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 99px; background: #fff; border: 2.5px solid var(--ink); transform: translate(-50%, -50%); left: 0; transition: left 0.7s cubic-bezier(0.25, 0.6, 0.2, 1); }
+.rangebar i { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 99px; background: #fff; border: 2.5px solid var(--ink); transform: translate(-50%, -50%); left: 0; }
 
 .typebox { font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: #3b3d41; min-height: 112px; white-space: pre-wrap; cursor: pointer; }
 .caret { display: inline-block; width: 7px; height: 14px; background: var(--acc); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
@@ -1980,7 +2026,7 @@ body.scan-confirm-open { overflow: hidden; }
 .foot { max-width: 1080px; margin: 0 auto; padding: 26px; text-align: center; font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: #c2c3be; }
 
 /* ---------- mobile stack (9:16 recording view) ---------- */
-@media (max-width: 760px) {
+@media (max-width: 850px) {
   #v-main { grid-template-columns: 1fr; gap: 20px; margin-top: 16px; }
   .pane-photo { position: static; }
   /* The pass on a phone: the frame is width-bound and short, which left the
@@ -3650,6 +3696,23 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
    full-width as before; on a short laptop the svh cap shrinks it. */
 #capture-stage { width: min(420px, 100%, 52svh); }
 
+/* Reserve the first short-phone screen for the headline and scan actions.
+   Live camera sizing stays in its dedicated takeover rules. */
+@media (max-width: 850px) {
+  #v-upload:not(:has(.oval-frame.live)) { padding-top: 18px; }
+  #v-upload:not(:has(.oval-frame.live)) #capture-stage { width: 100%; max-width: 420px; }
+  #v-upload:not(:has(.oval-frame.live)) .oval-frame { width: min(100%, 40svh, 340px); align-self: center; }
+  #v-upload:not(:has(.oval-frame.live)) h1 { font-size: clamp(30px, 8vw, 38px); margin-bottom: 10px; }
+  #v-upload:not(:has(.oval-frame.live)) .cam-actions .btn { min-width: 0; padding: 15px 10px; font-size: 14px; }
+  #v-upload:not(:has(.oval-frame.live)) .cam-actions .btn > span { white-space: nowrap; }
+  #v-upload .paste-hint { display: none; }
+}
+.capture-privacy { margin: 8px 0 0; text-align: center; font-size: 12px; line-height: 1.45; color: var(--mut); }
+#v-upload:has(.oval-frame.live) .capture-privacy { display: none; }
+@media (min-width: 1100px) {
+  #v-upload:not(:has(.oval-frame.live)) .oval-frame { width: min(100%, calc((100svh - 210px) * .8)); align-self: center; }
+}
+
 /* Very short windows (phone landscape, tiny laptop): drop the lines nobody
    re-reads so the shutter stays on screen. Harmless display toggles only. */
 @media (max-height: 520px) { .sub-note, .sub-more { display: none; } }
@@ -3869,8 +3932,14 @@ body.auth-modal-open { overflow: hidden; }
 }
 .acct-lede { color: var(--mut); font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
 .acct-social { display: grid; gap: 9px; }
+.acct-provider-options { margin-top: 20px; }
+.acct-provider-status { color: var(--mut); font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
+.acct-provider-retry { min-height: 44px; border: 0; padding: 8px 0; background: none; color: var(--acc); font: 600 13px/1.3 var(--sans); cursor: pointer; }
+.acct-provider-retry:hover { text-decoration: underline; }
+.acct-provider-retry:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.acct-provider-options [hidden] { display: none; }
 .acct-oauth {
-  width: 100%; min-height: 43px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 10px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink);
   font: 500 13.5px/1 var(--sans); cursor: pointer; transition: background 0.12s, border-color 0.12s;
 }
@@ -3894,6 +3963,7 @@ body.auth-modal-open { overflow: hidden; }
    feeling on a phone. */
 .acct-field { display: flex; flex-direction: column; gap: 7px; }
 .acct-field span { font-size: 11px; letter-spacing: 0.06em; color: var(--mut); text-transform: uppercase; font-weight: 600; }
+.acct-field small { color: var(--mut); font-size: 11.5px; line-height: 1.5; }
 .acct-field input {
   width: 100%; min-height: 52px; font-family: var(--sans); font-size: 16px; color: var(--ink);
   background: rgba(255,255,255,.76); border: 1px solid var(--line); border-radius: 14px; padding: 14px 15px;
@@ -3916,11 +3986,11 @@ body.auth-modal-open { overflow: hidden; }
 }
 .acct-switch { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
 .acct-switch button {
-  background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12.5px;
+  background: none; border: 0; min-height: 44px; padding: 8px 0; cursor: pointer; font: inherit; font-size: 12.5px;
   color: var(--acc);
 }
 .acct-switch button:hover { text-decoration: underline; }
-.acct-portal-link { display: inline-block; color: var(--mut); font-size: 11.5px; margin-top: 15px; text-decoration: none; }
+.acct-portal-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--mut); font-size: 11.5px; margin-top: 4px; text-decoration: none; }
 .acct-portal-link:hover { color: var(--acc); }
 .acct-home { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 
@@ -6175,6 +6245,11 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .viewtoggle-anchor { display: none !important; }
   .mobile-score-summary { display: grid; gap: 12px; margin: 2px 0 8px; }
   .mobile-viewcards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .mobile-viewcards:has(> .viewcard:only-child) { grid-template-columns: minmax(0, 1fr); }
+  .mobile-viewcards > .viewcard:only-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; text-align: left; padding: 14px 18px; }
+  .mobile-viewcards > .viewcard:only-child .vc-label { grid-column: 1; grid-row: 1; }
+  .mobile-viewcards > .viewcard:only-child .vc-rank { grid-column: 1; grid-row: 2; }
+  .mobile-viewcards > .viewcard:only-child .vc-score { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
   button.viewcard {
     width: 100%; color: inherit; font: inherit; cursor: pointer;
     transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
@@ -6230,6 +6305,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
     position: sticky;
     top: var(--report-header-h, 38px);
   }
+  /* Budget the frame separately from the compact chrome, rail and pane gap.
+     A fixed viewport-based size avoids shrinking the face during a scroll. */
+  #v-main { --report-frame-h: clamp(110px, calc(40svh - 140px), 280px); }
   #v-main:has(.pane-photo.results-ready) { gap: 10px; margin-top: 8px; }
   /* Reading order on a phone: photograph, score, then the small print about
      how it was measured. The notes used to sit ABOVE the picture, which meant
@@ -6257,8 +6335,8 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   /* The entire face remains legible while most of the phone is left for the
      selected region. The frame does not shrink during the scroll. */
   .pane-photo.results-ready .face-frame {
-    height: min(38svh, 430px);
-    max-height: min(38svh, 430px);
+    height: var(--report-frame-h, min(28svh, 330px));
+    max-height: var(--report-frame-h, min(28svh, 330px));
   }
   /* While the engine is still working there is no score strip and nothing
      below the progress bar, so the 52vh cap left the best animation in the
@@ -6267,7 +6345,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      rest of the strip already moves on. */
   .pane-photo:not(.results-ready) .face-frame { max-height: 66vh; }
   .pane-photo.results-ready .face-frame .zoomable canvas {
-    height: min(38svh, 430px); object-fit: cover;
+    height: var(--report-frame-h, min(28svh, 330px)); object-fit: contain;
     object-position: var(--face-x, center) var(--face-y, 40%);
   }
   /* A finished result already names its active view in the score cards and
@@ -6297,7 +6375,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
      measured live, so account avatars, browser text scaling and a rotated
      phone cannot make the controls overlap either the face or app chrome. */
   .rtabs-rail {
-    top: calc(var(--report-header-h, 38px) + var(--report-photo-h, 38svh));
+    top: calc(var(--report-header-h, 38px) + var(--report-photo-h, 28svh));
   }
   /* The rail only earns elevation once it is actually pinned. Before that it
      remains part of the page; afterwards one restrained shadow separates the

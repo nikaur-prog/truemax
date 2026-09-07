@@ -15,7 +15,7 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#141518" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/static-site.css" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -24,7 +24,7 @@
             "@type": "Article",
             "headline": "How TrueMax measures a face",
             "description": "The inputs, reference ranges, scoring boundaries, privacy design and limitations behind TrueMax facial analysis.",
-            "dateModified": "2026-08-31",
+            "dateModified": "2026-09-07",
             "mainEntityOfPage": "https://www.truemax.app/methodology",
             "author": {
               "@type": "Organization",
@@ -60,24 +60,63 @@
       <nav class="guide-breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a> / Methodology</nav>
       <p class="legal-kicker">Transparency</p>
       <h1>How TrueMax measures a face</h1>
-      <p class="legal-meta">Updated 31 August 2026</p>
+      <p class="legal-meta">Updated 7 September 2026 · Published by <a href="/about">TrueMax</a></p>
       <p class="guide-deck">TrueMax is a facial measurement tool. This page explains what enters the analysis, how the output is organised and where the method stops.</p>
 
       <h2>Inputs</h2>
-      <p>The complete analysis uses one front photograph and one 90-degree side-profile photograph. The front view supplies symmetry, vertical and horizontal proportions, eye, nose, lip and jaw measurements. The side view supplies measurements that do not exist in a front projection, including profile angles and relative projection.</p>
+      <p>Start with one front photograph. A 90-degree side-profile photograph is optional and adds measurements that do not exist in a front projection, including profile angles and relative projection. The front view supplies symmetry, proportions and visible eye, nose, lip and jaw measurements. A front-only report does not invent missing side values.</p>
       <p>Image quality matters. Pose, expression, occlusion, camera distance and lens distortion can all move landmarks. TrueMax validates the photograph and omits measurements that cannot be supported reliably enough by the available view.</p>
+      <p>Use the <a href="/help/take-a-good-face-scan">illustrated photo guide</a> to keep camera position, lighting and expression repeatable.</p>
 
       <h2>Landmarks and measurements</h2>
       <p>The front analysis detects a 478-point facial mesh. Named points and groups of points become distances, ratios, angles and symmetry comparisons. The side profile uses a smaller set of visible landmarks that you can review before the analysis continues.</p>
       <p>Distances are normalised against stable dimensions of the same face. This prevents the pixel size of the photograph from becoming the measurement. Some measurements need the front view, some need the side view and some combine evidence from both.</p>
 
-      <h2>Reference ranges</h2>
-      <p>Each measurement is compared with a defined reference range. TrueMax asks which sex reference population to use because the reference distributions differ and a weak visual guess should not make that choice. The app does not infer ethnicity.</p>
-      <p>Reference data describes a population distribution. It does not say that every person should move toward its centre, and it cannot represent every cultural or individual preference.</p>
+      <figure class="guide-figure">
+        <svg viewBox="0 0 330 300" role="img" aria-labelledby="measurement-map-title measurement-map-desc">
+          <title id="measurement-map-title">A map of three front-view measurements</title>
+          <desc id="measurement-map-desc">A schematic face labels the cheekbone width, nose width and mouth width. Nose width divided by mouth width gives the nose-to-mouth ratio.</desc>
+          <g transform="translate(-45 0)">
+          <ellipse cx="195" cy="153" rx="102" ry="128" fill="#e4f0ec" stroke="currentColor" stroke-width="2"/>
+          <path d="M135 116h34m52 0h34M195 128v47M160 216q35 12 70 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <path d="M93 145h204M174 183h42M155 210h80" fill="none" stroke="currentColor" stroke-width="3"/>
+          <g fill="currentColor"><circle cx="93" cy="145" r="4"/><circle cx="297" cy="145" r="4"/><circle cx="174" cy="183" r="4"/><circle cx="216" cy="183" r="4"/><circle cx="155" cy="210" r="4"/><circle cx="235" cy="210" r="4"/></g>
+          <path d="M297 145h36M216 183h117M235 210h98" fill="none" stroke="currentColor" stroke-dasharray="4 4"/>
+          <text x="345" y="149">1</text><text x="345" y="187">2</text><text x="345" y="214">3</text>
+          </g>
+        </svg>
+        <p class="guide-diagram-key"><span><b>1</b> Cheekbone width</span><span><b>2</b> Nose width</span><span><b>3</b> Mouth width</span></p>
+        <figcaption>This schematic is not an ideal face or a scored scan. The points mark visible surface locations. A cheek-width measurement cannot separate bone width from the soft tissue covering it. Lines are measurement constructions, not treatment targets.</figcaption>
+      </figure>
+
+      <h2 id="worked-example">A worked measurement, before any score</h2>
+      <p>The nose-to-mouth ratio divides the horizontal width across the outer nose points by the distance between the mouth corners. Suppose those distances on a straight, corrected front image are 42 and 60 units:</p>
+      <p class="guide-equation"><b>Nose : mouth width = 42 ÷ 60 = 0.70</b></p>
+      <p>At double the image size, 84 ÷ 120 still equals 0.70. This is why the ratio does not need a millimetre ruler. Perspective, an open mouth or misplaced points can still change it. The result 0.70 is a measurement, not a score of 7/10 and not a recommended target.</p>
+
+      <h2 id="references">What the references support</h2>
+      <p>TrueMax uses explicit male and female reference tables, selected by the user, not inferred ethnicity. Those tables also contain product-specific calibration, provisional values and scoring choices. They are not an untouched copy of a single published population study.</p>
+      <table class="legal-table">
+        <caption>Research context mapped to implemented readings</caption>
+        <thead><tr><th scope="col">Source</th><th scope="col">Connection to TrueMax</th><th scope="col">Limit</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://pubmed.ncbi.nlm.nih.gov/16077306/">Farkas and colleagues, 2005</a></td><td>Facial anthropometry, including nasal and mouth dimensions, provides context for visible width and proportion readings such as nose-to-mouth width.</td><td>The study included 1,470 adults aged 18 to 30 from multiple populations and described its samples as preliminary. It does not validate TrueMax's mesh-based ratios, numerical ideals or scores, and is not a reference for every age.</td></tr>
+          <tr><td><a href="https://pubmed.ncbi.nlm.nih.gov/6575614/">Holdaway, 1983</a></td><td>The signed H-angle construction used for the chin-profile reading compares the upper-lip-to-chin line with the soft-tissue nasion-to-chin line.</td><td>This originated in clinical soft-tissue analysis. A phone-photo implementation is not an orthodontic examination or a prediction of treatment response.</td></tr>
+          <tr><td><a href="https://pubmed.ncbi.nlm.nih.gov/29494735/">Ward and colleagues, 2018</a></td><td>Short-distance photography changes apparent nasal proportions, relevant to nose widths and other depth-sensitive readings.</td><td>Normalising pixels does not remove perspective. Consistent distance helps comparison but does not recover full three-dimensional anatomy.</td></tr>
+        </tbody>
+      </table>
+      <p>These sources explain measurement concepts and limitations. They are <b>not</b> claimed as the source of every mean, spread, ideal or weight in the scoring tables. A full per-value source audit and broader representative validation remain necessary. The app's reference percentile should therefore be read as a model-relative estimate, not a surveyed rank among all people.</p>
+      <p>Some similar-sounding measurements also use different units: TrueMax's lip-to-E-line distances are expressed as a percentage of visible face height, not the millimetres used in clinical measurements. A soft-tissue jaw angle in a photo is not interchangeable with a skeletal angle from a radiograph.</p>
 
       <h2>Score and percentile</h2>
       <p>Measurement-level results are combined into a canonical score from 0 to 10. Population percentile is calculated and displayed separately. The overall score is not silently stretched to create a more dramatic rating.</p>
       <p>Measurements with lower confidence can be excluded or identified as unavailable. A result based on incomplete evidence should not pretend to have the same certainty as a clean front and side pair.</p>
+      <p>A direction or an ideal band, a metric weight and a reliability adjustment are choices in the scoring system. They are not biological rules. The report, saved scorecard and exports use the same report values; changing the presentation must not quietly change the number.</p>
+
+      <h2 id="repeatability">What has and has not been validated</h2>
+      <p>The repository includes automated tests for measurement calculations, mirroring, rotation, missing points and consistent score output. Those tests check implementation behaviour; they do not prove accuracy on new people or establish a real-world noise floor.</p>
+      <p>Existing calibration work uses small, non-random collections. The repeat-photo programme calls for different photographs of the same consenting person under recorded conditions, with automatic and corrected placement evaluated separately. A broad completed study and a validated fixed rescan error are not currently published. We therefore do not promise that a particular fraction of a point proves progress.</p>
+      <p>A publishable benchmark needs the sample size, capture protocol, device and pose conditions, exclusions, per-measurement spread and failures. Re-uploading the same image is not a repeatability study. A numerical change alone does not establish fat loss, improved skin health or a treatment effect.</p>
 
       <div class="guide-callout">
         <h2>What the score means</h2>
@@ -85,7 +124,8 @@
       </div>
 
       <h2>Privacy boundary</h2>
-      <p>The measurement engine runs in your browser. Your front photograph is not uploaded to TrueMax. Scan photographs and thumbnails are stored in the browser so history can work on that device. An optional, separate consent step can send one side-profile image and reviewed landmark positions to improve automatic placement. Declining does not change the score or account.</p>
+      <p>Front-photo measurement runs in your browser. Scan photographs and thumbnails are stored locally in that browser for history. A side photo is optional. Cloud side-point placement requires consent; a no-upload placement path remains available. TrueMax does not store the source image for the cloud-placement request. Anthropic normally deletes commercial API inputs and outputs within 30 days, subject to its stated retention exceptions.</p>
+      <p>Sharing a side photo and reviewed positions to improve placement requires separate feedback consent and has a 90-day TrueMax retention limit. Separately, adult Max members can consent to a Goal preview, which uploads the selected front photo and, if present, side photo to the named provider. TrueMax does not store these source photos; generated previews expire after 30 days, or up to a year when explicitly kept. OpenAI may retain abuse-monitoring data for up to 30 days. Higgsfield applies its commercial privacy terms, and the integration cannot delete its provider upload. These choices are not required for the front analysis.</p>
       <p>The complete operational details, retention periods and processor list are in the <a href="/privacy">privacy policy</a>.</p>
 
       <h2>Known limitations</h2>

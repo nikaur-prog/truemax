@@ -52,7 +52,7 @@ test("mobile report scrolling compacts chrome without building a hidden score ca
   assert.match(photoLifecycle, /classList\.toggle\("report-compact", compact\)/);
   assert.doesNotMatch(photoLifecycle, /classList\.(?:add|remove)\("shrunk"/);
   assert.match(styles, /\.pane-photo\.results-ready\.report-photo-pinned \{\s+position: sticky/);
-  assert.match(styles, /top: calc\(var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 38svh\)\)/);
+  assert.match(styles, /top: calc\(var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 28svh\)\)/);
 });
 
 test("the photograph and category rail remain one persistent mobile stack", () => {

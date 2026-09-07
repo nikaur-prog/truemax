@@ -11,7 +11,7 @@
     <link rel="alternate icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/static-site.css" />
   </head>
   <body class="legal-page">
     <header class="topbar">
@@ -22,7 +22,7 @@
     <main class="legal-shell">
       <p class="legal-kicker">TrueMax</p>
       <h1>Privacy Policy</h1>
-      <p class="legal-meta">Last updated 31 August 2026</p>
+      <p class="legal-meta">Last updated 7 September 2026</p>
 
       <!-- The summary is not decoration and it is not marketing. Almost nobody
            reads a privacy policy end to end, so the two facts that actually
@@ -33,12 +33,12 @@
         <h2>The short version</h2>
         <p>
           <b>Your front photograph is analysed on your own device.</b> The face
-          measurement engine runs entirely inside your browser. Your photos stay
-          on your phone unless you separately choose a Goal preview, which sends
-          the selected scan once to create it.
+          measurement engine runs entirely inside your browser. The front photo
+          is not uploaded for the measurement. Separately choosing a Goal preview
+          sends the selected front photo and, if present, side photo once to create it.
         </p>
         <p>
-          <b>A side profile has two separate choices.</b> You can allow one cloud
+          <b>A side profile is optional and has two separate choices.</b> You can allow one cloud
           request to place its thirteen points, or place them on-device yourself.
           After review, a different optional consent can share that side photo and
           its point positions for up to 90 days to improve future placement.
@@ -102,9 +102,11 @@
         <a href="https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">Anthropic's commercial data-retention information</a>.
       </p>
       <p>
-        If you decline, are signed out, reach the daily cloud limit, or the
-        request fails or takes longer than five seconds, an on-device placement
-        is used instead. Your choice is remembered in this browser and can be
+        If you decline, you can place the points on-device without an upload.
+        If you are signed out, reach the daily cloud limit, or the request fails
+        or reaches its bounded time limit, an on-device starting layout is used
+        instead. You can review it, place points yourself, retake the photo or
+        skip the side. Your choice is remembered in this browser and can be
         changed from the side-profile capture screen.
       </p>
 
@@ -162,7 +164,7 @@
             <td>To calculate energy and macros for your daily plan on Max.
               They are never used in your face score</td>
             <td>Supabase, readable only by your account and the service.
-              Optional at signup, editable or removable in Settings, and deleted
+              Optional for adults in the post-signup quiz, editable or removable in Settings, and deleted
               with your account</td>
           </tr>
           <tr>

@@ -203,25 +203,27 @@ export async function saveOnboardingProfile(
   user: User,
   profile: OnboardingProfile,
   attempts = 3,
+  clientLoader: typeof getSupabaseClient = getSupabaseClient,
 ): Promise<SaveProfileResult> {
   // Retried, because the failure this hit in testing was a phone on one bar of
   // 4G — "TypeError: Load failed" is Safari's words for a fetch that never left
   // the handset, and it is exactly the kind of failure that succeeds on the
   // second try a second later.
   for (let attempt = 1; attempt < attempts; attempt++) {
-    const result = await attemptSave(user, profile);
+    const result = await attemptSave(user, profile, clientLoader);
     if (result.ok) return result;
     await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
   }
-  return attemptSave(user, profile);
+  return attemptSave(user, profile, clientLoader);
 }
 
 async function attemptSave(
   user: User,
   profile: OnboardingProfile,
+  clientLoader: typeof getSupabaseClient,
 ): Promise<SaveProfileResult> {
   try {
-    const client = await getSupabaseClient();
+    const client = await clientLoader();
     const { error } = await client.from("profiles").upsert({
       user_id: user.id,
       first_name: profile.firstName.trim(),
@@ -241,13 +243,10 @@ async function attemptSave(
     }, { onConflict: "user_id" });
     if (error) return { ok: false, message: error.message };
     profile.completedAt = new Date().toISOString();
-    // Mirror the name into the auth user so the greeting has it without a round
-    // trip to the profiles table on every page load. The table stays the source
-    // of truth; this is a cache, and a failure to write it is not a failure to
-    // save the profile — so it is deliberately not awaited into the result.
-    await client.auth
-      .updateUser({ data: { first_name: profile.firstName.trim(), last_name: profile.lastName.trim() } })
-      .catch(() => undefined);
+    // Names stay in this explicitly user-bound profile row. A second write via
+    // auth.updateUser would target whichever session is current after the
+    // upsert, potentially copying this person's name into a different account.
+    // Auth-only greetings may remain generic until the canonical profile loads.
     return { ok: true };
   } catch {
     return { ok: false, message: "Could not save your pathway. Check your connection and try again." };

@@ -2,6 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createScanPerformanceRecorder, type ScanPerformanceStage } from "./scanPerformance.js";
 
+test("optional covering fallback has its own timing without marking inference as failed", () => {
+  let clock = 0;
+  const recorder = createScanPerformanceRecorder(() => clock);
+  const attempt = recorder.startAttempt();
+  attempt.start("front_inference")("success");
+  const covering = attempt.start("head_covering");
+  clock = 1_500;
+  covering("fallback");
+  attempt.finish("success");
+  assert.deepEqual(recorder.read()[0].stages, [
+    { stage: "front_inference", durationMs: 0, outcome: "success" },
+    { stage: "head_covering", durationMs: 1_500, outcome: "fallback" },
+  ]);
+});
+
 test("records bounded durations and fixed stages without timestamps or personal fields", () => {
   let clock = 100;
   const recorder = createScanPerformanceRecorder(() => clock);

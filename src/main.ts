@@ -31,7 +31,7 @@ import { drawLandmarksAnimated, drawCalm } from "./ui/overlay.js";
 import { buildPassPlan, INTERACTIVE_MESH_REVEAL_MS, runMeasurePass } from "./ui/measurePass.js";
 import { applyZoom, IDENTITY_ZOOM } from "./ui/zoomTransform.js";
 import { landPhoto } from "./ui/photoLanding.js";
-import { beginSkinTrialStaffCheck, clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/results.js";
+import { prepareResults, beginSkinTrialStaffCheck, clearResultPhotoRecovery, clearResultsIdentityState, currentCeiling, renderResults, setAdult, setBirthDate, setDepth, setMaxAccess, setPathwayState } from "./ui/lazyResults.js";
 import { clearScoreStrip } from "./ui/scoreStrip.js";
 import { closeMaxChat } from "./ui/maxChat.js";
 import {
@@ -101,7 +101,7 @@ import { createAutoCapture } from "./ui/autoCapture.js";
 import { automaticCaptureDetail } from "./ui/captureCopy.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { closeScanConfirm, confirmScanAction } from "./ui/scanConfirm.js";
-import { close as closeDashboard, openDashboard } from "./ui/dashboard.js";
+import { close as closeDashboard, openDashboard, prepareDashboard } from "./ui/lazyDashboard.js";
 import { recordStreakAction } from "./ui/streakLamp.js";
 import { mountFaceOutline } from "./ui/faceOutline.js";
 import type { CameraHandle } from "./ui/camera.js";
@@ -323,20 +323,23 @@ if (import.meta.env.DEV) {
   if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
     queueMicrotask(() => void openTrialFunnelPreview(preview !== "offer-minor", preview !== "funnel"));
   }
+  if (preview === "body-quiz" || preview === "body-quiz-minor") {
+    queueMicrotask(() => void openTrialFunnelPreview(preview !== "body-quiz-minor", false, true));
+  }
   // The dashboard is behind a sign-in, so the only way to look at it during
   // development — or to drive its tabs in a browser check — was to hold a real
   // account. Dev builds only: Vite folds import.meta.env.DEV to false for
   // production, so this whole block is removed from the shipped bundle.
   if (preview === "dash") {
     activateScanOwner(null);
-    queueMicrotask(() =>
+    queueMicrotask(() => void prepareDashboard().then(() =>
       // onSettings is a no-op here, but passing it makes the preview render
       // the profile button — which is where the avatar lives, and the whole
       // reason to look at this screen in a browser check.
       // adult: true so the preview also shows the Max tab's locked state,
       // which is the harder of its two rooms to reach with a real account.
       openDashboard({ onScan: () => {}, name: "Sam", membership: "member", onSettings: () => {}, adult: true }),
-    );
+    ));
   }
 }
 
@@ -1031,8 +1034,8 @@ function ensureEngine(): Promise<void> {
 // Intent, not commitment. Swallows its own rejection: a warm that fails is not
 // an error anybody asked for, and the real attempt will report it properly.
 function warmEngine(): void {
-  void ensureEngine().catch(() => {});
-  void warmHeadCovering().catch(() => {});
+  void ensureEngine().then(() => warmHeadCovering()).catch(() => {});
+  void prepareResults().catch(() => {});
 }
 
 for (const target of [el.btnCamera, el.btnUpload]) {
@@ -1134,26 +1137,30 @@ let knownAdult = false;
 // The owner's first name once their profile has loaded, for Coach Max's
 // greeting. Null until then; the greeting drops the name rather than guessing.
 let knownFirstName: string | null = null;
+let knownProfileOwner: string | null = null;
 
 async function ensureOnboarded(user: User): Promise<void> {
   const generation = scanGeneration;
+  const ownsProfile = () => generation === scanGeneration && activeScanOwner() === `user:${user.id}`;
   // Answers that could not be sent last time — a phone that dropped its
   // connection mid-quiz — go up first, silently. Somebody who has already
   // answered must never be asked twice because their network blipped.
   await flushPendingProfile(user).catch(() => undefined);
-  if (generation !== scanGeneration) return;
+  if (!ownsProfile()) return;
   let profile;
   try {
     profile = await loadOnboardingProfile(user);
   } catch {
     return;
   }
-  if (generation !== scanGeneration) return;
+  if (!ownsProfile()) return;
   // The one place the date of birth is already in hand. Every 18+ Max surface
   // on the results screen keys off this; the default is false, so a profile
   // that never loads behaves like a minor rather than like an adult.
   knownAdult = profileIsAdult(profile);
   knownFirstName = profile.firstName?.trim() || null;
+  knownProfileOwner = user.id;
+  syncLandingHeadline(displayName(user));
   setAdult(knownAdult);
   // The macro calculator's gate reads the date rather than the flag, because an
   // age it derives itself cannot be a tick box somebody set.
@@ -1198,6 +1205,13 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
   resetToUpload();
   const dashboardGeneration = scanGeneration;
   const brand = await refreshHomeBrand(user);
+  if (dashboardGeneration !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
+  try { await prepareDashboard(); } catch {
+    if (dashboardGeneration === scanGeneration && activeScanOwner() === `user:${user.id}`) {
+      window.alert("Your dashboard could not load. Select your profile again to retry.");
+    }
+    return;
+  }
   if (dashboardGeneration !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
   openDashboard({
     onScan: () => resetToUpload(),
@@ -1285,6 +1299,7 @@ window.addEventListener(MEMBERSHIP_BRAND_EVENT, (event) => {
 // the dashboard has one. If it somehow does not, the greeting reads "Welcome."
 // and that is a better sentence than a wrong name.
 function displayName(user: User): string | null {
+  if (knownProfileOwner === user.id && knownFirstName) return knownFirstName;
   const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
   for (const key of ["first_name", "full_name", "name"]) {
     const value = meta[key];
@@ -1735,6 +1750,13 @@ function canvasFromDataURL(url: string): Promise<HTMLCanvasElement | null> {
 async function reopenArchivedScan(scan: StoredScan): Promise<void> {
   const owner = activeScanOwner();
   const generation = scanGeneration;
+  try { await prepareResults(); } catch {
+    if (owner === activeScanOwner() && generation === scanGeneration) {
+      window.alert("The report could not load. Your saved scan is safe. Please try opening it again.");
+    }
+    return;
+  }
+  if (owner !== activeScanOwner() || generation !== scanGeneration) return;
   const key = scanStorageKey(scan);
   const [archive, photos] = await Promise.all([loadArchive(key), loadPhotos(key)]);
   if (!archive || owner !== activeScanOwner() || generation !== scanGeneration) return;
@@ -2067,7 +2089,13 @@ async function handleCanvas(
   // their own head, and on this one question they outrank the model.
   let coveringRejection = false;
   if (!rejection && !skipCoveringCheck) {
-    rejection = headCoveringRejection(await detectHeadCovering(el.photoCanvas));
+    const endCovering = scanTiming?.start("head_covering");
+    const covering = await detectHeadCovering(el.photoCanvas, {
+      signal: scanWorkAbort.signal,
+      isCurrent: () => scanIsCurrent(token, generation),
+    });
+    endCovering?.(scanIsCurrent(token, generation) ? covering.available ? "success" : "fallback" : "cancelled");
+    rejection = headCoveringRejection(covering);
     coveringRejection = rejection !== null;
   }
   skipCoveringCheck = false;
@@ -2492,6 +2520,26 @@ async function runFullAnalysis(
   const generation = scanGeneration;
   const { landmarks, width, height, quality, autoNote, photo: frontShot } = pending;
   el.main.classList.remove("hidden");
+  // Load before any history/quota side effect. A failed chunk is recoverable
+  // without spending a scan or dropping its in-memory photographs.
+  try { await prepareResults(); } catch {
+    if (!scanIsCurrent(token, generation)) return;
+    // The full-screen scan stage hides the analysis pane. Recovery must leave
+    // that stage before showing its action or a failed chunk looks like a stall.
+    el.frame.classList.remove("scanning", "settling");
+    el.analysis.innerHTML = `<section class="panel" role="alert"><h2>Your photo is safe</h2><p>The report could not load. Check your connection, then try again.</p><button type="button" class="btn pri" data-retry-report>Try again</button></section>`;
+    const retry = el.analysis.querySelector<HTMLButtonElement>("[data-retry-report]")!;
+    retry.onclick = () => {
+      if (retry.disabled || !scanIsCurrent(token, generation)) return;
+      retry.disabled = true;
+      retry.onclick = null;
+      retry.textContent = "Loading report...";
+      void runFullAnalysis(sideReport, token);
+    };
+    retry.focus({ preventScroll: true });
+    return;
+  }
+  if (!scanIsCurrent(token, generation) || !pending) return;
   // MEASURE FIRST, THEN SHOW THE MEASURING.
   //
   // This used to run the other way round: eight sentences on a timer, then the
@@ -3550,6 +3598,9 @@ if (isAuthAvailable()) {
     const nextUserId = user?.id ?? null;
     const identityChanged = previousUserId !== undefined && previousUserId !== nextUserId;
     if (identityChanged) {
+      knownAdult = false;
+      knownFirstName = null;
+      knownProfileOwner = null;
       installPrompt.clear();
       // Both of these are module state describing the PREVIOUS account, and
       // neither was reset here. A Max holder finishing a scan and a free user

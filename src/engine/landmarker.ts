@@ -1,5 +1,4 @@
-import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
+import type { FaceLandmarker, FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 
 // One landmarker instance, switched between modes rather than loading the
 // model twice: IMAGE for the actual scan (deterministic — a given photo always
@@ -58,6 +57,7 @@ export function initLandmarker(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
+  const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
   const fileset = await FilesetResolver.forVisionTasks("/wasm");
   landmarker = await FaceLandmarker.createFromOptions(fileset, {
     baseOptions: {

@@ -48,6 +48,57 @@ export function applyZoom(el: HTMLElement, spec: ZoomSpec): void {
   el.style.transform = zoomTransform(spec);
 }
 
+export interface ContainGeometry {
+  imageWidth: number;
+  imageHeight: number;
+  boxWidth: number;
+  boxHeight: number;
+  /** Object-position fractions: .5 is centred within the unused space. */
+  positionX?: number;
+  positionY?: number;
+}
+
+/** Map a source-image pivot into the CSS box of an object-fit:contain canvas. */
+export function containZoom(spec: ZoomSpec, geometry: ContainGeometry): ZoomSpec {
+  const { imageWidth, imageHeight, boxWidth, boxHeight } = geometry;
+  if (![imageWidth, imageHeight, boxWidth, boxHeight].every((value) => Number.isFinite(value) && value > 0)) return spec;
+  if (spec.scale === 1) return spec;
+  const scale = Math.min(boxWidth / imageWidth, boxHeight / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  const positionX = Number.isFinite(geometry.positionX) ? geometry.positionX! : .5;
+  const positionY = Number.isFinite(geometry.positionY) ? geometry.positionY! : .5;
+  return {
+    scale: spec.scale,
+    originX: ((boxWidth - width) * positionX + width * spec.originX / 100) / boxWidth * 100,
+    originY: ((boxHeight - height) * positionY + height * spec.originY / 100) / boxHeight * 100,
+  };
+}
+
+/**
+ * Report canvases share one wrapper and the same fitted image coordinates.
+ * Read geometry only on a requested zoom, never on an animation frame. Using
+ * client sizes, not transformed bounds, also keeps repeated hovers stable.
+ * Other surfaces retain applyZoom's existing full-box behavior.
+ */
+export function applyCanvasZoom(el: HTMLElement, spec: ZoomSpec): void {
+  if (spec.scale === 1) return applyZoom(el, spec);
+  const canvas = el.querySelector<HTMLCanvasElement>("canvas");
+  if (!canvas) return applyZoom(el, spec);
+  const style = getComputedStyle(canvas);
+  if (style.objectFit !== "contain") return applyZoom(el, spec);
+  const position = style.objectPosition.split(/\s+/);
+  const fraction = (value: string | undefined): number => value?.endsWith("%") ? Number.parseFloat(value) / 100 : .5;
+  applyZoom(el, containZoom(spec, {
+    imageWidth: canvas.width,
+    imageHeight: canvas.height,
+    boxWidth: canvas.clientWidth,
+    boxHeight: canvas.clientHeight,
+    positionX: fraction(position[0]),
+    positionY: fraction(position[1]),
+  }));
+}
+
 export const IDENTITY_ZOOM: ZoomSpec = { scale: 1, originX: 0, originY: 0 };
 
 /**
