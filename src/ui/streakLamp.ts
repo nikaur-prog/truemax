@@ -85,7 +85,7 @@ export function updateStreakEnabled(enabled: boolean, userId: string): Promise<S
  */
 export function lampMarkup(reading: StreakReading, balances: StreakBalances | null): string {
   if (!reading.enabled) return "";
-  const points = (balances?.consistency ?? 0) + (balances?.progress ?? 0);
+  const points = balances?.consistency ?? 0;
   const count = reading.days > 0 ? `<b class="daily-count">${dayLabel(reading.days)}</b>` : "";
   const kept = reading.days === 0 && reading.lapsed && reading.best > 0
     ? `<span class="daily-best">${bestLine(reading.best)}</span>`

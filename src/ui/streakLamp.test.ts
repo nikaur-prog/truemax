@@ -13,7 +13,7 @@ const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 const state = (overrides: Partial<StreakState>): StreakState => ({ ...EMPTY_STREAK, ...overrides });
 
 test("the lamp shows the day count and the tier only as a glow class, never as words", () => {
-  const html = lampMarkup(readStreak(state({ current: 12, best: 12, lastCountedDay: "2026-09-05" }), "2026-09-05"), { consistency: 30, progress: 0 });
+  const html = lampMarkup(readStreak(state({ current: 12, best: 12, lastCountedDay: "2026-09-05" }), "2026-09-05"), { consistency: 30 });
   assert.match(html, /glow-steady/);
   assert.match(html, /12 days/);
   assert.match(html, /30 pts/);
@@ -22,7 +22,7 @@ test("the lamp shows the day count and the tier only as a glow class, never as w
 });
 
 test("a run that has ended shows what was kept, and no loss words anywhere", () => {
-  const html = lampMarkup(readStreak(state({ current: 41, best: 41, lastCountedDay: "2026-08-01" }), "2026-09-05"), { consistency: 90, progress: 100 });
+  const html = lampMarkup(readStreak(state({ current: 41, best: 41, lastCountedDay: "2026-08-01" }), "2026-09-05"), { consistency: 190 });
   assert.match(html, /glow-off/);
   assert.match(html, /Best: 41 days/);
   assert.match(html, /190 pts/);
@@ -31,12 +31,12 @@ test("a run that has ended shows what was kept, and no loss words anywhere", () 
 });
 
 test("switched off in Settings, the lamp renders nothing at all", () => {
-  const html = lampMarkup(readStreak(state({ current: 5, best: 5, lastCountedDay: "2026-09-05", enabled: false }), "2026-09-05"), { consistency: 10, progress: 0 });
+  const html = lampMarkup(readStreak(state({ current: 5, best: 5, lastCountedDay: "2026-09-05", enabled: false }), "2026-09-05"), { consistency: 10 });
   assert.equal(html, "");
 });
 
 test("a person who has never counted a day sees the unlit lamp and the line naming what would count", () => {
-  const html = lampMarkup(readStreak(EMPTY_STREAK, "2026-09-05"), { consistency: 0, progress: 0 });
+  const html = lampMarkup(readStreak(EMPTY_STREAK, "2026-09-05"), { consistency: 0 });
   assert.match(html, /glow-off/);
   assert.doesNotMatch(html, /0 days/);
   assert.doesNotMatch(html, /pts/);

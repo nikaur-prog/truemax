@@ -26,7 +26,7 @@ function validCache(value: unknown): value is StreakCache {
     && nonnegative(s.graceBanked) && typeof s.enabled === "boolean"
     && (s.lastCountedDay === null || isDayString(s.lastCountedDay))
     && (s.graceSpentOn === null || s.graceSpentOn === undefined || isDayString(s.graceSpentOn))
-    && nonnegative(b.consistency) && nonnegative(b.progress));
+    && nonnegative(b.consistency));
 }
 
 /** Owner-bound requests, serial writes, and a small retry queue for real actions.

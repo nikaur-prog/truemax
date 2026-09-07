@@ -6,7 +6,7 @@ import { EMPTY_STREAK, readStreak, type StreakCountResult, type StreakSnapshot }
 const day = "2026-09-07";
 const snapshot = (current = 0, enabled = true): StreakSnapshot => {
   const state = { ...EMPTY_STREAK, current, best: current, enabled, lastCountedDay: current ? day : null };
-  return { state, reading: readStreak(state, day), balances: { consistency: current * 2, progress: 0 }, today: day };
+  return { state, reading: readStreak(state, day), balances: { consistency: current * 2 }, today: day };
 };
 const counted = (): StreakCountResult => ({ ...snapshot(1), counted: true, ended: false, weekLanded: false, graceSpent: 0, awarded: 2 });
 function deferred<T>() {

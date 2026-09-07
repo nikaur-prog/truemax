@@ -250,7 +250,6 @@ export function streakLine(reading: StreakReading): string {
 
 export interface StreakBalances {
   consistency: number;
-  progress: number;
 }
 
 export interface StreakSnapshot {

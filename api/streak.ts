@@ -35,7 +35,7 @@ interface StreakRow {
 }
 
 interface BalanceRow {
-  ledger: "consistency" | "progress";
+  ledger: string;
   points: number | string;
 }
 
@@ -79,10 +79,12 @@ async function snapshot(userId: string, today: string) {
   if (row.error) throw new Error(`Streak read failed: ${row.error.message}`);
   if (balances.error) throw new Error(`Balance read failed: ${balances.error.message}`);
   const state = stateOf(row.data);
-  const sums: StreakBalances = { consistency: 0, progress: 0 };
+  // Consistency is the only ledger. A row in any other is not possible after
+  // 20260907140000, and is ignored rather than trusted if one somehow is.
+  const sums: StreakBalances = { consistency: 0 };
   for (const b of (balances.data ?? []) as BalanceRow[]) {
     const n = typeof b.points === "number" ? b.points : Number(b.points);
-    if (Number.isFinite(n) && (b.ledger === "consistency" || b.ledger === "progress")) sums[b.ledger] = n;
+    if (Number.isFinite(n) && b.ledger === "consistency") sums.consistency = n;
   }
   return { state, reading: readStreak(state, today), balances: sums, today };
 }

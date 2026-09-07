@@ -96,9 +96,8 @@ into a browser console:
   the week bonus from the catalogue when seven land), multiplied by the
   streak tier at the moment of the award. This is the only ledger the
   multiplier touches.
-- **Verified progress**, earned once per goal when the catalogue's
-  completion rule is met by the follow-up read, never by a scan alone,
-  never multiplied, never scaled by the size of a change.
+- **Verified progress**: RETIRED, 7 September 2026, before it ever paid.
+  See section 11.
 
 Every award is an append-only event keyed on (user, reason, day), so a day
 is counted once however many devices tap it. Balances are the sum.
@@ -197,8 +196,9 @@ the return rate, the store would not have either.
 
 - A day is counted by an action, never by a visit.
 - The multiplier touches consistency points only, capped at 1.5x.
-- Verified progress is never multiplied and never scaled by the size of a
-  change.
+- Nothing pays for a measured change. Consistency is the only ledger, and
+  it pays for a day counted by an action, which needs no measurement to be
+  true.
 - A guest scan counts for nothing.
 - No loss framing anywhere: no lose, break, or don't miss.
 - The streak can be switched off and the record survives the switch.
@@ -225,7 +225,8 @@ changes in section 1 stood.
   and the awards are one database transaction inside `count_streak_day`,
   paying only when the day was newly counted; funnel bumps for
   `streak-day-counted` and `streak-ended`), PATCH (the Settings switch).
-- Verified progress pays once per goal, ever: a partial unique index on
+- Verified progress paid once per goal, ever, until section 11 retired it:
+  a partial unique index on
   (user, reason) where the ledger is progress, with the goal id as the
   reason.
 - The funnel chain's side stage is two branches, side done or side skipped,
@@ -268,3 +269,41 @@ changes in section 1 stood.
   `isStandaloneLaunch()`.
 - `track("signup-return-analysis")` or `track("signup-return-lost")` where a
   guest who signed up at the wall lands.
+
+## 11. The verified-progress ledger, retired
+
+Decided 7 September 2026, on the owner's call, after the mechanic was built
+and before it ever awarded anything. `award_progress` had no caller in any
+shipped build, so no balance changes and nobody loses a point they had.
+
+**Why.** The ledger's name is a claim the product cannot presently check.
+`public.scans` grants insert and update to `authenticated` and its payload is
+written by the browser; no server route reads it. So there is no
+independently trustworthy reading to test a progress claim against, and
+awarding from one would mint points from client-supplied numbers, undoing the
+reason `points_events` is service-only and append-only.
+
+The codebase had already reached this conclusion twice on its own, before the
+question was asked. `assessTargetProgress` in `src/engine/goalTargets.ts` is
+documented as "a pure evaluator for a future reviewed evidence rule" that
+"never awards points", and `heldTargetRenderState` tells a person that
+reaching a marker "does not confirm biological progress or earn points".
+That is a deliberate hold on evidence grounds, and it sits beside the open
+repeatability work in tasks #47 and #54.
+
+**What went.** `award_progress`, the `points_events_progress_once` index, the
+`progress` value in the ledger check constraint, `VERIFIED_PROGRESS_POINTS`,
+and the second field of `StreakBalances`. Migration
+`20260907140000_retire_progress_ledger.sql`, which refuses to run if a row
+outside the consistency ledger exists rather than deleting evidence.
+
+**What stayed, and why.** `assessTargetProgress` stays: it is a correct
+evaluator, unused and honest, for whenever a reviewed evidence rule becomes
+possible. Each goal's `completion` rule stays too: it describes when that
+goal is met, which is a fact about the goal rather than a points mechanism.
+
+**What it would take to bring it back.** A reading the server can trust. That
+means either a server-side measurement path that does not accept a
+browser-supplied payload, or a signed capture whose provenance can be
+checked. Repeatability has to be settled first regardless: a ledger called
+verified cannot rest on metrics that do not repeat.

@@ -28,6 +28,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260904090000_daily_streak_and_points.sql",
   "supabase/migrations/20260904100000_body_profile_device_migration.sql",
   "supabase/migrations/20260907090000_streak_grace_visible.sql",
+  "supabase/migrations/20260907140000_retire_progress_ledger.sql",
 ];
 
 const DB = `truemax_test_${process.pid}`;
@@ -93,13 +94,33 @@ if (CONN) {
 
 const skip = CONN ? false : "set TRUEMAX_TEST_PG to a libpq conninfo string to run the database invariants";
 
-test("verified progress pays once per goal, on any later day, and once per goal only", { skip }, () => {
-  assert.equal(psql(testConn, `select public.award_progress('${U1}', 'jaw', '2026-09-01', 100)`), "100");
-  assert.equal(psql(testConn, `select public.award_progress('${U1}', 'jaw', '2026-09-20', 100)`), "0", "the same goal on a later day pays nothing");
-  assert.equal(psql(testConn, `select public.award_progress('${U1}', 'skin', '2026-09-20', 100)`), "100", "a different goal pays");
-  assert.equal(psql(testConn, `select public.award_progress('${U2}', 'jaw', '2026-09-20', 100)`), "100", "another person's same goal pays");
-  assert.equal(psql(testConn, `select points from public.points_balances where user_id = '${U1}' and ledger = 'progress'`), "200");
-  assert.equal(psql(testConn, `select count(*) from public.points_events where user_id = '${U1}' and ledger = 'progress' and reason = 'jaw'`), "1");
+test("the verified-progress ledger is retired: no function, no index, and the ledger cannot hold one", { skip }, () => {
+  // The award function is gone, so nothing can call it by accident.
+  assert.equal(
+    psql(testConn, `select count(*) from pg_proc where proname = 'award_progress'`),
+    "0",
+    "award_progress still exists",
+  );
+  // As is the index that existed only to keep progress awards once per goal.
+  assert.equal(
+    psql(testConn, `select count(*) from pg_indexes where indexname = 'points_events_progress_once'`),
+    "0",
+  );
+  // And the ledger itself refuses anything but consistency, so a future
+  // caller cannot quietly reintroduce a claim the server cannot verify.
+  const refused = psqlFails(
+    testConn,
+    `insert into public.points_events (user_id, ledger, reason, day, base, multiplier, points)
+     values ('${U1}', 'progress', 'jaw', '2026-09-01', 100, 1.00, 100)`,
+  );
+  assert.match(refused, /points_events_ledger_check|violates check constraint/i);
+  // Consistency still writes, through its own function. On a user of its own:
+  // the later tests measure U1 and U2 exactly, so nothing may seed them.
+  const solo = "99999999-9999-4999-8999-999999999999";
+  psql(testConn, `insert into auth.users (id) values ('${solo}')`);
+  assert.equal(psql(testConn, `select public.award_consistency('${solo}', 'seed', '2026-08-01', 2)`), "2");
+  assert.equal(psql(testConn, `select points from public.points_balances where user_id = '${solo}' and ledger = 'consistency'`), "2");
+  assert.equal(psql(testConn, `select count(*) from public.points_events where user_id = '${U1}'`), "0", "U1 is left untouched for the tests that measure it");
 });
 
 test("a failed award leaves the day uncounted, so the retry counts and pays it once", { skip }, () => {
@@ -248,13 +269,14 @@ test("a signed-in browser reads only its own rows and writes none of them", { sk
   assert.equal(asUser(U1, `select count(*) from public.daily_streaks`), "1", "own streak row visible");
   assert.equal(asUser(U2, `select count(*) from public.daily_streaks`), "0", "nobody else's row is visible");
   assert.equal(asUser(U1, `select count(*) from public.points_balances where ledger = 'consistency'`), "1");
-  assert.equal(asUser(U2, `select coalesce(sum(points), 0) from public.points_balances`), "100", "only their own jaw award, none of U1's");
+  // U2 has earned nothing, and must not see a single point of U1's.
+  assert.equal(asUser(U2, `select coalesce(sum(points), 0) from public.points_balances`), "0");
   assert.equal(asUser(U2, `select count(*) from public.points_events where user_id = '${U1}'`), "0", "another person's events are invisible even when named");
   assert.equal(asUser(U1, `select count(*) from public.body_profiles`), "1");
   for (const write of [
     `insert into public.points_events (user_id, ledger, reason, day, base, multiplier, points) values ('${U1}', 'consistency', 'x', '2026-09-01', 1, 1.00, 999)`,
     `update public.daily_streaks set current = 999 where user_id = '${U1}'`,
-    `select public.award_progress('${U1}', 'jaw2', '2026-09-01', 100)`,
+    `select public.award_consistency('${U1}', 'forged', '2026-09-01', 100)`,
     `select public.count_streak_day('${U1}', '2026-09-30', 2, 10)`,
     `select public.migrate_body_profile('${U1}', 150, 50, 'metric')`,
   ]) {

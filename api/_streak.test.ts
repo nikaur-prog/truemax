@@ -34,15 +34,24 @@ test("the count and both awards are one database transaction, and the funnel lea
   assert.match(post, /rpc\("count_streak_day", \{[\s\S]*?p_day_base: CONSISTENCY_POINTS_PER_DAY,[\s\S]*?p_week_base: STREAK_WEEK_BONUS,/);
   assert.doesNotMatch(post, /rpc\("award_consistency"/, "the route never awards on its own; the function does, inside the count");
   assert.match(post, /if \(result\.counted\) \{[\s\S]*?bump_funnel_event[\s\S]*?"streak-day-counted"[\s\S]*?"streak-ended"/);
-  assert.doesNotMatch(route, /award_progress/, "verified progress is never awarded by the streak route");
+  assert.doesNotMatch(route, /award_progress/, "the verified-progress award no longer exists anywhere");
   const fn = migration.match(/create or replace function public\.count_streak_day[\s\S]*?\$\$;/)?.[0] ?? "";
   assert.match(fn, /update public\.daily_streaks[\s\S]*?day_points := public\.award_consistency\(p_user_id, 'day', p_day, p_day_base\);[\s\S]*?if week_landed then[\s\S]*?week_points := public\.award_consistency\(p_user_id, 'week', p_day, p_week_base\);/);
   assert.match(fn, /'awarded', day_points \+ week_points/);
 });
 
-test("verified progress pays once per goal, ever, by a database invariant", () => {
-  assert.match(migration, /create unique index if not exists points_events_progress_once\s+on public\.points_events \(user_id, reason\)\s+where ledger = 'progress'/);
-  assert.match(migration, /award_progress[\s\S]*?on conflict \(user_id, reason\) where ledger = 'progress' do nothing/);
+test("the verified-progress ledger is retired, and consistency is the only one left", () => {
+  const retire = read("supabase/migrations/20260907140000_retire_progress_ledger.sql");
+  assert.match(retire, /drop function if exists public\.award_progress\(uuid, text, date, integer\)/);
+  assert.match(retire, /drop index if exists public\.points_events_progress_once/);
+  assert.match(retire, /add constraint points_events_ledger_check check \(ledger = 'consistency'\)/);
+  // A stray row would mean somebody wrote one by hand; say so rather than
+  // failing later on a constraint nobody can read.
+  assert.match(retire, /raise exception[\s\S]*?outside the consistency ledger/);
+  // Nothing in the app may sum or surface a second ledger any more.
+  assert.doesNotMatch(read("src/engine/goalCatalogue.ts"), /VERIFIED_PROGRESS_POINTS/);
+  assert.match(read("src/engine/dailyStreak.ts"), /export interface StreakBalances \{\s+consistency: number;\s+\}/);
+  assert.doesNotMatch(read("src/ui/streakLamp.ts"), /balances\?\.progress/);
 });
 
 test("the streak and points tables are owner-readable, service-written, and the ledger is append-only", () => {
