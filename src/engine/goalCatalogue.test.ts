@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { GOALS } from "./goals.js";
 import { canShowProgress } from "./goalEvidence.js";
@@ -9,7 +10,6 @@ import {
   GOAL_CATALOGUE,
   GOAL_CATALOGUE_VERSION,
   RENDER_LAYERS,
-  VERIFIED_PROGRESS_POINTS,
   allowedLayers,
   catalogueCoversGoals,
   goalEffect,
@@ -57,11 +57,14 @@ test("ranges are ranges, conservative, and the weeks are ordered", () => {
   }
 });
 
-test("points pay for showing up and for verified movement, never for the size of a change", () => {
+test("points pay for showing up, never for the size of a change, and never for a measured one", () => {
   assert.ok(CONSISTENCY_POINTS_PER_WEEK[3] > CONSISTENCY_POINTS_PER_WEEK[1]);
   assert.ok(CONSISTENCY_POINTS_PER_WEEK[3] <= 2 * CONSISTENCY_POINTS_PER_WEEK[1], "mild scaling only");
-  assert.equal(typeof VERIFIED_PROGRESS_POINTS, "number");
-  // No entry carries its own progress award: the award is flat by construction.
+  // The verified-progress award was retired in 20260907140000: the server
+  // cannot check a measured change, so nothing may pay for one. No entry
+  // carries an award of its own either.
+  const source = readFileSync(new URL("./goalCatalogue.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /VERIFIED_PROGRESS_POINTS/);
   for (const g of GOAL_CATALOGUE) assert.ok(!("progressPoints" in g.points));
 });
 

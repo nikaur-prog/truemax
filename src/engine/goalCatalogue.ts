@@ -83,8 +83,12 @@ export interface GoalEffect {
 // Consistency points per completed week by effort tier. The slow goals earn
 // more for showing up, never for changing more.
 export const CONSISTENCY_POINTS_PER_WEEK: Record<1 | 2 | 3, number> = { 1: 10, 2: 12, 3: 15 };
-// One flat award when a goal's completion rule is met, the same for every goal.
-export const VERIFIED_PROGRESS_POINTS = 100;
+// There is no verified-progress award. The ledger it belonged to was retired
+// in 20260907140000 because the server cannot verify a measured change: the
+// scan payload is written by the browser. `completion` below stays as each
+// goal's own description of done, which is a fact about the goal rather than
+// a points mechanism, and src/engine/goalTargets.ts keeps the evaluator for
+// whenever a reviewed evidence rule becomes possible.
 
 const RAW: readonly GoalEffect[] = [
   {
