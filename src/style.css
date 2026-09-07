@@ -3183,6 +3183,9 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
 }
 .daily-pts { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: var(--mut); }
 .daily-line { display: none; }
+/* Grace speaks once, on the day it acted, wherever the lamp is. */
+.daily-line.shown { display: block; flex-basis: 100%; font-size: 10.5px; color: var(--mut); margin-top: 2px; }
+.daily-slot { flex-wrap: wrap; }
 .dash-hero.empty .daily-slot.has-lamp { margin-bottom: 10px; }
 .dash-hero.empty .daily-line { display: inline; font-size: 10.5px; color: var(--mut); font-style: normal; }
 

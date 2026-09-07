@@ -90,10 +90,13 @@ export function lampMarkup(reading: StreakReading, balances: StreakBalances | nu
   const kept = reading.days === 0 && reading.lapsed && reading.best > 0
     ? `<span class="daily-best">${bestLine(reading.best)}</span>`
     : "";
+  // The line is normally reserved for the empty hero, where it explains the
+  // mechanic. Grace is the exception: it has to be seen on the day it acts,
+  // or the person never learns the mechanic exists.
   return `<span class="daily-lamp glow-${reading.glow}" aria-hidden="true"></span>
     ${count}${kept}
     ${points > 0 ? `<span class="daily-pts">${points} pts</span>` : ""}
-    <small class="daily-line">${streakLine(reading)}</small>`;
+    <small class="daily-line${reading.graceCovered ? " shown" : ""}">${streakLine(reading)}</small>`;
 }
 
 // Every mounted lamp, so an action anywhere updates the light everywhere.

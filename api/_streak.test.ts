@@ -76,6 +76,31 @@ test("count_streak_day is idempotent per day, spends grace, banks one per seven,
   assert.match(fn, /s\.best := greatest\(s\.best, s\.current\)/);
 });
 
+test("the Settings switch is instrumented both ways, and a counter failure never fails the save", () => {
+  const patch = route.match(/export async function PATCH[\s\S]*?\n}\n/)?.[0] ?? "";
+  assert.match(patch, /bump_funnel_event", \{ p_event: body\.enabled \? "streak-enabled" : "streak-disabled" \}/);
+  // The bump sits after the save and inside its own try, so a dead counter
+  // cannot turn a successful opt-out into an error the person sees.
+  assert.match(patch, /if \(error\) throw new Error\(error\.message\);[\s\S]*?try \{[\s\S]*?bump_funnel_event[\s\S]*?\} catch/);
+  const events = read("src/engine/funnelEvents.ts");
+  for (const name of ["streak-disabled", "streak-enabled"]) {
+    assert.ok(events.includes(`"${name}"`), `${name} is not in the allowlist`);
+  }
+});
+
+test("grace is recorded on the day it acts, and the count still pays in one transaction", () => {
+  const grace = read("supabase/migrations/20260907090000_streak_grace_visible.sql");
+  assert.match(grace, /add column if not exists grace_spent_on date/);
+  const fn = grace.match(/create or replace function public\.count_streak_day[\s\S]*?\$\$;/)?.[0] ?? "";
+  assert.match(fn, /if missed <= s\.grace_banked then\s+spent := missed;/);
+  assert.match(fn, /if spent > 0 then\s+s\.grace_spent_on := p_day;/);
+  assert.match(fn, /'graceSpent', spent/);
+  // The award path from 20260904090000 must survive the replacement.
+  assert.match(fn, /day_points := public\.award_consistency\(p_user_id, 'day', p_day, p_day_base\);/);
+  assert.match(fn, /if week_landed then[\s\S]*?week_points := public\.award_consistency\(p_user_id, 'week', p_day, p_week_base\);/);
+  assert.match(route, /grace_spent_on/);
+});
+
 test("the funnel report is staff-only behind a 404 and reads counts only", () => {
   assert.match(report, /requestOrigin\(request\)\) return json\(\{ error: "Not found\." \}, 404\)/);
   assert.match(report, /!user \|\| !\(await isStaff\(user\.id\)\)\) return json\(\{ error: "Not found\." \}, 404\)/);

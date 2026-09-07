@@ -27,6 +27,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260903180000_body_profiles.sql",
   "supabase/migrations/20260904090000_daily_streak_and_points.sql",
   "supabase/migrations/20260904100000_body_profile_device_migration.sql",
+  "supabase/migrations/20260907090000_streak_grace_visible.sql",
 ];
 
 const DB = `truemax_test_${process.pid}`;
@@ -140,6 +141,55 @@ test("seven days bank a grace day and pay the week bonus at the tier reached; a 
   assert.equal(ended.current, 1);
   assert.equal(ended.best, 8);
   assert.equal(psql(testConn, `select points from public.points_balances where user_id = '${U1}' and ledger = 'consistency'`), String(2 * 6 + 2 + 11 + 2 + 2));
+});
+
+test("grace is recorded on the day it covers a gap, and not on any other day", { skip }, () => {
+  const U = "77777777-7777-4777-8777-777777777777";
+  psql(testConn, `insert into auth.users (id) values ('${U}')`);
+  const count = (day: string) => JSON.parse(psql(testConn, `select public.count_streak_day('${U}', '${day}', 2, 10)`));
+
+  // Seven straight days bank one grace day and never spend any.
+  let last: Record<string, unknown> = {};
+  for (let d = 1; d <= 7; d++) last = count(`2026-10-${String(d).padStart(2, "0")}`);
+  assert.equal(last.graceSpent, 0);
+  assert.equal(last.graceBanked, 1);
+  assert.equal(psql(testConn, `select coalesce(grace_spent_on::text, 'null') from public.daily_streaks where user_id = '${U}'`), "null");
+
+  // Skip the 8th. The 9th is covered, and the day is stamped.
+  const covered = count("2026-10-09");
+  assert.equal(covered.graceSpent, 1);
+  assert.equal(covered.ended, false);
+  assert.equal(covered.current, 8);
+  assert.equal(covered.graceBanked, 0);
+  assert.equal(covered.graceSpentOn, "2026-10-09");
+
+  // An ordinary next day spends nothing and leaves the stamp where it was.
+  const ordinary = count("2026-10-10");
+  assert.equal(ordinary.graceSpent, 0);
+  assert.equal(ordinary.graceSpentOn, "2026-10-09");
+
+  // A gap with nothing banked ends the run and stamps no grace.
+  const ended = count("2026-10-14");
+  assert.equal(ended.ended, true);
+  assert.equal(ended.graceSpent, 0);
+  assert.equal(ended.current, 1);
+  assert.equal(ended.graceSpentOn, "2026-10-09", "the old stamp is history, not a new claim");
+});
+
+test("replacing count_streak_day kept the count and the awards in one transaction", { skip }, () => {
+  const U = "88888888-8888-4888-8888-888888888888";
+  psql(testConn, `insert into auth.users (id) values ('${U}')`);
+  // A negative base still raises from inside the function, and still takes
+  // the whole count with it.
+  const error = psqlFails(testConn, `select public.count_streak_day('${U}', '2026-11-01', -1, 10)`);
+  assert.match(error, /Base points cannot be negative/);
+  assert.equal(psql(testConn, `select count(*) from public.daily_streaks where user_id = '${U}'`), "0");
+  assert.equal(psql(testConn, `select count(*) from public.points_events where user_id = '${U}'`), "0");
+
+  const paid = JSON.parse(psql(testConn, `select public.count_streak_day('${U}', '2026-11-01', 2, 10)`));
+  assert.equal(paid.counted, true);
+  assert.equal(paid.awarded, 2);
+  assert.equal(psql(testConn, `select count(*) from public.points_events where user_id = '${U}' and ledger = 'consistency'`), "1");
 });
 
 test("the device migration fills only a completely empty profile", { skip }, () => {

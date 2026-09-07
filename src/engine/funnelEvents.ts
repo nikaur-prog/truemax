@@ -66,6 +66,13 @@ export const FUNNEL_EVENTS = [
   // without anything about whose streak it was.
   "streak-day-counted",
   "streak-ended",
+  // The Settings switch, both ways. A disable count on its own would read as
+  // permanent rejection when much of it is people turning it back on, so the
+  // pair is what makes the opt-out rate honest. This is the number that says
+  // whether the mechanic is felt as pressure, and it is the one that would
+  // justify pulling it.
+  "streak-disabled",
+  "streak-enabled",
 ] as const;
 
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];

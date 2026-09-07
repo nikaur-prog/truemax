@@ -60,10 +60,18 @@ export interface StreakState {
   /** YYYY-MM-DD, or null before the first counted day. */
   lastCountedDay: string | null;
   graceBanked: number;
+  /**
+   * The counted day on which banked grace covered a gap, or null.
+   *
+   * Kept so the mechanic can explain itself once, on the day it acted. Grace
+   * used to be silent, which meant nobody knew it existed until a run ended
+   * without one and the ending read as arbitrary.
+   */
+  graceSpentOn: string | null;
   enabled: boolean;
 }
 
-export const EMPTY_STREAK: StreakState = { current: 0, best: 0, lastCountedDay: null, graceBanked: 0, enabled: true };
+export const EMPTY_STREAK: StreakState = { current: 0, best: 0, lastCountedDay: null, graceBanked: 0, graceSpentOn: null, enabled: true };
 
 function tierFor(days: number): StreakTier | null {
   let tier: StreakTier | null = null;
@@ -119,6 +127,8 @@ export function dayAccepted(day: string, now: Date = new Date()): boolean {
 export interface StreakStep {
   state: StreakState;
   counted: boolean;
+  /** Banked days spent covering the gap, so the lamp can say grace acted. */
+  graceSpent: number;
   /** A previous run ended on this action and a new one began at one. */
   ended: boolean;
   /** The count reached a multiple of seven on this action. */
@@ -130,12 +140,14 @@ export function nextStreak(state: StreakState, day: string): StreakStep {
   const s = { ...state };
   let counted = false;
   let ended = false;
+  let graceSpent = 0;
   if (s.lastCountedDay === null) {
     s.current = 1;
     counted = true;
   } else if (dayDiff(s.lastCountedDay, day) > 0) {
     const missed = dayDiff(s.lastCountedDay, day) - 1;
     if (missed <= s.graceBanked) {
+      graceSpent = missed;
       s.graceBanked -= missed;
       s.current += 1;
     } else {
@@ -148,13 +160,14 @@ export function nextStreak(state: StreakState, day: string): StreakStep {
   let weekLanded = false;
   if (counted) {
     s.lastCountedDay = day;
+    if (graceSpent > 0) s.graceSpentOn = day;
     if (s.current % GRACE_EVERY_DAYS === 0) {
       s.graceBanked = Math.min(GRACE_MAX, s.graceBanked + 1);
       weekLanded = true;
     }
     s.best = Math.max(s.best, s.current);
   }
-  return { state: s, counted, ended, weekLanded };
+  return { state: s, counted, ended, weekLanded, graceSpent };
 }
 
 export interface StreakReading {
@@ -164,6 +177,8 @@ export interface StreakReading {
   /** The run has ended and nothing has been counted since. */
   lapsed: boolean;
   countedToday: boolean;
+  /** Banked grace covered a gap on today's counted day. */
+  graceCovered: boolean;
   glow: StreakGlow;
   multiplier: number;
   graceBanked: number;
@@ -191,6 +206,8 @@ export function readStreak(state: StreakState, today: string): StreakReading {
     best: state.best,
     lapsed,
     countedToday,
+    // Only on the day grace acted, and only while that day is still today.
+    graceCovered: countedToday && state.graceSpentOn === today,
     glow: glowFor(days),
     multiplier: multiplierFor(days),
     graceBanked: state.graceBanked,
@@ -212,8 +229,17 @@ export function bestLine(best: number): string {
 
 export const NOTHING_COUNTED_LINE = "Nothing counted yet today. Tick a routine, or scan.";
 export const COUNTED_TODAY_LINE = "Today is counted.";
+/**
+ * Said once, on the day banked grace covered a gap.
+ *
+ * States what happened and what is still true. It does not scold the gap or
+ * warn about the next one: a mechanic that exists to take the pressure off
+ * should not be delivered as a threat.
+ */
+export const GRACE_COVERED_LINE = "Today is counted. A missed day was covered by a banked day, so the run carries on.";
 
 export function streakLine(reading: StreakReading): string {
+  if (reading.graceCovered) return GRACE_COVERED_LINE;
   if (reading.countedToday) return COUNTED_TODAY_LINE;
   return NOTHING_COUNTED_LINE;
 }
@@ -239,6 +265,8 @@ export interface StreakCountResult extends StreakSnapshot {
   counted: boolean;
   ended: boolean;
   weekLanded: boolean;
+  /** Banked days the server spent covering the gap. */
+  graceSpent: number;
   /** Consistency points written by this call, after the multiplier. */
   awarded: number;
 }
