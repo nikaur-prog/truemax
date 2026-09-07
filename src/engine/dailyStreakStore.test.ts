@@ -8,7 +8,7 @@ const snapshot = (current = 0, enabled = true): StreakSnapshot => {
   const state = { ...EMPTY_STREAK, current, best: current, enabled, lastCountedDay: current ? day : null };
   return { state, reading: readStreak(state, day), balances: { consistency: current * 2, progress: 0 }, today: day };
 };
-const counted = (): StreakCountResult => ({ ...snapshot(1), counted: true, ended: false, weekLanded: false, awarded: 2 });
+const counted = (): StreakCountResult => ({ ...snapshot(1), counted: true, ended: false, weekLanded: false, graceSpent: 0, awarded: 2 });
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });

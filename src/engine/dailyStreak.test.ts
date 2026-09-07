@@ -17,6 +17,7 @@ import {
   isDayString,
   localDay,
   multiplierFor,
+  GRACE_COVERED_LINE,
   nextStreak,
   readStreak,
   streakLine,
@@ -94,6 +95,38 @@ test("seven consecutive days bank one grace day, held to two", () => {
   assert.equal(two.graceBanked, 2);
   const three = run(calendar("2026-09-01", 21));
   assert.equal(three.graceBanked, GRACE_MAX);
+});
+
+test("grace says it was spent, on the day it acted and only that day", () => {
+  const week = run(calendar("2026-09-01", 7));
+  assert.equal(week.graceSpentOn, null, "an unbroken run never spends grace");
+  assert.equal(readStreak(week, "2026-09-07").graceCovered, false);
+
+  const step = nextStreak(week, "2026-09-09");
+  assert.equal(step.graceSpent, 1);
+  assert.equal(step.state.graceSpentOn, "2026-09-09");
+  const covered = readStreak(step.state, "2026-09-09");
+  assert.equal(covered.graceCovered, true);
+  assert.equal(streakLine(covered), GRACE_COVERED_LINE);
+  assert.match(GRACE_COVERED_LINE, /counted/);
+
+  // Tomorrow it is history, not a standing notice.
+  assert.equal(readStreak(step.state, "2026-09-10").graceCovered, false);
+  // And a later ordinary day does not re-raise it.
+  const next = nextStreak(step.state, "2026-09-10");
+  assert.equal(next.graceSpent, 0);
+  assert.equal(next.state.graceSpentOn, "2026-09-09");
+  assert.equal(readStreak(next.state, "2026-09-10").graceCovered, false);
+  assert.equal(streakLine(readStreak(next.state, "2026-09-10")), "Today is counted.");
+});
+
+test("a run that ends spends no grace, so nothing claims it was covered", () => {
+  const five = run(calendar("2026-09-01", 5));
+  const ended = nextStreak(five, "2026-09-07");
+  assert.equal(ended.ended, true);
+  assert.equal(ended.graceSpent, 0);
+  assert.equal(ended.state.graceSpentOn, null);
+  assert.equal(readStreak(ended.state, "2026-09-07").graceCovered, false);
 });
 
 test("a missed day spends a grace day and the run continues", () => {

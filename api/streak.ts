@@ -30,6 +30,7 @@ interface StreakRow {
   best: number;
   last_counted_day: string | null;
   grace_banked: number;
+  grace_spent_on: string | null;
   enabled: boolean;
 }
 
@@ -42,6 +43,7 @@ interface CountedRow {
   counted: boolean;
   ended: boolean;
   weekLanded: boolean;
+  graceSpent: number;
   awarded: number;
   current: number;
   best: number;
@@ -59,6 +61,7 @@ function stateOf(row: StreakRow | null): StreakState {
     best: row.best,
     lastCountedDay: row.last_counted_day,
     graceBanked: row.grace_banked,
+    graceSpentOn: row.grace_spent_on,
     enabled: row.enabled,
   };
 }
@@ -68,7 +71,7 @@ async function snapshot(userId: string, today: string) {
   const [row, balances] = await Promise.all([
     admin
       .from("daily_streaks")
-      .select("current,best,last_counted_day,grace_banked,enabled")
+      .select("current,best,last_counted_day,grace_banked,grace_spent_on,enabled")
       .eq("user_id", userId)
       .maybeSingle<StreakRow>(),
     admin.from("points_balances").select("ledger,points").eq("user_id", userId),
@@ -143,7 +146,14 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const snap = await snapshot(user.id, utcToday());
-    return json({ ...snap, counted: result.counted, ended: result.ended, weekLanded: result.weekLanded, awarded });
+    return json({
+      ...snap,
+      counted: result.counted,
+      ended: result.ended,
+      weekLanded: result.weekLanded,
+      graceSpent: Number(result.graceSpent) || 0,
+      awarded,
+    });
   } catch (error) {
     console.error("streak post", safeMessage(error));
     return json({ error: "Your day could not be counted just then." }, 500);
@@ -161,6 +171,14 @@ export async function PATCH(request: Request): Promise<Response> {
       .from("daily_streaks")
       .upsert({ user_id: user.id, enabled: body.enabled, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
     if (error) throw new Error(error.message);
+    // Counts, not people. The streak measures its own upside already; this is
+    // the only signal that says whether it is being rejected, so it is worth
+    // as much as the counted days are. A counter failing never fails the save.
+    try {
+      await getSupabaseAdmin().rpc("bump_funnel_event", { p_event: body.enabled ? "streak-enabled" : "streak-disabled" });
+    } catch (bumpError) {
+      console.error("streak switch funnel", safeMessage(bumpError));
+    }
     return json(await snapshot(user.id, utcToday()));
   } catch (error) {
     console.error("streak patch", safeMessage(error));

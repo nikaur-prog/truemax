@@ -25,6 +25,7 @@ function validCache(value: unknown): value is StreakCache {
   return Boolean(s && b && nonnegative(s.current) && nonnegative(s.best)
     && nonnegative(s.graceBanked) && typeof s.enabled === "boolean"
     && (s.lastCountedDay === null || isDayString(s.lastCountedDay))
+    && (s.graceSpentOn === null || s.graceSpentOn === undefined || isDayString(s.graceSpentOn))
     && nonnegative(b.consistency) && nonnegative(b.progress));
 }
 
@@ -51,7 +52,11 @@ export function createDailyStreakStore(deps: Dependencies) {
   };
   const cached = (owner: string): StreakCache | null => {
     const value = get(key(owner));
-    return validCache(value) ? value : null;
+    if (!validCache(value)) return null;
+    // A cache written before grace was recorded has no such field. Normalise
+    // rather than reject: the run itself is still true, and only the one-day
+    // explanation is missing.
+    return { ...value, state: { ...value.state, graceSpentOn: value.state.graceSpentOn ?? null } };
   };
   const pending = (owner: string): PendingDay[] => {
     const value = get(`${key(owner)}:pending`);
