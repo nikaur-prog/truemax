@@ -911,6 +911,8 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
     localResult.points,
     cloudResult?.points ?? null,
     cloudResult?.confidenceByPoint,
+    undefined,
+    cloudResult?.evidence,
   );
   const bandOpacity = { high: 1, mid: 0.68, low: 0.32 } as const;
   const confidenceByPoint = Object.fromEntries(
@@ -954,7 +956,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   }
 }
 
-async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal): Promise<SidePlacementSeed | null> {
+async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal): ReturnType<typeof requestCloudSidePlacement> {
   const token = await currentAccessToken().catch(() => null);
   if (!token || signal.aborted) return null;
   if (readSidePlacementChoice() !== "cloud") return null;

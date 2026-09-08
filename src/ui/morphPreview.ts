@@ -2,6 +2,7 @@ import { currentAccessToken, onAuthChange } from "../engine/auth.js";
 import { activeScanOwner } from "../engine/scanScope.js";
 import {
   createMorphRenderRequest,
+  MorphPreviewCheckError,
   pollMorphRender,
   requestMorphRender,
   submitMorphValidation,
@@ -333,7 +334,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
       try {
         let accessToken = await runtime.token(userId);
         if (!current()) return;
-        if (!accessToken) throw new Error("Sign in again to create this preview.");
+        if (!accessToken) throw new MorphPreviewCheckError("auth", "Sign in again to check or create your preview.");
         const consented = await runtime.consent({ userId, signal: controller.signal });
         if (!current()) return;
         if (!consented) {
@@ -347,7 +348,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
         budget = previewDeadline(controller.signal, runtime.renderBudgetMs, "The preview took too long and was withheld. Your plan is still here. Try again shortly.");
         accessToken = await budget.run(() => runtime.token(userId));
         if (!current()) return;
-        if (!accessToken) throw new Error("Sign in again to create this preview.");
+        if (!accessToken) throw new MorphPreviewCheckError("auth", "Sign in again to check or create your preview.");
         const request = createMorphRenderRequest(input.scanId, blueprint, renderSource);
         const existingJob = pendingJobs[renderVariant];
         let state = existingJob
@@ -400,7 +401,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
       } catch (error) {
         if (current() && status && (!(error instanceof DOMException) || error.name !== "AbortError")) {
           status.textContent = pendingJobs[renderVariant]
-            ? "The preview check was interrupted. Check the existing preview to resume without starting another render."
+            ? `${error instanceof MorphPreviewCheckError ? error.message : "The preview check was interrupted."} Check existing preview resumes this job without starting another render.`
             : error instanceof Error ? error.message : "The preview could not be created.";
         }
       } finally {

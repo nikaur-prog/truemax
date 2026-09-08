@@ -7,7 +7,7 @@ export const SIDE_PLACEMENT_RESPONSE_RESERVE_MS = 250;
 
 /** Keep correction cohorts distinct when the same reader uses a different path. */
 export function sidePlacementProtocolVersion(version: string, seeded: boolean): string {
-  return `${version}.${seeded ? "seeded" : "full"}`;
+  return `${version}.${seeded ? "seeded" : "full"}.e1`;
 }
 
 export function sidePlacementTimeoutMs(value: unknown): number {

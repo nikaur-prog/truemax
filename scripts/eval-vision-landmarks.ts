@@ -19,22 +19,23 @@
 //   - The three out-of-spec faces and the partial labels from tools/side-fit.mjs
 //     are excluded here the same way.
 //
-// Runs the SAME code the endpoint runs (api/_sideLandmarks.ts), so the number
-// describes production, not a benchmark copy of it.
+// Replays the endpoint reader, client parser, deadline and fusion. Local image
+// encoding is included; browser upload, authentication and quota latency are
+// not simulated. A live latency study is still required before rollout.
 //
 //   ANTHROPIC_API_KEY=... npx tsx scripts/eval-vision-landmarks.ts [--limit 10] [--ids s000,s001]
-//       [--model claude-sonnet-5] [--concurrency 2] [--no-cache] [--no-zoom] [--seed] [--repeat 3] [--samples 3]
+//       [--model <configured-reader>] [--concurrency 2] [--no-cache] [--repeat 3]
+//       [--mode diagnostic --unseeded --no-zoom --samples 3 --timeout-ms 55000]
+//       [--delivery cloud|signed_out|device_choice]
 //
-// Predictions are cached in .side-dataset/vision-<model>-<version>[-seed|-nozoom].json
-// so a re-run of the table costs nothing; delete the file or pass --no-cache
-// to spend again. --no-zoom runs the whole-frame call only. --seed sends the
-// device seeder's points as the hint, which is what the app does: the
-// whole-frame call is skipped, the front eight are the mesh's, and the crops
-// are cut around the seed. Run with and without to see what the seed buys.
+// Default: seeded, one sample, zoom enabled, five-second total budget.
+// Cached outcomes include failures and are bound to image, seed and protocol
+// fingerprints. Reusing a matching cache costs nothing; --no-cache spends
+// again. Slower/raw experiments require explicit diagnostic mode and cannot
+// approve rollout. All cache files and labelled data stay in .side-dataset.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
-import sharp from "sharp";
 import { anthropicKey } from "../api/_anthropicKey.js";
 import {
   BACK_LANDMARK_IDS,
@@ -43,17 +44,19 @@ import {
   SIDE_LANDMARK_IDS,
   anchorVertical,
   placeSideLandmarks,
-  prepareLandmarkImage,
 } from "../api/_sideLandmarks.js";
-import type { LandmarkPoint, SideLandmarkId, SideLandmarkResult, StageName, WindowName } from "../api/_sideLandmarks.js";
-import { fuseSideSeeds } from "../src/engine/sideSeedFusion.js";
+import type { LandmarkPoint, SideLandmarkId, StageName, WindowName } from "../api/_sideLandmarks.js";
 import type { ConfidenceBand } from "../src/engine/sideSeedFusion.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
 import { cleanProfileRate, evaluationCompletenessHolds } from "./side-eval-completeness.js";
+import {
+  deliveredEvaluationPoints, evaluationCacheMatches, evaluationFailureOutcome,
+  evaluationFingerprint, evaluationHash, evaluationSettings, prepareEvaluationSource, runEvaluationAttempt,
+} from "./side-evaluation-protocol.js";
+import type { EvaluationFingerprint, EvaluationMetrics, EvaluationRun } from "./side-evaluation-protocol.js";
 
 const APP_DIR = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const DATA = `${APP_DIR}/.side-dataset`;
-const DISPLAY_W = 640;
 
 // Mirrors tools/side-fit.mjs. Kept in step by hand; the harness prints which
 // ids it skipped so a drift is visible.
@@ -69,23 +72,12 @@ type Frame = Record<SideLandmarkId, LandmarkPoint>;
 interface Labelled {
   points: Frame;
 }
-interface Cached {
-  model: string;
+interface Cached extends EvaluationRun {
+  readerHash: string;
   version: string;
-  result: SideLandmarkResult;
-  usage: { inputTokens: number; outputTokens: number };
-  calls?: number;
-  zoomed?: SideLandmarkId[];
-  ms?: number;
-  stages?: Partial<Record<StageName, Partial<Record<SideLandmarkId, LandmarkPoint>>>>;
-  gonion?: string | null;
-  gonionDisagreement?: number | null;
-  mentonRetried?: boolean;
-  seeded?: boolean;
-  windows?: Partial<Record<WindowName, { left: number; top: number; size: number }>>;
-  spread?: Partial<Record<SideLandmarkId, number>>;
+  fingerprint: EvaluationFingerprint;
   /** Further runs of the same pass, for the repeatability block. */
-  runs?: Array<{ result: SideLandmarkResult; stages?: Cached["stages"] }>;
+  runs?: EvaluationRun[];
 }
 
 function arg(name: string): string | undefined {
@@ -99,19 +91,30 @@ const limit = Number(arg("limit") || 0) || Infinity;
 const onlyIds = arg("ids")?.split(",").map((s) => s.trim()).filter(Boolean);
 const concurrency = Math.max(1, Number(arg("concurrency") || 2));
 const useCache = !flag("no-cache");
-const zoom = !flag("no-zoom");
-const useSeed = flag("seed");
+const settings = evaluationSettings({
+  mode: arg("mode"), delivery: arg("delivery"),
+  seeded: flag("unseeded") ? false : true,
+  zoom: !flag("no-zoom"),
+  samples: arg("samples") === undefined ? undefined : Number(arg("samples")),
+  timeoutMs: arg("timeout-ms") === undefined ? undefined : Number(arg("timeout-ms")),
+});
 // --repeat N runs the pass N times on the chosen faces (use --ids or --limit)
 // and prints run-to-run scatter per stage: the model's own noise, which says
 // whether an error is a stable misreading (fix the definition) or a wobble
 // (vote). Extra runs are kept in the cache entry beside the first.
 const repeat = Math.max(1, Number(arg("repeat") || 1));
-// --samples N takes N jittered reads of the fine ear crop and settles on
-// their median; the pass reports the spread, which is a confidence the
-// model did not have to state. Production stays at one until the run says
-// the spread predicts the error and the median lowers it.
-const samples = Math.max(1, Math.min(5, Number(arg("samples") || 1)));
-const cachePath = `${DATA}/vision-${model.replace(/[^a-z0-9.-]/gi, "_")}-${LANDMARK_VERSION}${zoom ? "" : "-nozoom"}${useSeed ? "-seed" : ""}${samples > 1 ? `-s${samples}` : ""}.json`;
+if (!Number.isInteger(repeat) || !Number.isInteger(concurrency)) throw new Error("Repeat and concurrency must be positive integers");
+const readerHash = evaluationHash(model);
+const protocolHash = evaluationHash({
+  revision: 1, version: LANDMARK_VERSION, readerHash, settings,
+  sources: Object.fromEntries([
+    "api/_sideLandmarks.ts", "api/side-landmarks.ts", "src/engine/sideSeedFusion.ts",
+    "src/engine/sidePlacementEvidence.ts", "src/engine/sidePlacementRequest.ts",
+    "src/ui/sideCloudPlacement.ts", "src/ui/sideFlow.ts", "scripts/side-evaluation-protocol.ts",
+    "scripts/eval-vision-landmarks.ts",
+  ].map((path) => [path, evaluationHash(readFileSync(`${APP_DIR}/${path}`, "utf8"))])),
+});
+const cachePath = `${DATA}/vision-${settings.mode}-${protocolHash.slice(0, 16)}.json`;
 
 const labels = JSON.parse(readFileSync(`${DATA}/labels.json`, "utf8")) as Record<string, Labelled>;
 const seeds = JSON.parse(readFileSync(`${DATA}/seeds.json`, "utf8")) as Record<string, Labelled>;
@@ -124,6 +127,10 @@ const eligibleIds = files
 const ids = eligibleIds
   .filter((id) => !onlyIds || onlyIds.includes(id))
   .slice(0, Number.isFinite(limit) ? limit : undefined);
+const inputBytes = new Map(ids.map((id) => [id, readFileSync(`${DATA}/raw/${files.find((file) => file.startsWith(`${id}.`))!}`)]));
+const fingerprints = new Map(ids.map((id) => [id, evaluationFingerprint(inputBytes.get(id)!, seeds[id]?.points ?? null, protocolHash)]));
+const matches = (id: string, count = 1) => cache[id]?.readerHash === readerHash && cache[id]?.version === LANDMARK_VERSION
+  && evaluationCacheMatches(cache[id], fingerprints.get(id)!, count);
 
 if (!ids.length) {
   console.error("No labelled profiles to evaluate.");
@@ -136,56 +143,58 @@ try {
 } catch {
   apiKey = null;
 }
-const pending = ids.filter((id) => !(cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION && (cache[id].runs?.length ?? 0) + 1 >= repeat));
-if (pending.length && !apiKey) {
+const pending = ids.filter((id) => !matches(id, repeat));
+if (pending.length && settings.delivery === "cloud" && !apiKey) {
   console.error(`${pending.length} profile(s) need a model call and ANTHROPIC_API_KEY is not set.`);
   process.exit(1);
 }
 const client = apiKey ? new Anthropic({ apiKey }) : null;
 
-async function displayFrame(id: string): Promise<{ w: number; h: number }> {
-  const file = files.find((f) => f.startsWith(`${id}.`))!;
-  const meta = await sharp(readFileSync(`${DATA}/raw/${file}`)).rotate().metadata();
-  const w = meta.width || 1;
-  const h = meta.height || 1;
-  return { w: DISPLAY_W, h: (h * DISPLAY_W) / w };
+const sources = new Map<string, ReturnType<typeof prepareEvaluationSource>>();
+function sourceFor(id: string): ReturnType<typeof prepareEvaluationSource> {
+  if (!sources.has(id)) sources.set(id, prepareEvaluationSource(inputBytes.get(id)!));
+  return sources.get(id)!;
 }
+async function displayFrame(id: string): Promise<{ w: number; h: number }> { return (await sourceFor(id)).frame; }
 
 async function predict(id: string): Promise<void> {
-  const file = files.find((f) => f.startsWith(`${id}.`))!;
-  const prepared = await prepareLandmarkImage(readFileSync(`${DATA}/raw/${file}`));
-  // The seed as the app would send it: fractions of the same photograph.
-  // seeds.json is in display pixels, 640 wide, of the upright image.
-  let hint: Record<SideLandmarkId, LandmarkPoint> | null = null;
-  if (useSeed && seeds[id]) {
-    const { w, h } = await displayFrame(id);
-    hint = {} as Record<SideLandmarkId, LandmarkPoint>;
-    for (const pid of SIDE_LANDMARK_IDS) hint[pid] = { x: seeds[id].points[pid].x / w, y: seeds[id].points[pid].y / h };
-  }
-  const run = () => placeSideLandmarks(client!, prepared, {
-    model,
-    zoom,
-    hint,
-    samples,
-    onZoomError: (stage, error) => console.error(`${id}: ${stage} failed, ${error instanceof Error ? error.message : String(error)}`),
-  });
-  const have = cache[id] && cache[id].model === model && cache[id].version === LANDMARK_VERSION ? cache[id] : null;
-  const pass = have ? null : await run();
-  if (pass) {
-    cache[id] = {
-      model: pass.model, version: pass.version, result: pass.result, usage: pass.usage, calls: pass.calls, zoomed: pass.zoomed, ms: pass.ms,
-      stages: pass.stages, gonion: pass.gonion, gonionDisagreement: pass.gonionDisagreement, mentonRetried: pass.mentonRetried, seeded: pass.seeded,
-      windows: pass.windows, spread: pass.spread,
-    };
-  }
+  const source = await sourceFor(id);
+  const seed = seeds[id]?.points;
+  if (!seed) throw new Error("No device seed: cannot evaluate delivered fallback");
+  const run = async (): Promise<EvaluationRun> => {
+    const metrics: EvaluationMetrics = { attemptedCalls: 0, usage: { inputTokens: 0, outputTokens: 0 } };
+    // Count rejected/invalid calls too, and preserve billed usage from any
+    // completed response. Pass.usage alone omits responses without a tool.
+    const measuredClient = { messages: { create: async (...args: Parameters<Anthropic["messages"]["create"]>) => {
+      metrics.attemptedCalls += 1;
+      try {
+        const response = await client!.messages.create(...args);
+        if ("usage" in response) {
+          metrics.usage.inputTokens += response.usage.input_tokens;
+          metrics.usage.outputTokens += response.usage.output_tokens;
+          if (String(response.stop_reason) === "refusal") metrics.failureOutcome = "refused";
+          else if (!response.content.some((part) => part.type === "tool_use")) metrics.failureOutcome ??= "invalid_response";
+        }
+        return response;
+      } catch (error) {
+        const reason = evaluationFailureOutcome(error);
+        if (!metrics.failureOutcome || metrics.failureOutcome === "unavailable") metrics.failureOutcome = reason;
+        throw error;
+      }
+    } } } as unknown as Anthropic;
+    const attempt = await runEvaluationAttempt(source, seed as SidePoints, settings, LANDMARK_VERSION, {
+      metrics: () => metrics,
+      read: (image, hint, signal) => placeSideLandmarks(measuredClient, image, { model, zoom: settings.zoom, hint, samples: settings.samples, signal }),
+    });
+    console.error(`${id}: ${attempt.outcome}, ${attempt.attemptedCalls} attempted call(s), ${(attempt.ms / 1000).toFixed(1)}s (${attempt.usage.inputTokens} in, ${attempt.usage.outputTokens} out)`);
+    return attempt;
+  };
+  if (!matches(id)) cache[id] = { ...await run(), readerHash, version: LANDMARK_VERSION, fingerprint: fingerprints.get(id)! };
   while ((cache[id].runs?.length ?? 0) + 1 < repeat) {
-    const again = await run();
-    cache[id].runs = [...(cache[id].runs ?? []), { result: again.result, stages: again.stages }];
+    cache[id].runs = [...(cache[id].runs ?? []), await run()];
     if (useCache) writeFileSync(cachePath, JSON.stringify(cache, null, 1));
   }
-  if (!pass) return;
   if (useCache) writeFileSync(cachePath, JSON.stringify(cache, null, 1));
-  console.error(`${id}: ${pass.calls} call(s), ${(pass.ms / 1000).toFixed(1)}s, jaw corner ${pass.gonion ?? "first pass"}${pass.mentonRetried ? ", chin re-asked" : ""} (${pass.usage.inputTokens} in, ${pass.usage.outputTokens} out)`);
 }
 
 // A small worker pool; the provider is the bottleneck, not the disk.
@@ -196,8 +205,8 @@ await Promise.all(
       const id = queue.shift()!;
       try {
         await predict(id);
-      } catch (error) {
-        console.error(`${id}: failed, ${error instanceof Error ? error.message : String(error)}`);
+      } catch {
+        console.error(`${id}: invalid evaluation input; no delivered placement can be scored`);
       }
     }
   }),
@@ -296,6 +305,9 @@ let scored = 0;
 let tokensIn = 0;
 let tokensOut = 0;
 let calls = 0;
+let attemptedCalls = 0;
+let attempts = 0;
+const outcomes: Record<string, number> = {};
 let zoomedPoints = 0;
 const latencies: number[] = [];
 // Where each back point stood after each stage, so a stage that buys nothing is visible.
@@ -351,7 +363,7 @@ const spreadPairs: Record<string, Array<{ spread: number; err: number }>> = { tr
 const skipped: string[] = [];
 for (const id of ids) {
   const cached = cache[id];
-  if (!cached || cached.model !== model || cached.version !== LANDMARK_VERSION) {
+  if (!cached || cached.readerHash !== readerHash || cached.version !== LANDMARK_VERSION || !matches(id, repeat)) {
     skipped.push(id);
     continue;
   }
@@ -364,35 +376,43 @@ for (const id of ids) {
     continue;
   }
   const partial = new Set(PARTIAL[id] ?? []);
-  tokensIn += cached.usage.inputTokens;
-  tokensOut += cached.usage.outputTokens;
-  calls += cached.calls ?? 1;
-  zoomedPoints += cached.zoomed?.length ?? 0;
-  if (typeof cached.ms === "number") latencies.push(cached.ms);
+  for (const attempt of [cached, ...(cached.runs ?? []).slice(0, repeat - 1)]) {
+    attempts += 1;
+    outcomes[attempt.outcome] = (outcomes[attempt.outcome] ?? 0) + 1;
+    tokensIn += attempt.usage.inputTokens;
+    tokensOut += attempt.usage.outputTokens;
+    calls += attempt.calls;
+    attemptedCalls += attempt.attemptedCalls;
+    zoomedPoints += attempt.zoomed?.length ?? 0;
+    latencies.push(attempt.ms);
+  }
   if (cached.gonion) gonionMethods[cached.gonion] = (gonionMethods[cached.gonion] ?? 0) + 1;
   if (typeof cached.gonionDisagreement === "number") gonionDisagreements.push(cached.gonionDisagreement);
   if (cached.mentonRetried) mentonRetries += 1;
   if (cached.seeded) seededCount += 1;
   scored += 1;
-  const px = (pid: SideLandmarkId) => ({ x: cached.result.points[pid].x * w, y: cached.result.points[pid].y * h });
+  const raw = cached.outcome === "success" ? cached.result : null;
+  // A failed pass contributes the delivered device seed, never a fabricated
+  // raw cloud score. Missing raw errors keep the existing completeness HOLD.
+  const px = (pid: SideLandmarkId) => raw ? ({ x: raw.points[pid].x * w, y: raw.points[pid].y * h }) : seed[pid];
   // The y scale this face implies. Reported because a value that is not 1 and
   // barely moves across faces is a framing bug, and a framing bug is fixable
   // where imprecision is not.
   const usable = SIDE_LANDMARK_IDS.filter((pid) => !partial.has(pid));
   const den = usable.reduce((t, pid) => t + px(pid).y ** 2, 0);
-  if (den) impliedYScale.push(usable.reduce((t, pid) => t + px(pid).y * truth[pid].y, 0) / den);
+  if (raw && den) impliedYScale.push(usable.reduce((t, pid) => t + px(pid).y * truth[pid].y, 0) / den);
   // The model's own shape, anchored onto the seeder's front points. This is the
   // best correction production could actually apply, so it is the fair ceiling
   // on what the model is worth here.
   const anchors = FRONT_LANDMARK_IDS.filter((pid) => !partial.has(pid) && seed?.[pid]);
-  const fit = seed && anchors.length >= 3
+  const fit = raw && seed && anchors.length >= 3
     ? similarity(anchors.map(px), anchors.map((pid) => seed[pid]))
     : null;
   const modelPx = Object.fromEntries(SIDE_LANDMARK_IDS.map((pid) => [pid, px(pid)])) as Frame;
-  const fitY = seed && anchors.length >= 2 ? anchorVertical(modelPx, seed, anchors) : null;
+  const fitY = raw && seed && anchors.length >= 2 ? anchorVertical(modelPx, seed, anchors) : null;
   // The seed the app would use: the device seed and the model fused by the
   // production policy, in the same display frame as the labels.
-  const fused = seed ? fuseSideSeeds(seed as SidePoints, modelPx as SidePoints, cached.result.confidence) : null;
+  const fused = seed ? deliveredEvaluationPoints(seed as SidePoints, raw, { w, h }, LANDMARK_VERSION, cached.seeded ?? settings.seeded) : null;
   if (fused) overallBands[fused.overall] += 1;
   const face: (typeof perFace)[number] = { id, moved: new Set(), err: { seeder: {}, model: {}, fused: {} }, highWrong: 0, highCount: 0 };
   perFace.push(face);
@@ -415,14 +435,18 @@ for (const id of ids) {
   }
   // Repeatability: distance between runs of the same pass, per stage.
   if (cached.runs?.length) {
-    const all = [cached, ...cached.runs];
+    const all = [cached, ...cached.runs.slice(0, repeat - 1)];
     for (const pid of BACK_LANDMARK_IDS) {
       if (partial.has(pid)) continue;
       const key = (stage: string) => `${pid}:${stage}`;
-      const pts = all.map((r) => ({ x: r.result.points[pid].x * w, y: r.result.points[pid].y * h }));
+      const pts = all.map((r) => deliveredEvaluationPoints(seed as SidePoints, r.outcome === "success" ? r.result : null, { w, h }, LANDMARK_VERSION, r.seeded ?? settings.seeded).points[pid]);
       const ds: number[] = [];
       for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) ds.push(dist(pts[a], pts[b]) / unit);
-      (scatter[key("final")] ??= []).push(median(ds));
+      if (ds.length) (scatter[key("final")] ??= []).push(median(ds));
+      const observed = all.flatMap((r) => r.outcome === "success" && r.result ? [{ x: r.result.points[pid].x * w, y: r.result.points[pid].y * h }] : []);
+      const rawDistances: number[] = [];
+      for (let a = 0; a < observed.length; a++) for (let b = a + 1; b < observed.length; b++) rawDistances.push(dist(observed[a], observed[b]) / unit);
+      if (rawDistances.length) (scatter[key("raw")] ??= []).push(median(rawDistances));
       for (const stage of ["first", "coarse", "fine"] as const) {
         const sp = all.map((r) => r.stages?.[stage]?.[pid]).filter(Boolean) as LandmarkPoint[];
         if (sp.length < 2) continue;
@@ -441,12 +465,12 @@ for (const id of ids) {
   // The model's own relations, to set beside the labels' (gonion 0.46 below
   // the notch and 0.07 above the chin bottom; menton 0.067 below the chin
   // front; condylion 0.02 ahead of the notch).
-  if (!partial.has("gonion") && !partial.has("tragion") && !partial.has("menton")) {
+  if (raw && !partial.has("gonion") && !partial.has("tragion") && !partial.has("menton")) {
     relations.gonionBelowNotch.push((px("gonion").y - px("tragion").y) / unit);
     relations.gonionAboveMenton.push((px("menton").y - px("gonion").y) / unit);
   }
-  if (!partial.has("menton")) relations.mentonBelowPogonion.push((px("menton").y - px("pogonion").y) / unit);
-  if (!partial.has("condylion") && !partial.has("tragion")) relations.condylionAheadOfNotch.push((facing * (px("condylion").x - px("tragion").x)) / unit);
+  if (raw && !partial.has("menton")) relations.mentonBelowPogonion.push((px("menton").y - px("pogonion").y) / unit);
+  if (raw && !partial.has("condylion") && !partial.has("tragion")) relations.condylionAheadOfNotch.push((facing * (px("condylion").x - px("tragion").x)) / unit);
   for (const stage of ["first", "coarse", "fine"] as const) {
     const st = cached.stages?.[stage];
     if (!st) continue;
@@ -461,34 +485,36 @@ for (const id of ids) {
     const t = truth[pid];
     const m = px(pid);
     const mErr = dist(m, t) / unit;
-    if ((pid === "tragion" || pid === "condylion") && typeof cached.spread?.[pid] === "number") {
+    if (raw && (pid === "tragion" || pid === "condylion") && typeof cached.spread?.[pid] === "number") {
       spreadPairs[pid].push({ spread: cached.spread[pid]!, err: mErr });
     }
-    if (BACK_LANDMARK_IDS.includes(pid)) {
+    if (raw && BACK_LANDMARK_IDS.includes(pid)) {
       const ox = (m.x - t.x) / unit;
       const oy = (m.y - t.y) / unit;
       biasSamples[pid].push({ along: ox * axis.x + oy * axis.y, across: -ox * axis.y + oy * axis.x, err: mErr, m, t, axis, unit });
     }
-    perPoint[pid].model.push(mErr);
-    perPoint[pid].dx.push((facing * (m.x - t.x)) / unit);
-    perPoint[pid].dy.push((m.y - t.y) / unit);
+    if (raw) {
+      perPoint[pid].model.push(mErr);
+      perPoint[pid].dx.push((facing * (m.x - t.x)) / unit);
+      perPoint[pid].dy.push((m.y - t.y) / unit);
+    }
     if (fit) perPoint[pid].anchored.push(dist(fit(m), t) / unit);
     if (fitY) perPoint[pid].anchoredY.push(dist(fitY[pid], t) / unit);
-    const conf = cached.result.confidence[pid];
-    byConfidence[conf >= 0.8 ? "0.8 to 1" : conf >= 0.5 ? "0.5 to 0.8" : "under 0.5"].push(mErr);
+    const conf = raw?.confidence[pid] ?? 0;
+    if (raw && raw.evidence[pid] !== "seed") byConfidence[conf >= 0.8 ? "0.8 to 1" : conf >= 0.5 ? "0.5 to 0.8" : "under 0.5"].push(mErr);
     if (fused) {
       const fErr = dist(fused.points[pid], t) / unit;
       perPoint[pid].fused.push(fErr);
       byBand[fused.band[pid]].push(fErr);
       if (BACK_LANDMARK_IDS.includes(pid)) {
         face.err.fused[pid] = fErr;
-        face.err.model[pid] = mErr;
+        if (raw) face.err.model[pid] = mErr;
         if (fused.band[pid] === "high") {
           face.highCount += 1;
           if (fErr > 0.1) face.highWrong += 1;
         }
       }
-      if (seed?.[pid] && BACK_LANDMARK_IDS.includes(pid)) {
+      if (raw && raw.evidence[pid] !== "seed" && seed?.[pid] && BACK_LANDMARK_IDS.includes(pid)) {
         const sErr = dist(seed[pid], t) / unit;
         const blend = dist({ x: (seed[pid].x + m.x) / 2, y: (seed[pid].y + m.y) / 2 }, t) / unit;
         pairs[pid].push({ d: fused.agreement[pid] ?? 0, seed: sErr, model: mErr, blend, fused: fErr, conf });
@@ -501,7 +527,7 @@ for (const id of ids) {
       if (BACK_LANDMARK_IDS.includes(pid)) face.err.seeder[pid] = sErr;
       if (moved) {
         perPoint[pid].seedMoved.push(sErr);
-        perPoint[pid].modelMoved.push(mErr);
+        if (raw) perPoint[pid].modelMoved.push(mErr);
         if (BACK_LANDMARK_IDS.includes(pid)) face.moved.add(pid);
         if (fused) perPoint[pid].fusedMoved.push(dist(fused.points[pid], t) / unit);
       }
@@ -515,7 +541,11 @@ const line = (label: string, b: Bucket) =>
 const biasLine = (label: string, b: Bucket) =>
   `${label.padEnd(16)} ${String(b.dx.length).padStart(3)}  ${fmt(median(b.dx))}  ${fmt(median(b.dy))}   ${fmt(median(b.anchoredY))}  ${fmt(p90(b.anchoredY))}   ${fmt(median(b.anchored))}`;
 
-console.log(`\nVision pass ${model} (${LANDMARK_VERSION}) against ${scored} labelled profiles; error in head widths (nose tip to ear notch).`);
+console.log(`\nVision pass ${LANDMARK_VERSION}, reader fingerprint ${readerHash.slice(0, 12)}, against ${scored} labelled profiles; error in head widths (nose tip to ear notch).`);
+console.log(`Mode: ${settings.mode}; delivery: ${settings.delivery}; seeded: ${settings.seeded}; total budget ${settings.timeoutMs}ms, including ${settings.responseReserveMs}ms response reserve.`);
+console.log("Local replay includes image encoding and server preparation, but excludes browser upload, auth and quota latency. It is not a live end-to-end latency measurement.");
+console.log(`Delivery outcomes across ${attempts} attempts: ${Object.entries(outcomes).map(([outcome, count]) => `${outcome}=${count}`).join(", ")}.`);
+console.log("Fused scores include the device fallback on every failed attempt's first run; raw scores only include successful responses. Seeded raw output can include inherited device points.");
 if (skipped.length) console.log(`Skipped: ${skipped.join(", ")}`);
 console.log("");
 console.log("landmark           n   model med  p90    seeder med  p90    moved  model@moved seeder@moved fused@moved   fused med  p90");
@@ -711,6 +741,8 @@ console.log("landmark    reader   n   median   [95% CI]        beats seeder   gr
 // cannot approve rollout for the full labelled set. Missing back points also
 // remain failures rather than silently counting as clean profiles.
 const holds = evaluationCompletenessHolds(eligibleIds, perFace, BACK_LANDMARK_IDS, READERS);
+if (settings.mode !== "production") holds.push("diagnostic mode cannot approve production rollout");
+if (settings.delivery !== "cloud") holds.push("device-only cohort cannot approve cloud rollout");
 for (const pid of BACK_LANDMARK_IDS) {
   const movedFaces = perFace.filter((f) => f.moved.has(pid));
   for (const reader of READERS) {
@@ -769,18 +801,18 @@ if (spreadPairs.tragion.length) {
 if (Object.keys(scatter).length) {
   console.log("");
   console.log(`Run-to-run scatter from --repeat (median distance between runs, head widths):`);
-  console.log("landmark          first  coarse   fine   final");
+  console.log("landmark          first  coarse   fine    raw  delivered");
   for (const pid of BACK_LANDMARK_IDS) {
     const cell = (stage: string) => fmt(median(scatter[`${pid}:${stage}`] ?? [])).padStart(7);
-    console.log(`${pid.padEnd(16)}${cell("first")}${cell("coarse")}${cell("fine")}${cell("final")}`);
+    console.log(`${pid.padEnd(16)}${cell("first")}${cell("coarse")}${cell("fine")}${cell("raw")}${cell("final")}`);
   }
 }
 
 const back = merge(BACK_LANDMARK_IDS);
 const ratio = median(back.modelMoved) / median(back.seedMoved);
 console.log("");
-console.log(`Tokens: ${tokensIn} in, ${tokensOut} out across ${scored} profiles, ${calls} model calls, ${zoomedPoints} points from a zoom pass.`);
-if (latencies.length) console.log(`Latency per photo: median ${(median(latencies) / 1000).toFixed(1)}s, p90 ${(p90(latencies) / 1000).toFixed(1)}s (client deadline is what the app sets).`);
+console.log(`Observed tokens: ${tokensIn} in, ${tokensOut} out across ${attempts} attempts on ${scored} profiles, ${attemptedCalls} requests started, ${calls} responses containing tool calls, ${zoomedPoints} points from a zoom pass. Cancelled requests may have provider-side usage not returned to this replay.`);
+if (latencies.length) console.log(`Delivered latency including fallback: median ${(median(latencies) / 1000).toFixed(1)}s, p90 ${(p90(latencies) / 1000).toFixed(1)}s across ${attempts} attempts.`);
 if (Number.isFinite(ratio)) {
   console.log(
     `Legacy pooled rule (70% of these points are the ear pair): model median ${fmt(median(back.modelMoved))} vs seeder ${fmt(median(back.seedMoved))} where the seeder was wrong (ratio ${ratio.toFixed(2)}). ` +

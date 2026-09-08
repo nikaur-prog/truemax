@@ -1,5 +1,6 @@
 import type { Report, Sex } from "./types.js";
 import { METRICS } from "./metrics.js";
+import { SIDE_METRICS } from "./sideMetrics.js";
 import { scopedStorageKey } from "./scanScope.js";
 
 // ---------------------------------------------------------------------------
@@ -357,15 +358,15 @@ export function corpusJSON(faces: RatedFace[]): string {
  * empty side one behind a single reassuring count.
  */
 export function missingCoverage(faces: RatedFace[], view: "front" | "side" = "front"): string[] {
-  return METRICS.filter((m) => m.view === view)
-    .filter((m) => !faces.some((f) => m.id in f.measurements))
+  const definitions = view === "side" ? SIDE_METRICS : METRICS;
+  return definitions
+    .filter((m) => !faces.some((f) => Number.isFinite(f.measurements[m.id])))
     .map((m) => m.id);
 }
 
 /** How many faces in the set carry any side measurement at all. */
 export function sideCount(faces: RatedFace[]): number {
-  const side = METRICS.filter((m) => m.view === "side");
-  return faces.filter((f) => side.some((m) => m.id in f.measurements)).length;
+  return faces.filter((f) => SIDE_METRICS.some((m) => Number.isFinite(f.measurements[m.id]))).length;
 }
 
 /**
@@ -384,6 +385,7 @@ export interface SetHealth {
   sex: Sex;
   count: number;
   spread: number;
+  /** Collection target only, never evidence that scoring has been validated. */
   enough: boolean;
   note: string;
 }
@@ -403,6 +405,6 @@ export function setHealth(faces: RatedFace[], sex: Sex): SetHealth {
     note = `ratings only span ${spread.toFixed(1)} points; add faces at the ends, not the middle`;
   } else if (count < WANT_PER_SEX) {
     note = `${WANT_PER_SEX - count} more to go`;
-  } else note = "enough to fit directions from";
+  } else note = "pilot collection target met; independent validation still needed";
   return { sex, count, spread, enough, note };
 }

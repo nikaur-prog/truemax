@@ -4,6 +4,7 @@ import { buildMorphBlueprint } from "../engine/morphPlan.js";
 import { EMPTY_PROFILE } from "../engine/goals.js";
 import type { Report } from "../engine/types.js";
 import type { MorphRenderState } from "../engine/morphContract.js";
+import { pollMorphRender } from "../engine/morphContract.js";
 import { wireMorphPreview } from "./morphPreview.js";
 import { ensureGoalPreviewConsent } from "./goalPreviewConsent.js";
 
@@ -310,6 +311,87 @@ test("checking a known job after timeout resumes it without another render reque
   assert.equal(polls, 2);
   assert.equal(f.output.hidden, false);
   f.dispose();
+});
+
+test("HTTP and protocol check failures resume the same job and still validate its images", async () => {
+  const failures: Array<{ status: number; payload: unknown; message: RegExp }> = [
+    { status: 503, payload: { error: "Unavailable" }, message: /interrupted/ },
+    { status: 429, payload: { error: "Slow down" }, message: /interrupted/ },
+    { status: 401, payload: { error: "Expired token" }, message: /Sign in again/ },
+    { status: 403, payload: { error: "Access denied" }, message: /account access/ },
+    { status: 404, payload: { error: "Not found" }, message: /account access/ },
+    { status: 200, payload: null, message: /unexpected response/ },
+    { status: 200, payload: { ...ready, jobId: "preview_different" }, message: /unexpected response/ },
+    { status: 200, payload: { ...ready, validation: { ...ready.validation, identityPreserved: false } }, message: /did not pass validation/ },
+  ];
+  for (const failure of failures) {
+    let requests = 0, polls = 0, validations = 0, submissions = 0;
+    const fetcher = (async () => {
+      polls++;
+      const payload = polls === 1 ? failure.payload : polls === 2
+        ? { ...ready, validation: { ...ready.validation, identityPreserved: false, targetAligned: false, pending: ["identityPreserved", "targetAligned"] } }
+        : ready;
+      return new Response(JSON.stringify(payload), { status: polls === 1 ? failure.status : 200 });
+    }) as typeof fetch;
+    const f = fixture({ request: async () => { requests++; return { status: "accepted", jobId: ready.jobId }; },
+      wait: async () => {},
+      poll: (id, side, token, signal) => pollMorphRender(id, side, token, signal, fetcher),
+      validate: async () => { validations++; return { passed: true, identityPreserved: true, targetAligned: true }; },
+      submit: async (id, passed) => { submissions++; assert.equal(id, ready.jobId); assert.equal(passed, true); return { ok: true }; },
+    });
+    try {
+      await f.create.click();
+      assert.equal(f.create.textContent, "Check existing preview");
+      assert.equal(f.output.hidden, true);
+      assert.equal(validations, 0);
+      assert.match(f.shell.querySelector("[data-morph-status]")!.textContent, failure.message);
+      await f.create.click();
+      assert.equal(requests, 1, "a failed check must not create another paid render");
+      assert.equal(polls, 3);
+      assert.equal(validations, 1);
+      assert.equal(submissions, 1);
+      assert.equal(f.output.hidden, false);
+    } finally { f.dispose(); }
+  }
+});
+
+test("explicit failed and cancelled jobs allow a deliberate new render", async () => {
+  for (const status of ["failed", "cancelled"]) {
+    let requests = 0;
+    const f = fixture({ request: async () => { requests++; return requests === 1 ? { status: "accepted", jobId: ready.jobId } : ready; },
+      wait: async () => {},
+      poll: (id, side, token, signal) => pollMorphRender(id, side, token, signal,
+        (async () => new Response(JSON.stringify({ status, jobId: id }))) as typeof fetch),
+    });
+    try {
+      await f.create.click();
+      assert.equal(f.create.textContent, "Create my visual target");
+      assert.equal(f.output.hidden, true);
+      await f.create.click();
+      assert.equal(requests, 2);
+      assert.equal(f.output.hidden, false);
+    } finally { f.dispose(); }
+  }
+});
+
+test("an unavailable refreshed token preserves the pending job and asks for sign-in", async () => {
+  let token: string | null = "member-a-token";
+  let requests = 0, polls = 0;
+  const f = fixture({ token: async () => token,
+    request: async () => { requests++; return { status: "accepted", jobId: ready.jobId }; },
+    wait: async () => {},
+    poll: async () => { polls++; throw new Error("Temporary network failure"); },
+  });
+  try {
+    await f.create.click();
+    token = null;
+    await f.create.click();
+    assert.equal(requests, 1);
+    assert.equal(polls, 1);
+    assert.equal(f.create.textContent, "Check existing preview");
+    assert.match(f.shell.querySelector("[data-morph-status]")!.textContent, /Sign in again/);
+    assert.equal(f.output.hidden, true);
+  } finally { f.dispose(); }
 });
 
 test("a held composite cannot start a render even through a programmatic click", async () => {
