@@ -114,19 +114,28 @@ and the numbers above are what applied as of writing, not a permanent law.
 
 ### What this repo is missing
 
-- **A web account-deletion URL.** Play requires a page reachable *without
-  installing the app and without signing in*, where somebody can request
-  deletion, and it is a required field on the Data Safety form. We have in-app
-  deletion (`api/delete-account.ts`) and `/privacy` says "delete your account
-  from inside the app", which is not sufficient — it assumes the app. Needs a
-  small public route, e.g. `/delete-account`, explaining what is deleted and how
-  to request it by email, then linked from `/privacy`.
-- **A 1024x500 feature graphic.** Mandatory for a Play listing, and there is no
-  equivalent on the App Store, so `resources/` has nothing like it.
-- **An adaptive icon.** Android wants a foreground and a background layer rather
-  than one square, and draws its own mask over them.
-  `scripts/make-app-icons.mjs` currently emits only the Apple sizes plus a flat
-  512; it needs an Android target.
+Nothing, as of this revision. All three gaps this section used to list are
+closed; they are kept here with what closed them, because the next person to
+read this will otherwise go looking for them.
+
+- ~~**A web account-deletion URL.**~~ `delete-account.html` is a public static
+  route, built by `vite.config.ts` and linked from `/privacy`. Reachable
+  without installing the app and without signing in, which is what Play
+  requires and what the Data Safety form asks for.
+- ~~**A 1024x500 feature graphic.**~~ `resources/feature-graphic-1024x500.png`,
+  from `scripts/make-app-icons.mjs`. 24-bit, no alpha, because Play rejects a
+  feature graphic carrying an alpha channel.
+- ~~**An adaptive icon.**~~ `resources/android/ic_launcher_foreground.png` and
+  `ic_launcher_background.png`, both 432x432 (108dp at xxxhdpi), from the same
+  script. The mark is drawn at 246px so it survives the 66dp safe circle on the
+  diagonal; the apparent margin is the part the launcher is allowed to crop.
+  Drop them into `android/app/src/main/res/mipmap-anydpi-v26/` as the
+  `<foreground>` and `<background>` of `ic_launcher.xml` once `npx cap add
+  android` has generated the project.
+
+Regenerate all of it with `npx tsx scripts/make-app-icons.mjs` whenever the
+mark changes. One script writes the Apple set, the splash and both Play
+shapes, so they cannot drift apart.
 
 ### What carries over unchanged
 

@@ -1,5 +1,22 @@
 export type ScanConfirmTone = "primary" | "positive";
 
+/**
+ * One worked example shown inside the dialog, before anybody has committed.
+ *
+ * Distinct from `preview`, which shows the photograph you just took. A teaser
+ * shows the photograph you are being ASKED for, which is a different job: the
+ * profile is the shot people get wrong, and "turn your head 90 degrees" does
+ * not land until you have seen the difference between a full quarter turn and
+ * the three-quarter view almost everybody produces instead.
+ */
+export interface ScanConfirmTeaser {
+  src: string;
+  alt: string;
+  caption: string;
+  /** A right answer or a wrong one. Drives the tick, the cross and the tone. */
+  kind: "do" | "dont";
+}
+
 export interface ScanConfirmOptions {
   eyebrow?: string;
   title: string;
@@ -7,6 +24,12 @@ export interface ScanConfirmOptions {
   confirmLabel: string;
   cancelLabel: string;
   preview?: HTMLCanvasElement;
+  /**
+   * Examples shown above the copy. Two, never more: this card already carries
+   * an eyebrow, a heading, a paragraph and two buttons, and on a short phone a
+   * third figure is what pushes the buttons off the bottom of the screen.
+   */
+  teasers?: readonly ScanConfirmTeaser[];
   tone?: ScanConfirmTone;
 }
 
@@ -75,6 +98,34 @@ export function confirmScanAction(options: ScanConfirmOptions): Promise<boolean>
       canvas.setAttribute("aria-label", "The front photo you just captured");
       figure.appendChild(canvas);
       card.appendChild(figure);
+    }
+
+    // Above the copy, not below it. The examples are what makes the paragraph
+    // legible rather than the other way round, and somebody who understands
+    // the picture can act without reading the sentence at all.
+    if (options.teasers?.length) {
+      const strip = document.createElement("div");
+      strip.className = "scan-confirm-teasers";
+      for (const teaser of options.teasers) {
+        const figure = document.createElement("figure");
+        figure.className = `scan-confirm-teaser ${teaser.kind}`;
+        const img = document.createElement("img");
+        img.src = teaser.src;
+        img.alt = teaser.alt;
+        // Eager: this dialog is the whole screen at the moment it opens, so a
+        // lazy image here is a blank rectangle exactly when it is being looked
+        // at. Sizes are declared so the card does not reflow as they land.
+        img.decoding = "async";
+        const caption = document.createElement("figcaption");
+        const mark = document.createElement("span");
+        mark.className = "scan-confirm-teaser-mark";
+        mark.textContent = teaser.kind === "do" ? "✓" : "✕";
+        mark.setAttribute("aria-hidden", "true");
+        caption.append(mark, document.createTextNode(teaser.caption));
+        figure.append(img, caption);
+        strip.appendChild(figure);
+      }
+      card.appendChild(strip);
     }
 
     const copy = document.createElement("p");

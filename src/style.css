@@ -1858,6 +1858,40 @@ body.scan-confirm-open { overflow: hidden; }
   display: block; width: auto; height: auto; max-width: 100%;
   max-height: min(48dvh, 520px); margin: auto; object-fit: contain;
 }
+/* The worked examples inside a confirm dialog: right and wrong, side by side.
+
+   Two columns at every width, never a stack. These photographs mean nothing
+   apart — the whole content is the DIFFERENCE between them, and a reader who
+   has to scroll from one to the other to compare has been given two pictures
+   instead of one comparison. They are portrait crops, so two columns fit a
+   360px phone comfortably; it is the card's padding that has to give, not the
+   layout.
+
+   The height cap is in dvh so a short phone in landscape shrinks the pictures
+   rather than pushing the buttons off the bottom. */
+.scan-confirm-teasers {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin: 4px 0 18px; text-align: left;
+}
+.scan-confirm-teaser { margin: 0; }
+.scan-confirm-teaser img {
+  display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+  object-position: 50% 32%;
+  border-radius: 14px; border: 1px solid var(--line); background: #0d0f11;
+  max-height: min(30dvh, 260px);
+}
+.scan-confirm-teaser figcaption {
+  display: flex; align-items: baseline; gap: 6px;
+  margin-top: 8px; color: var(--mut); font-size: 12px; line-height: 1.35;
+}
+.scan-confirm-teaser-mark { flex: 0 0 auto; font-size: 13px; font-weight: 700; }
+.scan-confirm-teaser.do .scan-confirm-teaser-mark { color: var(--acc); }
+.scan-confirm-teaser.do img { border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); }
+.scan-confirm-teaser.dont .scan-confirm-teaser-mark { color: #c2543f; }
+/* Desaturated, so the wrong answer reads as wrong before the caption is read.
+   Not blurred and not dimmed to unreadability: the mistake has to stay legible
+   enough to recognise as your own. */
+.scan-confirm-teaser.dont img { filter: saturate(.35) brightness(.94); }
 .scan-confirm-copy {
   max-width: 42ch; margin: 0 auto 20px; color: var(--mut); font-size: 14px; line-height: 1.55;
 }
@@ -1870,6 +1904,10 @@ body.scan-confirm-open { overflow: hidden; }
   .scan-confirm-card h2 { font-size: 27px; }
   .scan-confirm-actions { grid-template-columns: 1fr; }
   .scan-confirm-actions .positive { grid-row: 1; }
+  /* The pair stays two-up here — see .scan-confirm-teasers. Only the gutter
+     and the caption give way, because the comparison is the content. */
+  .scan-confirm-teasers { gap: 8px; margin-bottom: 14px; }
+  .scan-confirm-teaser figcaption { font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .scan-confirm-backdrop, .scan-confirm-card { animation: none; }
