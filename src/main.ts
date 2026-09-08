@@ -112,7 +112,7 @@ import { analyzeSkin } from "./engine/skin.js";
 import { detectSkinPatterns } from "./engine/skinPatterns.js";
 import { softTissueFromLandmarks } from "./engine/softTissue.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
-import { offerBothTutorials, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
+import { offerTutorial, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
 import { soundChapter } from "./ui/scanSounds.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
@@ -1065,7 +1065,10 @@ el.btnUpload.addEventListener("click", () => {
     if (generation !== scanGeneration) return;
     void ensureSex(() => {
       if (generation !== scanGeneration) return;
-      offerBothTutorials(() => {
+      // The FRONT tutorial only. The profile one is offered later, on the
+      // far side of "Take side photo" — see the side branch in the front
+      // review, and offerTutorial's own note on why it moved.
+      offerTutorial("front", () => {
         if (generation !== scanGeneration) return;
         filePickerGeneration = generation;
         el.fileInput.click();
@@ -1540,10 +1543,11 @@ el.btnCamera.addEventListener("click", async () => {
       void ensureSex(() => {
         if (generation !== scanGeneration) return;
         // After the reference population is settled and before the camera
-        // opens: the tutorial is about the photographs, so it belongs at the
-        // last moment where neither of them exists yet. Both, here, rather
-        // than the front now and the profile later — see offerBothTutorials.
-        offerBothTutorials(() => {
+        // opens: this tutorial is about the FRONT photograph, so it belongs at
+        // the last moment that photograph does not yet exist. The profile
+        // tutorial no longer runs here — it waits until somebody has actually
+        // asked for a profile.
+        offerTutorial("front", () => {
           if (generation === scanGeneration) void openCamera();
         });
       });
@@ -2205,6 +2209,23 @@ async function handleCanvas(
   const takeSide = await confirmScanAction({
     eyebrow: "OPTIONAL SECOND VIEW",
     title: "And now the side photo",
+    // The examples carry this. A full quarter turn and the three-quarter view
+    // people actually produce are one sentence apart and worlds apart in the
+    // measurement, and the picture settles it before the paragraph is read.
+    teasers: [
+      {
+        src: "/tutorial/side-do.jpg",
+        alt: "A correct side profile: a full quarter turn, one ear to the camera, chin level",
+        caption: "A full quarter turn, chin level",
+        kind: "do",
+      },
+      {
+        src: "/tutorial/side-partial.jpg",
+        alt: "An incorrect side profile: only half turned, so both eyes are still visible",
+        caption: "Half turned, both eyes showing",
+        kind: "dont",
+      },
+    ],
     copy: "Turn your head 90 degrees so one ear faces the camera. Keep your head level and your full forehead and chin visible. This adds projection, jaw-angle and profile measurements, but you can skip it and see your front analysis now.",
     confirmLabel: "Take side photo",
     cancelLabel: "Skip side photo",
@@ -2212,7 +2233,25 @@ async function handleCanvas(
   });
   if (!scanIsCurrent(token, generation)) return;
   if (takeSide) {
-    startSide();
+    // The profile tutorial belongs HERE, not with the front one at the top of
+    // the scan.
+    //
+    // It used to run back to back with the front tutorial before the first
+    // photograph, to avoid interrupting the same scan twice. That bought the
+    // wrong thing: the profile is optional, so everybody who skips it sat
+    // through a tutorial for a photograph they never took, and everybody who
+    // takes it was taught the shot several minutes and one whole photograph
+    // before doing it. Offered on the far side of "Take side photo" it reaches
+    // exactly the people who are about to need it, at the moment they need it,
+    // and it is still ahead of the instruction to turn away from the screen —
+    // which was the original objection, and does not apply here.
+    //
+    // Suppressed for anyone who ticked "don't show me this again" on either
+    // the offer or the player, and offerTutorial handles that itself.
+    offerTutorial("side", () => {
+      if (!scanIsCurrent(token, generation)) return;
+      startSide();
+    });
     return;
   }
   track("scan-side-skipped");
@@ -3460,12 +3499,12 @@ function startSide(): void {
       await gateAnalysis(sideReport, token);
     },
   });
-  // No offer here any more. Both tutorials are shown together before the
-  // FRONT photograph (see offerBothTutorials), because asking again at this
-  // point meant interrupting the same scan twice — and doing it at the moment
-  // somebody has just been told to turn away from the screen, with a dialogue
-  // on the screen. The information button on the frame reaches the profile
-  // tutorial on demand for anyone who wants it again.
+  // No offer here. By this point the profile tutorial has already been
+  // offered, one step earlier, immediately after "Take side photo" and before
+  // the camera opened. Asking at THIS moment is what the flow has always
+  // avoided: somebody has just been told to turn their head away from the
+  // screen, and a dialogue on that screen is unreadable to them. The
+  // information button on the frame reaches the tutorial on demand.
   //
   // A bell first. This is the one boundary in a scan — one photograph is
   // finished and a different one is being asked for — and it arrives at the
