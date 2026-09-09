@@ -15,8 +15,8 @@ import { readFileSync } from "node:fs";
 const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
 const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
 
-test("taking the automatic placement never reaches a confirm screen", () => {
-  const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("if (startInGuidedMode)"));
+test("taking the public automatic placement never reaches a confirm screen", () => {
+  const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("const releaseFurniture"));
   // Both terminal branches go straight to confirmPlacement with auto set.
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: true, consented: consentAnswer \}\)/);
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented: consentAnswer \}\)/);
@@ -48,7 +48,7 @@ test("the accuracy question is asked once, as a dialog, not in the panel", () =>
 
 test("each automatic-placement review names the template-backed jaw points", () => {
   const copy = [
-    src.slice(src.indexOf('e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points'), src.indexOf('e.actions.innerHTML = `', src.indexOf('const cloud = seedMethod'))),
+    src.slice(src.indexOf('const cloud = seedMethod'), src.indexOf('e.actions.innerHTML = `', src.indexOf('const cloud = seedMethod'))),
     src.slice(src.indexOf("const untouchedCopy ="), src.indexOf("return false;", src.indexOf("const untouchedCopy ="))),
     src.slice(src.indexOf("const afterAutomatic ="), src.indexOf("if (right === null")),
     src.slice(src.indexOf("function askPlacementMode("), src.indexOf("if (exitCtx) appendSideExitActions", src.indexOf("function askPlacementMode("))),
@@ -135,7 +135,8 @@ test("the untouched guard is skipped only on the path that replaced it", () => {
   // disagreeing with an independent product by 22, 12 and 48 degrees. It is
   // skipped only where an explicit "yes, these look right" has been given,
   // which is a stronger form of the same protection than a second button press.
-  assert.match(src, /if \(!opts\.auto && !movedSidePointIds\(/);
+  assert.match(src, /if \(!calibrationReview && !opts\.auto && !movedSidePointIds\(/);
+  assert.match(src, /if \(calibrationReview && !calibrationAcknowledged\)/, "admin calibration replaces the double press with an explicit all-points review");
 });
 
 // The scan takeover painted a near-black room in an otherwise light product,

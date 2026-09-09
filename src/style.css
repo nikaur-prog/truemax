@@ -1996,6 +1996,9 @@ body:not(.cam-takeover) #side-actions > .btn svg { flex: 0 0 auto; }
 #side-actions .side-review-tools > button:hover {
   background: var(--card); border-color: var(--line); color: var(--ink); transform: none;
 }
+#side-actions .side-review-tools > button[aria-pressed="true"] {
+  background: var(--acc); border-color: var(--acc); color: #fff;
+}
 #side-actions .side-review-tools svg { flex: 0 0 auto; }
 .side-exit-actions {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;

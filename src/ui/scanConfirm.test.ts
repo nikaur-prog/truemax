@@ -164,7 +164,7 @@ test("skipping the side routes the owned front to analysis without a side result
 test("side readers use an owned snapshot with cancellation and no artificial delay", () => {
   const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
   assert.match(src, /seedSidePointsSmart\(\s*snapshot,/);
-  assert.match(src, /cloudPlacementFor\(snapshot, localResult, signal\)/);
+  assert.match(src, /cloudPlacementFor\(snapshot, localResult, signal, ctx\.reviewMode\)/);
   assert.match(src, /if \(!sideAttempt.current\(signal\)\) return/);
   assert.doesNotMatch(src, /READ_BEAT_MS/);
 });

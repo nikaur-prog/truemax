@@ -17,7 +17,7 @@ import {
   stopThinking,
 } from "./scanSounds.js";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
-import { mountVerifier, seedSidePointsSmart } from "./sideVerify.js";
+import { mountVerifier, seedSidePointsSmart, seedSideTemplate } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
@@ -55,6 +55,9 @@ import { createSideAttemptOwner } from "./sideAttempt.js";
 import { createSideInputGuard } from "./sideInputGuard.js";
 import { withPointDerivedSideDirection } from "./sidePlacementDirection.js";
 import type { ScanPerformanceAttempt } from "../engine/scanPerformance.js";
+import { flipSideReviewPoints, recoverSideSeed, sideImageSize } from "../engine/sideCaptureRecovery.js";
+import type { SideCaptureDiagnostics, SideReviewMode } from "../engine/sideCaptureRecovery.js";
+import { runSideCloudAttempt } from "../engine/sideCloudAttempt.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -102,6 +105,8 @@ interface SideCtx {
   standalone?: boolean;
   /** Explicitly enabled only for a signed-in adult scanning their own face. */
   feedbackEligible?: boolean;
+  /** Set only by the authorized admin calibration entry point. Not an auth gate. */
+  reviewMode?: SideReviewMode;
   onDone: (
     report: Report,
     points: SidePoints,
@@ -118,6 +123,8 @@ export interface SidePlacementReview {
   automaticPoints: SidePoints;
   seedMethod: SideSeedMethod;
   seedVersion?: string;
+  /** Local calibration evidence, including failed automatic placement. */
+  diagnostics?: SideCaptureDiagnostics;
   feedback: SideFeedbackIntent | null;
   /**
    * Whether a human stood behind these thirteen points.
@@ -161,6 +168,7 @@ interface SidePlacementSeed {
   confidence?: number;
   confidenceByPoint?: Partial<Record<SidePointId, number>>;
   seedVersion?: string;
+  diagnostics?: SideCaptureDiagnostics;
 }
 
 let verifier: VerifyHandle | null = null;
@@ -699,7 +707,9 @@ function stopSideCamera(): void {
   // as "no face", and every camera-captured profile quietly fell back to the
   // silhouette trace — the worse path, on the most common route into this
   // screen.
-  void setRunningMode("IMAGE");
+  // loadCanvas awaits this transition as part of the placement attempt. A
+  // failed background mode reset must not become an unhandled rejection.
+  void setRunningMode("IMAGE").catch(() => {});
   const e = el();
   exitCameraTakeover(e.frame.closest(".cam-stage"));
   e.live.classList.add("hidden");
@@ -791,9 +801,9 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
   const img = await loadImage(file);
   if (!sideAttempt.current(signal)) return;
   const c = document.createElement("canvas");
-  const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
-  c.width = Math.round(img.naturalWidth * scale);
-  c.height = Math.round(img.naturalHeight * scale);
+  const size = sideImageSize(img.naturalWidth, img.naturalHeight, MAX_DIM);
+  c.width = size.width;
+  c.height = size.height;
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
   await loadCanvas(c, ctx, signal);
   } catch {
@@ -807,7 +817,17 @@ function showSideLoadFailure(ctx: SideCtx): void {
   e.frame.classList.remove("scanning");
   e.cap.textContent = "PHOTO COULD NOT BE READ";
   e.actions.replaceChildren();
-  e.panelCopy.innerHTML = `<h2 class="side-title">Try another side photo</h2><p class="side-sub">That photo could not be prepared.${ctx.onSkip ? " Your front scan has not changed." : " Choose a clearer photo to try again."}</p>`;
+  e.panelCopy.innerHTML = `<h2 class="side-title">This photo could not be opened</h2><p class="side-sub">Try saving it as a JPEG, PNG or WebP, then upload it again. This is a file-reading problem, not a judgement of the photo's pose or quality.${ctx.onSkip ? " Your front scan has not changed." : ""}</p>`;
+  appendSideExitActions(e.actions, ctx);
+}
+
+function showSidePlacementFailure(ctx: SideCtx): void {
+  const e = el();
+  stopThinking();
+  e.frame.classList.remove("scanning");
+  e.cap.textContent = "PLACEMENT COULD NOT OPEN";
+  e.actions.replaceChildren();
+  e.panelCopy.innerHTML = `<h2 class="side-title">The photo opened, but placement did not</h2><p class="side-sub">The image is readable. The point-placement tools could not finish this attempt. Try the photo again${ctx.onSkip ? " or use your front result" : ""}.</p>`;
   appendSideExitActions(e.actions, ctx);
 }
 
@@ -816,6 +836,7 @@ function showSideLoadFailure(ctx: SideCtx): void {
 // from.
 async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAttempt.begin()): Promise<void> {
   const e = el();
+  let photoPrepared = false;
   try {
   cancelDialogs();
   verifier?.destroy();
@@ -823,12 +844,8 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   e.section.inert = false;
   e.actions.classList.remove("mode-pending", "guided-row");
   stopSideCamera();
-  // Awaited, not assumed: seeding runs the still-image detector below.
-  await setRunningMode("IMAGE");
   if (!sideAttempt.current(signal)) return;
-  const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
-  const w = Math.round(src.width * scale);
-  const h = Math.round(src.height * scale);
+  const { width: w, height: h } = sideImageSize(src.width, src.height, MAX_DIM);
   e.canvas.width = w;
   e.canvas.height = h;
   // Async readers own a snapshot, never the display canvas a retake reuses.
@@ -837,6 +854,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   snapshot.height = h;
   snapshot.getContext("2d")!.drawImage(src, 0, 0, w, h);
   e.canvas.getContext("2d")!.drawImage(src, 0, 0, w, h);
+  photoPrepared = true;
 
   // Do not reject a side still here. Profile focus, crop, lighting, pose and
   // silhouette classifiers all produced false negatives on plainly usable
@@ -892,18 +910,27 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   // Send the supported seed in the exact same frame as the immutable photo.
   // The cloud refines an existing placement instead of starting without it.
   const finishSeed = ctx.performance?.start("side_seed");
-  const localResult = await seedSidePointsSmart(
-      snapshot,
-      (points, faceDir) => {
+  const recovered = await recoverSideSeed({
+    mode: ctx.reviewMode,
+    signal,
+    prepare: () => setRunningMode("IMAGE"),
+    // Calibration keeps the reader's first geometry rather than selecting a
+    // candidate because its measurements fit today's reference boundaries.
+    read: (readSignal) => seedSidePointsSmart(snapshot, ctx.reviewMode === "calibration" ? undefined : (points, faceDir) => {
         const assessment = seedAssessment(points, faceDir, ctx.sex);
         return assessment.hard.length === 0 && assessment.marginal.length === 0;
-      },
-      signal,
-    );
-  finishSeed?.(signal.aborted ? "cancelled" : "success");
+      }, readSignal),
+    template: () => seedSideTemplate(w, h),
+  });
+  const localResult = recovered.seed;
+  finishSeed?.(signal.aborted ? "cancelled" : recovered.diagnostics?.templateFallback ? "fallback" : "success");
   if (!sideAttempt.current(signal)) return;
   const finishCloud = ctx.performance?.start("side_cloud");
-  const cloudResult = await cloudPlacementFor(snapshot, localResult, signal);
+  const cloudAttempt = await cloudPlacementFor(snapshot, localResult, signal, ctx.reviewMode);
+  const cloudResult = cloudAttempt.placement;
+  if (cloudAttempt.status === "unavailable") {
+    recovered.diagnostics?.warnings.push("cloud-unavailable");
+  }
   finishCloud?.(signal.aborted ? "cancelled" : cloudResult ? "success" : "fallback");
   if (!sideAttempt.current(signal)) return;
   // The cloud is a second reader, not a replacement for the device seed. The
@@ -926,14 +953,15 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
     ...localResult,
     points: fused.points,
     method: cloudResult ? "fused" : localResult.method,
-    confidence: overallConfidence,
+    confidence: recovered.diagnostics?.templateFallback ? 0 : overallConfidence,
     confidenceByPoint,
-    seedVersion: cloudResult?.seedVersion,
+    seedVersion: cloudResult?.seedVersion ?? (recovered.diagnostics?.templateFallback ? "manual-template-fallback-v1" : undefined),
+    diagnostics: recovered.diagnostics,
   });
   stopThinking();
   e.frame.classList.remove("scanning");
   e.cap.textContent = "VERIFY LANDMARKS";
-  if (seed.faceDir === -1 && (seed.method === "mesh" || (seed.confidence ?? 0) >= 0.5)) {
+  if (ctx.reviewMode !== "calibration" && seed.faceDir === -1 && (seed.method === "mesh" || (seed.confidence ?? 0) >= 0.5)) {
     const w2 = e.canvas.width;
     const flipped = document.createElement("canvas");
     flipped.width = w2;
@@ -955,19 +983,27 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
 
   mountVerify(e.canvas, seed, ctx, "VERIFY LANDMARKS");
   } catch {
-    if (sideAttempt.current(signal)) showSideLoadFailure(ctx);
+    if (sideAttempt.current(signal)) {
+      if (photoPrepared) showSidePlacementFailure(ctx);
+      else showSideLoadFailure(ctx);
+    }
   }
 }
 
-async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal): ReturnType<typeof requestCloudSidePlacement> {
-  const token = await currentAccessToken().catch(() => null);
-  if (!token || signal.aborted) return null;
-  if (readSidePlacementChoice() !== "cloud") return null;
-  const directedSeed = withPointDerivedSideDirection(seed);
-  return requestCloudSidePlacement(canvas, token, {
-    seed: directedSeed.points,
-    faceDir: directedSeed.faceDir,
+async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal, mode: SideReviewMode) {
+  return runSideCloudAttempt({
+    enabled: readSidePlacementChoice() === "cloud",
+    mode,
     signal,
+    getAccessToken: () => currentAccessToken(),
+    request: (token, requestSignal) => {
+      const directedSeed = withPointDerivedSideDirection(seed);
+      return requestCloudSidePlacement(canvas, token, {
+        seed: directedSeed.points,
+        faceDir: directedSeed.faceDir,
+        signal: requestSignal,
+      });
+    },
   });
 }
 
@@ -1031,6 +1067,15 @@ function mountVerify(
   const automaticPoints = cloneSidePoints(seed.automaticPoints ?? seed.points);
   const seedMethod = seed.method ?? "existing";
   const seedVersion = seed.seedVersion;
+  const calibrationReview = ctx.reviewMode === "calibration";
+  const diagnostics = seed.diagnostics ? structuredClone(seed.diagnostics) : undefined;
+  let calibrationAcknowledged = false;
+  let paintCalibrationDirection = () => {};
+  const resetCalibrationAcknowledgement = () => {
+    calibrationAcknowledged = false;
+    const checkbox = document.getElementById("side-calibration-reviewed") as HTMLInputElement | null;
+    if (checkbox) checkbox.checked = false;
+  };
 
   // A fresh seed opens IN the walkthrough; a placement being re-opened for
   // corrections goes straight to the free-editing review, because those points
@@ -1039,7 +1084,11 @@ function mountVerify(
   // below keys off it.
   const startInGuidedMode = seedMethod !== "existing";
   verifier?.destroy();
-  verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
+  verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => {
+    drawGuides(e.lines, pts, w, h);
+    resetCalibrationAcknowledgement();
+    paintCalibrationDirection();
+  });
   const mountedVerifier = verifier;
   const isMounted = () => verifier === mountedVerifier;
   // Confidence guides fusion internally. Every visible point keeps the same
@@ -1393,6 +1442,7 @@ function mountVerify(
   };
 
   const showReviewActions = () => {
+    resetCalibrationAcknowledgement();
     // Editable from the first frame. The old flow parked the points behind an
     // "Edit point placement" button, which meant the natural gesture — grab
     // the wrong dot and drag it — did nothing until you found the mode switch.
@@ -1419,15 +1469,19 @@ function mountVerify(
           soundAdvance();
         }
       };
-      verifier.onDragMove = () => soundDrag();
+      verifier.onDragMove = () => { resetCalibrationAcknowledgement(); soundDrag(); };
       verifier.onSelect = (id) => {
         const def = SIDE_POINTS.find((sp) => sp.id === id);
         if (def) setReference(id, def.label, def.hint);
       };
     }
     const cloud = seedMethod === "vision" || seedMethod === "fused";
-    e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
-      <p class="side-sub">Automatic placement can include template-based starting positions. Check the jaw corner, jaw hinge and chin bottom closely, then the hairline, ear and neck point. Drag any ring onto the feature it names.</p>
+    const calibrationCopy = diagnostics?.templateFallback
+      ? "Automatic placement did not finish. These are template starting positions, not detected landmarks. Move every point onto its named feature, and check the facing direction below."
+      : "Review all thirteen positions against this photo. Uncertain pose or detection does not reject an admin calibration image. Correct any misplaced point and check the facing direction below. The original automatic positions are retained separately from your edits.";
+    e.panelCopy.innerHTML = `<h2 class="side-title">${calibrationReview ? diagnostics?.templateFallback ? "Place the estimated points" : "Review this calibration photo" : "Check the automatic points"}</h2>
+      <p class="side-sub">${calibrationReview ? calibrationCopy : "Automatic placement can include template-based starting positions. Check the jaw corner, jaw hinge and chin bottom closely, then the hairline, ear and neck point. Drag any ring onto the feature it names."}</p>
+      ${calibrationReview ? `<p class="side-review-note">A reviewed position is an operator annotation, not proof of anatomical accuracy. Out-of-range measurements remain excluded from scoring and are kept in diagnostics.</p>` : ""}
       <p class="side-review-note">${cloud
         ? "The placement request is finished and TrueMax kept no copy. Sharing a correction later is a separate choice."
         : "Nothing leaves this device unless you separately choose to share it."}</p>`;
@@ -1445,6 +1499,41 @@ function mountVerify(
       </button>
       <button class="btn gho" id="side-wrong" type="button">Points look wrong</button>
       </div>`;
+    if (calibrationReview) {
+      const direction = document.createElement("div");
+      direction.className = "side-review-tools";
+      direction.setAttribute("role", "group");
+      direction.setAttribute("aria-label", "Which way does the face point in this photo?");
+      direction.innerHTML = `<button class="btn gho" type="button" data-side-direction="-1">Face points left</button><button class="btn gho" type="button" data-side-direction="1">Face points right</button>`;
+      paintCalibrationDirection = () => {
+        const actual = faceDirFromPoints(verifier!.points);
+        verifier!.faceDir = actual;
+        for (const button of direction.querySelectorAll<HTMLButtonElement>("button")) {
+          const selected = Number(button.dataset.sideDirection) === actual;
+          button.setAttribute("aria-pressed", selected ? "true" : "false");
+          button.classList.toggle("pri", selected);
+          button.classList.toggle("gho", !selected);
+        }
+      };
+      direction.addEventListener("click", (event) => {
+        const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-side-direction]");
+        if (!button || !verifier || !isMounted()) return;
+        const next = Number(button.dataset.sideDirection);
+        if (next !== faceDirFromPoints(verifier.points)) verifier.reset(flipSideReviewPoints(verifier.points, w));
+        verifier.faceDir = next;
+        resetCalibrationAcknowledgement();
+        paintCalibrationDirection();
+      });
+      paintCalibrationDirection();
+      e.actions.appendChild(direction);
+      const confirmation = document.createElement("label");
+      confirmation.className = "side-feedback-confirmation";
+      confirmation.innerHTML = `<input type="checkbox" id="side-calibration-reviewed" /><span>I checked all thirteen points and the facing direction against this photo.</span>`;
+      confirmation.querySelector("input")!.addEventListener("change", (event) => {
+        calibrationAcknowledged = (event.target as HTMLInputElement).checked;
+      });
+      e.actions.appendChild(confirmation);
+    }
     appendSideExitActions(e.actions, ctx);
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
@@ -1454,6 +1543,8 @@ function mountVerify(
     // editing, and "Points are wrong" is the complaint route for them.
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
+      if (verifier) verifier.faceDir = faceDirFromPoints(verifier.points);
+      resetCalibrationAcknowledgement();
       drawGuides(e.lines, automaticPoints, w, h);
     };
     document.getElementById("side-guided")!.onclick = () => showGuidedActions();
@@ -1510,6 +1601,11 @@ function mountVerify(
     consented?: boolean;
   } = {}): Promise<boolean> => {
     if (!verifier || !isMounted()) return false;
+    if (calibrationReview && !calibrationAcknowledged) {
+      e.cap.textContent = "CONFIRM YOUR REVIEW";
+      document.getElementById("side-calibration-reviewed")?.focus();
+      return false;
+    }
     const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
     if (confirmButton) confirmButton.disabled = true;
     // The facing comes from the confirmed points, not from the detector that
@@ -1553,7 +1649,7 @@ function mountVerify(
       // it, names the measurement, and refuses to store the scan until the
       // points behind it have been moved.
       const impossible = classifySidePlacement(report.metrics).hard;
-      if (impossible.length) {
+      if (impossible.length && !calibrationReview) {
         if (confirmButton) confirmButton.disabled = false;
         e.cap.textContent = "CHECK LANDMARKS";
         const names = impossible.map((m) => m.def.name.toLowerCase());
@@ -1589,6 +1685,9 @@ function mountVerify(
           use the retake option before continuing.</p>`;
         return false;
       }
+      if (calibrationReview && diagnostics) {
+        diagnostics.reviewedRangeWarnings = report.metrics.filter((m) => m.implausible).map((m) => m.def.id);
+      }
 
       // Confirming a seed nobody touched.
       //
@@ -1598,7 +1697,7 @@ function mountVerify(
       // confirmed untouched, and their measurements disagree with an
       // independent product by 22, 12 and 48 degrees on metrics that agreed to
       // within two degrees on the one capture that happened to seed well.
-      if (!opts.auto && !movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
+      if (!calibrationReview && !opts.auto && !movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
         untouchedAcknowledged = true;
         if (confirmButton) {
           confirmButton.disabled = false;
@@ -1647,13 +1746,14 @@ function mountVerify(
         automaticPoints,
         seedMethod,
         seedVersion,
+        diagnostics: diagnostics ? structuredClone(diagnostics) : undefined,
         feedback,
         photo: reviewed,
         // Anything that reaches here through the review screen has been
         // looked at: the person either moved a point or pressed Confirm on a
         // screen showing all thirteen. Only the automatic path can carry a
         // false, and only when it says so.
-        verified: opts.verified ?? true,
+        verified: calibrationReview ? calibrationAcknowledged : opts.verified ?? true,
       });
       return true;
     } catch (err) {
@@ -1759,7 +1859,12 @@ function mountVerify(
     e.actions.classList.remove("mode-pending");
   };
 
-  if (startInGuidedMode) {
+  if (calibrationReview) {
+    // Admin data collection must show the decoded photo and editable estimates
+    // even when today's scoring bounds or pose reader disagree. It has no
+    // unverified automatic shortcut; Confirm requires the explicit review above.
+    showReviewActions();
+  } else if (startInGuidedMode) {
     // The choice, before the walkthrough rather than instead of it.
     //
     // A fresh seed used to drop straight into thirteen guided taps whether the

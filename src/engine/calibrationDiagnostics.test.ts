@@ -42,6 +42,31 @@ test("mixed-reference pairs are rejected rather than silently saving incompatibl
   }), /same reference group/);
 });
 
+test("uncertain side capture warnings and initial points survive review, save and export unchanged", () => {
+  const capture = diagnostic();
+  capture.side!.diagnostics = {
+    coordinateSpace: "review-image-pixels",
+    localAutomaticPoints: points(),
+    localMethod: "silhouette",
+    localConfidence: 0,
+    templateFallback: true,
+    warnings: ["detector-unavailable"],
+    reviewedRangeWarnings: ["gonialAngle"],
+  };
+  const snapshot = snapshotCalibrationDiagnostics({ ...capture, side: capture.side });
+  capture.side!.diagnostics!.localAutomaticPoints!.gonion.x = 999;
+  capture.side!.diagnostics!.warnings.length = 0;
+  const exported = JSON.parse(calibrationDiagnosticsJSON([
+    { id: "w1", sex: "female", rating: null, ratedBy: "self", scored: 5.6, measurements: {}, diagnostics: snapshot },
+  ]));
+  const side = exported.faces[0].diagnostics.side;
+  assert.equal(side.operatorVerified, true);
+  assert.equal(side.diagnostics.templateFallback, true, "human review does not turn a template into automatic detection");
+  assert.notEqual(side.diagnostics.localAutomaticPoints.gonion.x, 999);
+  assert.deepEqual(side.diagnostics.warnings, ["detector-unavailable"]);
+  assert.deepEqual(side.diagnostics.reviewedRangeWarnings, ["gonialAngle"]);
+});
+
 test("diagnostic export retains unrated and external rows but omits names, photos and unrelated fields", () => {
   const faces: RatedFace[] = [
     { id: "w1", sex: "female", rating: null, ratedBy: "self", scored: 5.6, measurements: { gonialAngle: 117 }, label: "Private name", thumb: "data:image/jpeg;base64,secret", diagnostics: diagnostic() },

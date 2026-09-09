@@ -2,6 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { SidePoints } from "./sideMetrics.js";
 import type { SideSeedMethod } from "./sideFeedbackPayload.js";
 import type { Report, Sex } from "./types.js";
+import type { SideCaptureDiagnostics } from "./sideCaptureRecovery.js";
 
 export interface CalibrationSideCapture {
   width: number;
@@ -12,6 +13,7 @@ export interface CalibrationSideCapture {
   seedMethod: SideSeedMethod;
   seedVersion?: string;
   operatorVerified: boolean;
+  diagnostics?: SideCaptureDiagnostics;
 }
 
 /** Local diagnostic record. No photograph, account identifier or inferred demographics. */

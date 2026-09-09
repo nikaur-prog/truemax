@@ -77,7 +77,7 @@ test("cloud, cosmetic orientation and verifier entry all normalize direction bef
   assert.match(cloud, /const directedSeed = withPointDerivedSideDirection\(seed\);[\s\S]*seed: directedSeed\.points,[\s\S]*faceDir: directedSeed\.faceDir,/);
 
   const fusion = flow.slice(flow.indexOf("const fused = fuseSideSeeds("), flow.indexOf("async function cloudPlacementFor"));
-  assert.match(fusion, /let seed: SidePlacementSeed = withPointDerivedSideDirection\(\{[\s\S]*points: fused\.points,[\s\S]*\}\);[\s\S]*if \(seed\.faceDir === -1/);
+  assert.match(fusion, /let seed: SidePlacementSeed = withPointDerivedSideDirection\(\{[\s\S]*points: fused\.points,[\s\S]*\}\);[\s\S]*if \(ctx.reviewMode !== "calibration" && seed\.faceDir === -1/);
   assert.match(fusion, /seed\.method === "mesh" \|\| \(seed\.confidence \?\? 0\) >= 0\.5/, "existing mirror eligibility stays unchanged");
 
   const verifier = flow.slice(flow.indexOf("function mountVerify("));

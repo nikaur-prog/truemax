@@ -60,6 +60,8 @@ import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "
 import { activateScanOwner, activeScanOwner, scopedStorageKey } from "./engine/scanScope.js";
 import { canShareFiles, exportName, outcomeMessage, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
+import type { QuickAccess } from "./ui/quickGate.js";
+import { canUseOwnerTools } from "./engine/quickOwnerAccess.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
 import { assessPhotoQuality } from "./engine/photoQuality.js";
@@ -160,6 +162,7 @@ let camOpening = false;
 let camOpenAttempt = 0;
 let ready = false;
 let quickOwnerId: string | null = null;
+let quickAccess: QuickAccess | null = null;
 
 // Checked before anything else starts.
 //
@@ -183,6 +186,7 @@ void quickAccessProfile().then((access) => {
       return;
     }
     quickOwnerId = user.id;
+    quickAccess = access;
     applyPillarGrants(access);
     document.querySelector(".q-wrap")?.classList.remove("q-locked");
     openFromHash();
@@ -502,6 +506,7 @@ if (!isAuthAvailable()) {
     previousOwner = owner;
     quickOwnerId = owner;
     if (changed) {
+      quickAccess = null;
       leaveMode();
       // Re-run both the staff/League gate and the per-pillar grants. Keeping
       // this page alive across an account switch would let the next person use
@@ -836,6 +841,9 @@ function beginQuickProfileCapture(): void {
 }
 
 function enterMode(next: QuickMode): void {
+  // Removing a card is not the authorization boundary: check every entry,
+  // including deep links and a stale click after an account switch.
+  if (OWNER_ONLY_MODES.includes(next) && !canUseOwnerTools(quickAccess, quickOwnerId)) return;
   quickScanGeneration += 1;
   clearPending();
   last = null;
@@ -1219,6 +1227,7 @@ function clearPending(): void {
  * make the side feel mandatory and the front feel like a gate.
  */
 function renderFaceSlots(): void {
+  if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
   el.calStep.textContent = "This face";
   const slot = (
     id: string,
@@ -1237,7 +1246,7 @@ function renderFaceSlots(): void {
     Both views of this face use the same group. Start a new face to change it.</p>
     <div class="q-slots">
       ${slot("q-slot-front", "Front", pendingFront, "Camera or upload")}
-      ${slot("q-slot-side", "Side", pendingSide, "Upload, then check 13 points")}
+      ${slot("q-slot-side", "Side", pendingSide, "Upload, review and correct 13 points")}
     </div>
     <button type="button" class="btn pri q-slot-go" id="q-slot-go"
       ${pendingFront || pendingSide ? "" : "disabled"}>Analyse</button>
@@ -1245,6 +1254,10 @@ function renderFaceSlots(): void {
     save measurements without judging attractiveness. Side-point corrections
     are separate and are shared only if you choose to. Saving a face does not
     automatically train the scanner or change anyone's scores.</p>
+    <p class="q-cal-hint">Side calibration always opens point review after a readable photo.
+    If detection is uncertain, you get a labelled starting template to correct.
+    Confirm only when all 13 points are where you intend them; a difficult photo
+    is useful evidence, not a reason to guess a rating.</p>
     <p class="q-cal-hint" id="q-slot-share" role="status">${shareStatus}</p>
     <button type="button" class="btn gho${failedUpload ? "" : " hidden"}" id="q-slot-retry">Retry sending the correction</button>
     <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
@@ -1255,6 +1268,7 @@ function renderFaceSlots(): void {
   };
 
   document.getElementById("q-slot-side")!.onclick = () => withSex(() => {
+    if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
     el.cal.classList.add("hidden");
     openSideCapture({
       scanId: crypto.randomUUID(),
@@ -1263,6 +1277,7 @@ function renderFaceSlots(): void {
       // see, which is the right flow for scanning yourself and the wrong one for
       // working through a folder of photographs.
       method: "upload",
+      reviewMode: "calibration",
       onDone: (report, points, faceDir, review) => {
         closeSideFlow();
         pendingSide = report;
@@ -1280,6 +1295,7 @@ function renderFaceSlots(): void {
           seedMethod: review.seedMethod,
           seedVersion: review.seedVersion,
           operatorVerified: review.verified,
+          diagnostics: review.diagnostics,
         };
         // Send the correction, if the operator consented to sharing it.
         //
@@ -1668,6 +1684,7 @@ function gapOf(f: RatedFace): number {
 }
 
 function renderCalibrationSet(): void {
+  if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
   // The set is the one screen with no face in flight, so arriving here always
   // ends the current one.
   resetSexAsk();
