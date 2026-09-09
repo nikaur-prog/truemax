@@ -124,3 +124,17 @@ test("invalid cache fields and expired queued days are never rendered or submitt
   await store.refresh();
   assert.equal(f.calls.length, 0);
 });
+
+test("an older cache keeps its consistency balance when the grace field is absent", () => {
+  const f = fixture();
+  const oldState = { ...snapshot(4).state } as Partial<StreakCache["state"]>;
+  delete oldState.graceSpentOn;
+  f.data.set("truemax:dailyStreak:user:a", JSON.stringify({
+    state: oldState, balances: { consistency: 8, progress: 0 },
+  }));
+  const store = createDailyStreakStore(f.deps);
+  assert.equal(store.cached()?.state.graceSpentOn, null);
+  assert.equal(store.cached()?.state.current, 4);
+  assert.equal(store.cached()?.balances.consistency, 8);
+  assert.equal(f.calls.length, 0, "reading an older cache never awards another day");
+});

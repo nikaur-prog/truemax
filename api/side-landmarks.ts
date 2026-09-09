@@ -67,7 +67,17 @@ function frameSize(value: FormDataEntryValue | null): number | null {
   return Number.isFinite(n) && n > 0 && n <= 20_000 ? n : null;
 }
 
-export async function POST(request: Request): Promise<Response> {
+const defaultDependencies = {
+  authenticatedUser, getSupabaseAdmin, prepareLandmarkImage, placeSideLandmarks, client,
+};
+
+/** Injectable boundaries let allowance cleanup be exercised without live accounts or paid calls. */
+export function createSidePlacementHandler(overrides: Partial<typeof defaultDependencies> = {}) {
+  const deps = { ...defaultDependencies, ...overrides };
+  return (request: Request) => handleSidePlacement(request, deps);
+}
+
+async function handleSidePlacement(request: Request, deps: typeof defaultDependencies): Promise<Response> {
   const startedAt = Date.now();
   let deadline: ReturnType<typeof sidePlacementDeadline> | undefined;
   let claimedUserId: string | null = null;
@@ -75,13 +85,13 @@ export async function POST(request: Request): Promise<Response> {
     const userId = claimedUserId;
     claimedUserId = null;
     if (!userId) return;
-    const { error } = await getSupabaseAdmin().rpc("release_side_landmark_pass", { p_user_id: userId });
+    const { error } = await deps.getSupabaseAdmin().rpc("release_side_landmark_pass", { p_user_id: userId });
     if (error) throw new Error(error.message);
   };
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin placement is not allowed." }, 403);
 
-    const user = await authenticatedUser(request);
+    const user = await deps.authenticatedUser(request);
     if (!user) return json({ error: "Sign in to place the points with the cloud pass." }, 401);
 
     const declared = Number(request.headers.get("content-length") ?? "0");
@@ -105,7 +115,7 @@ export async function POST(request: Request): Promise<Response> {
 
     // Claimed before the model is called, as one statement, so two requests
     // racing cannot both pass the ceiling (same shape as the chat allowance).
-    const admin = getSupabaseAdmin();
+    const admin = deps.getSupabaseAdmin();
     const { data: remaining, error: claimError } = await admin.rpc("claim_side_landmark_pass", {
       p_user_id: user.id,
       p_limit: LANDMARK_PASSES_PER_DAY,
@@ -125,9 +135,9 @@ export async function POST(request: Request): Promise<Response> {
     let pass;
     try {
       deadline.signal.throwIfAborted();
-      const prepared = await prepareLandmarkImage(Buffer.from(await photo.arrayBuffer()));
+      const prepared = await deps.prepareLandmarkImage(Buffer.from(await photo.arrayBuffer()));
       deadline.signal.throwIfAborted();
-      pass = await placeSideLandmarks(client(), prepared, {
+      pass = await deps.placeSideLandmarks(deps.client(), prepared, {
         hint,
         signal: deadline.signal,
         onZoomError: (cluster, error) => console.error(`side-landmarks zoom ${cluster}`, safeMessage(error)),
@@ -139,6 +149,9 @@ export async function POST(request: Request): Promise<Response> {
         console.error("side-landmarks release", safeMessage(releaseError));
       });
       console.error("side-landmarks model", safeMessage(error));
+      if (deadline.signal.aborted) {
+        return json({ error: "The placement request timed out. Use the device points or try again." }, 408);
+      }
       return json({ error: "The points could not be placed just then. Placing them on the device instead." }, 502);
     }
     claimedUserId = null;
@@ -147,6 +160,7 @@ export async function POST(request: Request): Promise<Response> {
       points: pass.result.points,
       pixels: width && height ? landmarksToPixels(pass.result, width, height) : undefined,
       confidence: pass.result.confidence,
+      evidence: pass.result.evidence,
       faceDir: pass.result.faceDir,
       model: pass.model,
       version: sidePlacementProtocolVersion(pass.version, pass.seeded),
@@ -163,3 +177,5 @@ export async function POST(request: Request): Promise<Response> {
     deadline?.dispose();
   }
 }
+
+export const POST = createSidePlacementHandler();

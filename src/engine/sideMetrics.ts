@@ -70,6 +70,13 @@ export function sidePointIntegrityIssues(
   if (p.nasion.y >= p.subnasale.y) issues.push("Nose bridge must sit above the nose base");
   if (p.subnasale.y >= p.labialeInferius.y) issues.push("The lip points are out of vertical order");
   if (p.condylion.y >= p.gonion.y) issues.push("Jaw hinge must sit above the jaw corner");
+  // A collapsed ray has no angle, but atan2(0, 0) would invent one that can
+  // even pass the gonial plausibility bounds. Normalize the numerical
+  // tolerance by facial height so image resizing and mirroring agree. This
+  // rejects coincidence, not an anatomical proportion or a scoring target.
+  const minimumJawRay = faceH * 1e-6;
+  if (!(dist(p.gonion, p.menton) > minimumJawRay)) issues.push("Jaw corner and chin bottom overlap");
+  if (!(dist(p.gonion, p.condylion) > minimumJawRay)) issues.push("Jaw corner and jaw hinge overlap");
   // Nose and ear must be meaningfully separated across the frame. What this
   // must NOT do is check which SIDE the nose is on: that is the definition of
   // which way the face points, so testing it against a separately-detected

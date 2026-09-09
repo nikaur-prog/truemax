@@ -86,3 +86,12 @@ test("a refused measurement gets no read at all", () => {
   const d = distFor(ALL.find((x) => x.id === "browTilt")!, "male");
   assert.equal(metricRead(scored("browTilt", d.mean + 3 * d.sd), "male"), null);
 });
+
+test("mesh proportions and frontal jaw construction do not claim a hairline or side angle", () => {
+  for (const text of Object.values(READ_TABLE.topThirdEst)) {
+    assert.match(text, /mesh estimate/);
+    assert.doesNotMatch(text, /more than a third|less than its third/);
+  }
+  for (const text of Object.values(READ_TABLE.gonialProxy)) assert.match(text, /not the side-profile gonial angle/);
+  assert.match(READ_TABLE.eyeAspectRatio.low, /does not measure hooding or eye depth/);
+});

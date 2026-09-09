@@ -76,8 +76,10 @@ test("the profile is visibly read BEFORE the question about it is asked", () => 
   assert.ok(done > seeding && done < mount, "and comes down before the points are shown");
   assert.match(body, /e\.cap\.textContent = "READING PROFILE"/);
   // The visible state yields before actual work, without an artificial floor.
-  assert.match(body, /const localResult = await seedSidePointsSmart/);
-  assert.match(body, /await cloudPlacementFor\(snapshot, localResult, signal\)/);
+  assert.match(body, /const recovered = await recoverSideSeed\(/);
+  assert.match(body, /read: [\s\S]*?seedSidePointsSmart/);
+  assert.match(body, /const localResult = recovered\.seed/);
+  assert.match(body, /await cloudPlacementFor\(snapshot, localResult, signal, ctx\.reviewMode\)/);
   assert.doesNotMatch(side, /READ_BEAT_MS/);
 });
 

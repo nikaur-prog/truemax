@@ -13,13 +13,13 @@ import { reliabilityOf } from "../engine/reliability.js";
 // wrong, or by how much, or whether the ideal or the spread is at fault.
 //
 // So this prints the whole measurement: every metric's raw value, where that
-// value sits against the population, what the engine considers ideal, and how
+// value sits against the population, which scoring reference it uses, and how
 // much of it is signal rather than photo-to-photo noise. It is deliberately
 // plain text rather than JSON — it gets pasted into a chat window by a person,
 // not parsed by a program, and a wall of braces is harder to read at 3am.
 //
 // The `off` column is the one that matters most and is the reason this exists.
-// It is how many standard deviations the face sits from the engine's ideal, so
+// It is how many standard deviations the reading sits from its scoring reference, so
 // a metric that reads +3.0 on a feature a human calls excellent is not a face
 // with a problem — it is a metric whose model of "ideal" runs backwards, and no
 // amount of rescaling the aggregate will fix it.
@@ -86,6 +86,8 @@ export function diagnosticsText(
       `front: ${n(report.views.front.score, 1)} (pct ${n(report.views.front.percentile, 1)})` +
         `  ·  side: ${n(report.views.side.score, 1)} (pct ${n(report.views.side.percentile, 1)})`,
     );
+  } else if (report.metrics.length && report.metrics.every((m) => m.def.view === "side")) {
+    lines.push(`views: side only: no front profile in this scan`);
   } else {
     lines.push(`views: front only: no side profile in this scan`);
   }
@@ -103,7 +105,7 @@ export function diagnosticsText(
   // Sorted by distance from ideal, worst first: the metrics dragging the score
   // down are the ones a disagreement is usually about, so they go where the eye
   // lands rather than at the bottom of thirty rows.
-  lines.push(`  score    off  reliab  dir     value      ideal  metric`);
+  lines.push(`  score    off  reliab  dir     value  reference  metric`);
   const rows = report.metrics
     .filter((m) => !m.implausible)
     .map((m) => {
@@ -123,11 +125,30 @@ export function diagnosticsText(
     );
   }
 
+  lines.push("");
+  lines.push("REFERENCE NOTES");
+  lines.push("reference = band target (explicit ideal, otherwise mean); for higher/lower directions it is the population mean, not an ideal to reach.");
+  lines.push("off = (value - reference) / reference SD. It is not a landmark-position error or an attractiveness verdict.");
+  lines.push("reliab = metric repeatability estimate, not confidence that these particular points are correctly placed. A zero-reliability metric has no aggregate weight.");
+  for (const { m } of rows) {
+    const d = distFor(m.def, report.sex);
+    const unit = m.def.unit || "ratio";
+    const band = directionFor(m.def, report.sex) === "band"
+      ? `; model band ${n(m.idealRange[0], m.def.decimals)} to ${n(m.idealRange[1], m.def.decimals)}`
+      : "; directional scoring, no two-sided ideal";
+    lines.push(`  ${m.def.id} [${m.def.view}, ${unit}]: mean ${n(d.mean, m.def.decimals)}; SD ${n(d.sd, m.def.decimals)}${band}`);
+  }
+
   const dropped = report.metrics.filter((m) => m.implausible);
   if (dropped.length) {
     lines.push("");
-    lines.push(`EXCLUDED (anatomically implausible, placement error, not a face)`);
-    for (const m of dropped) lines.push(`  ${m.def.name}: ${n(m.value, m.def.decimals)}`);
+    lines.push(`EXCLUDED (unavailable or outside measurement checks; not scored)`);
+    for (const m of dropped) {
+      const reason = !Number.isFinite(m.value)
+        ? "not measured: required landmark or geometry unavailable"
+        : "outside measurement checks: review the photo and point placement";
+      lines.push(`  ${m.def.name}: ${n(m.value, m.def.decimals)} (${reason})`);
+    }
   }
 
   return lines.join("\n");

@@ -13,6 +13,7 @@ const services = (overrides: Partial<OnboardingBodyServices> = {}): OnboardingBo
   loadProfile: async () => adult,
   token: async () => "owner-bound-test-token",
   fetchBody: async () => emptyBody,
+  migrateBody: async () => false,
   saveBody: async () => ({ ok: true, metric: { heightCm: 180, weightKg: 80 } }),
   ...overrides,
 });
@@ -40,6 +41,29 @@ test("existing values and offline or signed-out states skip the optional screen"
   assert.equal(await loadOptionalOnboardingBody(user, () => true, services({ token: async () => null })), null);
   assert.equal(await loadOptionalOnboardingBody(user, () => true, services({ fetchBody: async () => null })), null);
   assert.equal(await loadOptionalOnboardingBody(user, () => true, services({ loadProfile: async () => { throw new Error("offline"); } })), null);
+});
+
+test("legacy measurements migrate before the optional screen hydrates an empty server row", async () => {
+  let migrated = false;
+  const order: string[] = [];
+  assert.equal(await loadOptionalOnboardingBody(user, () => true, services({
+    migrateBody: async () => { order.push("migrate"); migrated = true; return true; },
+    fetchBody: async () => {
+      order.push("read");
+      return migrated ? { ...emptyBody, heightCm: 180, weightKg: 80 } : emptyBody;
+    },
+  })), null, "saved legacy details must not be discarded or requested again");
+  assert.deepEqual(order, ["migrate", "read"]);
+});
+
+test("an account change during migration cannot start a body read for a dismissed quiz", async () => {
+  let current = true;
+  let reads = 0;
+  assert.equal(await loadOptionalOnboardingBody(user, () => current, services({
+    migrateBody: async () => { current = false; return false; },
+    fetchBody: async () => { reads++; return emptyBody; },
+  })), null);
+  assert.equal(reads, 0);
 });
 
 test("a stale quiz cannot read or save another account's measurements", async () => {

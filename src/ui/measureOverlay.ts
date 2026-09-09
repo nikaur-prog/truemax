@@ -331,10 +331,20 @@ function transitionBufferPair(canvas: HTMLCanvasElement, width: number, height: 
   return pair;
 }
 
+/** Respect the OS setting in canvas animations, not only CSS transitions. */
+export function prefersReducedOverlayMotion(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function transitionMeasurement(
   canvas: HTMLCanvasElement,
   paintNext: (target: HTMLCanvasElement) => void,
 ): OverlayFade {
+  if (prefersReducedOverlayMotion()) {
+    paintNext(canvas);
+    return { cancel() {} };
+  }
   const w = canvas.width || 1;
   const h = canvas.height || 1;
 
@@ -722,6 +732,10 @@ export function animateMeasurement(
   height: number,
   metric: ScoredMetric,
 ): OverlayFade {
+  if (prefersReducedOverlayMotion()) {
+    drawMeasurement(canvas, landmarks, width, height, metric);
+    return { cancel() {} };
+  }
   // Whatever is on the canvas RIGHT NOW — the previous measurement, or the
   // calm region outline — fades out underneath while the new figure draws on.
   //

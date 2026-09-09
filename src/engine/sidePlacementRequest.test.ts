@@ -15,8 +15,8 @@ test("the side-placement cap stays below the actual deployed function budget", (
 });
 
 test("seeded and full-frame correction cohorts have distinct opaque version tags", () => {
-  assert.equal(sidePlacementProtocolVersion("pass-v3", true), "pass-v3.seeded");
-  assert.equal(sidePlacementProtocolVersion("pass-v3", false), "pass-v3.full");
+  assert.equal(sidePlacementProtocolVersion("pass-v3", true), "pass-v3.seeded.e1");
+  assert.equal(sidePlacementProtocolVersion("pass-v3", false), "pass-v3.full.e1");
 });
 
 test("a shared side deadline inherits retakes and disposes its listener and timer", async () => {

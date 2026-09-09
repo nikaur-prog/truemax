@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { snapshotIfMatching } from "./measureOverlay.js";
+import { prefersReducedOverlayMotion, snapshotIfMatching, transitionMeasurement } from "./measureOverlay.js";
 
 test("front and side hover snapshots reuse their buffer without resizing or leaving old pixels", () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -57,4 +57,40 @@ test("tab changes and report teardown cancel both views' drawings and pending ho
   }
   assert.match(cleanup, /clearTimeout\(revert\)/);
   assert.match(cleanup, /clearTimeout\(pillarRevert\)/);
+});
+
+test("reduced motion paints a transition immediately without a canvas buffer or frame loop", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { matchMedia: (query: string) => ({ matches: query === "(prefers-reduced-motion: reduce)" }) } });
+  try {
+    assert.equal(prefersReducedOverlayMotion(), true);
+    let painted = 0;
+    const canvas = {} as HTMLCanvasElement;
+    const animation = transitionMeasurement(canvas, (target) => { assert.equal(target, canvas); painted++; });
+    animation.cancel();
+    assert.equal(painted, 1);
+  } finally {
+    if (original) Object.defineProperty(globalThis, "window", original);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
+
+test("both measurement draw-on paths honour reduced motion before allocating", () => {
+  for (const [file, method, paint] of [
+    ["./measureOverlay.ts", "animateMeasurement", "drawMeasurement"],
+    ["./sideMeasureOverlay.ts", "animateSideMeasurement", "drawSideMeasurement"],
+  ]) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    const animation = source.slice(source.indexOf(`export function ${method}(`));
+    assert.match(animation, new RegExp(`if \\(prefersReducedOverlayMotion\\(\\)\\) \\{\\s+${paint}\\(`));
+    assert.ok(animation.indexOf("prefersReducedOverlayMotion()") < animation.indexOf("snapshotIfMatching("));
+  }
+});
+
+test("side measurement hint and detail opener stay inside their own region", () => {
+  const source = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
+  assert.match(source, /data-side-region="\$\{r.region\}"/);
+  assert.match(source, /metric.def.region === hint.dataset.sideRegion/);
+  assert.match(source, /x.def.region === hint.dataset.sideRegion && wasMeasured\(x\)/);
+  assert.doesNotMatch(source, /flattering comparison you did not earn/);
 });

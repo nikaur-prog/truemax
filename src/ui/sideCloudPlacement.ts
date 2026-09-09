@@ -1,6 +1,8 @@
 import { SIDE_POINTS } from "../engine/sideMetrics.js";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
 import { sidePlacementDeadline, sidePlacementTimeoutMs } from "../engine/sidePlacementRequest.js";
+import { hasSideObservations, parseSidePlacementEvidence } from "../engine/sidePlacementEvidence.js";
+import type { SidePlacementEvidence } from "../engine/sidePlacementEvidence.js";
 
 const CHOICE_KEY = "truemax:side-cloud-placement:v1";
 const MAX_UPLOAD_BYTES = 2_000_000;
@@ -12,6 +14,7 @@ export interface CloudSidePlacement {
   faceDir: 1 | -1;
   confidence: number;
   confidenceByPoint: Record<SidePointId, number>;
+  evidence: SidePlacementEvidence;
   seedVersion?: string;
 }
 
@@ -78,6 +81,8 @@ export function parseCloudSidePlacement(
   if (raw.faceDir !== 1 && raw.faceDir !== -1) return null;
   if (!raw.points || typeof raw.points !== "object") return null;
   if (!raw.confidence || typeof raw.confidence !== "object") return null;
+  const evidence = parseSidePlacementEvidence(raw.evidence);
+  if (!evidence || !hasSideObservations(evidence)) return null;
 
   const fractions = raw.points as Record<string, unknown>;
   const rawConfidence = raw.confidence as Record<string, unknown>;
@@ -106,6 +111,7 @@ export function parseCloudSidePlacement(
     faceDir: raw.faceDir,
     confidence: totalConfidence / SIDE_POINTS.length,
     confidenceByPoint,
+    evidence,
     seedVersion,
   };
 }

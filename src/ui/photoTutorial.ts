@@ -195,39 +195,13 @@ export function tutorialSteps(view: TutorialView): readonly Step[] {
 }
 
 /**
- * Offer BOTH tutorials, once, before the first photograph.
- *
- * A scan is two photographs, and the tutorial used to be offered twice — once
- * before the front, then again several minutes later before the profile. Which
- * meant being interrupted by the same question twice in one scan, the second
- * time at the worst possible moment: you have just been told to turn away from
- * the screen, and the app puts a dialogue on it.
- *
- * Both up front instead. One question, both sets of examples, and answering
- * "show me" plays the front tutorial straight into the side one. Somebody who
- * is about to take two photographs would rather learn about both while they
- * are still looking at the screen.
- *
- * The never-ask tick covers both views for the same reason: it is answering
- * "do I need to be taught how to photograph my face", not "do I need to be
- * taught this specific angle".
- */
-export function offerBothTutorials(then: () => void): void {
-  if (tutorialSuppressed("front") && tutorialSuppressed("side")) {
-    then();
-    return;
-  }
-  offerTutorial("both", then);
-}
-
-/**
  * Offer the tutorial, then continue.
  *
  * Calls `then` exactly once, whatever route the person takes — including the
  * suppressed case, where nothing is shown at all.
  */
-export function offerTutorial(view: TutorialView | "both", then: () => void): void {
-  if (view !== "both" && tutorialSuppressed(view)) {
+export function offerTutorial(view: TutorialView, then: () => void): void {
+  if (tutorialSuppressed(view)) {
     then();
     return;
   }
@@ -256,15 +230,11 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
     </figure>`;
 
   const heading = view === "front"
-    ? "Would you like a tutorial on how to take the front-on photo for best results?"
-    : view === "side"
-      ? "Would you like a tutorial on how to take the side profile for best results?"
-      : "Would you like a tutorial on how to take both photos for best results?";
+    ? "A quick guide to your front photo?"
+    : "A quick guide to your side photo?";
   const blurb = view === "front"
-    ? "Twenty seconds on what ruins a front photo, and what a good one looks like."
-    : view === "side"
-      ? "The profile is the shot people get wrong most. Twenty seconds on why."
-      : "Start with a front photo, square to the lens. You can add an optional side photo with a full quarter turn, or skip it. This tutorial covers both in forty seconds.";
+    ? "See how to frame a clear, straight-on photo. You can decide whether to add a side photo later."
+    : "See the full side view to aim for, and how to keep your head level.";
 
   const wrap = document.createElement("div");
   wrap.className = "tut-ask";
@@ -276,14 +246,6 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
            question above is abstract until you have seen the difference it is
            asking about; two photographs answer "is this worth twenty seconds?"
            faster than the sentence does. -->
-      <!-- Two examples, never four. The combined ask covers both photographs,
-           and showing both pairs here put four figures and four captions in a
-           panel that on a phone is already carrying a three-line heading, a
-           paragraph, two buttons and a checkbox: so the bottom of it fell off
-           the screen. The teaser is answering one question, "is this worth
-           forty seconds?", and the front pair answers it as well as four do.
-           The profile examples are still in the tutorial itself, which is
-           where somebody who said yes is going to see them anyway. -->
       ${view === "side" ? `<div class="tut-egs">${SIDE_EGS}</div>` : `<div class="tut-egs">${FRONT_EGS}</div>`}
       <div class="tut-ask-actions">
         <button class="btn pri" id="tut-yes" type="button">Show me</button>
@@ -295,15 +257,8 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
 
   const never = wrap.querySelector<HTMLInputElement>("#tut-never")!;
   const closeAsk = () => wrap.remove();
-  // "Both" answers for both views. The tick is answering "do I need to be
-  // taught how to photograph my face", not "do I need to be taught this angle".
   const remember = (hidden: boolean) => {
-    if (view === "both") {
-      setTutorialSuppressed("front", hidden);
-      setTutorialSuppressed("side", hidden);
-    } else {
-      setTutorialSuppressed(view, hidden);
-    }
+    setTutorialSuppressed(view, hidden);
   };
 
   wrap.querySelector("#tut-no")!.addEventListener("click", () => {
@@ -316,16 +271,7 @@ export function offerTutorial(view: TutorialView | "both", then: () => void): vo
     // not quietly un-answer it.
     const carried = never.checked;
     closeAsk();
-    if (view === "both") {
-      // Front runs straight into the profile. Closing the front player early
-      // still moves on to the side one — somebody who has seen enough of the
-      // front tutorial has not thereby declined the side tutorial, and the
-      // side is the shot people get wrong.
-      const both: readonly TutorialView[] = ["front", "side"];
-      playTutorial("front", carried, () => playTutorial("side", carried, finish, both), both);
-    } else {
-      playTutorial(view, carried, finish);
-    }
+    playTutorial(view, carried, finish);
   });
   wrap.querySelector<HTMLButtonElement>("#tut-yes")!.focus();
 }
@@ -335,14 +281,6 @@ export function playTutorial(
   view: TutorialView,
   neverChecked: boolean,
   onClose: () => void,
-  /**
-   * Which flags the tick at the end writes. Defaults to this view alone; the
-   * back-to-back run before a scan passes both, because there the tick is one
-   * answer to one question asked once, and letting the front player's copy of
-   * it silence only the front would leave the profile tutorial reappearing on
-   * every scan for somebody who ticked the box.
-   */
-  remembers: readonly TutorialView[] = [view],
 ): void {
   const steps = STEPS[view];
   let index = 0;
@@ -516,7 +454,7 @@ export function playTutorial(
     if (timer) clearTimeout(timer);
     cancelAnimationFrame(cueFrame);
     vid.pause();
-    for (const v of remembers) setTutorialSuppressed(v, never2.checked);
+    setTutorialSuppressed(view, never2.checked);
     document.removeEventListener("keydown", key);
     wrap.remove();
     onClose();

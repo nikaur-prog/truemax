@@ -1,4 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { hasSideObservations, sidePlacementEvidence } from "../src/engine/sidePlacementEvidence.js";
+import type { SidePlacementEvidence } from "../src/engine/sidePlacementEvidence.js";
 import sharp from "sharp";
 
 // ---------------------------------------------------------------------------
@@ -149,6 +151,8 @@ export interface SideLandmarkResult {
   points: Record<SideLandmarkId, LandmarkPoint>;
   /** 0 to 1 per point, the model's own estimate. */
   confidence: Record<SideLandmarkId, number>;
+  /** Source of each accepted coordinate, never inferred from matching a seed. */
+  evidence: SidePlacementEvidence;
   /** +1 when the subject faces image-right, -1 when image-left. Derived from the points. */
   faceDir: 1 | -1;
 }
@@ -369,7 +373,7 @@ export function resultFromPixels(
   }
   const spread = points.pronasale.x - points.tragion.x;
   if (Math.abs(spread) < 0.05) throw new Error("Nose tip and ear notch are too close together to be a profile");
-  return { points, confidence, faceDir: spread > 0 ? 1 : -1 };
+  return { points, confidence, evidence: sidePlacementEvidence("whole"), faceDir: spread > 0 ? 1 : -1 };
 }
 
 /** One tool call over the whole frame, parsed into the result. */
@@ -753,13 +757,27 @@ export interface LandmarkPassUsage {
 
 export type StageName = "first" | "coarse" | "fine";
 
+export class SideLandmarkUnavailableError extends Error {
+  readonly code = "side_landmarks_unavailable";
+  constructor(
+    readonly attemptedCalls = 0,
+    readonly calls = 0,
+    readonly usage: LandmarkPassUsage = { inputTokens: 0, outputTokens: 0 },
+  ) {
+    super("No side landmarks were observed by the cloud pass");
+    this.name = "SideLandmarkUnavailableError";
+  }
+}
+
 export interface LandmarkPass {
   result: SideLandmarkResult;
   model: string;
   version: string;
   usage: LandmarkPassUsage;
-  /** Model calls made. */
+  /** Provider responses received, including refusals and malformed tool output. */
   calls: number;
+  /** All provider requests started, including refusals and failed requests. */
+  attemptedCalls: number;
   /** The points whose final position came from an enlarged look. */
   zoomed: SideLandmarkId[];
   /** Wall-clock milliseconds for the whole pass, image preparation excluded. */
@@ -813,6 +831,7 @@ async function callTool(
   prompt: string,
   tool: Anthropic.Messages.Tool,
   signal?: AbortSignal,
+  onResponse?: (usage: LandmarkPassUsage) => void,
 ): Promise<{ input: unknown; usage: LandmarkPassUsage }> {
   const content: Anthropic.Messages.ContentBlockParam[] = [];
   images.forEach((image, i) => {
@@ -828,12 +847,14 @@ async function callTool(
     tool_choice: { type: "tool", name: tool.name },
     messages: [{ role: "user", content }],
   }, { signal, maxRetries: 0 });
+  const usage = { inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0 };
+  onResponse?.(usage);
   signal?.throwIfAborted();
   const block = response.content.find((b) => b.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new Error("The model returned no landmark tool call");
   return {
     input: block.input,
-    usage: { inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0 },
+    usage,
   };
 }
 
@@ -890,7 +911,7 @@ function snapshot(placed: Record<SideLandmarkId, PixelPlacement>, ids: readonly 
  *           crop shown first for context
  *
  * A crop pass that fails leaves the previous stage's placement for its
- * points; it never fails the photograph.
+ * points. If a seeded pass observes nothing, it fails back to the device.
  */
 export async function placeSideLandmarks(
   client: Anthropic,
@@ -904,24 +925,30 @@ export async function placeSideLandmarks(
   const usage: LandmarkPassUsage = { inputTokens: 0, outputTokens: 0 };
   const stages: LandmarkPass["stages"] = {};
   let calls = 0;
+  let attemptedCalls = 0;
   const started = Date.now();
   const spend = (u: LandmarkPassUsage) => {
     calls += 1;
     usage.inputTokens += u.inputTokens;
     usage.outputTokens += u.outputTokens;
   };
+  const readTool = (...args: Parameters<typeof callTool>) => {
+    options.signal?.throwIfAborted();
+    attemptedCalls += 1;
+    return callTool(args[0], args[1], args[2], args[3], args[4], args[5], spend);
+  };
 
   // ---- first: the whole frame, or the seed.
   const seeded = !!options.hint && (options.seeded ?? true) && zoom;
+  const evidence = sidePlacementEvidence(seeded ? "seed" : "whole");
   let placed: Record<SideLandmarkId, PixelPlacement>;
   if (seeded) {
     placed = {} as Record<SideLandmarkId, PixelPlacement>;
     for (const id of SIDE_LANDMARK_IDS) {
-      placed[id] = { x: options.hint![id].x * frame.width, y: options.hint![id].y * frame.height, confidence: 0.5 };
+      placed[id] = { x: options.hint![id].x * frame.width, y: options.hint![id].y * frame.height, confidence: 0 };
     }
   } else {
-    const first = await callTool(client, model, [{ data: await withGrid(image.plain, frame) }], landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame), options.signal);
-    spend(first.usage);
+    const first = await readTool(client, model, [{ data: await withGrid(image.plain, frame) }], landmarkPrompt(frame), landmarkTool(SIDE_LANDMARK_IDS, frame), options.signal);
     placed = parsePixelToolInput(first.input, SIDE_LANDMARK_IDS, frame) as Record<SideLandmarkId, PixelPlacement>;
     stages.first = snapshot(placed, SIDE_LANDMARK_IDS, frame);
   }
@@ -957,11 +984,11 @@ export async function placeSideLandmarks(
           const window = coarseWindows[cluster];
           const crop = await zoomCrop(image.plain, window);
           coarseCrops[cluster] = crop;
-          const answer = await callTool(client, model, [{ data: crop.data }], zoomPrompt(cluster, ids, crop.frame, faceDir), landmarkTool(ids, crop.frame), options.signal);
-          spend(answer.usage);
+          const answer = await readTool(client, model, [{ data: crop.data }], zoomPrompt(cluster, ids, crop.frame, faceDir), landmarkTool(ids, crop.frame), options.signal);
           const read = parsePixelToolInput(answer.input, ids, crop.frame);
           for (const id of ids) {
             placed[id] = fromZoom(read[id]!, window, crop.scale);
+            evidence[id] = "coarse";
             if (!zoomed.includes(id)) zoomed.push(id);
           }
         } catch (error) {
@@ -1033,8 +1060,7 @@ export async function placeSideLandmarks(
       );
       const context = await contextFor(region);
       const images = context ? [context, { data: crop.data }] : [{ data: crop.data }];
-      const answer = await callTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction, cueFor(region)), landmarkTool(ids, crop.frame), options.signal);
-      spend(answer.usage);
+      const answer = await readTool(client, model, images, finePrompt(region, ids, crop.frame, faceDir, redo?.instruction, cueFor(region)), landmarkTool(ids, crop.frame), options.signal);
       const read = parsePixelToolInput(answer.input, ids, crop.frame);
       const out: Partial<Record<Id, PixelPlacement>> = {};
       for (const id of ids) out[id] = fromZoom(read[id]!, window, crop.scale);
@@ -1071,6 +1097,8 @@ export async function placeSideLandmarks(
           for (const id of ["tragion", "condylion"] as const) {
             const all = reads.map((r) => r[id]!);
             placed[id] = medianPlacement(all);
+            evidence[id] = "fine";
+            if (!zoomed.includes(id)) zoomed.push(id);
             if (all.length > 1) spread[id] = readSpread(all, unit);
           }
         } catch (error) {
@@ -1102,7 +1130,11 @@ export async function placeSideLandmarks(
                 "Place the chin bottom on the chin's own curve, above and forward of the neck point, and place the other two afresh.",
             });
           }
-          for (const id of CHIN_IDS) placed[id] = read[id]!;
+          for (const id of CHIN_IDS) {
+            placed[id] = read[id]!;
+            evidence[id] = "fine";
+            if (!zoomed.includes(id)) zoomed.push(id);
+          }
         } catch (error) {
           options.signal?.throwIfAborted();
           options.onZoomError?.("fine chin", error);
@@ -1113,6 +1145,8 @@ export async function placeSideLandmarks(
       const jr = jawRead as Partial<Record<"gonion" | JawOutlineId, PixelPlacement>>;
       const built = constructGonion(jr.gonion!, placed.menton, jr.jawLower!, placed.condylion, jr.jawBack!, unit);
       placed.gonion = built.point;
+      evidence.gonion = "fine";
+      if (!zoomed.includes("gonion")) zoomed.push("gonion");
       gonion = built.method;
       gonionDisagreement = built.disagreement;
     }
@@ -1120,12 +1154,14 @@ export async function placeSideLandmarks(
   }
 
   options.signal?.throwIfAborted();
+  if (!hasSideObservations(evidence)) throw new SideLandmarkUnavailableError(attemptedCalls, calls, usage);
   return {
-    result: resultFromPixels(placed, frame),
+    result: { ...resultFromPixels(placed, frame), evidence },
     model,
     version: LANDMARK_VERSION,
     usage,
     calls,
+    attemptedCalls,
     zoomed,
     ms: Date.now() - started,
     stages,

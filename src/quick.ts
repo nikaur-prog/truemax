@@ -46,6 +46,7 @@ import {
   confirmOwnRating,
   reviseRating,
   corpusJSON,
+  calibrationDiagnosticsJSON,
   loadCalibrationSet,
   missingCoverage,
   sideCount,
@@ -59,6 +60,8 @@ import { currentAccessToken, currentUser, isAuthAvailable, onAuthChange } from "
 import { activateScanOwner, activeScanOwner, scopedStorageKey } from "./engine/scanScope.js";
 import { canShareFiles, exportName, outcomeMessage, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
+import type { QuickAccess } from "./ui/quickGate.js";
+import { canUseOwnerTools } from "./engine/quickOwnerAccess.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
 import { assessPhotoQuality } from "./engine/photoQuality.js";
@@ -66,6 +69,18 @@ import type { PhotoQuality } from "./engine/photoQuality.js";
 import { LOOKS, applyEnhance, lookFor } from "./engine/enhance.js";
 import { closeCarouselCreator, openCarouselCreator } from "./ui/carouselCreator.js";
 import { decodeImageDataUrl } from "./ui/dataUrl.js";
+import { calibrationVerdictSnapshot } from "./ui/calibrationVerdict.js";
+import type { CalibrationVerdictSnapshot } from "./ui/calibrationVerdict.js";
+import { setSidePriorSuspended } from "./engine/sidePrior.js";
+import { creatorFrontViewIssue } from "./engine/quickCapturePolicy.js";
+import { snapshotCalibrationDiagnostics } from "./engine/calibrationDiagnostics.js";
+import type { CalibrationSideCapture } from "./engine/calibrationDiagnostics.js";
+
+// Quick scans different people, even when the operator is the account owner.
+// Never project that owner's last confirmed ear/jaw geometry onto the next
+// creator/calibration subject. This is page-local; their saved prior remains
+// available to personal scans in the main app.
+setSidePriorSuspended(true);
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -147,6 +162,7 @@ let camOpening = false;
 let camOpenAttempt = 0;
 let ready = false;
 let quickOwnerId: string | null = null;
+let quickAccess: QuickAccess | null = null;
 
 // Checked before anything else starts.
 //
@@ -170,6 +186,7 @@ void quickAccessProfile().then((access) => {
       return;
     }
     quickOwnerId = user.id;
+    quickAccess = access;
     applyPillarGrants(access);
     document.querySelector(".q-wrap")?.classList.remove("q-locked");
     openFromHash();
@@ -428,6 +445,15 @@ function resetSexAsk(): void {
 }
 
 function withSex(next: () => void, onCancel?: () => void): void {
+  // A calibration pair belongs to one person. Never ask for a new group after
+  // the front was captured and silently save it beside a differently scored side.
+  const pairedSex = mode === "calibrate" ? (pendingFront ?? pendingSide)?.sex : undefined;
+  if (pairedSex) {
+    storeSex(pairedSex);
+    askedForThisFace = true;
+    next();
+    return;
+  }
   if (askedForThisFace && storedSex()) {
     next();
     return;
@@ -480,6 +506,7 @@ if (!isAuthAvailable()) {
     previousOwner = owner;
     quickOwnerId = owner;
     if (changed) {
+      quickAccess = null;
       leaveMode();
       // Re-run both the staff/League gate and the per-pillar grants. Keeping
       // this page alive across an account switch would let the next person use
@@ -580,7 +607,20 @@ async function run(
   lastProfile = null;
   shown = null;
   clearRundownMedia();
-  if (!isReady()) return;
+  document.getElementById("q-wrong-view")?.remove();
+  if (!isReady()) {
+    el.hintTitle.textContent = "Loading the analysis engine";
+    el.hintDetail.textContent = "Your photo is ready; this can take a moment on the first scan.";
+    try {
+      await initLandmarker();
+    } catch {
+      if (generation !== quickScanGeneration) return;
+      el.hintTitle.textContent = "The analysis engine could not load";
+      el.hintDetail.textContent = "Check your connection and upload the photo again. No score was saved.";
+      return;
+    }
+    if (generation !== quickScanGeneration) return;
+  }
   await setRunningMode("IMAGE");
   if (generation !== quickScanGeneration) return;
   const det = detectStable(src);
@@ -591,22 +631,46 @@ async function run(
     return;
   }
   const lm = det.faceLandmarks[0];
-  // Deliberately no quality rejection here. /quick exists for filming social
-  // clips, so a detected face proceeds even if the full scan would warn about
-  // softness, lighting, expression, glasses, framing, or camera angle.
-  // No demographic question in front of the score — on a page built for
-  // filming, that is the one interaction guaranteed to end up in the clip. The
-  // stored choice is used if there is one, and the label on the card is a
-  // button either way, so correcting it costs one tap and re-scores instantly.
-  //
-  // What is NOT used here is the shape model's guess. It classified a bearded
-  // man as female while testing this page, and at 58.8% on held-out faces
-  // against a 54.1% base rate that is not an unlucky case — see sexPref.ts.
+  const viewIssue = creatorFrontViewIssue(q);
+  if (viewIssue) {
+    // Keep the actual photo visible. A view mismatch is not a bad face and
+    // must never produce a low front score from profile-only geometry.
+    el.silhouette.width = src.width;
+    el.silhouette.height = src.height;
+    el.silhouette.getContext("2d")?.drawImage(src, 0, 0);
+    el.hintTitle.textContent = viewIssue === "turned" ? "This needs a front-facing photo" : "The head is tilted too far";
+    el.hintDetail.textContent = viewIssue === "turned"
+      ? "No score was saved. Upload a straight-on photo, or choose Side profile and upload this photo there."
+      : "No score was saved. Use an eye-level photo with the head upright.";
+    if (viewIssue === "turned" && (mode === "calibrate" || mode === "analysis" || (mode === "reel" && reelKind === "single"))) {
+      const button = document.createElement("button");
+      button.id = "q-wrong-view";
+      button.className = "btn gho";
+      button.textContent = "Choose side-profile review";
+      button.onclick = () => {
+        button.remove();
+        if (mode === "calibrate") {
+          el.capture.classList.add("hidden");
+          el.cal.classList.remove("hidden");
+          renderFaceSlots();
+          document.getElementById("q-slot-side")?.click();
+        } else {
+          creatorView = "profile";
+          updateModeStep();
+          beginQuickProfileCapture();
+        }
+      };
+      el.pick.parentElement?.appendChild(button);
+    }
+    return;
+  }
+  // Softness/expression warnings remain non-blocking in the creator tool.
+  // Reference group is explicitly selected by withSex; it is never inferred.
   last = { lm, w: src.width, h: src.height, photo: src };
   // The photograph is taken, so whatever happens next is a different face and
   // gets asked afresh. Placed on the way out of every mode rather than in each
   // one, since "a scan finished" is exactly the condition that ends a face.
-  resetSexAsk();
+  if (mode !== "calibrate") resetSexAsk();
   track("quick-scan-done");
   show(storedSex() ?? "male", true);
 }
@@ -777,7 +841,11 @@ function beginQuickProfileCapture(): void {
 }
 
 function enterMode(next: QuickMode): void {
+  // Removing a card is not the authorization boundary: check every entry,
+  // including deep links and a stale click after an account switch.
+  if (OWNER_ONLY_MODES.includes(next) && !canUseOwnerTools(quickAccess, quickOwnerId)) return;
   quickScanGeneration += 1;
+  clearPending();
   last = null;
   lastProfile = null;
   shown = null;
@@ -887,11 +955,11 @@ async function openSavedFaceFromLibrary(face: SavedFace): Promise<void> {
   mode = "analysis";
   creatorView = "front";
   el.clips.classList.add("hidden");
-  el.capture.classList.add("hidden");
+  el.capture.classList.remove("hidden");
   el.modeName.textContent = MODE_NAMES.analysis;
   el.modeStep.textContent = "Saved front photo";
-  last = { lm: face.landmarks, w: face.width, h: face.height, photo: canvas };
-  show(storedSex() ?? "male", true);
+  resetSexAsk();
+  withSex(() => void run(canvas), leaveMode);
 }
 
 function updateModeStep(): void {
@@ -899,7 +967,7 @@ function updateModeStep(): void {
     el.modeStep.textContent =
       mode === "analysis"
         ? creatorView === "profile" ? "One profile · 13 checked points" : "One front photo"
-        : mode === "calibrate" ? "One photo · then your rating" : "";
+        : mode === "calibrate" ? "One or both views · optional rating" : "";
     return;
   }
   if (reelKind === "single") {
@@ -914,6 +982,9 @@ function updateModeStep(): void {
 
 function leaveMode(): void {
   quickScanGeneration += 1;
+  clearPending();
+  // Drop saved-verdict handlers and their capture-owned export media on exit.
+  el.calBody.replaceChildren();
   last = null;
   lastProfile = null;
   shown = null;
@@ -1000,8 +1071,10 @@ async function refreshLibrary(): Promise<void> {
         await refreshLibrary();
         return;
       }
-      last = { lm: face.landmarks, w: face.width, h: face.height, photo: canvas };
-      show(storedSex() ?? "male", true);
+      // Old saved rows carry neither a selected group nor validated pose.
+      // Ask explicitly and recheck the pixels instead of trusting stale mesh data.
+      resetSexAsk();
+      withSex(() => void run(canvas));
     };
   }
   for (const button of el.libStrip.querySelectorAll<HTMLButtonElement>("[data-del]")) {
@@ -1073,6 +1146,7 @@ let pendingFrontShot: HTMLCanvasElement | null = null;
 let pendingFrontLandmarks: NormalizedLandmark[] | null = null;
 let pendingSidePhoto: HTMLCanvasElement | null = null;
 let pendingSidePoints: SidePoints | null = null;
+let pendingSideCapture: CalibrationSideCapture | null = null;
 
 // The last correction upload's fate, shown in the slots panel.
 //
@@ -1120,7 +1194,7 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
   void submitSideCorrectionFeedback(upload.photo, upload.points, upload.faceDir, upload.feedback)
     .then((result) => {
       if (result.ok) {
-        setShareStatus("Side correction shared: it will teach the automatic placement.");
+        setShareStatus("Side correction shared privately for review. Automatic placement has not changed.");
       } else if (result.rateLimited) {
         // Retrying a limit would return the same answer all day, so nothing is
         // kept: the correction is declined, not lost in transit.
@@ -1133,12 +1207,15 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
 }
 
 function clearPending(): void {
+  resetSexAsk();
+  document.getElementById("q-wrong-view")?.remove();
   pendingFront = null;
   pendingFrontShot = null;
   pendingFrontLandmarks = null;
   pendingSide = null;
   pendingSidePhoto = null;
   pendingSidePoints = null;
+  pendingSideCapture = null;
 }
 
 /**
@@ -1150,6 +1227,7 @@ function clearPending(): void {
  * make the side feel mandatory and the front feel like a gate.
  */
 function renderFaceSlots(): void {
+  if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
   el.calStep.textContent = "This face";
   const slot = (
     id: string,
@@ -1164,15 +1242,22 @@ function renderFaceSlots(): void {
     </button>`;
 
   el.calBody.innerHTML = `
+    <p class="q-cal-hint">Reference group: <b>${(pendingFront ?? pendingSide)?.sex === "female" ? "women" : (pendingFront ?? pendingSide)?.sex === "male" ? "men" : "choose before capturing"}</b>.
+    Both views of this face use the same group. Start a new face to change it.</p>
     <div class="q-slots">
       ${slot("q-slot-front", "Front", pendingFront, "Camera or upload")}
-      ${slot("q-slot-side", "Side", pendingSide, "Upload, then check 13 points")}
+      ${slot("q-slot-side", "Side", pendingSide, "Upload, review and correct 13 points")}
     </div>
     <button type="button" class="btn pri q-slot-go" id="q-slot-go"
       ${pendingFront || pendingSide ? "" : "disabled"}>Analyse</button>
-    <p class="q-cal-hint">Either view on its own is worth having: a front-only
-    face still carries every front metric. Both together is what lets a side
-    measurement ever be checked against a human rating.</p>
+    <p class="q-cal-hint">Add either view or both. Ratings are optional; you can
+    save measurements without judging attractiveness. Side-point corrections
+    are separate and are shared only if you choose to. Saving a face does not
+    automatically train the scanner or change anyone's scores.</p>
+    <p class="q-cal-hint">Side calibration always opens point review after a readable photo.
+    If detection is uncertain, you get a labelled starting template to correct.
+    Confirm only when all 13 points are where you intend them; a difficult photo
+    is useful evidence, not a reason to guess a rating.</p>
     <p class="q-cal-hint" id="q-slot-share" role="status">${shareStatus}</p>
     <button type="button" class="btn gho${failedUpload ? "" : " hidden"}" id="q-slot-retry">Retry sending the correction</button>
     <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
@@ -1183,6 +1268,7 @@ function renderFaceSlots(): void {
   };
 
   document.getElementById("q-slot-side")!.onclick = () => withSex(() => {
+    if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
     el.cal.classList.add("hidden");
     openSideCapture({
       scanId: crypto.randomUUID(),
@@ -1191,6 +1277,7 @@ function renderFaceSlots(): void {
       // see, which is the right flow for scanning yourself and the wrong one for
       // working through a folder of photographs.
       method: "upload",
+      reviewMode: "calibration",
       onDone: (report, points, faceDir, review) => {
         closeSideFlow();
         pendingSide = report;
@@ -1199,6 +1286,17 @@ function renderFaceSlots(): void {
         // owning it.
         pendingSidePhoto = review.photo;
         pendingSidePoints = points;
+        pendingSideCapture = {
+          width: review.photo.width,
+          height: review.photo.height,
+          faceDir,
+          automaticPoints: review.automaticPoints,
+          finalPoints: points,
+          seedMethod: review.seedMethod,
+          seedVersion: review.seedVersion,
+          operatorVerified: review.verified,
+          diagnostics: review.diagnostics,
+        };
         // Send the correction, if the operator consented to sharing it.
         //
         // This slot used to take the report and drop the other three arguments,
@@ -1302,8 +1400,12 @@ function renderRatingEdit(id: string): void {
       num.focus();
       return;
     }
-    reviseRating(id, Math.round(rating * 10) / 10, keepsProvenance);
-    renderCalibrationSet();
+    try {
+      reviseRating(id, Math.round(rating * 10) / 10, keepsProvenance);
+      renderCalibrationSet();
+    } catch {
+      msg.textContent = "That change was not saved. Device storage is unavailable; your earlier rating is unchanged.";
+    }
   };
   document.getElementById("q-edit-typo")!.onclick = () => commit(true);
   document.getElementById("q-edit-mind")!.onclick = () => commit(false);
@@ -1360,8 +1462,8 @@ function renderRatingStep(r: Report): void {
   el.calStep.textContent = "Your rating";
   el.calBody.innerHTML = `
     <div class="q-cal-rate">
-      <p class="q-cal-ask">Before you see what it said, what is this face, out of ten?
-      Leave it empty if you are not sure; the face saves either way.</p>
+      <p class="q-cal-ask">Have an independent rating for this face?
+      Add it before revealing the result, or leave it empty to save just the measurements and points.</p>
       <div class="q-cal-input">
         <input type="number" id="q-cal-num" min="1" max="10" step="0.1" inputmode="decimal"
                placeholder="Optional" autocomplete="off" />
@@ -1369,22 +1471,15 @@ function renderRatingStep(r: Report): void {
                maxlength="40" autocomplete="off" />
         <button type="button" class="btn pri" id="q-cal-save">Save face</button>
       </div>
-      <p class="q-cal-hint">Whole face, one number, gut answer. Use the ends of the scale:
-      a set where everybody sits between 4.5 and 6 cannot settle anything, which is exactly
-      how the men in the current corpus ended up useless.</p>
+      <p class="q-cal-hint">Don't stretch a rating to fill the scale. An uncertain number
+      is less useful than an unrated capture with carefully checked points.</p>
       <label class="q-cal-prov">
         <input type="checkbox" id="q-cal-external" />
-        <span>This number came off another app's analysis, not out of my own head.</span>
+        <span>This rating comes from another app.</span>
       </label>
-      <p class="q-cal-hint">Worth naming because it is easy to do by accident with a
-      competitor's read of the same face open in the next tab. Fitting our weights to
-      another product's scores is reverse-engineering its formula with arithmetic, so a
-      borrowed number is kept with the face and left out of the corpus export.</p>
-      <p class="q-cal-hint">Skipping is a real answer, not a failure. A face saved
-      without a rating still carries its measurements and its side corrections: it
-      just sits out of the agreement fit. A corpus full of hesitant 5s settles nothing;
-      the nine men already in it span 4.5 to 6.1 and are useless for that exact reason.
-      Rate the ones you are sure about.</p>
+      <p class="q-cal-hint">External ratings stay in the diagnostic export for comparison.
+      They are not independent human labels and are excluded from the fitting corpus.
+      Saving a capture does not update the live scoring model.</p>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
@@ -1394,28 +1489,45 @@ function renderRatingStep(r: Report): void {
   const msg = document.getElementById("q-cal-msg")!;
   num.focus();
   const store = (rating: number | null) => {
-    addRatedFace(
-      r,
-      rating,
-      // Provenance describes the NUMBER. With no number there is nothing
-      // borrowed, so a skipped rating is recorded as `self` regardless of the
-      // checkbox — an "external" tag on an absent value would read as a row
-      // needing scrubbing when there is nothing in it to scrub.
-      rating !== null && external.checked ? "external" : "self",
-      label.value.trim() || undefined,
-      pendingSide ?? undefined,
-      {
-        thumb: pendingFrontShot ? (toAvatarThumb(pendingFrontShot) ?? undefined) : undefined,
-        // Front and side counted together: a misplaced point poisons the row
-        // whichever view it came from.
-        suspect:
-          r.metrics.filter((m) => m.implausible).length +
-          (pendingSide?.metrics.filter((m) => m.implausible).length ?? 0),
-      },
-    );
-    const held = pendingSide;
-    clearPending();
-    renderVerdictStep(r, rating, held);
+    try {
+      const verdict = calibrationVerdictSnapshot(r, {
+        front: pendingFront,
+        side: pendingSide,
+        frontPhoto: pendingFrontShot,
+        frontLandmarks: pendingFrontLandmarks,
+        sidePhoto: pendingSidePhoto,
+        sidePoints: pendingSidePoints,
+      });
+      addRatedFace(
+        r,
+        rating,
+        // Provenance describes the NUMBER. With no number there is nothing
+        // borrowed, so a skipped rating is recorded as `self` regardless of the
+        // checkbox; an "external" tag on an absent value would be misleading.
+        rating !== null && external.checked ? "external" : "self",
+        label.value.trim() || undefined,
+        verdict.additionalSide ?? undefined,
+        {
+          thumb: pendingFrontShot ? (toAvatarThumb(pendingFrontShot) ?? undefined) : undefined,
+          suspect: verdict.suspect,
+          diagnostics: snapshotCalibrationDiagnostics({
+            build: __BUILD__,
+            referenceGroup: r.sex,
+            front: pendingFront && pendingFrontShot && pendingFrontLandmarks ? {
+              width: pendingFrontShot.width,
+              height: pendingFrontShot.height,
+              landmarks: pendingFrontLandmarks,
+              report: pendingFront,
+            } : null,
+            side: pendingSide && pendingSideCapture ? { ...pendingSideCapture, report: pendingSide } : null,
+          }),
+        },
+      );
+      clearPending();
+      renderVerdictStep(r, rating, verdict);
+    } catch {
+      msg.textContent = "This face was not saved. Device storage may be full or unavailable. Your capture is still open; export the saved set before clearing space, then try again.";
+    }
   };
   // One button, and it always stores. The old shape — a primary button that
   // ERRORED on an empty box, with skipping exiled to a second button — made
@@ -1440,8 +1552,9 @@ function renderRatingStep(r: Report): void {
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
-function renderVerdictStep(r: Report, rating: number | null, side: Report | null = null): void {
-  const withSide = side !== null;
+function renderVerdictStep(r: Report, rating: number | null, capture: CalibrationVerdictSnapshot): void {
+  const side = capture.additionalSide;
+  const withSide = capture.hasSide;
   const gap = rating === null ? null : r.overall - rating;
   // Named rather than left as a number. "−2.3" is a figure; "the engine is
   // two points below you on this face" is the thing worth acting on, and the
@@ -1469,14 +1582,14 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
         <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
       </div>
       <p class="q-cal-said">It ${verdict}.${
-        withSide ? " Front and side both stored." : ""
+        side ? " Front and side both stored." : ""
       }</p>`
       }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
         <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
         <button class="btn gho" id="q-cal-list">See the set</button>
-        ${withSide && pendingFrontShot && pendingFrontLandmarks && pendingSidePhoto && pendingSidePoints
+        ${capture.dual
           ? `<button class="btn gho" id="q-cal-dual">Export Dual-View MP4</button>`
           : ""}
       </div>
@@ -1511,9 +1624,9 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
   // screen where a front, a hand-confirmed side, and the merged report all
   // exist at once — the honesty condition for ever printing a side figure.
   const dualBtn = document.getElementById("q-cal-dual") as HTMLButtonElement | null;
-  if (dualBtn && side) {
+  const media = capture.dual;
+  if (dualBtn && side && media) {
     dualBtn.onclick = async () => {
-      if (!pendingFrontShot || !pendingFrontLandmarks || !pendingSidePhoto || !pendingSidePoints) return;
       const merged = mergeReports(r, side);
       if (!merged.views) return; // merge fell back to front-only: nothing dual to show
       dualBtn.disabled = true;
@@ -1527,15 +1640,15 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
       ].slice(0, 4);
       try {
         await downloadQuickVideo(
-          pendingFrontShot,
-          pendingFrontLandmarks,
+          media.frontPhoto,
+          media.frontLandmarks,
           r.sex,
           { overall: merged.overall, percentile: merged.overallPercentile, regions: [] },
           (p) => (dualBtn.textContent = p < 1 ? `Rendering ${Math.round(p * 100)}%` : "Saved"),
           "dual",
           {
-            sidePhoto: pendingSidePhoto,
-            sidePoints: pendingSidePoints,
+            sidePhoto: media.sidePhoto,
+            sidePoints: media.sidePoints,
             sideMetrics,
             frontScore: merged.views.front.score,
             sideScore: merged.views.side.score,
@@ -1571,9 +1684,11 @@ function gapOf(f: RatedFace): number {
 }
 
 function renderCalibrationSet(): void {
+  if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
   // The set is the one screen with no face in flight, so arriving here always
   // ends the current one.
   resetSexAsk();
+  clearPending();
   const faces = loadCalibrationSet();
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
   // Everything below counts only what may be fitted against. A withheld row is
@@ -1587,11 +1702,13 @@ function renderCalibrationSet(): void {
 
   el.calBody.innerHTML = `
     <div class="q-cal-set">
+      <p class="q-cal-hint"><b>${faces.length} saved capture${faces.length === 1 ? "" : "s"}</b>,
+      including ${sideCount(faces)} with side measurements. The counts below are independent ratings eligible for the fitting corpus, not all captures.</p>
       <div class="q-cal-health">
         ${health
           .map(
             (h) => `<div class="q-cal-hcard${h.enough ? " ok" : ""}">
-              <span>${h.sex === "male" ? "MEN" : "WOMEN"}</span>
+              <span>RATED ${h.sex === "male" ? "MEN" : "WOMEN"}</span>
               <b>${h.count}</b>
               <small>${h.note}</small>
             </div>`,
@@ -1600,15 +1717,14 @@ function renderCalibrationSet(): void {
       </div>
       ${
         missing.length
-          ? `<p class="q-cal-missing">No face in this set carries ${missing.join(", ")} yet,
-             so those stay on a prior until one does.</p>`
+          ? `<p class="q-cal-missing">The eligible rating set does not yet cover ${missing.join(", ")}.
+             Unrated captures remain available in the diagnostic export.</p>`
           : ""
       }
       <p class="q-cal-missing">${
         sides === 0
-          ? `No face carries a side profile yet, so all ${missingSide.length} side
-             measurements are still on a prior. Add one from the Side slot.`
-          : `${sides} of ${own.length} carr${sides === 1 ? "ies" : "y"} a side profile${
+          ? `No eligible rated face carries a side profile yet. Side captures without a rating are still saved for placement review.`
+          : `${sides} of ${own.length} eligible rated faces include side measurements${
               missingSide.length
                 ? `, ${missingSide.length} side measurement${
                     missingSide.length === 1 ? "" : "s"
@@ -1619,10 +1735,9 @@ function renderCalibrationSet(): void {
       ${
         withheld.length
           ? `<p class="q-cal-missing">${withheld.length} row${withheld.length === 1 ? "" : "s"}
-             held out of the export, because the rating is not marked as your own. A row marked
-             <b>borrowed</b> stays out for good; a row marked <b>unknown</b> predates the
-             provenance field and one tap on "mine" clears it, but only do that for a number
-             you remember writing yourself.</p>`
+             excluded from the fitting corpus because the rating is absent, external, revised or unknown.
+             All remain in the diagnostic export. Use "mine" only when you remember giving
+             that rating independently, before seeing the engine's result.</p>`
           : ""
       }
       ${
@@ -1657,12 +1772,12 @@ function renderCalibrationSet(): void {
                   // fit, and the time to notice is while the person is still
                   // around to re-scan.
                   const suspectFlag = f.suspect
-                    ? ` <em class="q-cal-flag bad">${f.suspect} reading${f.suspect === 1 ? "" : "s"} off-anatomy</em>`
+                    ? ` <em class="q-cal-flag bad">${f.suspect} reading${f.suspect === 1 ? "" : "s"} need review</em>`
                     : "";
                   return `<div class="q-cal-row${fittable ? "" : " held"}">
                     <span>${
                       f.thumb ? `<img class="q-cal-thumb" src="${f.thumb}" alt="" />` : `<i class="q-cal-thumb none"></i>`
-                    }${f.label ? escapeHtml(f.label) : f.id}${flag}${suspectFlag}</span>
+                    }${f.label ? `${escapeHtml(f.label)} <small>(${f.id})</small>` : f.id}${flag}${suspectFlag}</span>
                     <span>${f.rating === null ? "–" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
                     <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
@@ -1677,17 +1792,20 @@ function renderCalibrationSet(): void {
                 })
                 .join("")}
             </div>`
-          : `<p class="q-cal-empty">Nothing yet. Scan a face and give it a number.</p>`
+          : `<p class="q-cal-empty">No saved captures yet. Add a face; a rating is optional.</p>`
       }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-add">Add a face</button>
+        <button class="btn gho" id="q-cal-export"${faces.length ? "" : " disabled"}>Export all capture diagnostics</button>
         <button class="btn gho" id="q-cal-copy"${own.length ? "" : " disabled"}>Copy corpus JSON${
           withheld.length ? ` (${own.length} of ${faces.length})` : ""
         }</button>
         <button class="btn gho" id="q-cal-clear"${faces.length ? "" : " disabled"}>Clear the set</button>
       </div>
-      <p class="q-cal-hint">Copy pastes straight over src/engine/calibration/corpus.json.
-      Rows sort by disagreement, so the faces the engine is worst at are at the top.</p>
+      <p class="q-cal-hint">Capture diagnostics include every row, even without a rating:
+      measurements, scoring references, and automatic/final points from new captures.
+      Photos and labels are omitted. Keep the export private. Older captures cannot recover
+      points that were not saved. Corpus JSON is separate and includes only eligible ratings.</p>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
@@ -1696,16 +1814,29 @@ function renderCalibrationSet(): void {
     clearPending();
     renderFaceSlots();
   };
+  const msg = document.getElementById("q-cal-msg")!;
+  const updateSet = (change: () => unknown) => {
+    try {
+      change();
+      renderCalibrationSet();
+    } catch {
+      msg.textContent = "The saved set could not be updated. Device storage is unavailable; no changes were confirmed.";
+    }
+  };
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-drop]")) {
-    button.onclick = () => { removeRatedFace(button.dataset.drop!); renderCalibrationSet(); };
+    button.onclick = () => updateSet(() => removeRatedFace(button.dataset.drop!));
   }
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-mine]")) {
-    button.onclick = () => { confirmOwnRating(button.dataset.mine!); renderCalibrationSet(); };
+    button.onclick = () => updateSet(() => confirmOwnRating(button.dataset.mine!));
   }
   for (const button of el.calBody.querySelectorAll<HTMLButtonElement>("[data-edit]")) {
     button.onclick = () => renderRatingEdit(button.dataset.edit!);
   }
-  const msg = document.getElementById("q-cal-msg")!;
+  document.getElementById("q-cal-export")!.onclick = async () => {
+    const blob = new Blob([calibrationDiagnosticsJSON(loadCalibrationSet())], { type: "application/json" });
+    const outcome = await saveFile(blob, "truemax-calibration-diagnostics.json");
+    msg.textContent = outcomeMessage(outcome);
+  };
   document.getElementById("q-cal-copy")!.onclick = async () => {
     const text = corpusJSON(loadCalibrationSet());
     try {
@@ -1737,8 +1868,7 @@ function renderCalibrationSet(): void {
       }, 4000);
       return;
     }
-    clearCalibrationSet();
-    renderCalibrationSet();
+    updateSet(clearCalibrationSet);
   };
 }
 

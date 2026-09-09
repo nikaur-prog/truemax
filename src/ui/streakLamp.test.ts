@@ -35,6 +35,22 @@ test("switched off in Settings, the lamp renders nothing at all", () => {
   assert.equal(html, "");
 });
 
+test("a legacy second balance cannot inflate the displayed consistency points", () => {
+  const legacyBalances = { consistency: 10, progress: 900 };
+  const html = lampMarkup(readStreak(state({ current: 5, best: 5, lastCountedDay: "2026-09-05" }), "2026-09-05"), legacyBalances);
+  assert.match(html, /10 pts/);
+  assert.doesNotMatch(html, /900|910/);
+});
+
+test("the grace explanation is visible on the covered day, not on a later day", () => {
+  const covered = state({ current: 8, best: 8, lastCountedDay: "2026-09-09", graceSpentOn: "2026-09-09" });
+  const today = lampMarkup(readStreak(covered, "2026-09-09"), { consistency: 27 });
+  assert.match(today, /class="daily-line shown"/);
+  assert.match(today, /A missed day was covered by a banked day/);
+  const tomorrow = lampMarkup(readStreak(covered, "2026-09-10"), { consistency: 27 });
+  assert.doesNotMatch(tomorrow, /daily-line shown|A missed day was covered/);
+});
+
 test("a person who has never counted a day sees the unlit lamp and the line naming what would count", () => {
   const html = lampMarkup(readStreak(EMPTY_STREAK, "2026-09-05"), { consistency: 0 });
   assert.match(html, /glow-off/);

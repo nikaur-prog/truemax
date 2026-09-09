@@ -1,4 +1,4 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "../engine/faceConnections.js";
 import { shapeSubset } from "../engine/shape.js";
 
 // ---------------------------------------------------------------------------
@@ -33,11 +33,11 @@ import { shapeSubset } from "../engine/shape.js";
 // brows, lips. Those are unambiguous, they are what the metrics are built
 // from, and a contour closing around an eye is the moment worth showing.
 const SETS = () => [
-  FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
-  FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
-  FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
-  FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
-  FaceLandmarker.FACE_LANDMARKS_LIPS,
+  FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYE,
+  FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYE,
+  FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYEBROW,
+  FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYEBROW,
+  FACE_CONNECTIONS.FACE_LANDMARKS_LIPS,
 ];
 
 /**
@@ -93,7 +93,7 @@ export function reelOvalPoints(): Set<number> {
   for (const ring of reelContours()) for (const i of ring) keep.add(i);
 
   const oval = new Set<number>();
-  for (const edge of FaceLandmarker.FACE_LANDMARKS_FACE_OVAL) {
+  for (const edge of FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL) {
     for (const mesh of [edge.start, edge.end]) {
       const i = at.get(mesh);
       if (i !== undefined && !keep.has(i)) oval.add(i);

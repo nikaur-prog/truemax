@@ -15,10 +15,22 @@ import {
   jpegDimensions,
   parseFeedbackRevocation,
   parseSideFeedbackMetadata,
+  sideContributionEligible,
 } from "./side-correction-feedback.js";
 
 const SCAN_ID = "a42ad7cd-2285-4f0a-82f8-f075588101f8";
 const SUBMISSION_ID = "b42ad7cd-2285-4f0a-82f8-f075588101f9";
+
+test("contributions require both server-profile adulthood and an explicit own-face declaration", () => {
+  const now = new Date("2026-09-09T00:00:00Z");
+  assert.equal(sideContributionEligible("2008-09-09", "my-own-adult-face", now), true);
+  for (const dob of [null, "invalid", "2008-09-10", "2030-01-01"]) {
+    assert.equal(sideContributionEligible(dob, "my-own-adult-face", now), false);
+  }
+  for (const subject of [undefined, null, "guest", "friend", true]) {
+    assert.equal(sideContributionEligible("1995-01-01", subject, now), false);
+  }
+});
 
 function points(): SidePoints {
   return Object.fromEntries(SIDE_POINTS.map(({ id }, index) => [id, {

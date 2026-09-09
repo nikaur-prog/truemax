@@ -17,7 +17,7 @@ import {
   stopThinking,
 } from "./scanSounds.js";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
-import { mountVerifier, seedSidePointsSmart } from "./sideVerify.js";
+import { mountVerifier, seedSidePointsSmart, seedSideTemplate } from "./sideVerify.js";
 import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
@@ -53,7 +53,11 @@ import type { SidePlacementChoice } from "./sideCloudPlacement.js";
 import { fuseSideSeeds } from "../engine/sideSeedFusion.js";
 import { createSideAttemptOwner } from "./sideAttempt.js";
 import { createSideInputGuard } from "./sideInputGuard.js";
+import { withPointDerivedSideDirection } from "./sidePlacementDirection.js";
 import type { ScanPerformanceAttempt } from "../engine/scanPerformance.js";
+import { flipSideReviewPoints, recoverSideSeed, sideImageSize } from "../engine/sideCaptureRecovery.js";
+import type { SideCaptureDiagnostics, SideReviewMode } from "../engine/sideCaptureRecovery.js";
+import { runSideCloudAttempt } from "../engine/sideCloudAttempt.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -99,6 +103,10 @@ interface SideCtx {
   method?: "camera" | "upload";
   /** Standalone profile result rather than the second view of a main scan. */
   standalone?: boolean;
+  /** Explicitly enabled only for a signed-in adult scanning their own face. */
+  feedbackEligible?: boolean;
+  /** Set only by the authorized admin calibration entry point. Not an auth gate. */
+  reviewMode?: SideReviewMode;
   onDone: (
     report: Report,
     points: SidePoints,
@@ -115,6 +123,8 @@ export interface SidePlacementReview {
   automaticPoints: SidePoints;
   seedMethod: SideSeedMethod;
   seedVersion?: string;
+  /** Local calibration evidence, including failed automatic placement. */
+  diagnostics?: SideCaptureDiagnostics;
   feedback: SideFeedbackIntent | null;
   /**
    * Whether a human stood behind these thirteen points.
@@ -158,6 +168,7 @@ interface SidePlacementSeed {
   confidence?: number;
   confidenceByPoint?: Partial<Record<SidePointId, number>>;
   seedVersion?: string;
+  diagnostics?: SideCaptureDiagnostics;
 }
 
 let verifier: VerifyHandle | null = null;
@@ -201,9 +212,9 @@ function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"], st
     ? "Choose a clear side-profile photo with your whole forehead and chin visible. Landscape and portrait photos are both accepted."
     : sideCaptureInstruction();
   copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
-    <p class="side-sub">${standalone ? "This is a profile-only scan" : "Second of two"}. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
+    <p class="side-sub">${standalone ? "This side view measures" : "Your front photo is ready. This optional view adds"} chin projection, jaw-angle and profile measurements. Face fully sideways, with your head level and one ear toward the camera.</p>
     <p class="side-sub">${captureHelp}</p>
-    <p class="side-sub">Afterwards, TrueMax places thirteen points for you to review. If any missed, choose edit and drag only those points before confirming.</p>
+    <p class="side-sub">Next, review thirteen starting points. You can drag any that missed, retake the photo${standalone ? " or cancel" : " or use your front photo only"}.</p>
     ${placementChoiceControl()}`;
   copy.querySelector<HTMLButtonElement>("[data-side-placement-choice]")?.addEventListener("click", () => {
     clearSidePlacementChoice();
@@ -325,7 +336,7 @@ export function openSideCapture(ctx: SideCtx): void {
   e.actions.innerHTML = camBtn + pickBtn;
   e.actions.insertAdjacentHTML(
     "beforeend",
-    `<button class="btn cancel" id="side-quit">Cancel</button>`,
+    `<button class="btn cancel" id="side-quit">${ctx.onSkip ? "Back to front photo" : "Cancel"}</button>`,
   );
   document.getElementById("side-cam")?.addEventListener("click", () => openSideCamera(ctx));
   document.getElementById("side-pick")!.onclick = () => e.input.click();
@@ -350,7 +361,7 @@ function appendSideExitActions(host: HTMLElement, ctx: SideCtx, allowRetake = tr
     const retakeButton = document.createElement("button");
     retakeButton.type = "button";
     retakeButton.className = "btn gho";
-    retakeButton.textContent = "Take another side photo";
+    retakeButton.textContent = "Retake side photo";
     retakeButton.onclick = () => openSideCapture(ctx);
     row.appendChild(retakeButton);
   }
@@ -358,7 +369,7 @@ function appendSideExitActions(host: HTMLElement, ctx: SideCtx, allowRetake = tr
     const skipButton = document.createElement("button");
     skipButton.type = "button";
     skipButton.className = "btn cancel";
-    skipButton.textContent = "Skip side and see front analysis";
+    skipButton.textContent = "Use front only";
     skipButton.onclick = () => skipSide(ctx);
     row.appendChild(skipButton);
   } else if (allowRetake) {
@@ -603,10 +614,10 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // out.
   void cameraCount().then((n) => {
     if (!ownsCamera()) return;
-    e.swap.classList.toggle("hidden", n < 2 || !sideCam);
+    e.swap?.classList.toggle("hidden", n < 2 || !sideCam);
   });
-  e.swap.disabled = false;
-  e.swap.onclick = async () => {
+  if (e.swap) e.swap.disabled = false;
+  if (e.swap) e.swap.onclick = async () => {
     if (!ownsCamera() || !sideCam) return;
     const swappingCamera = sideCam;
     e.swap.disabled = true;
@@ -696,14 +707,16 @@ function stopSideCamera(): void {
   // as "no face", and every camera-captured profile quietly fell back to the
   // silhouette trace — the worse path, on the most common route into this
   // screen.
-  void setRunningMode("IMAGE");
+  // loadCanvas awaits this transition as part of the placement attempt. A
+  // failed background mode reset must not become an unhandled rejection.
+  void setRunningMode("IMAGE").catch(() => {});
   const e = el();
   exitCameraTakeover(e.frame.closest(".cam-stage"));
   e.live.classList.add("hidden");
   e.turnCue.classList.add("hidden");
   e.frame.classList.remove("live");
-  e.swap.classList.add("hidden");
-  e.swap.onclick = null;
+  e.swap?.classList.add("hidden");
+  if (e.swap) e.swap.onclick = null;
 }
 
 // Re-open the verifier on a profile that has already been captured, so the
@@ -788,9 +801,9 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
   const img = await loadImage(file);
   if (!sideAttempt.current(signal)) return;
   const c = document.createElement("canvas");
-  const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
-  c.width = Math.round(img.naturalWidth * scale);
-  c.height = Math.round(img.naturalHeight * scale);
+  const size = sideImageSize(img.naturalWidth, img.naturalHeight, MAX_DIM);
+  c.width = size.width;
+  c.height = size.height;
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
   await loadCanvas(c, ctx, signal);
   } catch {
@@ -804,7 +817,17 @@ function showSideLoadFailure(ctx: SideCtx): void {
   e.frame.classList.remove("scanning");
   e.cap.textContent = "PHOTO COULD NOT BE READ";
   e.actions.replaceChildren();
-  e.panelCopy.innerHTML = `<h2 class="side-title">Try another side photo</h2><p class="side-sub">That photo could not be prepared.${ctx.onSkip ? " Your front scan has not changed." : " Choose a clearer photo to try again."}</p>`;
+  e.panelCopy.innerHTML = `<h2 class="side-title">This photo could not be opened</h2><p class="side-sub">Try saving it as a JPEG, PNG or WebP, then upload it again. This is a file-reading problem, not a judgement of the photo's pose or quality.${ctx.onSkip ? " Your front scan has not changed." : ""}</p>`;
+  appendSideExitActions(e.actions, ctx);
+}
+
+function showSidePlacementFailure(ctx: SideCtx): void {
+  const e = el();
+  stopThinking();
+  e.frame.classList.remove("scanning");
+  e.cap.textContent = "PLACEMENT COULD NOT OPEN";
+  e.actions.replaceChildren();
+  e.panelCopy.innerHTML = `<h2 class="side-title">The photo opened, but placement did not</h2><p class="side-sub">The image is readable. The point-placement tools could not finish this attempt. Try the photo again${ctx.onSkip ? " or use your front result" : ""}.</p>`;
   appendSideExitActions(e.actions, ctx);
 }
 
@@ -813,6 +836,7 @@ function showSideLoadFailure(ctx: SideCtx): void {
 // from.
 async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAttempt.begin()): Promise<void> {
   const e = el();
+  let photoPrepared = false;
   try {
   cancelDialogs();
   verifier?.destroy();
@@ -820,12 +844,8 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   e.section.inert = false;
   e.actions.classList.remove("mode-pending", "guided-row");
   stopSideCamera();
-  // Awaited, not assumed: seeding runs the still-image detector below.
-  await setRunningMode("IMAGE");
   if (!sideAttempt.current(signal)) return;
-  const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
-  const w = Math.round(src.width * scale);
-  const h = Math.round(src.height * scale);
+  const { width: w, height: h } = sideImageSize(src.width, src.height, MAX_DIM);
   e.canvas.width = w;
   e.canvas.height = h;
   // Async readers own a snapshot, never the display canvas a retake reuses.
@@ -834,6 +854,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   snapshot.height = h;
   snapshot.getContext("2d")!.drawImage(src, 0, 0, w, h);
   e.canvas.getContext("2d")!.drawImage(src, 0, 0, w, h);
+  photoPrepared = true;
 
   // Do not reject a side still here. Profile focus, crop, lighting, pose and
   // silhouette classifiers all produced false negatives on plainly usable
@@ -889,18 +910,27 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   // Send the supported seed in the exact same frame as the immutable photo.
   // The cloud refines an existing placement instead of starting without it.
   const finishSeed = ctx.performance?.start("side_seed");
-  const localResult = await seedSidePointsSmart(
-      snapshot,
-      (points, faceDir) => {
+  const recovered = await recoverSideSeed({
+    mode: ctx.reviewMode,
+    signal,
+    prepare: () => setRunningMode("IMAGE"),
+    // Calibration keeps the reader's first geometry rather than selecting a
+    // candidate because its measurements fit today's reference boundaries.
+    read: (readSignal) => seedSidePointsSmart(snapshot, ctx.reviewMode === "calibration" ? undefined : (points, faceDir) => {
         const assessment = seedAssessment(points, faceDir, ctx.sex);
         return assessment.hard.length === 0 && assessment.marginal.length === 0;
-      },
-      signal,
-    );
-  finishSeed?.(signal.aborted ? "cancelled" : "success");
+      }, readSignal),
+    template: () => seedSideTemplate(w, h),
+  });
+  const localResult = recovered.seed;
+  finishSeed?.(signal.aborted ? "cancelled" : recovered.diagnostics?.templateFallback ? "fallback" : "success");
   if (!sideAttempt.current(signal)) return;
   const finishCloud = ctx.performance?.start("side_cloud");
-  const cloudResult = await cloudPlacementFor(snapshot, localResult, signal);
+  const cloudAttempt = await cloudPlacementFor(snapshot, localResult, signal, ctx.reviewMode);
+  const cloudResult = cloudAttempt.placement;
+  if (cloudAttempt.status === "unavailable") {
+    recovered.diagnostics?.warnings.push("cloud-unavailable");
+  }
   finishCloud?.(signal.aborted ? "cancelled" : cloudResult ? "success" : "fallback");
   if (!sideAttempt.current(signal)) return;
   // The cloud is a second reader, not a replacement for the device seed. The
@@ -911,24 +941,27 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
     localResult.points,
     cloudResult?.points ?? null,
     cloudResult?.confidenceByPoint,
+    undefined,
+    cloudResult?.evidence,
   );
   const bandOpacity = { high: 1, mid: 0.68, low: 0.32 } as const;
   const confidenceByPoint = Object.fromEntries(
     Object.entries(fused.band).map(([id, band]) => [id, bandOpacity[band]]),
   ) as Record<SidePointId, number>;
   const overallConfidence = bandOpacity[fused.overall];
-  let seed: SidePlacementSeed = {
+  let seed: SidePlacementSeed = withPointDerivedSideDirection({
     ...localResult,
     points: fused.points,
     method: cloudResult ? "fused" : localResult.method,
-    confidence: overallConfidence,
+    confidence: recovered.diagnostics?.templateFallback ? 0 : overallConfidence,
     confidenceByPoint,
-    seedVersion: cloudResult?.seedVersion,
-  };
+    seedVersion: cloudResult?.seedVersion ?? (recovered.diagnostics?.templateFallback ? "manual-template-fallback-v1" : undefined),
+    diagnostics: recovered.diagnostics,
+  });
   stopThinking();
   e.frame.classList.remove("scanning");
   e.cap.textContent = "VERIFY LANDMARKS";
-  if (seed.faceDir === -1 && (seed.method === "mesh" || (seed.confidence ?? 0) >= 0.5)) {
+  if (ctx.reviewMode !== "calibration" && seed.faceDir === -1 && (seed.method === "mesh" || (seed.confidence ?? 0) >= 0.5)) {
     const w2 = e.canvas.width;
     const flipped = document.createElement("canvas");
     flipped.width = w2;
@@ -950,18 +983,27 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
 
   mountVerify(e.canvas, seed, ctx, "VERIFY LANDMARKS");
   } catch {
-    if (sideAttempt.current(signal)) showSideLoadFailure(ctx);
+    if (sideAttempt.current(signal)) {
+      if (photoPrepared) showSidePlacementFailure(ctx);
+      else showSideLoadFailure(ctx);
+    }
   }
 }
 
-async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal): Promise<SidePlacementSeed | null> {
-  const token = await currentAccessToken().catch(() => null);
-  if (!token || signal.aborted) return null;
-  if (readSidePlacementChoice() !== "cloud") return null;
-  return requestCloudSidePlacement(canvas, token, {
-    seed: seed.points,
-    faceDir: seed.faceDir < 0 ? -1 : 1,
+async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal, mode: SideReviewMode) {
+  return runSideCloudAttempt({
+    enabled: readSidePlacementChoice() === "cloud",
+    mode,
     signal,
+    getAccessToken: () => currentAccessToken(),
+    request: (token, requestSignal) => {
+      const directedSeed = withPointDerivedSideDirection(seed);
+      return requestCloudSidePlacement(canvas, token, {
+        seed: directedSeed.points,
+        faceDir: directedSeed.faceDir,
+        signal: requestSignal,
+      });
+    },
   });
 }
 
@@ -1008,6 +1050,7 @@ function mountVerify(
   ctx: SideCtx,
   caption: string,
 ): void {
+  seed = withPointDerivedSideDirection(seed);
   const e = el();
   if (photo !== e.canvas) {
     e.canvas.width = photo.width;
@@ -1024,6 +1067,15 @@ function mountVerify(
   const automaticPoints = cloneSidePoints(seed.automaticPoints ?? seed.points);
   const seedMethod = seed.method ?? "existing";
   const seedVersion = seed.seedVersion;
+  const calibrationReview = ctx.reviewMode === "calibration";
+  const diagnostics = seed.diagnostics ? structuredClone(seed.diagnostics) : undefined;
+  let calibrationAcknowledged = false;
+  let paintCalibrationDirection = () => {};
+  const resetCalibrationAcknowledgement = () => {
+    calibrationAcknowledged = false;
+    const checkbox = document.getElementById("side-calibration-reviewed") as HTMLInputElement | null;
+    if (checkbox) checkbox.checked = false;
+  };
 
   // A fresh seed opens IN the walkthrough; a placement being re-opened for
   // corrections goes straight to the free-editing review, because those points
@@ -1032,7 +1084,11 @@ function mountVerify(
   // below keys off it.
   const startInGuidedMode = seedMethod !== "existing";
   verifier?.destroy();
-  verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => drawGuides(e.lines, pts, w, h));
+  verifier = mountVerifier(e.layer, e.canvas, seed, (pts) => {
+    drawGuides(e.lines, pts, w, h);
+    resetCalibrationAcknowledgement();
+    paintCalibrationDirection();
+  });
   const mountedVerifier = verifier;
   const isMounted = () => verifier === mountedVerifier;
   // Confidence guides fusion internally. Every visible point keeps the same
@@ -1386,6 +1442,7 @@ function mountVerify(
   };
 
   const showReviewActions = () => {
+    resetCalibrationAcknowledgement();
     // Editable from the first frame. The old flow parked the points behind an
     // "Edit point placement" button, which meant the natural gesture — grab
     // the wrong dot and drag it — did nothing until you found the mode switch.
@@ -1412,29 +1469,71 @@ function mountVerify(
           soundAdvance();
         }
       };
-      verifier.onDragMove = () => soundDrag();
+      verifier.onDragMove = () => { resetCalibrationAcknowledgement(); soundDrag(); };
       verifier.onSelect = (id) => {
         const def = SIDE_POINTS.find((sp) => sp.id === id);
         if (def) setReference(id, def.label, def.hint);
       };
     }
     const cloud = seedMethod === "vision" || seedMethod === "fused";
-    e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
-      <p class="side-sub">${cloud
-        ? "All thirteen points were identified from this photo. Drag any ring straight onto the feature it names, paying closest attention to the hairline, ear, jaw corner and neck point."
-        : "The front outline is read from the photo. Check the hairline, ear, jaw corner and neck point, then drag any ring that missed straight onto the feature it names."}</p>
+    const calibrationCopy = diagnostics?.templateFallback
+      ? "Automatic placement did not finish. These are template starting positions, not detected landmarks. Move every point onto its named feature, and check the facing direction below."
+      : "Review all thirteen positions against this photo. Uncertain pose or detection does not reject an admin calibration image. Correct any misplaced point and check the facing direction below. The original automatic positions are retained separately from your edits.";
+    e.panelCopy.innerHTML = `<h2 class="side-title">${calibrationReview ? diagnostics?.templateFallback ? "Place the estimated points" : "Review this calibration photo" : "Check the automatic points"}</h2>
+      <p class="side-sub">${calibrationReview ? calibrationCopy : "Automatic placement can include template-based starting positions. Check the jaw corner, jaw hinge and chin bottom closely, then the hairline, ear and neck point. Drag any ring onto the feature it names."}</p>
+      ${calibrationReview ? `<p class="side-review-note">A reviewed position is an operator annotation, not proof of anatomical accuracy. Out-of-range measurements remain excluded from scoring and are kept in diagnostics.</p>` : ""}
       <p class="side-review-note">${cloud
         ? "The placement request is finished and TrueMax kept no copy. Sharing a correction later is a separate choice."
         : "Nothing leaves this device unless you separately choose to share it."}</p>`;
     e.actions.innerHTML = `
+      <div class="side-review-actions">
+        <button class="btn side-confirm" id="side-go" type="button">Confirm points</button>
+        <button class="btn gho" id="side-guided" type="button">Review one by one</button>
+      </div>
+      <div class="side-review-tools">
       <button class="side-reset-glyph" id="side-reset" type="button" aria-label="Reset points to the automatic placement" title="Reset to automatic placement">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
         </svg>
+        <span>Reset points</span>
       </button>
-      <button class="btn side-confirm" id="side-go">Confirm</button>
-      <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>`;
+      <button class="btn gho" id="side-wrong" type="button">Points look wrong</button>
+      </div>`;
+    if (calibrationReview) {
+      const direction = document.createElement("div");
+      direction.className = "side-review-tools";
+      direction.setAttribute("role", "group");
+      direction.setAttribute("aria-label", "Which way does the face point in this photo?");
+      direction.innerHTML = `<button class="btn gho" type="button" data-side-direction="-1">Face points left</button><button class="btn gho" type="button" data-side-direction="1">Face points right</button>`;
+      paintCalibrationDirection = () => {
+        const actual = faceDirFromPoints(verifier!.points);
+        verifier!.faceDir = actual;
+        for (const button of direction.querySelectorAll<HTMLButtonElement>("button")) {
+          const selected = Number(button.dataset.sideDirection) === actual;
+          button.setAttribute("aria-pressed", selected ? "true" : "false");
+          button.classList.toggle("pri", selected);
+          button.classList.toggle("gho", !selected);
+        }
+      };
+      direction.addEventListener("click", (event) => {
+        const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-side-direction]");
+        if (!button || !verifier || !isMounted()) return;
+        const next = Number(button.dataset.sideDirection);
+        if (next !== faceDirFromPoints(verifier.points)) verifier.reset(flipSideReviewPoints(verifier.points, w));
+        verifier.faceDir = next;
+        resetCalibrationAcknowledgement();
+        paintCalibrationDirection();
+      });
+      paintCalibrationDirection();
+      e.actions.appendChild(direction);
+      const confirmation = document.createElement("label");
+      confirmation.className = "side-feedback-confirmation";
+      confirmation.innerHTML = `<input type="checkbox" id="side-calibration-reviewed" /><span>I checked all thirteen points and the facing direction against this photo.</span>`;
+      confirmation.querySelector("input")!.addEventListener("change", (event) => {
+        calibrationAcknowledged = (event.target as HTMLInputElement).checked;
+      });
+      e.actions.appendChild(confirmation);
+    }
     appendSideExitActions(e.actions, ctx);
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
@@ -1444,6 +1543,8 @@ function mountVerify(
     // editing, and "Points are wrong" is the complaint route for them.
     document.getElementById("side-reset")!.onclick = () => {
       verifier?.reset(automaticPoints);
+      if (verifier) verifier.faceDir = faceDirFromPoints(verifier.points);
+      resetCalibrationAcknowledgement();
       drawGuides(e.lines, automaticPoints, w, h);
     };
     document.getElementById("side-guided")!.onclick = () => showGuidedActions();
@@ -1463,13 +1564,13 @@ function mountVerify(
       // the moment an app starts feeling like a funnel, so the send waits
       // until after Confirm, when sign-in happens anyway.
       verificationAnswer = "no";
-      consentAnswer = await askSideFeedbackConsent();
+      consentAnswer = ctx.feedbackEligible === true ? await askSideFeedbackConsent() : false;
       if (!isMounted()) return;
       const wrongButton = document.getElementById("side-wrong");
       if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
       e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
         <p class="side-sub">${consentAnswer
-          ? "Thank you: that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
+          ? "Thank you: that photo and the correction will be shared privately after you confirm for our team to review. Reviewed corrections can help improve future placement. Move each wrong ring onto the feature it names, then confirm."
           : "No problem: nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
         <p class="side-review-note">The circular arrow under the photo resets every point to the automatic placement.</p>`;
     };
@@ -1500,6 +1601,11 @@ function mountVerify(
     consented?: boolean;
   } = {}): Promise<boolean> => {
     if (!verifier || !isMounted()) return false;
+    if (calibrationReview && !calibrationAcknowledged) {
+      e.cap.textContent = "CONFIRM YOUR REVIEW";
+      document.getElementById("side-calibration-reviewed")?.focus();
+      return false;
+    }
     const confirmButton = document.getElementById("side-go") as HTMLButtonElement | null;
     if (confirmButton) confirmButton.disabled = true;
     // The facing comes from the confirmed points, not from the detector that
@@ -1543,7 +1649,7 @@ function mountVerify(
       // it, names the measurement, and refuses to store the scan until the
       // points behind it have been moved.
       const impossible = classifySidePlacement(report.metrics).hard;
-      if (impossible.length) {
+      if (impossible.length && !calibrationReview) {
         if (confirmButton) confirmButton.disabled = false;
         e.cap.textContent = "CHECK LANDMARKS";
         const names = impossible.map((m) => m.def.name.toLowerCase());
@@ -1560,7 +1666,7 @@ function mountVerify(
         const readings = impossible.map((m) => {
           const bound = m.def.plausible;
           const value = m.value.toFixed(m.def.decimals);
-          return bound ? `${m.def.name} ${value} (expected ${bound[0]}–${bound[1]})` : `${m.def.name} ${value}`;
+          return bound ? `${m.def.name} ${value} (check range ${bound[0]}–${bound[1]})` : `${m.def.name} ${value}`;
         });
         const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
         if (hint) {
@@ -1569,15 +1675,18 @@ function mountVerify(
           }`;
           hint.classList.add("show");
         }
-        e.panelCopy.innerHTML = `<h2 class="side-title">One of these cannot be right</h2>
-          <p class="side-sub">The ${names.join(" and ")} measured outside the range a human
-          face occupies, which means a point is in the wrong place rather than that this is an
-          unusual profile. ${points.length
+        e.panelCopy.innerHTML = `<h2 class="side-title">A measurement needs review</h2>
+          <p class="side-sub">The ${names.join(" and ")} measured outside the current check
+          range. This can reflect point placement, the photo, or a reference that does not fit
+          this measurement. ${points.length
             ? `Check <b>${points.join("</b>, <b>")}</b>.`
             : ""}</p>
-          <p class="side-review-note">Storing it anyway would put a number in the calibration
-          set that describes where a point landed, not the face.</p>`;
+          <p class="side-review-note">The scan has not been saved. Review the named points or
+          use the retake option before continuing.</p>`;
         return false;
+      }
+      if (calibrationReview && diagnostics) {
+        diagnostics.reviewedRangeWarnings = report.metrics.filter((m) => m.implausible).map((m) => m.def.id);
       }
 
       // Confirming a seed nobody touched.
@@ -1588,15 +1697,13 @@ function mountVerify(
       // confirmed untouched, and their measurements disagree with an
       // independent product by 22, 12 and 48 degrees on metrics that agreed to
       // within two degrees on the one capture that happened to seed well.
-      if (!opts.auto && !movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
+      if (!calibrationReview && !opts.auto && !movedSidePointIds(automaticPoints, correctedPoints).length && !untouchedAcknowledged) {
         untouchedAcknowledged = true;
         if (confirmButton) {
           confirmButton.disabled = false;
           confirmButton.textContent = "Confirm as-is";
         }
-        const untouchedCopy = seedMethod === "vision" || seedMethod === "fused"
-          ? "These are the positions placed from this photograph. If they are genuinely right, press Confirm as-is."
-          : "These are the automatic positions exactly as they were estimated. The five behind the face, jaw corner, ear and the neck point, are inferred from an average head rather than found in the photo, so they are the ones that drift.";
+        const untouchedCopy = "These automatic positions have not been moved. Check the jaw corner, jaw hinge and chin bottom, which may still be template-based starting positions.";
         e.panelCopy.innerHTML = `<h2 class="side-title">Nothing was moved</h2>
           <p class="side-sub">${untouchedCopy}</p>
           <p class="side-review-note">If they are genuinely right, press Confirm as-is. If you
@@ -1612,9 +1719,9 @@ function mountVerify(
       //                            ask now, framed around the edit.
       //   Confirmed untouched    — the seed was right and there is nothing to
       //                            teach. Asking would be pure friction.
-      let consented = opts.consented ?? consentAnswer ?? false;
+      let consented = ctx.feedbackEligible === true && (opts.consented ?? consentAnswer ?? false);
       const moved = movedSidePointIds(automaticPoints, correctedPoints);
-      if (shouldAskSideCorrectionConsent(Boolean(opts.auto), consentAnswer, moved.length)) {
+      if (ctx.feedbackEligible === true && shouldAskSideCorrectionConsent(Boolean(opts.auto), consentAnswer, moved.length)) {
         consentAnswer = await askSideFeedbackConsent(true);
         consented = consentAnswer;
       }
@@ -1628,6 +1735,7 @@ function mountVerify(
         seedVersion,
         { verificationAnswer, finalPlacementVerified: opts.verified ?? true },
       );
+      if (feedback) feedback.subjectConfirmation = "my-own-adult-face";
       e.cap.textContent = "ANALYZED";
       const reviewed = document.createElement("canvas");
       reviewed.width = e.canvas.width;
@@ -1638,13 +1746,14 @@ function mountVerify(
         automaticPoints,
         seedMethod,
         seedVersion,
+        diagnostics: diagnostics ? structuredClone(diagnostics) : undefined,
         feedback,
         photo: reviewed,
         // Anything that reaches here through the review screen has been
         // looked at: the person either moved a point or pressed Confirm on a
         // screen showing all thirteen. Only the automatic path can carry a
         // false, and only when it says so.
-        verified: opts.verified ?? true,
+        verified: calibrationReview ? calibrationAcknowledged : opts.verified ?? true,
       });
       return true;
     } catch (err) {
@@ -1691,7 +1800,7 @@ function mountVerify(
       klabel: "ONE QUESTION",
       title: "Do these points look right?",
       preview: { photo: e.canvas, points: verifier!.points },
-      copy: "We identified all thirteen points from this photo. Check the hairline, ear, jaw corner and neck point most closely.",
+      copy: "Check these automatic positions on your photo, especially the jaw corner, jaw hinge and chin bottom. Some positions may come from a template or a previous review, so confirm each against your photo.",
       no: "No, they look off",
       yes: "Yes, they look right",
       fine: "Yes goes straight to your analysis. No lets you place them yourself first.",
@@ -1700,7 +1809,7 @@ function mountVerify(
     if (right === null || !isMounted()) return;
     verificationAnswer = right ? "yes" : "no";
     if (right) {
-      consentAnswer = await askSideFeedbackConsent();
+      consentAnswer = ctx.feedbackEligible === true ? await askSideFeedbackConsent() : false;
       if (!isMounted()) return;
       // A refused confirm (a reading outside what a face can be, or a point
       // pair that cannot both be right) leaves the person on this screen
@@ -1733,7 +1842,7 @@ function mountVerify(
       return;
     }
 
-    consentAnswer = await askSideFeedbackConsent();
+    consentAnswer = ctx.feedbackEligible === true ? await askSideFeedbackConsent() : false;
     if (!isMounted()) return;
     if (!(await confirmPlacement({ auto: true, verified: false, consented: consentAnswer })) && verifier) {
       releaseFurniture();
@@ -1750,7 +1859,12 @@ function mountVerify(
     e.actions.classList.remove("mode-pending");
   };
 
-  if (startInGuidedMode) {
+  if (calibrationReview) {
+    // Admin data collection must show the decoded photo and editable estimates
+    // even when today's scoring bounds or pose reader disagree. It has no
+    // unverified automatic shortcut; Confirm requires the explicit review above.
+    showReviewActions();
+  } else if (startInGuidedMode) {
     // The choice, before the walkthrough rather than instead of it.
     //
     // A fresh seed used to drop straight into thirteen guided taps whether the
@@ -1903,14 +2017,14 @@ function askPlacementMode(
     backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-mode-title">
       <span class="klabel">${blocked ? "QUICK CORRECTION" : "AUTOMATIC PLACEMENT"}</span>
       <h2 id="side-mode-title">${blocked
-        ? "These points need one correction"
-        : "We identified these points"}</h2>
+        ? "These points need a review"
+        : "Review your profile points"}</h2>
       <figure class="side-mode-shot">
         <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
       <p class="side-mode-copy">${blocked
-        ? `One or more points would produce an invalid measurement: ${broken.join("; ")}. Place them yourself so the profile score is built from valid anatomy.`
-        : "This is what TrueMax identified on your photo. Review the placement, then use it or place the points yourself."}</p>
+        ? `One or more measurements are outside the current check range: ${broken.join("; ")}. Review the named points. Placement, capture conditions or the measurement reference can affect this check.`
+        : "These are TrueMax's automatic starting positions. Check the jaw corner, jaw hinge and chin bottom against your photo. Some positions may be template-based; review them, then use them or place the points yourself."}</p>
       <div class="side-mode-actions${blocked ? " single" : ""}">
         ${blocked ? "" : `<button type="button" class="btn gho" data-mode="manual">Place them myself</button>`}
         <button type="button" class="btn pri" data-mode="${blocked ? "manual" : "auto"}">${
@@ -2033,7 +2147,7 @@ function askSideQuestion(opts: {
 function trapSideDialogFocus(backdrop: HTMLElement): void {
   backdrop.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
-    const buttons = [...backdrop.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
+    const buttons = [...backdrop.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), a[href]")];
     if (!buttons.length) return;
     const first = buttons[0];
     const last = buttons[buttons.length - 1];
@@ -2225,17 +2339,23 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       <span class="klabel">OPTIONAL · YOUR CHOICE</span>
       <h2 id="side-feedback-title">${afterEdit ? "We noticed you adjusted the points" : "Help improve TrueMax?"}</h2>
       <p id="side-feedback-copy">${afterEdit
-        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them. Corrections like yours are exactly what teaches the placement to land right next time."
+        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them for our team to review. Reviewed corrections can help improve future placement; they do not automatically change the next scan."
         : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
+      <label class="side-feedback-confirmation"><input type="checkbox" id="side-feedback-own-face" />
+        <span>This is my own face, I’m 18 or older, and I agree to this private contribution.</span>
+      </label>
       <div class="side-feedback-actions">
-        <button type="button" class="btn gho" data-choice="no">No, keep it on this device</button>
-        <button type="button" class="btn pri" data-choice="yes">Yes, share this scan</button>
+        <button type="button" class="btn gho" data-choice="no">No, don't contribute</button>
+        <button type="button" class="btn pri" data-choice="yes" disabled>Yes, contribute this scan</button>
       </div>
     </section>`;
     document.body.appendChild(backdrop);
     const no = backdrop.querySelector<HTMLButtonElement>('[data-choice="no"]')!;
     const yes = backdrop.querySelector<HTMLButtonElement>('[data-choice="yes"]')!;
+    const subject = backdrop.querySelector<HTMLInputElement>("#side-feedback-own-face")!;
+    subject.onchange = () => { yes.disabled = !subject.checked; };
+    trapSideDialogFocus(backdrop);
     let finished = false;
     let thanksTimer = 0;
     // Cancelled by close(), which is also the identity-change path. No consent
@@ -2263,6 +2383,7 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
     });
     const finish = (choice: boolean) => {
       if (finished) return;
+      if (choice && !subject.checked) return;
       finished = true;
       if (!choice) {
         untrack();

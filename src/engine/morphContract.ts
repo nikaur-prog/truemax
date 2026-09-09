@@ -40,6 +40,14 @@ export type MorphRenderState =
     }
   | { status: "failed"; jobId?: string; error: string };
 
+/** A failed check is not evidence that the stored render itself has failed. */
+export class MorphPreviewCheckError extends Error {
+  constructor(readonly reason: "auth" | "access" | "transport" | "protocol", message: string) {
+    super(message);
+    this.name = "MorphPreviewCheckError";
+  }
+}
+
 const MAX_IMAGE_CHARS = 16_000_000;
 const SAFE_IMAGE = /^data:image\/(?:jpeg|webp);base64,[a-z0-9+/=]+$/i;
 
@@ -99,11 +107,11 @@ export function parseMorphRenderState(value: unknown, expectSide: boolean): Morp
       : { status: "failed", error: "The preview service returned an invalid job." };
   }
 
-  if (value.status === "failed") {
+  if (value.status === "failed" || value.status === "cancelled") {
     const id = jobId(value.jobId) ?? undefined;
     const message = typeof value.error === "string" && value.error.trim()
       ? value.error.trim().slice(0, 240)
-      : "The preview could not be created.";
+      : value.status === "cancelled" ? "The preview was cancelled." : "The preview could not be created.";
     return { status: "failed", ...(id ? { jobId: id } : {}), error: message };
   }
 
@@ -232,16 +240,31 @@ export async function pollMorphRender(
 ): Promise<MorphRenderState> {
   const id = jobId(jobIdValue);
   if (!id) return { status: "failed", error: "The preview job was invalid." };
+  if (!accessToken.trim()) {
+    throw new MorphPreviewCheckError("auth", "Sign in again to check your existing preview.");
+  }
   const response = await fetcher(`/api/morph-preview?job=${encodeURIComponent(id)}`, {
     headers: { authorization: `Bearer ${accessToken}` },
     signal,
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = isRecord(payload) && typeof payload.error === "string"
-      ? payload.error.slice(0, 240)
-      : "The preview service could not be reached.";
-    return { status: "failed", jobId: id, error: message };
+    if (response.status === 401) {
+      throw new MorphPreviewCheckError("auth", "Sign in again to check your existing preview.");
+    }
+    if (response.status === 403 || response.status === 404 || response.status === 410) {
+      throw new MorphPreviewCheckError("access", "This preview cannot be opened right now. Check your account access before trying again.");
+    }
+    throw new MorphPreviewCheckError("transport", "The preview check was interrupted.");
   }
-  return parseMorphRenderState(payload, expectSide);
+  // Only the requested job can satisfy this check, including a terminal state.
+  // A malformed reply or gateway failure must not discard a paid render's ID.
+  if (!isRecord(payload) || jobId(payload.jobId) !== id) {
+    throw new MorphPreviewCheckError("protocol", "The preview check returned an unexpected response. The image was withheld.");
+  }
+  const state = parseMorphRenderState(payload, expectSide);
+  if (state.status === "failed" && payload.status !== "failed" && payload.status !== "cancelled") {
+    throw new MorphPreviewCheckError("protocol", "The preview check did not pass validation. The image was withheld.");
+  }
+  return state;
 }

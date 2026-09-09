@@ -1,4 +1,4 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "./faceConnections.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Pt } from "./geometry.js";
 
@@ -127,7 +127,7 @@ export function detectOcclusion(
   const pt = (i: number): Pt => ({ x: lm[i].x * width, y: lm[i].y * height });
 
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const c of FaceLandmarker.FACE_LANDMARKS_FACE_OVAL) {
+  for (const c of FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL) {
     const p = pt(c.start);
     x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
     y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);

@@ -1029,7 +1029,7 @@ function showSideRegion(id: RegionId): void {
     <div class="reveal">
       ${sideRegionDeck(r, report)}
       <div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} · IN PROFILE</h4>
-        <p class="side-nocurve">No population curve for profile measurements yet. The reference set was scanned front-on, so there is no measured distribution of profiles to place this against. The score above is real; the curve would be invented.</p></div>
+        <p class="side-nocurve">A profile comparison curve isn't available yet: the reference set does not contain enough measured side profiles. The score uses provisional references, so check the construction and points before interpreting it.</p></div>
     </div>`;
 
   revealBars();
@@ -1151,7 +1151,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
             m.implausible ? " implausible" : ""
           }" data-pillar-row="${i}" style="animation-delay:${Math.min(i * 20, 100)}ms">
         <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${
-          m.implausible ? "–" : m.score.toFixed(1)
+          m.implausible || isIndicative(m) ? "–" : m.score.toFixed(1)
         }</span></span></div>
         <div class="psx-where">${REGION_NAMES[m.def.region] ?? m.def.region}</div>
         ${
@@ -1159,7 +1159,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
           // side rows and in the detail card. The row still appears, because
           // dropping it would change how many measurements a pillar has from
           // one scan to the next with no account of why.
-          m.implausible ? "" : `<div class="rangebar">${idealWindow(m, sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`
+          m.implausible || isIndicative(m) ? "" : `<div class="rangebar">${idealWindow(m, sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`
         }
       </div>`,
         )
@@ -1239,12 +1239,13 @@ function wireSideMeasurementTaps(report: Report): void {
   revert = null;
 
   const hints = Array.from(document.querySelectorAll<HTMLElement>(".side-tap-hint"));
-  const setHints = (name: string | null) => {
+  const setHints = (metric: ScoredMetric | null) => {
     for (const hint of hints) {
-      hint.classList.toggle("on", !!name);
-      hint.innerHTML = name
-        ? `<i>◱</i>Drawing <b>${name}</b>, tap to open`
-        : `<i>◱</i>Hover to draw it on your profile · tap to open`;
+      const activeHere = !!metric && metric.def.region === hint.dataset.sideRegion;
+      hint.classList.toggle("on", activeHere);
+      hint.innerHTML = activeHere
+        ? `<i>◱</i>Showing <b>${metric.def.name}</b> · open details`
+        : `<i>◱</i>Explore this region's measurements`;
     }
   };
 
@@ -1285,7 +1286,7 @@ function wireSideMeasurementTaps(report: Report): void {
     for (const other of document.querySelectorAll(".metric[data-side-metric]")) {
       other.classList.toggle("active", (other as HTMLElement).dataset.sideMetric === id);
     }
-    setHints(metric?.def.name ?? null);
+    setHints(metric ?? null);
     sideFade?.cancel();
     if (metric) {
       sideFade = animateSideMeasurement(ctx.overlay, pts, w, h, metric);
@@ -1315,7 +1316,8 @@ function wireSideMeasurementTaps(report: Report): void {
   // no hover to fall back on.
   for (const hint of hints) {
     hint.onclick = () => {
-      const m = metrics.find((x) => x.def.id === sideActive) ?? metrics.find((x) => hasSideOverlay(x.def.id));
+      const local = metrics.filter((x) => x.def.region === hint.dataset.sideRegion && wasMeasured(x) && hasSideOverlay(x.def.id));
+      const m = local.find((x) => x.def.id === sideActive) ?? local[0];
       if (m) openDetail(m);
     };
   }
@@ -1840,7 +1842,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
   } catch (err) {
     console.error("celebrity match failed", err);
   }
-  return `<div class="deck">
+  return `<div class="deck${matches.length ? "" : " deck-measurements-only"}">
     <div class="dcard">
       <h3>${regionHeadline(r, r.region)}<em>SIDE</em></h3>
       ${r.metrics
@@ -1853,21 +1855,21 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
         }</span></div>
         ${
           m.implausible
-            ? `<p class="mimplausible">No head measures this. Re-check ${pointLabels(m)} and this will score.</p>`
+            ? `<p class="mimplausible">${Number.isFinite(m.value) ? `This reading needs checking. Review ${pointLabels(m)}.` : "Not measured: a required point or part of the geometry is unavailable."} It has been left out of the score.</p>`
             : `<div class="rangebar">${idealWindow(m, report.sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`
         }</div>`,
         )
         .join("")}
       ${
         r.metrics.some((mm) => hasSideOverlay(mm.def.id))
-          ? `<button class="tap-hint side-tap-hint"><i>◱</i>Hover to draw it on your profile · tap to open</button>`
+          ? `<button class="tap-hint side-tap-hint" data-side-region="${r.region}"><i>◱</i>Explore this region's measurements</button>`
           : ""
       }
     </div>
-    <div class="dcard">
+    ${matches.length ? `<div class="dcard">
       <h3>Notable comparisons<em>REFERENCE</em></h3>
       ${celebCard(matches)}
-    </div>
+    </div>` : ""}
   </div>`;
 }
 
@@ -1900,18 +1902,12 @@ function indicativeNote(metrics: ScoredMetric[]): string {
   const list = names.length === 1
     ? names[0]
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `<p class="indnote">${
-    names.length === 1 ? `${list} is measured but not scored` : `${list} are measured but not scored`
-  }. We tested each measurement across many photos of the same people, and ${
-    names.length === 1 ? "this one moves" : "these move"
-  } as much between two photos of one face as between two different faces. So ${
-    names.length === 1 ? "it is shown" : "they are shown"
-  } for interest and given no weight. Showing you the number and hiding that would be the dishonest option.</p>`;
+  return `<p class="indnote">${list} ${names.length === 1 ? "has" : "have"} low repeatability across photos. The readings are available to inspect, but are not reliable strengths or weaknesses. Their aggregate weight is reduced; a reading with zero reliability has no weight.</p>`;
 }
 
 function indicativeTag(m: ScoredMetric): string {
   if (!isIndicative(m)) return "";
-  return `<span class="indtag" title="Measured, but it varies as much between two photos of one face as it does between people: so it is shown and not scored.">not scored</span>`;
+  return `<span class="indtag" title="Low repeatability across photographs; its weight is reduced, or zero when reliability is zero.">indicative</span>`;
 }
 
 // The same rule as isIndicative, one level up.
@@ -1929,7 +1925,7 @@ function indicativeTag(m: ScoredMetric): string {
 function regionHeadline(r: RegionScore, id: RegionId): string {
   return regionIsScored(r)
     ? `${REGION_NAMES[id]} · ${r.score.toFixed(1)}`
-    : `${REGION_NAMES[id]} · <span class="rnotscored">not scored</span>`;
+    : `${REGION_NAMES[id]} · <span class="rnotscored">indicative</span>`;
 }
 
 // A curve is a claim about where you sit among other people. It needs a
@@ -1947,7 +1943,7 @@ function regionHeadline(r: RegionScore, id: RegionId): string {
 function regionPositionPanel(r: RegionScore, id: RegionId, sex: Sex): string {
   if (!regionIsScored(r)) {
     return `<div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>
-      <p class="side-nocurve">No population curve for the ${REGION_NAMES[id].toLowerCase()}. Every measurement in this region moves about as much between two photographs of one face as it does between two different faces, so there is no stable position to plot. The readings above are real; a curve drawn from them would be a picture of the lighting.</p></div>`;
+      <p class="side-nocurve">A population position isn't shown for the ${REGION_NAMES[id].toLowerCase()} because these measurements have low repeatability across photos. The raw readings are above; they need better validation before supporting a confident comparison.</p></div>`;
   }
   return `<div class="panel"><h4>${REGION_NAMES[id].toUpperCase()} POSITION</h4>${curveSVG(r.percentile, `region:${id}`, sex, true)}
     ${curveLegend()}
@@ -1981,12 +1977,10 @@ function unverifiedBanner(): string {
     ? ` <button class="linkish" id="unver-redo">Place the points now</button>`
     : "";
   return `<div class="impbanner">
-    <b>You told us these points were wrong</b>
-    <p>This side score is measured from the automatic placement you said looked off, because
-    you chose not to correct it. The five points behind the face, the jaw corner, the ear, the
-    hinge and the neck point, are estimated from an average head rather than found in your
-    photo, so a placement that looks wrong usually is. Treat this profile score as indicative
-    until the points are placed.${redo}</p>
+    <b>These side points still need review</b>
+    <p>This analysis uses automatic points you flagged as misplaced. Some jaw and ear points
+    can come from a template rather than a feature detected in the photo. Treat the profile
+    readings as provisional until those points are corrected.${redo}</p>
   </div>`;
 }
 
@@ -2001,7 +1995,7 @@ function implausibleBanner(report: Report): string {
     : "";
   return `<div class="impbanner">
     <b>${bad.length} measurement${bad.length === 1 ? "" : "s"} left out of your score</b>
-    <p>${bad.map((m) => m.def.name).join(", ")} came back outside what a human head can measure, which means a landmark is in the wrong place rather than your profile being unusual. ${
+    <p>${bad.map((m) => m.def.name).join(", ")} ${bad.some((m) => !Number.isFinite(m.value)) ? "could not be measured or did not pass the measurement checks" : "did not pass the measurement checks"}. Review the photo and point placement. ${
       points.length ? `Worth checking: ${points.join(", ")}.` : ""
     } Nothing here counted against you.${redo}</p>
   </div>`;
@@ -2023,9 +2017,7 @@ function pointLabels(m: ScoredMetric): string {
 // One renderer for the comparison card, so the front regions and the profile
 // cannot drift apart in either wording or restraint.
 function celebCard(matches: ReturnType<typeof regionMatches>): string {
-  if (!matches.length) {
-    return `<p class="footnote" style="margin-top:2px">No match shown here: matches are only offered on measurements where you land at or above average, and this region has none. That restraint is the point: a flattering comparison you did not earn would make every other number worth less.</p>`;
-  }
+  if (!matches.length) return "";
   // No sigma column. "Δ 0.03σ" is the distance between two z-scores, which is
   // the correct way to pick these matches and a meaningless thing to show
   // someone: nobody reads it, and the few who try will misread it as a score.
@@ -2259,16 +2251,16 @@ function showRegion(id: RegionId): void {
 
   body().innerHTML = `
     <div class="reveal">
-      <div class="deck report-deck" id="deck">
+      <div class="deck report-deck${matches.length ? "" : " deck-measurements-only"}" id="deck">
         <div class="dcard">
           <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
           ${r.metrics
             .map(
               (m, i) => wasMeasured(m)
                 ? `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${Math.min(i * 20, 100)}ms">
-            <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
-            <div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>
-            ${metricRead(m, ctx!.report.sex) ? `<p class="metric-summary">On this photo: ${metricRead(m, ctx!.report.sex)}.</p>` : ""}</div>`
+            <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}${isIndicative(m) ? "" : `<span class="mscore">${m.score.toFixed(1)}</span>`}</span></div>
+            ${isIndicative(m) ? "" : `<div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`}
+            ${!isIndicative(m) && metricRead(m, ctx!.report.sex) ? `<p class="metric-summary">On this photo: ${metricRead(m, ctx!.report.sex)}.</p>` : ""}</div>`
                 // Not measured on this photograph. It keeps its row and says so,
                 // rather than vanishing: the same region would otherwise show a
                 // different number of measurements from one scan to the next with
@@ -2289,11 +2281,11 @@ function showRegion(id: RegionId): void {
           }
           <details class="report-reading"><summary>What these measurements mean</summary><div class="typebox" id="tw"></div></details>
         </div>
-        <details class="dcard report-comparisons"${window.matchMedia("(min-width: 1440px)").matches ? " open" : ""}>
+        ${matches.length ? `<details class="dcard report-comparisons"${window.matchMedia("(min-width: 1440px)").matches ? " open" : ""}>
           <summary>Notable comparisons <span>Reference faces</span></summary>
           ${matchCard}
           <p class="footnote">Matches compare specific measurements in the reference set, not your whole face.</p>
-        </details>
+        </details>` : ""}
       </div>
       ${regionPositionPanel(r, id, ctx!.report.sex)}
     </div>`;
@@ -2340,7 +2332,7 @@ function goalDraftPanel(plan: MorphBlueprint): string {
     <p>${matching ? "Your saved targets stay fixed across scans. White is your current reading; green is your draft goal."
       : saved ? "Your goals or measurement method changed. Your old targets are kept, but are not shown on these measurements. Replace them only if you want a new baseline."
       : "Keep this scan as your starting point and add a green draft goal marker beside the white current marker on supported measurements."}</p>
-    <p class="goal-target-note">These are illustrative estimates, not promised results. They stay on this device for this account. Appearance points remain unavailable until repeatability and completion rules are validated.</p>
+    <p class="goal-target-note">These are illustrative estimates, not promised results. They stay on this device for this account. Appearance changes do not earn points.</p>
     <div class="navrow">${available ? `<button type="button" class="btn gho" id="keep-goal-targets">${saved ? "Replace draft targets with this scan" : "Keep these draft targets"}</button>` : ""}
       ${saved ? '<button type="button" class="btn cancel" id="clear-goal-targets">Clear draft targets</button>' : ""}</div>
     ${!available && !saved ? '<p class="goal-target-note">No supported measurement target is available for these goals yet. You can still follow the routine without an invented number.</p>' : ""}

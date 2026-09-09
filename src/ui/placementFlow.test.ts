@@ -15,14 +15,14 @@ import { readFileSync } from "node:fs";
 const src = readFileSync(new URL("./sideFlow.ts", import.meta.url), "utf8");
 const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
 
-test("taking the automatic placement never reaches a confirm screen", () => {
-  const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("if (startInGuidedMode)"));
+test("taking the public automatic placement never reaches a confirm screen", () => {
+  const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("const releaseFurniture"));
   // Both terminal branches go straight to confirmPlacement with auto set.
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: true, consented: consentAnswer \}\)/);
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented: consentAnswer \}\)/);
   // Remember the sharing answer so a refused measurement followed by a
   // manual correction cannot ask again after an explicit No.
-  assert.equal(auto.match(/consentAnswer = await askSideFeedbackConsent\(\)/g)?.length, 2);
+  assert.equal(auto.match(/consentAnswer = ctx\.feedbackEligible === true \? await askSideFeedbackConsent\(\) : false/g)?.length, 2);
   // And the only path back to the review row is the one where a person chose
   // to edit, where the row is the tool they asked for...
   assert.match(auto, /if \(!useAnyway\) \{[\s\S]*?showGuidedActions\(\);/);
@@ -46,6 +46,38 @@ test("the accuracy question is asked once, as a dialog, not in the panel", () =>
   assert.doesNotMatch(css, /\.side-accuracy/);
 });
 
+test("each automatic-placement review names the template-backed jaw points", () => {
+  const copy = [
+    src.slice(src.indexOf('const cloud = seedMethod'), src.indexOf('e.actions.innerHTML = `', src.indexOf('const cloud = seedMethod'))),
+    src.slice(src.indexOf("const untouchedCopy ="), src.indexOf("return false;", src.indexOf("const untouchedCopy ="))),
+    src.slice(src.indexOf("const afterAutomatic ="), src.indexOf("if (right === null")),
+    src.slice(src.indexOf("function askPlacementMode("), src.indexOf("if (exitCtx) appendSideExitActions", src.indexOf("function askPlacementMode("))),
+  ];
+  for (const text of copy) {
+    assert.match(text, /jaw corner, jaw hinge and chin bottom/, "review must identify all three angle-defining points");
+    assert.match(text, /template/, "a cloud request does not prove every output point was observed");
+  }
+  assert.doesNotMatch(src, /(?:All thirteen points were identified|We identified all thirteen points) from this photo/);
+});
+
+test("measurement-range copy does not diagnose every failure as a misplaced landmark", () => {
+  const refusal = src.slice(src.indexOf('e.panelCopy.innerHTML = `<h2 class="side-title">A measurement needs review'), src.indexOf("return false;", src.indexOf('e.panelCopy.innerHTML = `<h2 class="side-title">A measurement needs review')));
+  assert.match(refusal, /current check\s+range/);
+  assert.match(refusal, /point placement, the photo, or a reference/);
+  assert.match(refusal, /scan has not been saved/);
+  const preview = src.slice(src.indexOf("function askPlacementMode("), src.indexOf("if (exitCtx) appendSideExitActions", src.indexOf("function askPlacementMode(")));
+  assert.match(preview, /Placement, capture conditions or the measurement reference/);
+  assert.doesNotMatch(src, /which means a point is in the wrong place rather than/);
+  assert.doesNotMatch(preview, /built from valid anatomy/);
+});
+
+test("sharing a correction promises review, not automatic next-scan retraining", () => {
+  assert.match(src, /Reviewed corrections can help improve future placement/);
+  assert.match(src, /they do not automatically change the next scan/);
+  assert.doesNotMatch(src, /directly teaches the automatic placement to land closer/);
+  assert.doesNotMatch(src, /teaches the placement to land right next time/);
+});
+
 test("the primary confirmation is first in the review order and reads as success", () => {
   const review = src.indexOf("const showReviewActions");
   const rowStart = src.indexOf('e.actions.innerHTML = `', review);
@@ -58,13 +90,11 @@ test("the primary confirmation is first in the review order and reads as success
   assert.match(css, /\.btn\.side-confirm\s*\{[^}]*background:\s*var\(--up\)/s);
 });
 
-test("consent is asked on every terminal branch", () => {
-  // Whether the points were right, wrong-and-fixed, or wrong-and-left, the
-  // correction is the thing that teaches the seeder. Missing the ask on any
-  // branch loses exactly the cases worth learning from.
+test("eligible adults can contribute on either automatic terminal branch", () => {
   const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("if (startInGuidedMode)"));
   const asks = auto.match(/askSideFeedbackConsent\(\)/g) ?? [];
   assert.equal(asks.length, 2, "both non-editing branches must ask");
+  assert.equal(auto.match(/ctx\.feedbackEligible === true \? await askSideFeedbackConsent\(\) : false/g)?.length, 2);
 });
 
 // The engine has always known when a placement is impossible. It just said so
@@ -105,7 +135,8 @@ test("the untouched guard is skipped only on the path that replaced it", () => {
   // disagreeing with an independent product by 22, 12 and 48 degrees. It is
   // skipped only where an explicit "yes, these look right" has been given,
   // which is a stronger form of the same protection than a second button press.
-  assert.match(src, /if \(!opts\.auto && !movedSidePointIds\(/);
+  assert.match(src, /if \(!calibrationReview && !opts\.auto && !movedSidePointIds\(/);
+  assert.match(src, /if \(calibrationReview && !calibrationAcknowledged\)/, "admin calibration replaces the double press with an explicit all-points review");
 });
 
 // The scan takeover painted a near-black room in an otherwise light product,

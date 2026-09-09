@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "../engine/faceConnections.js";
 
 // Landmark overlay: animated reveal during the scan beat, then a calm dim
 // state; region tabs re-light their own landmarks.
@@ -320,7 +320,7 @@ function strokeMesh(
 ): void {
   ctx.lineWidth = Math.max(0.4, width / 1600);
   ctx.beginPath();
-  for (const { start, end } of FaceLandmarker.FACE_LANDMARKS_TESSELATION) {
+  for (const { start, end } of FACE_CONNECTIONS.FACE_LANDMARKS_TESSELATION) {
     const a = landmarks[start];
     const b = landmarks[end];
     ctx.moveTo(a.x * width, a.y * height);

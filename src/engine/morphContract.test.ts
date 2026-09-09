@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildMorphBlueprint } from "./morphPlan.js";
 import { EMPTY_PROFILE } from "./goals.js";
-import { createMorphRenderRequest, parseMorphRenderState, requestMorphRender, submitMorphValidation } from "./morphContract.js";
+import { createMorphRenderRequest, MorphPreviewCheckError, parseMorphRenderState, pollMorphRender, requestMorphRender, submitMorphValidation } from "./morphContract.js";
 import type { Report } from "./types.js";
 
 const PIXEL = "data:image/webp;base64,UklGRg==";
@@ -159,4 +159,63 @@ test("device validation is posted to the owning preview route", async () => {
   assert.equal(result.ok, true);
   assert.equal(path, "/api/goal-preview?id=preview_12345678");
   assert.deepEqual(JSON.parse(body), { validation: { passed: true } });
+});
+
+const JOB_ID = "preview_12345678";
+const responseFetcher = (payload: unknown, status = 200): typeof fetch => (async () =>
+  new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+test("poll HTTP failures are check errors, not terminal render failures", async () => {
+  for (const status of [400, 401, 403, 404, 408, 410, 429, 500, 502, 503]) {
+    await assert.rejects(pollMorphRender(JOB_ID, true, "member-token", undefined,
+      responseFetcher({ status: "failed", jobId: JOB_ID, error: "Do not trust a gateway's status as a render verdict." }, status)),
+    (error: unknown) => {
+      assert.ok(error instanceof MorphPreviewCheckError);
+      assert.equal(error.reason, status === 401 ? "auth" : [403, 404, 410].includes(status) ? "access" : "transport");
+      assert.doesNotMatch(error.message, /gateway/);
+      return true;
+    });
+  }
+});
+
+test("polling with no token does not make an unauthorized request", async () => {
+  await assert.rejects(pollMorphRender(JOB_ID, true, " ", undefined,
+    (async () => { assert.fail("missing auth must not fetch"); }) as typeof fetch),
+  (error: unknown) => error instanceof MorphPreviewCheckError && error.reason === "auth");
+});
+
+test("malformed, wrong-job or unchecked poll images are withheld without losing the job", async () => {
+  const goodValidation = ready().validation as Record<string, unknown>;
+  for (const payload of [
+    null, {},
+    ready({ jobId: "preview_different" }),
+    { status: "processing" },
+    { status: "failed", jobId: "preview_different" },
+    ready({ images: { front: PIXEL } }),
+    ready({ images: { front: "https://example.invalid/image.jpg", side: PIXEL } }),
+    ready({ validation: { ...goodValidation, identityPreserved: false } }),
+    ready({ validation: { ...goodValidation, pending: ["identityPreserved"] } }),
+  ]) {
+    await assert.rejects(pollMorphRender(JOB_ID, true, "member-token", undefined, responseFetcher(payload)),
+      (error: unknown) => error instanceof MorphPreviewCheckError && error.reason === "protocol");
+  }
+  await assert.rejects(pollMorphRender(JOB_ID, true, "member-token", undefined,
+    (async () => new Response("not json")) as typeof fetch),
+  (error: unknown) => error instanceof MorphPreviewCheckError && error.reason === "protocol");
+});
+
+test("a matching explicit terminal job can fail or be cancelled", async () => {
+  for (const status of ["failed", "cancelled"]) {
+    const state = await pollMorphRender(JOB_ID, true, "member-token", undefined,
+      responseFetcher({ status, jobId: JOB_ID }));
+    assert.equal(state.status, "failed");
+    assert.equal(state.jobId, JOB_ID);
+  }
+});
+
+test("a valid poll still requires all gates or a device-validation pending state", async () => {
+  const validation = ready().validation as Record<string, unknown>;
+  const waiting = ready({ validation: { ...validation, identityPreserved: false, targetAligned: false, pending: ["identityPreserved", "targetAligned"] } });
+  assert.equal((await pollMorphRender(JOB_ID, true, "member-token", undefined, responseFetcher(waiting))).status, "validation_pending");
+  assert.equal((await pollMorphRender(JOB_ID, true, "member-token", undefined, responseFetcher(ready()))).status, "ready");
 });

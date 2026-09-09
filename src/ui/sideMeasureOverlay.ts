@@ -1,7 +1,7 @@
 import type { Pt } from "../engine/geometry.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import type { ScoredMetric } from "../engine/types.js";
-import { compositeDeparting, snapshotIfMatching } from "./measureOverlay.js";
+import { compositeDeparting, snapshotIfMatching, prefersReducedOverlayMotion } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 
 // ---------------------------------------------------------------------------
@@ -181,6 +181,10 @@ export function animateSideMeasurement(
   h: number,
   metric: ScoredMetric,
 ): OverlayFade {
+  if (prefersReducedOverlayMotion()) {
+    drawSideMeasurement(canvas, points, w, h, metric);
+    return { cancel() {} };
+  }
   // The departing figure dissolves under the arriving one — same reasoning and
   // same helpers as animateMeasurement in measureOverlay.ts.
   const from = snapshotIfMatching(canvas, w, h);

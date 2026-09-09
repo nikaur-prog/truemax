@@ -120,12 +120,16 @@
         make the automatic placement better.
       </p>
       <ul>
+        <li>This optional contribution is offered only to signed-in adults
+          contributing their own face. A separate, unticked confirmation asks
+          you to confirm this for the current photo. Guest scans are not eligible.
+          Sharing or downloading a result card does not grant contribution consent.</li>
         <li><b>If you decline</b>, nothing is uploaded and no record is created.</li>
         <li><b>If you agree</b>, we receive that one side photograph and the two
           sets of coordinates. Your front photograph is never included.</li>
         <li>It is stored in a private database table and a private storage bucket
           that no browser can read directly.</li>
-        <li>It is <b>deleted automatically after 90 days</b> by a scheduled job.
+        <li>It expires after <b>90 days</b> and is removed by a scheduled cleanup job.
           You can revoke one submission from Settings at any time; deleting your
           account also queues its images for removal.</li>
         <li>We keep a pseudonymous record of consent, revocation, expiry or

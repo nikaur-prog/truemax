@@ -1,6 +1,8 @@
 import type { Report, Sex } from "./types.js";
 import { METRICS } from "./metrics.js";
+import { SIDE_METRICS } from "./sideMetrics.js";
 import { scopedStorageKey } from "./scanScope.js";
+import type { CalibrationDiagnostics } from "./calibrationDiagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Collecting rated faces, so the corpus can grow without being assembled by
@@ -137,6 +139,8 @@ export interface RatedFace {
    * re-checked or removed while the face is still around to re-scan.
    */
   suspect?: number;
+  /** Raw capture evidence for review; never included in the fitting corpus. */
+  diagnostics?: CalibrationDiagnostics;
   measurements: Record<string, number>;
 }
 
@@ -153,14 +157,11 @@ export function loadCalibrationSet(): RatedFace[] {
 }
 
 function save(faces: RatedFace[]): void {
-  try {
-    const key = scopedStorageKey(KEY);
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(faces));
-  } catch {
-    // A full quota is not worth interrupting a scan over. The set in memory is
-    // still correct for this session and the export still works.
-  }
+  const key = scopedStorageKey(KEY);
+  if (!key) throw new Error("Sign in again before saving this calibration face.");
+  // The caller must keep its pending capture on failure. Previously this catch
+  // silently discarded quota errors and then the UI cleared the only copy.
+  localStorage.setItem(key, JSON.stringify(faces));
 }
 
 /**
@@ -208,7 +209,7 @@ export function addRatedFace(
   // The row's audit trail: the thumbnail that says which face this is, and
   // the implausible-reading count that says whether to trust it. Optional as
   // a pair because both come from the same capture context.
-  extras?: { thumb?: string; suspect?: number },
+  extras?: { thumb?: string; suspect?: number; diagnostics?: CalibrationDiagnostics },
 ): RatedFace[] {
   const faces = loadCalibrationSet();
   const sexPrefix = report.sex === "male" ? "m" : "w";
@@ -239,6 +240,7 @@ export function addRatedFace(
     ...(label ? { label } : {}),
     ...(extras?.thumb ? { thumb: extras.thumb } : {}),
     ...(extras?.suspect ? { suspect: extras.suspect } : {}),
+    ...(extras?.diagnostics ? { diagnostics: structuredClone(extras.diagnostics) } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
   save(faces);
@@ -347,6 +349,24 @@ export function corpusJSON(faces: RatedFace[]): string {
   )}\n`;
 }
 
+/** All captures, including unrated/external rows. Review data is not a fitting corpus. */
+export function calibrationDiagnosticsJSON(faces: RatedFace[]): string {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    purpose: "landmark-and-measurement-review-not-training-labels",
+    notice: "Includes all saved captures. Operator-reviewed points are not expert labels. Photos and labels are omitted; keep this export private.",
+    faces: faces.map((face) => ({
+      id: face.id,
+      referenceGroup: face.sex,
+      rating: face.rating,
+      ratingSource: face.ratedBy ?? "unknown",
+      scored: face.scored,
+      measurements: face.measurements,
+      diagnostics: face.diagnostics ?? null,
+    })),
+  }, null, 2)}\n`;
+}
+
 /**
  * Which metrics no face in the set carries yet, for one view.
  *
@@ -357,15 +377,15 @@ export function corpusJSON(faces: RatedFace[]): string {
  * empty side one behind a single reassuring count.
  */
 export function missingCoverage(faces: RatedFace[], view: "front" | "side" = "front"): string[] {
-  return METRICS.filter((m) => m.view === view)
-    .filter((m) => !faces.some((f) => m.id in f.measurements))
+  const definitions = view === "side" ? SIDE_METRICS : METRICS;
+  return definitions
+    .filter((m) => !faces.some((f) => Number.isFinite(f.measurements[m.id])))
     .map((m) => m.id);
 }
 
 /** How many faces in the set carry any side measurement at all. */
 export function sideCount(faces: RatedFace[]): number {
-  const side = METRICS.filter((m) => m.view === "side");
-  return faces.filter((f) => side.some((m) => m.id in f.measurements)).length;
+  return faces.filter((f) => SIDE_METRICS.some((m) => Number.isFinite(f.measurements[m.id]))).length;
 }
 
 /**
@@ -384,6 +404,7 @@ export interface SetHealth {
   sex: Sex;
   count: number;
   spread: number;
+  /** Collection target only, never evidence that scoring has been validated. */
   enough: boolean;
   note: string;
 }
@@ -403,6 +424,6 @@ export function setHealth(faces: RatedFace[], sex: Sex): SetHealth {
     note = `ratings only span ${spread.toFixed(1)} points; add faces at the ends, not the middle`;
   } else if (count < WANT_PER_SEX) {
     note = `${WANT_PER_SEX - count} more to go`;
-  } else note = "enough to fit directions from";
+  } else note = "pilot collection target met; independent validation still needed";
   return { sex, count, spread, enough, note };
 }
