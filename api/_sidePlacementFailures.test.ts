@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -9,6 +9,18 @@ import { getSupabaseAdmin } from "./_shared.js";
 import { cloudSideSeedFractions, parseCloudSidePlacement } from "../src/ui/sideCloudPlacement.js";
 import { fuseSideSeeds } from "../src/engine/sideSeedFusion.js";
 import type { SidePoints } from "../src/engine/sideMetrics.js";
+import { SIDE_PLACEMENT_DEFAULT_TIMEOUT_MS, SIDE_PLACEMENT_RESPONSE_RESERVE_MS } from "../src/engine/sidePlacementRequest.js";
+
+// These fixtures run real Sharp crops, whose wall time depends on the load
+// from other test workers. They test provider evidence and allowance cleanup,
+// not machine throughput: a busy worker must not turn an expected 502 into a
+// valid production 408. Freeze BOTH elapsed Date reads and the deadline timer.
+// Deadline tests below advance the real handler's clock explicitly, keeping
+// the production five-second limit and parent-cancellation path covered.
+beforeEach((t) => {
+  assert.ok("mock" in t, "The side-placement clock hook must run with an individual test context");
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.UTC(2026, 8, 9) });
+});
 
 const seed: SidePoints = {
   trichion: { x: 420, y: 250 }, glabella: { x: 470, y: 420 }, nasion: { x: 460, y: 475 },
@@ -145,7 +157,7 @@ test("a failed allowance release is not retried as another decrement", async (t)
   assert.deepEqual(rpcs, ["claim_side_landmark_pass", "release_side_landmark_pass"]);
 });
 
-test("a deadline during a claimed pass returns the allowance and no points", async (t) => {
+test("parent cancellation during a claimed pass returns the allowance and no points", async (t) => {
   t.mock.method(console, "error", () => {});
   const parent = new AbortController();
   const rpcs: string[] = [];
@@ -166,4 +178,66 @@ test("a deadline during a claimed pass returns the allowance and no points", asy
   const response = await post(await request(parent.signal));
   assert.equal(response.status, 408);
   assert.deepEqual(rpcs, ["claim_side_landmark_pass", "release_side_landmark_pass"]);
+});
+
+for (const authenticationMs of [0, 1_250]) {
+  test(`the real endpoint deadline expires at its remaining default budget after ${authenticationMs} ms of authentication`, async (t) => {
+    t.mock.method(console, "error", () => {});
+    assert.equal(SIDE_PLACEMENT_DEFAULT_TIMEOUT_MS, 5_000, "the production rollout deadline is not relaxed by these tests");
+    const rpcs: string[] = [];
+    const abortStates: boolean[] = [];
+    const mock = provider("throw");
+    const post = createSidePlacementHandler({
+      client: () => mock.client,
+      authenticatedUser: async () => {
+        t.mock.timers.tick(authenticationMs);
+        return { id: "synthetic-user" } as User;
+      },
+      getSupabaseAdmin: () => ({ rpc: async (name: string) => {
+        rpcs.push(name);
+        return { data: 3, error: null };
+      } }) as unknown as ReturnType<typeof getSupabaseAdmin>,
+      placeSideLandmarks: async (_client, _image, options) => {
+        const signal = options!.signal!;
+        const remaining = SIDE_PLACEMENT_DEFAULT_TIMEOUT_MS - authenticationMs - SIDE_PLACEMENT_RESPONSE_RESERVE_MS;
+        abortStates.push(signal.aborted);
+        t.mock.timers.tick(remaining - 1);
+        abortStates.push(signal.aborted);
+        t.mock.timers.tick(1);
+        abortStates.push(signal.aborted);
+        signal.throwIfAborted();
+        throw new Error("unreachable");
+      },
+    });
+    const response = await post(await request());
+    assert.equal(response.status, 408);
+    // Assert outside the injected operation, whose errors the route catches.
+    assert.deepEqual(abortStates, [false, false, true], "the actual production timer fires exactly at the remaining budget boundary");
+    assert.deepEqual(rpcs, ["claim_side_landmark_pass", "release_side_landmark_pass"]);
+    assert.equal(mock.calls(), 0);
+    assert.equal((await response.json()).points, undefined);
+  });
+}
+
+test("an exhausted default budget before the claim does not consume or release an allowance", async (t) => {
+  const rpcs: string[] = [];
+  const mock = provider("throw");
+  const post = createSidePlacementHandler({
+    client: () => mock.client,
+    authenticatedUser: async () => {
+      // The response reserve belongs to the same default budget as auth.
+      // Advancing its last available millisecond must stop before claiming.
+      t.mock.timers.tick(SIDE_PLACEMENT_DEFAULT_TIMEOUT_MS - SIDE_PLACEMENT_RESPONSE_RESERVE_MS);
+      return { id: "synthetic-user" } as User;
+    },
+    getSupabaseAdmin: () => ({ rpc: async (name: string) => {
+      rpcs.push(name);
+      return { data: 3, error: null };
+    } }) as unknown as ReturnType<typeof getSupabaseAdmin>,
+  });
+  const response = await post(await request());
+  assert.equal(response.status, 408);
+  assert.deepEqual(rpcs, []);
+  assert.equal(mock.calls(), 0);
+  assert.equal((await response.json()).points, undefined);
 });

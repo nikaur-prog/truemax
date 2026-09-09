@@ -191,6 +191,8 @@ function step(delta: number): void {
 // from the inner end to the outer is not what a typical face does, it is what
 // our two landmarks do. Saying so is cheaper than being asked.
 const CONSTRUCTION_CAVEAT: Record<string, string> = {
+  gonialAngle:
+    "Measured between the visible jaw corner, the surface point used for the jaw hinge, and the chin bottom. This is a photographic surface angle, not the skeletal gonial angle measured on an X-ray. Its current scoring reference is borrowed from skeletal measurements and has not been validated for these surface points. Point placement and head turn can change the reading.",
   browTilt:
     "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail: so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
   jawFrontalAngle:
@@ -209,7 +211,7 @@ function normLine(m: ScoredMetric, sex: Sex): string {
   // toFixed on a mean that sits a hair under zero prints "-0.0", which reads
   // as a typo rather than as a number.
   const noNegZero = (s: string) => (/^-0(\.0+)?$/.test(s) ? s.slice(1) : s);
-  const avg = `${group} average <b>${noNegZero(d.mean.toFixed(dec))}${unit}</b> ± ${d.sd.toFixed(dec)}`;
+  const avg = `${group} ${m.def.id === "gonialAngle" ? "scoring reference" : "average"} <b>${noNegZero(d.mean.toFixed(dec))}${unit}</b> ± ${d.sd.toFixed(dec)}`;
   const dir = directionFor(m.def, sex);
   if (dir === "band") {
     return `${avg} · ideal <b>${m.idealRange[0].toFixed(dec)}–${m.idealRange[1].toFixed(dec)}${unit}</b>`;

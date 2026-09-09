@@ -137,7 +137,7 @@ import {
 } from "./ui/membershipBrand.js";
 import type { MembershipBrand } from "./ui/membershipBrand.js";
 import { closeTrialFunnel, openTrialFunnel, openTrialFunnelPreview } from "./ui/onboardingFunnel.js";
-import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, profileIsAdult } from "./engine/onboarding.js";
+import { flushPendingProfile, loadOnboardingProfile, onboardingComplete, onOnboardingProfileSaved, profileIsAdult } from "./engine/onboarding.js";
 import { closeLazySettings, openLazySettings } from "./ui/lazySettings.js";
 import { track } from "./engine/track.js";
 import { signupReturn } from "./engine/signupReturn.js";
@@ -1139,21 +1139,15 @@ let knownAdult = false;
 let knownFirstName: string | null = null;
 let knownProfileOwner: string | null = null;
 
-async function ensureOnboarded(user: User): Promise<void> {
-  const generation = scanGeneration;
-  const ownsProfile = () => generation === scanGeneration && activeScanOwner() === `user:${user.id}`;
-  // Answers that could not be sent last time — a phone that dropped its
-  // connection mid-quiz — go up first, silently. Somebody who has already
-  // answered must never be asked twice because their network blipped.
-  await flushPendingProfile(user).catch(() => undefined);
-  if (!ownsProfile()) return;
+async function refreshKnownOnboardingProfile(user: User, ownsProfile: () => boolean) {
+  if (!ownsProfile()) return null;
   let profile;
   try {
     profile = await loadOnboardingProfile(user);
   } catch {
-    return;
+    return null;
   }
-  if (!ownsProfile()) return;
+  if (!ownsProfile()) return null;
   // The one place the date of birth is already in hand. Every 18+ Max surface
   // on the results screen keys off this; the default is false, so a profile
   // that never loads behaves like a minor rather than like an adult.
@@ -1165,8 +1159,27 @@ async function ensureOnboarded(user: User): Promise<void> {
   // The macro calculator's gate reads the date rather than the flag, because an
   // age it derives itself cannot be a tick box somebody set.
   setBirthDate(profile.dateOfBirth ?? null);
-  if (onboardingComplete(profile)) return;
+  return profile;
+}
+
+onOnboardingProfileSaved(async (user) => {
+  const generation = scanGeneration;
+  const ownsProfile = () => generation === scanGeneration && activeScanOwner() === `user:${user.id}`;
+  await refreshKnownOnboardingProfile(user, ownsProfile);
+});
+
+async function ensureOnboarded(user: User): Promise<void> {
+  const generation = scanGeneration;
+  const ownsProfile = () => generation === scanGeneration && activeScanOwner() === `user:${user.id}`;
+  // Retry queued answers before deciding whether this account needs the quiz.
+  await flushPendingProfile(user).catch(() => undefined);
+  if (!ownsProfile()) return;
+  const profile = await refreshKnownOnboardingProfile(user, ownsProfile);
+  if (!profile || onboardingComplete(profile)) return;
   await openTrialFunnel(user, undefined, { required: true });
+  // The quiz promise resolves on dismissal, after optional body setup. Read
+  // back the saved DOB before any caller opens a dashboard or paid body gate.
+  await refreshKnownOnboardingProfile(user, ownsProfile);
 }
 
 async function requirePaidMaxBodyProfile(user: User, allowPrompt = true): Promise<void> {

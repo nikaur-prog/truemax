@@ -56,7 +56,9 @@ import {
 import type { EvaluationFingerprint, EvaluationMetrics, EvaluationRun } from "./side-evaluation-protocol.js";
 
 const APP_DIR = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
-const DATA = `${APP_DIR}/.side-dataset`;
+// Explicit override supports isolated synthetic smoke tests and consented
+// evaluation sets without mixing them into the default private dataset.
+const DATA = arg("data-dir") || `${APP_DIR}/.side-dataset`;
 
 // Mirrors tools/side-fit.mjs. Kept in step by hand; the harness prints which
 // ids it skipped so a drift is visible.
@@ -111,7 +113,7 @@ const protocolHash = evaluationHash({
     "api/_sideLandmarks.ts", "api/side-landmarks.ts", "src/engine/sideSeedFusion.ts",
     "src/engine/sidePlacementEvidence.ts", "src/engine/sidePlacementRequest.ts",
     "src/ui/sideCloudPlacement.ts", "src/ui/sideFlow.ts", "scripts/side-evaluation-protocol.ts",
-    "scripts/eval-vision-landmarks.ts",
+    "scripts/eval-vision-landmarks.ts", "package-lock.json",
   ].map((path) => [path, evaluationHash(readFileSync(`${APP_DIR}/${path}`, "utf8"))])),
 });
 const cachePath = `${DATA}/vision-${settings.mode}-${protocolHash.slice(0, 16)}.json`;
@@ -162,7 +164,7 @@ async function predict(id: string): Promise<void> {
   const seed = seeds[id]?.points;
   if (!seed) throw new Error("No device seed: cannot evaluate delivered fallback");
   const run = async (): Promise<EvaluationRun> => {
-    const metrics: EvaluationMetrics = { attemptedCalls: 0, usage: { inputTokens: 0, outputTokens: 0 } };
+    const metrics: EvaluationMetrics = { attemptedCalls: 0, calls: 0, usage: { inputTokens: 0, outputTokens: 0 } };
     // Count rejected/invalid calls too, and preserve billed usage from any
     // completed response. Pass.usage alone omits responses without a tool.
     const measuredClient = { messages: { create: async (...args: Parameters<Anthropic["messages"]["create"]>) => {
@@ -172,6 +174,7 @@ async function predict(id: string): Promise<void> {
         if ("usage" in response) {
           metrics.usage.inputTokens += response.usage.input_tokens;
           metrics.usage.outputTokens += response.usage.output_tokens;
+          if (response.content.some((part) => part.type === "tool_use")) metrics.calls! += 1;
           if (String(response.stop_reason) === "refusal") metrics.failureOutcome = "refused";
           else if (!response.content.some((part) => part.type === "tool_use")) metrics.failureOutcome ??= "invalid_response";
         }
@@ -545,7 +548,7 @@ console.log(`\nVision pass ${LANDMARK_VERSION}, reader fingerprint ${readerHash.
 console.log(`Mode: ${settings.mode}; delivery: ${settings.delivery}; seeded: ${settings.seeded}; total budget ${settings.timeoutMs}ms, including ${settings.responseReserveMs}ms response reserve.`);
 console.log("Local replay includes image encoding and server preparation, but excludes browser upload, auth and quota latency. It is not a live end-to-end latency measurement.");
 console.log(`Delivery outcomes across ${attempts} attempts: ${Object.entries(outcomes).map(([outcome, count]) => `${outcome}=${count}`).join(", ")}.`);
-console.log("Fused scores include the device fallback on every failed attempt's first run; raw scores only include successful responses. Seeded raw output can include inherited device points.");
+console.log("Accuracy uses the first attempt per profile, including fallback. All attempts contribute outcomes, latency and delivered repeatability. Raw scores only include successful responses; seeded raw output can include inherited device points.");
 if (skipped.length) console.log(`Skipped: ${skipped.join(", ")}`);
 console.log("");
 console.log("landmark           n   model med  p90    seeder med  p90    moved  model@moved seeder@moved fused@moved   fused med  p90");

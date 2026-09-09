@@ -53,6 +53,7 @@ import type { SidePlacementChoice } from "./sideCloudPlacement.js";
 import { fuseSideSeeds } from "../engine/sideSeedFusion.js";
 import { createSideAttemptOwner } from "./sideAttempt.js";
 import { createSideInputGuard } from "./sideInputGuard.js";
+import { withPointDerivedSideDirection } from "./sidePlacementDirection.js";
 import type { ScanPerformanceAttempt } from "../engine/scanPerformance.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
@@ -919,14 +920,14 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
     Object.entries(fused.band).map(([id, band]) => [id, bandOpacity[band]]),
   ) as Record<SidePointId, number>;
   const overallConfidence = bandOpacity[fused.overall];
-  let seed: SidePlacementSeed = {
+  let seed: SidePlacementSeed = withPointDerivedSideDirection({
     ...localResult,
     points: fused.points,
     method: cloudResult ? "fused" : localResult.method,
     confidence: overallConfidence,
     confidenceByPoint,
     seedVersion: cloudResult?.seedVersion,
-  };
+  });
   stopThinking();
   e.frame.classList.remove("scanning");
   e.cap.textContent = "VERIFY LANDMARKS";
@@ -960,9 +961,10 @@ async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementS
   const token = await currentAccessToken().catch(() => null);
   if (!token || signal.aborted) return null;
   if (readSidePlacementChoice() !== "cloud") return null;
+  const directedSeed = withPointDerivedSideDirection(seed);
   return requestCloudSidePlacement(canvas, token, {
-    seed: seed.points,
-    faceDir: seed.faceDir < 0 ? -1 : 1,
+    seed: directedSeed.points,
+    faceDir: directedSeed.faceDir,
     signal,
   });
 }
@@ -1010,6 +1012,7 @@ function mountVerify(
   ctx: SideCtx,
   caption: string,
 ): void {
+  seed = withPointDerivedSideDirection(seed);
   const e = el();
   if (photo !== e.canvas) {
     e.canvas.width = photo.width;

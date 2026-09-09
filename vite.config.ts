@@ -1,7 +1,17 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
+import { assertDeferredVisionRuntime } from "./scripts/vision-bundle-boundary.js";
 
 export default defineConfig({
+  plugins: [{
+    name: "deferred-vision-runtime",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      // A constants-only import must never pull the detector back into initial
+      // HTML preloads. This checks emitted chunks, not a guessed source graph.
+      assertDeferredVisionRuntime(bundle);
+    },
+  }],
   // The build a browser is actually running, stamped into the bundle and shown
   // in the footer. Twice now a fix has been reported as missing when it was
   // deployed and the browser was holding an older bundle, and there was no way

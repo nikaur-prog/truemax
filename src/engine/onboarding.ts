@@ -48,6 +48,14 @@ export interface SaveProfileResult {
   message?: string;
 }
 
+const savedListeners = new Set<(user: User) => void | Promise<void>>();
+
+/** Refresh account-owned UI after either the quiz or Settings saves the canonical row. */
+export function onOnboardingProfileSaved(listener: (user: User) => void | Promise<void>): () => void {
+  savedListeners.add(listener);
+  return () => { savedListeners.delete(listener); };
+}
+
 function namesFromUser(user: User): [string, string] {
   const meta = user.user_metadata as Record<string, unknown>;
   const first = typeof meta.first_name === "string" ? meta.first_name.trim() : "";
@@ -247,6 +255,10 @@ async function attemptSave(
     // auth.updateUser would target whichever session is current after the
     // upsert, potentially copying this person's name into a different account.
     // Auth-only greetings may remain generic until the canonical profile loads.
+    for (const listener of savedListeners) {
+      // A view refresh must not turn a successful profile write into a retry.
+      void Promise.resolve().then(() => listener(user)).catch(() => undefined);
+    }
     return { ok: true };
   } catch {
     return { ok: false, message: "Could not save your pathway. Check your connection and try again." };

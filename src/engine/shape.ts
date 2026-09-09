@@ -1,4 +1,4 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "./faceConnections.js";
 import type { Pt } from "./geometry.js";
 import type { Geom } from "./geometry.js";
 import type { Sex } from "./types.js";
@@ -25,12 +25,12 @@ import { SHAPE_MODEL } from "./shapeModel.js";
 // information, so including it would add noise and inflate the model.
 function buildSubset(): number[] {
   const sets = [
-    FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
-    FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
-    FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
-    FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
-    FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
-    FaceLandmarker.FACE_LANDMARKS_LIPS,
+    FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL,
+    FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYE,
+    FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYE,
+    FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYEBROW,
+    FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYEBROW,
+    FACE_CONNECTIONS.FACE_LANDMARKS_LIPS,
   ];
   const ids = new Set<number>();
   for (const s of sets) for (const c of s) ids.add(c.start);

@@ -108,6 +108,7 @@ export function evaluationCacheMatches(
 
 export interface EvaluationMetrics {
   attemptedCalls: number;
+  calls?: number;
   usage: LandmarkPass["usage"];
   failureOutcome?: EvaluationOutcome;
 }
@@ -132,7 +133,7 @@ export interface EvaluationRun {
 
 export function evaluationFailureOutcome(error: unknown): EvaluationOutcome {
   const value = error && typeof error === "object" ? error as { name?: string; code?: string; status?: number } : {};
-  if (value.name === "AbortError" || value.code === "ETIMEDOUT") return "timeout";
+  if (value.name === "AbortError" || value.code === "ETIMEDOUT" || value.status === 408) return "timeout";
   if (value.status === 429) return "rate_limited";
   if (value.code === "refusal") return "refused";
   if (value.code === "invalid_response") return "invalid_response";
@@ -163,7 +164,7 @@ export async function runEvaluationAttempt(source: EvaluationSource, seed: SideP
   const started = performance.now();
   const fallback = (outcome: EvaluationOutcome): EvaluationRun => {
     const metrics = dependencies.metrics?.();
-    return { result: null, outcome, delivered: fuseSideSeeds(seed, null), usage: { ...(metrics?.usage ?? { inputTokens: 0, outputTokens: 0 }) }, attemptedCalls: metrics?.attemptedCalls ?? 0, calls: 0, ms: performance.now() - started, seeded: settings.seeded };
+    return { result: null, outcome, delivered: fuseSideSeeds(seed, null), usage: { ...(metrics?.usage ?? { inputTokens: 0, outputTokens: 0 }) }, attemptedCalls: metrics?.attemptedCalls ?? 0, calls: metrics?.calls ?? 0, ms: performance.now() - started, seeded: settings.seeded };
   };
   if (settings.delivery !== "cloud") return fallback(settings.delivery);
   const hint = cloudSideSeedFractions(seed, source.frame.w, source.frame.h);
@@ -194,7 +195,7 @@ export async function runEvaluationAttempt(source: EvaluationSource, seed: SideP
       return {
         result: pass.result, outcome: "success",
         delivered: fuseSideSeeds(seed, cloud.points, cloud.confidenceByPoint, undefined, cloud.evidence),
-        usage: { ...(metrics?.usage ?? pass.usage) }, attemptedCalls: metrics?.attemptedCalls ?? pass.attemptedCalls, calls: pass.calls,
+        usage: { ...(metrics?.usage ?? pass.usage) }, attemptedCalls: metrics?.attemptedCalls ?? pass.attemptedCalls, calls: metrics?.calls ?? pass.calls,
         ms: performance.now() - started, zoomed: pass.zoomed, stages: pass.stages, gonion: pass.gonion,
         gonionDisagreement: pass.gonionDisagreement, mentonRetried: pass.mentonRetried, seeded: pass.seeded, windows: pass.windows, spread: pass.spread,
       };

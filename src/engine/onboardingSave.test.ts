@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { emptyOnboardingProfile, saveOnboardingProfile } from "./onboarding.js";
+import { emptyOnboardingProfile, onOnboardingProfileSaved, saveOnboardingProfile } from "./onboarding.js";
 
 const user = { id: "profile-owner-a", user_metadata: {} } as User;
 const profile = () => ({
@@ -50,4 +50,33 @@ test("a failed canonical save stays failed and never stamps completion or writes
   assert.deepEqual(await saveOnboardingProfile(user, entry, 1, async () => fakeClient), { ok: false, message: "Profile save denied" });
   assert.equal(entry.completedAt, null);
   assert.equal(authWrites, 0);
+});
+
+test("successful canonical saves notify their owner, failed saves do not, and view failures never retry a saved row", async () => {
+  let writes = 0;
+  let denied = false;
+  const owners: string[] = [];
+  const fakeClient = {
+    from: () => ({ upsert: async () => {
+      writes++;
+      return { error: denied ? { message: "Save denied" } : null };
+    } }),
+  } as unknown as SupabaseClient;
+  const unsubscribe = onOnboardingProfileSaved((savedUser) => { owners.push(savedUser.id); });
+  const unsubscribeFailedView = onOnboardingProfileSaved(async () => { throw new Error("View already closed"); });
+  try {
+    assert.deepEqual(await saveOnboardingProfile(user, profile(), 1, async () => fakeClient), { ok: true });
+    assert.deepEqual(owners, [user.id]);
+    assert.equal(writes, 1);
+    denied = true;
+    assert.equal((await saveOnboardingProfile(user, profile(), 1, async () => fakeClient)).ok, false);
+    assert.deepEqual(owners, [user.id]);
+    unsubscribe();
+    denied = false;
+    await saveOnboardingProfile(user, profile(), 1, async () => fakeClient);
+    assert.deepEqual(owners, [user.id]);
+  } finally {
+    unsubscribe();
+    unsubscribeFailedView();
+  }
 });

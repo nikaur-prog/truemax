@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { metricScoreLabel, stageViewFor, stepIndex } from "./metricDetail.js";
+import { constructionCaveat, metricScoreLabel, stageViewFor, stepIndex } from "./metricDetail.js";
 import { sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { SIDE_METRICS, computeSideMetrics, faceDirFromPoints } from "../engine/sideMetrics.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
@@ -90,4 +90,12 @@ test("measurement detail grades climb with the score", () => {
   assert.equal(metricScoreLabel(5.0, "Midface ratio"), "Balanced midface ratio");
   assert.equal(metricScoreLabel(3.8, "Chin projection"), "Below range chin projection");
   assert.equal(metricScoreLabel(2.7, "Lower lip"), "Weak lower lip");
+});
+
+test("gonial detail distinguishes the photographed surface angle from its unvalidated skeletal reference", () => {
+  const caveat = constructionCaveat("gonialAngle");
+  assert.ok(caveat);
+  assert.match(caveat, /photographic surface angle, not the skeletal gonial angle/);
+  assert.match(caveat, /has not been validated for these surface points/);
+  assert.match(caveat, /Point placement and head turn/);
 });

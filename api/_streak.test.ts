@@ -33,7 +33,7 @@ test("the count and both awards are one database transaction, and the funnel lea
   const post = route.match(/export async function POST[\s\S]*?\n}\n/)?.[0] ?? "";
   assert.match(post, /rpc\("count_streak_day", \{[\s\S]*?p_day_base: CONSISTENCY_POINTS_PER_DAY,[\s\S]*?p_week_base: STREAK_WEEK_BONUS,/);
   assert.doesNotMatch(post, /rpc\("award_consistency"/, "the route never awards on its own; the function does, inside the count");
-  assert.match(post, /if \(result\.counted\) \{[\s\S]*?bump_funnel_event[\s\S]*?"streak-day-counted"[\s\S]*?"streak-ended"/);
+  assert.match(post, /if \(result\.counted\) \{[\s\S]*?recordStreakFunnel\(admin, result\.ended \? \["streak-day-counted", "streak-ended"\] : \["streak-day-counted"\]\)/);
   assert.doesNotMatch(route, /award_progress/, "the verified-progress award no longer exists anywhere");
   const fn = migration.match(/create or replace function public\.count_streak_day[\s\S]*?\$\$;/)?.[0] ?? "";
   assert.match(fn, /update public\.daily_streaks[\s\S]*?day_points := public\.award_consistency\(p_user_id, 'day', p_day, p_day_base\);[\s\S]*?if week_landed then[\s\S]*?week_points := public\.award_consistency\(p_user_id, 'week', p_day, p_week_base\);/);
@@ -87,10 +87,10 @@ test("count_streak_day is idempotent per day, spends grace, banks one per seven,
 
 test("the Settings switch is instrumented both ways, and a counter failure never fails the save", () => {
   const patch = route.match(/export async function PATCH[\s\S]*?\n}\n/)?.[0] ?? "";
-  assert.match(patch, /bump_funnel_event", \{ p_event: body\.enabled \? "streak-enabled" : "streak-disabled" \}/);
-  // The bump sits after the save and inside its own try, so a dead counter
-  // cannot turn a successful opt-out into an error the person sees.
-  assert.match(patch, /if \(error\) throw new Error\(error\.message\);[\s\S]*?try \{[\s\S]*?bump_funnel_event[\s\S]*?\} catch/);
+  assert.match(patch, /recordStreakFunnel\(getSupabaseAdmin\(\), \[body\.enabled \? "streak-enabled" : "streak-disabled"\]\)/);
+  // The best-effort counter runs after the save. Its returned-error and
+  // rejection behavior is exercised in _streakFunnel.test.ts.
+  assert.match(patch, /if \(error\) throw new Error\(error\.message\);[\s\S]*?await recordStreakFunnel/);
   const events = read("src/engine/funnelEvents.ts");
   for (const name of ["streak-disabled", "streak-enabled"]) {
     assert.ok(events.includes(`"${name}"`), `${name} is not in the allowlist`);

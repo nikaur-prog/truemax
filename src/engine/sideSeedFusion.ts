@@ -8,8 +8,8 @@ import type { SidePlacementEvidence } from "./sidePlacementEvidence.js";
 //
 // The device seed and accepted cloud observations read the same photograph.
 // A seed-guided crop is not an independent reader, and a retained hint is not
-// an observation at all. The seeder's eight outline points come from the face mesh and
-// are right to a few pixels; its five back points come from a silhouette and
+// an observation at all. The seeder's eight outline points come from the face mesh;
+// their real-photo error still needs evaluation. Its five back points come from a silhouette and
 // a template, and drift. The cloud pass reads all thirteen from the pixels
 // and, as of vision-2, matches the seeder on the ear notch, the neck point
 // and the chin front, and is worse on the jaw corner and the chin bottom
@@ -64,7 +64,7 @@ export interface SeedFusionPolicy {
 // 0.107 vs 0.099) but not on the tail: the seeder's notch is more than 0.15
 // head widths off on 17 of 54 faces, up to 0.96, while the model's p90 is
 // 0.195 with no bias. So a small disagreement on the ear is averaged (two
-// similar independent errors cancel) and a large one goes to the model,
+// nearby predictions are blended) and a large one goes to the model,
 // because at that distance it is the seeder that is usually the one that
 // missed. The front eight are the mesh's. Revisit from the harness's
 // disagreement table and fused column, never by feel.

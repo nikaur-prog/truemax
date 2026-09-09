@@ -103,6 +103,7 @@ exports/
 .cta-assets/
 .side-dataset/
 .preview-out/
+.calibration-pilot/
 
 # Scratch files from research harnesses. The side-seeder run drops probe copies
 # of modules and one-off Chromium drivers into the tree while it works, and a

@@ -1,6 +1,8 @@
 # FaceIQ comparison and TrueMax calibration plan
 
-Date: 7 September 2026. Status: proposed, not a completed benchmark. Earliest proposed start: 9 September, after the owner's usage reset. No automation has been scheduled, subscription credits spent, faces uploaded or scoring parameters changed for this plan.
+Date: 7 September 2026. Updated: 9 September 2026. Status: benchmark not completed. The owner has now requested 20 fictional adult identities, 10 per supported reference group, with paired front and side images. Synthetic generation and local TrueMax diagnostics are authorized. FaceIQ batch access permissions and a credit cap remain unresolved; no FaceIQ subscription credits have been spent or scoring parameters fitted for this plan.
+
+The September 9 audit repairs the provenance, EXIF, deadline/cache and collection-count defects listed below. The separate dev-only diagnostic workspace is complete, and all 40 generated images completed two local diagnostic passes. Fifteen profiles reproduce the default jaw template's exact 117.457752-degree angle; this exposes a placement defect, not a validated anatomical measurement. Detailed inputs and exports remain private and gitignored. The synthetic set is an engineering stress test, not a substitute for the independently annotated real-person evaluation. No 90 percent accuracy claim is established. A future release target must state the landmark/measurement tolerances, eligible photo conditions, held-out cohort size, and uncertainty, not a bare percentage.
 
 ## Decision
 
@@ -18,7 +20,7 @@ Photos require both source-image rights and the depicted adult's permission for 
 
 Suggested request to FaceIQ, not sent:
 
-> I operate TrueMax and would like written permission for a limited comparative evaluation of facial measurements using consenting adult participants. We propose a 10-person pilot, potentially expanding to 50 or 100 people, with paired front and side photographs. Please confirm whether normal UI automation, report export, private per-metric comparisons and using permitted results to evaluate or calibrate our own scoring are allowed, and what credit limits, attribution, data-retention or licensing conditions apply. We will not extract your source code, bypass restrictions or redistribute your reports.
+> I operate TrueMax and would like written permission for a limited comparative evaluation of facial measurements. Our initial engineering set has 20 fictional adults, each with a generated front and side image; it is not a population study. Please confirm that these synthetic inputs, normal UI automation, report export and private per-metric comparisons are permitted, and specify any credit, attribution, retention or licensing conditions on using outputs to evaluate or calibrate our own product. We may later propose a separate consenting-adult study. We will not extract your source code, bypass restrictions or redistribute your reports.
 
 ## Confirmed TrueMax issues to resolve first
 
@@ -32,8 +34,9 @@ These are source findings and synthetic/mock reproductions, not a completed live
 6. `calibrationSet.ts` uses the front-only catalogue for side coverage/count checks. A stored side measurement can therefore report zero side faces. Fix and regression-test this before cohort collection.
 7. `benchmark-agreement.mjs` accepts a missing definition confirmation. Require an explicitly approved mapping. Use degrees or normalized absolute units near zero, not unstable percentage error.
 8. The existing 25-per-group calibration health threshold is a collection heuristic, not evidence of validation. Its copy must not imply that count alone justifies fitting metric directions.
+9. A collapsed jaw ray could pass landmark integrity and produce a plausible angle: setting the jaw corner equal to the chin bottom produced 129.09 degrees and a 4.3 metric score in a synthetic profile, because a zero-length ray reached `atan2`. The local audit fix rejects both coincident and numerically near-coincident jaw rays using a facial-height-relative tolerance, with mirrored/resized regression cases. This is a geometry repair, not evidence that an observed user's points were collapsed, and it changes no reference distribution or score weight. Keep this case in the pilot's invalid-input checks.
 
-Claude owns the API and vision-harness repairs. Codex owns capture/report integration and can build the collection and comparison UI after scope and file ownership are confirmed. No calibration, fusion or scoring changes are included in the current UI/SEO/Max release merely because this plan exists.
+The September 9 audit branch carries the API, vision-harness and capture/report integration repairs together. Numerical fusion policies, scoring reference distributions and weights remain unchanged. Comparison work records discrepancies before any candidate fitting.
 
 ## Stage 1: inventory before spending credits
 
@@ -142,7 +145,7 @@ Use the benchmark to improve point placement, measurement definitions, compariso
 
 For TrueMax's goal markers, white can represent the current measurement and green a justified target interval, with capture uncertainty shown separately. Targets must relate to an actually changeable, supported presentation goal, not the competitor's maximum score. Fixed skeletal proportions must not be moved by a non-surgical routine. Do not diagnose skin disease or body fat from a generic face score.
 
-Award any progress credit only for comparable repeated captures and change beyond the measured noise band, with caps and reversal handling. Habit completion can earn separate points. An AI-generated preview or a scoring-version change never earns improvement points. Goal feasibility, image identity preservation and safe skin-treatment guidance need their own validation, separate from this benchmark.
+The merged ledger retirement means appearance changes do not earn points. Habit consistency points remain separate. Any future proposal to reinstate appearance progress would need separate approval and validation; this benchmark does not reintroduce it. Goal feasibility, image identity preservation and safe skin-treatment guidance need their own validation, separate from this benchmark.
 
 ## Suggested work split after approval
 

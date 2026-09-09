@@ -2340,7 +2340,7 @@ function goalDraftPanel(plan: MorphBlueprint): string {
     <p>${matching ? "Your saved targets stay fixed across scans. White is your current reading; green is your draft goal."
       : saved ? "Your goals or measurement method changed. Your old targets are kept, but are not shown on these measurements. Replace them only if you want a new baseline."
       : "Keep this scan as your starting point and add a green draft goal marker beside the white current marker on supported measurements."}</p>
-    <p class="goal-target-note">These are illustrative estimates, not promised results. They stay on this device for this account. Appearance points remain unavailable until repeatability and completion rules are validated.</p>
+    <p class="goal-target-note">These are illustrative estimates, not promised results. They stay on this device for this account. Appearance changes do not earn points.</p>
     <div class="navrow">${available ? `<button type="button" class="btn gho" id="keep-goal-targets">${saved ? "Replace draft targets with this scan" : "Keep these draft targets"}</button>` : ""}
       ${saved ? '<button type="button" class="btn cancel" id="clear-goal-targets">Clear draft targets</button>' : ""}</div>
     ${!available && !saved ? '<p class="goal-target-note">No supported measurement target is available for these goals yet. You can still follow the routine without an invented number.</p>' : ""}
