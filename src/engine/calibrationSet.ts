@@ -2,6 +2,7 @@ import type { Report, Sex } from "./types.js";
 import { METRICS } from "./metrics.js";
 import { SIDE_METRICS } from "./sideMetrics.js";
 import { scopedStorageKey } from "./scanScope.js";
+import type { CalibrationDiagnostics } from "./calibrationDiagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Collecting rated faces, so the corpus can grow without being assembled by
@@ -138,6 +139,8 @@ export interface RatedFace {
    * re-checked or removed while the face is still around to re-scan.
    */
   suspect?: number;
+  /** Raw capture evidence for review; never included in the fitting corpus. */
+  diagnostics?: CalibrationDiagnostics;
   measurements: Record<string, number>;
 }
 
@@ -154,14 +157,11 @@ export function loadCalibrationSet(): RatedFace[] {
 }
 
 function save(faces: RatedFace[]): void {
-  try {
-    const key = scopedStorageKey(KEY);
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(faces));
-  } catch {
-    // A full quota is not worth interrupting a scan over. The set in memory is
-    // still correct for this session and the export still works.
-  }
+  const key = scopedStorageKey(KEY);
+  if (!key) throw new Error("Sign in again before saving this calibration face.");
+  // The caller must keep its pending capture on failure. Previously this catch
+  // silently discarded quota errors and then the UI cleared the only copy.
+  localStorage.setItem(key, JSON.stringify(faces));
 }
 
 /**
@@ -209,7 +209,7 @@ export function addRatedFace(
   // The row's audit trail: the thumbnail that says which face this is, and
   // the implausible-reading count that says whether to trust it. Optional as
   // a pair because both come from the same capture context.
-  extras?: { thumb?: string; suspect?: number },
+  extras?: { thumb?: string; suspect?: number; diagnostics?: CalibrationDiagnostics },
 ): RatedFace[] {
   const faces = loadCalibrationSet();
   const sexPrefix = report.sex === "male" ? "m" : "w";
@@ -240,6 +240,7 @@ export function addRatedFace(
     ...(label ? { label } : {}),
     ...(extras?.thumb ? { thumb: extras.thumb } : {}),
     ...(extras?.suspect ? { suspect: extras.suspect } : {}),
+    ...(extras?.diagnostics ? { diagnostics: structuredClone(extras.diagnostics) } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
   save(faces);
@@ -346,6 +347,24 @@ export function corpusJSON(faces: RatedFace[]): string {
     null,
     1,
   )}\n`;
+}
+
+/** All captures, including unrated/external rows. Review data is not a fitting corpus. */
+export function calibrationDiagnosticsJSON(faces: RatedFace[]): string {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    purpose: "landmark-and-measurement-review-not-training-labels",
+    notice: "Includes all saved captures. Operator-reviewed points are not expert labels. Photos and labels are omitted; keep this export private.",
+    faces: faces.map((face) => ({
+      id: face.id,
+      referenceGroup: face.sex,
+      rating: face.rating,
+      ratingSource: face.ratedBy ?? "unknown",
+      scored: face.scored,
+      measurements: face.measurements,
+      diagnostics: face.diagnostics ?? null,
+    })),
+  }, null, 2)}\n`;
 }
 
 /**

@@ -6,6 +6,7 @@ import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
 import { DISPLAY_NOISE } from "../engine/history.js";
 import type { ScanDelta } from "../engine/history.js";
+import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 
 // Deterministic explanation engine. No LLM, no randomness: banded templates
 // with the actual computed numbers interpolated in. Every sentence must
@@ -17,13 +18,13 @@ import type { ScanDelta } from "../engine/history.js";
 // a few were clauses rather than phrases and why the summaries were stitched
 // together with dashes end to end.
 const TRAITS: Record<string, string> = {
-  canthalTilt: "eye-corner tilt, where a positive angle reads alert and structurally dimorphic",
-  eyeAspectRatio: "aperture shape, where narrower reads intense and rounder reads softer",
+  canthalTilt: "the angle between the inner and outer eye corners",
+  eyeAspectRatio: "the height of the visible eye opening relative to its width",
   eyeSeparationRatio: "how the eyes sit across the face's width",
   intercanthalEyeWidth: "eye spacing, counted in eye-widths",
-  browPosition: "brow height, where low-set brows harden the whole upper third",
+  browPosition: "brow height relative to the eyes",
   browTilt: "the rise of the brow from inner to outer end",
-  fwhr: "upper-face width against height, a core dominance signal",
+  fwhr: "upper-face width relative to the measured upper-face height",
   midfaceRatio: "the compactness of the midface",
   cheekboneHeight: "where the face carries its widest point",
   jawCheekRatio: "the jaw base measured against the cheekbones",
@@ -203,11 +204,13 @@ export function regionSummary(
   // unpredictably and can land at either end — so the sentence would name the
   // one measurement that does not exist as the region's best or its weakest,
   // and print an em dash and an "NaNth percentile" alongside it.
-  const sorted = r.metrics.filter(wasMeasured).sort((a, b) => b.zEff - a.zEff);
+  const sorted = r.metrics.filter((m) => wasMeasured(m) && !m.implausible && reliabilityOf(m.def.id) >= RELIABLE_MIN).sort((a, b) => b.zEff - a.zEff);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
   const name = REGION_NAMES[r.region].toLowerCase();
-  const hi = opener(trendOf(voice?.delta), voice?.name);
+  // A region explanation is not a new conversation. Repeating the same
+  // greeting on every tab obscures the one thing the person came to read.
+  void voice;
   // A region CAN now arrive with nothing in it: measurements that failed are
   // dropped from the report rather than carried as undefined (see
   // scoreFrontSet), and the side view scores no metric at all in some regions.
@@ -215,14 +218,15 @@ export function regionSummary(
   // took the Midface tab out, one line further along, so it is answered here
   // rather than left to be discovered.
   if (!best || !worst) {
-    return `${hi}. I couldn't get a clean read on your ${name} from this photograph, so I'm not scoring it. It sits out of your total rather than counting against you. Worth a rescan in better light.`;
+    if (!r.metrics.some((m) => wasMeasured(m) && !m.implausible)) {
+      return `No usable measurements were captured for the ${name}, so this region is not scored. Check the photo and the required points; missing readings do not count against you.`;
+    }
+    return `There isn't enough reliable detail to interpret the ${name} on this photo. You can still inspect the available readings, but they shouldn't be used to pick a strength or a problem. Check the pose and point placement before comparing another scan.`;
   }
 
   // What is good. Named, with the number, and with what it actually means —
   // praise that does not say what it is praising is worth nothing.
-  const s1 = best.percentile >= 55
-    ? `${hi}. Your ${best.def.name.toLowerCase()} is carrying this one. ${fmt(best)} where the ${sexNoun(sex)} average is ${fmtMean(best, sex)}, which puts it in the ${bandOf(best.percentile, sex)}. That's ${traitOf(best.def.id)}, and yours is genuinely good.`
-    : `${hi}. I'm not going to pretend anything in your ${name} is doing heavy lifting. The best of it is ${best.def.name.toLowerCase()} at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which is about the middle of the room.`;
+  const s1 = `${best.def.name} reads ${fmt(best)} on this photo, compared with a ${sexNoun(sex)} reference mean of ${fmtMean(best, sex)}. It measures ${traitOf(best.def.id)}.`;
 
   // What to work on. Said outright, with the number, no cushioning — the warm
   // opener exists so that this sentence can afford to be blunt.
@@ -234,11 +238,9 @@ export function regionSummary(
   // still, neither does the ranking that picked a worst one, so there is no
   // honest target to hand somebody.
   const scored = regionIsScored(r);
-  const s2 = !scored
-    ? `I'm not going to point you at one of these to fix, either.`
-    : worst.percentile < 45
-      ? `The one to go at is your ${worst.def.name.toLowerCase()}: ${fmt(worst)} against ${fmtMean(worst, sex)}, in the ${bandOf(worst.percentile, sex)}. That one's ${traitOf(worst.def.id)}.`
-      : `Nothing here is really letting you down. Even your weakest number, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, is holding its own.`;
+  const s2 = scored && worst !== best && worst.conformance < 0.999
+    ? `${worst.def.name}, at ${fmt(worst)}, has a lower model standing within this region. That is a comparison, not evidence that you need to change it.`
+    : "";
 
   // Where that leaves you.
   //
@@ -249,10 +251,10 @@ export function regionSummary(
   // region wanders as much between two photos of one face as between two
   // faces, the ranking is a ranking of the lighting.
   const s3 = !scored
-    ? `Here's why: every measurement in your ${name} moves about as much between two photos of the same face as it does between two different people. There's nothing steady enough there to rank, so I'm not giving it a score and I'm keeping it out of your total. You still get the readings.`
-    : `All in, ${r.score.toFixed(1)} out of 10 across the ${name}. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces come in above you, and you now know the exact number standing in the way. Most people never get told that.`;
+    ? `The region's repeatability is too low for a confident interpretation, so its score is shown as indicative. Review individual measurements before drawing conclusions.`
+    : `Together, the measurements give this region ${r.score.toFixed(1)} out of 10 in TrueMax's model. Open a measurement to see its construction and reference band.`;
 
-  return `${s1} ${s2} ${s3}`;
+  return [s1, s2, s3].filter(Boolean).join(" ");
 }
 
 // How rare is this, stated only as precisely as the sample allows.
@@ -480,7 +482,7 @@ export function coachRead(
 
   // What is noticeably standing out. Region-level, because that is the unit a
   // person recognises in a mirror.
-  const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
+  const regions = r.regions.filter(regionIsScored).sort((a, b) => b.percentile - a.percentile);
   const best = regions[0];
   // "Standout" has to earn the word. The best region of a face can still sit
   // below average, and calling a 45th-percentile nose "the part doing the most
@@ -488,20 +490,20 @@ export function coachRead(
   // summary gates at 55. Below the bar he says so and moves to the fixable
   // thing, which is the useful half anyway.
   const good = !best
-    ? `${hi}. Not much to go on from this scan.`
+    ? `${hi}. There isn't enough reliable detail here to pick out a strongest area. Check the photo and points before drawing conclusions.`
     : best.percentile >= 55
-      ? `${hi}. Your ${REGION_NAMES[best.region].toLowerCase()} is the standout on this scan, sitting in the ${bandOf(best.percentile, sex)}. That's the part of your face doing the most for you, so don't go changing it.`
-      : `${hi}. Straight answer: nothing on this scan is jumping out as a strength yet. Your best region is your ${REGION_NAMES[best.region].toLowerCase()} and even that lands mid-pack. That's not a write-off, it just means the wins here come from work rather than from something you were born with.`;
+      ? `${hi}. Your ${REGION_NAMES[best.region].toLowerCase()} has the highest supported region reading here, in the ${bandOf(best.percentile, sex)}. Open its measurements to see which proportions contributed.`
+      : `${hi}. None of the measured regions stands clearly above the reference on this photo. That is a result from this model, not a judgment of how you look in person.`;
 
   // What is noticeably poor, restricted to things that can actually move. No
   // "lever", no "moves without surgery": naming a fixable thing and then
   // offering to fix it says the same thing without the vocabulary.
   const fixables = r.metrics
-    .filter((m) => m.def.fixability >= 0.3)
+    .filter((m) => !m.implausible && Number.isFinite(m.value) && reliabilityOf(m.def.id) >= RELIABLE_MIN && m.def.fixability >= 0.3 && m.conformance < 0.999 && m.def.id !== "gonialAngle")
     .sort((a, b) => a.zEff - b.zEff);
   const weakest = fixables[0];
   const work = weakest
-    ? `The one holding you back most is your ${weakest.def.name.toLowerCase()}, reading ${fmt(weakest)}. Good news is it's one of the ones that actually shifts with what you do day to day, so it's worth your attention rather than your worry.`
+    ? `${weakest.def.name} reads ${fmt(weakest)} in this photo. It is one of the change-sensitive measurements outside the model's preferred range. Check the points first; the number alone does not show what caused it or whether you need to change anything.`
     : "";
 
   const memory = opts.scope === "side"
@@ -510,11 +512,11 @@ export function coachRead(
       ? `This one's ${escapeForCopy(opts.guestName)}'s scan, so I'm keeping it as its own record. It stays off your history, your average and your trend.`
       : delta
         ? memoryLine(delta, sex)
-        : `First scan on record, so there's nothing to compare it to yet. Scan again in a few weeks and I'll be able to tell you whether anything you're doing is working, which is the part that actually matters.`;
+        : `This is your starting scan. A later photo with the same pose, expression and lighting will make comparison more useful; a score change alone won't prove a routine worked.`;
 
   const invite = weakest
-    ? `Want me to help you with your ${areaOf(weakest.def.region)}? Ask me and I'll talk you through what actually works on it and how long it realistically takes.`
-    : `Ask me anything off this scan and I'll tell you what I'd actually do about it.`;
+    ? `If your ${areaOf(weakest.def.region)} is something you want to work on, tell me what you would like to change and we can look at the options.`
+    : `Ask me about any measurement and I'll explain what it can and can't tell you.`;
 
   return { good, work, memory, invite };
 }
@@ -740,7 +742,7 @@ export function percentileLine(pct: number, sex: Sex, tailLimit?: number): strin
 // The substance of the old line was worth keeping and is not banded, because it
 // is equally true at every score.
 export function overviewCaveat(): string {
-  return `One photograph, scored on bone proportion and soft tissue against a reference
-    population. Two photos of the same face differ by about 0.9 points, so a single
-    scan is one reading rather than a verdict.`;
+  return `These are estimates from photographs, compared with TrueMax's reference model.
+    Pose, expression, lighting and point placement can change the result. A score
+    is not a medical assessment or an objective verdict on attractiveness.`;
 }

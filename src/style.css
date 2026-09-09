@@ -1270,6 +1270,8 @@ button.pillar:active { transform: translateY(0); }
 /* Measurements are the primary reading at every width. Comparisons and
    explanations expand in place, never behind a horizontal swipe gesture. */
 .report-deck { display: grid; grid-template-columns: minmax(0, 1fr); overflow: visible; scroll-snap-type: none; }
+.deck.deck-measurements-only { grid-template-columns: minmax(0, 1fr); }
+.deck-measurements-only > .dcard { flex-basis: 100%; }
 .report-reading { border-top: 1px solid var(--line); margin-top: 12px; }
 .report-reading > summary, .report-comparisons > summary {
   min-height: 44px; display: flex; align-items: center; justify-content: space-between;
@@ -1858,6 +1860,18 @@ body.scan-confirm-open { overflow: hidden; }
   display: block; width: auto; height: auto; max-width: 100%;
   max-height: min(48dvh, 520px); margin: auto; object-fit: contain;
 }
+.scan-confirm-example {
+  margin: 16px 0 18px; padding: 12px; border-radius: 16px;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.scan-confirm-example img {
+  display: block; width: 100%; height: clamp(150px, 28dvh, 240px);
+  object-fit: contain; border-radius: 10px;
+}
+.scan-confirm-example img[hidden] { display: none; }
+.scan-confirm-example figcaption {
+  margin-top: 8px; font: 500 11.5px/1.4 var(--sans); color: var(--mut);
+}
 .scan-confirm-copy {
   max-width: 42ch; margin: 0 auto 20px; color: var(--mut); font-size: 14px; line-height: 1.55;
 }
@@ -1952,9 +1966,52 @@ body.scan-confirm-open { overflow: hidden; }
    against: a second button here would be offering a choice we know the answer
    to. */
 .side-mode-actions.single { grid-template-columns: 1fr; }
-.side-exit-actions { display: grid; grid-template-columns: 1fr; gap: 8px; width: 100%; flex-basis: 100%; margin-top: 12px; }
-.side-exit-actions .btn { min-height: 44px; white-space: normal; line-height: 1.35; color: var(--ink); }
-.side-mode-card .side-exit-actions { border-top: 1px solid var(--line); padding-top: 12px; }
+/* Full-width utility groups must wrap below the main actions. In a nowrap
+   flex row they consumed the row and squeezed Confirm into a tall sliver. */
+body:not(.cam-takeover) #side-actions {
+  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px;
+}
+body:not(.cam-takeover) #side-actions:not(.guided-row) > .btn {
+  flex: 1 1 160px; width: auto; min-width: 0; margin: 0;
+  min-height: 48px; padding: 13px 18px; line-height: 1.35;
+  white-space: normal; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+body:not(.cam-takeover) #side-actions > .btn svg { flex: 0 0 auto; }
+.side-review-actions, .side-review-tools {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  width: 100%; flex: 0 0 100%;
+}
+#side-actions .side-review-actions .btn {
+  width: 100%; min-width: 0; min-height: 48px; margin: 0; padding: 13px 16px;
+  white-space: normal; line-height: 1.35;
+}
+#side-actions .side-review-tools { gap: 8px; }
+#side-actions .side-review-tools > button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; min-width: 0; height: auto; min-height: 44px;
+  margin: 0; padding: 10px 12px; border: 1px solid transparent; border-radius: 12px;
+  background: transparent; color: var(--mut); font: 500 12.5px/1.35 var(--sans);
+  cursor: pointer; white-space: normal;
+}
+#side-actions .side-review-tools > button:hover {
+  background: var(--card); border-color: var(--line); color: var(--ink); transform: none;
+}
+#side-actions .side-review-tools svg { flex: 0 0 auto; }
+.side-exit-actions {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  width: 100%; flex: 0 0 100%; margin-top: 4px; padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.side-exit-actions > :only-child { grid-column: 1 / -1; }
+#side-actions .side-exit-actions .btn, .side-mode-card .side-exit-actions .btn {
+  width: 100%; margin: 0; min-width: 0; min-height: 46px; padding: 11px 12px;
+  white-space: normal; line-height: 1.35; font-size: 13px;
+  background: transparent; color: var(--mut); border: 1px solid var(--line);
+}
+.side-mode-card .side-exit-actions { margin-top: 18px; }
+@container (max-width: 380px) {
+  .side-review-actions { grid-template-columns: 1fr; }
+}
 .rangebar:has(.goal-target-marker) { margin-bottom: 22px; }
 .goal-target-marker { position: absolute; top: -4px; bottom: -4px; width: 3px; transform: translateX(-50%); background: #078569; box-shadow: 0 0 0 1px var(--card); border-radius: 2px; z-index: 2; }
 .goal-target-marker b { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font: 600 9px/1.4 var(--sans); color: #087760; padding-top: 3px; }
@@ -1982,11 +2039,13 @@ body.scan-confirm-open { overflow: hidden; }
    competing with Confirm on the review screen. */
 
 .side-feedback-backdrop {
-  position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center;
-  padding: 20px; background: rgba(12, 13, 15, 0.62); backdrop-filter: blur(5px);
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center; overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(12, 13, 15, 0.62); backdrop-filter: blur(5px);
 }
 .side-feedback-dialog {
-  width: min(520px, 100%); background: var(--card); color: var(--ink);
+  width: min(520px, 100%); margin: auto; flex: 0 0 auto; background: var(--card); color: var(--ink);
   border: 1px solid var(--line); border-radius: 24px; padding: 30px;
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.28);
 }
@@ -1996,6 +2055,13 @@ body.scan-confirm-open { overflow: hidden; }
 }
 .side-feedback-dialog p { color: var(--mut); font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
 .side-feedback-dialog .side-feedback-privacy { font-size: 12px; }
+.side-feedback-confirmation {
+  display: flex; align-items: flex-start; gap: 10px; margin: 18px 0 0;
+  padding: 14px; border: 1px solid var(--line); border-radius: 12px;
+  font: 500 13px/1.5 var(--sans); color: var(--ink); text-align: left; cursor: pointer;
+}
+.side-feedback-confirmation input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--acc); }
+.side-feedback-actions .btn:disabled { opacity: .45; cursor: not-allowed; }
 .side-feedback-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
 .side-feedback-thanks {
   display: block; font-family: var(--serif); font-size: 34px; color: var(--acc);

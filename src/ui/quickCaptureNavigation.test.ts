@@ -12,8 +12,14 @@ test("cancelled profile population choice returns to angle selection, not front 
   assert.match(chooser, /resetSexAsk\(\);\s+if \(onCancel\) \{\s+onCancel\(\);\s+return;/);
 });
 
-test("the combined tutorial describes the side photo as optional", () => {
+test("tutorials are view-specific and side capture remains an explicit optional step", () => {
   const tutorial = readFileSync(new URL("./photoTutorial.ts", import.meta.url), "utf8");
-  assert.match(tutorial, /optional side photo/);
-  assert.match(tutorial, /or skip it/);
+  const main = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+  assert.match(tutorial, /export function offerTutorial\(view: TutorialView,/);
+  assert.doesNotMatch(tutorial, /offerBothTutorials/);
+  assert.equal(main.match(/offerTutorial\("front",/g)?.length, 2, "upload and camera both start with the front guide only");
+  const invitation = main.slice(main.indexOf("const takeSide = await confirmScanAction"), main.indexOf("function startSide()"));
+  assert.match(invitation, /cancelLabel: "Use front only"/);
+  assert.match(invitation, /if \(takeSide\) \{\s*startSide\(\);\s*return;\s*\}/);
+  assert.match(invitation, /await gateAnalysis\(null, token\)/, "declining side capture still opens the front analysis");
 });

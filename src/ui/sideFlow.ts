@@ -100,6 +100,8 @@ interface SideCtx {
   method?: "camera" | "upload";
   /** Standalone profile result rather than the second view of a main scan. */
   standalone?: boolean;
+  /** Explicitly enabled only for a signed-in adult scanning their own face. */
+  feedbackEligible?: boolean;
   onDone: (
     report: Report,
     points: SidePoints,
@@ -202,9 +204,9 @@ function renderSideCaptureCopy(copy: HTMLElement, method?: SideCtx["method"], st
     ? "Choose a clear side-profile photo with your whole forehead and chin visible. Landscape and portrait photos are both accepted."
     : sideCaptureInstruction();
   copy.innerHTML = `<h2 class="side-title">Now the side profile</h2>
-    <p class="side-sub">${standalone ? "This is a profile-only scan" : "Second of two"}. Chin projection, jaw angle and facial convexity can only be measured from the side. Face exactly sideways with one ear toward the camera, your head level, and your full forehead and chin visible.</p>
+    <p class="side-sub">${standalone ? "This side view measures" : "Your front photo is ready. This optional view adds"} chin projection, jaw-angle and profile measurements. Face fully sideways, with your head level and one ear toward the camera.</p>
     <p class="side-sub">${captureHelp}</p>
-    <p class="side-sub">Afterwards, TrueMax places thirteen points for you to review. If any missed, choose edit and drag only those points before confirming.</p>
+    <p class="side-sub">Next, review thirteen starting points. You can drag any that missed, retake the photo${standalone ? " or cancel" : " or use your front photo only"}.</p>
     ${placementChoiceControl()}`;
   copy.querySelector<HTMLButtonElement>("[data-side-placement-choice]")?.addEventListener("click", () => {
     clearSidePlacementChoice();
@@ -326,7 +328,7 @@ export function openSideCapture(ctx: SideCtx): void {
   e.actions.innerHTML = camBtn + pickBtn;
   e.actions.insertAdjacentHTML(
     "beforeend",
-    `<button class="btn cancel" id="side-quit">Cancel</button>`,
+    `<button class="btn cancel" id="side-quit">${ctx.onSkip ? "Back to front photo" : "Cancel"}</button>`,
   );
   document.getElementById("side-cam")?.addEventListener("click", () => openSideCamera(ctx));
   document.getElementById("side-pick")!.onclick = () => e.input.click();
@@ -351,7 +353,7 @@ function appendSideExitActions(host: HTMLElement, ctx: SideCtx, allowRetake = tr
     const retakeButton = document.createElement("button");
     retakeButton.type = "button";
     retakeButton.className = "btn gho";
-    retakeButton.textContent = "Take another side photo";
+    retakeButton.textContent = "Retake side photo";
     retakeButton.onclick = () => openSideCapture(ctx);
     row.appendChild(retakeButton);
   }
@@ -359,7 +361,7 @@ function appendSideExitActions(host: HTMLElement, ctx: SideCtx, allowRetake = tr
     const skipButton = document.createElement("button");
     skipButton.type = "button";
     skipButton.className = "btn cancel";
-    skipButton.textContent = "Skip side and see front analysis";
+    skipButton.textContent = "Use front only";
     skipButton.onclick = () => skipSide(ctx);
     row.appendChild(skipButton);
   } else if (allowRetake) {
@@ -604,10 +606,10 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // out.
   void cameraCount().then((n) => {
     if (!ownsCamera()) return;
-    e.swap.classList.toggle("hidden", n < 2 || !sideCam);
+    e.swap?.classList.toggle("hidden", n < 2 || !sideCam);
   });
-  e.swap.disabled = false;
-  e.swap.onclick = async () => {
+  if (e.swap) e.swap.disabled = false;
+  if (e.swap) e.swap.onclick = async () => {
     if (!ownsCamera() || !sideCam) return;
     const swappingCamera = sideCam;
     e.swap.disabled = true;
@@ -703,8 +705,8 @@ function stopSideCamera(): void {
   e.live.classList.add("hidden");
   e.turnCue.classList.add("hidden");
   e.frame.classList.remove("live");
-  e.swap.classList.add("hidden");
-  e.swap.onclick = null;
+  e.swap?.classList.add("hidden");
+  if (e.swap) e.swap.onclick = null;
 }
 
 // Re-open the verifier on a profile that has already been captured, so the
@@ -1430,14 +1432,19 @@ function mountVerify(
         ? "The placement request is finished and TrueMax kept no copy. Sharing a correction later is a separate choice."
         : "Nothing leaves this device unless you separately choose to share it."}</p>`;
     e.actions.innerHTML = `
+      <div class="side-review-actions">
+        <button class="btn side-confirm" id="side-go" type="button">Confirm points</button>
+        <button class="btn gho" id="side-guided" type="button">Review one by one</button>
+      </div>
+      <div class="side-review-tools">
       <button class="side-reset-glyph" id="side-reset" type="button" aria-label="Reset points to the automatic placement" title="Reset to automatic placement">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3.5 8a9 9 0 1 1-1 6.5"/><path d="M3 3v5h5"/>
         </svg>
+        <span>Reset points</span>
       </button>
-      <button class="btn side-confirm" id="side-go">Confirm</button>
-      <button class="btn gho" id="side-guided">One by one</button>
-      <button class="btn gho" id="side-wrong">Points are wrong</button>`;
+      <button class="btn gho" id="side-wrong" type="button">Points look wrong</button>
+      </div>`;
     appendSideExitActions(e.actions, ctx);
     // The in-panel accuracy question that used to live here is gone. It only
     // ever appeared on the automatic path, and that path no longer arrives at
@@ -1466,7 +1473,7 @@ function mountVerify(
       // the moment an app starts feeling like a funnel, so the send waits
       // until after Confirm, when sign-in happens anyway.
       verificationAnswer = "no";
-      consentAnswer = await askSideFeedbackConsent();
+      consentAnswer = ctx.feedbackEligible === true ? await askSideFeedbackConsent() : false;
       if (!isMounted()) return;
       const wrongButton = document.getElementById("side-wrong");
       if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
@@ -1613,9 +1620,9 @@ function mountVerify(
       //                            ask now, framed around the edit.
       //   Confirmed untouched    — the seed was right and there is nothing to
       //                            teach. Asking would be pure friction.
-      let consented = opts.consented ?? consentAnswer ?? false;
+      let consented = ctx.feedbackEligible === true && (opts.consented ?? consentAnswer ?? false);
       const moved = movedSidePointIds(automaticPoints, correctedPoints);
-      if (shouldAskSideCorrectionConsent(Boolean(opts.auto), consentAnswer, moved.length)) {
+      if (ctx.feedbackEligible === true && shouldAskSideCorrectionConsent(Boolean(opts.auto), consentAnswer, moved.length)) {
         consentAnswer = await askSideFeedbackConsent(true);
         consented = consentAnswer;
       }
@@ -1629,6 +1636,7 @@ function mountVerify(
         seedVersion,
         { verificationAnswer, finalPlacementVerified: opts.verified ?? true },
       );
+      if (feedback) feedback.subjectConfirmation = "my-own-adult-face";
       e.cap.textContent = "ANALYZED";
       const reviewed = document.createElement("canvas");
       reviewed.width = e.canvas.width;
@@ -1701,7 +1709,7 @@ function mountVerify(
     if (right === null || !isMounted()) return;
     verificationAnswer = right ? "yes" : "no";
     if (right) {
-      consentAnswer = await askSideFeedbackConsent();
+      consentAnswer = ctx.feedbackEligible === true ? await askSideFeedbackConsent() : false;
       if (!isMounted()) return;
       // A refused confirm (a reading outside what a face can be, or a point
       // pair that cannot both be right) leaves the person on this screen
@@ -1734,7 +1742,7 @@ function mountVerify(
       return;
     }
 
-    consentAnswer = await askSideFeedbackConsent();
+    consentAnswer = ctx.feedbackEligible === true ? await askSideFeedbackConsent() : false;
     if (!isMounted()) return;
     if (!(await confirmPlacement({ auto: true, verified: false, consented: consentAnswer })) && verifier) {
       releaseFurniture();
@@ -2034,7 +2042,7 @@ function askSideQuestion(opts: {
 function trapSideDialogFocus(backdrop: HTMLElement): void {
   backdrop.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
-    const buttons = [...backdrop.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
+    const buttons = [...backdrop.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), a[href]")];
     if (!buttons.length) return;
     const first = buttons[0];
     const last = buttons[buttons.length - 1];
@@ -2229,14 +2237,20 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
         ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them for our team to review. Reviewed corrections can help improve future placement; they do not automatically change the next scan."
         : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
+      <label class="side-feedback-confirmation"><input type="checkbox" id="side-feedback-own-face" />
+        <span>This is my own face, I’m 18 or older, and I agree to this private contribution.</span>
+      </label>
       <div class="side-feedback-actions">
-        <button type="button" class="btn gho" data-choice="no">No, keep it on this device</button>
-        <button type="button" class="btn pri" data-choice="yes">Yes, share this scan</button>
+        <button type="button" class="btn gho" data-choice="no">No, don't contribute</button>
+        <button type="button" class="btn pri" data-choice="yes" disabled>Yes, contribute this scan</button>
       </div>
     </section>`;
     document.body.appendChild(backdrop);
     const no = backdrop.querySelector<HTMLButtonElement>('[data-choice="no"]')!;
     const yes = backdrop.querySelector<HTMLButtonElement>('[data-choice="yes"]')!;
+    const subject = backdrop.querySelector<HTMLInputElement>("#side-feedback-own-face")!;
+    subject.onchange = () => { yes.disabled = !subject.checked; };
+    trapSideDialogFocus(backdrop);
     let finished = false;
     let thanksTimer = 0;
     // Cancelled by close(), which is also the identity-change path. No consent
@@ -2264,6 +2278,7 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
     });
     const finish = (choice: boolean) => {
       if (finished) return;
+      if (choice && !subject.checked) return;
       finished = true;
       if (!choice) {
         untrack();

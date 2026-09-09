@@ -7,6 +7,8 @@ export interface ScanConfirmOptions {
   confirmLabel: string;
   cancelLabel: string;
   preview?: HTMLCanvasElement;
+  /** An illustrative capture example, never the person's own photograph. */
+  example?: { src: string; alt: string; caption: string };
   tone?: ScanConfirmTone;
 }
 
@@ -76,6 +78,20 @@ export function confirmScanAction(options: ScanConfirmOptions): Promise<boolean>
       figure.appendChild(canvas);
       card.appendChild(figure);
     }
+    if (options.example && !options.preview) {
+      const figure = document.createElement("figure");
+      figure.className = "scan-confirm-example";
+      const image = document.createElement("img");
+      image.src = options.example.src;
+      image.alt = options.example.alt;
+      image.decoding = "async";
+      const caption = document.createElement("figcaption");
+      caption.textContent = options.example.caption;
+      // The instructions remain usable if the illustration fails to load.
+      image.onerror = () => { image.hidden = true; };
+      figure.append(image, caption);
+      card.appendChild(figure);
+    }
 
     const copy = document.createElement("p");
     copy.className = "scan-confirm-copy";
@@ -109,9 +125,19 @@ export function confirmScanAction(options: ScanConfirmOptions): Promise<boolean>
       resolve(answer);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      finish(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === "Tab") {
+        // Keep keyboard navigation inside the decision, not on a hidden scan.
+        if (event.shiftKey && document.activeElement === cancel) {
+          event.preventDefault();
+          confirm.focus();
+        } else if (!event.shiftKey && document.activeElement === confirm) {
+          event.preventDefault();
+          cancel.focus();
+        }
+      }
     };
     closeActive = () => finish(false);
     document.addEventListener("keydown", onKey);

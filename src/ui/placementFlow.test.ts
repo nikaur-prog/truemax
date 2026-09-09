@@ -22,7 +22,7 @@ test("taking the automatic placement never reaches a confirm screen", () => {
   assert.match(auto, /confirmPlacement\(\{ auto: true, verified: false, consented: consentAnswer \}\)/);
   // Remember the sharing answer so a refused measurement followed by a
   // manual correction cannot ask again after an explicit No.
-  assert.equal(auto.match(/consentAnswer = await askSideFeedbackConsent\(\)/g)?.length, 2);
+  assert.equal(auto.match(/consentAnswer = ctx\.feedbackEligible === true \? await askSideFeedbackConsent\(\) : false/g)?.length, 2);
   // And the only path back to the review row is the one where a person chose
   // to edit, where the row is the tool they asked for...
   assert.match(auto, /if \(!useAnyway\) \{[\s\S]*?showGuidedActions\(\);/);
@@ -90,13 +90,11 @@ test("the primary confirmation is first in the review order and reads as success
   assert.match(css, /\.btn\.side-confirm\s*\{[^}]*background:\s*var\(--up\)/s);
 });
 
-test("consent is asked on every terminal branch", () => {
-  // Whether the points were right, wrong-and-fixed, or wrong-and-left, the
-  // correction is the thing that teaches the seeder. Missing the ask on any
-  // branch loses exactly the cases worth learning from.
+test("eligible adults can contribute on either automatic terminal branch", () => {
   const auto = src.slice(src.indexOf("const afterAutomatic"), src.indexOf("if (startInGuidedMode)"));
   const asks = auto.match(/askSideFeedbackConsent\(\)/g) ?? [];
   assert.equal(asks.length, 2, "both non-editing branches must ask");
+  assert.equal(auto.match(/ctx\.feedbackEligible === true \? await askSideFeedbackConsent\(\) : false/g)?.length, 2);
 });
 
 // The engine has always known when a placement is impossible. It just said so

@@ -2,6 +2,8 @@ import { REGION_NAMES } from "./scoring.js";
 import type { Report, ScoredMetric } from "./types.js";
 import type { VerdictTone } from "./analysisMode.js";
 import { ordinal } from "./ordinal.js";
+import { directionFor } from "./metrics.js";
+import { RELIABLE_MIN, reliabilityOf } from "./reliability.js";
 
 // ---------------------------------------------------------------------------
 // What Max is allowed to know.
@@ -31,7 +33,7 @@ export interface MaxChatContext {
   potential?: number;
   pillars: Array<{ label: string; score: number }>;
   regions: Array<{ label: string; percentile: number }>;
-  measurements: Array<{ label: string; reading: string; target?: string; standing?: string }>;
+  measurements: Array<{ label: string; reading: string; target?: string; standing?: string; caveat?: string; reliability?: number; view?: "front" | "side" }>;
   focus: string[];
   activePlan?: string[];
   scans: number;
@@ -48,7 +50,9 @@ function reading(m: ScoredMetric): string {
   return `${m.value.toFixed(m.def.decimals)}${m.def.unit}`;
 }
 
-function target(m: ScoredMetric): string {
+function target(m: ScoredMetric, sex: Report["sex"]): string | undefined {
+  // The open end of a directional display band is cosmetic, not a goal.
+  if (directionFor(m.def, sex) !== "band") return undefined;
   const [lo, hi] = m.idealRange;
   return `${lo.toFixed(m.def.decimals)} to ${hi.toFixed(m.def.decimals)}${m.def.unit}`;
 }
@@ -57,11 +61,11 @@ function target(m: ScoredMetric): string {
 // model handed "-1.4" will happily invent what that means.
 function standing(m: ScoredMetric): string {
   const p = Math.round(m.percentile);
-  if (p >= 85) return `top ${100 - p}%, a strength`;
+  if (p >= 85) return `${ordinal(Math.min(99, p))} model percentile`;
   if (p >= 60) return `${ordinal(p)} percentile, above average`;
   if (p >= 40) return `${ordinal(p)} percentile, average`;
   if (p >= 15) return `${ordinal(p)} percentile, below average`;
-  return `${ordinal(p)} percentile, the weakest end`;
+  return `${ordinal(Math.max(1, p))} percentile, below reference`;
 }
 
 // Whether the measurement can move at all without surgery. Max is forbidden
@@ -84,7 +88,7 @@ function movability(m: ScoredMetric): string {
   if (m.def.fixability >= 0.2) {
     return "the photographed soft tissue can move a little; this scan does not identify the cause, and the underlying structure does not move";
   }
-  return "essentially fixed skeletal geometry, not changeable";
+  return "not a routine target; photographed geometry can still vary with point placement and pose";
 }
 
 export interface ContextInput {
@@ -100,7 +104,12 @@ export interface ContextInput {
 }
 
 export function buildMaxContext({ report, tone, scans, potential, movement, activePlan }: ContextInput): MaxChatContext {
-  const byStanding = [...report.metrics].sort((a, b) => a.zEff - b.zEff);
+  // Do not hand the coach a false priority that the report calls unavailable
+  // or too unstable to interpret. Reliability is a metric-level estimate,
+  // not proof of correct landmarks on this particular photograph.
+  const byStanding = report.metrics
+    .filter((m) => !m.implausible && Number.isFinite(m.value) && Number.isFinite(m.zEff) && reliabilityOf(m.def.id) >= RELIABLE_MIN)
+    .sort((a, b) => a.zEff - b.zEff);
   const weakest = byStanding.slice(0, WEAKEST);
   const strongest = byStanding.slice(-STRONGEST).reverse();
   // A short table can overlap at both ends. Sending one measurement twice is
@@ -122,20 +131,26 @@ export function buildMaxContext({ report, tone, scans, potential, movement, acti
       label,
       score: Math.round(score * 10) / 10,
     })),
-    regions: report.regions.map((r) => ({
+    regions: report.regions.filter((r) => r.metrics.some((m) => !m.implausible && Number.isFinite(m.value)) && r.reliability >= RELIABLE_MIN).map((r) => ({
       label: REGION_NAMES[r.region],
       percentile: Math.round(r.percentile),
     })),
     measurements: picked.map((m) => ({
       label: m.def.name,
       reading: reading(m),
-      target: target(m),
-      standing: `${standing(m)}, ${movability(m)}`,
+      target: target(m, report.sex),
+      standing: standing(m),
+      reliability: reliabilityOf(m.def.id),
+      view: m.def.view,
+      caveat: m.def.id === "gonialAngle"
+        ? "Photographic surface angle, not an X-ray skeletal angle. Its borrowed scoring reference is not validated for these points. Review the jaw corner, hinge and chin before interpreting; do not call the jaw good or bad from this number."
+        : `${movability(m)}. ${directionFor(m.def, report.sex) === "band" ? "The model band is a comparison, not a prescribed goal." : `This model favours ${directionFor(m.def, report.sex)} values; no personal target is established.`}`,
     })),
     // The weak end again, as the thing the plan points at. Named rather than
     // described, because the routine copy itself is long and Max writes his own
     // sentences anyway.
-    focus: weakest.slice(0, 4).map((m) => `${m.def.name}, currently ${reading(m)}, ${movability(m)}`),
+    focus: weakest.filter((m) => m.def.fixability >= 0.2 && m.conformance < 0.999 && m.def.id !== "gonialAngle")
+      .slice(0, 4).map((m) => `${m.def.name}, currently ${reading(m)}; discuss only if it matches their goal, not proof a routine is needed`),
     activePlan: activePlan?.slice(0, 8),
     scans,
     movement,

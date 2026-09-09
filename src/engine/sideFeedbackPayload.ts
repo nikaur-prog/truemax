@@ -23,6 +23,8 @@ export interface SideFeedbackIntent {
   seedMethod: SideSeedMethod;
   seedVersion?: string;
   review?: SideFeedbackReview;
+  /** Explicit per-submission self/adult declaration, never inferred from a photo. */
+  subjectConfirmation?: "my-own-adult-face";
 }
 
 export interface SideFeedbackMetadata {
@@ -37,6 +39,7 @@ export interface SideFeedbackMetadata {
   automaticPoints: SidePoints;
   correctedPoints: SidePoints;
   review?: SideFeedbackReview;
+  subjectConfirmation?: "my-own-adult-face";
 }
 
 export function cloneSidePoints(points: SidePoints): SidePoints {
@@ -92,6 +95,7 @@ export function sideFeedbackMetadataIssues(value: unknown): string[] {
   }
   if (m.seedVersion !== undefined && !validSeedVersion(m.seedVersion)) issues.push("Seed version is invalid");
   if (m.review !== undefined && !validReview(m.review)) issues.push("Placement review is invalid");
+  if (m.subjectConfirmation !== undefined && m.subjectConfirmation !== "my-own-adult-face") issues.push("Subject confirmation is invalid");
   if (dimension(m.width) && dimension(m.height)) {
     issues.push(...pointIssues(m.automaticPoints, m.width, m.height, "Automatic"));
     issues.push(...pointIssues(m.correctedPoints, m.width, m.height, "Corrected"));
@@ -111,6 +115,7 @@ export function sideFeedbackIntentIssues(value: unknown, width: number, height: 
   }
   if (intent.seedVersion !== undefined && !validSeedVersion(intent.seedVersion)) issues.push("Seed version is invalid");
   if (intent.review !== undefined && !validReview(intent.review)) issues.push("Placement review is invalid");
+  if (intent.subjectConfirmation !== undefined && intent.subjectConfirmation !== "my-own-adult-face") issues.push("Subject confirmation is invalid");
   issues.push(...pointIssues(intent.automaticPoints, width, height, "Automatic"));
   return issues.slice(0, 6);
 }
@@ -122,6 +127,7 @@ export function sideFeedbackProvenance(metadata: SideFeedbackMetadata) {
   const finalVerified = metadata.review?.finalPlacementVerified ?? null;
   return {
     source: "explicit_consent_upload",
+    subjectConfirmation: metadata.subjectConfirmation ?? null,
     provenanceVersion: "side-review-v1",
     verificationAnswer: answer,
     finalPlacementVerified: finalVerified,

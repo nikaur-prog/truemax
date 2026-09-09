@@ -56,13 +56,13 @@ test("missing and non-finite jaw points remain unavailable instead of receiving 
   }
 });
 
-test("the existing scale calls 117 and 127 degrees balanced and does not mistake 117 for a jaw weakness", () => {
+test("the existing scale calls 117 and 127 degrees mid-range and does not mistake 117 for a jaw weakness", () => {
   // These are regression observations of the current mapping, not validation
   // of its population reference or a target fitted to another product.
   for (const sex of ["male", "female"] as const) for (const angle of [117, 127]) {
     const report = analyzeSide(withAngle(angle), 1, sex);
     const metric = report.metrics.find((item) => item.def.id === "gonialAngle")!;
-    assert.equal(metricScoreLabel(metric.score, metric.def.name), "Balanced gonial angle");
+    assert.equal(metricScoreLabel(metric.score, metric.def.name), "Mid-range model score for gonial angle");
     if (angle === 117) {
       assert.ok(metric.conformance >= 0.999);
       assert.ok(metric.zEff > 0);

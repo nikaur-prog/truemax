@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAdult } from "../src/engine/age.js";
 import {
   movedSidePointIds,
   normalizedSidePoints,
@@ -34,6 +35,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 // Listing never returns the photo path, hashes, landmarks, notes or review
 // outcome. Those fields are for the private review process, not account UI.
 export const SIDE_FEEDBACK_LIST_FIELDS = "id,scan_id,created_at,expires_at,consent_version";
+
+/** Account DOB is read server-side; the subject declaration is a separate opt-in. */
+export function sideContributionEligible(dateOfBirth: string | null, subjectConfirmation: unknown, now = new Date()): boolean {
+  return subjectConfirmation === "my-own-adult-face"
+    && typeof dateOfBirth === "string" && isAdult(dateOfBirth, now);
+}
 
 interface ExistingFeedback {
   id: string;
@@ -227,7 +234,20 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: "Side photo must be a JPEG under 2 MB." }, 400);
     }
 
-    const metadata = parseSideFeedbackMetadata(rawMetadata);
+    let metadata: SideFeedbackMetadata;
+    try {
+      metadata = parseSideFeedbackMetadata(rawMetadata);
+    } catch (error) {
+      return json({ error: safeMessage(error) }, 400);
+    }
+    const admin = getSupabaseAdmin();
+    const { data: profile, error: profileError } = await admin.from("profiles")
+      .select("date_of_birth").eq("user_id", user.id)
+      .maybeSingle<{ date_of_birth: string | null }>();
+    if (profileError) throw new Error(`Contribution eligibility could not be checked: ${profileError.message}`);
+    if (!sideContributionEligible(profile?.date_of_birth ?? null, metadata.subjectConfirmation)) {
+      return json({ error: "Contributions are optional and only available to adults sharing their own face. Your analysis is unchanged." }, 403);
+    }
     const bytes = new Uint8Array(await photo.arrayBuffer());
     if (!isJpeg(bytes)) return json({ error: "Side photo is not a valid JPEG." }, 400);
     const dimensions = jpegDimensions(bytes);
@@ -237,7 +257,6 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: "Side photo dimensions do not match its landmark data." }, 400);
     }
 
-    const admin = getSupabaseAdmin();
     const { data: existing, error: existingError } = await admin
       .from("side_landmark_feedback")
       .select("id,scan_id,user_id,consent_version")
@@ -252,7 +271,10 @@ export async function POST(request: Request): Promise<Response> {
         scan_id: existing.scan_id,
         event_type: "granted",
         consent_version: existing.consent_version,
-        details: { source: "idempotent_retry" },
+        // A prior row can survive a failed grant insert and rollback. Preserve
+        // the freshly validated subject declaration when repairing its grant,
+        // but do not attach retry geometry to the original saved photograph.
+        details: { source: "idempotent_retry", subjectConfirmation: metadata.subjectConfirmation },
       }, {
         onConflict: "submission_id,event_type",
         ignoreDuplicates: true,

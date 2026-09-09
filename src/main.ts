@@ -58,6 +58,7 @@ import { openFrontEdit } from "./ui/frontEdit.js";
 import { analyzeSide } from "./engine/scoring.js";
 import type { SidePoints } from "./engine/sideMetrics.js";
 import { submitSideCorrectionFeedback } from "./engine/sideFeedback.js";
+import { sideFeedbackEligible } from "./engine/sideFeedbackEligibility.js";
 import type { SideFeedbackIntent, SideSeedMethod } from "./engine/sideFeedbackPayload.js";
 import { cameraCount, isSupported, overrideGlasses, resetGlassesOverride, startCamera } from "./ui/camera.js";
 import {
@@ -112,7 +113,7 @@ import { analyzeSkin } from "./engine/skin.js";
 import { detectSkinPatterns } from "./engine/skinPatterns.js";
 import { softTissueFromLandmarks } from "./engine/softTissue.js";
 import { storeSex, storedSex } from "./engine/sexPref.js";
-import { offerBothTutorials, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
+import { offerTutorial, playTutorial, tutorialSuppressed } from "./ui/photoTutorial.js";
 import { soundChapter } from "./ui/scanSounds.js";
 import { detectOcclusion } from "./engine/occlusion.js";
 import { frontPhotoRejection, frontPhotoWarnings, landmarkBox } from "./engine/photoEligibility.js";
@@ -1065,7 +1066,7 @@ el.btnUpload.addEventListener("click", () => {
     if (generation !== scanGeneration) return;
     void ensureSex(() => {
       if (generation !== scanGeneration) return;
-      offerBothTutorials(() => {
+      offerTutorial("front", () => {
         if (generation !== scanGeneration) return;
         filePickerGeneration = generation;
         el.fileInput.click();
@@ -1552,11 +1553,9 @@ el.btnCamera.addEventListener("click", async () => {
       if (generation !== scanGeneration) return;
       void ensureSex(() => {
         if (generation !== scanGeneration) return;
-        // After the reference population is settled and before the camera
-        // opens: the tutorial is about the photographs, so it belongs at the
-        // last moment where neither of them exists yet. Both, here, rather
-        // than the front now and the profile later — see offerBothTutorials.
-        offerBothTutorials(() => {
+        // Teach only the photograph the person is taking now. The side is
+        // optional, so its tutorial belongs after that separate choice.
+        offerTutorial("front", () => {
           if (generation === scanGeneration) void openCamera();
         });
       });
@@ -2217,10 +2216,15 @@ async function handleCanvas(
   el.status.innerHTML = "<b>Front captured.</b> Add a profile for the full analysis, or continue with the front.";
   const takeSide = await confirmScanAction({
     eyebrow: "OPTIONAL SECOND VIEW",
-    title: "And now the side photo",
-    copy: "Turn your head 90 degrees so one ear faces the camera. Keep your head level and your full forehead and chin visible. This adds projection, jaw-angle and profile measurements, but you can skip it and see your front analysis now.",
-    confirmLabel: "Take side photo",
-    cancelLabel: "Skip side photo",
+    title: "Add a side photo?",
+    copy: "A side view adds chin projection, jaw-angle and profile measurements that the front cannot show. Aim for a full side view like this, with your head level. You can add it now or continue with your front analysis.",
+    confirmLabel: "Add side photo",
+    cancelLabel: "Use front only",
+    example: {
+      src: "/tutorial/side-do.jpg",
+      alt: "Example side photo: one ear facing the camera, head level, forehead and chin visible",
+      caption: "Example only · A full side view, head level",
+    },
     tone: "positive",
   });
   if (!scanIsCurrent(token, generation)) return;
@@ -2321,7 +2325,17 @@ function startConsentedSideFeedback(): void {
   feedbackInFlight = submitConsentedSideFeedback(generation);
 }
 
+function currentSideFeedbackEligible(): boolean {
+  return sideFeedbackEligible({
+    knownAdult, subjectAsked, isGuest: scanSubject !== null,
+    owner: activeScanOwner(), profileOwner: knownProfileOwner,
+  });
+}
+
 async function submitConsentedSideFeedback(generation = scanGeneration): Promise<void> {
+  // A restored capture can be attributed to someone else by the late chooser.
+  // An old own-face intent is not permission to upload that guest's photograph.
+  if (!currentSideFeedbackEligible()) return;
   const side = lastSide;
   if (!side?.feedback || side.feedbackSubmitted || !side.photo) return;
   const token = scanSession.currentToken();
@@ -2849,12 +2863,15 @@ async function runFullAnalysis(
       }, {
         scanId: token.scanId,
         sex: selectedSex,
+        feedbackEligible: currentSideFeedbackEligible(),
         onBack: () => {
           closeSide();
           scanSession.transition(token, "results");
           el.main.classList.remove("hidden");
         },
         onDone: async (sideReport, points, faceDir, review) => {
+          if (!scanIsCurrent(token, generation)
+            || scanSession.snapshot().owner !== activeScanOwner()) return;
           closeSide();
           lastSide = {
             points,
@@ -3422,6 +3439,7 @@ function startSide(): void {
   const openSide = () => openSideCapture({
     scanId: token.scanId,
     sex: selectedSex,
+    feedbackEligible: currentSideFeedbackEligible(),
     performance: scanTiming ?? undefined,
     // Carry the front's capture method so the side does not make the user
     // switch: camera stays camera, upload stays upload.
@@ -3473,23 +3491,18 @@ function startSide(): void {
       await gateAnalysis(sideReport, token);
     },
   });
-  // No offer here any more. Both tutorials are shown together before the
-  // FRONT photograph (see offerBothTutorials), because asking again at this
-  // point meant interrupting the same scan twice — and doing it at the moment
-  // somebody has just been told to turn away from the screen, with a dialogue
-  // on the screen. The information button on the frame reaches the profile
-  // tutorial on demand for anyone who wants it again.
-  //
-  // A bell first. This is the one boundary in a scan — one photograph is
-  // finished and a different one is being asked for — and it arrives at the
-  // exact moment the instructions are telling somebody to turn their head away
-  // from the screen those instructions are on. A sound is the only channel
-  // that still reaches them.
+  // The person has chosen the optional side view. Teach it here, while they
+  // can still look at the screen, before permission and the camera open.
+  // Suppression is per view; declining the front tutorial never declines this.
   // Automatic cloud placement needs one explicit, remembered permission, but
   // the decision belongs before capture. Asking after the photograph is taken
   // makes a normal continuation look like an unexpected upload request and
   // leaves the user staring at a modal instead of the promised loading state.
   void (async () => {
+    if (!tutorialSuppressed("side")) {
+      await new Promise<void>((resolve) => playTutorial("side", false, resolve));
+    }
+    if (!scanSession.isCurrent(token)) return;
     if (!(await prepareSidePlacementChoice())) {
       // Escape means "do not send the profile", not "discard the completed
       // front scan". Continue to the result that is already available.
