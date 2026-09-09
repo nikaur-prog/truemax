@@ -66,6 +66,15 @@ import type { PhotoQuality } from "./engine/photoQuality.js";
 import { LOOKS, applyEnhance, lookFor } from "./engine/enhance.js";
 import { closeCarouselCreator, openCarouselCreator } from "./ui/carouselCreator.js";
 import { decodeImageDataUrl } from "./ui/dataUrl.js";
+import { calibrationVerdictSnapshot } from "./ui/calibrationVerdict.js";
+import type { CalibrationVerdictSnapshot } from "./ui/calibrationVerdict.js";
+import { setSidePriorSuspended } from "./engine/sidePrior.js";
+
+// Quick scans different people, even when the operator is the account owner.
+// Never project that owner's last confirmed ear/jaw geometry onto the next
+// creator/calibration subject. This is page-local; their saved prior remains
+// available to personal scans in the main app.
+setSidePriorSuspended(true);
 
 // ---------------------------------------------------------------------------
 // The quick breakdown.
@@ -778,6 +787,7 @@ function beginQuickProfileCapture(): void {
 
 function enterMode(next: QuickMode): void {
   quickScanGeneration += 1;
+  clearPending();
   last = null;
   lastProfile = null;
   shown = null;
@@ -899,7 +909,7 @@ function updateModeStep(): void {
     el.modeStep.textContent =
       mode === "analysis"
         ? creatorView === "profile" ? "One profile · 13 checked points" : "One front photo"
-        : mode === "calibrate" ? "One photo · then your rating" : "";
+        : mode === "calibrate" ? "One or both views · optional rating" : "";
     return;
   }
   if (reelKind === "single") {
@@ -914,6 +924,9 @@ function updateModeStep(): void {
 
 function leaveMode(): void {
   quickScanGeneration += 1;
+  clearPending();
+  // Drop saved-verdict handlers and their capture-owned export media on exit.
+  el.calBody.replaceChildren();
   last = null;
   lastProfile = null;
   shown = null;
@@ -1120,7 +1133,7 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
   void submitSideCorrectionFeedback(upload.photo, upload.points, upload.faceDir, upload.feedback)
     .then((result) => {
       if (result.ok) {
-        setShareStatus("Side correction shared: it will teach the automatic placement.");
+        setShareStatus("Side correction shared privately for review. Automatic placement has not changed.");
       } else if (result.rateLimited) {
         // Retrying a limit would return the same answer all day, so nothing is
         // kept: the correction is declined, not lost in transit.
@@ -1170,9 +1183,10 @@ function renderFaceSlots(): void {
     </div>
     <button type="button" class="btn pri q-slot-go" id="q-slot-go"
       ${pendingFront || pendingSide ? "" : "disabled"}>Analyse</button>
-    <p class="q-cal-hint">Either view on its own is worth having: a front-only
-    face still carries every front metric. Both together is what lets a side
-    measurement ever be checked against a human rating.</p>
+    <p class="q-cal-hint">Add either view or both. Ratings are optional; you can
+    save measurements without judging attractiveness. Side-point corrections
+    are separate and are shared only if you choose to. Saving a face does not
+    automatically train the scanner or change anyone's scores.</p>
     <p class="q-cal-hint" id="q-slot-share" role="status">${shareStatus}</p>
     <button type="button" class="btn gho${failedUpload ? "" : " hidden"}" id="q-slot-retry">Retry sending the correction</button>
     <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
@@ -1394,6 +1408,14 @@ function renderRatingStep(r: Report): void {
   const msg = document.getElementById("q-cal-msg")!;
   num.focus();
   const store = (rating: number | null) => {
+    const verdict = calibrationVerdictSnapshot(r, {
+      front: pendingFront,
+      side: pendingSide,
+      frontPhoto: pendingFrontShot,
+      frontLandmarks: pendingFrontLandmarks,
+      sidePhoto: pendingSidePhoto,
+      sidePoints: pendingSidePoints,
+    });
     addRatedFace(
       r,
       rating,
@@ -1403,19 +1425,16 @@ function renderRatingStep(r: Report): void {
       // needing scrubbing when there is nothing in it to scrub.
       rating !== null && external.checked ? "external" : "self",
       label.value.trim() || undefined,
-      pendingSide ?? undefined,
+      verdict.additionalSide ?? undefined,
       {
         thumb: pendingFrontShot ? (toAvatarThumb(pendingFrontShot) ?? undefined) : undefined,
         // Front and side counted together: a misplaced point poisons the row
         // whichever view it came from.
-        suspect:
-          r.metrics.filter((m) => m.implausible).length +
-          (pendingSide?.metrics.filter((m) => m.implausible).length ?? 0),
+        suspect: verdict.suspect,
       },
     );
-    const held = pendingSide;
     clearPending();
-    renderVerdictStep(r, rating, held);
+    renderVerdictStep(r, rating, verdict);
   };
   // One button, and it always stores. The old shape — a primary button that
   // ERRORED on an empty box, with skipping exiled to a second button — made
@@ -1440,8 +1459,9 @@ function renderRatingStep(r: Report): void {
   num.onkeydown = (event) => { if (event.key === "Enter") commit(); };
 }
 
-function renderVerdictStep(r: Report, rating: number | null, side: Report | null = null): void {
-  const withSide = side !== null;
+function renderVerdictStep(r: Report, rating: number | null, capture: CalibrationVerdictSnapshot): void {
+  const side = capture.additionalSide;
+  const withSide = capture.hasSide;
   const gap = rating === null ? null : r.overall - rating;
   // Named rather than left as a number. "−2.3" is a figure; "the engine is
   // two points below you on this face" is the thing worth acting on, and the
@@ -1469,14 +1489,14 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
         <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
       </div>
       <p class="q-cal-said">It ${verdict}.${
-        withSide ? " Front and side both stored." : ""
+        side ? " Front and side both stored." : ""
       }</p>`
       }
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
         <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
         <button class="btn gho" id="q-cal-list">See the set</button>
-        ${withSide && pendingFrontShot && pendingFrontLandmarks && pendingSidePhoto && pendingSidePoints
+        ${capture.dual
           ? `<button class="btn gho" id="q-cal-dual">Export Dual-View MP4</button>`
           : ""}
       </div>
@@ -1511,9 +1531,9 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
   // screen where a front, a hand-confirmed side, and the merged report all
   // exist at once — the honesty condition for ever printing a side figure.
   const dualBtn = document.getElementById("q-cal-dual") as HTMLButtonElement | null;
-  if (dualBtn && side) {
+  const media = capture.dual;
+  if (dualBtn && side && media) {
     dualBtn.onclick = async () => {
-      if (!pendingFrontShot || !pendingFrontLandmarks || !pendingSidePhoto || !pendingSidePoints) return;
       const merged = mergeReports(r, side);
       if (!merged.views) return; // merge fell back to front-only: nothing dual to show
       dualBtn.disabled = true;
@@ -1527,15 +1547,15 @@ function renderVerdictStep(r: Report, rating: number | null, side: Report | null
       ].slice(0, 4);
       try {
         await downloadQuickVideo(
-          pendingFrontShot,
-          pendingFrontLandmarks,
+          media.frontPhoto,
+          media.frontLandmarks,
           r.sex,
           { overall: merged.overall, percentile: merged.overallPercentile, regions: [] },
           (p) => (dualBtn.textContent = p < 1 ? `Rendering ${Math.round(p * 100)}%` : "Saved"),
           "dual",
           {
-            sidePhoto: pendingSidePhoto,
-            sidePoints: pendingSidePoints,
+            sidePhoto: media.sidePhoto,
+            sidePoints: media.sidePoints,
             sideMetrics,
             frontScore: merged.views.front.score,
             sideScore: merged.views.side.score,
@@ -1574,6 +1594,7 @@ function renderCalibrationSet(): void {
   // The set is the one screen with no face in flight, so arriving here always
   // ends the current one.
   resetSexAsk();
+  clearPending();
   const faces = loadCalibrationSet();
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
   // Everything below counts only what may be fitted against. A withheld row is

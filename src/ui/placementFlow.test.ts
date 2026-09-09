@@ -46,6 +46,38 @@ test("the accuracy question is asked once, as a dialog, not in the panel", () =>
   assert.doesNotMatch(css, /\.side-accuracy/);
 });
 
+test("each automatic-placement review names the template-backed jaw points", () => {
+  const copy = [
+    src.slice(src.indexOf('e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points'), src.indexOf('e.actions.innerHTML = `', src.indexOf('const cloud = seedMethod'))),
+    src.slice(src.indexOf("const untouchedCopy ="), src.indexOf("return false;", src.indexOf("const untouchedCopy ="))),
+    src.slice(src.indexOf("const afterAutomatic ="), src.indexOf("if (right === null")),
+    src.slice(src.indexOf("function askPlacementMode("), src.indexOf("if (exitCtx) appendSideExitActions", src.indexOf("function askPlacementMode("))),
+  ];
+  for (const text of copy) {
+    assert.match(text, /jaw corner, jaw hinge and chin bottom/, "review must identify all three angle-defining points");
+    assert.match(text, /template/, "a cloud request does not prove every output point was observed");
+  }
+  assert.doesNotMatch(src, /(?:All thirteen points were identified|We identified all thirteen points) from this photo/);
+});
+
+test("measurement-range copy does not diagnose every failure as a misplaced landmark", () => {
+  const refusal = src.slice(src.indexOf('e.panelCopy.innerHTML = `<h2 class="side-title">A measurement needs review'), src.indexOf("return false;", src.indexOf('e.panelCopy.innerHTML = `<h2 class="side-title">A measurement needs review')));
+  assert.match(refusal, /current check\s+range/);
+  assert.match(refusal, /point placement, the photo, or a reference/);
+  assert.match(refusal, /scan has not been saved/);
+  const preview = src.slice(src.indexOf("function askPlacementMode("), src.indexOf("if (exitCtx) appendSideExitActions", src.indexOf("function askPlacementMode(")));
+  assert.match(preview, /Placement, capture conditions or the measurement reference/);
+  assert.doesNotMatch(src, /which means a point is in the wrong place rather than/);
+  assert.doesNotMatch(preview, /built from valid anatomy/);
+});
+
+test("sharing a correction promises review, not automatic next-scan retraining", () => {
+  assert.match(src, /Reviewed corrections can help improve future placement/);
+  assert.match(src, /they do not automatically change the next scan/);
+  assert.doesNotMatch(src, /directly teaches the automatic placement to land closer/);
+  assert.doesNotMatch(src, /teaches the placement to land right next time/);
+});
+
 test("the primary confirmation is first in the review order and reads as success", () => {
   const review = src.indexOf("const showReviewActions");
   const rowStart = src.indexOf('e.actions.innerHTML = `', review);

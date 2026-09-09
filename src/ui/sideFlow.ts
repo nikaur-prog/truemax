@@ -1425,9 +1425,7 @@ function mountVerify(
     }
     const cloud = seedMethod === "vision" || seedMethod === "fused";
     e.panelCopy.innerHTML = `<h2 class="side-title">Check the automatic points</h2>
-      <p class="side-sub">${cloud
-        ? "All thirteen points were identified from this photo. Drag any ring straight onto the feature it names, paying closest attention to the hairline, ear, jaw corner and neck point."
-        : "The front outline is read from the photo. Check the hairline, ear, jaw corner and neck point, then drag any ring that missed straight onto the feature it names."}</p>
+      <p class="side-sub">Automatic placement can include template-based starting positions. Check the jaw corner, jaw hinge and chin bottom closely, then the hairline, ear and neck point. Drag any ring onto the feature it names.</p>
       <p class="side-review-note">${cloud
         ? "The placement request is finished and TrueMax kept no copy. Sharing a correction later is a separate choice."
         : "Nothing leaves this device unless you separately choose to share it."}</p>`;
@@ -1474,7 +1472,7 @@ function mountVerify(
       if (wrongButton) wrongButton.textContent = consentAnswer ? "Thanks, noted" : "Noted";
       e.panelCopy.innerHTML = `<h2 class="side-title">Drag them where they belong</h2>
         <p class="side-sub">${consentAnswer
-          ? "Thank you: that photo and the correction will be shared privately after you confirm, and it directly teaches the automatic placement to land closer. Move each wrong ring onto the feature it names, then confirm."
+          ? "Thank you: that photo and the correction will be shared privately after you confirm for our team to review. Reviewed corrections can help improve future placement. Move each wrong ring onto the feature it names, then confirm."
           : "No problem: nothing will be shared. Move each wrong ring onto the feature it names, then confirm."}</p>
         <p class="side-review-note">The circular arrow under the photo resets every point to the automatic placement.</p>`;
     };
@@ -1565,7 +1563,7 @@ function mountVerify(
         const readings = impossible.map((m) => {
           const bound = m.def.plausible;
           const value = m.value.toFixed(m.def.decimals);
-          return bound ? `${m.def.name} ${value} (expected ${bound[0]}–${bound[1]})` : `${m.def.name} ${value}`;
+          return bound ? `${m.def.name} ${value} (check range ${bound[0]}–${bound[1]})` : `${m.def.name} ${value}`;
         });
         const hint = e.layer.querySelector<HTMLElement>(".verify-hint");
         if (hint) {
@@ -1574,14 +1572,14 @@ function mountVerify(
           }`;
           hint.classList.add("show");
         }
-        e.panelCopy.innerHTML = `<h2 class="side-title">One of these cannot be right</h2>
-          <p class="side-sub">The ${names.join(" and ")} measured outside the range a human
-          face occupies, which means a point is in the wrong place rather than that this is an
-          unusual profile. ${points.length
+        e.panelCopy.innerHTML = `<h2 class="side-title">A measurement needs review</h2>
+          <p class="side-sub">The ${names.join(" and ")} measured outside the current check
+          range. This can reflect point placement, the photo, or a reference that does not fit
+          this measurement. ${points.length
             ? `Check <b>${points.join("</b>, <b>")}</b>.`
             : ""}</p>
-          <p class="side-review-note">Storing it anyway would put a number in the calibration
-          set that describes where a point landed, not the face.</p>`;
+          <p class="side-review-note">The scan has not been saved. Review the named points or
+          use the retake option before continuing.</p>`;
         return false;
       }
 
@@ -1599,9 +1597,7 @@ function mountVerify(
           confirmButton.disabled = false;
           confirmButton.textContent = "Confirm as-is";
         }
-        const untouchedCopy = seedMethod === "vision" || seedMethod === "fused"
-          ? "These are the positions placed from this photograph. If they are genuinely right, press Confirm as-is."
-          : "These are the automatic positions exactly as they were estimated. The five behind the face, jaw corner, ear and the neck point, are inferred from an average head rather than found in the photo, so they are the ones that drift.";
+        const untouchedCopy = "These automatic positions have not been moved. Check the jaw corner, jaw hinge and chin bottom, which may still be template-based starting positions.";
         e.panelCopy.innerHTML = `<h2 class="side-title">Nothing was moved</h2>
           <p class="side-sub">${untouchedCopy}</p>
           <p class="side-review-note">If they are genuinely right, press Confirm as-is. If you
@@ -1696,7 +1692,7 @@ function mountVerify(
       klabel: "ONE QUESTION",
       title: "Do these points look right?",
       preview: { photo: e.canvas, points: verifier!.points },
-      copy: "We identified all thirteen points from this photo. Check the hairline, ear, jaw corner and neck point most closely.",
+      copy: "Check these automatic positions on your photo, especially the jaw corner, jaw hinge and chin bottom. Some positions may come from a template or a previous review, so confirm each against your photo.",
       no: "No, they look off",
       yes: "Yes, they look right",
       fine: "Yes goes straight to your analysis. No lets you place them yourself first.",
@@ -1908,14 +1904,14 @@ function askPlacementMode(
     backdrop.innerHTML = `<section class="side-mode-card" role="dialog" aria-modal="true" aria-labelledby="side-mode-title">
       <span class="klabel">${blocked ? "QUICK CORRECTION" : "AUTOMATIC PLACEMENT"}</span>
       <h2 id="side-mode-title">${blocked
-        ? "These points need one correction"
-        : "We identified these points"}</h2>
+        ? "These points need a review"
+        : "Review your profile points"}</h2>
       <figure class="side-mode-shot">
         <canvas aria-label="Your side profile with the thirteen automatic points marked"></canvas>
       </figure>
       <p class="side-mode-copy">${blocked
-        ? `One or more points would produce an invalid measurement: ${broken.join("; ")}. Place them yourself so the profile score is built from valid anatomy.`
-        : "This is what TrueMax identified on your photo. Review the placement, then use it or place the points yourself."}</p>
+        ? `One or more measurements are outside the current check range: ${broken.join("; ")}. Review the named points. Placement, capture conditions or the measurement reference can affect this check.`
+        : "These are TrueMax's automatic starting positions. Check the jaw corner, jaw hinge and chin bottom against your photo. Some positions may be template-based; review them, then use them or place the points yourself."}</p>
       <div class="side-mode-actions${blocked ? " single" : ""}">
         ${blocked ? "" : `<button type="button" class="btn gho" data-mode="manual">Place them myself</button>`}
         <button type="button" class="btn pri" data-mode="${blocked ? "manual" : "auto"}">${
@@ -2230,7 +2226,7 @@ function askSideFeedbackConsent(afterEdit = false): Promise<boolean> {
       <span class="klabel">OPTIONAL · YOUR CHOICE</span>
       <h2 id="side-feedback-title">${afterEdit ? "We noticed you adjusted the points" : "Help improve TrueMax?"}</h2>
       <p id="side-feedback-copy">${afterEdit
-        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them. Corrections like yours are exactly what teaches the placement to land right next time."
+        ? "Was that because the automatic placement was wrong? With your permission, TrueMax will privately send this side-profile photo, where the points landed automatically, and where you moved them for our team to review. Reviewed corrections can help improve future placement; they do not automatically change the next scan."
         : "With your permission, TrueMax will privately send this side-profile photo, the points placed automatically, and the final points you confirmed. This helps us improve landmark placement for future scans."}</p>
       <p class="side-feedback-privacy">Saying no will not change your analysis. If you say yes, the submission is stored privately for up to 90 days and is not used for advertising.</p>
       <div class="side-feedback-actions">
