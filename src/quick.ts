@@ -17,7 +17,9 @@ import { storeSex, storedSex } from "./engine/sexPref.js";
 import { enablePhotoPaste, pasteHintApplies } from "./ui/pastePhoto.js";
 import { track } from "./engine/track.js";
 import { drawQuickSilhouette } from "./ui/quickSilhouette.js";
-import { openSexChooser } from "./ui/sexChooser.js";
+import { openSexChooser, close as closeSexChooser } from "./ui/sexChooser.js";
+import { createCalibrationCaptureChoice } from "./ui/calibrationCaptureChoice.js";
+import { createSideInputGuard } from "./ui/sideInputGuard.js";
 import { openSideCapture, close as closeSideFlow } from "./ui/sideFlow.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone, verdictForPercentile } from "./engine/analysisMode.js";
 import { askVerdictTone } from "./ui/tonePrompt.js";
@@ -408,7 +410,9 @@ async function openCamera(): Promise<void> {
   el.shoot.disabled = true;
 }
 
-// The reference population, asked once, before anything is captured.
+// Creator modes ask for the reference population before capture. Calibration
+// instead owns a per-file choice below: select the image, review its reference,
+// then analyse. It never consumes or changes the stored creator preference.
 //
 // The main app asks at the start of a scan for a measured reason: the choice
 // moves the score by a median of 0.70 points, and inferring it from face shape
@@ -444,19 +448,66 @@ async function openCamera(): Promise<void> {
 // a remembered answer is a wrong answer most of the time on a tool built for
 // scanning other people.
 let askedForThisFace = false;
+const calibrationCaptureChoice = createCalibrationCaptureChoice();
+const frontFileInputGuard = createSideInputGuard(activeScanOwner);
+let cancelCalibrationChoice: (() => void) | null = null;
+
+function resetCalibrationChoice(): void {
+  calibrationCaptureChoice.cancel();
+  cancelCalibrationChoice?.();
+  cancelCalibrationChoice = null;
+}
+
+function chooseCalibrationReference(photo?: Blob | HTMLCanvasElement, signal?: AbortSignal, changeExisting = false): Promise<Sex | null> {
+  resetCalibrationChoice();
+  if (mode !== "calibrate" || signal?.aborted) return Promise.resolve(null);
+  const existingSex = (pendingFront ?? pendingSide)?.sex;
+  const pairedSex = changeExisting ? undefined : existingSex;
+  const attempt = calibrationCaptureChoice.begin(pairedSex);
+  if (pairedSex) return Promise.resolve(pairedSex);
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = (sex: Sex | null) => {
+      if (finished) return;
+      finished = true;
+      signal?.removeEventListener("abort", abort);
+      if (cancelCalibrationChoice === abort) cancelCalibrationChoice = null;
+      const accepted = sex && mode === "calibrate" && !signal?.aborted
+        && calibrationCaptureChoice.choose(attempt, sex);
+      if (!accepted && calibrationCaptureChoice.current(attempt)) calibrationCaptureChoice.cancel();
+      resolve(accepted ? sex : null);
+    };
+    const abort = () => { closeSexChooser(); finish(null); };
+    cancelCalibrationChoice = abort;
+    signal?.addEventListener("abort", abort, { once: true });
+    openSexChooser((sex) => finish(sex), changeExisting ? existingSex : undefined, () => finish(null), undefined, { photo, confirm: true });
+  });
+}
+
+function backToCalibrationSlots(): void {
+  quickScanGeneration += 1;
+  frontFileInputGuard.cancel();
+  resetSexAsk();
+  resetCalibrationChoice();
+  stopCamera();
+  el.capture.classList.add("hidden");
+  el.cal.classList.remove("hidden");
+  renderFaceSlots();
+}
 
 function resetSexAsk(): void {
   askedForThisFace = false;
 }
 
-function withSex(next: () => void, onCancel?: () => void): void {
-  // A calibration pair belongs to one person. Never ask for a new group after
-  // the front was captured and silently save it beside a differently scored side.
-  const pairedSex = mode === "calibrate" ? (pendingFront ?? pendingSide)?.sex : undefined;
-  if (pairedSex) {
-    storeSex(pairedSex);
-    askedForThisFace = true;
-    next();
+function withSex(next: () => void, onCancel?: () => void, photo?: Blob | HTMLCanvasElement): void {
+  // Calibration never inherits the persistent creator/self choice. Its file or
+  // captured frame already exists when this branch is used.
+  if (mode === "calibrate") {
+    void chooseCalibrationReference(photo).then((sex) => {
+      if (sex) next();
+      else if (onCancel) onCancel();
+      else if (mode === "calibrate") backToCalibrationSlots();
+    });
     return;
   }
   if (askedForThisFace && storedSex()) {
@@ -534,7 +585,7 @@ el.libClear.onclick = async () => {
 paintSilhouette();
 window.addEventListener("resize", paintSilhouette);
 
-el.shoot.onclick = () => withSex(async () => {
+const shootFront = async () => {
   if (!cam) {
     await openCamera();
     return;
@@ -542,15 +593,57 @@ el.shoot.onclick = () => withSex(async () => {
   if (!ready) return;
   const shot = cam.capture();
   stopCamera();
-  if (shot) await run(shot);
-});
+  if (!shot) return;
+  if (mode === "calibrate") {
+    const generation = ++quickScanGeneration;
+    const sex = await chooseCalibrationReference(shot);
+    if (generation !== quickScanGeneration || mode !== "calibrate") return;
+    if (!sex) { backToCalibrationSlots(); return; }
+    await run(shot, generation, undefined, sex);
+  } else await run(shot);
+};
+el.shoot.onclick = () => {
+  if (mode === "calibrate") void shootFront();
+  else withSex(() => void shootFront());
+};
 
-el.pick.onclick = () => withSex(() => el.file.click());
-el.file.onchange = async () => {
-  const f = el.file.files?.[0];
-  el.file.value = "";
-  if (!f) return;
-  await useFile(f);
+function openFrontFilePicker(): void {
+  if (!mode || el.capture.classList.contains("hidden")) return;
+  const pickerMode = mode;
+  const pickerGeneration = ++quickScanGeneration;
+  const ownsInput = frontFileInputGuard.begin();
+  // A detached native picker can still deliver an event. Give each picker its
+  // own element and handlers, as the side flow does, so it cannot target a
+  // replacement mode/account's file handler.
+  const input = el.file.cloneNode(false) as HTMLInputElement;
+  input.value = "";
+  el.file.replaceWith(input);
+  el.file = input;
+  const acceptsInput = () => ownsInput() && input === el.file
+    && pickerGeneration === quickScanGeneration && pickerMode === mode
+    && !el.capture.classList.contains("hidden");
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!acceptsInput()) return;
+    frontFileInputGuard.cancel();
+    if (file) await useFile(file);
+  };
+  input.addEventListener("cancel", () => {
+    input.value = "";
+    if (!acceptsInput()) return;
+    frontFileInputGuard.cancel();
+    if (mode === "calibrate") backToCalibrationSlots();
+    else resetSexAsk();
+  });
+  input.click();
+}
+
+el.pick.onclick = () => {
+  if (mode === "calibrate") {
+    resetCalibrationChoice();
+    openFrontFilePicker();
+  } else withSex(openFrontFilePicker);
 };
 
 // Paste or drag straight onto the page. The photo somebody wants scanned has
@@ -559,9 +652,12 @@ el.file.onchange = async () => {
 // they started. Goes through withSex so a pasted first photo still picks a
 // reference population rather than silently defaulting.
 enablePhotoPaste({
-  busy: () => el.stage.classList.contains("scanning"),
+  busy: () => el.stage.classList.contains("scanning") || el.capture.classList.contains("hidden") || Boolean(document.querySelector(".sexpick")),
   dropZone: el.frame,
-  onImage: (file) => withSex(() => void useFile(file)),
+  onImage: (file) => {
+    if (mode === "calibrate") void useFile(file);
+    else withSex(() => void useFile(file));
+  },
 });
 
 // Only shown where the gesture exists.
@@ -578,14 +674,29 @@ let quickScanGeneration = 0;
 async function useFile(f: File): Promise<void> {
   const generation = ++quickScanGeneration;
   stopCamera();
-  const img = await loadImage(f);
+  let img: HTMLImageElement;
+  try { img = await loadImage(f); }
+  catch {
+    if (generation !== quickScanGeneration) return;
+    resetCalibrationChoice();
+    el.hintTitle.textContent = "This photo could not be opened";
+    el.hintDetail.textContent = "Choose a JPEG, PNG or WebP image. No score was saved.";
+    return;
+  }
   if (generation !== quickScanGeneration) return;
   const s = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
   const c = document.createElement("canvas");
   c.width = Math.round(img.naturalWidth * s);
   c.height = Math.round(img.naturalHeight * s);
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  await run(c, generation, f);
+  let referenceSex: Sex | undefined;
+  if (mode === "calibrate") {
+    const sex = await chooseCalibrationReference(f);
+    if (generation !== quickScanGeneration || mode !== "calibrate") return;
+    if (!sex) { backToCalibrationSlots(); return; }
+    referenceSex = sex;
+  }
+  await run(c, generation, f, referenceSex);
 }
 
 function stopCamera(): void {
@@ -605,8 +716,11 @@ async function run(
   src: HTMLCanvasElement,
   generation = ++quickScanGeneration,
   sourceFile?: File,
+  referenceSex?: Sex,
 ): Promise<void> {
   if (generation !== quickScanGeneration) return;
+  const scanSex = referenceSex ?? (mode === "calibrate" ? calibrationCaptureChoice.read() : storedSex() ?? "male");
+  if (!scanSex) return;
   // A new attempt owns the active scan immediately. If detection fails, no
   // later control may fall back to the previous person's photo, landmarks, or
   // creator attachments.
@@ -691,7 +805,8 @@ async function run(
   // one, since "a scan finished" is exactly the condition that ends a face.
   if (mode !== "calibrate") resetSexAsk();
   track("quick-scan-done");
-  show(storedSex() ?? "male", true);
+  if (mode === "calibrate") render(analyze(last.lm, last.w, last.h, scanSex, last.photo), last.photo);
+  else show(scanSex, true);
 }
 
 // The last analysed photo, kept so switching reference population re-scores it
@@ -978,7 +1093,7 @@ async function openSavedFaceFromLibrary(face: SavedFace): Promise<void> {
   el.modeName.textContent = MODE_NAMES.analysis;
   el.modeStep.textContent = "Saved front photo";
   resetSexAsk();
-  withSex(() => void run(canvas), leaveMode);
+  withSex(() => void run(canvas), leaveMode, canvas);
 }
 
 function updateModeStep(): void {
@@ -1093,7 +1208,7 @@ async function refreshLibrary(): Promise<void> {
       // Old saved rows carry neither a selected group nor validated pose.
       // Ask explicitly and recheck the pixels instead of trusting stale mesh data.
       resetSexAsk();
-      withSex(() => void run(canvas));
+      withSex(() => void run(canvas), undefined, canvas);
     };
   }
   for (const button of el.libStrip.querySelectorAll<HTMLButtonElement>("[data-del]")) {
@@ -1227,7 +1342,12 @@ function sendCorrection(upload: NonNullable<typeof failedUpload>): void {
 }
 
 function clearPending(): void {
+  quickScanGeneration += 1;
+  frontFileInputGuard.cancel();
+  el.file.value = "";
   resetSexAsk();
+  resetCalibrationChoice();
+  document.getElementById("q-cal-capture-back")?.remove();
   document.getElementById("q-wrong-view")?.remove();
   pendingFront = null;
   pendingFrontShot = null;
@@ -1237,6 +1357,28 @@ function clearPending(): void {
   pendingSidePhoto = null;
   pendingSidePoints = null;
   pendingSideCapture = null;
+}
+
+async function changeCalibrationReference(): Promise<void> {
+  const frontBefore = pendingFront;
+  const sideBefore = pendingSide;
+  const sex = await chooseCalibrationReference(pendingFrontShot ?? pendingSidePhoto ?? undefined, undefined, true);
+  if (!sex || mode !== "calibrate" || pendingFront !== frontBefore || pendingSide !== sideBefore) return;
+  try {
+    // Build both reports before assigning either, so a failed re-score cannot
+    // leave one face split between two reference groups. Saved rows are untouched.
+    const front = pendingFrontShot && pendingFrontLandmarks
+      ? analyze(pendingFrontLandmarks, pendingFrontShot.width, pendingFrontShot.height, sex, pendingFrontShot)
+      : null;
+    const side = pendingSidePoints && pendingSideCapture
+      ? analyzeSide(pendingSidePoints, pendingSideCapture.faceDir, sex)
+      : null;
+    pendingFront = front;
+    pendingSide = side;
+    renderFaceSlots();
+  } catch {
+    setShareStatus("The reference group could not be changed. Your current photos and points are still open; nothing was saved.");
+  }
 }
 
 /**
@@ -1263,8 +1405,9 @@ function renderFaceSlots(): void {
     </button>`;
 
   el.calBody.innerHTML = `
-    <p class="q-cal-hint">Reference group: <b>${(pendingFront ?? pendingSide)?.sex === "female" ? "women" : (pendingFront ?? pendingSide)?.sex === "male" ? "men" : "choose before capturing"}</b>.
-    Both views of this face use the same group. Start a new face to change it.</p>
+    <p class="q-cal-hint">Reference group: <b>${(pendingFront ?? pendingSide)?.sex === "female" ? "women" : (pendingFront ?? pendingSide)?.sex === "male" ? "men" : "choose after selecting a photo"}</b>.
+    Both views of this face use the same group. You can correct the group before saving.</p>
+    ${pendingFront || pendingSide ? `<button type="button" class="btn gho" id="q-slot-reference">Change reference group</button>` : ""}
     <div class="q-slots">
       ${slot("q-slot-front", "Front", pendingFront, "Camera or upload")}
       ${slot("q-slot-side", "Side", pendingSide, "Upload, review and correct 13 points")}
@@ -1284,16 +1427,31 @@ function renderFaceSlots(): void {
     <button type="button" class="q-slot-back" id="q-slot-back">Back to the set</button>`;
 
   document.getElementById("q-slot-front")!.onclick = () => {
+    resetCalibrationChoice();
     el.cal.classList.add("hidden");
     el.capture.classList.remove("hidden");
+    document.getElementById("q-cal-capture-back")?.remove();
+    const back = document.createElement("button");
+    back.id = "q-cal-capture-back";
+    back.type = "button";
+    back.className = "btn gho";
+    back.textContent = "Back to this face";
+    back.onclick = backToCalibrationSlots;
+    el.pick.parentElement?.appendChild(back);
   };
+  document.getElementById("q-slot-reference")?.addEventListener("click", () => void changeCalibrationReference());
 
-  document.getElementById("q-slot-side")!.onclick = () => withSex(() => {
+  document.getElementById("q-slot-side")!.onclick = () => {
     if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
+    resetCalibrationChoice();
     el.cal.classList.add("hidden");
     openSideCapture({
       scanId: crypto.randomUUID(),
-      sex: storedSex() ?? "male",
+      // The placeholder is never used for scoring: beforeUpload must return
+      // the explicit group for this file, or the load is cancelled.
+      sex: (pendingFront ?? pendingSide)?.sex ?? "male",
+      beforeUpload: (file, signal) => chooseCalibrationReference(file, signal),
+      onUploadCancel: resetCalibrationChoice,
       // Upload only. The live profile camera coaches a turn the operator cannot
       // see, which is the right flow for scanning yourself and the wrong one for
       // working through a folder of photographs.
@@ -1315,6 +1473,7 @@ function renderFaceSlots(): void {
           finalPoints: points,
           seedMethod: review.seedMethod,
           seedVersion: review.seedVersion,
+          landmarkGuideVersion: review.landmarkGuideVersion,
           operatorVerified: review.verified,
           diagnostics: review.diagnostics,
           imageSource: review.imageSource,
@@ -1343,12 +1502,13 @@ function renderFaceSlots(): void {
         renderFaceSlots();
       },
       onBack: () => {
+        resetCalibrationChoice();
         closeSideFlow();
         el.cal.classList.remove("hidden");
         renderFaceSlots();
       },
     });
-  });
+  };
 
   document.getElementById("q-slot-go")!.onclick = () => {
     // Front is the primary when present: `scored` has to stay the front score,
@@ -1507,6 +1667,8 @@ function renderRatingStep(r: Report): void {
       <p class="q-cal-hint">External ratings stay in the diagnostic export for comparison.
       They are not independent human labels and are excluded from the fitting corpus.
       Saving a capture does not update the live scoring model.</p>
+      <p class="q-cal-hint">Reference group: <b>${r.sex === "female" ? "women" : "men"}</b>. Both views use this group.</p>
+      <button type="button" class="btn gho" id="q-cal-back-to-views">Back to photos and reference group</button>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
@@ -1515,6 +1677,7 @@ function renderRatingStep(r: Report): void {
   const label = document.getElementById("q-cal-label") as HTMLInputElement;
   const external = document.getElementById("q-cal-external") as HTMLInputElement;
   const msg = document.getElementById("q-cal-msg")!;
+  document.getElementById("q-cal-back-to-views")!.onclick = renderFaceSlots;
   num.focus();
   const store = (rating: number | null) => {
     let referenceId: string | undefined;
@@ -1526,6 +1689,9 @@ function renderRatingStep(r: Report): void {
       return;
     }
     try {
+      if ([pendingFront, pendingSide].some((report) => report && report.sex !== r.sex)) {
+        throw new Error("The views have different reference groups. Go back and choose one group for this face.");
+      }
       const verdict = calibrationVerdictSnapshot(r, {
         front: pendingFront,
         side: pendingSide,

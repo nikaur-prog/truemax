@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GUIDE_POINTS, guideCrop } from "./sideGuidePhoto.js";
-import { SIDE_POINTS } from "../engine/sideMetrics.js";
+import { GUIDE_POINTS, GUIDE_ZOOM, guideCrop, guideMarkerPosition, earGuideCompanion } from "./sideGuidePhoto.js";
+import { SIDE_POINTS, SIDE_EAR_GUIDANCE } from "../engine/sideMetrics.js";
 
 // ---------------------------------------------------------------------------
 // The photographic guide's data, whenever it exists.
@@ -43,17 +43,40 @@ test("the guide points run down the face in anatomical order", () => {
   assert.ok(GUIDE_POINTS.cervicale[1] > GUIDE_POINTS.menton[1], "the neck point is below the chin");
 });
 
-test("the jaw joint sits in front of the ear notch, at about its height", () => {
+test("the illustrated surface hinge stays near the ear, not on the temple", () => {
   if (!GUIDE_POINTS) return;
   const [tx, ty] = GUIDE_POINTS.tragion;
   const [cx, cy] = GUIDE_POINTS.condylion;
   assert.ok(cx > tx, "the condyle is forward of the notch, not behind it");
-  // "Level with the ear canal" — the whole point of the renamed label. A
-  // condylion up on the temple is the bug that made ramus : mandible reject
-  // real faces, so the reference must not teach it.
+  // This checks our illustration, not a universal anatomical distance or
+  // height rule. Other photos may have different ear-to-hinge spacing.
   assert.ok(Math.abs(cy - ty) < 0.03, `condylion sits ${(cy - ty).toFixed(3)} off the notch's height`);
   assert.ok(GUIDE_POINTS.gonion[1] > cy, "the jaw corner is below the hinge");
   assert.ok(GUIDE_POINTS.gonion[0] > cx, "the jaw corner is forward of the hinge");
+});
+
+test("hinge and ear-notch guidance distinguishes a surface estimate from a visible notch", () => {
+  assert.match(SIDE_POINTS.find((point) => point.id === "condylion")!.label, /estimate/);
+  assert.match(SIDE_EAR_GUIDANCE.condylion, /exact joint inside cannot be seen/);
+  assert.match(SIDE_EAR_GUIDANCE.condylion, /not on the sideburn or cheekbone/);
+  assert.match(SIDE_EAR_GUIDANCE.tragion, /notch at its top/);
+  assert.doesNotMatch(SIDE_EAR_GUIDANCE.condylion, /same height|one fiftieth|level with/);
+});
+
+test("both ear close-ups retain the companion point and mirror coordinates without moving it", () => {
+  assert.ok(GUIDE_POINTS);
+  for (const id of ["condylion", "tragion"] as const) {
+    const companion = earGuideCompanion(id)!;
+    const crop = guideCrop(GUIDE_POINTS[id], 1000, 1153, GUIDE_ZOOM[id]);
+    for (const current of [id, companion]) {
+      const right = guideMarkerPosition(GUIDE_POINTS[current], crop, 1000, 1153, 400, 1);
+      const left = guideMarkerPosition(GUIDE_POINTS[current], crop, 1000, 1153, 400, -1);
+      assert.ok(right.x > 0 && right.x < 400 && right.y > 0 && right.y < 400);
+      assert.equal(left.x, 400 - right.x);
+      assert.equal(left.y, right.y);
+    }
+  }
+  assert.equal(earGuideCompanion("pronasale"), null);
 });
 
 test("a crop is clamped inside the image and never degenerate", () => {

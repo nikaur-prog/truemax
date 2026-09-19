@@ -4684,8 +4684,21 @@ body.auth-modal-open { overflow: hidden; }
 .refcrop-play { left: 5px; bottom: 6px; padding-left: 1px; }
 .refcrop-big { right: 4px; top: 4px; }
 .refcrop-play:hover, .refcrop-big:hover { border-color: #8ff3e0; }
-.refcrop-fullcard { position: relative; }
-.refcrop-fullcard canvas { display: block; border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+.refcrop-fullcard { position: relative; width: min(590px, 100%); max-height: calc(100svh - 40px); overflow-y: auto; padding: 18px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 22px; }
+.refcrop-fullcard header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.refcrop-fullcard h2 { margin: 0; font: 500 20px/1.25 var(--sans); }
+.refcrop-dismiss { flex: 0 0 40px; height: 40px; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--ink); font-size: 24px; cursor: pointer; }
+.refcrop-fullcard canvas { display: block; max-width: 100%; margin: auto; border-radius: 14px; }
+.refcrop-fullcard canvas[hidden] { display: none; }
+.refcrop-instruction, .refcrop-load-error { margin: 12px 0; font-size: 13px; line-height: 1.6; color: var(--mut); }
+.refcrop-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0; font-size: 12px; }
+.refcrop-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.refcrop-key { width: 12px; height: 12px; border: 3px solid #fff; border-radius: 50%; background: #20312d; outline: 1px solid #52645f; }
+.refcrop-key.active { border-color: #168575; }
+.refcrop-controls, .sref-ear-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.refcrop-controls .btn, .sref-ear-actions .btn { flex: 1 1 auto; min-height: 44px; padding: 10px 12px; border-radius: 12px; font-size: 12px; }
+.refcrop-controls .btn[aria-pressed="true"] { outline: 2px solid var(--acc); outline-offset: -2px; }
+.sref-ear-actions { margin-bottom: 14px; }
 /* Inside the card, not hooked over its corners: the controls belong to the
    picture they act on. Play bottom left, minimise top right. */
 .refcrop-play-big, .refcrop-close {
@@ -8076,3 +8089,36 @@ select.q-input { appearance: auto; }
 .sp-presence.moderate { color: var(--ink); }
 .sp-presence.marked { color: var(--warm); }
 .sp-none, .sp-foot { margin: 10px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--mut); }
+
+/* A reference choice tied to an already selected photo, not the previous scan. */
+.sexpick-confirm { display: grid; place-items: center; padding: 20px; overflow-y: auto; background: rgba(10, 14, 13, .72); }
+.sexpick-confirm-card { position: relative; width: min(520px, 100%); max-height: calc(100svh - 40px); overflow-y: auto; padding: 24px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 24px; }
+.sexpick-confirm .sexpick-head { padding: 38px 0 18px; }
+.sexpick-confirm .sexpick-head h2 { font-size: clamp(24px, 5vw, 32px); }
+.sexpick-confirm .sexpick-head p { font-size: 13px; }
+.sexpick-confirm .sexpick-cancel { color: var(--ink); background: var(--soft); border-color: var(--line); }
+.sexpick-confirm .sexpick-cancel:hover { color: var(--ink); border-color: var(--mut); }
+.sexpick-preview { margin: 0 auto 18px; text-align: center; }
+.sexpick-preview-image { display: flex; justify-content: center; }
+.sexpick-preview-image img, .sexpick-preview-image canvas { display: block; width: auto; max-width: 100%; height: auto; max-height: min(32svh, 260px); object-fit: contain; border-radius: 14px; }
+.sexpick-preview figcaption { margin-top: 8px; color: var(--mut); font-size: 11px; line-height: 1.5; }
+.sexpick-preview-error { margin-top: 10px; font-size: 13px; color: var(--warm); }
+.sexpick-confirm .sexpick-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sexpick-confirm .sexpick-side { min-height: 112px; padding: 16px 8px; border: 2px solid transparent; border-radius: 14px; transition: border-color .15s ease; }
+.sexpick-confirm .sexpick-side.selected { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.sexpick-confirm .sexpick-side:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.sexpick-confirm .sexpick-side .sexpick-ic { font-size: 26px; }
+.sexpick-confirm .sexpick-side b { font: 600 17px/1.3 var(--sans); }
+.sexpick-confirm .sexpick-sub { font-size: 9px; letter-spacing: .04em; }
+.sexpick-confirm .sexpick-side.was::after { display: none; }
+.sexpick-continue { width: 100%; min-height: 48px; margin-top: 18px; border-radius: 14px; }
+.sexpick-continue:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 380px) {
+  .sexpick-confirm { padding: 12px; }
+  .sexpick-confirm-card { padding: 18px; max-height: calc(100svh - 24px); }
+  .sexpick-confirm .sexpick-split { gap: 8px; }
+  .sexpick-confirm .sexpick-sub { font-size: 8px; letter-spacing: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sexpick-confirm .sexpick-side { transition: none; }
+}

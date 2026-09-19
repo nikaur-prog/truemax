@@ -40,7 +40,7 @@ test("League uses staff access independently of a pending creator application", 
 });
 
 test("front calibration carries the upload fingerprint through the pending capture and clears it on reset", () => {
-  assert.match(quick, /await run\(c, generation, f\)/);
+  assert.match(quick, /await run\(c, generation, f, referenceSex\)/);
   assert.match(quick, /if \(mode === "calibrate"\) \{\s*try \{\s*imageSource = await fingerprintCalibrationImage\(src, \{ originalFile: sourceFile \}\)/);
   assert.match(quick, /pendingFrontImageSource = last\?\.imageSource/);
   assert.match(quick, /imageSource: pendingFrontImageSource/);

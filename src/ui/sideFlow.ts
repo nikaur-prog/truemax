@@ -3,7 +3,7 @@ import { activeScanOwner } from "../engine/scanScope.js";
 import { analyzeSide } from "../engine/scoring.js";
 import type { Report, Sex } from "../engine/types.js";
 import { classifySidePlacement } from "../engine/sidePlacementQuality.js";
-import { SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
+import { SIDE_LANDMARK_GUIDE_VERSION, SIDE_POINTS, faceDirFromPoints, sidePointIntegrityIssues } from "../engine/sideMetrics.js";
 import { createSettler } from "../engine/captureSettle.js";
 import { GuidedAdvance } from "./guidedAdvance.js";
 import {
@@ -18,7 +18,8 @@ import {
 } from "./scanSounds.js";
 import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
 import { mountVerifier, seedSidePointsSmart, seedSideTemplate } from "./sideVerify.js";
-import { GUIDE_PHOTO_URL, drawGuideCrop, drawGuideWhole, guidePhotoReady, playGuideZoom } from "./sideGuidePhoto.js";
+import { GUIDE_PHOTO_URL, drawGuideCrop, guidePhotoReady } from "./sideGuidePhoto.js";
+import { openPointReference } from "./sidePointReference.js";
 import { mountSideReference } from "./sideReference.js";
 import type { ReferenceHandle } from "./sideReference.js";
 import { landPhoto } from "./photoLanding.js";
@@ -109,6 +110,10 @@ interface SideCtx {
   feedbackEligible?: boolean;
   /** Set only by the authorized admin calibration entry point. Not an auth gate. */
   reviewMode?: SideReviewMode;
+  /** Calibration asks about the selected image before any placement or scoring. Null cancels this file. */
+  beforeUpload?: (file: File, signal: AbortSignal) => Promise<Sex | null>;
+  /** Clears a caller's per-attempt choice when the native file picker is dismissed. */
+  onUploadCancel?: () => void;
   onDone: (
     report: Report,
     points: SidePoints,
@@ -125,6 +130,8 @@ export interface SidePlacementReview {
   automaticPoints: SidePoints;
   seedMethod: SideSeedMethod;
   seedVersion?: string;
+  /** The guide shown during this review, separate from the automatic reader. */
+  landmarkGuideVersion?: string;
   /** Local calibration evidence, including failed automatic placement. */
   diagnostics?: SideCaptureDiagnostics;
   /** Calibration-only match to the exact source file and displayed review raster. */
@@ -178,6 +185,7 @@ interface SidePlacementSeed {
 
 let verifier: VerifyHandle | null = null;
 let reference: ReferenceHandle | null = null;
+let closePointReference: (() => void) | null = null;
 let retake: RetakeHandle | null = null;
 let soundToggle: { destroy(): void } | null = null;
 let sideCam: CameraHandle | null = null;
@@ -261,7 +269,15 @@ function markSideOpen(open: boolean): void {
  * Called from every path that puts the frame back into a state where there is
  * no photograph to point at: opening the capture, retaking, and closing.
  */
+function disposePointReference(): void {
+  const close = closePointReference;
+  closePointReference = null;
+  close?.();
+}
+
 function clearWalkthrough(frame: HTMLElement): void {
+  // Use the owner's disposer so listeners and zoom callbacks leave with it.
+  disposePointReference();
   // The reading treatment and the landing come off with everything else. Both
   // are put on around an await, so a flow abandoned mid-read would otherwise
   // hand the next screen an animation belonging to a photograph that is no
@@ -269,9 +285,6 @@ function clearWalkthrough(frame: HTMLElement): void {
   frame.classList.remove("scanning", "settling");
   frame.querySelector(".side-pointpill")?.remove();
   frame.querySelector(".side-refcrop")?.remove();
-  // The popped-out reference lives on <body>, so it survives the frame being
-  // emptied and would hang over the camera on its own.
-  document.querySelector(".refcrop-full")?.remove();
 }
 
 export function openSideCapture(ctx: SideCtx): void {
@@ -447,6 +460,9 @@ function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
     e.input.value = "";
     if (file && acceptsInput()) await load(file, ctx);
   };
+  e.input.addEventListener("cancel", () => {
+    if (acceptsInput()) ctx.onUploadCancel?.();
+  });
   e.drop.ondragover = (ev) => {
     if (!acceptsInput()) return;
     ev.preventDefault();
@@ -672,7 +688,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // which makes it the one control you can still hit blind — and it does not
   // shift the framing the way reaching for a button does.
   sideKeyHandler = (e: KeyboardEvent) => {
-    if (!ownsCamera()) return;
+    if (!ownsCamera() || document.querySelector(".sexpick")) return;
     if (e.key !== " " && e.key !== "Enter") return;
     const t = e.target as HTMLElement | null;
     // Never hijack a key from a field or another button.
@@ -805,6 +821,14 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
   try {
   const img = await loadImage(file);
   if (!sideAttempt.current(signal)) return;
+  if (ctx.beforeUpload) {
+    const sex = await ctx.beforeUpload(file, signal);
+    if (!sideAttempt.current(signal)) return;
+    if (!sex) { openSideCapture(ctx); return; }
+    // Freeze the answer into this load's context. A retake still runs its own
+    // beforeUpload callback, rather than inheriting this file's answer.
+    ctx = { ...ctx, sex };
+  }
   const c = document.createElement("canvas");
   const size = sideImageSize(img.naturalWidth, img.naturalHeight, MAX_DIM);
   c.width = size.width;
@@ -1060,6 +1084,7 @@ function mountVerify(
   ctx: SideCtx,
   caption: string,
 ): void {
+  disposePointReference();
   seed = withPointDerivedSideDirection(seed);
   const e = el();
   if (photo !== e.canvas) {
@@ -1077,6 +1102,9 @@ function mountVerify(
   const automaticPoints = cloneSidePoints(seed.automaticPoints ?? seed.points);
   const seedMethod = seed.method ?? "existing";
   const seedVersion = seed.seedVersion;
+  // Capture the guide when review opens, not later when a saved set is exported.
+  // Historical captures without this field remain unversioned.
+  const landmarkGuideVersion = SIDE_LANDMARK_GUIDE_VERSION;
   const calibrationReview = ctx.reviewMode === "calibration";
   const diagnostics = seed.diagnostics ? structuredClone(seed.diagnostics) : undefined;
   let calibrationAcknowledged = false;
@@ -1189,57 +1217,25 @@ function mountVerify(
     // Tap it and it opens; the movement lives there, where it is legible.
     const big = document.getElementById("refcrop-big");
     const openBig = () => {
-        const overlay = document.createElement("div");
-        overlay.className = "sref-overlay refcrop-full";
-        overlay.innerHTML = `<div class="refcrop-fullcard" role="dialog" aria-modal="true" aria-label="Reference for this point">
-          <div class="refcrop-stage">
-            <canvas></canvas>
-            <button type="button" class="refcrop-play-big" aria-label="Play the zoom">▶</button>
-            <button type="button" class="refcrop-close" aria-label="Minimise">⤡</button>
-          </div>
-          <p class="refcrop-hint"><b>${label}</b>${hint ? `. ${hint}` : ""}</p>
-        </div>`;
-        document.body.appendChild(overlay);
-        const bigCanvas = overlay.querySelector("canvas")!;
-        const size = Math.min(640, Math.min(window.innerWidth, window.innerHeight) - 48);
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        bigCanvas.width = size * dpr;
-        bigCanvas.height = size * dpr;
-        bigCanvas.style.width = `${size}px`;
-        bigCanvas.style.height = `${size}px`;
-        // Opens on the WHOLE profile, held still. The zoom is a thing you
-        // ask for with the play button, not a thing that happens at you
-        // the moment a panel appears — which is what made this feel like a
-        // glitch rather than a demonstration.
-        drawGuideWhole(bigCanvas, guideImage!, id, verifier!.faceDir);
-        let stop: (() => void) | null = null;
-        const close = () => {
-          stop?.();
-          stop = null;
-          overlay.remove();
-          document.removeEventListener("keydown", onKey);
-        };
-        const onKey = (ev: KeyboardEvent) => {
-          if (ev.key === "Escape") close();
-        };
-        document.addEventListener("keydown", onKey);
-        overlay.querySelector(".refcrop-play-big")?.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          stop?.();
-          stop = playGuideZoom(bigCanvas, guideImage!, id, verifier!.faceDir, {
-            durationMs: 1900,
-            holdMs: 650,
-            onDone: () => (stop = null),
-          });
-        });
-        overlay.addEventListener("click", (ev) => {
-          if (ev.target === overlay || (ev.target as HTMLElement).closest(".refcrop-close")) close();
-        });
+      disposePointReference();
+      closePointReference = openPointReference(guideImage!, id, verifier!.faceDir);
     };
     if (big) big.onclick = openBig;
     // The picture itself is the target people reach for, not the small
     // glyph in its corner.
-    if (crop) crop.onclick = openBig;
+    if (crop) {
+      crop.setAttribute("role", "button");
+      crop.setAttribute("aria-label", `Open ${label} placement guide. ${hint}`);
+      crop.tabIndex = 0;
+      crop.onclick = openBig;
+      crop.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          openBig();
+        }
+      };
+    }
   }
   };
 
@@ -1428,7 +1424,7 @@ function mountVerify(
     // starts to grate. Focused buttons already fire their own click on Enter,
     // so those are left to the browser rather than fired twice.
     const onWalkKey = (ev: KeyboardEvent) => {
-      if (ev.key !== "Enter") return;
+      if (!inFrame.isConnected || ev.defaultPrevented || ev.key !== "Enter" || document.querySelector(".sref-overlay, .sexpick")) return;
       const t = ev.target as HTMLElement | null;
       if (t && ["BUTTON", "INPUT", "TEXTAREA", "SELECT", "A"].includes(t.tagName)) return;
       ev.preventDefault();
@@ -1756,6 +1752,7 @@ function mountVerify(
         automaticPoints,
         seedMethod,
         seedVersion,
+        landmarkGuideVersion,
         diagnostics: diagnostics ? structuredClone(diagnostics) : undefined,
         imageSource: seed.imageSource ? { ...seed.imageSource } : undefined,
         feedback,

@@ -8,7 +8,10 @@ import { launchChromium } from './launchChromium.mjs';
 const origin = process.argv[2] ?? 'http://127.0.0.1:4189';
 if (!['localhost', '127.0.0.1'].includes(new URL(origin).hostname)) throw new Error('Use a local dev server.');
 const quick = await readFile(new URL('../src/quick.ts', import.meta.url), 'utf8');
-const form = quick.slice(quick.indexOf('function renderRatingStep('), quick.indexOf('function renderVerdictStep(')).match(/el\.calBody\.innerHTML = `([\s\S]*?)`;/)?.[1];
+const extractedForm = quick.slice(quick.indexOf('function renderRatingStep('), quick.indexOf('function renderVerdictStep(')).match(/el\.calBody\.innerHTML = `([\s\S]*?)`;/)?.[1];
+// This fixture owns a female report. Substitute only its known group label;
+// new template expressions must still be reviewed instead of evaluated here.
+const form = extractedForm?.replace('${r.sex === "female" ? "women" : "men"}', 'women');
 if (!form || form.includes('${')) throw new Error('Review fixture extraction before running this test.');
 const artifacts = await mkdtemp(path.join(os.tmpdir(), 'truemax-calibration-reference-'));
 const browser = await launchChromium({ headless: true });
@@ -28,6 +31,7 @@ try {
       return route.continue();
     });
     await page.goto(`${origin}/calibration-reference-fixture`);
+    assert.match(await page.locator('.q-cal-rate').innerText(), /Reference group: women/);
     const reference = page.getByRole('textbox', { name: 'Reference ID (optional)' });
     await reference.fill('f01');
     assert.equal(await reference.evaluate(input => input.checkValidity()), true);

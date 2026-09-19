@@ -65,3 +65,25 @@ test("missing camera-switch markup cannot abort a side photo upload", () => {
   assert.match(stop, /e.swap\?\.classList.add\("hidden"\)/);
   assert.match(stop, /if \(e.swap\) e.swap.onclick = null/);
 });
+
+test("point reference overlays retain an owned disposer for retakes and flow teardown", () => {
+  const dispose = flow.slice(flow.indexOf("function disposePointReference"), flow.indexOf("function clearWalkthrough"));
+  assert.match(dispose, /const close = closePointReference;\s*closePointReference = null;\s*close\?\.\(\);/);
+  const cleanup = flow.slice(flow.indexOf("function clearWalkthrough"), flow.indexOf("export function openSideCapture"));
+  assert.match(cleanup, /disposePointReference\(\)/);
+  assert.doesNotMatch(cleanup, /querySelector\("\.refcrop-full"\)\?\.remove\(\)/, "DOM removal alone leaks reference handlers");
+  const mount = flow.slice(flow.indexOf("function mountVerify("), flow.indexOf("const automaticPoints =", flow.indexOf("function mountVerify(")));
+  assert.match(mount, /disposePointReference\(\)/);
+  const open = flow.slice(flow.indexOf("const openBig ="), flow.indexOf("if (big) big.onclick"));
+  assert.match(open, /disposePointReference\(\);\s*closePointReference = openPointReference\(/);
+  const close = flow.slice(flow.indexOf("export function close(): void"), flow.indexOf("async function load("));
+  assert.match(close, /clearWalkthrough\(el\(\).frame\)/);
+});
+
+test("opening a reference with Enter cannot also confirm or advance the landmark", () => {
+  const activation = flow.slice(flow.indexOf("crop.onkeydown ="), flow.indexOf("// The walkthrough: one point at a time"));
+  assert.match(activation, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*openBig\(\);/);
+  const key = flow.slice(flow.indexOf("const onWalkKey ="), flow.indexOf('window.addEventListener("keydown", onWalkKey)'));
+  assert.match(key, /if \(!inFrame\.isConnected \|\| ev\.defaultPrevented \|\| ev\.key !== "Enter" \|\| document\.querySelector\("\.sref-overlay, \.sexpick"\)\) return;/);
+  assert.ok(key.indexOf("ev.defaultPrevented") < key.indexOf("pressAdvance()"));
+});

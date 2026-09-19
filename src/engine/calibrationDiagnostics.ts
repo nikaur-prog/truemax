@@ -16,6 +16,8 @@ export interface CalibrationSideCapture {
   finalPoints: SidePoints;
   seedMethod: SideSeedMethod;
   seedVersion?: string;
+  /** Guide presented during this review; absent on older captures, never inferred. */
+  landmarkGuideVersion?: string;
   operatorVerified: boolean;
   diagnostics?: SideCaptureDiagnostics;
   /** Optional for older captures; hashes match the photo to this review geometry. */

@@ -51,6 +51,10 @@ import sharp from "sharp";
 //      underside of the jaw or the neck, and a placement below the neck
 //      point is refused and asked again with the placement drawn.
 //
+// vision-4 separates the visible ear notch from the estimated jaw-hinge
+// surface position. It removes the fixed gap and height instructions; it
+// does not change the landmark keys or the measurement construction.
+//
 // Two rules the endpoint and the evaluation harness both go through here, so
 // production and the benchmark cannot drift apart:
 //
@@ -96,7 +100,7 @@ export const ZOOM_CLUSTERS: ReadonlyArray<{ name: "ear" | "chin"; ids: readonly 
 // Bumped whenever the prompt, the schema, the passes or the default model
 // change. Stored beside every seed the pass produces so later analysis can
 // tell them apart.
-export const LANDMARK_VERSION = "vision-3";
+export const LANDMARK_VERSION = "vision-4";
 
 // Same margin call as Coach Max: the mid-size model, overridable from the
 // environment so a week on the larger one can be measured rather than argued.
@@ -172,8 +176,8 @@ const DEFINITIONS: Record<SideLandmarkId, string> = {
   menton: "Chin bottom: the lowest point of the chin itself, where the front curve of the chin turns under. It is directly below the chin front or slightly behind it, and only a little lower: about one fifteenth of the nose-to-ear distance below the chin front. Stop there. The skin under the jaw often keeps sloping down and back toward the neck; that lower skin is not the chin bottom.",
   cervicale: "Neck point: where the underside of the jaw meets the front of the neck, the deepest point of the angle between them. It is about a third of the nose-to-ear distance behind the chin bottom and level with it or slightly lower.",
   gonion: "Jaw corner: the back corner of the jaw, where the lower edge of the jaw stops running back from the chin and turns upward toward the ear. It sits far below the ear: about half the nose-to-ear distance below the ear notch, a little in front of it, and almost level with the chin bottom, usually a little above it. It is on the skin of the jaw line, never on or under the ear lobe. Follow the jaw line back from the chin bottom until it turns up; that turn is the point.",
-  condylion: "Jaw hinge: the joint the jaw pivots on. On the skin it is essentially at the ear notch: a little in front of it, about one fiftieth of the nose-to-ear distance, and at the same height. Never on the cheek in front of the ear and never above the notch.",
-  tragion: "Ear notch: the notch at the front of the ear where the ear's rim curves down and meets the top of the small flap (the tragus) that covers the ear canal. It is at the height of the top of the canal opening, and the dark opening is directly below and behind it. It is not the higher point where the rim first leaves the head.",
+  condylion: "Jaw hinge (estimate): an estimated skin position immediately in front of the upper tragus, the small flap over the ear opening. This is a photographic surface proxy, not a precise bone location; a photo cannot reveal the exact joint centre. Keep it in the small region immediately in front of the ear, not out on the cheek or at the sideburn or cheekbone. Do not force it to coincide with the ear notch or use a fixed distance or height relative to that notch. Use the visible ear anatomy and lower the confidence when that region is unclear.",
+  tragion: "Ear notch: the visible notch at the upper edge of the tragus, the small flap over the ear canal, where the ear cartilage meets the face. Mark the notch itself, not a point on the cheek, the centre of the dark canal opening, or the higher attachment of the ear's rim.",
 };
 
 // What the enlarged crop shows and how the three points sit in it. Written
@@ -181,8 +185,7 @@ const DEFINITIONS: Record<SideLandmarkId, string> = {
 const ZOOM_CONTEXT: Record<"ear" | "chin", string> = {
   ear:
     "This is an enlarged crop of the ear region of that photograph. Find the ear first, then its front edge. " +
-    "The ear notch (tragion) is where the ear's rim comes down and meets the top of the tragus, the small flap over the canal, at the height of the top of the canal opening. " +
-    "The jaw hinge (condylion) sits essentially on that notch, a few pixels in front of it and at the same height.",
+    DEFINITIONS.tragion + " " + DEFINITIONS.condylion,
   chin:
     "This is an enlarged crop of the lower face of that photograph: the chin, the underside of the jaw, the start of the neck and the back corner of the jaw. " +
     "The chin front (pogonion) is the most forward point of the soft chin. The chin bottom (menton) is just under it, where the chin's front curve turns under; stop there, the skin below that is the underside of the jaw. " +
@@ -198,8 +201,7 @@ const OUTLINE_DEFINITIONS: Record<JawOutlineId, string> = {
 const FINE_CONTEXT: Record<"ear" | "jaw" | "chin", string> = {
   ear:
     "This is a close crop around the ear notch of that photograph; the first image shows the wider ear region with this crop outlined. " +
-    "The tragus is the small flap of skin over the ear canal opening. The ear notch (tragion) is where the ear's rim comes down and meets the top of that flap, at the height of the top of the canal opening; not the higher point where the rim first leaves the head. " +
-    "The jaw hinge (condylion) sits essentially on that notch: a little toward the face, about one fiftieth of the nose-to-ear distance, and at the same height. Never on the cheek in front of the ear and never above the notch.",
+    DEFINITIONS.tragion + " " + DEFINITIONS.condylion,
   jaw:
     "This is a close crop centred on the back half of the jaw, well below the ear; the first image shows the wider region with this crop outlined. " +
     "The bottom of the ear lobe is near the top of this crop and the chin is toward the front edge. " +
@@ -1034,7 +1036,8 @@ export async function placeSideLandmarks(
         return `From a first look, the chin front is near ${at(placed.pogonion)} in this crop's coordinates. ` +
           `On most faces the chin bottom is ${px(0.048)} to ${px(0.094)} pixels below the chin front, and the neck point about ${px(0.33)} pixels behind the chin bottom, level with it or slightly lower.`;
       }
-      return `From a first look, the ear notch is near ${at(placed.tragion)} in this crop's coordinates. The jaw hinge is within about ${px(0.04)} pixels of it, in front and at the same height.`;
+      return `From a first look, the ear notch is near ${at(placed.tragion)} in this crop's coordinates. ` +
+        "Use this only to find the ear region, then relocate the notch to the visible cartilage. Locate the jaw-hinge surface estimate independently in the region immediately in front of the upper tragus; do not derive it from a fixed offset from the notch.";
     };
     const contextFor = async (region: "ear" | "jaw" | "chin"): Promise<ImageBlock | null> => {
       const coarse = coarseCrops[region === "chin" ? "chin" : "ear"];

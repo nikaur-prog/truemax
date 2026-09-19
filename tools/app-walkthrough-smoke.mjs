@@ -39,8 +39,10 @@ try {
     await page.screenshot({ path: join(artifacts, `${viewport.width}-signup.png`) });
     await page.locator(".acct-overlay .hist-close").click();
     await page.locator("#btn-upload").click();
-    await page.locator('.sexpick-side[data-sex="male"]').click();
     await page.locator(".tut-ask").waitFor();
+    // A reference choice now belongs to an actual selected photo. The front
+    // tutorial still comes first; do not choose a reference before the file.
+    assert.equal(await page.locator(".sexpick").count(), 0);
     assert.match(await page.locator(".tut-ask").innerText(), /front photo/i);
     assert.equal(await page.locator('.tut-ask img[src*="side-"]').count(), 0);
     await page.screenshot({ path: join(artifacts, `${viewport.width}-front-guide.png`) });
