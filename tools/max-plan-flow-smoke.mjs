@@ -22,6 +22,9 @@ try {
       const req = route.request();
       const url = new URL(req.url());
       if (url.origin !== new URL(origin).origin) return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      if (url.pathname === "/__max_plan_flow_fixture") return route.fulfill({ contentType: "text/html", body: `<!doctype html>
+        <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/style.css"></head>
+        <body><main><h1>Local Coach plan fixture</h1></main></body></html>` });
       if (url.pathname === "/api/max-chat") {
         chatRequests.push(req.postDataJSON());
         return route.fulfill({ status: 200, contentType: "text/plain", headers: { "X-Max-Remaining": "25" }, body: "Keep it manageable.\n- Choose a basic cleansing routine if that fits your skin goal.\n- Use the routine picker to decide what to track. Nothing has been started or completed." });
@@ -39,11 +42,20 @@ try {
       if (url.pathname.startsWith("/api/")) return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
       return route.continue();
     });
-    await page.goto(`${origin}/?preview=max-coach`);
-    await page.waitForSelector("[data-max-coach-preview]");
+    // Exercise real Coach UI without also booting the unrelated anonymous
+    // signup/onboarding flow in main.ts behind the fixture's signed-in state.
+    await page.goto(`${origin}/__max_plan_flow_fixture`);
     await page.evaluate(async () => {
-      const { getSupabaseClient } = await import("/src/engine/auth.ts");
+      const tabModule = "/src/ui/maxTab.ts";
+      const tabCode = await (await fetch(tabModule)).text();
+      const chatModule = tabCode.match(/["'](\/src\/ui\/maxChat\.ts[^"']*)["']/)?.[1];
+      if (!chatModule) throw new Error("The Coach tab's transformed chat import was not found.");
+      const chatCode = await (await fetch(chatModule)).text();
+      const authModule = chatCode.match(/["'](\/src\/engine\/auth\.ts[^"']*)["']/)?.[1];
+      if (!authModule) throw new Error("The chat's transformed Auth import was not found.");
+      const { getSupabaseClient } = await import(authModule);
       const client = await getSupabaseClient();
+      await client.auth.getSession();
       const listeners = new Set();
       const session = { access_token: "local-fixture-not-a-credential", user: { id: "local-coach-review" } };
       client.auth.getSession = async () => ({ data: { session }, error: null });
@@ -57,7 +69,7 @@ try {
       activateScanOwner(session.user.id);
       const { EMPTY_PROFILE, saveProfile } = await import("/src/engine/goals.ts");
       saveProfile({ ...EMPTY_PROFILE, goals: ["skin"], skin: ["dryness"] });
-      const { maxTabMarkup, wireMaxTab } = await import("/src/ui/maxTab.ts");
+      const { maxTabMarkup, wireMaxTab } = await import(tabModule);
       const panel = document.createElement("main");
       panel.style.cssText = "max-width:760px;margin:auto;padding:20px;box-sizing:border-box";
       panel.innerHTML = maxTabMarkup(true);

@@ -15,7 +15,7 @@ export function mountMax3DPreview(container: HTMLElement = document.body): () =>
     [data-max-state]:focus-visible{outline:3px solid #2a947c;outline-offset:2px}
     @media(max-width:650px){[data-max-workbench]{grid-template-columns:minmax(0,1fr);gap:4px}}
   </style><h1 style="margin:0 0 8px;font-size:clamp(24px,4vw,36px)">Max, with a little more life</h1>
-    <p>The original Max face on a round 3D body, now used in Coach and the Max chat. Try a gesture, an expression or a five-second prop routine. Small scan and report icons stay lightweight.</p>
+    <p>The original Max face on a round 3D body, used in Coach and the Max chat. Wave is a happy bouncing entrance. Mirror holds the reflection in front, points, winks and grins. Speaking shows cartoon teeth and tongue. Small scan and report icons stay lightweight.</p>
     <div data-max-workbench>
     <div data-max-preview-stage style="display:block;position:relative;width:min(100%,420px);aspect-ratio:1;margin:12px auto;background:radial-gradient(ellipse at center,#fff,#e1ebf4);border-radius:28px">
       ${maxCharacterMarkup()}
@@ -111,7 +111,7 @@ export function mountMax3DPreview(container: HTMLElement = document.body): () =>
     if (utterance) { cancelVoice(); selectState("idle"); voiceStatus.textContent = "Speaking demo stopped."; return; }
     if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") { voiceStatus.textContent = "This browser has no speech playback. Choose Speaking to see the mouth animation."; return; }
     selectState("speaking");
-    const speech = new SpeechSynthesisUtterance("Hey, I'm Max. Let's take this one step at a time. You've got this!");
+    const speech = new SpeechSynthesisUtterance("Hi, I'm Max. Want to look at your scan, or work on a routine? Tell me what you would like to focus on.");
     utterance = speech;
     speech.rate = 0.96;
     speech.onend = () => { if (utterance !== speech) return; utterance = null; voiceButton.textContent = "Hear a speaking demo"; selectState("idle"); voiceStatus.textContent = "Speaking demo complete."; };

@@ -4,18 +4,26 @@ import test from "node:test";
 import ts from "typescript";
 import { drainMaxStream, maxStreamErrorMessage } from "./maxStream.js";
 import type { MaxStreamView } from "./maxStream.js";
+import { parseMaxRemaining } from "../engine/maxAllowance.js";
+import { maxReplyText } from "../engine/maxReplyText.js";
+import { maxUndeliveredReply, MAX_REPLY_UNAVAILABLE, MAX_REPLY_EMPTY, MAX_REPLY_INTERRUPTED } from "../engine/maxReplyStatus.js";
+import { maxTextMouthLevel } from "./maxSpeechText.js";
 
 // Exercise the actual private ask function with isolated network/DOM seams.
 // No browser, Auth request or paid chat request is made by these tests.
 const source = readFileSync(new URL("./maxChat.ts", import.meta.url), "utf8");
 const askSource = source.slice(source.indexOf("async function ask("), source.indexOf("// The line under the composer."));
 const askJS = ts.transpileModule(askSource, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const failSource = source.slice(source.indexOf("function fail("), source.indexOf("// The answer lives in a child span"));
+const failJS = ts.transpileModule(failSource, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 
 function scenario() {
   let nextTimer = 0;
   let nextFrame = 0;
   let now = 0;
   let writes = 0;
+  let speechClears = 0;
+  const speechUpdates: string[] = [];
   const timers = new Map<number, () => void>();
   const frames = new Map<number, FrameRequestCallback>();
   const classes = (names: string[] = []) => {
@@ -38,11 +46,13 @@ function scenario() {
     currentAccessToken: async () => "test-token-not-a-credential",
     fetch: async () => new Response(stream, { headers: { "X-Max-Remaining": "5" } }),
     say: () => {
-      const bubble = { isConnected: true, classList: classes(), innerHTML: "", querySelector: () => null };
+      const bubble = {
+        isConnected: true, classList: classes(), innerHTML: "", querySelector: () => null, closest: () => scope,
+        set textContent(value: string) { writes++; errors.push(value); },
+      };
       bubbles.push(bubble);
       return bubble;
     },
-    fail: (_bubble: unknown, message: string) => { writes++; errors.push(message); },
     write: () => { writes++; },
     reactMax: () => { writes++; },
     showAllowance: () => {},
@@ -52,6 +62,11 @@ function scenario() {
     loadProfile: () => ({}),
     readProtocols: () => [],
     activeScanOwner: () => "user:test-owner",
+    chatSpeech: {
+      clear: () => { writes++; speechClears++; },
+      update: (text: string) => { writes++; speechUpdates.push(text); },
+    },
+    parseMaxRemaining, maxTextMouthLevel, maxReplyText, maxUndeliveredReply,
     window: {
       setTimeout: (fn: () => void) => { const id = ++nextTimer; timers.set(id, fn); return id; },
       clearTimeout: (id: number) => timers.delete(id),
@@ -64,12 +79,14 @@ function scenario() {
     maxStreamErrorMessage,
   };
   const runtime = new Function("deps", `
-    const {currentAccessToken,fetch,say,fail,write,reactMax,showAllowance,allowanceLine,
+    const {currentAccessToken,fetch,say,write,reactMax,showAllowance,allowanceLine,
       announceMaxConversationChanged,window,drainMaxStream,maxStreamErrorMessage,
-      buildCoachingSnapshot,loadProfile,readProtocols,activeScanOwner}=deps;
+      buildCoachingSnapshot,loadProfile,readProtocols,activeScanOwner,chatSpeech,
+      parseMaxRemaining,maxTextMouthLevel,maxReplyText,maxUndeliveredReply}=deps;
     const GIVE_UP_MS=90000;
     let chatGeneration=1, inFlight=null, transcript=[], chatAvatar=null;
     ${askJS}
+    ${failJS}
     return {
       ask:(log,form)=>ask(log,form,"Hello",null,1,{conversationId:null,source:"dashboard",onConversation:()=>{}}),
       state:()=>({inFlight,transcript}),
@@ -90,6 +107,8 @@ function scenario() {
   return {
     runtime, log, form, face, errors, bubbles, stream, bodyController, timers, frames,
     writes: () => writes,
+    speechClears: () => speechClears,
+    speechUpdates,
     expire: () => [...timers.values()].forEach((fn) => fn()),
     frame: () => {
       now += 100;
@@ -107,6 +126,7 @@ test("actual chat request exits busy/thinking and clears its deadline on a reade
   const result = s.runtime.ask(s.log, s.form);
   await flush();
   assert.equal(s.form.classList.contains("busy"), true);
+  const beforeFailure = s.speechClears();
   s.bodyController.error(new Error("network lost"));
   assert.equal(await result, null);
   assert.equal(s.form.classList.contains("busy"), false);
@@ -117,6 +137,7 @@ test("actual chat request exits busy/thinking and clears its deadline on a reade
   assert.deepEqual(s.runtime.state().transcript, []);
   assert.equal(s.timers.size, 0);
   assert.equal(s.frames.size, 0);
+  assert.ok(s.speechClears() > beforeFailure, "the actual error renderer clears the mascot's speech bubble");
 });
 
 test("actual timeout shows timeout copy and releases chat controls without a frame", async () => {
@@ -163,4 +184,41 @@ test("detaching the reply/log stops the stream and releases the surviving compos
   assert.deepEqual(s.errors, []);
   assert.equal(s.timers.size, 0);
   assert.equal(s.frames.size, 0);
+});
+
+async function receiveReply(s: ReturnType<typeof scenario>, text: string): Promise<void> {
+  s.bodyController.enqueue(new TextEncoder().encode(text));
+  s.bodyController.close();
+  await flush();
+  for (let i = 0; i < 45; i++) { s.frame(); await flush(); }
+}
+
+test("undelivered service notices clear speech and do not become successful local assistant turns", async () => {
+  for (const notice of [MAX_REPLY_UNAVAILABLE, MAX_REPLY_EMPTY]) {
+    const s = scenario();
+    const result = s.runtime.ask(s.log, s.form);
+    await flush();
+    const beforeFailure = s.speechClears();
+    await receiveReply(s, notice);
+    assert.equal(await result, null);
+    assert.deepEqual(s.errors, [notice]);
+    assert.deepEqual(s.runtime.state().transcript, []);
+    assert.ok(s.speechClears() > beforeFailure);
+    assert.equal(s.form.classList.contains("busy"), false);
+    assert.equal(s.timers.size, 0);
+    assert.equal(s.frames.size, 0);
+  }
+});
+
+test("a useful partial answer retains its interruption notice and normal speech completion", async () => {
+  const s = scenario();
+  const result = s.runtime.ask(s.log, s.form);
+  await flush();
+  const text = `Keep one useful step.\n\n${MAX_REPLY_INTERRUPTED}`;
+  await receiveReply(s, text);
+  assert.equal(await result, text);
+  const turns = s.runtime.state().transcript;
+  assert.equal(turns[turns.length - 1]?.content, text);
+  assert.deepEqual(s.errors, []);
+  assert.equal(s.speechUpdates[s.speechUpdates.length - 1], text);
 });

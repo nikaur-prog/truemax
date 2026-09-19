@@ -1,0 +1,34 @@
+.maxchat .maxchat-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 5px 12px; padding: 12px 16px 8px;
+}
+.maxchat .maxchat-close { width: 40px; height: 40px; margin: 0; }
+.maxchat-presence {
+  grid-column: 1 / -1; display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  align-items: start; gap: 12px; min-height: 96px;
+}
+.maxchat-speech { align-self: center; }
+.maxchat .maxchat-speech .max-speech-bubble {
+  max-width: none; padding: 9px 12px 11px;
+}
+.maxchat .maxchat-speech .max-speech-words {
+  font-size: 12px; line-height: 1.4;
+}
+.maxchat-presence .maxchat-face { align-self: end; }
+@media (max-width: 480px), (max-height: 650px) {
+  .maxchat .maxchat-head { padding: 8px 12px 6px; gap: 2px 10px; }
+  .maxchat-presence { grid-template-columns: minmax(0, 1fr) 88px; min-height: 88px; gap: 8px; }
+  .maxchat .maxchat-presence .maxchat-face { width: 88px; height: 88px; }
+  .maxchat .maxchat-speech .max-speech-label { margin-bottom: 3px; }
+}
+.maxchat.maxchat-compact { padding: 0; }
+.maxchat.maxchat-compact .maxchat-sheet { max-height: 100%; }
+.maxchat.maxchat-compact .maxchat-presence,
+.maxchat.maxchat-compact .maxchat-chips { display: none; }
+.maxchat.maxchat-compact .maxchat-log { min-height: 0; }
+.maxchat {
+  top: var(--max-chat-top, 0); bottom: auto;
+  height: var(--max-chat-height, 100dvh); box-sizing: border-box;
+}
+.maxchat .maxchat-sheet { max-height: min(92%, 760px); }

@@ -31,7 +31,8 @@ try {
     const camera = new THREE.OrthographicCamera(-2.15, 2.15, 2.15, -2.15, .1, 20);
     camera.position.set(0, 0, 6); camera.lookAt(0, 0, 0);
     const mixer = new THREE.AnimationMixer(asset.scene);
-    window.poseMax = (clip, seconds, side = false) => {
+    window.poseMax = (clip, seconds, side = false, size = 740) => {
+      renderer.setSize(size, size);
       mixer.stopAllAction();
       const action = mixer.clipAction(asset.animations.find((item) => item.name === clip));
       action.reset().play();
@@ -42,21 +43,27 @@ try {
   });
   for (const [name, clip, at] of [
     ["front", "idle", 0], ["mirror-hold", "mirror", 1.75], ["mirror-wink", "mirror", 2.65625],
+    ["mirror-point", "mirror", 2.9], ["wave-bounce", "wave", 1.6],
+    ["speaking-open", "speaking", 1.6], ["speaking-pause", "speaking", 1.3],
     ["skate-reveal", "skate", 1], ["skate-ride", "skate", 2],
     ["skate-kickflip", "skate", 2.92], ["skate-land", "skate", 3.78],
   ]) {
     await page.evaluate(([clip, at]) => window.poseMax(clip, at), [clip, at]);
     await page.screenshot({ path: join(artifacts, `${name}.png`) });
   }
+  for (const [clip, at] of [["mirror", 2.65625], ["wave", 1.6], ["speaking", 1.6]]) {
+    await page.evaluate(([clip, at]) => window.poseMax(clip, at, false, 180), [clip, at]);
+    await page.locator("canvas").screenshot({ path: join(artifacts, `${clip}-small.png`) });
+  }
   await page.goto(`${origin}/?preview=max-coach&gestures=4`);
   await page.locator("[data-preview-open-chat]").click();
   await page.waitForFunction(() => document.querySelector(".maxchat-face canvas[data-max3d]")?.style.visibility === "visible");
   assert.equal(await page.locator("canvas[data-max3d]").count(), 1);
-  for (const state of ["mirror", "skate", "speaking"]) {
+  for (const state of ["wave", "mirror", "skate", "speaking"]) {
     await page.locator(`[data-preview-coach-state=${state}]`).click();
     await page.waitForFunction((state) => document.querySelector(".maxchat-face canvas")?.dataset.animation === state, state);
     if (state !== "speaking") await page.waitForFunction(() => document.querySelector(".maxchat-face canvas")?.dataset.animation === "idle", undefined, { timeout: 10000 });
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ clips: ["mirror", "skate", "speaking"], returnedToIdle: true, errors, artifacts }));
+  console.log(JSON.stringify({ clips: ["wave", "mirror", "skate", "speaking"], returnedToIdle: true, errors, artifacts }));
 } finally { await browser.close(); }

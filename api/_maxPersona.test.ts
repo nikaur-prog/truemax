@@ -121,6 +121,24 @@ test("measurement caution survives sanitisation separately from the short standi
   assert.equal(buildSystemPrompt(injected).split("</scan_data>").length - 1, 1);
 });
 
+test("greetings and check-ins are natural without invented personal context", () => {
+  const prompt = buildSystemPrompt(ctx());
+  assert.match(prompt, /If they are simply saying hello, respond briefly and naturally/);
+  assert.match(prompt, /Do not invent a routine day, product, streak or improvement/);
+  assert.match(prompt, /Their latest correction takes priority over an older note/);
+});
+
+test("merged unanswered messages retain the newest question and correction", () => {
+  const turns = sanitiseHistory([
+    { role: "user", content: "a".repeat(2000) },
+    { role: "user", content: "b".repeat(2000) },
+    { role: "user", content: "Actually, ignore the old goal. I only want one hair-styling step." },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].content.length, 4000);
+  assert.ok(turns[0].content.endsWith("Actually, ignore the old goal. I only want one hair-styling step."));
+});
+
 test("a zero score does not falsely say no scan was completed", () => {
   assert.doesNotMatch(buildSystemPrompt(ctx({ overall: 0, measurements: [] })), /has not completed a scan yet/);
 });

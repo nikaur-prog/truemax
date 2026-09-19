@@ -32,7 +32,7 @@ export function maxStreamErrorMessage(error: unknown, signal: AbortSignal): stri
   if (name === "TimeoutError" || (signal.aborted && signal.reason?.name === "TimeoutError")) {
     return "That took too long to come back. Ask me again?";
   }
-  if (signal.aborted || name === "AbortError") return null;
+  if (signal.aborted) return null;
   return "I lost the connection there. Ask me again?";
 }
 
@@ -134,7 +134,8 @@ export function drainMaxStream(
     };
     const receive = (chunk: string): void => {
       raw += chunk;
-      const next = maxReplyText(raw);
+      // A whitespace prelude is not speech and must not clear the thinking UI.
+      const next = maxReplyText(raw).trimStart();
       if (next !== text) grewAt = clock.now();
       text = next;
     };

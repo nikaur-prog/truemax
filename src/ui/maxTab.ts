@@ -27,6 +27,9 @@ import { activeScanOwner } from "../engine/scanScope.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 import { ownScans, readAllHistory, readOwnComparableHistory } from "../engine/history.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
+import { chooseMaxPresence, type MaxPresenceLine } from "./maxPresence.js";
+import { mountMaxSpeechBubble } from "./maxSpeechBubble.js";
+import { isAppForeground, subscribeNativeActivity } from "../engine/nativeBridge.js";
 
 // ---------------------------------------------------------------------------
 // The Max tab on the dashboard.
@@ -153,7 +156,11 @@ export function maxTabMarkup(paid: boolean): string {
   if (paid) {
     return `<div class="maxtab">
       <div class="maxtab-stage">
-        <span class="maxtab-face">${maxCharacterMarkup({ mood: "happy" })}</span>
+        <div class="maxtab-presence">
+          <div data-max-presence-speech></div>
+          <span class="maxtab-face">${maxCharacterMarkup({ mood: "happy" })}</span>
+        </div>
+        <button type="button" class="maxtab-presence-action" data-max-presence-action hidden></button>
         <h2>Ask Coach Max anything</h2>
         <p>Discuss your goals, current routine and available scan readings. Keep the plan practical and review what you have actually tried.</p>
         <div class="maxtab-plan-actions"><button type="button" class="btn primary" data-build-plan>Build my plan</button><button type="button" class="btn" data-choose-routines>Choose routines</button></div>
@@ -225,11 +232,10 @@ function dashboardContext(): { context: MaxChatContext | null; greeting: string 
   };
 }
 
-export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
+export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean; name?: string | null }): void {
   const root = panel.querySelector<HTMLElement>(".maxtab");
   if (!root) return;
-  if (opts.paid) mountMaxAvatar3D(root.querySelector<HTMLElement>(".maxtab-stage .maxtab-face"), { state: "idle" });
-  else wireMaxInteractions(root.querySelector<HTMLElement>(".maxtab-face"));
+  if (!opts.paid) wireMaxInteractions(root.querySelector<HTMLElement>(".maxtab-face"));
 
   const form = root.querySelector<HTMLFormElement>(".maxtab-composer")!;
   const input = form.querySelector<HTMLInputElement>("input")!;
@@ -287,6 +293,7 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
         if (slot && owner === activeScanOwner()) slot.textContent = "Your recent chat could not load. Try again, or choose New chat.";
       } finally { opening = false; }
     };
+    mountDashboardPresence(root, panel, opts.name, (question) => { void open(false, question); });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       if (input.value.trim()) void open(false, input.value.trim());
@@ -427,7 +434,7 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
           const question = input.value.trim();
           announceMembershipBrand("max");
           panel.innerHTML = maxTabMarkup(true);
-          wireMaxTab(panel, { paid: true });
+          wireMaxTab(panel, { paid: true, name: opts.name });
           const latest = dashboardContext();
           openMaxChat(latest.context, { greeting: latest.greeting, initialQuestion: question || undefined, source: "dashboard" });
           return;
@@ -466,4 +473,100 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
       input.value = "";
     }
   });
+}
+
+/** Only a visible Coach tab gets an opener. No timer rotates unsolicited copy. */
+function mountDashboardPresence(root: HTMLElement, panel: HTMLElement, name: string | null | undefined, ask: (question: string) => void): void {
+  const host = root.querySelector<HTMLElement>("[data-max-presence-speech]");
+  const face = root.querySelector<HTMLElement>(".maxtab-stage .maxtab-face");
+  const action = root.querySelector<HTMLButtonElement>("[data-max-presence-action]");
+  if (!host || !face || !action) return;
+  const owner = activeScanOwner();
+  const avatar = mountMaxAvatar3D(face, { state: "idle" });
+  let dead = false;
+  let visible = false;
+  let intersecting = false;
+  let visit = 0;
+  let lastId: string | undefined;
+  let current: MaxPresenceLine | undefined;
+  let welcomeTimer: number | undefined;
+  const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const speech = mountMaxSpeechBubble(host, {
+    announce: true,
+    onSpeakingChange: (speaking) => avatar.setState(speaking ? "speaking" : "idle"),
+    onSpeechLevel: (level) => avatar.setSpeechLevel(level),
+  });
+  const cancelWelcome = (): void => {
+    if (welcomeTimer !== undefined) window.clearTimeout(welcomeTimer);
+    welcomeTimer = undefined;
+  };
+  const greet = (): void => {
+    const profile = loadProfile();
+    // An opted-out topic must not return as a decorative personalised opener.
+    // General prompts remain available even when specific coaching is muted.
+    const routines = profile.quiet.length ? [] : readProtocols().filter((routine) => profile.advice[routine.channel]);
+    current = chooseMaxPresence({
+      name: owner?.startsWith("user:") ? name : null,
+      hasOwnScan: readOwnComparableHistory().length > 0,
+      routines,
+    }, visit++, lastId);
+    lastId = current.id;
+    action.textContent = current.action;
+    action.hidden = false;
+    if (motion.matches) { speech.update(current.text, { animate: false }); return; }
+    avatar.setState("wave");
+    // Give the welcome gesture a beat, then let the text cadence own the mouth.
+    welcomeTimer = window.setTimeout(() => {
+      welcomeTimer = undefined;
+      if (!dead && visible && owner === activeScanOwner() && current) speech.update(current.text);
+    }, 1600);
+  };
+  const sync = (): void => {
+    if (dead) return;
+    if (!root.isConnected || owner !== activeScanOwner()) { destroy(); return; }
+    const next = intersecting && !panel.hidden && !root.closest("[hidden]") && !document.hidden && isAppForeground()
+      && !document.querySelector(".maxchat");
+    if (next === visible) return;
+    visible = next;
+    speech.setVisible(visible);
+    if (visible) greet();
+    else { cancelWelcome(); speech.clear(); avatar.setState("quiet"); }
+  };
+  action.onclick = () => {
+    if (dead || owner !== activeScanOwner() || !current || !visible) return;
+    cancelWelcome(); speech.clear(); ask(current.question);
+  };
+  const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
+    intersecting = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.2);
+    sync();
+  }, { threshold: 0.2 });
+  observer?.observe(face);
+  const measure = (): void => {
+    const box = face.getBoundingClientRect();
+    intersecting = box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 && box.top < window.innerHeight && box.left < window.innerWidth;
+    sync();
+  };
+  if (!observer) {
+    window.addEventListener("scroll", measure, { passive: true, capture: true });
+    window.addEventListener("resize", measure);
+  }
+  // A dashboard can be hidden behind chat or replaced on an account change.
+  const removal = new MutationObserver(sync);
+  removal.observe(document.documentElement, { childList: true, subtree: true });
+  const panelChanges = new MutationObserver(sync);
+  panelChanges.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
+  document.addEventListener("visibilitychange", sync);
+  const stopNative = subscribeNativeActivity(sync);
+  if (!observer) measure();
+  function destroy(): void {
+    if (dead) return;
+    dead = true; cancelWelcome();
+    observer?.disconnect(); removal.disconnect(); panelChanges.disconnect(); stopNative();
+    document.removeEventListener("visibilitychange", sync);
+    if (!observer) {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    }
+    speech.destroy(); avatar.destroy(); action!.onclick = null;
+  }
 }
