@@ -47,10 +47,12 @@ export const ETHNICITY_OPTIONS = [
 ] as const;
 
 let host: HTMLDivElement | null = null;
+let disposeSubject: (() => void) | null = null;
 
 export function closeSubjectChooser(): void {
-  host?.remove();
-  host = null;
+  const dispose = disposeSubject;
+  disposeSubject = null;
+  dispose?.();
 }
 
 /**
@@ -154,31 +156,31 @@ export function openSubjectChooser(
       </div>
     </div>`;
 
+  let done = false;
+  let focusTimer: ReturnType<typeof setTimeout> | undefined;
+  let entranceFrame = 0;
   const step = (id: "who" | "guest") => {
+    if (done) return;
     for (const s of el.querySelectorAll<HTMLElement>(".subjpick-step")) {
       s.classList.toggle("hidden", s.dataset.step !== id);
     }
-    if (id === "guest") setTimeout(() => el.querySelector<HTMLInputElement>("#subj-name")?.focus(), 80);
+    clearTimeout(focusTimer);
+    if (id === "guest") focusTimer = setTimeout(() => { if (!done) el.querySelector<HTMLInputElement>("#subj-name")?.focus(); }, 80);
   };
 
-  let done = false;
   const finish = (a: SubjectAnswer) => {
     if (done) return;
-    done = true;
     closeSubjectChooser();
-    document.removeEventListener("keydown", onKey);
     onPick(a);
   };
   const cancel = () => {
     if (done) return;
-    done = true;
     closeSubjectChooser();
-    document.removeEventListener("keydown", onKey);
     onCancel?.();
   };
 
   for (const b of el.querySelectorAll<HTMLButtonElement>("[data-who]")) {
-    b.onclick = () => (b.dataset.who === "me" ? finish({ self: true }) : step("guest"));
+    b.onclick = () => { if (!done && !b.disabled) b.dataset.who === "me" ? finish({ self: true }) : step("guest"); };
   }
   el.querySelector<HTMLButtonElement>("[data-back]")!.onclick = () => step("who");
   el.querySelector<HTMLButtonElement>("[data-go]")!.onclick = () => {
@@ -190,9 +192,18 @@ export function openSubjectChooser(
   };
   el.querySelector<HTMLButtonElement>(".subjpick-cancel")!.onclick = cancel;
   el.onclick = (e) => { if (e.target === el) cancel(); };
-  const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") cancel(); };
+  const onKey = (e: KeyboardEvent) => { if (!done && e.key === "Escape") cancel(); };
+  disposeSubject = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(focusTimer);
+    cancelAnimationFrame(entranceFrame);
+    document.removeEventListener("keydown", onKey);
+    el.remove();
+    if (host === el) host = null;
+  };
   document.addEventListener("keydown", onKey);
 
   document.body.appendChild(el);
-  requestAnimationFrame(() => el.classList.add("in"));
+  entranceFrame = requestAnimationFrame(() => { if (!done) el.classList.add("in"); });
 }

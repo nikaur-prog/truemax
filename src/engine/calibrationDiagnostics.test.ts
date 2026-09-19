@@ -3,7 +3,7 @@ import test from "node:test";
 import { snapshotCalibrationDiagnostics } from "./calibrationDiagnostics.js";
 import { addRatedFace, calibrationDiagnosticsJSON, calibrationReferenceId, corpusJSON, loadCalibrationSet } from "./calibrationSet.js";
 import { activateScanOwner, activeScanOwner } from "./scanScope.js";
-import { SIDE_POINTS } from "./sideMetrics.js";
+import { SIDE_LANDMARK_GUIDE_VERSION, SIDE_POINTS } from "./sideMetrics.js";
 import type { SidePoints } from "./sideMetrics.js";
 import type { RatedFace } from "./calibrationSet.js";
 import type { Report } from "./types.js";
@@ -38,6 +38,35 @@ test("capture diagnostics own the points and references even after the editor ch
   assert.equal(copy.side!.coordinateSpace, "review-image-pixels");
   assert.equal(copy.side!.reviewKind, "operator-not-expert");
   assert.equal(copy.side!.width, 600);
+});
+
+test("review guide provenance survives snapshots and export without relabelling historical captures", () => {
+  const legacy = diagnostic();
+  const before = structuredClone(legacy.side);
+  const current = snapshotCalibrationDiagnostics({
+    ...legacy,
+    side: { ...legacy.side!, landmarkGuideVersion: SIDE_LANDMARK_GUIDE_VERSION },
+  });
+  const earlier = snapshotCalibrationDiagnostics({
+    ...legacy,
+    side: { ...legacy.side!, landmarkGuideVersion: "side-surface-guide-1" },
+  });
+  const reexportedLegacy = snapshotCalibrationDiagnostics({ ...legacy, side: legacy.side });
+  const exports = JSON.parse(calibrationDiagnosticsJSON([current, earlier, reexportedLegacy].map((diagnostics, index) => ({
+    id: `f${index + 1}`, sex: "female", rating: null, scored: 5.6, measurements: {}, diagnostics,
+  }))));
+  const [newSide, earlierSide, oldSide] = exports.faces.map((face: { diagnostics: { side: unknown } }) => face.diagnostics.side);
+  assert.equal(newSide.landmarkGuideVersion, SIDE_LANDMARK_GUIDE_VERSION);
+  assert.equal(earlierSide.landmarkGuideVersion, "side-surface-guide-1");
+  assert.equal("landmarkGuideVersion" in oldSide, false, "export must not pretend a legacy review saw the current guide");
+  assert.equal(legacy.side!.landmarkGuideVersion, undefined);
+  assert.deepEqual(legacy.side, before, "adding guide provenance never migrates original points or reports");
+  for (const side of [newSide, earlierSide, oldSide]) {
+    assert.deepEqual(side.automaticPoints, before!.automaticPoints);
+    assert.deepEqual(side.finalPoints, before!.finalPoints);
+    assert.deepEqual(side.report, before!.report);
+    assert.equal(side.seedVersion, "test-v1", "reader version is distinct from review guide version");
+  }
 });
 
 test("front and side photo fingerprints survive snapshots and export without private source fields", () => {

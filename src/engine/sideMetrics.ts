@@ -10,6 +10,14 @@ import type { MetricDef } from "./types.js";
 // nasion→menton facial height so image scale never matters.
 // ---------------------------------------------------------------------------
 
+// Guide revision, not a new anatomical definition or scoring calibration.
+export const SIDE_LANDMARK_GUIDE_VERSION = "side-surface-guide-2";
+
+export const SIDE_EAR_GUIDANCE = {
+  condylion: "Find the small flap in front of the ear opening. Place the marker on the skin immediately in front of its upper part, not on the sideburn or cheekbone. This is a surface estimate: the exact joint inside cannot be seen in a photo. Do not copy the example's spacing.",
+  tragion: "Find the small flap in front of the ear opening. Place the marker in the notch at its top, where the ear cartilage meets the face. Not in the dark ear opening and not out on the cheek.",
+} as const;
+
 export const SIDE_POINTS = [
   { id: "trichion", label: "Hairline", hint: "Top of the forehead where hair starts" },
   { id: "glabella", label: "Brow ridge", hint: "Most prominent point between the brows" },
@@ -28,14 +36,10 @@ export const SIDE_POINTS = [
   // which reads as a mistake mid-walkthrough.
   { id: "cervicale", label: "Neck point", hint: "Where the under-chin meets the neck" },
   { id: "gonion", label: "Jaw corner", hint: "The angle where the jaw turns upward" },
-  // "Jaw top" was the wrong name and it cost a measurement. The top of the
-  // visible jaw region is the temple, so that is where people put it — 26mm
-  // above the ear notch, on skull rather than on jaw, which inflated the ramus
-  // arm enough to push ramus : mandible outside anatomical bounds on every
-  // face. This point is a JOINT: the knuckle the jaw pivots on, level with the
-  // ear canal and just in front of it.
-  { id: "condylion", label: "Jaw hinge", hint: "The pivot just in front of the ear canal, level with it" },
-  { id: "tragion", label: "Ear notch", hint: "Notch at the front of the ear" },
+  // Keep the persisted key, but do not claim a photo locates skeletal condylion.
+  // The ear notch is a visible feature; the nearby hinge is a surface proxy.
+  { id: "condylion", label: "Jaw hinge (estimate)", hint: "Skin just in front of the upper ear flap, not the sideburn" },
+  { id: "tragion", label: "Ear notch", hint: "Small notch at the top of the ear flap, not the ear opening" },
 ] as const;
 
 export type SidePointId = (typeof SIDE_POINTS)[number]["id"];

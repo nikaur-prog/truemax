@@ -90,8 +90,8 @@ import {
 import { TRIAL_SCANS, depthFor, freeScansLeft, tierOf } from "./engine/depth.js";
 import type { EntitlementTier } from "./engine/entitlement.js";
 import type { User } from "@supabase/supabase-js";
-import { openSexChooser } from "./ui/sexChooser.js";
-import { openSubjectChooser, selfLockFor } from "./ui/subjectChooser.js";
+import { openSexChooser, close as closeSexChooser } from "./ui/sexChooser.js";
+import { openSubjectChooser, closeSubjectChooser, selfLockFor } from "./ui/subjectChooser.js";
 import type { SelfLock } from "./ui/subjectChooser.js";
 import {
   clearDeclinedCache,
@@ -434,13 +434,10 @@ let skipCoveringCheck = false;
 // scan captured signed-out never asked, and attributing it to whoever then
 // signs in would put a friend's face in the owner's history.
 let subjectAsked = false;
-// Whether the reference population is a real choice yet, or still the silent
-// default. A face app is used mostly by young men, so "male" is the right
-// default to compute against — but computing a man a percentile "of women"
-// because he never saw the toggle is the kind of thing that gets screenshotted.
-// So the first scan requires the pick; a returning visitor who already chose is
-// never asked again.
-let sexChosen = storedSex() !== null;
+// Whether this capture has an explicitly chosen reference population.
+// Only an explicit self-scan may reuse the account's choice. Another person's
+// photo gets a new answer; the browser's previous selection is not consent.
+let sexChosen = false;
 
 // How the front photo was obtained, carried into the side step so the two
 // halves of one scan use the same capture method. If you shot the front with
@@ -452,6 +449,7 @@ let captureMethod: "camera" | "upload" | null = null;
 // the generation it started under and drops its result if this value moves, so
 // an old animation/upload cannot repaint the next person's screen.
 let scanGeneration = 0;
+let filePickerGeneration: number | null = null;
 const scanSession = new ScanSession();
 let scanTiming: ScanPerformanceAttempt | null = null;
 let scanWorkAbort = new AbortController();
@@ -801,10 +799,8 @@ paintRefPop();
 // she ranks among men, which the chooser itself calls a 0.7-to-4.5-point error.
 // That is precisely what happened in the first live test.
 //
-// The cost is one tap per scan, against a flow that involves posing for two
-// photographs; the previous answer is highlighted so the owner's repeat scans
-// are a single confirm. The stored choice still seeds the results-screen
-// toggle and the guide, it just no longer answers for the next face.
+// Uploads show the selected photo before this choice. Another person's photo
+// starts unselected; an explicit self-scan can use the account's own setting.
 // Who is being scanned, and only then which population to score against.
 //
 // A signed-in member is asked "is this you?" first, and answering "me" ends the
@@ -816,13 +812,17 @@ paintRefPop();
 // about THEM — and flags the scan so it stays off the owner's chart, average,
 // streak and everything Max says about their progress. See StoredScan.subject.
 //
-// A signed-out visitor skips the whole thing. There is no "you" to compare
-// against without an account, so the question would be one more screen between
-// a stranger and their first result.
-async function ensureSex(then: () => void): Promise<void> {
+// A signed-out visitor skips the identity question, but still chooses the
+// reference group for every new photo.
+async function ensureSex(then: () => void, photo?: Blob | HTMLCanvasElement): Promise<void> {
+  const owner = activeScanOwner();
+  const generation = scanGeneration;
+  const isCurrent = () => owner === activeScanOwner() && generation === scanGeneration;
+  const cancel = () => { if (isCurrent()) resetToUpload(); };
   const askPopulation = (preselect: Sex | undefined, subject: { name: string } | null) => {
     openSexChooser(
       (sex) => {
+        if (!isCurrent()) return;
         selectedSex = sex;
         sexChosen = true;
         scanSubject = subject;
@@ -835,8 +835,9 @@ async function ensureSex(then: () => void): Promise<void> {
         then();
       },
       preselect,
-      undefined,
+      cancel,
       subject?.name,
+      { photo, confirm: Boolean(photo) },
     );
   };
 
@@ -846,7 +847,7 @@ async function ensureSex(then: () => void): Promise<void> {
     // Signed OUT only. `is-member` is Boolean(user), so every signed-in
     // account reaches the chooser below, free ones included — an earlier
     // comment here claimed the opposite and was wrong.
-    askPopulation(storedSex() ?? undefined, null);
+    askPopulation(undefined, null);
     return;
   }
 
@@ -854,12 +855,11 @@ async function ensureSex(then: () => void): Promise<void> {
   // chooser used to open in that gap with lastKnownTier's closed default and
   // tell paid owners they had used zero guest slots. Resolve access before the
   // one screen that quotes it.
-  const owner = activeScanOwner();
-  const generation = scanGeneration;
   await refreshMaxAccess();
   if (owner !== activeScanOwner() || generation !== scanGeneration) return;
 
   openSubjectChooser((answer) => {
+    if (!isCurrent()) return;
     subjectAsked = true;
     if (answer.self) {
       // Only the ACCOUNT'S own stored answer can skip the question. The first
@@ -885,6 +885,7 @@ async function ensureSex(then: () => void): Promise<void> {
       // last time a self-scan ever asks.
       openSexChooser(
         (sex) => {
+          if (!isCurrent()) return;
           saveProfile({ ...loadProfile(), sex });
           selectedSex = sex;
           sexChosen = true;
@@ -895,12 +896,15 @@ async function ensureSex(then: () => void): Promise<void> {
           showGuide(sex);
           then();
         },
-        storedSex() ?? undefined,
+        undefined,
+        cancel,
+        undefined,
+        { photo, confirm: Boolean(photo) },
       );
       return;
     }
     askPopulation(undefined, { name: answer.subject.name });
-  }, undefined,
+  }, cancel,
   guestScansLeft(lastKnownTier, declinedNow(), lastKnownAdmin),
   selfLockNow(),
   guestAllowance(lastKnownTier, declinedNow(), lastKnownAdmin));
@@ -1071,22 +1075,44 @@ if (navigator.webdriver || new URLSearchParams(location.search).has("eager")) {
   warmEngine();
 }
 
-let filePickerGeneration = 0;
+/** A chosen file owns a fresh subject/reference decision, never the last file's. */
+function chooseUploadSubject(file: File, expectedGeneration: number): void {
+  if (expectedGeneration !== scanGeneration) return;
+  const generation = ++scanGeneration;
+  closeSexChooser();
+  closeSubjectChooser();
+  sexChosen = false;
+  scanSubject = null;
+  subjectAsked = false;
+  setSidePriorSuspended(false);
+  paintRefPop();
+  void ensureSex(() => {
+    if (generation === scanGeneration) void handleFile(file, generation);
+  }, file);
+}
+
 el.fileInput.addEventListener("change", () => {
   const file = el.fileInput.files?.[0];
-  if (file) handleFile(file, filePickerGeneration);
+  const generation = filePickerGeneration;
+  filePickerGeneration = null;
+  el.fileInput.value = "";
+  if (file && generation !== null) chooseUploadSubject(file, generation);
+});
+el.fileInput.addEventListener("cancel", () => {
+  const generation = filePickerGeneration;
+  filePickerGeneration = null;
+  el.fileInput.value = "";
+  if (generation === scanGeneration) resetToUpload();
 });
 el.btnUpload.addEventListener("click", () => {
   const generation = scanGeneration;
   void ensureScanAllowed(() => {
     if (generation !== scanGeneration) return;
-    void ensureSex(() => {
+    offerTutorial("front", () => {
       if (generation !== scanGeneration) return;
-      offerTutorial("front", () => {
-        if (generation !== scanGeneration) return;
-        filePickerGeneration = generation;
-        el.fileInput.click();
-      });
+      filePickerGeneration = generation;
+      el.fileInput.value = "";
+      el.fileInput.click();
     });
   });
 });
@@ -1106,7 +1132,7 @@ enablePhotoPaste({
     const generation = scanGeneration;
     void ensureScanAllowed(() => {
       if (generation !== scanGeneration) return;
-      void ensureSex(() => handleFile(file, generation));
+      chooseUploadSubject(file, generation);
     });
   },
 });
@@ -1873,21 +1899,9 @@ async function reopenArchivedScan(scan: StoredScan): Promise<void> {
 
 setScanReopen((scan) => void reopenArchivedScan(scan));
 
-// Another go at the front photograph, inside the same scan.
-//
-// A retake used to be a reset followed by a press of the capture button, and
-// the capture button is the front door: it runs the allowance gate, asks whose
-// face this is and which reference population, and offers the tutorial. All
-// of that had been answered a minute earlier by the person now pressing
-// "Retake photo", and asking again read as the app forgetting. The upload
-// path was worse: it reset to the landing card and did nothing at all.
-//
-// So the answers survive the reset and the capture reopens directly: the
-// viewfinder when the front came from the camera, the file picker when it was
-// uploaded. The allowance gate is not re-run because this is the SAME scan,
-// which is what ensureScanAllowed's own resume path already treats it as; the
-// rest of the reset (canvases, pending state, the privacy boundary between two
-// people's photographs) still happens, because a retake is still a new capture.
+// A replacement file may show a different person, so it gets a new subject
+// choice after selection. Camera retakes keep only an explicit self-scan's
+// answers. The allowance is unchanged: this is still an unfinished scan.
 function retakeFront(method: "camera" | "upload" | null): void {
   const kept = {
     sex: selectedSex,
@@ -1896,6 +1910,17 @@ function retakeFront(method: "camera" | "upload" | null): void {
     subjectAsked,
   };
   resetToUpload();
+  if (method === "upload") {
+    // A different file may be a different person. Ask after selection; an
+    // explicit self answer can still reuse the account's own reference.
+    filePickerGeneration = scanGeneration;
+    el.fileInput.click();
+    return;
+  }
+  if (method === "camera" && (!kept.subjectAsked || kept.subject)) {
+    void ensureSex(() => void openCamera());
+    return;
+  }
   selectedSex = kept.sex;
   sexChosen = kept.sexChosen;
   scanSubject = kept.subject;
@@ -1905,13 +1930,14 @@ function retakeFront(method: "camera" | "upload" | null): void {
     void openCamera();
     return;
   }
-  if (method === "upload") {
-    filePickerGeneration = scanGeneration;
-    el.fileInput.click();
-  }
 }
 
 function resetToUpload(): void {
+  closeSexChooser();
+  closeSubjectChooser();
+  filePickerGeneration = null;
+  sexChosen = false;
+  paintRefPop();
   if (cam || camOpening) void closeCamera({ instant: true });
   scanTiming?.cancel();
   scanTiming = null;

@@ -1,4 +1,5 @@
 import { SIDE_POINTS } from "../engine/sideMetrics.js";
+import { openPointReference } from "./sidePointReference.js";
 import {
   GUIDE_PHOTO_URL,
   GUIDE_POINTS,
@@ -87,9 +88,10 @@ export function openReferenceOverlay(faceDir: number, doc = document): () => voi
   overlay.innerHTML = `<div class="sref-card" role="dialog" aria-modal="true" aria-label="Landmark reference">
     <span class="klabel">WHERE EACH POINT BELONGS</span>
     <canvas class="sref-photo-full"></canvas>
-    <p>Hold this against your photo. Any ring sitting somewhere different is the
-      one to drag: the five behind the face are the usual culprits, since a jaw
-      corner has no landmark and they are estimated from an average head.</p>
+    <p>Match each named feature on your own photo, not this example's proportions.
+      The ear notch is visible. The jaw hinge is an estimated surface position,
+      not a precise view of the joint inside.</p>
+    <div class="sref-ear-actions"><button type="button" class="btn gho" data-ear="tragion">Find the ear notch</button><button type="button" class="btn gho" data-ear="condylion">Find the hinge estimate</button></div>
     <button type="button" class="btn gho sref-close">Back to my photo</button>
   </div>`;
   doc.body.appendChild(overlay);
@@ -103,7 +105,16 @@ export function openReferenceOverlay(faceDir: number, doc = document): () => voi
   if (image.complete) paint();
   else image.onload = paint;
 
+  let closePoint: (() => void) | null = null;
+  for (const button of overlay.querySelectorAll<HTMLButtonElement>("[data-ear]")) {
+    button.onclick = () => {
+      closePoint?.();
+      closePoint = openPointReference(image, button.dataset.ear as "condylion" | "tragion", faceDir, doc);
+    };
+  }
+
   const close = () => {
+    closePoint?.();
     overlay.remove();
     doc.removeEventListener("keydown", onKey);
   };

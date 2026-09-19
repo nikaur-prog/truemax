@@ -98,8 +98,8 @@ test("the prompt names every landmark, states the frame and the grid, asks for p
   assert.ok(ear.includes("- tragion:") && ear.includes("- gonion:") && !ear.includes("- pronasale:"));
   const fineEar = finePrompt("ear", ["tragion", "condylion"], { width: 1024, height: 1024, step: 50 }, 1);
   assert.doesNotMatch(fineEar, /finger/, "the fine ear call must agree with the definitions");
-  assert.match(fineEar, /same height/);
-  assert.match(fineEar, /Never on the cheek/);
+  assert.match(fineEar, /photographic surface proxy/);
+  assert.match(fineEar, /not out on the cheek or at the sideburn or cheekbone/);
   const cued = finePrompt("jaw", ["gonion", "jawLower", "jawBack"], { width: 1024, height: 1024, step: 50 }, 1, undefined, "From a first look, the ear notch is near (12, 34).");
   assert.match(cued, /ear notch is near \(12, 34\)/);
   const chin = zoomPrompt("chin", ["pogonion", "menton", "cervicale"], { width: 1024, height: 1024, step: 100 }, -1);
@@ -119,6 +119,52 @@ test("the prompt names every landmark, states the frame and the grid, asks for p
       assert.doesNotMatch(text, new RegExp(`\\b${word}\\b`, "i"), word);
     }
   }
+});
+
+test("all ear-placement stages distinguish the visible notch from an estimated hinge without a forced gap or height", () => {
+  const closeGrid = { width: 1024, height: 1024, step: 50 };
+  for (const dir of [1, -1] as const) {
+    const prompts = [
+      landmarkPrompt(GRID),
+      zoomPrompt("ear", ["tragion", "condylion"], closeGrid, dir),
+      finePrompt("ear", ["tragion", "condylion"], closeGrid, dir),
+    ];
+    for (const prompt of prompts) {
+      assert.match(prompt, /visible notch at the upper edge of the tragus/);
+      assert.match(prompt, /not a point on the cheek, the centre of the dark canal opening/);
+      assert.match(prompt, /estimated skin position immediately in front of the upper tragus/);
+      assert.match(prompt, /a photo cannot reveal the exact joint centre/);
+      assert.match(prompt, /Do not force it to coincide with the ear notch or use a fixed distance or height/);
+      assert.doesNotMatch(prompt, /one fiftieth|same height|never above the notch|essentially (?:at|on) (?:the ear|that) notch|a few pixels in front/i);
+    }
+  }
+});
+
+test("the live fine-ear cue cannot reintroduce a fixed hinge offset", async () => {
+  const prompts: string[] = [];
+  const client = { messages: { create: async (body: {
+    tools: Array<{ input_schema: { required: string[] } }>;
+    messages: Array<{ content: Array<{ type: string; text?: string }> }>;
+  }) => {
+    const ids = body.tools[0].input_schema.required;
+    if (ids.length === 2 && ids.includes("tragion")) {
+      prompts.push(body.messages[0].content.filter((entry) => entry.type === "text").map((entry) => entry.text).join("\n"));
+      return { content: [{ type: "tool_use", input: {
+        tragion: { x: 500, y: 500, confidence: 0.8 },
+        condylion: { x: 560, y: 480, confidence: 0.5 },
+      } }], usage: { input_tokens: 10, output_tokens: 10 } };
+    }
+    return { content: [{ type: "text", text: "Cannot read these points" }] };
+  } } } as unknown as Anthropic;
+  const image = await prepareLandmarkImage(await sharp({ create: { width: 100, height: 140, channels: 3, background: "white" } }).jpeg().toBuffer());
+  const hint = parseSeedHint(cloudSideSeedFractions(facingRight() as unknown as SidePoints, FRAME.width, FRAME.height, 1));
+  await placeSideLandmarks(client, image, { hint });
+  assert.equal(prompts.length, 2, "both coarse and fine ear placement are exercised");
+  const fine = prompts.find((prompt) => prompt.includes("From a first look"));
+  assert.ok(fine, "the fine pass must contain its runtime location cue");
+  assert.match(fine, /relocate the notch to the visible cartilage/);
+  assert.match(fine, /do not derive it from a fixed offset from the notch/);
+  assert.doesNotMatch(fine, /jaw hinge is within about|one fiftieth|same height|never above the notch/i);
 });
 
 test("a complete answer parses to fractions, with the facing taken from the points", () => {
@@ -172,7 +218,7 @@ test("pixels are fractions times the frame", () => {
 
 test("the version stamp is a short tag, not a model name", () => {
   assert.match(LANDMARK_VERSION, /^vision-\d+$/);
-  assert.equal(LANDMARK_VERSION, "vision-3");
+  assert.equal(LANDMARK_VERSION, "vision-4");
 });
 
 test("the zoom window is a square around the cluster, at least a head width wide, inside the image", () => {

@@ -5,7 +5,7 @@ import type { SidePointId } from "../engine/sideMetrics.js";
 //
 // The line-drawing guide answers "what is the layout of these thirteen
 // points"; it cannot answer the question people actually stall on, which is
-// "what does the jaw hinge look like ON A FACE". A photograph can. One clean
+// "where is the surface hinge estimate relative to the ear". One clean
 // synthetic profile (AI-generated — deliberately nobody's real face) carries
 // thirteen annotated positions, and the same image serves two surfaces:
 //
@@ -13,12 +13,10 @@ import type { SidePointId } from "../engine/sideMetrics.js";
 //     ring at the centre, under the step's description — "it goes here"
 //   - the full-screen guide shows the whole photograph with every ring
 //
-// GUIDE_POINTS is the hand-verified position of each landmark on that image,
-// normalised 0..1 against its width and height. Hand-verified is the point:
-// these were placed by eye on a rendered overlay, not trusted from the seeder
-// the guide exists to correct. While it is null the photographic guide simply
-// does not render and the drawing carries the whole job, so shipping the
-// wiring before the artwork costs nothing.
+// GUIDE_POINTS contains illustration positions, normalised 0..1. They were
+// placed by eye, not clinically verified. In particular, condylion is only a
+// surface estimate near the ear; a photo cannot reveal the underlying joint.
+// The exact spacing on this synthetic face is not a rule for other faces.
 //
 // The reference faces image-RIGHT, matching the canonical orientation the
 // analysis flips photos into. A left-facing subject gets the reference
@@ -72,7 +70,7 @@ export const GUIDE_POINTS: Record<SidePointId, [number, number]> | null = {
   pogonion: [0.7697, 0.7017],
   menton: [0.7359, 0.751],
   gonion: [0.4212, 0.6973],
-  condylion: [0.3829, 0.5117],
+  condylion: [0.3829, 0.5117], // Skin in front of the tragus, not a bone label.
   cervicale: [0.6059, 0.7725],
   tragion: [0.353, 0.5024],
 };
@@ -88,11 +86,13 @@ export const GUIDE_POINTS: Record<SidePointId, [number, number]> | null = {
  * whole forehead and brow), and the tighter member goes in close on its own
  * feature. Anything not listed uses the default.
  */
-const GUIDE_ZOOM: Partial<Record<SidePointId, number>> = {
+export const GUIDE_ZOOM: Partial<Record<SidePointId, number>> = {
   glabella: 0.46,
   nasion: 0.2,
   labialeSuperius: 0.2,
   labialeInferius: 0.3,
+  // Preserve the surrounding ear so the two close points are distinguishable.
+  condylion: 0.26,
   tragion: 0.2,
   // Gonion is the one landmark with no feature under it — on soft tissue the
   // jaw corner is a shading change, not an edge. Close in it is a ring on a
@@ -109,6 +109,20 @@ export interface CropRect {
   x: number;
   y: number;
   size: number;
+}
+
+export function earGuideCompanion(id: SidePointId): SidePointId | null {
+  return id === "condylion" ? "tragion" : id === "tragion" ? "condylion" : null;
+}
+
+/** Same coordinate transform for stills, expanded views and every zoom frame. */
+export function guideMarkerPosition(
+  point: [number, number], rect: CropRect, imageW: number, imageH: number,
+  canvasSize: number, faceDir: number,
+): { x: number; y: number } {
+  const x = (point[0] * imageW - rect.x) / rect.size * canvasSize;
+  return { x: faceDir === -1 ? canvasSize - x : x,
+    y: (point[1] * imageH - rect.y) / rect.size * canvasSize };
 }
 
 /**
@@ -165,6 +179,13 @@ export function playGuideZoom(
   const point = GUIDE_POINTS[id];
   const iw = image.naturalWidth;
   const ih = image.naturalHeight;
+  const displaySize = canvas.width / Math.min(2, window.devicePixelRatio || 1) || 148;
+  const finish = () => drawGuideCrop(canvas, image, id, faceDir, displaySize);
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    finish();
+    options.onDone?.();
+    return () => {};
+  }
   // Start: the largest square the image can offer, centred so the whole
   // profile reads. End: the landmark's own crop.
   const startSize = Math.min(iw, ih);
@@ -194,7 +215,7 @@ export function playGuideZoom(
     const cy = start.y + start.size / 2 + (point[1] * ih - (start.y + start.size / 2)) * p;
     const x = Math.max(0, Math.min(iw - k, cx - k / 2));
     const y = Math.max(0, Math.min(ih - k, cy - k / 2));
-    drawGuidePatch(canvas, image, { x, y, size: k }, point, faceDir);
+    drawGuidePatch(canvas, image, { x, y, size: k }, id, faceDir);
   };
 
   const frame = (now: number) => {
@@ -207,7 +228,7 @@ export function playGuideZoom(
       paintAt(easeInOut(p));
       if (p >= 1) {
         // Land on the canonical crop, so play-then-look matches never-played.
-        drawGuideCrop(canvas, image, id, faceDir);
+        finish();
         options.onDone?.();
         return;
       }
@@ -220,7 +241,7 @@ export function playGuideZoom(
   return () => {
     cancelled = true;
     cancelAnimationFrame(raf);
-    drawGuideCrop(canvas, image, id, faceDir);
+    finish();
   };
 }
 
@@ -229,7 +250,7 @@ function drawGuidePatch(
   canvas: HTMLCanvasElement,
   image: HTMLImageElement,
   rect: CropRect,
-  point: [number, number],
+  id: SidePointId,
   faceDir: number,
 ): void {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -246,16 +267,38 @@ function drawGuidePatch(
   }
   ctx.drawImage(image, rect.x, rect.y, rect.size, rect.size, 0, 0, canvas.width, canvas.height);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const rx = ((point[0] * image.naturalWidth - rect.x) / rect.size) * canvas.width;
-  const ringX = faceDir === -1 ? canvas.width - rx : rx;
-  const ringY = ((point[1] * image.naturalHeight - rect.y) / rect.size) * canvas.height;
-  ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
-  ctx.lineWidth = 2 * dpr;
-  ctx.shadowColor = "rgba(6, 20, 17, 0.85)";
-  ctx.shadowBlur = 3 * dpr;
-  ctx.beginPath();
-  ctx.arc(ringX, ringY, 7 * dpr, 0, Math.PI * 2);
-  ctx.stroke();
+  if (!GUIDE_POINTS) return;
+  const at = (point: [number, number]) => guideMarkerPosition(point, rect,
+    image.naturalWidth, image.naturalHeight, canvas.width, faceDir);
+  drawGuideMarkers(ctx, id, at, dpr);
+}
+
+function drawGuideMarkers(
+  ctx: CanvasRenderingContext2D, id: SidePointId,
+  at: (point: [number, number]) => { x: number; y: number }, dpr: number,
+): void {
+  if (!GUIDE_POINTS) return;
+  const primary = at(GUIDE_POINTS[id]);
+  const companion = earGuideCompanion(id);
+  const secondary = companion ? at(GUIDE_POINTS[companion]) : null;
+  const gap = secondary ? Math.hypot(primary.x - secondary.x, primary.y - secondary.y) : Infinity;
+  const ring = (x: number, y: number, active: boolean) => {
+    ctx.strokeStyle = active ? "#8ff3e0" : "#ffffff";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = Math.min(2 * dpr, gap * 0.1);
+    ctx.shadowColor = "rgba(6, 20, 17, 0.9)";
+    ctx.shadowBlur = 3 * dpr;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.min((active ? 6 : 4) * dpr, gap * (active ? 0.3 : 0.22)), 0, Math.PI * 2);
+    ctx.stroke();
+    if (active) {
+      ctx.beginPath();
+      ctx.arc(x, y, Math.min(1.5 * dpr, gap * 0.08), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  if (secondary) ring(secondary.x, secondary.y, false);
+  ring(primary.x, primary.y, true);
 }
 
 export function drawGuideCrop(
@@ -265,33 +308,14 @@ export function drawGuideCrop(
   faceDir: number,
   displaySize = 148,
 ): boolean {
-  if (!GUIDE_POINTS) return false;
+  if (!GUIDE_POINTS || !image.naturalWidth || !image.naturalHeight) return false;
   const point = GUIDE_POINTS[id];
   const { x, y, size } = guideCrop(point, image.naturalWidth, image.naturalHeight, GUIDE_ZOOM[id]);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = displaySize * dpr;
   canvas.height = displaySize * dpr;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return false;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  if (faceDir === -1) {
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-  }
-  ctx.drawImage(image, x, y, size, size, 0, 0, canvas.width, canvas.height);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // The ring sits at the landmark's true position in the patch — see guideCrop.
-  const rx = ((point[0] * image.naturalWidth - x) / size) * canvas.width;
-  const ringX = faceDir === -1 ? canvas.width - rx : rx;
-  const ringY = ((point[1] * image.naturalHeight - y) / size) * canvas.height;
-  ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
-  ctx.lineWidth = 2 * dpr;
-  ctx.shadowColor = "rgba(6, 20, 17, 0.85)";
-  ctx.shadowBlur = 3 * dpr;
-  ctx.beginPath();
-  ctx.arc(ringX, ringY, 7 * dpr, 0, Math.PI * 2);
-  ctx.stroke();
+  if (!canvas.getContext("2d")) return false;
+  drawGuidePatch(canvas, image, { x, y, size }, id, faceDir);
   return true;
 }
 
@@ -310,7 +334,6 @@ export function drawGuideWhole(
   faceDir: number,
 ): boolean {
   if (!GUIDE_POINTS) return false;
-  const point = GUIDE_POINTS[id];
   const ctx = canvas.getContext("2d");
   if (!ctx || !image.naturalWidth) return false;
   ctx.imageSmoothingEnabled = true;
@@ -329,16 +352,10 @@ export function drawGuideWhole(
   }
   ctx.drawImage(image, dx, dy, dw, dh);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const rx = dx + point[0] * dw;
-  const ringX = faceDir === -1 ? canvas.width - rx : rx;
-  const ringY = dy + point[1] * dh;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  ctx.strokeStyle = "rgba(143, 243, 224, 0.98)";
-  ctx.lineWidth = 2 * dpr;
-  ctx.shadowColor = "rgba(6, 20, 17, 0.85)";
-  ctx.shadowBlur = 4 * dpr;
-  ctx.beginPath();
-  ctx.arc(ringX, ringY, 9 * dpr, 0, Math.PI * 2);
-  ctx.stroke();
+  drawGuideMarkers(ctx, id, ([px, py]) => ({
+    x: faceDir === -1 ? canvas.width - (dx + px * dw) : dx + px * dw,
+    y: dy + py * dh,
+  }), dpr);
   return true;
 }
